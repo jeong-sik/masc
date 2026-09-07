@@ -24,9 +24,5 @@ type resolved =
 val build : generated_at_iso:string -> resolved -> Yojson.Safe.t
 (** Pure JSON encoder over the resolved structure. *)
 
-val resolved_of_snapshot : Runtime.dashboard_runtime_defaults_snapshot -> resolved
-(** Project one typed Runtime snapshot into the dashboard wire structure without
-    rereading mutable runtime state. *)
-
 val current : generated_at_iso:string -> unit -> Yojson.Safe.t
 (** [build] applied to {!resolved_of_runtime}. *)

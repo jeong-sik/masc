@@ -1,11 +1,28 @@
-(* Closed-set tests for the observation-only gate fast-path. The argv tables
-   are the whole safety surface, so every table entry and every guard is
-   asserted — a table added without a test here should feel unfinished. *)
+(* Feature-boundary tests for static observation and the existing boxed
+   execution path. The retained command tables are covered as policy; they
+   are not a complete proof of every command option or configuration. *)
 
 open Alcotest
 open Masc
 
 module Readonly = Keeper_gate_readonly
+
+let is_static = function
+  | Readonly.Static_observation -> true
+  | Readonly.Needs_observation _ -> false
+;;
+
+let observation_only_request ~operation ~sandbox_profile ~input =
+  Readonly.classify_request ~operation ~sandbox_profile ~input |> is_static
+;;
+
+let classification =
+  testable
+    (fun formatter value ->
+      Format.pp_print_string formatter
+        (Yojson.Safe.to_string (Readonly.classification_to_yojson value)))
+    ( = )
+;;
 
 (* The wire envelope still carries sandbox labels — producers emit them for
    display/audit. The classification must never read them: the typed
@@ -32,8 +49,8 @@ let script_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandb
     ]
 ;;
 
-let passes label argv = check bool label true (Readonly.classify_argv argv)
-let blocked label argv = check bool label false (Readonly.classify_argv argv)
+let passes label argv = check bool label true (Readonly.classify_argv argv |> is_static)
+let requires_observation label argv = check bool label false (Readonly.classify_argv argv |> is_static)
 
 let test_observation_table_is_fully_read () =
   passes "ls" [ "ls"; "-la" ];
@@ -44,8 +61,6 @@ let test_observation_table_is_fully_read () =
   passes "echo" [ "echo"; "hello"; "world" ];
   passes "printf" [ "printf"; "%s"; "x" ];
   passes "git status through -C" [ "git"; "-C"; "repos/masc"; "status"; "--short"; "--branch" ];
-  passes "git log" [ "git"; "log"; "--oneline"; "-5" ];
-  passes "git diff with global -c" [ "git"; "-c"; "core.pager=cat"; "diff" ];
   passes "git branch listing" [ "git"; "branch"; "-a" ];
   passes "git rev-list count against upstream"
     [ "git"; "-C"; "clone-probe"; "rev-list"; "--count"; "HEAD..origin/main" ];
@@ -59,7 +74,7 @@ let test_observation_table_is_fully_read () =
   passes "rg --pretty stays allowed" [ "rg"; "--pretty"; "x" ];
   passes "grep" [ "grep"; "-r"; "x"; "." ];
   passes "find read" [ "find"; "."; "-name"; "*.ml" ];
-  blocked "sed is judged, never fast-pathed (script can write/exec)"
+  requires_observation "sed needs execution evidence (script can write/exec)"
     [ "sed"; "-n"; "1,5p"; "f" ];
   passes "sort read" [ "sort"; "-u"; "f" ];
   passes "uniq one operand" [ "uniq"; "f" ];
@@ -94,86 +109,86 @@ let test_gh_read_verbs_pass () =
   passes "api get" [ "gh"; "api"; "repos/jeong-sik/masc" ];
   passes "api with an explicit jq" [ "gh"; "api"; "user"; "--jq"; ".login" ]
 
-let test_gh_write_shapes_stay_blocked () =
-  blocked "pr merge" [ "gh"; "pr"; "merge"; "32891"; "--squash" ];
-  blocked "pr create" [ "gh"; "pr"; "create"; "--title"; "x" ];
-  blocked "pr comment" [ "gh"; "pr"; "comment"; "32891"; "--body"; "x" ];
-  blocked "pr checkout writes the worktree" [ "gh"; "pr"; "checkout"; "32891" ];
-  blocked "repo clone writes the worktree" [ "gh"; "repo"; "clone"; "jeong-sik/masc" ];
-  blocked "auth login writes credentials" [ "gh"; "auth"; "login" ];
-  blocked "an unlisted family" [ "gh"; "secret"; "list" ];
-  blocked "an unlisted verb" [ "gh"; "pr"; "ready"; "32891" ];
-  blocked "a bare family" [ "gh"; "pr" ];
-  blocked "bare gh" [ "gh" ];
+let test_gh_write_shapes_require_observation () =
+  requires_observation "pr merge" [ "gh"; "pr"; "merge"; "32891"; "--squash" ];
+  requires_observation "pr create" [ "gh"; "pr"; "create"; "--title"; "x" ];
+  requires_observation "pr comment" [ "gh"; "pr"; "comment"; "32891"; "--body"; "x" ];
+  requires_observation "pr checkout writes the worktree" [ "gh"; "pr"; "checkout"; "32891" ];
+  requires_observation "repo clone writes the worktree" [ "gh"; "repo"; "clone"; "jeong-sik/masc" ];
+  requires_observation "auth login writes credentials" [ "gh"; "auth"; "login" ];
+  requires_observation "an unlisted family" [ "gh"; "secret"; "list" ];
+  requires_observation "an unlisted verb" [ "gh"; "pr"; "ready"; "32891" ];
+  requires_observation "a bare family" [ "gh"; "pr" ];
+  requires_observation "bare gh" [ "gh" ];
   (* --web opens a browser on the host, outside the guest. *)
-  blocked "pr view --web" [ "gh"; "pr"; "view"; "1"; "--web" ];
+  requires_observation "pr view --web" [ "gh"; "pr"; "view"; "1"; "--web" ];
   (* A field flag alone flips gh api to POST. *)
-  blocked "api with a method" [ "gh"; "api"; "-X"; "POST"; "repos/x/y/issues" ];
-  blocked "api with --method=" [ "gh"; "api"; "--method=DELETE"; "x" ];
-  blocked "api with a field" [ "gh"; "api"; "repos/x/y/issues"; "-f"; "title=x" ];
-  blocked "api with --field=" [ "gh"; "api"; "x"; "--field=a=b" ];
-  blocked "api with an input file" [ "gh"; "api"; "x"; "--input"; "body.json" ];
-  blocked "bare api" [ "gh"; "api" ]
+  requires_observation "api with a method" [ "gh"; "api"; "-X"; "POST"; "repos/x/y/issues" ];
+  requires_observation "api with --method=" [ "gh"; "api"; "--method=DELETE"; "x" ];
+  requires_observation "api with a field" [ "gh"; "api"; "repos/x/y/issues"; "-f"; "title=x" ];
+  requires_observation "api with --field=" [ "gh"; "api"; "x"; "--field=a=b" ];
+  requires_observation "api with an input file" [ "gh"; "api"; "x"; "--input"; "body.json" ];
+  requires_observation "bare api" [ "gh"; "api" ]
 
-let test_write_shapes_stay_blocked () =
-  blocked "empty argv" [];
-  blocked "empty command" [ "" ];
-  blocked "absolute path argv0" [ "/bin/rm"; "-rf"; "/" ];
-  blocked "rm" [ "rm"; "f" ];
-  blocked "mkdir" [ "mkdir"; "d" ];
-  blocked "tee" [ "tee"; "f" ];
-  blocked "chmod" [ "chmod"; "+x"; "f" ];
-  blocked "awk" [ "awk"; "1"; "f" ];
-  blocked "env prefixing a command" [ "env"; "rm"; "f" ];
-  blocked "find -delete" [ "find"; "."; "-delete" ];
-  blocked "find -exec" [ "find"; "."; "-exec"; "rm"; "{}"; ";" ];
-  blocked "find -ok" [ "find"; "."; "-ok"; "rm"; "{}"; ";" ];
-  blocked "find -fprint" [ "find"; "."; "-fprint"; "out" ];
-  blocked "find -fls" [ "find"; "."; "-fls"; "out" ];
-  blocked "sed in-place" [ "sed"; "-i"; "s/a/b/"; "f" ];
-  blocked "sed in-place backup suffix" [ "sed"; "-i.bak"; "s/a/b/"; "f" ];
-  blocked "sed --in-place" [ "sed"; "--in-place"; "s/a/b/"; "f" ];
+let test_write_shapes_require_observation () =
+  requires_observation "empty argv" [];
+  requires_observation "empty command" [ "" ];
+  requires_observation "absolute path argv0" [ "/bin/rm"; "-rf"; "/" ];
+  requires_observation "rm" [ "rm"; "f" ];
+  requires_observation "mkdir" [ "mkdir"; "d" ];
+  requires_observation "tee" [ "tee"; "f" ];
+  requires_observation "chmod" [ "chmod"; "+x"; "f" ];
+  requires_observation "awk" [ "awk"; "1"; "f" ];
+  requires_observation "env prefixing a command" [ "env"; "rm"; "f" ];
+  requires_observation "find -delete" [ "find"; "."; "-delete" ];
+  requires_observation "find -exec" [ "find"; "."; "-exec"; "rm"; "{}"; ";" ];
+  requires_observation "find -ok" [ "find"; "."; "-ok"; "rm"; "{}"; ";" ];
+  requires_observation "find -fprint" [ "find"; "."; "-fprint"; "out" ];
+  requires_observation "find -fls" [ "find"; "."; "-fls"; "out" ];
+  requires_observation "sed in-place" [ "sed"; "-i"; "s/a/b/"; "f" ];
+  requires_observation "sed in-place backup suffix" [ "sed"; "-i.bak"; "s/a/b/"; "f" ];
+  requires_observation "sed --in-place" [ "sed"; "--in-place"; "s/a/b/"; "f" ];
   (* The write/exec verbs a flag denylist cannot see, which is why sed is not
      fast-pathed at all: [w] writes a file, [e] runs a shell -- neither is a
      flag, both without [-i]. *)
-  blocked "sed script write verb" [ "sed"; "w /etc/passwd"; "f" ];
-  blocked "sed script exec verb" [ "sed"; "s/a/b/e"; "f" ];
-  blocked "sort -o writes" [ "sort"; "-o"; "out"; "f" ];
-  blocked "sort --output= writes" [ "sort"; "--output=out"; "f" ];
-  blocked "diff -o writes" [ "diff"; "-o"; "out"; "a"; "b" ];
-  blocked "rg --pre executes" [ "rg"; "--pre"; "cat"; "x" ];
-  blocked "rg --pre-glob executes" [ "rg"; "--pre-glob"; "*.z"; "x" ];
-  blocked "date sets clock" [ "date"; "-s"; "2026-01-01" ];
-  blocked "date --set sets clock" [ "date"; "--set=2026-01-01" ];
-  blocked "hostname sets name" [ "hostname"; "evil.example" ];
-  blocked "uniq second operand writes" [ "uniq"; "a"; "b" ];
-  blocked "git push" [ "git"; "push"; "origin"; "main" ];
-  blocked "git config writes" [ "git"; "config"; "user.name"; "x" ];
-  blocked "git checkout mutates" [ "git"; "checkout"; "-b"; "feature" ];
-  blocked "git reset" [ "git"; "reset"; "--hard" ];
-  blocked "git clean" [ "git"; "clean"; "-fd" ];
-  blocked "git branch create" [ "git"; "branch"; "feature" ];
-  blocked "git branch delete" [ "git"; "branch"; "-D"; "feature" ];
-  blocked "git tag create" [ "git"; "tag"; "v1.0.0" ];
-  blocked "git remote add" [ "git"; "remote"; "add"; "origin"; "x" ];
-  blocked "git remote remove" [ "git"; "remote"; "remove"; "origin" ];
-  blocked "git with no subcommand" [ "git" ];
+  requires_observation "sed script write verb" [ "sed"; "w /etc/passwd"; "f" ];
+  requires_observation "sed script exec verb" [ "sed"; "s/a/b/e"; "f" ];
+  requires_observation "sort -o writes" [ "sort"; "-o"; "out"; "f" ];
+  requires_observation "sort --output= writes" [ "sort"; "--output=out"; "f" ];
+  requires_observation "diff -o writes" [ "diff"; "-o"; "out"; "a"; "b" ];
+  requires_observation "rg --pre executes" [ "rg"; "--pre"; "cat"; "x" ];
+  requires_observation "rg --pre-glob executes" [ "rg"; "--pre-glob"; "*.z"; "x" ];
+  requires_observation "date sets clock" [ "date"; "-s"; "2026-01-01" ];
+  requires_observation "date --set sets clock" [ "date"; "--set=2026-01-01" ];
+  requires_observation "hostname sets name" [ "hostname"; "evil.example" ];
+  requires_observation "uniq second operand writes" [ "uniq"; "a"; "b" ];
+  requires_observation "git push" [ "git"; "push"; "origin"; "main" ];
+  requires_observation "git config writes" [ "git"; "config"; "user.name"; "x" ];
+  requires_observation "git checkout mutates" [ "git"; "checkout"; "-b"; "feature" ];
+  requires_observation "git reset" [ "git"; "reset"; "--hard" ];
+  requires_observation "git clean" [ "git"; "clean"; "-fd" ];
+  requires_observation "git branch create" [ "git"; "branch"; "feature" ];
+  requires_observation "git branch delete" [ "git"; "branch"; "-D"; "feature" ];
+  requires_observation "git tag create" [ "git"; "tag"; "v1.0.0" ];
+  requires_observation "git remote add" [ "git"; "remote"; "add"; "origin"; "x" ];
+  requires_observation "git remote remove" [ "git"; "remote"; "remove"; "origin" ];
+  requires_observation "git with no subcommand" [ "git" ];
   (* Script-form inert prefixes are stripped; the argv form has no script
      to be equivalent to, so argv[0] stays unregistered. *)
-  blocked "env assignment as argv form" [ "NO_COLOR=1"; "gh"; "pr"; "list" ];
+  requires_observation "env assignment as argv form" [ "NO_COLOR=1"; "gh"; "pr"; "list" ];
   (* Read-only graphql queries ride a field flag, which flips the method
      to POST; the query text itself is never parsed for read-ness. *)
-  blocked "graphql via field flag"
+  requires_observation "graphql via field flag"
     [ "gh"; "api"; "graphql"; "-f"; "query={viewer{login}}" ]
 ;;
 
 
 let executes ~operation ~sandbox_profile argv =
-  Readonly.observation_only_request ~operation ~sandbox_profile ~input:(gate_input argv)
+  observation_only_request ~operation ~sandbox_profile ~input:(gate_input argv)
 ;;
 
 let executes_script ~operation ~sandbox_profile script =
-  Readonly.observation_only_request
+  observation_only_request
     ~operation
     ~sandbox_profile
     ~input:(script_gate_input script)
@@ -197,6 +212,102 @@ let docker = Some Keeper_types_profile_sandbox.Docker
 let microvm = Some Keeper_types_profile_sandbox.Micro_vm
 let remote_ssh = Some Keeper_types_profile_sandbox.Remote_ssh
 
+let git_execution_cases =
+  [ Readonly.Diff, [ "git"; "diff"; "--output=changes.patch" ]
+  ; Readonly.Log, [ "git"; "log"; "--output=history.txt" ]
+  ; Readonly.Show, [ "git"; "show"; "--output=commit.txt" ]
+  ; Readonly.Grep, [ "git"; "grep"; "--open-files-in-pager=cat"; "needle" ]
+  ; Readonly.Reflog, [ "git"; "reflog"; "delete"; "HEAD@{0}" ]
+  ; Readonly.Reflog, [ "git"; "reflog"; "expire"; "--all" ]
+  ; Readonly.Whatchanged, [ "git"; "whatchanged"; "--output=history.txt" ]
+  ; Readonly.Blame, [ "git"; "blame"; "--textconv"; "notes.txt" ]
+  ; Readonly.Annotate, [ "git"; "annotate"; "--textconv"; "notes.txt" ]
+  ]
+;;
+
+let test_git_effects_require_execution_evidence () =
+  List.iter
+    (fun (command, argv) ->
+      let expected = Readonly.Needs_observation (Git_command_requires_execution command) in
+      check classification "output/helper/mutation options require execution"
+        expected (Readonly.classify_argv argv);
+      (* A repository can configure helpers even when the caller supplies no
+         such option, so stripping the options must not restore static proof. *)
+      match argv with
+      | git :: subcommand :: _ ->
+        check classification "plain command preserves configuration uncertainty"
+          expected (Readonly.classify_argv [ git; subcommand ])
+      | _ -> fail "invalid Git scenario fixture")
+    git_execution_cases
+;;
+
+let test_git_global_configuration_uses_exact_syntax () =
+  let override = Readonly.Needs_observation Readonly.Git_configuration_override in
+  List.iter
+    (fun argv ->
+      check classification "global override requires execution" override
+        (Readonly.classify_argv argv))
+    [ [ "git"; "-c"; "core.fsmonitor=helper"; "status" ]
+    ; [ "git"; "--no-pager"; "-C"; "repo"; "-c"; "core.pager=cat"; "rev-parse"; "HEAD" ]
+    ; [ "git"; "--config-env=core.fsmonitor=MONITOR"; "status" ]
+    ];
+  check classification "log -c is the subcommand's combined-diff option"
+    (Readonly.Needs_observation (Git_command_requires_execution Log))
+    (Readonly.classify_argv [ "git"; "log"; "-c" ]);
+  check classification "-C consumes a directory that happens to spell -c"
+    Readonly.Static_observation
+    (Readonly.classify_argv [ "git"; "-C"; "-c"; "rev-parse"; "HEAD" ]);
+  List.iter
+    (fun argv ->
+      check classification "unknown spelling remains unproven"
+        (Readonly.Needs_observation Unproven_request)
+        (Readonly.classify_argv argv))
+    [ [ "git"; "-ccore.pager=cat"; "status" ]
+    ; [ "git"; "--config-env-extra=core.pager=VALUE"; "status" ]
+    ; [ "git"; "-C" ]
+    ];
+  passes "Git words in another command's data are not Git syntax"
+    [ "echo"; "git diff --output=out -c core.pager=helper" ]
+;;
+
+let test_git_reasons_survive_the_request_projection () =
+  let diff = Readonly.Needs_observation (Git_command_requires_execution Diff) in
+  let script = "pwd && git diff --output=changes.patch | head" in
+  check classification "pipeline and sequence retain the Git reason"
+    diff (Readonly.classify_script script);
+  List.iter
+    (fun input ->
+      check classification "argv/script/shell costume retain the Git reason"
+        diff (Readonly.classify_request ~operation:"tool_execute"
+                ~sandbox_profile:microvm ~input))
+    [ gate_input [ "git"; "diff"; "--output=changes.patch" ]
+    ; script_gate_input script
+    ; gate_input [ "sh"; "-c"; script ]
+    ];
+  check classification "unsupported profile does not erase the command reason"
+    diff (Readonly.classify_request ~operation:"tool_execute"
+            ~sandbox_profile:remote_ssh ~input:(script_gate_input script));
+  check classification "configuration reason survives Shell IR"
+    (Readonly.Needs_observation Git_configuration_override)
+    (Readonly.classify_script "git -c core.fsmonitor=helper status && pwd");
+  check classification "unknown first stage remains explicitly unproven"
+    (Readonly.Needs_observation Unproven_request)
+    (Readonly.classify_script "unknown-command && git diff")
+;;
+
+let test_git_classification_projection_contains_no_arguments () =
+  let encoded argv =
+    Readonly.classify_argv argv |> Readonly.classification_to_yojson
+    |> Yojson.Safe.to_string
+  in
+  check string "configuration values are not copied to the reason"
+    {|{"kind":"needs_observation","reason":{"kind":"git_configuration_override"}}|}
+    (encoded [ "git"; "-c"; "http.extraHeader=Authorization: secret"; "status" ]);
+  check string "command reason contains only the typed name"
+    {|{"kind":"needs_observation","reason":{"kind":"git_command_requires_execution","command":"diff"}}|}
+    (encoded [ "git"; "diff"; "--output=private-path.patch" ])
+;;
+
 let network_input ~capability =
   `Assoc
     [ "capability", `String capability
@@ -208,35 +319,35 @@ let test_network_observation_capabilities () =
   check bool
     "web_search reads without judgment"
     true
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"network_read"
        ~sandbox_profile:None
        ~input:(network_input ~capability:"web_search"));
   check bool
     "web_fetch reads without judgment (address boundary is the fetch's own)"
     true
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"network_read"
        ~sandbox_profile:None
        ~input:(network_input ~capability:"web_fetch"));
   check bool
     "unknown capability never matches"
     false
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"network_read"
        ~sandbox_profile:None
        ~input:(network_input ~capability:"port_scan"));
   check bool
     "missing capability never matches"
     false
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"network_read"
        ~sandbox_profile:None
        ~input:(`Assoc [ "input", `Assoc [ "query", `String "x" ] ]));
   check bool
     "network arm ignores tool_execute shapes"
     false
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"network_read"
        ~sandbox_profile:None
        ~input:(gate_input [ "ls" ]));
@@ -264,32 +375,32 @@ let test_gate_shape_gates () =
   check bool
     "wire labels are not consulted: typed Micro_vm with nonsense labels still passes"
     true
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"tool_execute"
        ~sandbox_profile:microvm
        ~input:(gate_input ~profile:"local" ~target:"local" [ "ls" ]));
   check bool
     "wire labels are not consulted: microvm labels without a typed profile never match"
     false
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"tool_execute"
        ~sandbox_profile:None
        ~input:(gate_input ~profile:"microvm" ~target:"microvm:masc-keeper-sandbox:local" [ "ls" ]));
   check bool
     "non-tool_execute never matches"
     false
-    (Readonly.observation_only_request ~operation:"slack_post" ~sandbox_profile:docker ~input:(gate_input [ "ls" ]));
+    (observation_only_request ~operation:"slack_post" ~sandbox_profile:docker ~input:(gate_input [ "ls" ]));
   check bool
     "missing argv never matches"
     false
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"tool_execute"
        ~sandbox_profile:docker
        ~input:(`Assoc [ "input", `Assoc [] ]));
   check bool
     "non-string argv entry never matches"
     false
-    (Readonly.observation_only_request
+    (observation_only_request
        ~operation:"tool_execute"
        ~sandbox_profile:docker
        ~input:(`Assoc [ "input", `Assoc [ "argv", `List [ `String "ls"; `Int 3 ] ] ]))
@@ -371,11 +482,11 @@ let with_auto_judge f =
 (* ── script classification through the shell IR (RFC-0421) ─────────── *)
 
 let observation label script =
-  check bool (label ^ " is observation") true (Readonly.classify_script script)
+  check bool (label ^ " is observation") true (Readonly.classify_script script |> is_static)
 ;;
 
-let judged label script =
-  check bool (label ^ " keeps the judge") false (Readonly.classify_script script)
+let script_requires_observation label script =
+  check bool (label ^ " requires execution evidence") false (Readonly.classify_script script |> is_static)
 ;;
 
 let test_script_classification_unit () =
@@ -387,9 +498,9 @@ let test_script_classification_unit () =
   observation "a tab is a word boundary, like the shell reads it" "ls\t-la";
   observation "quoted argument" "grep 'x y' f";
   observation "double-quoted argument" "grep -n \"a b\" notes.txt";
-  judged "pipeline of reads" "git show HEAD:f | sed -n '10,20p'";
+  script_requires_observation "pipeline of reads" "git show HEAD:f | sed -n '10,20p'";
   observation "pipeline with head" "ls repos | head -5";
-  observation "cd before observing" "cd repos/masc && git log --oneline -3";
+  observation "cd before observing" "cd repos/masc && git rev-parse HEAD";
   observation "sequence of reads" "pwd; ls -la; echo ---";
   observation "newline-separated reads" "cat a\ncat b";
   observation "or-connector of reads" "ls /masc-work || echo none";
@@ -399,49 +510,49 @@ let test_script_classification_unit () =
   observation "tilde is a path the read resolves" "cat ~/notes";
   (* The tab cases RFC-0404 refused by character: the parser splits the
      flag out, so the guards see it. *)
-  judged "tab splits the sed in-place flag out" "sed -e\t-i s/a/b/ f";
-  judged "tab splits the rg preprocessor flag out" "rg --pre\trm x";
-  judged "tab splits the sort output flag out" "sort -o\tout f";
-  judged "tab splits the uniq second operand out" "uniq -c\ta b";
+  script_requires_observation "tab splits the sed in-place flag out" "sed -e\t-i s/a/b/ f";
+  script_requires_observation "tab splits the rg preprocessor flag out" "rg --pre\trm x";
+  script_requires_observation "tab splits the sort output flag out" "sort -o\tout f";
+  script_requires_observation "tab splits the uniq second operand out" "uniq -c\ta b";
   (* Where the argv depends on the guest at run time. *)
-  judged "glob" "ls *.ml";
-  judged "bracket glob" "ls [a-z]*";
-  judged "brace expansion" "cat {a,b}";
-  judged "variable" "echo $HOME";
-  judged "command substitution" "echo $(whoami)";
-  judged "backtick" "echo `whoami`";
-  judged "subshell" "(ls)";
-  judged "environment prefix" "PAGER=cat git log";
+  script_requires_observation "glob" "ls *.ml";
+  script_requires_observation "bracket glob" "ls [a-z]*";
+  script_requires_observation "brace expansion" "cat {a,b}";
+  script_requires_observation "variable" "echo $HOME";
+  script_requires_observation "command substitution" "echo $(whoami)";
+  script_requires_observation "backtick" "echo `whoami`";
+  script_requires_observation "subshell" "(ls)";
+  script_requires_observation "environment prefix" "PAGER=cat git log";
   (* Effects, wherever they sit on the line. *)
-  judged "write redirect" "cat f > out";
-  judged "append redirect" "cat f >> out";
-  judged "a write after a read" "ls; rm -rf /";
-  judged "a write inside a pipeline" "cat f | tee out";
-  judged "fetch behind cd" "cd repos/masc && git fetch origin main";
-  judged "export then read" "export X=1; ls";
-  judged "a command outside the table" "curl https://example.com";
-  judged "a shell inside the script" "bash -c ls";
-  judged "whitespace only" "   ";
-  judged "empty" "";
+  script_requires_observation "write redirect" "cat f > out";
+  script_requires_observation "append redirect" "cat f >> out";
+  script_requires_observation "a write after a read" "ls; rm -rf /";
+  script_requires_observation "a write inside a pipeline" "cat f | tee out";
+  script_requires_observation "fetch behind cd" "cd repos/masc && git fetch origin main";
+  script_requires_observation "export then read" "export X=1; ls";
+  script_requires_observation "a command outside the table" "curl https://example.com";
+  script_requires_observation "a shell inside the script" "bash -c ls";
+  script_requires_observation "whitespace only" "   ";
+  script_requires_observation "empty" "";
   (* Leading environment assignments the IR separates into simple.Ir.env:
      the closed inert list decides which ones keep the observation fast
      path, every other name keeps its judge turn (task-1348). *)
   observation "inert NO_COLOR prefix" "NO_COLOR=1 gh pr list";
-  observation "stacked inert prefixes" "TZ=UTC LANG=C git log";
+  observation "stacked inert prefixes" "TZ=UTC LANG=C git rev-parse HEAD";
   observation "inert prefix keeps flags" "NO_COLOR=1 CLICOLOR=0 gh run list";
   observation "assignment-looking argument is not a prefix" "echo NO_COLOR=1";
-  judged "unknown assignment name" "FOO=1 gh pr list";
-  judged "PATH assignment" "PATH=. ls";
-  judged "git external diff assignment" "GIT_EXTERNAL_DIFF=cat git diff";
-  judged "inert assignments alone are not a command" "NO_COLOR=1";
+  script_requires_observation "unknown assignment name" "FOO=1 gh pr list";
+  script_requires_observation "PATH assignment" "PATH=. ls";
+  script_requires_observation "git external diff assignment" "GIT_EXTERNAL_DIFF=cat git diff";
+  script_requires_observation "inert assignments alone are not a command" "NO_COLOR=1";
   (* [TZ] whose value could name a tzfile is not inert: glibc opens a
      value starting with [:] (or containing [/]) as a timezone file, so
-     [TZ=:/etc/passwd git log] would be a file-existence oracle riding
+     [TZ=:/etc/passwd git rev-parse HEAD] would be a file-existence oracle riding
      the observation fast path. The value guard sends it to the judge
      (code-reviewer HOLD, 2026-09-05). *)
-  judged "TZ tzfile reference via colon" "TZ=:/etc/passwd git log";
-  judged "TZ tzfile reference via slash" "TZ=/etc/localtime git log";
-  observation "TZ zone abbreviation stays inert" "TZ=UTC git log"
+  script_requires_observation "TZ tzfile reference via colon" "TZ=:/etc/passwd git rev-parse HEAD";
+  script_requires_observation "TZ tzfile reference via slash" "TZ=/etc/localtime git rev-parse HEAD";
+  observation "TZ zone abbreviation stays inert" "TZ=UTC git rev-parse HEAD"
 ;;
 
 let test_observation_scripts_pass_the_table () =
@@ -597,16 +708,103 @@ let test_auto_judge_allows_a_clean_observe_run () =
       ~keeper_always_allow:false
       ~observe:(fun () ->
         incr asked;
-        Keeper_gate.Observed_clean { run = Keeper_types_profile_sandbox.Observe })
+        Keeper_gate.Observed_result
+          { run = Keeper_types_profile_sandbox.Observe
+          ; result = { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout = "1\n"; stderr = "" }
+          })
       (boxed_request base_path)
   with
-  | Keeper_gate.Allow { source = Observed_in_box Keeper_types_profile_sandbox.Observe; _ } ->
+  | Keeper_gate.Allow
+      { source = Observed_in_box { run = Keeper_types_profile_sandbox.Observe; _ }; _ } ->
     check int "the box was asked exactly once" 1 !asked
   | Keeper_gate.Allow { source; _ } ->
     failf "a clean observe run was allowed through the wrong source: %s"
       (Keeper_gate.authorization_source_to_string source)
   | Keeper_gate.Deferred _ -> fail "a clean observe run was deferred"
   | Keeper_gate.Unavailable _ -> fail "a clean observe run made the queue unavailable"
+;;
+
+let pending_count base_path =
+  match Keeper_approval_queue.pending_count_for_keeper_in_workspace
+          ~base_path ~keeper_name:"alpha" with
+  | Ok count -> count
+  | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+;;
+
+let test_git_observation_returns_without_judge_queueing () =
+  with_auto_judge @@ fun base_path ->
+  List.iter
+    (fun (_, argv) ->
+      let asked = ref 0 in
+      let stdout = "the box's Git output\n" in
+      let decision =
+        Keeper_gate.decide
+          ~keeper_always_allow:false
+          ~observe:(fun () ->
+            incr asked;
+            Keeper_gate.Observed_result
+              { run = Keeper_types_profile_sandbox.Observe
+              ; result = { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout; stderr = "" }
+              })
+          (gate_request ~sandbox_profile:microvm base_path argv)
+      in
+      (match decision with
+       | Keeper_gate.Allow
+           { source = Observed_in_box { run = Keeper_types_profile_sandbox.Observe; result }; _ } ->
+         check string "the captured result is returned" stdout result.stdout
+       | Keeper_gate.Allow { source; _ } ->
+         failf "Git required observation but used %s"
+           (Keeper_gate.authorization_source_to_string source)
+       | Keeper_gate.Deferred _ -> fail "successful Git observation queued a Judge"
+       | Keeper_gate.Unavailable _ -> fail "successful Git observation made Gate unavailable");
+      check int "the box executed once" 1 !asked;
+      check int "no Judge request was created" 0 (pending_count base_path))
+    git_execution_cases
+;;
+
+let test_git_without_a_box_uses_the_configured_judge () =
+  with_auto_judge @@ fun base_path ->
+  let asked = ref 0 in
+  let decision =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        incr asked;
+        Keeper_gate.Observation_unavailable "no_box")
+      (gate_request ~sandbox_profile:docker base_path
+         [ "git"; "-c"; "core.fsmonitor=helper"; "status" ])
+  in
+  deferred_to_the_judge "Git whose configuration needs a box" decision;
+  check int "the available execution path was consulted once" 1 !asked;
+  check int "the existing Judge request was created" 1 (pending_count base_path)
+;;
+
+let test_git_refusal_reaches_the_judge_with_the_original_status () =
+  with_auto_judge @@ fun base_path ->
+  let asked = ref 0 in
+  let stderr = "Git helper could not write its output\n" in
+  let decision =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        incr asked;
+        Keeper_gate.Observed_refused { status = Unix.WEXITED 23; stderr })
+      (script_gate_request ~sandbox_profile:microvm base_path
+         "git diff --output=changes.patch")
+  in
+  deferred_to_the_judge "refused Git observation" decision;
+  check int "the refused run was attempted once" 1 !asked;
+  check int "one Judge request was created" 1 (pending_count base_path);
+  match decision with
+  | Keeper_gate.Deferred { approval_id; _ } ->
+    (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
+     | Ok (Some { observation = Some refusal; _ }) ->
+       check bool "original exit status" true
+         (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 23);
+       check string "original stderr" stderr refusal.observed_stderr
+     | Ok _ -> fail "the Git refusal was not recorded on the Judge request"
+     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+  | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
 ;;
 
 (* A write the box refused ends non-zero. That is not an effect, and it is
@@ -754,9 +952,13 @@ let () =
   run "Keeper gate readonly"
     [ ( "argv classification"
       , [ test_case "observation table is fully read" `Quick test_observation_table_is_fully_read
-        ; test_case "write shapes stay blocked" `Quick test_write_shapes_stay_blocked
+        ; test_case "write shapes require observation" `Quick test_write_shapes_require_observation
         ; test_case "gh read verbs pass" `Quick test_gh_read_verbs_pass
-        ; test_case "gh write shapes stay blocked" `Quick test_gh_write_shapes_stay_blocked
+        ; test_case "gh write shapes require observation" `Quick test_gh_write_shapes_require_observation
+        ; test_case "Git effects need execution evidence" `Quick test_git_effects_require_execution_evidence
+        ; test_case "Git global configuration follows exact syntax" `Quick test_git_global_configuration_uses_exact_syntax
+        ; test_case "Git reasons survive request projection" `Quick test_git_reasons_survive_the_request_projection
+        ; test_case "Git classification omits raw arguments" `Quick test_git_classification_projection_contains_no_arguments
         ; test_case "gate shape gates" `Quick test_gate_shape_gates
         ; test_case
             "network observation capabilities"
@@ -787,6 +989,18 @@ let () =
             "auto_judge allows a clean observe run"
             `Quick
             test_auto_judge_allows_a_clean_observe_run
+        ; test_case
+            "Git observation returns without Judge queueing"
+            `Quick
+            test_git_observation_returns_without_judge_queueing
+        ; test_case
+            "Git without a box uses the configured Judge"
+            `Quick
+            test_git_without_a_box_uses_the_configured_judge
+        ; test_case
+            "Git refusal preserves status for the Judge"
+            `Quick
+            test_git_refusal_reaches_the_judge_with_the_original_status
         ; test_case
             "auto_judge defers a refused observe run"
             `Quick

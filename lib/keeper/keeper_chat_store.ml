@@ -55,12 +55,8 @@ type attachment = {
   size : int;
   mime_type : string;
   data : string;
-  (* Pixel size, set once at the moment the bytes are swapped out for their
-     [masc://] reference: after [persisted_attachment] the bytes are gone and
-     the size is no longer derivable, so this field is the only memory of
-     them. [None] is a normal value -- WebP, documents, and rows written
-     before the field existed all read as None and the note shows without a
-     size. *)
+  (* Dimensions are measured before externalization so history pages need
+     only metadata. [data] becomes a canonical marker for retained wire bytes. *)
   width : int option;
   height : int option;
 }
@@ -312,17 +308,9 @@ let redaction_for ~base_dir ~keeper_name =
 let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }
 
-let persisted_attachment_ref (att : attachment) =
-  (* SHA-256, not Stdlib.Digest (MD5): this is attachment content identity,
-     not a display checksum (#26720). Nothing reads the digest back out of the
-     URI — [att.id] is the locator — so rows written before this keep working. *)
-  let digest = Digestif.SHA256.(digest_string att.data |> to_hex) in
-  Printf.sprintf "masc://attachment/%s/%s" att.id digest
-
-let persisted_attachment (att : attachment) =
-  (* The last place the bytes exist: the reference that replaces them cannot
-     answer "how big was it", so the pixel size is read here, once, from the
-     same payload the provider request was built from. Gate connectors send
+let persisted_attachment ~base_dir (att : attachment) =
+  (* Measure dimensions before replacing inline data with a durable reference.
+     History pages then carry metadata without fetching image payloads. Gate connectors send
      [data:<mime>;base64,<payload>] URIs and the TUI sends bare base64;
      both decode here, and a payload that decodes to nothing parseable just
      leaves the size unset. *)
@@ -343,7 +331,13 @@ let persisted_attachment (att : attachment) =
     | Some (width, height) -> (Some width, Some height)
     | None -> (att.width, att.height)
   in
-  { att with data = persisted_attachment_ref att; width; height }
+  let reference =
+    Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:base_dir)
+      ~bytes:att.data ~mime:"text/plain"
+    |> fun reference -> Tool_output.with_preview reference "attachment payload"
+  in
+  let data = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  { att with data; width; height }
 
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
@@ -1321,7 +1315,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
       List.map (redact_attachment redaction) user_attachments
     in
     let persisted_user_attachments =
-      List.map persisted_attachment user_attachments
+      List.map (persisted_attachment ~base_dir) user_attachments
     in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let assistant_content =
@@ -1397,7 +1391,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
     let redaction = redaction_for ~base_dir ~keeper_name in
     let user_content = Keeper_secret_redaction.redact_text redaction user_content in
     let user_attachments = List.map (redact_attachment redaction) user_attachments in
-    let persisted_user_attachments = List.map persisted_attachment user_attachments in
+    let persisted_user_attachments = List.map (persisted_attachment ~base_dir) user_attachments in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
@@ -1840,7 +1834,7 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map persisted_attachment attachments in
+    let persisted_attachments = List.map (persisted_attachment ~base_dir) attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
@@ -1879,7 +1873,7 @@ let append_user_message_once
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map persisted_attachment attachments in
+    let persisted_attachments = List.map (persisted_attachment ~base_dir) attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in
@@ -2456,25 +2450,134 @@ let load_page ~base_dir ~keeper_name ?before () : page =
 let load ~base_dir ~keeper_name : chat_message list =
   (load_page ~base_dir ~keeper_name ()).messages
 
+(* ── Transcript cache (RFC main-domain-scheduler-latency §8.8, P4k) ────
+   [load_all] used to read the whole transcript, parse every row and redact
+   every message on the calling fiber, on every keeper wake: 1.7-3.5 MB and
+   2,000-3,700 rows per keeper on the live root, and the regex passes of the
+   redaction alone were 19% of the main domain's busy time (2026-09-05).
+   The transcript is append-only — the store's one writer appends under the
+   private JSONL lock — so a load parses only the rows past the last parsed
+   row boundary and appends them to what was parsed before. The cache is per
+   path and holds while the file keeps its identity (device, inode), has not
+   shrunk below the parsed boundary, and the redaction snapshot the messages
+   were redacted with is the one in force ([redaction_for] hands back the
+   same value while the secret sources are unchanged). Anything else, and a
+   torn tail, reload the whole transcript through the rows reader. Parsing
+   and redaction run on the domain pool when one is installed. *)
+type transcript_cache =
+  { device : int
+  ; inode : int
+  ; parsed_end : int  (** Offset just past the last parsed ['\n']-terminated row. *)
+  ; messages_rev : chat_message list  (** Newest first. *)
+  ; redaction : Keeper_secret_redaction.t
+  }
+
+let transcript_caches : (string, transcript_cache) Hashtbl.t = Hashtbl.create 16
+let transcript_caches_mu = Stdlib.Mutex.create ()
+
+let remember_transcript path cache =
+  Stdlib.Mutex.protect transcript_caches_mu (fun () ->
+    Hashtbl.replace transcript_caches path cache)
+;;
+
+let forget_transcript path =
+  Stdlib.Mutex.protect transcript_caches_mu (fun () -> Hashtbl.remove transcript_caches path)
+;;
+
+let transcript_identity path =
+  match Unix.stat path with
+  | st -> Some (st.Unix.st_dev, st.Unix.st_ino, st.Unix.st_size)
+  | exception Unix.Unix_error _ -> None
+;;
+
+let parse_transcript_rows ~path ~redaction rows =
+  rows
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    let trimmed = String.trim line in
+    if trimmed = "" then None else parse_line ~file_path:path trimmed)
+  |> List.map (redact_message redaction)
+;;
+
+let load_transcript_fully ~path ~redaction =
+  let before = transcript_identity path in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing
+  | Private_file_succeeded_with_cleanup_failure
+      { value = Fs_compat.Private_jsonl_rows.Rows_missing; _ } ->
+    forget_transcript path;
+    []
+  | Private_file_succeeded
+      (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset = _ })
+  | Private_file_succeeded_with_cleanup_failure
+      { value =
+          Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset = _ }
+      ; _
+      } ->
+    let messages =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        parse_transcript_rows ~path ~redaction rows)
+    in
+    (* Register only when the file the rows came from is the one statted
+       before the read: a replacement between the two would pair a new
+       identity with old rows, and the next load would append to it. *)
+    (match before, transcript_identity path with
+     | Some (device, inode, _), Some (device', inode', _)
+       when device = device' && inode = inode' ->
+       remember_transcript
+         path
+         { device; inode; parsed_end = rows_end; messages_rev = List.rev messages; redaction }
+     | Some _, Some _ | Some _, None | None, Some _ | None, None -> forget_transcript path);
+    messages
+  | Private_file_failed error
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
+    report_persistence_read_drop
+      ~reason:Read_drop_reason.Entry_load_error
+      ~path
+      ~detail:(Fs_compat.Private_jsonl_rows.error_to_string error);
+    forget_transcript path;
+    []
+;;
+
 let load_all ~base_dir ~keeper_name : chat_message list =
   let path = chat_path ~base_dir ~keeper_name in
-  if not (Sys.file_exists path) then []
+  if not (Sys.file_exists path) then (
+    forget_transcript path;
+    [])
   else
-    match Safe_ops.read_file_safe path with
-    | Error detail ->
-      report_persistence_read_drop
-        ~reason:Read_drop_reason.Entry_load_error
-        ~path
-        ~detail;
-      []
-    | Ok contents ->
-      let redaction = redaction_for ~base_dir ~keeper_name in
-      contents
-      |> String.split_on_char '\n'
-      |> List.filter_map (fun line ->
-        let trimmed = String.trim line in
-        if trimmed = "" then None else parse_line ~file_path:path trimmed)
-      |> List.map (redact_message redaction)
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let cached =
+      Stdlib.Mutex.protect transcript_caches_mu (fun () ->
+        Hashtbl.find_opt transcript_caches path)
+    in
+    let continuation =
+      match cached, transcript_identity path with
+      | Some cache, Some (device, inode, size)
+        when cache.device = device
+             && cache.inode = inode
+             && size >= cache.parsed_end
+             && cache.redaction == redaction -> Some cache
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
+    in
+    match continuation with
+    | None -> load_transcript_fully ~path ~redaction
+    | Some cache ->
+      (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:cache.parsed_end with
+       | Private_file_succeeded { Fs_compat.Private_jsonl_slice.bytes; end_offset }
+       | Private_file_succeeded_with_cleanup_failure
+           { value = { Fs_compat.Private_jsonl_slice.bytes; end_offset }; _ } ->
+         let fresh =
+           if String.equal bytes ""
+           then []
+           else
+             Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               parse_transcript_rows ~path ~redaction bytes)
+         in
+         let messages_rev = List.rev_append fresh cache.messages_rev in
+         remember_transcript path { cache with parsed_end = end_offset; messages_rev };
+         List.rev messages_rev
+       | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
+         load_transcript_fully ~path ~redaction)
 
 (* Content equality for the [Already_present] branch of the append-once
    paths: does the row that already holds this approval's slot say the same
@@ -2873,10 +2976,8 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
               @ (match m.attachments with
                  | None | Some [] -> []
                  | Some atts ->
-                     (* The dashboard API carries the size the row was
-                        persisted with -- the [masc://] reference in [data]
-                        cannot be re-measured, and rows that never went
-                        through [persisted_attachment] have none to show. *)
+                     (* History carries dimensions and a small blob marker;
+                        image payloads are fetched only when requested. *)
                      let att_json = List.map (fun (att : attachment) ->
                        `Assoc ([
                          ("id", `String att.id);

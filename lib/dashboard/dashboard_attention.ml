@@ -14,23 +14,12 @@ type attention_item = {
   suggested_tool : string;
 }
 
-let severity_to_string = function
-  | Critical -> "critical"
-  | Warning -> "warning"
-  | Info -> "info"
-
 let severity_icon = function
   | Critical -> "[!]"
   | Warning -> "[~]"
   | Info -> "[i]"
 
 let severity_order = function Critical -> 0 | Warning -> 1 | Info -> 2
-
-(** Coerce to canonical [Severity.t] for cross-module communication. *)
-let to_severity : severity -> Severity.t = function
-  | Critical -> Critical
-  | Warning -> Warning
-  | Info -> Info
 
 (* ===== Detection Rules ===== *)
 

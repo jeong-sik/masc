@@ -301,6 +301,24 @@ val keeper_work_root : keeper_name:string -> string
 val shim_guest_dir : string
 val shim_binary_name : string
 val shim_config_name : string
+
+val shim_sidecar_name : string
+(** [masc-exec-shim.sha256], written by [scripts/install.sh] beside the shim
+    it placed: the sha256 the release's SHA256SUMS gave for that asset, in
+    [sha256sum] format (digest, two spaces, asset name). *)
+
+(** RFC-0427 B-2: what the boot knows about the shim it is about to run. *)
+type shim_provenance =
+  | Shim_verified of { sha256 : string }
+      (** the binary's digest equals the sidecar's *)
+  | Shim_unverified  (** no sidecar: a hand-built shim, run as it is *)
+
+val verify_shim_sidecar : dir:string -> (shim_provenance, string) result
+(** Reads [dir/masc-exec-shim.sha256] if present and compares it with the
+    digest of [dir/masc-exec-shim]. [Error] names the case:
+    [microvm_shim_hash_mismatch] (both digests in the text),
+    [microvm_shim_sidecar_invalid], [microvm_shim_sidecar_unreadable],
+    [microvm_shim_unreadable]. Never raises. *)
 val shim_guest_path : string
 val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list

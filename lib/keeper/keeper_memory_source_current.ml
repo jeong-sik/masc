@@ -145,12 +145,6 @@ let render_invalidation invalidation =
     (invalidation_reason_to_string invalidation.reason)
 ;;
 
-let render_payload facts invalidations =
-  List.map render_fact facts
-  @ List.map render_invalidation invalidations
-  |> String.concat "\n"
-;;
-
 let source_to_json source =
   `Assoc
     [ "kind", `String "file"

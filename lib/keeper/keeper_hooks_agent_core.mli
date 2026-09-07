@@ -28,12 +28,6 @@ val resolve_after_turn_model :
     metrics when AGENT_CORE omits [response.model] or returns a selector alias,
     without exposing concrete model identity. *)
 
-val record_response_content_quality_metric :
-  keeper_name:string -> Agent_core.Types.api_response -> unit
-(** Count after-turn responses that contain no visible assistant text and no
-    tool progress.  Tool-use responses are progress, even when textual content
-    is empty. *)
-
 (** context_max_of_telemetry, redact_inference_telemetry_json,
     inference_telemetry_to_runtime_json moved to Keeper_hooks_agent_core_types
     (intra-library file split, 2026-05-16). Re-exported via include below. *)
@@ -51,10 +45,6 @@ val classify_usage_trust :
 (** Validate objective non-negative usage-counter invariants.  A usage
     record without any token evidence (e.g. cost-only) is [Usage_missing],
     matching [usage_missing_of_usage], never [Usage_trusted]. *)
-
-val record_usage_anomaly_metrics :
-  keeper_name:string -> Keeper_usage_trust.t -> unit
-(** Emit Otel_metric_store counters for each anomaly category in the verdict. *)
 
 (** {1 Cost ledger}
 
@@ -74,26 +64,6 @@ val record_keeper_tool_duration_metric :
 (** Emit the per-tool duration histogram for the summary. *)
 
 (** {1 Throughput metrics} *)
-
-val record_llm_tok_s_metrics :
-  telemetry:Agent_core.Types.inference_telemetry option -> unit
-(** Record provider-reported tokens-per-second when telemetry exposes it. *)
-
-val record_llm_inference_latency_metric :
-  telemetry:Agent_core.Types.inference_telemetry option -> unit
-(** Record after-turn inference latency. [request_latency_ms <= 0] is counted
-    by [masc_after_turn_telemetry_zero_latency_total] and floored to 1ms in
-    [masc_llm_inference_duration_seconds] so a live hook does not leave the
-    latency histogram blank. *)
-
-val wall_tokens_per_second :
-  usage_missing:bool ->
-  output_tokens:int ->
-  telemetry:Agent_core.Types.inference_telemetry option -> float option
-(** Output tokens/sec computed from telemetry latency, subtracting
-    [ttfrc_ms] when available so the fallback approximates decode
-    throughput instead of first-token wait time. Returns [None] when usage
-    / latency is missing. *)
 
 (** {1 Cost emit source} *)
 

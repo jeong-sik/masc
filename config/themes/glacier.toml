@@ -1,0 +1,20 @@
+name = "glacier"
+light = false
+
+[palette]
+base00 = "070d14"
+base01 = "0c1620"
+base02 = "152331"
+base03 = "3d5a70"
+base04 = "7b9db3"
+base05 = "dce9f2"
+base06 = "eaf3f9"
+base07 = "f7fbfe"
+base08 = "e05c5c"
+base09 = "ffab6b"
+base0a = "f0e68c"
+base0b = "8ce6b0"
+base0c = "7ae0ff"
+base0d = "6ba8ff"
+base0e = "9270d9"
+base0f = "e08cc4"

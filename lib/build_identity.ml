@@ -40,10 +40,48 @@ let rec find_git_root dir =
 
 let runtime_cwd () = Config_dir_resolver.current_working_dir ()
 
+(** The path to try for the running binary, given what the process knows.
+
+    A relative [argv0] is not relative to the current directory. POSIX says a
+    name with no slash is looked up in [PATH], so joining "masc" to the cwd
+    builds a path that does not exist -- ".../masc/masc" for a checkout named
+    masc -- and every probe below then falls back to the cwd. That is not just
+    a warning: {!pick_repo_candidates} exists to let the binary's own source
+    tree outrank the cwd, and it cannot when the two are the same string.
+
+    [Sys.executable_name] is what the runtime resolved at start-up, through
+    _NSGetExecutablePath on macOS and /proc/self/exe on Linux, so it is the
+    real binary even for a PATH launch. It is preferred, and joined to the cwd
+    only when it carries a directory of its own.
+
+    Pure -- exposed for unit testing. *)
+let executable_candidate ~cwd ~executable_name ~argv0 =
+  let cwd_relative name =
+    (* Only a name that already carries a directory is cwd-relative. *)
+    if Filename.is_relative name && String.contains name '/'
+    then Some (Filename.concat cwd name)
+    else if Filename.is_relative name
+    then None
+    else Some name
+  in
+  match cwd_relative executable_name with
+  | Some path -> path
+  | None ->
+    (match cwd_relative argv0 with
+     | Some path -> path
+     | None ->
+       (* Both are bare names resolved through PATH, which this cannot
+          reproduce. Answer the name itself rather than a cwd-joined path
+          that is certainly wrong. *)
+       executable_name)
+;;
+
 let executable_path () =
   let cwd = runtime_cwd () in
   let argv0 = if Array.length Sys.argv > 0 then Sys.argv.(0) else cwd in
-  let path = if Filename.is_relative argv0 then Filename.concat cwd argv0 else argv0 in
+  let path =
+    executable_candidate ~cwd ~executable_name:Sys.executable_name ~argv0
+  in
   try Unix.realpath path with
   | exn ->
     Log.Identity.warn

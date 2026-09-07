@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { waitFor } from '@testing-library/preact'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import {
@@ -107,36 +108,48 @@ describe('openConnectorErrorDetail — copy sits on confirm, never on dismiss', 
 
   // Exact-match on trimmed text: '복사 후 닫기' contains '닫기', so a
   // substring find could grab the wrong button.
-  const dialogButton = (label: string) =>
-    Array.from(dialogHost.querySelectorAll('button'))
-      .find(b => b.textContent?.trim() === label)!
-
-  // Macrotask flush: DialogOverlay attaches its document-level Escape
-  // listener inside useEffect, which preact schedules on rAF/timer —
-  // microtasks alone leave the listener unattached.
-  const flushUi = async () => {
-    await new Promise(resolve => setTimeout(resolve, 30))
+  const dialogButton = (label: string) => {
+    const found = Array.from(dialogHost.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === label)
+    // Throwing rather than asserting non-null is what lets waitFor retry, and
+    // it names the missing label instead of failing on .click of undefined.
+    if (!found) throw new Error(`no dialog button labelled ${label}`)
+    return found
   }
+
+  // DialogOverlay renders its body and attaches its document-level Escape
+  // listener in the same effect, which preact schedules off the render.
+  // Waiting a fixed 30ms for that guessed how long the scheduler would take,
+  // and a parallel suite run makes the guess wrong: on 2026-09-06 this file
+  // was the single failure in a 697-file parallel run — 5023ms against a 5s
+  // limit — while passing every single-worker run. So wait for the thing.
+  const dialogShown = () =>
+    waitFor(() => expect(dialogHost.textContent).toContain('MASC_SIDECAR_ROOT'))
+  const dialogGone = () =>
+    waitFor(() =>
+      expect(dialogHost.textContent ?? '').not.toContain('MASC_SIDECAR_ROOT'))
 
   it('Escape dismiss closes WITHOUT copying (ESC/backdrop map to cancel)', async () => {
     const { openConnectorErrorDetail } = await import('./connector-action-error')
     const pending = openConnectorErrorDetail('headline', RAW_SERVER_ERROR)
-    await flushUi()
-    expect(dialogHost.textContent).toContain('MASC_SIDECAR_ROOT')
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await dialogShown()
+    // One dispatch can still land ahead of the listener. Escape on a closed
+    // dialog does nothing, so retrying until it closes removes the race.
+    await waitFor(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      expect(dialogHost.textContent ?? '').not.toContain('MASC_SIDECAR_ROOT')
+    })
     await pending
-    await flushUi()
     expect(writeText).not.toHaveBeenCalled()
-    expect(dialogHost.textContent ?? '').not.toContain('MASC_SIDECAR_ROOT')
   })
 
   it('복사 후 닫기 copies the raw text to the clipboard', async () => {
     const { openConnectorErrorDetail } = await import('./connector-action-error')
     const pending = openConnectorErrorDetail('headline', RAW_SERVER_ERROR)
-    await flushUi()
-    dialogButton('복사 후 닫기').click()
+    await dialogShown()
+    ;(await waitFor(() => dialogButton('복사 후 닫기'))).click()
     await pending
-    await flushUi()
+    await dialogGone()
     expect(writeText).toHaveBeenCalledWith(RAW_SERVER_ERROR)
     expect(_testGetToasts().some(t => t.message.includes('복사했습니다'))).toBe(true)
   })
@@ -144,10 +157,10 @@ describe('openConnectorErrorDetail — copy sits on confirm, never on dismiss', 
   it('닫기 button closes without copying', async () => {
     const { openConnectorErrorDetail } = await import('./connector-action-error')
     const pending = openConnectorErrorDetail('headline', RAW_SERVER_ERROR)
-    await flushUi()
-    dialogButton('닫기').click()
+    await dialogShown()
+    ;(await waitFor(() => dialogButton('닫기'))).click()
     await pending
-    await flushUi()
+    await dialogGone()
     expect(writeText).not.toHaveBeenCalled()
   })
 })

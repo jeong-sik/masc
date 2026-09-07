@@ -32,7 +32,7 @@
     [tool_post_get], [tool_comment_add], [tool_vote],
     [tool_stats], [tool_search], [tool_comment_vote],
     [tool_profile], [tool_hearth_list], [tool_delete],
-    [board_tool_cleanup], [tool_spec_read_only]). *)
+    [board_tool_cleanup]). *)
 
 open Masc_board_handlers
 
@@ -57,10 +57,6 @@ val parse_sort_order : string -> (sort_order, string) Result.t
     catalogue. *)
 
 (** {1 Identity meta keys} *)
-
-val raw_agent_name_meta_key : field:string -> string
-(** Canonical board-post meta key for preserving the raw runtime
-    identity surface associated with [field]. *)
 
 val author_raw_agent_name_meta_key : string
 (** Canonical board-post meta key for the raw runtime author

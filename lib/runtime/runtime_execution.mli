@@ -41,7 +41,6 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
-val agent_core_provider_config : t -> Llm_provider.Provider_config.t option
 val model_id : t -> string option
 val label : t -> string
 val checkpoint_owner : t -> checkpoint_owner

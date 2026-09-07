@@ -62,16 +62,6 @@ let list_keys t ~prefix =
     in
     Ok keys)
 
-let get_all t ~prefix =
-  with_lock t (fun () ->
-    let pairs =
-      Hashtbl.fold
-        (fun k v acc -> if String.starts_with ~prefix k then (k, v) :: acc else acc)
-        t.data
-        []
-    in
-    Ok pairs)
-
 let set_if_not_exists t key value =
   with_lock t (fun () ->
     if Hashtbl.mem t.data key

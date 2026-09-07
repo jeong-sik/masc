@@ -287,6 +287,22 @@ val pick_repo_candidates :
     launched from an unrelated cwd. Returns a single entry when both
     arguments are equal. Pure — exposed for unit testing. *)
 
+val executable_candidate :
+  cwd:string -> executable_name:string -> argv0:string -> string
+(** The path to try for the running binary.
+
+    A relative [argv0] is not relative to [cwd]: POSIX resolves a name with no
+    slash through [PATH], so joining "masc" to a checkout at
+    [.../yousleepwhen/masc] built [.../masc/masc], realpath failed, and
+    [executable_dir] fell back to [cwd] -- which makes {!pick_repo_candidates}
+    a single entry and hands the repo probe to whatever directory the process
+    was started from.
+
+    Prefers [executable_name] ([Sys.executable_name], resolved by the runtime
+    at start-up), joins to [cwd] only when a name carries a directory of its
+    own, and answers the bare name rather than a wrong path when neither can
+    be resolved here. Pure — exposed for unit testing. *)
+
 val parse_commit_unix_ts_output : string -> float option
 (** Parse raw [git log -1 --format=%ct] output. Pure — exposed for unit
     testing. *)

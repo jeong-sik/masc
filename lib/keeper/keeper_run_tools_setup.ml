@@ -226,6 +226,81 @@ let deferred_names_absent_from ~declared_names ~actual_names =
   absent
 ;;
 
+(* task-1204 / #26057: seed the loop-detector accumulator with the matched
+   ToolUse/ToolResult pairs of the prior run so a keeper repeating the
+   identical call across a checkpoint restart is still caught. The detector
+   folds over the run-local accumulator, which used to start empty on every
+   resume; the checkpoint preserves the AGENT_CORE message history, so the
+   identical pairs of the previous run were invisible to it and a repeat
+   split 2+2 across two runs escaped at threshold 3. *)
+let seed_tool_calls_from_history
+    ~(history_messages : Agent_core.Types.message list)
+  : Keeper_agent_result.tool_call_detail list
+  =
+  let result_by_id = Hashtbl.create 16 in
+  List.iter
+    (fun (message : Agent_core.Types.message) ->
+       List.iter
+         (fun (block : Agent_core.Types.content_block) ->
+            match block with
+            | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
+              Hashtbl.replace result_by_id tool_use_id content
+            | _ -> ())
+         message.content)
+    history_messages;
+  (* Newest first, matching the live accumulator's order. Only matched
+     ToolUse/ToolResult pairs seed the detector: [same_exact_tool_call]
+     compares both input and output fingerprints, so an unanswered ToolUse
+     alone could never match a live call anyway. *)
+  List.rev history_messages
+  |> List.concat_map
+       (fun (message : Agent_core.Types.message) ->
+          List.filter_map
+            (fun (block : Agent_core.Types.content_block) ->
+               match block with
+               | Agent_core.Types.ToolUse { id; name; input; _ } -> (
+                   match Hashtbl.find_opt result_by_id id with
+                   | Some output_text -> (
+                       match
+                         Keeper_tool_progress_identity.digest_tool_io
+                           ~tool_name:name
+                           ~input
+                           ~output_text
+                       with
+                       | Some
+                           { Keeper_tool_progress_identity.input_fingerprint;
+                             output_fingerprint } ->
+                         Some
+                           { Keeper_agent_result.tool_name = name
+                           ; provider = "history"
+                           ; execution_outcome = Tool_result.Ok
+                           ; typed_outcome = None
+                           ; latency_ms = 0.
+                           ; task_id = None
+                           ; route_evidence = None
+                           ; input_fingerprint = Some input_fingerprint
+                           ; output_fingerprint = Some output_fingerprint
+                           }
+                       | None -> None)
+                   | None -> None)
+               | _ -> None)
+            message.content)
+(* The wiring seam for the task-1204 fix: what a fresh run's accumulator
+   starts from, given the checkpoint-resumed history. Production acc creation
+   and the regression test both go through this function, so reverting its
+   body to [] is exactly the pre-fix behavior. *)
+let initial_tool_calls ~(history_messages : Agent_core.Types.message list) :
+    Keeper_agent_result.tool_call_detail list =
+  (* Serialising and hashing every tool call in the history is pure, so the
+     pool does it. The walk is over the whole history, which measured
+     1,278,158 B above, and it runs once per turn between the raw-trace
+     append and [Keeper_identity_tools.for_turn]: the 2026-09-06 20:29 KST
+     trace shows that stretch as the longest run left on the main domain,
+     55-222 ms across five Keepers. *)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    seed_tool_calls_from_history ~history_messages)
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -329,11 +404,16 @@ let prepare_agent_setup
   let global_skill_catalog, skill_projection_diagnostics =
     Keeper_skill_catalog.of_snapshot skill_snapshot
   in
+  let snapshot_rev =
+    Skill_catalog_snapshot.snapshot_revision_to_string
+      (Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+  in
   List.iter
     (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
        Log.Keeper.warn
-         "Skill projection diagnostic for keeper=%s identity=%s error=%s"
+         "Skill projection diagnostic for keeper=%s snapshot_revision=%s identity=%s error=%s"
          meta.name
+         snapshot_rev
          (Yojson.Safe.to_string
             (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
          (Keeper_skill_catalog.error_to_string diagnostic.error))
@@ -343,8 +423,9 @@ let prepare_agent_setup
        Option.iter
          (fun diagnostic ->
             Log.Keeper.warn
-              "Task Skill frozen as instruction for keeper=%s reference=%s error=%s"
+              "Task Skill frozen as instruction for keeper=%s snapshot_revision=%s reference=%s error=%s"
               meta.name
+              snapshot_rev
               (Skill_reference.to_yojson selected.reference |> Yojson.Safe.to_string)
               (Keeper_skill_catalog.error_to_string diagnostic))
          selected.diagnostic)
@@ -363,8 +444,9 @@ let prepare_agent_setup
   List.iter
     (fun unavailable ->
        Log.Keeper.warn
-         "Task Skill unavailable for keeper=%s error=%s"
+         "Task Skill unavailable for keeper=%s snapshot_revision=%s error=%s"
          meta.name
+         snapshot_rev
          (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
     turn_skill_projection.unavailable;
   let executable_task_skill_selection =
@@ -386,24 +468,14 @@ let prepare_agent_setup
          Agent_core.Error.Internal
            (Keeper_skill_activation_recorder.error_to_string error))
   in
-  let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
-    { meta
-    ; tool_calls = []
-    ; current_turn = 0
-    ; tool_surface =
+  let acc =
+    Keeper_run_tools_hook_accumulator.create ~meta
+      ~historical_tool_calls:(initial_tool_calls ~history_messages)
+      ~tool_surface:
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; config_root
         ; runtime_config_path
         }
-    ; requested_tool_names = []
-    ; receipt_completion_contract_result =
-        Keeper_execution_receipt.Completion_observation_unknown
-    ; receipt_actionable_signal = None
-    ; prompt_blocks = []
-    ; extra_system_context_digest = None
-    ; extra_system_context_size = None
-    ; assistant_turn_texts = []
-    }
   in
   (* The agent this turn will run, made here because the tools are made here
      and one of them widens the callable set while the turn is running. It is

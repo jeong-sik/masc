@@ -12,7 +12,25 @@
     Issues: #8501 (mirror pattern), #8372 (agent_status enum derivation),
     #8467/#8480/#8484/#8490/#8493 (related mirror+sync pattern). *)
 
-(** Tool schemas: [masc_agent_fitness], [masc_get_metrics], and
-    [masc_agent_card]. Decoding refuses the boot on a missing or malformed
-    declaration rather than publishing a partial surface. *)
+type operation =
+  | Agent_card
+  | Agent_fitness
+  | Get_metrics
+[@@deriving enumerate]
+(** Closed vocabulary routed by [Tool_agent.dispatch]. *)
+
+val operations : operation list
+(** Exhaustive stable-order projection of the agent operations. *)
+
+val tool_name : operation -> string
+(** Canonical wire name for an agent operation. *)
+
+val operation_of_tool_name : string -> operation option
+(** Parse a canonical agent wire name at the dispatch boundary. *)
+
+val schema : operation -> Masc_domain.tool_schema
+(** Declaration for an operation. Decoding refuses the boot on a missing or
+    malformed file rather than publishing a partial surface. *)
+
 val schemas : Masc_domain.tool_schema list
+(** [schema] applied to every operation. *)

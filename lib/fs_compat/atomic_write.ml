@@ -27,14 +27,17 @@ let fsync_path_with ~allow_unsupported path =
 let fsync_path = fsync_path_with ~allow_unsupported:true
 let fsync_path_strict = fsync_path_with ~allow_unsupported:false
 
-(* An atomic replacement blocks in the kernel twice: creating the temp file
-   (an O_EXCL open per name tried) and committing it (fsync of the payload,
-   rename over the target, fsync of the parent directory). Inside an Eio
-   fiber each of the two runs as one systhread job so the domain keeps
-   scheduling other fibers while the kernel works; a single rename held the
-   main domain for 486 ms and temp-file creation was 3.7% of its busy time
-   in the 2026-09-05 stack samples (RFC main-domain-scheduler-latency §8.8).
-   Outside Eio they run inline.
+(* An atomic replacement is blocking syscalls from start to end: creating
+   the temp file (an O_EXCL open per name tried), writing the payload,
+   fsync of the payload, rename over the target, fsync of the parent
+   directory. Inside an Eio fiber the whole replacement runs as one
+   systhread job so the domain keeps scheduling other fibers while the
+   kernel works; a single rename held the main domain for 486 ms, temp-file
+   creation was 3.7% of its busy time, and the payload write of a 2 MB
+   file 120-130 ms per call in the 2026-09-05/06 profiles (RFC
+   main-domain-scheduler-latency §8.8). Outside Eio it runs inline. The
+   injected [save_file] must be a blocking writer: it is called inside the
+   job, where no Eio effect can be performed.
    [Eio_unix.run_in_systhread] re-raises the job's exception in the fiber
    with the backtrace captured in the thread (eio/unix/thread_pool.ml), so
    the failure stage and cancellation reporting below are unchanged. *)
@@ -2619,12 +2622,11 @@ let atomic_replace_failure_to_string failure =
     (Printexc.to_string failure.exception_)
 ;;
 
-let save_file_atomic_with_parent_sync
+let write_file_atomic_with_parent_sync
   ~sync_file
   ~sync_parent
-  ~(save_file : string -> string -> unit)
+  ~(write_temp : string -> unit)
   (path : string)
-  (content : string)
   : (unit, atomic_replace_failure) Result.t
   =
   let dir = Stdlib.Filename.dirname path in
@@ -2632,8 +2634,10 @@ let save_file_atomic_with_parent_sync
   let failure ~backtrace exception_ =
     Error { path; stage = !stage; exception_; backtrace }
   in
-  match
-    blocking_syscalls ~label:"fs-compat-atomic-temp-file" (fun () ->
+  blocking_syscalls
+    ~label:("fs-compat-atomic-replace " ^ Stdlib.Filename.basename path)
+    (fun () ->
+    match
       try
         Ok
           (Stdlib.Filename.temp_file
@@ -2646,24 +2650,23 @@ let save_file_atomic_with_parent_sync
          rather than collapse into the staged error channel. *)
       | Sys_error _ as exception_ ->
         let backtrace = Printexc.get_raw_backtrace () in
-        failure ~backtrace exception_)
-  with
-  | Error _ as error -> error
-  | Ok tmp ->
-    (try
-       save_file tmp content;
-       blocking_syscalls ~label:"fs-compat-atomic-commit" (fun () ->
+        failure ~backtrace exception_
+    with
+    | Error _ as error -> error
+    | Ok tmp ->
+      (try
+         write_temp tmp;
          sync_file tmp;
          Stdlib.Sys.rename tmp path;
          stage := After_rename;
-         sync_parent dir);
-       Ok ()
-     with
-     | exception_ ->
-       let backtrace = Printexc.get_raw_backtrace () in
-       (try Stdlib.Sys.remove tmp with
-        | Sys_error _ -> ());
-       failure ~backtrace exception_)
+         sync_parent dir;
+         Ok ()
+       with
+       | exception_ ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         (try Stdlib.Sys.remove tmp with
+          | Sys_error _ -> ());
+         failure ~backtrace exception_))
 ;;
 
 let legacy_atomic_replace_result = function
@@ -2676,24 +2679,42 @@ let legacy_atomic_replace_result = function
 ;;
 
 let save_file_atomic ~save_file path content =
-  save_file_atomic_with_parent_sync
+  write_file_atomic_with_parent_sync
     ~sync_file:fsync_path
     ~sync_parent:(fun dir ->
       try fsync_path dir with
       | Unix.Unix_error _ -> ())
-    ~save_file
+    ~write_temp:(fun tmp -> save_file tmp content)
     path
-    content
   |> legacy_atomic_replace_result
 ;;
 
 let save_file_atomic_strict_staged ~save_file path content =
-  save_file_atomic_with_parent_sync
+  write_file_atomic_with_parent_sync
     ~sync_file:fsync_path_strict
     ~sync_parent:fsync_path_strict
-    ~save_file
+    ~write_temp:(fun tmp -> save_file tmp content)
     path
-    content
+;;
+
+let write_temp_channel ~write path =
+  let channel = Stdlib.open_out_bin path in
+  (* fun-protect-finally-ok: runs inside [blocking_syscalls], outside Eio;
+     closing the stdlib channel performs no fiber operation. *)
+  Fun.protect
+    ~finally:(fun () -> Stdlib.close_out_noerr channel)
+    (fun () ->
+       write channel;
+       (* A failed flush/close is a failed staged write, before the rename. *)
+       Stdlib.close_out channel)
+;;
+
+let write_file_atomic_strict_staged path ~write =
+  write_file_atomic_with_parent_sync
+    ~sync_file:fsync_path_strict
+    ~sync_parent:fsync_path_strict
+    ~write_temp:(write_temp_channel ~write)
+    path
 ;;
 
 let save_file_atomic_strict ~save_file path content =
@@ -2709,12 +2730,24 @@ module Atomic_replace_for_testing = struct
       path
       content
     =
-    save_file_atomic_with_parent_sync
+    write_file_atomic_with_parent_sync
       ~sync_file
       ~sync_parent
-      ~save_file
+      ~write_temp:(fun tmp -> save_file tmp content)
       path
-      content
+  ;;
+
+  let write_file_atomic_strict_staged
+      ?(sync_file = fsync_path_strict)
+      ~sync_parent
+      path
+      ~write
+    =
+    write_file_atomic_with_parent_sync
+      ~sync_file
+      ~sync_parent
+      ~write_temp:(write_temp_channel ~write)
+      path
   ;;
 end
 

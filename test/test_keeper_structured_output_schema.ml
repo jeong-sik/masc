@@ -72,16 +72,27 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> List.sort String.compare
   in
+  (* remote_tool_names is derived from remote_schemas, so their agreement is
+     structural and not worth asserting. What is worth pinning is the policy
+     those two express: which operator tools the remote profile advertises.
+     Operator_tool.remote_schema decides it constructor by constructor, and
+     masc_operator_judgment_write is deliberately absent. *)
   check
     (list string)
-    "operator remote schema names"
-    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
+    "operator remote profile advertises exactly these"
+    [ "masc_operator_action"
+    ; "masc_operator_board_attention_quarantine_requeue"
+    ; "masc_operator_confirm"
+    ; "masc_operator_digest"
+    ; "masc_operator_snapshot"
+    ; "masc_operator_task_recovery_resolve"
+    ]
     schema_names;
   check
-    (list string)
-    "operator remote exported names"
-    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
-    (List.sort String.compare Operator_tool.remote_tool_names);
+    bool
+    "judgment_write stays off the remote profile"
+    false
+    (List.mem "masc_operator_judgment_write" Operator_tool.remote_tool_names);
   check bool "Board quarantine recovery cannot bypass operator profile" false
     (Tool_catalog.allow_direct_call
        "masc_operator_board_attention_quarantine_requeue")

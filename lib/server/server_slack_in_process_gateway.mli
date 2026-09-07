@@ -75,14 +75,6 @@ module For_testing : sig
     Slack_socket_client.slack_event ->
     unit
 
-  val submit_ambient_event :
-    ?team_id:string ->
-    ?user_directory:Slack_user_directory.t ->
-    Connector_ingress_lane.t ->
-    base_dir:string ->
-    Slack_socket_client.slack_event ->
-    unit
-
   val resolve_event_identity :
     ?user_directory:Slack_user_directory.t ->
     Slack_socket_client.slack_event ->

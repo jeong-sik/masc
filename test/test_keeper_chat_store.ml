@@ -145,6 +145,45 @@ let recent_roles lines =
       MS.direct_line_role_to_label line.role)
     lines
 
+(* [load_all] parses only the rows appended since its last call and must
+   agree with [load], which parses the file afresh; a replaced file (new
+   inode) is reloaded whole. *)
+let test_load_all_is_incremental_and_follows_appends () =
+  let base_dir = temp_base_path "keeper-chat-store-incremental" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_eio_fs @@ fun () ->
+      let keeper_name = "keeper-chat-incremental" in
+      let ids messages = List.map (fun (m : K.chat_message) -> m.id) messages in
+      let append n =
+        K.append_turn ~base_dir ~keeper_name
+          ~user_content:(Printf.sprintf "question %d" n)
+          ~user_attachments:[]
+          ~assistant_content:(Printf.sprintf "answer %d" n)
+          ()
+      in
+      append 1;
+      let first = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "first load parses the whole transcript" 2 (List.length first);
+      append 2;
+      append 3;
+      let grown = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "later loads see the appended turns" 6 (List.length grown);
+      Alcotest.(check (list string)) "incremental load agrees with a fresh parse"
+        (ids (K.load ~base_dir ~keeper_name)) (ids grown);
+      Alcotest.(check (list string)) "earlier messages are kept in order"
+        (ids first) (ids (List.filteri (fun i _ -> i < 2) grown));
+      (* A replaced file: same path, new inode, fewer rows. *)
+      let path = chat_path ~base_dir ~keeper_name in
+      let first_row = String.split_on_char '\n' (read_file path) |> List.hd in
+      Sys.remove path;
+      write_file path (first_row ^ "\n");
+      let replaced = K.load_all ~base_dir ~keeper_name in
+      Alcotest.(check int) "a replaced transcript is reloaded whole" 1 (List.length replaced);
+      Alcotest.(check (list string)) "and agrees with a fresh parse"
+        (ids (K.load ~base_dir ~keeper_name)) (ids replaced))
+
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in
   Fun.protect
@@ -191,11 +230,30 @@ let test_append_turn_roundtrip () =
       Alcotest.(check (option string)) "assistant has no tool id"
         None asst.tool_call_id)
 
-(* An attachment is measured once, at the moment its payload is swapped for
-   the [masc://] reference: after the swap the bytes are gone and the size is
-   no longer derivable. The loaded row carries the pixel size, the payload
-   itself reads as the reference, and the dashboard projection keeps the
-   size the row was persisted with. *)
+(* Appending an image retains both display metadata and the exact wire bytes
+   under a validated durable blob reference. *)
+let test_attachment_blob_failure_does_not_commit_chat () =
+  let base_dir = temp_base_path "keeper-chat-blob-failure" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    Unix.mkdir base_dir 0o700;
+    let masc_root = Common.masc_dir_from_base_path ~base_path:base_dir in
+    Unix.mkdir masc_root 0o700;
+    let blocker = open_out (Filename.concat masc_root "tool_blobs") in
+    close_out blocker;
+    let request_id =
+      match Keeper_chat_delivery_identity.Request_id.of_string "blocked-image-request" with
+      | Ok id -> id
+      | Error detail -> Alcotest.fail detail
+    in
+    let result = K.append_user_message_once ~base_dir ~keeper_name:"blocked-image"
+        ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
+        ~content:"look"
+        ~attachments:[{K.id="blocked-att"; att_type="image"; name="image.png";
+          size=3; mime_type="image/png"; data="UE5H"; width=None; height=None}] () in
+    Alcotest.(check bool) "unretained attachment cannot be committed" true (Result.is_error result);
+    Alcotest.(check int) "no chat row points at missing bytes" 0
+      (List.length (K.load ~base_dir ~keeper_name:"blocked-image")))
+
 let test_attachment_dimensions_survive_the_reference_swap () =
   let base_dir = temp_base_path "keeper-chat-store-att" in
   Fun.protect
@@ -229,10 +287,23 @@ let test_attachment_dimensions_survive_the_reference_swap () =
              (Some 2) att.K.width;
            Alcotest.(check (option int)) "height measured at the swap"
              (Some 1) att.K.height;
-           Alcotest.(check bool) "payload reads as the reference" true
-             (String.starts_with
-                ~prefix:(Printf.sprintf "masc://attachment/%s/" att.K.id)
-                att.K.data);
+           (match Tool_output.decode_from_agent_core att.K.data with
+            | Tool_output.Decoded reference ->
+                Alcotest.(check (result (option string) string))
+                  "retained payload round trips through the blob store"
+                  (Ok (Some (Base64.encode_string png)))
+                  (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base_dir)
+                     ~sha256:reference.sha256
+                   |> Result.map_error Tool_blob_store.fetch_error_to_string);
+                Alcotest.(check string) "no inline image in marker preview"
+                  "attachment payload" reference.preview;
+                (match Tool_blob_maintenance.run ~base_path:base_dir ~mode:Tool_blob_maintenance.Observe_only with
+                 | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+                 | Ok report ->
+                     Alcotest.(check int) "chat attachment is a live blob consumer" 1 report.live_references;
+                     Alcotest.(check int) "sent payload is not a deletion candidate" 0 report.candidates_recorded)
+            | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+                Alcotest.fail "image has no valid durable payload reference");
            (* The dashboard row exposes the same size without re-measuring:
               the reference cannot be decoded again. *)
            (match K.to_json_array [ user ] with
@@ -3285,6 +3356,8 @@ let () =
         [
           Alcotest.test_case "append_turn roundtrip" `Quick
             test_append_turn_roundtrip;
+          Alcotest.test_case "blob failure does not commit attachment metadata"
+            `Quick test_attachment_blob_failure_does_not_commit_chat;
           Alcotest.test_case "attachment dimensions survive the reference swap"
             `Quick test_attachment_dimensions_survive_the_reference_swap;
           Alcotest.test_case "provider and canonical ids stay separate" `Quick
@@ -3368,5 +3441,7 @@ let () =
             `Quick test_transcript_absent_returns_empty;
           Alcotest.test_case "purge plan removes the chat store" `Quick
             test_purge_plan_removes_chat_store;
+          Alcotest.test_case "load_all is incremental and follows appends" `Quick
+            test_load_all_is_incremental_and_follows_appends;
         ] );
     ]

@@ -30,9 +30,6 @@ let create ~lane result =
 let lane t = t.lane
 let result t = t.result
 let response_text t = t.result.Keeper_agent_run.response_text
-let turn_outcome t = t.result.Keeper_agent_run.turn_outcome
-let checkpoint t = t.result.Keeper_agent_run.checkpoint
-
 let completion_contract_result t =
   t.result.Keeper_agent_run.completion_contract_result
 ;;

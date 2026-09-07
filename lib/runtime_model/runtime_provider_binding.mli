@@ -14,21 +14,11 @@ val normalize_provider_id : string -> string
 (** Trim, lowercase, and replace [-] with [_] in a provider identifier so
     label/binding lookups are case- and separator-insensitive. *)
 
-val provider_name_of_kind :
-  Llm_provider.Provider_config.provider_kind -> string
-
 val provider_endpoint_label_of_config : Llm_provider.Provider_config.t -> string
 (** Which provider, model and endpoint a call resolved to. For
     OpenAI-compatible configs the model and base URL are appended, so two
     bindings sharing a provider are still distinguishable. Reported after a
     turn succeeds; nothing keys failure state off it. *)
-
-val binding_auth_is_no_auth : Runtime_binding.t -> bool
-
-val binding_base_url_is_loopback : Runtime_binding.t -> bool
-
-val runtime_kind_of_binding : Runtime_binding.t -> string
-(** ["local"] | ["direct_api"]. *)
 
 val local_runtime_label : string -> string
 

@@ -486,7 +486,9 @@ let () =
        in this env var crashed server bootstrap. [get_int_nonneg] also
        maps a negative value to the default. *)
     let gc_space_overhead =
-      Env_config_core.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD"
+      Env_config_core.get_int_nonneg
+        ~default:(Env_setting.Int_knob.default Gc_space_overhead)
+        (Env_setting.Int_knob.env_name Gc_space_overhead)
     in
     let ctrl = get () in
     set { ctrl with
@@ -728,18 +730,8 @@ let lazy_startup_plan () =
     [
       {
         group_name = "cleanup";
-        (* Parallel, because removing a guest is a VM shutdown at roughly a
-           minute each and jsonl_prune finishes in milliseconds. Run serially
-           the sweep held the whole group, and keeper boot waits for the
-           group: measured on 2026-08-28, autoboot logged
-           "waiting for lazy startup tasks" for 30s behind a single guest.
-
-           Boot is still the right moment. The sweep only removes guests
-           whose owning server is gone, and this process owns none yet, so
-           every candidate belongs to an earlier server -- one still running
-           keeps its own pid alive and its guests are not candidates. *)
         execution = Parallel;
-        task_names = [ "jsonl_prune"; "microvm_guest_sweep" ];
+        task_names = [ "jsonl_prune" ];
       };
     ]
   in
@@ -848,7 +840,7 @@ let initialize_owner_state_blocking
      denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in
   let base_path =
-    match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
+    match Eio_unix.run_in_systhread ~label:"bootstrap-realpath-base-path" (fun () -> Unix.realpath base_path) with
     | canonical -> canonical
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
@@ -949,8 +941,12 @@ let initialize_owner_state_blocking
      churn, and 30s is often enough to see it move when retention sweeps.
      Sampled here rather than inside [Gc_sampler] so neither that module nor
      [Activity_graph] gains a dependency on the other. *)
+  (* The maintenance loops open their named switch once per iteration, not
+     once per fiber: the runtime-events ring keeps a name only until it is
+     overwritten, so a tracer attached later sees the per-iteration names. *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
+      Eio.Switch.run ~name:"activity-cache-gauges" (fun _ ->
       (try
          let stats = Activity_graph.cache_stats () in
          Otel_metric_store.set_gauge
@@ -962,7 +958,7 @@ let initialize_owner_state_blocking
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
-         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn));
+         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn)));
       Eio.Time.sleep clock 30.0;
       loop ()
     in
@@ -970,24 +966,26 @@ let initialize_owner_state_blocking
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 5.0;
+      Eio.Switch.run ~name:"tool-usage-flush" (fun _ ->
       (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "tool_usage flush_all_dirty failed: %s"
-           (Printexc.to_string exn));
+           (Printexc.to_string exn)));
       loop ()
     in
     loop ());
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 2.0;
+      Eio.Switch.run ~name:"trajectory-flush" (fun _ ->
       (try Trajectory.flush_all_pending () with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "trajectory flush_all_pending failed: %s"
-           (Printexc.to_string exn));
+           (Printexc.to_string exn)));
       loop ()
     in
     loop ());
@@ -1187,7 +1185,7 @@ let initialize_owner_state_blocking
            (Keeper_persistence_preparation_failed error))
   in
   (match
-     Eio_unix.run_in_systhread (fun () ->
+     Eio_unix.run_in_systhread ~label:"wire-capture-prune" (fun () ->
        Keeper_wire_capture.prune_expired
          ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state)))
    with
@@ -1362,7 +1360,6 @@ let start_owner_lazy_tasks ~sw state =
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-    | "microvm_guest_sweep" -> fun () -> startup_sweep_microvm_guests state
     | task_name ->
       raise
         (Invalid_argument
@@ -1395,7 +1392,9 @@ let start_owner_lazy_tasks ~sw state =
    | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
-  Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"lazy-startup-tasks" @@ fun _ ->
+    List.iter run_lazy_task_group task_groups)
 
 let claim_and_start_keeper_persistence
       ~prepared_persistence
@@ -1470,6 +1469,8 @@ let start_post_ready_owner_lanes
      observe or resume AwaitingVerification work. *)
   start_completion_authority ~sw ~clock state;
   start_goal_verifier ~sw state;
+  start_microvm_guest_maintenance ~sw
+    ~sweep:(fun () -> startup_sweep_microvm_guests state);
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =
@@ -1638,6 +1639,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
      exits immediately rather than leaving that partial owner alive; only an
      auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"owner-initialization" @@ fun _ ->
     let handle_initialization_failure error =
       match
         startup_failure_disposition
@@ -1748,6 +1750,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
          Discord one. Off unless SLACK_APP_TOKEN is set; the start function
          logs a warning and skips otherwise, leaving the server unaffected. *)
       Server_slack_in_process_gateway.start ~sw ~env ~state;
+      (* slack-lane (task-1418): in-process collection fiber for bound
+         channels without app event subscriptions. Off unless
+         [slack] poll_enabled is set in runtime.toml; the start function
+         logs and skips otherwise, leaving the server unaffected. *)
+      Server_slack_poll_lane.start ~sw ~env ~state;
+      Server_browser_webdriver.start ~sw ~env;
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function
@@ -1934,6 +1942,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
          or later keeper loop startup (#keeper-bootstrap-stuck). *)
       Atomic.set Server_dashboard_http.shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
+        Eio.Switch.run ~name:"dashboard-shell-prewarm" @@ fun _ ->
         let outer_timeout_sec =
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
         in
@@ -1964,6 +1973,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
      Prevents zombie-listener state where the socket is open but HTTP
      requests hang because init is stuck. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" @@ fun _ ->
     try
       let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
       Eio.Time.sleep clock timeout_sec;

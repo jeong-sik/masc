@@ -132,6 +132,10 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -141,6 +145,7 @@ type runtime_handler =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
@@ -251,7 +256,6 @@ val registered_names : t -> string list
 
 val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list
-val internal_names : t -> string list
 val find_public : string -> t option
 val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list
@@ -269,7 +273,6 @@ val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
     handler names whose descriptor policy declares a static read-only hint. *)
 val readonly_internal_names : unit -> string list
 
-val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t
 

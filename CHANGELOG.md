@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+- **The shim names the release it came from, and the server says when they
+  differ.** `masc-exec-shim --probe` now answers with a `release` field taken
+  from `dune-project` through a generated module, so no build step has to
+  remember to stamp it. On every probe the server compares that with its own
+  version and logs `remote_shim_outdated` when they differ, or when the shim is
+  old enough not to name itself; the lane keeps running, because the two sides
+  negotiate the protocol major and tolerate one release apart on purpose. The
+  `keeper_lane_status` tool reports `shim_release` beside `server_release`, so a
+  keeper can read it for its own lane. The repair is the existing
+  `masc-exec-ssh-bootstrap --shim`, which the warning names (RFC-0427 B-3).
+
+- **The observation stage actually runs in the box now.** The gate's
+  pre-judge observation (RFC-0422) dispatched the keeper's effect-built
+  shell IR unchanged: execution reads the dispatch target from the IR, so
+  the "observed" run was the real call with live network, and its exit
+  became the gate's evidence — an `observed_in_box` auto-allow granted a
+  real `gh pr create` (PR #33609) and a review comment before any operator
+  decision on 2026-09-06. `Shell_ir.with_sandbox` rewrites every stage of
+  the IR onto the box's target (a delegated masc-tool stage keeps its own),
+  and the observation stage dispatches the rewritten IR (#33638,
+  task-1375).
+- **The exec shim traces every request and names its build.** On 2026-09-06
+  an `observed_in_box` auto-allow ran with live network (a keeper opened PR
+  #33609 through the observation path), while the same shim binary framed by
+  hand boxed correctly — and no record said what the server had actually
+  framed. The shim now appends one line per request to the guest's
+  `/tmp/masc-shim-requests.log` (framed mode, the plan it got, argv0, build
+  id; best-effort, capped at 4 MiB), and the static build stamps its commit
+  sha into the probe version (`3.0.0+a1b2c3d4`), so two artifacts of one
+  protocol stop looking identical. RFC-0422 diagnosis, task-1375.
+
+## [0.33.0] - 2026-09-06
+
+- **The release ships the exec shim.** Every tagged release now carries
+  `masc-exec-shim-linux-arm64` and `masc-exec-shim-linux-amd64`, built
+  statically on a runner of the same architecture and probed before upload.
+  Operators download the asset beside the server binary instead of building
+  it; the runbook says so (RFC-0427 B-1).
+- **The installer places the guest exec shim, and the boot verifies it.**
+  `scripts/install.sh` downloads `masc-exec-shim-linux-<guest arch>` from the
+  release beside the other companions, places it at
+  `<base>/.masc/microvm/shim/masc-exec-shim`, and writes the release's sha256
+  next to it as `masc-exec-shim.sha256`; `--no-guest-shim` skips it. A microvm
+  boot compares the binary with that sidecar and refuses a mismatch as
+  `microvm_shim_hash_mismatch`; a shim without a sidecar (hand-built) runs
+  unverified and the boot log says so. The release job's installer smoke
+  covers both paths (RFC-0427 B-2).
+
+- **TUI: Notion-grade 2-column web bookmarks, visual banners, and remote image viewer.**
+  - 2-column Notion-style bookmark cards with domain favicon/header, title, description summary, URL, and action pills (`[o:Browser]`, `[y:Copy]`, `[v:Visual]`), with mathematically grapheme-safe cell width alignment across all lines and responsive fallback to 1-column on narrow terminals (< 55 cols) (#33541).
+  - 24-bit TrueColor visual OG thumbnail banners with platform-specific branding: GitHub (slate/purple with Octocat), YouTube (crimson with play mark), arXiv (academic navy with preprint ID), Hacker News (warm orange), Direct Image (cyan), and Web (charcoal) (#33541).
+  - Remote image viewer: one-click inspection (`[v]`) downloads HTTP(S) images to `/tmp/masc_img_cache/` and renders inline via Kitty graphics or falls back to browser opening (#33541).
+  - Multi-protocol terminal graphics: added iTerm2 `OSC 1337` (`\x1b]1337;File=inline=1;...`) protocol alongside Kitty APC graphics, auto-detected via `TERM_PROGRAM = "iTerm.app"` (#33544).
+  - Universal fast image format conversion: added `convert_to_png` leveraging macOS built-in `/usr/bin/sips` (with ImageMagick `convert` and `ffmpeg` fallback) to convert JPEG, WebP, GIF, and TIFF images to PNG in milliseconds (#33544).
+- **TUI: line memos from lexed comments, Mermaid text rendering, and categorical themes.**
+  - Line memos are comments in the file (`masc(AUTHOR): TEXT`, `masc(AUTHOR) KIND: TEXT`), read directly off lexer rows without network round-trips or server drift (#33543).
+  - `keeper_ide_annotate` writes its memo into the file as a comment — the write side of the same design: language-specific comment markers, a line-anchored insert instead of text substitution, Markdown included (#33592).
+  - Mermaid diagram rendering: draws `mermaid` graph and flowchart code blocks as clean Unicode/ASCII box-and-arrow diagrams within the TUI viewport (#33508).
+  - Categorical 6-slot theming extended across all remaining axes in `render.ml` with raw hues removed (#33485).
+  - Palette matchers fold case internally (#33536, #33522); `K`/`D`/`R` shortcuts open the palette as a choice among the line's names (#33514); multiline preview uses return marks instead of raw `\n` (#33482); stopped keepers display as `paused` instead of `offline` (#33510).
+  - Loop gaps, slow requests, and mailbox waits logged with dual monotonic and wall clocks (#33486).
+- **LSP: 23 languages recognized with root detection and Python support.**
+  - Language table expanded to 23 languages, each paired with project root discovery rules (#33509).
+  - Python language server configured with `pyright-langserver` (#33535).
+- **Runtime, process execution, and storage performance.**
+  - Subprocess spawn migrated from `fork` to `posix_spawn` for safer and faster process management (#33483).
+  - Incremental dated JSONL folding: `fold_range_appended` reads only bytes appended since the last read cursor, avoiding redundant rescans of multi-megabyte log ranges (#33542).
+  - Workspace backlog decoding and task ID parsing offloaded to domain pool workers (#33487).
+  - Typed `run_outcome` prevents execution errors from masquerading as empty tool results (#33467).
+  - Seed catalog bindings declare explicit `max-request-body-bytes` (#33484).
+  - Tool schema payload size structurally reduced below the 80 KB ceiling (#33528).
+  - GitHub config directory preauth clarification prevents redundant HOME copies in keeper containers (#33545).
+- **Architecture & Specifications.**
+  - RFC-0427: Autonomous execution lanes and self-deploying shims (#33450).
+  - RFC-0429: Terminal UI as an IDE surface: real-world defect analysis, universal language servers, and Mermaid text rendering (#33480).
+
 ## [0.32.0] - 2026-09-05
 
 - **A context overflow walks the history down to its floor.** The same-run

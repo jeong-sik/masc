@@ -94,6 +94,95 @@ let apply_patch ~old_string ~new_string ~replace_all text =
       Ok { updated = Buffer.contents buf; occurrence_count; line_occurrences }))
 ;;
 
+type operation =
+  | Replace of
+      { old_string : string
+      ; new_string : string
+      ; replace_all : bool
+      }
+  | Insert_before_line of
+      { line : int
+      ; text : string
+      }
+
+let operation_label = function
+  | Replace _ -> "replace"
+  | Insert_before_line _ -> "insert_before_line"
+;;
+
+let is_blank_char c = Char.equal c ' ' || Char.equal c '\t'
+
+(* The lines of [content], counted the way an editor shows them: a file
+   ending in a line break has no extra empty line after it. *)
+let line_count content =
+  let len = String.length content in
+  if len = 0
+  then 0
+  else (
+    let breaks = ref 0 in
+    String.iter (fun c -> if Char.equal c '\n' then incr breaks) content;
+    if Char.equal content.[len - 1] '\n' then !breaks else !breaks + 1)
+;;
+
+let insert_before_line ~line ~text content =
+  let len = String.length content in
+  if line < 1
+  then Error (Printf.sprintf "insert_before_line must be >= 1, got %d." line)
+  else if String.equal text ""
+  then Error "insert_text must be non-empty."
+  else if String.contains text '\n'
+  then Error "insert_text is one line and cannot contain a line break."
+  else if len = 0
+  then Error "the file is empty; there is no line to insert above."
+  else (
+    let rec start_of current offset =
+      if current = line
+      then Some offset
+      else (
+        match String.index_from_opt content offset '\n' with
+        | None -> None
+        | Some break -> start_of (current + 1) (break + 1))
+    in
+    match start_of 1 0 with
+    | Some offset when offset < len ->
+      let line_end =
+        match String.index_from_opt content offset '\n' with
+        | Some break -> break + 1
+        | None -> len
+      in
+      let current_line = String.sub content offset (line_end - offset) in
+      let indent_len =
+        let rec walk i = if i < String.length current_line && is_blank_char current_line.[i] then walk (i + 1) else i in
+        walk 0
+      in
+      let inserted = String.sub current_line 0 indent_len ^ text ^ "\n" in
+      let updated =
+        String.sub content 0 offset ^ inserted ^ String.sub content offset (len - offset)
+      in
+      let occurrence =
+        Keeper_file_change_evidence.edit_occurrence
+          ~old_start_line:line
+          ~new_start_line:line
+          ~old_string:current_line
+          ~new_string:(inserted ^ current_line)
+      in
+      Ok { updated; occurrence_count = 1; line_occurrences = Some [ occurrence ] }
+    | Some _ | None ->
+      Error
+        (Printf.sprintf
+           "the file has %d line%s; line %d does not exist."
+           (line_count content)
+           (if line_count content = 1 then "" else "s")
+           line))
+;;
+
+let apply operation content =
+  match operation with
+  | Replace { old_string; new_string; replace_all } ->
+    apply_patch ~old_string ~new_string ~replace_all content
+  | Insert_before_line { line; text } -> insert_before_line ~line ~text content
+;;
+
 let file_change_evidence application =
   match application.line_occurrences with
   | Some occurrences -> Keeper_file_change_evidence.edited occurrences

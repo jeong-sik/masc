@@ -21,12 +21,4 @@ let env_key : t option Domain.DLS.key = Domain.DLS.new_key (fun () -> None)
 let init ~sw ~net ~clock () =
   Domain.DLS.set env_key (Some { sw; net; clock })
 
-let reset_for_test () =
-  Domain.DLS.set env_key None
-
 let get_opt () = Domain.DLS.get env_key
-
-let get () =
-  match get_opt () with
-  | Some e -> e
-  | None -> invalid_arg "Masc_eio_env.get: not initialized. Call init at server startup."

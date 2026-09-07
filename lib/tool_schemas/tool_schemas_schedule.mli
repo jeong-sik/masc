@@ -4,6 +4,7 @@ type action =
   | List_requests
   | Get_request
   | Cancel_request
+[@@deriving enumerate]
 
 type definition =
   { action : action

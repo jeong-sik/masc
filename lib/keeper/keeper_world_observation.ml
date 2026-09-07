@@ -285,8 +285,6 @@ type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
-let turn_reason_to_string =
-  Keeper_world_observation_turn_types.turn_reason_to_string
 let turn_reason_of_event_queue_trigger =
   Keeper_world_observation_turn_types.turn_reason_of_event_queue_trigger
 let skip_reason_to_string =

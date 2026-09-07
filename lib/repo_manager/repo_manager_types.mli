@@ -23,9 +23,3 @@ type repository = {
   updated_at : int64;
 }
 [@@deriving yojson, show, eq]
-
-(** [is_toml_table v] is [true] iff [v] is [Otoml.TomlTable] or
-    [Otoml.TomlInlineTable].  Shared by the on-disk config loaders so the
-    12-constructor [Otoml.t] enumeration that satisfies warning 4 lives
-    in one place. *)
-val is_toml_table : Otoml.t -> bool

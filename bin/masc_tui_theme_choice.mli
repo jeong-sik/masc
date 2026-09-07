@@ -27,6 +27,11 @@ val entries : unit -> entry list
     the same floor the renderer lifts to. Native-pass schemes come first;
     equal lift counts are ordered by name. *)
 
+val swatch_cells : entry -> string
+(** [entry]'s colours drawn as two-cell blocks, ending back on the terminal's
+    own page. The picker shows a colour for its own sake, which no other
+    surface does, so the escape is made here rather than by the renderer. *)
+
 val contrast_status : lift_on:bool -> entry -> string
 (** A compact, explicit reading of the measurement. [native 7/7] means every
     measured colour clears the floor without help; [lift 3/7] means the lift

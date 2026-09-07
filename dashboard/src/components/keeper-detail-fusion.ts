@@ -2,29 +2,32 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { CollapsibleSection } from './common/collapsible'
 import { TimeAgo } from './common/time-ago'
-import { buildFusionRuns } from './fusion/fusion-surface'
 import { navigate } from '../router'
-import { fusionBoardPosts, refreshFusionBoard } from '../store'
+import { fusionRuns, refreshFusionRuns } from '../store'
 
-// Keeper 상세 안의 Fusion deliberation 목록. 대화 첫 창(max_history 100행)은
-// fusion 결론 카드가 하루 만에 밀려나 있는 가장 흔한 이유라(2026-09-05 실측:
-// 뒤에서 107번째 줄), 이 keeper의 run을 상세에서 바로 가리킨다.
-// post→run 해석은 fusion 서피스의 buildFusionRuns를 그대로 쓴다 — 이 판별이
-// 두 벌이 되면 어느 한쪽만 새 증거 모양을 따라가는 drift가 생긴다.
+// Keeper 상세 안의 Fusion deliberation 목록. registry(fusion-runs) 기반이다.
+// board-sink 트랙(fetchDashboardMemory recent 500)은 활발한 board가 하루 만에
+// fusion post를 창 밖으로 밀어버린다(2026-09-06 실측: 뒤에서 553번째 줄) — 그
+// 창으로는 이 keeper의 run을 읽을 수 없다. registry는 완료분 Latest-64를
+// 디스크에 replay하므로 서버 재시작 뒤에도 살아 있고, run마다 keeper가 붙어
+// 여기서 바로 필터된다. 질문 원문·패널 상세는 run 상세(fusion 탭)가 가진다.
 export function KeeperFusionRuns({ keeperName }: { keeperName: string }) {
   useEffect(() => {
-    void refreshFusionBoard()
+    void refreshFusionRuns()
   }, [keeperName])
 
-  const posts = fusionBoardPosts.value
+  const all = fusionRuns.value
   const runs = useMemo(
-    () => buildFusionRuns(posts).filter(run => run.keeperName === keeperName),
-    [posts, keeperName],
+    () => all.filter(run => run.keeper === keeperName),
+    [all, keeperName],
   )
 
   // fusion을 쓰지 않는 keeper가 대부분이라, run이 없으면 섹션 자체를 내지
   // 않는다. 빈 접이식 섹션은 상세 페이지의 나머지 정합된 침묵과 어긋난다.
   if (runs.length === 0) return null
+
+  const statusLabel = (status: string): string =>
+    status === 'running' ? '진행 중' : status === 'failed' ? '실패' : '완료'
 
   return html`
     <${CollapsibleSection} title="Fusion deliberations (${runs.length})" open=${false}>
@@ -38,8 +41,13 @@ export function KeeperFusionRuns({ keeperName }: { keeperName: string }) {
             onClick=${() => navigate('fusion', { run_id: run.runId })}
           >
             <div class="flex items-baseline justify-between gap-3">
-              <span class="text-sm text-[var(--color-fg-primary)] leading-snug">${run.question}</span>
-              <span class="shrink-0 text-2xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${run.updatedAt} /></span>
+              <span class="text-sm text-[var(--color-fg-primary)] leading-snug">
+                ${statusLabel(run.status)} · ${run.runId}
+                <span class="text-2xs text-[var(--color-fg-muted)]"> (${run.preset})</span>
+              </span>
+              <span class="shrink-0 text-2xs text-[var(--color-fg-muted)]">
+                <${TimeAgo} timestamp=${new Date(run.startedAt * 1000).toISOString()} />
+              </span>
             </div>
           </button>
         `)}

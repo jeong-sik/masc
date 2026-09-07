@@ -891,6 +891,67 @@ let test_deleted_but_unpublished_is_explicit () =
   check bool "durable deletion is not hidden" false (Sys.file_exists skill_path)
 ;;
 
+let test_server_skill_snapshot_runtime_refresh () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _source_text, _reference, _refresh =
+    setup base_path ~access:"read-write"
+  in
+  let runtime_config_path = Filename.concat base_path "runtime.toml" in
+  let config_text =
+    Printf.sprintf
+      "[skills]\nresource-read-max-bytes = 65536\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
+  in
+  write_file runtime_config_path config_text;
+  match Runtime.load_config_observation ~runtime_config_path () with
+  | Error msg -> fail msg
+  | Ok observation ->
+    let rev1 =
+      match
+        Server_skill_snapshot_runtime.refresh_from_observation
+          ~base_path
+          observation
+      with
+      | Error err -> fail (Server_skill_snapshot_runtime.error_to_string err)
+      | Ok (Skill_catalog_snapshot_service.Published snapshot)
+      | Ok (Skill_catalog_snapshot_service.Unchanged snapshot) ->
+        let rev =
+          Skill_catalog_snapshot.snapshot_revision snapshot
+          |> Skill_catalog_snapshot.snapshot_revision_to_string
+        in
+        check bool "revision is non-empty" true (String.length rev > 0);
+        check
+          int
+          "one entry in snapshot"
+          1
+          (List.length (Skill_catalog_snapshot.entries snapshot));
+        rev
+      | Ok Skill_catalog_snapshot_service.Workspace_retired ->
+        fail "unexpected workspace retired"
+    in
+    let updated_text = skill_text "Updated description." "# Updated body" in
+    write_file skill_path updated_text;
+    (match
+       Server_skill_snapshot_runtime.refresh_from_observation
+         ~base_path
+         observation
+     with
+     | Error err -> fail (Server_skill_snapshot_runtime.error_to_string err)
+     | Ok (Skill_catalog_snapshot_service.Published snapshot) ->
+       let rev2 =
+         Skill_catalog_snapshot.snapshot_revision snapshot
+         |> Skill_catalog_snapshot.snapshot_revision_to_string
+       in
+       check
+         bool
+         "new revision after mutation"
+         true
+         (not (String.equal rev1 rev2))
+     | Ok (Skill_catalog_snapshot_service.Unchanged _) ->
+       fail "expected published after skill file mutation, got unchanged"
+     | Ok Skill_catalog_snapshot_service.Workspace_retired ->
+       fail "unexpected workspace retired")
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -945,6 +1006,8 @@ let () =
             test_delete_rejects_symlink_directory_escape
         ; test_case "deleted but unpublished is explicit" `Quick
             test_deleted_but_unpublished_is_explicit
+        ; test_case "server skill snapshot runtime refresh from observation" `Quick
+            test_server_skill_snapshot_runtime_refresh
         ] )
     ]
 ;;

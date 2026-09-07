@@ -22,9 +22,5 @@ val carries_whole_projection : string -> bool
 (** Whether the event replaces a projection outright. [false] for a delta and
     for any type not on the table. *)
 
-val slices : string list
-(** The image of {!slice_for_sse_type}, deduplicated and sorted. A
-    subscription naming anything else can never be delivered to. *)
-
 val valid_slice : string -> bool
-(** Membership in {!slices}. *)
+(** Membership in [slices]. *)

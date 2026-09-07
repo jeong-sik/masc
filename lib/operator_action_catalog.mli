@@ -10,9 +10,7 @@ type t =
   | Keeper_recover
   | Task_inject
 
-val to_string : t -> string
 val of_string : string -> t option
-val all : t list
 val strings : string list
 val is_allowed : string -> bool
 

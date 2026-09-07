@@ -191,7 +191,7 @@ let write_private_atomic ~write path raw =
 
 let remove_rotation_journal path =
   try
-    Eio_guard.run_in_systhread (fun () -> Sys.remove path);
+    Eio_guard.run_in_systhread ~label:"dev-token-remove" (fun () -> Sys.remove path);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as error -> raise error

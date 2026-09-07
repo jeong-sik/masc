@@ -33,6 +33,7 @@ type tts_config = {
 type stt_config = {
   default_model : string;
   endpoints : endpoint list;
+  send_on_stop : bool;
 }
 
 type session_config = { endpoints : endpoint list }
@@ -386,7 +387,12 @@ let parse_stt json =
       in
       let* endpoints_json = require_list ~ctx:"stt" ~field:"endpoints" stt_json in
       let* endpoints = parse_endpoints ~ctx:"stt.endpoints" [] endpoints_json in
-      Ok (Some { default_model; endpoints })
+      (* Optional and false by default: absent is the operator not having
+         asked for a spoken sentence to send itself. *)
+      let* send_on_stop =
+        optional_boolean ~ctx:"stt" ~field:"send_on_stop" ~default:false stt_json
+      in
+      Ok (Some { default_model; endpoints; send_on_stop })
   | Some other ->
       Error
         (Printf.sprintf "root.stt must be object, got %s: %s"
@@ -768,6 +774,10 @@ let public_json config =
               [
                 ("default_model", `String stt.default_model);
                 ("active_endpoint", active_endpoint_json stt.endpoints);
+                (* The TUI reads this to decide whether ending a capture also
+                   sends; without it on the wire the setting cannot reach the
+                   surface that acts on it. *)
+                ("send_on_stop", `Bool stt.send_on_stop);
               ] );
       ( "session",
         `Assoc [ ("active_endpoint", active_endpoint_json config.session.endpoints) ] );

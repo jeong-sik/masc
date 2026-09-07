@@ -100,7 +100,6 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, decode_error) result
 
 val descriptor_id : t -> string
-val accepted_tool_name : t -> string
 
 val revalidate
   :  descriptors:Keeper_tool_descriptor.t list

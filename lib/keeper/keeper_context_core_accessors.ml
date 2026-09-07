@@ -30,10 +30,6 @@ type session_context = Keeper_types.session_context
 
 let text_of_message = Agent_core.Types.text_of_message
 
-let ensure_dir path =
-  (* ensure_dir returns the created path; fire-and-forget *)
-  ignore (Keeper_fs.ensure_dir path)
-
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
 
 let agent_core_context_of_context (ctx : working_context) = ctx.checkpoint.context
@@ -119,10 +115,6 @@ let sync_agent_core_context (ctx : working_context) : working_context =
 
 let role_to_string = Message_json.role_to_string
 let role_of_string_opt = Message_json.role_of_string_opt
-let content_blocks_to_json = Message_json.content_blocks_to_json
-let content_blocks_of_json = Message_json.content_blocks_of_json
-let string_field_opt = Message_json.string_field_opt
-let metadata_of_json = Message_json.metadata_of_json
 let message_to_json = Message_json.message_to_json
 let message_of_json = Message_json.message_of_json
 let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json

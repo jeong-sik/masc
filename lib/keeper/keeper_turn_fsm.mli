@@ -11,10 +11,6 @@
 
 include module type of Turn_fsm
 
-val require_active_state : _ turn_state -> (unit, Masc_domain.masc_error) result
-(** Identity on [s]; runtime-asserts that [s] is not a terminal state
-    ([Done], [Failed _], [Cancelled _]) via the [@@fsm_guard] PPX. *)
-
 val emit_transition :
   ?ctx:transition_context ->
   keeper_name:string ->

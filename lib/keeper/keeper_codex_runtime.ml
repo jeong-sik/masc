@@ -894,7 +894,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         in
         (match
        Runtime_codex_app_server.run_turn
-         ~mgr:(Eio.Stdenv.process_mgr env)
+         ~mgr:Posix_spawn_process_mgr.mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools

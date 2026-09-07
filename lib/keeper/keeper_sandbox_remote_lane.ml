@@ -105,3 +105,15 @@ let remote_root ~(config : Workspace.config) ~(meta : keeper_meta) =
     Ok endpoint.remote_root
   | Micro_vm -> Ok Keeper_sandbox_microvm.work_volume_guest_root
 ;;
+
+let remote_keeper_root ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let* root = remote_root ~config ~meta in
+  Ok (Filename.concat root (Playground_paths.sanitize_keeper_name meta.name))
+;;
+
+let is_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  match meta.sandbox_profile with
+  | Docker -> false
+  | Remote_ssh -> true
+  | Micro_vm -> Keeper_turn_sandbox_runtime.is_microvm_guest_booted ~config ~meta ()
+;;

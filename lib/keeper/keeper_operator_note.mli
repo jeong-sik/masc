@@ -27,8 +27,6 @@ type note =
   ; consumed_turn : int option
   }
 
-val path_for : Workspace.config -> string -> string
-
 type write_error =
   | Unknown_keeper of string
   | Empty_text

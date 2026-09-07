@@ -13,3 +13,8 @@
 
     Immutable at runtime. *)
 val schemas : Masc_domain.tool_schema list
+
+val schema_for : Tool_name.Task_name.t -> Masc_domain.tool_schema
+(** The declaration for one task operation. {!schemas} is this applied to
+    [Tool_name.Task_name.all], so registration can walk the vocabulary and
+    decide per-constructor policy instead of matching names. *)

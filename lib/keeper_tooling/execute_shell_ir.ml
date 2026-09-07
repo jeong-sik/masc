@@ -38,8 +38,20 @@ type dispatch_error =
 let parse_reason_tag = Shell_gate.parse_reason_tag
 let too_complex_reason_tag = Shell_gate.too_complex_reason_tag
 
-let validate_paths ~workdir ir =
-  Exec_policy.validate_shell_ir_paths ~workdir ir
+let requires_existing_dir_of_sandbox = function
+  | Masc_exec.Sandbox_target.Host
+  | Docker _ -> true
+  | Micro_vm _ | Ssh _ | Delegated _ -> false
+;;
+
+let validate_paths ?requires_existing_dir ?sandbox ~workdir ir =
+  let requires_existing_dir =
+    match requires_existing_dir, sandbox with
+    | Some req, _ -> req
+    | None, Some target -> requires_existing_dir_of_sandbox target
+    | None, None -> true
+  in
+  Exec_policy.validate_shell_ir_paths ~requires_existing_dir ~workdir ir
 ;;
 
 let dispatch
@@ -63,7 +75,7 @@ let dispatch
   | Shell_gate.Cannot_parse { reason } -> Error (Cannot_parse reason)
   | Shell_gate.Too_complex { reason } -> Error (Too_complex reason)
   | Shell_gate.Allow _context ->
-    (match validate_paths ~workdir ir with
+    (match validate_paths ~sandbox ~workdir ir with
      | Error error -> Error (Path_reject error)
      | Ok () ->
        Ok

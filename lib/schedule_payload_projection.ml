@@ -352,17 +352,6 @@ let dispatch_tool_for_request_result request =
   | Error err -> Error err
 ;;
 
-let dispatch_tool_for_request request =
-  match dispatch_tool_for_request_result request with
-  | Ok tool_name -> Some tool_name
-  | Error err ->
-    log_projection_error
-      request
-      ~surface:"dispatch_tool_for_request"
-      (dispatch_rejection_message err);
-    None
-;;
-
 let known_kind_contract_to_yojson kind =
   match kind with
   | Keeper_wake ->

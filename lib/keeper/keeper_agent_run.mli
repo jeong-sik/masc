@@ -64,9 +64,6 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
-  val sse_event_progress_kind : Agent_core.Types.sse_event -> string option
-  val sse_event_watchdog_progress_kind :
-    Agent_core.Types.sse_event -> string option
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)
     -> (Agent_core.Types.sse_event -> unit) option
@@ -144,8 +141,9 @@ module For_testing : sig
 
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list
+    -> checkpoint:Agent_core.Checkpoint.t option
     -> dispatch:
-         (Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
+         (checkpoint:Agent_core.Checkpoint.t option -> Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
     -> ('a, Agent_core.Error.t) result
 
   (** Exact-run reference recorded on the turn record. Accepts a reference

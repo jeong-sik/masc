@@ -234,6 +234,7 @@ absent the tool reports it rather than failing quietly.
 | Dart | `dart` |
 | Scala | `metals` |
 | C# | `csharp-ls` |
+| Markdown | `marksman` |
 
 ## If something goes wrong
 

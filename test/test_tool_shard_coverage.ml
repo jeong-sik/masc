@@ -230,12 +230,12 @@ let test_keeper_board_comment_can_reply_to_a_comment () =
       (List.mem_assoc "parent_id" properties)
 ;;
 
-let test_ide_annotation_schema_uses_opaque_references () =
+let test_ide_annotate_schema_is_the_memo_contract () =
   let schema =
     schema_by_name "keeper_ide_annotate" Tool_shard_types.filesystem_tools
   in
   Alcotest.(check bool)
-    "unknown annotation fields rejected"
+    "unknown fields rejected"
     true
     (match schema.input_schema with
      | `Assoc fields ->
@@ -245,25 +245,10 @@ let test_ide_annotation_schema_uses_opaque_references () =
   match get_json_assoc "properties" schema.input_schema with
   | None -> Alcotest.fail "keeper_ide_annotate missing properties"
   | Some properties ->
-    Alcotest.(check bool)
-      "opaque references exposed"
-      true
-      (List.mem_assoc "references" properties);
-    List.iter
-      (fun retired_field ->
-         Alcotest.(check bool)
-           ("product-specific field absent: " ^ retired_field)
-           false
-           (List.mem_assoc retired_field properties))
-      [ "board_" ^ "post_id"
-      ; "comment_" ^ "id"
-      ; "pr_" ^ "id"
-      ; "git_" ^ "ref"
-      ; "log_" ^ "id"
-      ; "session_" ^ "id"
-      ; "operation_" ^ "id"
-      ; "worker_run_" ^ "id"
-      ]
+    Alcotest.(check (list string))
+      "the memo's four inputs and nothing else"
+      [ "file_path"; "kind"; "line"; "text" ]
+      (List.sort compare (List.map fst properties))
 ;;
 
 let () =
@@ -317,6 +302,6 @@ let () =
         ; Alcotest.test_case
             "IDE opaque references"
             `Quick
-            test_ide_annotation_schema_uses_opaque_references
+            test_ide_annotate_schema_is_the_memo_contract
         ] )
     ]

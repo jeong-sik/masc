@@ -23,9 +23,6 @@ type runtime_blocker_surface = {
 val blocker_class_of_core_error :
   Agent_core.Error.t -> blocker_class option
 
-val runtime_blocker_surface_of_typed_class :
-  ?summary:string -> blocker_class -> runtime_blocker_surface
-
 val runtime_blocker_surface_of_failure_reason :
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 

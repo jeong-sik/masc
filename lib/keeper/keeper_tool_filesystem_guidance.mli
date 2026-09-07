@@ -39,9 +39,6 @@ type t =
   | Patch_requires_old_string
   | Patch_target_missing
 
-(** The [keeper.tool_filesystem.*] prompt key for this arm. *)
-val key : t -> string
-
 (** Render the arm's managed template; on render failure log and return the
     bare data (never inline prose). *)
 val text : t -> string

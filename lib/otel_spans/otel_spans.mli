@@ -5,10 +5,6 @@
 
     @since 2.103.0 *)
 
-(** Initialize OTel globals (service name, context propagation).
-    Idempotent; safe to call repeatedly. *)
-val init : unit -> unit
-
 (** [is_exporter_active ()] reports whether an OTLP exporter backend is registered. *)
 val is_exporter_active : unit -> bool
 
@@ -82,10 +78,6 @@ val add_event :
 (** [add_attrs ~attrs ()] appends attributes to the active OTel span.
     No-op when OTel is disabled or when no ambient span exists. *)
 val add_attrs : ?attrs:Opentelemetry.key_value list -> unit -> unit
-
-(** [set_status status] sets the active span status.
-    No-op when OTel is disabled or when no ambient span exists. *)
-val set_status : Opentelemetry.Span_status.t -> unit
 
 (** [record_error ~message ~error_type] marks the active span as errored and
     emits the GenAI exception event. *)

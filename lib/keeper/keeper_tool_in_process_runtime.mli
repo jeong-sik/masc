@@ -57,8 +57,6 @@ val network_read_call_summary : network_read_replay -> string option
     and the replay engine both state it through this function. [None] when
     the leaf's argument is absent, not a string, or blank. *)
 
-val connector_post_gate_operation : string
-
 type connector_post_replay =
   | Replay_discord_post of
       { input : Yojson.Safe.t
@@ -151,6 +149,16 @@ val handle_memory_retract_with_outcome
 (** Atomically retract one exact ordinary-current Memory OS fact. This is an
     internal self-write, not an external Gate effect. *)
 
+val handle_browser_tabs_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+(** One browser-lane queue hop (masc_browser_tabs); no gate — the verb set
+    is closed and read-only at the state layer. *)
+
+val handle_browser_read_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+
+val handle_browser_session_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+
+val handle_browser_goto_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 val handle_library_read_with_outcome
@@ -179,18 +187,6 @@ val handle_person_note_set
   -> string
 
 val handle_person_note_set_with_outcome
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> Keeper_tool_execution.t
-
-val handle_ide_annotate
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
-
-val handle_ide_annotate_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
@@ -363,6 +359,18 @@ val handle_masc_fusion_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
   -> ?continuation_channel:Keeper_continuation_channel.t
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+
+(** RFC-0430 Phase 3 — [handle_masc_file_with_outcome] is the in-process
+    handler for the [masc_file_{upload,delete}] provider Files tools: it
+    resolves the server root switch + net from {!Eio_context} (same reason as
+    fusion: the upload must not be tied to the keeper turn) and the API key
+    from the [DEEPSEEK_API_KEY] environment. Every failure is an explicit
+    typed failure. *)
+val handle_masc_file_with_outcome
+  :  name:string
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t

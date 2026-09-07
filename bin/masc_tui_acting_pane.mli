@@ -54,13 +54,15 @@ type feed =
 
 (** One keeper as the fleet block draws it. [mark] is the one-cell health
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
-    colour the caller reads out of the same health, so this module never
-    interprets health itself. [trace_id] resolves agent-core events, which
-    name their runtime lane, back to the keeper. *)
+    colour the caller reads out of the same health. [health] is that same
+    reading, and it decides one thing here: whether a turn that has not
+    settled can still end. [trace_id] resolves agent-core events, which name
+    their runtime lane, back to the keeper. *)
 type keeper = {
   name : string;
   mark : string;
   mark_tone : tone;
+  health : Masc.Tui_decode.keeper_health_reading option;
   trace_id : string;
 }
 
@@ -172,12 +174,19 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     Changes tab: a status row for the keeper and the fetch, then one row per
     file, windowed the same way. *)
 
-val keeper_state_text : now:float -> approval:string option ->
-  Masc_tui_acting.chunk option -> span list
+val keeper_state_text :
+  now:float ->
+  health:Masc.Tui_decode.keeper_health_reading option ->
+  approval:string option ->
+  Masc_tui_acting.chunk option ->
+  span list
 (** The fleet row's reading for one keeper: a pending approval outranks
     everything (the keeper is waiting on the reader), then the current turn's
     tool and call count, then the settled turn's calls and tokens, then
-    [quiet] for a keeper the feed has not shown acting. *)
+    [quiet] for a keeper the feed has not shown acting. A turn that has not
+    settled reads as [running] while its keeper can still end it; for a
+    keeper whose process is gone it reads as [unfinished], because the end
+    event died with the keeper. *)
 
 val tokens_text : int option * int option -> string
 (** Input and output tokens as one compact figure ([38.2k tok], [412 tok]);

@@ -1869,8 +1869,8 @@ class MissionRun:
                 + f"Mission {self.marker}. exact Task {self.task_ids['builder-a']}를 claim하세요. "
                 f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-builder-a.md에 "
                 "구체적인 구현 결과를 실제로 쓰고, "
-                f"keeper_ide_annotate로 그 파일 1행을 Task {self.task_ids['builder-a']}와 Goal "
-                f"{self.goal_id}에 연결하세요. keeper_task_done으로 artifact evidence를 제출한 뒤 "
+                f"keeper_ide_annotate로 그 파일 1행 위에 text='Task {self.task_ids['builder-a']} / Goal "
+                f"{self.goal_id}' 메모를 남기세요. keeper_task_done으로 artifact evidence를 제출한 뒤 "
                 f"Board post {post_id}에 BUILDER_A_DONE comment를 남기세요."
             ),
             "builder-b": (
@@ -1878,8 +1878,8 @@ class MissionRun:
                 + f"Mission {self.marker}. exact Task {self.task_ids['builder-b']}를 claim하세요. "
                 f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-builder-b.md에 "
                 "구체적인 구현 결과를 실제로 쓰고, "
-                f"keeper_ide_annotate로 그 파일 1행을 Task {self.task_ids['builder-b']}와 Goal "
-                f"{self.goal_id}에 연결하세요. keeper_task_done으로 artifact evidence를 제출한 뒤 "
+                f"keeper_ide_annotate로 그 파일 1행 위에 text='Task {self.task_ids['builder-b']} / Goal "
+                f"{self.goal_id}' 메모를 남기세요. keeper_task_done으로 artifact evidence를 제출한 뒤 "
                 f"Board post {post_id}에 BUILDER_B_DONE comment를 남기세요."
             ),
             "reviewer": (
@@ -2005,7 +2005,7 @@ class MissionRun:
             "invalid-tool",
             (
                 f"Mission {self.marker}. deterministic rejection을 검증합니다. keeper_ide_annotate를 "
-                "file_path='invalid-proof.md', line_start=0, content='must reject'로 정확히 한 번 호출하세요. "
+                "file_path='invalid-proof.md', line=0, text='must reject'로 정확히 한 번 호출하세요. "
                 "거부 결과를 숨기거나 무한 재시도하지 말고 turn을 종료하세요."
             ),
         )

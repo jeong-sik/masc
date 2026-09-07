@@ -23,8 +23,6 @@ val create : lane:lane -> Keeper_agent_run.run_result -> t
 val lane : t -> lane
 val result : t -> Keeper_agent_run.run_result
 val response_text : t -> string
-val turn_outcome : t -> Keeper_turn_outcome.t
-val checkpoint : t -> Agent_core.Checkpoint.t option
 
 val completion_contract_result
   :  t

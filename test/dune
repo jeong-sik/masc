@@ -33,6 +33,7 @@
  (libraries
   alcotest
   masc
+  masc.runtime
   masc_server
   masc.skill_config
   masc.skill_reference
@@ -248,7 +249,6 @@
   test_lsp_questions
   test_lsp_message_router
   test_lsp_workspace_pool
-  test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_blocker_class_mirror
@@ -263,8 +263,6 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_lsp_join_key
-  test_ide_diagnostics
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -599,7 +597,6 @@
   test_lsp_questions
   test_lsp_message_router
   test_lsp_workspace_pool
-  test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
   test_blocker_class_mirror
@@ -615,8 +612,6 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
-  test_ide_lsp_join_key
-  test_ide_diagnostics
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -2154,6 +2149,8 @@
 
 (include stanzas/test_slack_gateway_state.inc)
 
+(include stanzas/test_slack_poll_lane.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -2930,16 +2927,6 @@
   ../lib/keeper/keeper_tool_surface_ops.ml
   ../lib/tool_workspace.ml))
 
-; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading
-; _ prefix that signalled "unused" in OCaml but was wrong because the
-; bindings are actively used by List.mem in the Tool_spec.register loop).
-
-(test
- (name test_rfc_0085_pr12_tool_spec_rename)
- (modules test_rfc_0085_pr12_tool_spec_rename)
- (libraries alcotest ast_grep)
- (deps ../lib/tool_workspace.ml))
-
 ; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
 
 (test
@@ -3095,12 +3082,13 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries
+ (libraries masc_tui_image_preview
   alcotest
   ast_grep
   astring
   masc
   masc.masc_types
+  masc_tui_footer
   masc_tui_interrupt_signal
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
@@ -3116,7 +3104,7 @@
 (test
  (name test_tui_chat_rows_memo)
  (modules test_tui_chat_rows_memo)
- (libraries
+ (libraries masc_tui_image_preview
   alcotest
   masc
   masc.masc_types
@@ -3129,7 +3117,7 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries alcotest masc_tui_keeper_chat_transcript masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript masc_tui_types))
 
 (test
  (name test_tui_text_input_target)
@@ -3186,6 +3174,7 @@
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries
+  masc_tui_image_preview
   alcotest
   masc
   masc_tui_keeper_chat_history
@@ -3246,7 +3235,7 @@
 (test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
- (libraries alcotest masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_types))
 
 (test
  (name test_tui_gate_text)
@@ -3298,7 +3287,8 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries alcotest masc masc_tui_types masc_tui_gate_text))
+ (libraries masc_tui_image_preview alcotest masc masc_tui_types masc_tui_gate_text
+   masc_tui_message_layout))
 
 (test
  (name test_tui_server_identity_refresh)
@@ -3340,7 +3330,7 @@
 (test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
- (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection))
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store))
 
 (test
  (name test_tui_keeper_chat_projection)
@@ -3722,6 +3712,41 @@
 ; output instead of one undifferentiated suite.
 
 (rule
+ (alias runtest-test_tui_keyboard_input-memory-journal)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   memory-journal)))
+
+; Not on the runtest alias: the scenario passes end to end on macOS and the
+; Linux runner stops later, widening back from a twelve-column pane, waiting
+; for journal:full after Ctrl-N and Ctrl-F land on the narrow notice screen
+; (run 34072434219). That step had never run anywhere either. The lane is
+; named so it can be dispatched on its own while that is open.
+
+
+(rule
+ (alias runtest-test_tui_keyboard_input-code-memo)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   code-memo)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-code-memo)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
@@ -3736,6 +3761,38 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-cli-base-path)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-held-back-override)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   held-back-override)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-held-back-override)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-theme-scheme)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   theme-scheme)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-theme-scheme)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-planning-review)
@@ -4152,6 +4209,7 @@
  (modules test_tui_acting_pane)
  (libraries
   alcotest
+  masc
   masc_tui_acting_pane
   masc_tui_acting
   masc_tui_observer
@@ -4334,7 +4392,7 @@
 (test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
- (libraries alcotest yojson masc masc_test_deps))
+ (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))
 
 (test
  (name test_goal_tool_toml_parity)
@@ -4603,7 +4661,19 @@
 (test
  (name test_keeper_sandbox_remote)
  (modules test_keeper_sandbox_remote)
- (libraries masc_test_deps exec_ssh_protocol eio_main))
+ (libraries masc_test_deps exec_ssh_protocol eio_main masc.build_version))
+
+(test
+ (name test_browser_lane)
+ (modules test_browser_lane)
+ (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
+
+(include stanzas/test_browser_native_host.inc)
+
+(test
+ (name test_shell_ir_with_sandbox)
+ (modules test_shell_ir_with_sandbox)
+ (libraries masc_test_deps))
 
 (test
  (name test_keeper_tool_execute_observe)
@@ -4644,3 +4714,27 @@
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
  (libraries alcotest masc yojson))
+
+(test
+ (name test_tui_image_mosaic)
+ (modules test_tui_image_mosaic)
+ (libraries alcotest masc_tui_image_mosaic))
+
+(test
+ (name test_monotonic_deadline)
+ (modules test_monotonic_deadline)
+ (libraries alcotest masc.monotonic_deadline unix))
+
+(test
+ (name test_tui_browser_lane)
+ (modules test_tui_browser_lane)
+ (libraries masc_tui_types))
+
+(test
+ (name test_tui_browser_lane_text)
+ (modules test_tui_browser_lane_text)
+ (libraries masc_tui_types masc_tui_message_layout))
+
+(include stanzas/test_browser_webdriver.inc)
+
+(include stanzas/test_browser_surface.inc)

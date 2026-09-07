@@ -1,0 +1,20 @@
+name = "catppuccin-frappe"
+light = false
+
+[palette]
+base00 = "303446"
+base01 = "292c3c"
+base02 = "414559"
+base03 = "51576d"
+base04 = "626880"
+base05 = "c6d0f5"
+base06 = "f2d5cf"
+base07 = "babbf1"
+base08 = "e78284"
+base09 = "ef9f76"
+base0a = "e5c890"
+base0b = "a6d189"
+base0c = "81c8be"
+base0d = "8caaee"
+base0e = "ca9ee6"
+base0f = "eebebe"

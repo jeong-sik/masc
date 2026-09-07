@@ -383,21 +383,64 @@ let create_input_reader () =
     partial_scalar = "";
   }
 
+(* Whether the terminal has bytes for us, waited for inside Eio rather than
+   in the kernel.
+
+   [Unix.select] blocks the whole domain, not one fiber. Every fiber waiting
+   on a socket then advances only when this loop comes back round, so a reply
+   costs the number of steps it takes times what one pass of the loop costs.
+   That is how a request the server answers in milliseconds reached the
+   ten-second timeout: measured with masc-http-probe, the same 1.8 MB read
+   takes 5.5 seconds beside a loop that waits this way and 26 ms beside one
+   that waits through Eio (RFC-0429 §3.0). Waiting through Eio takes this
+   fiber out of the run queue, and those fibers run until they block in turn.
+
+   Only the readiness wait races the deadline. The read below is never
+   cancelled, so no keystroke is taken from the terminal and then dropped
+   with the losing fiber -- which is what racing the read itself would risk.
+
+   A wait with no time left has nothing to register: asking Eio for one would
+   cancel it in the same breath, and the kernel answers that question without
+   blocking anyway. *)
+let terminal_has_bytes ~remaining =
+  let kernel_wait seconds =
+    match Unix.select [ Unix.stdin ] [] [] seconds with
+    | ready, _, _ -> ready <> []
+  in
+  if remaining <= 0.0 then kernel_wait 0.0
+  else
+    match (Eio_guard.is_eio_fiber (), Eio_context.get_clock_opt ()) with
+    | true, Some clock ->
+        Eio.Fiber.first
+          (fun () ->
+            Eio_unix.await_readable Unix.stdin;
+            true)
+          (fun () ->
+            Eio.Time.sleep clock remaining;
+            false)
+    | true, None | false, _ ->
+        (* The startup terminal probe reads through this same reader from
+           inside [Eio_guard.run_in_systhread], where an Eio effect has no
+           handler. The kernel wait is the right one there for the same
+           reason the probe runs on a thread at all: blocking a system
+           thread does not stop the domain. *)
+        kernel_wait remaining
+
 let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
   in
   let poll remaining =
-    match Unix.select [Unix.stdin] [] [] remaining with
-    | ready, _, _ when ready <> [] ->
-        (match
-           Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
-         with
-         | count when count > 0 -> Render_schedule.Input_wait.Ready count
-         | _ -> Render_schedule.Input_wait.Timed_out
-         | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-             Render_schedule.Input_wait.Interrupted)
-    | _ -> Render_schedule.Input_wait.Timed_out
+    match terminal_has_bytes ~remaining with
+    | true -> (
+        match
+          Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
+        with
+        | count when count > 0 -> Render_schedule.Input_wait.Ready count
+        | _ -> Render_schedule.Input_wait.Timed_out
+        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+            Render_schedule.Input_wait.Interrupted)
+    | false -> Render_schedule.Input_wait.Timed_out
     | exception Unix.Unix_error (Unix.EINTR, _, _) ->
         Render_schedule.Input_wait.Interrupted
   in
@@ -617,7 +660,7 @@ let read_apc_body reader =
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
-  Eio_guard.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
       let key name = Some (Key name) in
       (* A character left half-read by the previous call is finished before
          anything else is looked at. Its remaining bytes are the next thing in
@@ -1233,6 +1276,7 @@ let note_attachment_staged (state : state) =
 
 let clear_staged_attachments (state : state) =
   state.msg_attachments <- [];
+  state.msg_references <- [];
   state.msg_attachments_since <- None
 ;;
 
@@ -1535,6 +1579,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
             behind. *)
          clear_staged_attachments state;
          state.msg_attachments <- request.Keeper_chat.attachments;
+         state.msg_references <- request.Keeper_chat.references;
          (* The original staging moment is gone -- the send that queued this
             line cleared the marker with the batch -- so the recall is what
             Ctrl-O can weigh: the attachments are the freshest thing the
@@ -1763,6 +1808,9 @@ type async_msg =
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_lane_loaded of
+      int * (Browser_lane_view.reading, string) result
+  | Browser_lane_action_done of int * (unit, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -1788,6 +1836,21 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Sent_image_ready of {
+      generation : int;
+      view : surface;
+      keeper_name : string option;
+      name : string;
+      result : (string, string) result;
+    }
+  | Image_render_ready of {
+      title : string;
+      caption : string list;
+      result : (string, string) result;
+    }
+      (** A [v]-requested web image, downloaded and converted to PNG off the
+          render loop. [result] is the PNG bytes ready to draw, or why they
+          could not be produced. *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -1941,14 +2004,45 @@ type async_msg =
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was
    applied ten seconds later names the loop, not the request (RFC-0429
-   §3.0). *)
+   §3.0). The instant is read off [Mtime_clock.elapsed_ns] so that a clock
+   correction landing between the two reads cannot fabricate the wait or
+   erase it. *)
 type 'a mailed = {
-  ready_at : float;
+  ready_at_ns : int64;
   message : 'a;
 }
 
 let enqueue_async mailbox msg =
-  Eio.Stream.add mailbox { ready_at = Unix.gettimeofday (); message = msg }
+  Eio.Stream.add mailbox
+    { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
+
+(* Wire the web-link-preview background fetcher. On the first cache miss for a
+   URL, Masc_tui_link_preview renders the synthesized card immediately and calls
+   this hook; the fetched <title>/og:* then replace that entry in the shared
+   cache, and the next render (a periodic loader tick, sub-second) shows the real
+   card. A failed fetch leaves the synthesized card. Runs on its own daemon fiber
+   so a slow site never blocks the render loop, and sends no masc auth header to
+   the third-party URL. *)
+(* Set once the image helpers below are in scope: downloads and decodes a
+   preview's image into a half-block mosaic off the render loop. A no-op until
+   then, so a preview fetched during early init simply carries no mosaic. *)
+let compute_and_store_mosaic : (string -> unit) ref = ref (fun _ -> ())
+
+let () =
+  Masc_tui_link_preview.set_background_fetch (fun url ->
+      match Eio_context.get_switch_opt () with
+      | None -> ()
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match Masc_tui_http.fetch_link_preview_body ~url with
+               | Ok body ->
+                   let preview = Masc_tui_link_preview.parse_og_html ~url ~body in
+                   Masc_tui_link_preview.cache_store preview;
+                   (match preview.Masc_tui_link_preview.image_url with
+                    | Some img -> !compute_and_store_mosaic img
+                    | None -> ())
+               | Error _ -> ());
+              `Stop_daemon))
 
 let current_clock_text () =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -1996,6 +2090,10 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_turn_sequence = None;
           me_operation_seq = operation_seq;
           me_text = text;
+          me_image = Masc_tui_image_preview.in_message ~text
+            ~attachments:(match role with
+              | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
+              | _ -> []);
           me_memory_summary = None;
           me_gate = None;
           me_submitted_at = submitted_at;
@@ -2026,7 +2124,7 @@ let append_user_history_once ~submitted_at state
   in
   if not already_present then
     append_chat_history ~at:submitted_at ~submitted_at state request
-      (Message_user (Sent_by_operator "you"))
+      (Message_user (Sent_by_operator { surface = None }))
       request.message
 
 let enqueue_dispatch_ack mailbox make_message =
@@ -3910,6 +4008,42 @@ let launch_connectors_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
 
+let launch_browser_lane state ~mailbox operation =
+  let open Browser_lane_view in
+  match state.browser_lane with
+  | None -> ()
+  | Some view when busy view -> ()
+  | Some view ->
+      state.browser_lane_generation <- state.browser_lane_generation + 1;
+      let generation = state.browser_lane_generation in
+      state.browser_lane <- Some { view with load = Loading (generation, operation) };
+      let host = server_peer_host and port = state.port in
+      let perform () =
+        (* The mailbox is the effect boundary. Cancellation still belongs to
+           the switch; unexpected transport failures become visible errors. *)
+        let call f =
+          try f () with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        match operation with
+        | Read -> Browser_lane_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
+        | Open_session | Close_session | Goto _ -> Browser_lane_action_done
+            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+           enqueue_async mailbox (perform ()); `Stop_daemon)
+       | None ->
+           state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
+
+let open_browser_lane state ~mailbox app =
+  state.view <- Connectors;
+  state.browser_lane <- Some (Browser_lane_view.create app);
+  state.search <- None;
+  launch_browser_lane state ~mailbox Browser_lane_view.Read
+
 let launch_runtime_surface_load state ~mailbox ~force =
   match state.runtime_surface_inflight with
   | Some _ -> if force then state.runtime_surface_force_pending <- true
@@ -4960,7 +5094,10 @@ let goto_surface state ~mailbox (destination : surface) =
        match state.changes_keeper with
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
        | None -> ())
-   | Connectors -> launch_connectors_load state ~mailbox
+   | Connectors ->
+       (match state.browser_lane with
+        | None -> launch_connectors_load state ~mailbox
+        | Some _ -> launch_browser_lane state ~mailbox Browser_lane_view.Read)
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config -> (
@@ -5223,7 +5360,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
         | Keeper_chat_history.Gate_activity _
-        | Keeper_chat_history.Memory_activity _ ->
+        | Keeper_chat_history.Memory_activity _
+        | Keeper_chat_history.Fusion_conclusion _ ->
             None)
       rows
   in
@@ -5240,7 +5378,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Skill_activity _
         | Keeper_chat_history.Reasoning _
         | Keeper_chat_history.Gate_activity _
-        | Keeper_chat_history.Memory_activity _ -> None)
+        | Keeper_chat_history.Memory_activity _
+        | Keeper_chat_history.Fusion_conclusion _ -> None)
       rows
   in
   state.msg_history <-
@@ -5310,7 +5449,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Delivery_failed _
     | Keeper_chat_history.Tool_calls _
     | Keeper_chat_history.Skill_activity _
-    | Keeper_chat_history.Reasoning _ -> None
+    | Keeper_chat_history.Reasoning _
+    | Keeper_chat_history.Fusion_conclusion _ -> None
   in
   let memory_summary =
     match row.Keeper_chat_history.kind with
@@ -5322,7 +5462,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Delivery_failed _
     | Keeper_chat_history.Tool_calls _
     | Keeper_chat_history.Skill_activity _
-    | Keeper_chat_history.Reasoning _ ->
+    | Keeper_chat_history.Reasoning _
+    | Keeper_chat_history.Fusion_conclusion _ ->
         None
   in
   let role, turn_phase, text, tool_block, skill_activity =
@@ -5330,22 +5471,29 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
            come from the same decode, and only the label used to survive. *)
-        let label = Keeper_chat_history.addressed_label speaker surface in
+        let name, arrived_by =
+          Keeper_chat_history.addressed_label_parts speaker surface
+        in
         let author =
           match speaker with
-          | Keeper_chat_history.Operator -> Sent_by_operator label
+          (* The operator's own name is never in doubt, but the door is: this
+             row draws no arrival siding, so the surface is the only thing
+             saying a line came in from a connector. Handed over apart, the
+             column keeps it whenever it fits and drops it whole when it does
+             not -- joined, the row kept neither. *)
+          | Keeper_chat_history.Operator ->
+              Sent_by_operator { surface = arrived_by }
           | Keeper_chat_history.Named _
-          | Keeper_chat_history.Unresolved _ -> Sent_by_other label
+          | Keeper_chat_history.Unresolved _ ->
+              Sent_by_other { speaker = name; surface = arrived_by }
         in
         (Message_user author, Turn_input, row.text, None, None)
     | Keeper_chat_history.Said_by_keeper ->
         (Message_keeper, Turn_output, row.text, None, None)
     | Keeper_chat_history.Autonomous_reply ->
-        ( Message_autonomous
-        , Turn_output
-        , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
-        , None
-        , None )
+        (* The decoder no longer emits a blank autonomous reply, so there is
+           nothing here to stand in for. *)
+        (Message_autonomous, Turn_output, row.text, None, None)
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match
@@ -5386,6 +5534,22 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , None )
     | Keeper_chat_history.Memory_activity _ ->
         (Message_memory, Turn_progress, row.text, None, None)
+    | Keeper_chat_history.Fusion_conclusion
+        { fusion_run_id; fusion_board_post_id } ->
+        (* A pointer row, not keeper speech: the conclusion text is the
+           Said_by_keeper row it rides on, and this names the run whose
+           panel/judge detail the Runs tab holds. Status, not Memory, so it
+           keeps the Gate lane's non-journal slot. *)
+        let pointer =
+          match fusion_run_id with
+          | Some run_id -> "run " ^ run_id
+          | None -> "post " ^ fusion_board_post_id
+        in
+        ( Message_status
+        , Turn_progress
+        , Printf.sprintf "Fusion deliberation %s — 상세는 Runs 탭" pointer
+        , None
+        , None )
   in
   let submitted_at =
     match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
@@ -5398,7 +5562,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Skill_activity _
       | Keeper_chat_history.Reasoning _
       | Keeper_chat_history.Gate_activity _
-      | Keeper_chat_history.Memory_activity _), _
+      | Keeper_chat_history.Memory_activity _
+      | Keeper_chat_history.Fusion_conclusion _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
   let timestamp =
@@ -5409,14 +5574,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     then clock_text_of_unix source_at
     else "--:--:--"
   in
-  (* A file the row carries, said on a line of its own under the words. The
-     store has held these since the composer learned to stage one; the pane
-     never looked, so a message that arrived with a 70 KB image read as the
-     sentence beside it and nothing else.
-
-     Named, not drawn: the bytes stay where they are and [Ctrl-O] opens a path
-     the conversation mentions. What the reader needs here is to know a file
-     is there at all. *)
+  (* Display metadata without pulling image bytes into every history page.
+     The typed preview below is derived from the original text and refs. *)
   let text =
     Keeper_chat_history.text_with_attachments
       ~format_bytes:Masc_tui_context_inspector.format_bytes ~text
@@ -5435,6 +5594,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_image = Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
+      ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments)
   ; me_memory_summary =
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
@@ -5633,10 +5794,14 @@ let drop_inflight state request =
 (* Staged images belong to the message being composed, so the send that consumes
    the draft consumes them too. Returning and clearing in one step keeps a failed
    send from silently re-attaching the same image to the next one. *)
+(* Staged references follow the same rule as staged images: the send that
+   consumes the draft consumes them. Returned together so every request
+   builder carries both or neither. *)
 let take_pending_attachments state =
   let staged = state.msg_attachments in
+  let references = state.msg_references in
   clear_staged_attachments state;
-  staged
+  (staged, references)
 ;;
 
 let launch_keeper_request ?promoted state ~mailbox request =
@@ -5711,7 +5876,9 @@ let update_queued_history_text state (request : Keeper_chat.request) =
           (match entry.me_role with Message_user _ -> true | _ -> false)
           && String.equal entry.me_request_id request.Keeper_chat.request_id
           && String.equal entry.me_keeper_name request.keeper_name
-        then { entry with me_text = text }
+        then { entry with me_text = text;
+          me_image = Masc_tui_image_preview.in_message ~text:request.message
+            ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
         else entry)
       state.msg_history
 
@@ -5801,7 +5968,8 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
             place_spilled_paste state ~base_path ~keeper_name text
           in
           let request =
-            Keeper_chat.create_request ~attachments:state.msg_attachments
+            let attachments, references = take_pending_attachments state in
+            Keeper_chat.create_request ~attachments ~references
               ~keeper_name ~message:text ()
           in
           (match
@@ -5856,9 +6024,11 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                target ->
           let original = editing.Chat_queue.request in
           let request =
+            let attachments, references = take_pending_attachments state in
             { original with
               message = text
-            ; attachments = take_pending_attachments state
+            ; attachments
+            ; references
             }
           in
           (match
@@ -5885,7 +6055,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                        | Message_autonomous | Message_status | Message_local
                        | Message_error | Message_tool | Message_skill _
                        | Message_thinking | Message_memory -> false
-                     then { entry with me_text = safe_text }
+                     then { entry with me_text = safe_text;
+                       me_image = Masc_tui_image_preview.in_message ~text:request.message
+                         ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
                      else entry)
                    state.msg_history;
                clear_current_message_draft state;
@@ -5917,8 +6089,10 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (match send_disposition state ~keeper_name:target with
       | Sends ->
           let request =
+            let attachments, references = take_pending_attachments state in
             Keeper_chat.create_request
-              ~attachments:(take_pending_attachments state)
+              ~attachments
+              ~references
               ~keeper_name:target
               ~message:text
               ()
@@ -5934,8 +6108,10 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
              attachments included. Building it at dispatch instead is what sent
              an image with whichever line happened to go next. *)
           let request =
+            let attachments, references = take_pending_attachments state in
             Keeper_chat.create_request
-              ~attachments:(take_pending_attachments state)
+              ~attachments
+              ~references
               ~keeper_name:target
               ~message:text
               ()
@@ -6112,6 +6288,7 @@ let chat_notice state ~keeper_name ~role text =
               me_turn_sequence = None;
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_image = Masc_tui_image_preview.No_image;
               me_memory_summary = None;
               me_gate = None;
               me_submitted_at = None;
@@ -6377,7 +6554,7 @@ let clamp_planning_cursor state =
    about why -- the picture that never arrives looks exactly like the picture
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
-let draw_image state ~refuse ~title data =
+let draw_image state ?(caption = []) ~refuse ~title data =
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
   | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
@@ -6387,9 +6564,18 @@ let draw_image state ~refuse ~title data =
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
       let rows, columns = get_terminal_size () in
+      (* Header rows -- the title, then one row per caption line (description,
+         site, URL). The image starts below the header and the footer sits on
+         the last row, so the picture never overlaps the text. With no caption
+         this is the old title-only layout. *)
+      let header_lines =
+        List.map (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
+          (title :: caption)
+      in
+      let header_rows = List.length header_lines in
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
-        ; rows = max 1 (rows - 3)
+        ; rows = max 1 (rows - header_rows - 2)
         }
       in
       let img_escape =
@@ -6399,10 +6585,17 @@ let draw_image state ~refuse ~title data =
         | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
             Masc_tui_graphics.place ~data box
       in
+      let header =
+        String.concat ""
+          (List.mapi
+             (fun i line ->
+               Printf.sprintf "\x1b[%d;1H%s" (i + 1)
+                 (Message_layout.fit_width line (max 1 (columns - 1))))
+             header_lines)
+      in
       write_to_terminal
-        (Ansi.clear ^ Masc_tui_graphics.delete_all
-        ^ Printf.sprintf "\x1b[1;1H%s\x1b[2;1H"
-            (Message_layout.fit_width title (max 1 (columns - 1)))
+        (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
+        ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
@@ -6463,6 +6656,59 @@ let convert_to_png input_path =
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
+(* Mosaic preview width, in cells. Only the width is fixed; the height follows
+   the image's aspect ratio (see [image_url_to_mosaic]), so the picture is never
+   stretched. Bigger = sharper (og:images are high-res; cell count is the cap).
+   The modal draws it only when it fits the width (render_modal_card guards), so
+   a narrow terminal skips it rather than wrapping. Decode/draw stay a few ms. *)
+let mosaic_cols = 120
+
+(* Download a preview image and decode it into half-block mosaic lines, or None.
+   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
+   render loop inside run_in_systhread. *)
+let image_url_to_mosaic ~cols url =
+  match download_remote_image url with
+  | Error _ -> None
+  | Ok local_path -> (
+      let raw =
+        Filename.concat
+          (ensure_img_cache_dir ())
+          ("mosaic_"
+          ^ Digest.to_hex (Digest.string (Printf.sprintf "%s_ar%d" url cols))
+          ^ ".raw")
+      in
+      (* Width is fixed at [cols]; height follows the image's own aspect ratio.
+         scale=cols:-2 keeps the ratio and rounds to an even height for the
+         half-block pairing, so the picture is never stretched. *)
+      let cmd =
+        Printf.sprintf
+          "ffmpeg -y -loglevel error -i %s -vf scale=%d:-2 -f rawvideo -pix_fmt \
+           rgb24 %s"
+          (Filename.quote local_path) cols (Filename.quote raw)
+      in
+      match Unix.system cmd with
+      | Unix.WEXITED 0 when Sys.file_exists raw -> (
+          try
+            let ic = open_in_bin raw in
+            let data = really_input_string ic (in_channel_length ic) in
+            close_in ic;
+            let rows = String.length data / (cols * 3) in
+            match Masc_tui_image_mosaic.render ~cols ~rows data with
+            | [] -> None
+            | lines -> Some lines
+          with _ -> None)
+      | _ -> None)
+
+let () =
+  compute_and_store_mosaic :=
+    fun img ->
+      match
+        Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
+            image_url_to_mosaic ~cols:mosaic_cols img)
+      with
+      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
+      | None -> ()
+
 let open_image state ~notice path =
   let refuse reason =
     notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
@@ -6524,6 +6770,56 @@ let open_image state ~notice path =
                     else
                       draw_image state ~refuse ~title:path prepared_data))
 
+(* Download a remote image and hand back PNG bytes ready for [draw_image], or
+   why they could not be produced. Pure of the render loop: no terminal writes,
+   so it is safe to run on a systhread. *)
+let prepare_remote_image_bytes url =
+  match download_remote_image url with
+  | Error e -> Error e
+  | Ok local_path -> (
+      match read_file_bytes local_path with
+      | Error detail -> Error detail
+      | Ok data when String.length data = 0 -> Error "the downloaded image is empty"
+      | Ok initial_data -> (
+          match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
+          | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+              Ok initial_data
+          | _ -> (
+              match convert_to_png local_path with
+              | Ok png_path -> read_file_bytes png_path
+              | Error _ ->
+                  Error "could not convert the image to a format the terminal draws")))
+
+(* [v] on a link preview: download and convert the image OFF the render loop,
+   then hand the PNG bytes back through the mailbox so [draw_image] runs on the
+   render fiber, not here. The blocking curl/sips live inside run_in_systhread
+   so the domain keeps rendering; the loading line is shown at once so the
+   keypress is not silent. terminal_draws_images = false skips the download and
+   opens a browser instead. *)
+let launch_image_render ~mailbox ~notice ~title ~caption url =
+  if !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url url with
+    | Ok opener ->
+        notice ~role:Message_local
+          (Printf.sprintf "Opened in browser (%s): %s" opener url)
+    | Error err ->
+        notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
+  else begin
+    notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
+    let run () =
+      let result =
+        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () -> prepare_remote_image_bytes url)
+      in
+      enqueue_async mailbox (Image_render_ready { title; caption; result })
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Image_render_ready
+             { title; caption; result = Error "Eio switch unavailable" })
+  end
+
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
    the wire to the endpoint; the terminal wants the PNG's own bytes, so they
    are decoded back and drawn by the same tail a named file gets. The
@@ -6541,19 +6837,8 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* The picture this conversation last named, if it named one. Newest first
-   because that is why the key is pressed: something just arrived. Older ones
-   stay reachable by their path through /image -- cycling would make this key
-   a cursor, and a cursor needs state that has to be told when the
-   conversation changed underneath it.
-
-   The row's position comes back with the path: when the composer is also
-   holding a staged image, Ctrl-O weighs the two by which arrived later, and
-   the position is what the weighing compares against the staging marker.
-
-   Read at the keystroke rather than kept beside the history: the scan costs
-   one pass over what is loaded, once, and a kept list would have to be
-   rewritten at every place a line is appended or a page is paged in. *)
+(* Read the newest typed image in this Keeper's loaded conversation. Display
+   labels are never parsed as paths. The row index preserves staging order. *)
 let newest_named_image state =
   let in_this_chat entry =
     match state.msg_target_keeper_name with
@@ -6565,11 +6850,9 @@ let newest_named_image state =
   |> List.find_mapi (fun from_newest entry ->
          if not (in_this_chat entry) then None
          else
-           match List.rev (Masc_tui_image_ref.paths entry.me_text) with
-           | [] -> None
-           (* Last named in the newest line: one message can carry several,
-              and the reader means the one nearest what they just read. *)
-           | last :: _ -> Some (length - 1 - from_newest, last))
+           match entry.me_image with
+           | Masc_tui_image_preview.No_image -> None
+           | image -> Some (length - 1 - from_newest, image))
 
 (* Both a named path and a staged attachment: which is newer. The marker left
    by [note_attachment_staged] anchors the row that was newest when the newest
@@ -6589,35 +6872,57 @@ let named_vs_staged_order state ~named_index =
       then Masc_tui_image_preview.Staged_is_newer
       else Masc_tui_image_preview.Named_is_newer)
 
-(* Ctrl-O. What it opens is chosen by [Masc_tui_image_preview.choose_preview]:
-   the newer of the path the conversation last named and the newest staged
-   attachment. A screenshot staged a keystroke ago never enters the
-   transcript, so when the staging is the newer act it is what the key was
-   pressed to see; when the naming message is newer, what the operator just
-   read wins. The refusal when there is neither is text for the pane rather
-   than a cleared screen: a key that did nothing and a key that found nothing
-   look the same otherwise, which is the shape of failure this whole surface
-   keeps having. *)
-let open_named_image state =
+(* Fetch retained wire bytes through the authenticated artifact endpoint. No
+   local filename or reference-supplied URL is ever opened. The render fiber
+   receives only the decoded image after network work completes. *)
+let open_stored_image state ~mailbox ~notice ~name reference =
+  if !terminal_draws_images = Some false then
+    notice ~role:Message_error terminal_draws_no_images
+  else begin
+    notice ~role:Message_local (Printf.sprintf "Loading sent image (any key cancels): %s" name);
+    let port = state.port in
+    let keeper_name = state.msg_target_keeper_name in
+    let generation = state.image_request_generation in
+    let view = state.view in
+    let run () =
+      let result =
+        Eio_guard.run_in_systhread ~label:"tui-sent-image-bytes" (fun () ->
+          let response = Masc_tui_http.get_json ~host:server_peer_host ~port
+              ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) in
+          Result.bind response (function
+            | `Assoc fields ->
+                (match List.assoc_opt "content" fields with
+                 | Some (`String payload) -> Masc_tui_image_preview.decode_payload payload
+                 | Some _ | None -> Error "sent image response has no payload")
+            | _ -> Error "invalid sent image response"))
+      in
+      enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> notice ~role:Message_error "sent image preview requires an active connection"
+  end
+
+let open_named_image state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let named, order =
+  let conversation, order =
     match newest_named_image state with
-    | Some (named_index, path) ->
-        Some path, named_vs_staged_order state ~named_index
-    | None -> None, Masc_tui_image_preview.Unordered
+    | Some (named_index, image) ->
+        image, named_vs_staged_order state ~named_index
+    | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
   in
   match
-    Masc_tui_image_preview.choose_preview ~named ~staged:state.msg_attachments
-      ~order
+    Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
   with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
-  | Masc_tui_image_preview.Staged attachment ->
-      open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Stored_attachment { name; reference } ->
+      open_stored_image state ~mailbox ~notice ~name reference
+  | Masc_tui_image_preview.Unavailable_attachment name ->
+      notice ~role:Message_error
+        (Printf.sprintf "Ctrl-O %s: this attachment has no retained image payload; attach it again to preview it" name)
   | Masc_tui_image_preview.No_image ->
-      notice ~role:Message_local
-        (Printf.sprintf
-           "Ctrl-O: this conversation names no %s to look at, and no image is staged for the next message"
-           Masc_tui_image_ref.extension)
+      notice ~role:Message_local "Ctrl-O: no image in this conversation or the composer"
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -6820,6 +7125,38 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       open_image state ~notice (String.trim path)
   | Masc_tui_command.Attach_image_missing_path ->
       notice ~role:Message_error "/attach needs a path on the same line"
+  | Masc_tui_command.Attach_image_ref_missing_value ->
+      notice ~role:Message_error "/ref needs a URL or file_id on the same line"
+  | Masc_tui_command.Attach_image_ref value -> (
+      Buffer.clear state.msg_input;
+      (* A whole-token http(s) URL is a URL reference; anything else non-blank
+         is a Files-API id. Both send no bytes — the provider resolves the
+         reference or visibly rejects it. *)
+      let value = String.trim value in
+      let reference =
+        if String_util.starts_with_ci ~prefix:"https://" value
+           || String_util.starts_with_ci ~prefix:"http://" value
+        then Some (Keeper_chat.Ref_url value)
+        else if value = "" then None
+        else Some (Keeper_chat.Ref_file_id value)
+      in
+      match reference with
+      | None ->
+          notice ~role:Message_error "/ref needs a URL or file_id on the same line"
+      | Some reference ->
+          state.msg_references <- state.msg_references @ [ reference ];
+          note_attachment_staged state;
+          let kind =
+            match reference with
+            | Keeper_chat.Ref_url _ -> "url"
+            | Keeper_chat.Ref_file_id _ -> "file_id"
+          in
+          notice ~role:Message_local
+            (Printf.sprintf
+               "referenced %s (%s) — the provider fetches it; %d reference(s)                 staged for the next message"
+               value
+               kind
+               (List.length state.msg_references)))
   | Masc_tui_command.Attach_image path -> (
       Buffer.clear state.msg_input;
       match Masc_tui_attachment.of_file ~path:(String.trim path) with
@@ -7001,6 +7338,22 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           notice ~role:Message_local
             "an interrupt is already outstanding for this turn"
       | None -> notice ~role:Message_local "no turn is streaming in this pane")
+  | Masc_tui_command.Interrupt_keeper_turn name -> (
+      Buffer.clear state.msg_input;
+      (* The pane's own turn is [Interrupt_turn]'s business. This arm is for
+         the turn the pane only tells the operator about -- the "(also
+         sending to X ...)" row -- which nothing else could reach: every
+         other way in reads [msg_live], and the key that would put that
+         keeper on screen is refused while any request is in flight, which
+         is exactly when one is running (#33852).
+
+         Matched by the name the row prints, so what the operator types is
+         what they just read. *)
+      match Masc_tui_types.inflight_for_keeper state name with
+      | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
+      | None ->
+          notice ~role:Message_local
+            (Printf.sprintf "no turn of %S is in flight from this pane" name))
   | Masc_tui_command.Steer_missing_message ->
       notice ~role:Message_error "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
@@ -9457,7 +9810,9 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
          | Masc_tui_command.Set_embeds _
-        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+        | Masc_tui_command.Interrupt_turn
+        | Masc_tui_command.Interrupt_keeper_turn _
+        | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
@@ -9468,6 +9823,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
+       | Masc_tui_command.Attach_image_ref _ | Masc_tui_command.Attach_image_ref_missing_value
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
@@ -9488,7 +9844,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state)
+                   ~open_named_image:(fun () -> open_named_image state ~mailbox)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
@@ -9631,7 +9987,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         then Buffer.add_char state.msg_input ' ';
         Buffer.add_string state.msg_input text;
         save_message_draft state;
-        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ()))
+        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
+        (* [voice.stt].send_on_stop: the operator who says a sentence and
+           stops the capture has finished the sentence, and the Enter that
+           follows says nothing the stop did not. Off by default, because the
+           draft is also where a spoken half-sentence waits for typing, and
+           taking the review step away costs an operator who works that way
+           more than it saves the one who does not.
+
+           Sent by handing the composer the send key rather than calling the
+           send path: that path decides what a draft is (a message, a slash
+           command, a preset) and which surface comes forward, and a second
+           caller would be a second answer to those questions. A capture in
+           continuous mode re-arms above before this, so the microphone is
+           already listening for the next sentence when this returns. *)
+        if state.voice_send_on_stop
+        then (
+          let (_ : bool) =
+            handle_composer_key state ~base_path ~mailbox Composer.send_key
+          in
+          ()))
   | Voice_silent { keeper; reason } ->
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;
@@ -10302,6 +10677,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 in
                 max widest row_width)
               0 rows;
+          state.code_memos <- Masc_tui_memo.of_file ~path rows;
           state.code_focus_file <- Right_pane;
           (* A new file starts on its content; the old file's history or
              diff would caption the wrong bytes. *)
@@ -10315,6 +10691,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_notes_scroll <- 0;
           state.code_blame <- Masc_tui_fetched.clear state.code_blame
       | Error detail ->
+          state.code_memos <- [];
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
               (Error detail))
@@ -10830,6 +11207,33 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Sent_image_ready { generation; view; keeper_name; name; result } ->
+      if generation = state.image_request_generation
+         && view = state.view && keeper_name = state.msg_target_keeper_name then begin
+        let notice = chat_notice state ~keeper_name in
+        let refuse reason =
+          notice ~role:Message_error (Printf.sprintf "sent image %s: %s" name reason)
+        in
+        match result with
+        | Error reason -> refuse reason
+        | Ok data -> draw_image state ~refuse ~title:name data
+      end
+  | Image_render_ready { title; caption; result } ->
+      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+      (match result with
+       | Ok data ->
+           let refuse reason =
+             notice ~role:Message_error (Printf.sprintf "image %s: %s" title reason)
+           in
+           draw_image state ~caption ~refuse ~title data
+       | Error e -> (
+           match Masc_tui_browser.open_url title with
+           | Ok opener ->
+               notice ~role:Message_local
+                 (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
+                    e opener title)
+           | Error _ ->
+               notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
@@ -11290,6 +11694,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
                detail))
+  | Browser_lane_loaded (generation, result) ->
+      state.browser_lane <- Option.map
+        (Browser_lane_view.accept ~generation result) state.browser_lane
+  | Browser_lane_action_done (generation, result) ->
+      (match state.browser_lane with
+       | Some view ->
+           (match view.Browser_lane_view.load with
+            | Browser_lane_view.Loading (current, (Open_session | Close_session | Goto _))
+              when generation = current ->
+                (match result with
+                 | Error detail ->
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
+                 | Ok () ->
+                     state.browser_lane <- Some
+                       { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
+                     launch_browser_lane state ~mailbox Browser_lane_view.Read)
+            | Loading _ | Idle | Failed _ -> ())
+       | None -> ())
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -11674,22 +12096,33 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
-    | Some { ready_at; message = msg } ->
-        let waited = Unix.gettimeofday () -. ready_at in
-        if waited >= Masc_tui_http.slow_report_sec then
+    | Some { ready_at_ns; message = msg } ->
+        let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
+        if Int64.compare waited_ns Masc_tui_http.slow_report_ns >= 0 then
           Log.Transport.info
             "async result waited %.0f ms in the mailbox before the loop applied it"
-            (waited *. 1000.);
+            (Masc_tui_http.ms_of_ns waited_ns);
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         loop true
   in
   loop false
 
-let invalidate_frame_for_resize frame_presenter render_schedule =
-  invalidate_terminal_size ();
+(* What a size change costs, wherever it was noticed: the presenter's cached
+   screen describes the old geometry, and the next frame has to be drawn
+   rather than skipped as unchanged. Both doors below end here so the two
+   cannot come to disagree about what a resize costs. *)
+let discard_frame_for_new_size frame_presenter render_schedule =
   Frame_presenter.invalidate frame_presenter;
   Render_schedule.request render_schedule Render_schedule.Force
+
+(* SIGWINCH says the size changed without saying to what, so the cached size
+   is dropped and the next reader re-probes. The loop's own ioctl snapshot
+   takes the other door: it already holds the new size and has to keep it, or
+   the frame it is about to draw would read a different one. *)
+let invalidate_frame_for_resize frame_presenter render_schedule =
+  invalidate_terminal_size ();
+  discard_frame_for_new_size frame_presenter render_schedule
 
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
@@ -11805,7 +12238,7 @@ let toggle_mouse_tracking () =
 let terminal_probe_wait_seconds = 0.2
 
 let read_terminal_probe reader ~palette_requested =
-  Eio_guard.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"tui-terminal-probe" (fun () ->
       let decoder =
         Masc_tui_terminal_probe.create ~palette_requested
       in
@@ -11863,10 +12296,13 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  at_exit cleanup;
-  (* After [cleanup] registers, so the summary is written once the terminal is
-     back and cannot land in the middle of a restored screen. *)
+  (* [at_exit] runs its callbacks in the reverse of this order and stops at
+     the first one that raises, so the terminal restore is registered last
+     and runs first. The frame summary appends to a file and can raise on a
+     write -- registered the other way round it would take the restore with
+     it and leave the terminal in raw mode. *)
   at_exit Masc_tui_frame_timing.report;
+  at_exit cleanup;
   (* SIGINT is the only one of these a person sends by hand mid-sentence, so
      it asks the loop rather than ending the process. The rest still mean the
      session is over. *)
@@ -11956,6 +12392,12 @@ let main () =
     Option.value
       (Masc_tui_config.coalesce_queued_input ~base_path)
       ~default:true;
+  (* Default false, unlike its neighbours: this one sends without the operator
+     confirming, so absence is not consent. *)
+  state.voice_send_on_stop <-
+    Option.value
+      (Masc_tui_config.voice_send_on_stop ~base_path)
+      ~default:false;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -12082,17 +12524,30 @@ let main () =
     ~flush:(fun () -> flush stdout);
   (* Reads the palette rather than taking a colour, so every caller sends
      whatever is in force at the moment it asks -- picking a scheme, dropping
-     one, and the first paint all go through the same answer. *)
+     one, and the first paint all go through the same answer.
+
+     Gated on the reader's own pick rather than on the palette alone. The
+     palette is also what the terminal answered about itself, and sending a
+     terminal its own colours back is masc claiming an opinion it does not
+     have. It read as harmless while only the page travelled; the sixteen
+     make it a round trip through masc's 8-bit parse of a reply a terminal
+     may have given at 16. *)
   let sync_theme_page () =
-    Frame_presenter.sync_page ~write:(output_string stdout)
+    Frame_presenter.sync_scheme ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout)
-      (Option.map
-         (fun palette ->
-           { Frame_presenter.foreground =
-               Masc_tui_terminal_palette.foreground palette
-           ; background = Masc_tui_terminal_palette.background palette
-           })
-         (Masc_tui_terminal_palette.current ()))
+      (match state.theme_choice with
+       | None -> None
+       | Some _ ->
+         Option.map
+           (fun palette ->
+             { Frame_presenter.foreground =
+                 Masc_tui_terminal_palette.foreground palette
+             ; background = Masc_tui_terminal_palette.background palette
+             ; ansi =
+                 Array.init Masc_tui_terminal_palette.ansi_slot_count
+                   (Masc_tui_terminal_palette.ansi palette)
+             })
+           (Masc_tui_terminal_palette.current ()))
   in
   (* The pick, written to the runtime.toml boot reads it back from. Only a
      commit comes here: a preview is a look at a scheme, not a choice of one,
@@ -12191,7 +12646,7 @@ let main () =
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
-  let last_loop_at = ref (Unix.gettimeofday ()) in
+  let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind !presented_approval approval_row_reference
@@ -13464,13 +13919,15 @@ and is loaded on demand through keeper_skill.
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
-           Frame_presenter.invalidate frame_presenter;
-           Render_schedule.request render_schedule Render_schedule.Force
+           discard_frame_for_new_size frame_presenter render_schedule
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
-      if Option.is_some input then Atomic.set interrupt_armed false;
+      if Option.is_some input then begin
+        Atomic.set interrupt_armed false;
+        state.image_request_generation <- state.image_request_generation + 1
+      end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
          here rather than inside the surfaces is what keeps a paste from
@@ -13486,8 +13943,27 @@ and is loaded on demand through keeper_skill.
         close_image state;
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
-      let key =
+      (* The MSX screen owns the keyboard the same way a showing picture
+         does, except it answers keys instead of ending on the first one:
+         each is injected into the machine and steps a frame, and only [esc]
+         hands the terminal back. Intercepted before [key] is computed, so
+         no surface underneath ever sees an emulator's keystroke. *)
+      let msx_key =
         if dismissed_image then None
+        else if state.msx_open then
+          match input with
+          | Some (Key name) -> Some name
+          | Some _ -> Some ""  (* deliberate non-key input: step, own it *)
+          | None -> None
+        else None
+      in
+      (match msx_key with
+      | Some name ->
+          if not (Masc_tui_msx.consume ~write:write_to_terminal state name)
+          then invalidate_frame_for_resize frame_presenter render_schedule
+      | None -> ());
+      let key =
+        if dismissed_image || Option.is_some msx_key then None
         else
           match input with
           | Some (Key name) -> Some name
@@ -13545,6 +14021,11 @@ and is loaded on demand through keeper_skill.
             (* Typing in row search moves the cursor to the first match as
                each character lands, so a paste has to jump the same way or
                the query on screen and the row under it disagree. *)
+            | Some Text_browser_url ->
+                state.browser_lane <- Option.map
+                  (fun (view : Browser_lane_view.t) ->
+                    { view with url_draft = Some (Option.value ~default:"" view.url_draft ^ text) })
+                  state.browser_lane
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -13637,6 +14118,22 @@ and is loaded on demand through keeper_skill.
                handle_acting_pane_click state ~base_path ~mailbox:async_messages
                  ~line
            | Pane_miss -> ())
+       (* A press on a folded Gate row opens what the fold is holding. The
+          fold lives on the tool-detail axis, so this sets the state Ctrl-D
+          sets rather than a second one: two ways in, one thing opened. Only
+          folded rows carry the action, so a press on an open row is not a
+          press that quietly did nothing -- there was nothing to open. *)
+       | Some (Mouse_left_press (row, _column))
+         when state.view = Keepers Keeper_message
+              && (not dismissed_image) && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search
+              && Masc_tui_render.chat_row_action_at ~row
+                 = Masc_tui_message_layout.Action_unfold_argument ->
+           state.msg_tool_visibility <- Tools_full
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they
@@ -13661,12 +14158,12 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      (let now = Unix.gettimeofday () in
-       let gap = now -. !last_loop_at in
-       if gap >= Masc_tui_http.slow_report_sec then
+      (let now_ns = Mtime_clock.elapsed_ns () in
+       let gap_ns = Int64.sub now_ns !last_loop_at_ns in
+       if Int64.compare gap_ns Masc_tui_http.slow_report_ns >= 0 then
          Log.Transport.info "main loop: %.0f ms between two iterations"
-           (gap *. 1000.);
-       last_loop_at := now);
+           (Masc_tui_http.ms_of_ns gap_ns);
+       last_loop_at_ns := now_ns);
       ensure_acting_pane_changes state ~mailbox:async_messages;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
@@ -13675,7 +14172,9 @@ and is loaded on demand through keeper_skill.
       in
       let quit_key =
         match key with
-        | Some k -> Render_schedule.Input_shortcut.is_quit ~message_mode k
+        | Some k ->
+            text_input_target state ~compact_viewport <> Some Text_browser_url
+            && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
@@ -13740,6 +14239,7 @@ and is loaded on demand through keeper_skill.
         && (not state.palette_open)
         && Option.is_none state.runtime_param_edit
         && Option.is_none state.search
+        && text_input_target state ~compact_viewport <> Some Text_browser_url
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
@@ -14182,17 +14682,34 @@ and is loaded on demand through keeper_skill.
             | "?" | "esc" ->
                 state.help_open <- false;
                 state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" ->
+            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
                 (* Bounded against the sheet the frame draws, which folds to
                    two columns on a wide terminal and so holds half the rows
-                   the lines were written as. *)
+                   the lines were written as. A page moves by the viewport
+                   height the sheet itself claims, so one press lands the
+                   reader where the last visible line was the first. *)
                 let count, height = Masc_tui_render.help_viewport state in
+                let step =
+                  match k with
+                  | "pageup" | "pagedown" -> max 1 height
+                  | _ -> 1
+                in
                 let move =
                   match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
+                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
                   | _ -> Masc_tui_scroll.up
                 in
-                state.help_scroll <- move ~count ~height state.help_scroll
+                (* [down]/[up] move by one; the page keys repeat the single
+                   step so the bound stays the scroll module's, not a
+                   re-derived one. *)
+                let rec repeat n scroll =
+                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
+                in
+                state.help_scroll <- repeat step state.help_scroll
+            | "g" -> state.help_scroll <- 0
+            | "G" ->
+              let count, height = Masc_tui_render.help_viewport state in
+              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
             | _ -> ())
        (* Modal for the same reason the help sheet is: a panel that is
           answering "what is coming" should not have a surface binding fire
@@ -14326,11 +14843,18 @@ and is loaded on demand through keeper_skill.
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
                      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-                     (match p.image_url with
-                      | Some img_url ->
-                          open_image state ~notice img_url
-                      | None ->
-                          open_image state ~notice url)
+                     let img_url =
+                       match p.image_url with Some i -> i | None -> url
+                     in
+                     let title =
+                       match p.title with Some t -> "  " ^ t | None -> "  " ^ url
+                     in
+                     let caption =
+                       (match p.description with Some d -> [ "  " ^ d ] | None -> [])
+                       @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
+                     in
+                     launch_image_render ~mailbox:async_messages ~notice ~title
+                       ~caption img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->
@@ -14479,6 +15003,8 @@ and is loaded on demand through keeper_skill.
                 in
                 close ();
                 (match chosen with
+                 | Some (_, Masc_tui_types.Palette_browser_lane app) ->
+                     open_browser_lane state ~mailbox:async_messages app
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
                  | Some (_, Masc_tui_types.Palette_config pane) ->
@@ -14797,6 +15323,84 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key
+         when text_input_target state ~compact_viewport = Some Text_browser_url ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let draft = Option.value ~default:"" view.Browser_lane_view.url_draft in
+                let edit url_draft = state.browser_lane <- Some { view with url_draft } in
+                (match key with
+                 | "esc" -> edit None
+                 | "\r" | "\n" | "enter" ->
+                     let url = String.trim draft in
+                     if url = "" then
+                       state.browser_lane <- Some { view with load = Failed "Enter a URL" }
+                     else begin
+                       edit None;
+                       launch_browser_lane state ~mailbox:async_messages (Browser_lane_view.Goto url)
+                     end
+                 | "\127" | "\b" | "backspace" ->
+                     edit (Some (Masc_tui_message_layout.drop_last_utf8_scalar draft))
+                 | "ctrl-u" | "\021" -> edit (Some "")
+                 | text when String.length text > 0
+                             && Char.code text.[0] >= 32
+                             && (String.length text = 1 || Char.code text.[0] >= 128) ->
+                     edit (Some (draft ^ text))
+                 | _ -> ()))
+       | Some (("B" | "S") as key) when state.view = Connectors ->
+           open_browser_lane state ~mailbox:async_messages
+             (if key = "B" then Browser_lane_view.Browser else Slack)
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+               | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
+               | "o" | "x" | "g") as key)
+         when state.view = Connectors && Option.is_some state.browser_lane ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let open Browser_lane_view in
+                let scroll delta =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let limit = Masc_tui_render.browser_lane_scroll_limit state ~terminal_rows ~cols view in
+                  state.browser_lane <- Some
+                    { view with scroll = max 0 (min limit (min limit view.scroll + delta)) }
+                in
+                let read view =
+                  state.browser_lane <- Some view;
+                  launch_browser_lane state ~mailbox:async_messages Read
+                in
+                (match key with
+                 | "esc" | "left" ->
+                     state.browser_lane <- None;
+                     launch_connectors_load state ~mailbox:async_messages
+                 | "l" | "a" ->
+                     read (switch_source (if key = "l" then Live else Automation) view)
+                 | "[" | "]" when not (busy view) ->
+                     read (select_tab (if key = "[" then -1 else 1) view)
+                 | "r" -> read (refresh view)
+                 | "g" when view.source = Automation && not (busy view) ->
+                     state.browser_lane <- Some { view with url_draft = Some "" }
+                 | "g" when view.source = Live ->
+                     add_event state "system" "Select automation (a) to navigate its Firefox session"
+                 | "o" | "x" when view.source = Automation ->
+                     launch_browser_lane state ~mailbox:async_messages
+                       (if key = "o" then Open_session else Close_session)
+                 | "o" | "x" ->
+                     add_event state "system" "Select automation (a) to open or close its Firefox session"
+                 | "j" | "down" -> scroll 1
+                 | "k" | "up" -> scroll (-1)
+                 | "pagedown" | "pageup" ->
+                     let rows, _ = get_terminal_size () in
+                     let delta = max 1 (rows - 10) in
+                     scroll (if key = "pagedown" then delta else -delta)
+                 | "home" -> state.browser_lane <- Some { view with scroll = 0 }
+                 | _ -> ()))
+       | Some key
+         when state.view = Connectors && Option.is_some state.browser_lane
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+           (* The child owns its keys. In particular b/u must never mutate a
+              hidden connector binding while Firefox content is on screen. *)
+           ()
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
@@ -15316,7 +15920,7 @@ and is loaded on demand through keeper_skill.
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
                    ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state)
+                   ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
@@ -15382,9 +15986,56 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
+      | Some "&" ->
+           (* The MSX screen takes the whole terminal, like the image
+              overlay: it draws itself and the loop yields until [esc]. *)
+           Masc_tui_msx.open_screen ~write:write_to_terminal state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
+       | Some "r"
+         when (not message_mode)
+              && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
+              && state.context_inspector_open = false ->
+           (* The listing footers have promised [r:refresh] since the footer
+              tables existed; no handler ever answered it. This arm makes the
+              sheet true everywhere a listing draws it. The guards stay out
+              of the two surfaces that own their own r — the identity pane
+              and the context inspector — and out of the composer, where r
+              must type. *)
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
+       | Some "i"
+         when (not message_mode)
+              && (match state.msg_target_keeper_name with
+                 | Some _ -> true
+                 | None ->
+                   (* With no conversation open, the shown keeper is whoever
+                      the list cursor names; that is who the composer
+                      addresses. *)
+                   Option.is_some (selected_keeper state))
+              && not (state.view = Config && state.config_pane = Config_prompts) ->
+           (* The sheet has promised [i] as "focus the composer" as long as
+              it promised [r]. It opens the chat of the keeper the screen is
+              about — the open conversation's keeper, else the one under the
+              list cursor. The config pane keeps its own i. *)
+           let target =
+             match state.msg_target_keeper_name with
+             | Some keeper_name -> Some keeper_name
+             | None ->
+               (match selected_keeper state with
+                | Some keeper -> Some keeper.k_name
+                | None -> None)
+           in
+           Option.iter
+             (fun keeper_name ->
+                open_message_for_keeper ~return_to:state.msg_return state keeper_name
+                  ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox:async_messages);
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message)
+             target
        | Some "@" ->
            state.answering_open <- true;
            state.answering_scroll <- 0;
@@ -16039,13 +16690,29 @@ and is loaded on demand through keeper_skill.
                     launch_file_changes_load state ~mailbox:async_messages
                       ~keeper_name
                 | None -> ())
-            | Connectors -> launch_connectors_load state ~mailbox:async_messages
+            | Connectors ->
+                (match state.browser_lane with
+                 | None -> launch_connectors_load state ~mailbox:async_messages
+                 | Some _ -> launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read)
             | Runtime ->
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
-            | Config ->
-                launch_runtime_config_load state ~mailbox:async_messages
+            | Config -> (
+                (* Same per-pane dispatch as goto_surface: each Config pane
+                   loads its own source, so a manual refresh must not
+                   quietly fall back to runtime.toml's loader for panes
+                   that read somewhere else (presets, prompts, params,
+                   voice). *)
+                match state.config_pane with
+                | Config_prompts -> launch_prompts_load state ~mailbox:async_messages
+                | Config_presets -> launch_presets_load state ~mailbox:async_messages
+                | Config_params ->
+                    launch_runtime_params_load state ~mailbox:async_messages
+                | Config_voice ->
+                    launch_voice_config_load state ~mailbox:async_messages
+                | Config_runtime | Config_models | Config_themes ->
+                    launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
                 launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
@@ -16457,13 +17124,10 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready rows) ->
-                        state.code_notes_scroll <-
-                          min
-                            (max 0 (List.length (Masc_tui_memo.of_rows rows) - 1))
-                            (state.code_notes_scroll + 1)
-                    | Some (_, _) | None -> ())
+                    state.code_notes_scroll <-
+                      min
+                        (max 0 (List.length state.code_memos - 1))
+                        (state.code_notes_scroll + 1))
                   else if state.code_diff_open then (
                     match Masc_tui_fetched.current state.code_diff with
                     | Some (_, Masc_tui_fetched.Ready diff) ->
@@ -17611,6 +18275,12 @@ and is loaded on demand through keeper_skill.
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
+                      (* The cursor indexes the rows the pane draws, which
+                         [clamp_planning_cursor] also bounds by that list. The
+                         raw goal list is in the order the server sent; the
+                         filter hides goals and the sort reorders them, so an
+                         index found in it lands on a different row than the
+                         goal it was found for. *)
                       let rec find_idx i = function
                         | [] -> ()
                         | (g : planning_goal) :: rest ->
@@ -17618,7 +18288,9 @@ and is loaded on demand through keeper_skill.
                               state.planning_cursor <- i
                             else find_idx (i + 1) rest
                       in
-                      find_idx 0 snap.pl_goals
+                      find_idx 0
+                        (planning_visible_goals ~filter:state.planning_filter
+                           ~sort:state.planning_sort snap.pl_goals)
                   | None -> ());
                  clamp_planning_cursor state
              | None ->
@@ -18708,8 +19380,10 @@ and is loaded on demand through keeper_skill.
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
          | Connectors ->
-             (* Reachability is the column that moves on its own. *)
-             launch_connectors_load state ~mailbox:async_messages
+             (* Browser content is fetched on entry and explicit refresh.
+                Periodic tab reads would continually drive Firefox focus. *)
+             if Option.is_none state.browser_lane then
+               launch_connectors_load state ~mailbox:async_messages
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)
@@ -18748,7 +19422,7 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when state.image_open -> ()
+       | Render_schedule.Render when state.image_open || state.msx_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

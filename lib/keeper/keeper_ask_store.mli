@@ -63,14 +63,6 @@ val withdraw :
 (** Appends [Withdrawn]. Only the asking Keeper withdraws a question; nothing
     withdraws one on its behalf after an interval. *)
 
-val load_events : base_path:string -> keeper_name:string -> Keeper_ask.event list
-(** Reads the whole log. A final line that does not decode is dropped: that is
-    the shape an append cut short by a crash leaves, and losing every recorded
-    question to one truncated tail is worse than dropping the incomplete
-    write. A line that does not decode anywhere else fails the read, which
-    surfaces as a warning and an empty list rather than reporting a shortened
-    history as complete. *)
-
 val rows :
   base_path:string ->
   keeper_name:string ->

@@ -23,11 +23,6 @@ type accept_rejection =
   ; response_shape : Agent_core.Response_shape.content_shape option
   }
 
-let accept_rejection_kind_to_string = function
-  | No_usable_progress -> "no_usable_progress"
-  | Predicate_rejected -> "predicate_rejected"
-;;
-
 let response_accept_rejection (response : Agent_core.Types.api_response) =
   let shape = Agent_core.Response_shape.summarize response in
   let response_shape = Agent_core.Response_shape.content_shape response shape in

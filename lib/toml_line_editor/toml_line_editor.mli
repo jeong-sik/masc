@@ -19,9 +19,6 @@ val split_lines : string -> string list * bool
 val join_lines : string list -> trailing_newline:bool -> string
 (** Join lines, optionally restoring a final newline. *)
 
-val strip_comment : string -> string
-(** Remove the first TOML line comment from [line]. *)
-
 type header =
   | Table of string list
   | Table_array of string list

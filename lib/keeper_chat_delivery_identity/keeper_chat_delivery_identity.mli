@@ -4,7 +4,6 @@
 module Request_id : sig
   type t
 
-  val generate : unit -> t
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool

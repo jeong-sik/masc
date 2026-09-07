@@ -42,8 +42,6 @@ type t =
 
 val sample_of_api_usage : Agent_core.Types.api_usage -> sample
 val api_usage_of_sample : sample -> Agent_core.Types.api_usage
-val basis_to_json : basis -> Yojson.Safe.t
-val basis_of_json : Yojson.Safe.t -> (basis, string) result
 val cursor_to_json : cursor -> Yojson.Safe.t
 val cursor_of_json : Yojson.Safe.t -> (cursor, string) result
 val to_json : t -> Yojson.Safe.t

@@ -13,7 +13,6 @@ import {
 import { publishLspScope } from './ide-lsp-client'
 import { activeKeeperName } from '../../keeper-state'
 import { route } from '../../router'
-import { selectedTask } from '../goals/task-detail-selection'
 import {
   discoverRepositories,
   fetchRepositoriesList,
@@ -43,10 +42,6 @@ import {
   createFileTreeStore,
   type FileTreeStore,
 } from './file-tree-store'
-import {
-  fetchIdeAnnotations,
-  type IdeAnnotation,
-} from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
 import { isAbortError } from '../../lib/async-state'
 import { isDiffEditorView, viewFromRoute } from './ide-view-route'
@@ -69,12 +64,7 @@ export interface IdeDataWorkspaceStore {
   readonly subscribeActiveRepositoryId: (listener: () => void) => () => void
   readonly scanRepositories: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories: (listener: () => void) => () => void
-  readonly annotations: () => ReadonlyArray<IdeAnnotation>
-  readonly subscribeAnnotations: (listener: () => void) => () => void
-  /** Re-run the workspace fetches on demand — the annotation composer
-   *  (#23471 FE-4) calls this after a successful create so the line
-   *  chips / popover / Context Lens pick the new record up through the
-   *  same read path keeper edits use. */
+  /** Re-run the workspace fetches on demand. */
   readonly refresh: () => void
   readonly dispose: () => void
 }
@@ -90,7 +80,6 @@ export type WorkspaceFetchIssueKind =
   | 'file'
   | 'blame'
   | 'diff'
-  | 'annotations'
 
 export interface WorkspaceFetchIssue {
   readonly kind: WorkspaceFetchIssueKind
@@ -302,7 +291,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const repoId = activeRepositoryIdSignal.value
     return repositoriesSignal.value.find(repository => repository.id === repoId)?.codebase ?? null
   })
-  const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
   const currentWorkspaceIssues = (): ReadonlyArray<WorkspaceFetchIssue> =>
     workspaceIssuesSignal.peek()
   const clearIssue = (
@@ -412,7 +400,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const focus = activeIdeFocus.value
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
-    const task = selectedTask.value
     const selectedCodebase = selectedCodebaseSignal.value
     const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper, selectedCodebase)
     const workspaceIdentityChanged = !sameIdeWorkspaceIdentity(
@@ -430,7 +417,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       documentStore.invalidate()
       ownershipStore.reset(null)
       diffRowsSignal.value = []
-      annotationsSignal.value = []
     }
 
     const focusWorkspaceChanged = focus !== null
@@ -474,10 +460,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
     const codebase = selectedCodebase
-    // IDE observations have one address: the server-issued codebase slug.
-    // A keeper-only workspace still loads its tree, but does not invent an
-    // observation store when no repository is selected.
-    const ideOpts = { keeper: keeperParam, codebase, signal }
     publishLspScope({ repoId: repoId ?? null, codebase, keeper: keeperParam ?? null })
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,
@@ -646,7 +628,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // File-scoped fetches require an active file path; skip when none is selected.
     if (filePath === null) {
       diffRowsSignal.value = []
-      annotationsSignal.value = []
       if (requestedFilePath === null) {
         workspaceIssuesSignal.value = currentWorkspaceIssues().filter(issue => issue.file_path === null)
       }
@@ -774,33 +755,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       diffRowsSignal.value = []
     }
 
-    // Annotations are code facts. Without a server-issued codebase slug there
-    // is no store to query, so fail closed locally instead of issuing an
-    // unscoped request that the server must reject.
-    if (codebase) {
-      fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
-        if (signal.aborted) return
-        clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
-        annotationsSignal.value = annotations
-      }).catch(error => {
-        if (signal.aborted) return
-        recordIssue('annotations', error, {
-          filePath,
-          keeper: keeperParam ?? null,
-          repoId,
-          fallbackMessage: 'IDE annotations fetch failed',
-        })
-      })
-    } else {
-      annotationsSignal.value = []
-      clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
-    }
   }
 
   // Re-run fetches on navigation-signal changes. Reading the signals
   // synchronously inside runWorkspaceFetches registers them as effect
-  // dependencies (activeIdeFile, activeKeeperName, activeRepositoryId,
-  // selectedTask), so the effect re-fires exactly when they change.
+  // dependencies (activeIdeFile, activeKeeperName, activeRepositoryId),
+  // so the effect re-fires exactly when they change.
   const disposeEffect = effect(() => {
     runWorkspaceFetches()
   })
@@ -842,9 +802,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     scanRepositories,
     subscribeRepositories: (listener: () => void) =>
       repositoriesSignal.subscribe(listener),
-    annotations: () => annotationsSignal.value,
-    subscribeAnnotations: (listener: () => void) =>
-      annotationsSignal.subscribe(listener),
     refresh: () => {
       runWorkspaceFetches()
     },

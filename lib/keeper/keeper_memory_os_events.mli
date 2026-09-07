@@ -34,7 +34,6 @@ type event =
   ; kind : event_kind
   }
 
-val suffix : string
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** {1 Codec}

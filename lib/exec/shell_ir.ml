@@ -42,6 +42,34 @@ type t =
       tail : (connector * t) list;
     }
 
+(* Every stage's dispatch target replaced, recursively. The IR — not a
+   wrapper argument — is what execution reads ({!Exec_dispatch.dispatch} has
+   no sandbox parameter), so a caller that wants the same command run under
+   a different target must hand execution a rewritten IR. The observation
+   stage (RFC-0422) is that caller: it receives the IR the keeper built for
+   its effect target and must run it under the box's target instead. A
+   [Delegated] stage keeps its own target: it names a masc tool call whose
+   routing is the delegation's, not the box's. *)
+let rec with_sandbox (target : Sandbox_target.t) (ir : t) : t =
+  let stage (simple : simple) : simple =
+    match simple.sandbox with
+    | Sandbox_target.Delegated _ -> simple
+    | Sandbox_target.Host
+    | Sandbox_target.Docker _
+    | Sandbox_target.Micro_vm _
+    | Sandbox_target.Ssh _ ->
+      { simple with sandbox = target }
+  in
+  match ir with
+  | Simple simple -> Simple (stage simple)
+  | Pipeline stages -> Pipeline (List.map (with_sandbox target) stages)
+  | Sequence { head; tail } ->
+    Sequence
+      { head = with_sandbox target head
+      ; tail = List.map (fun (c, ir) -> (c, with_sandbox target ir)) tail
+      }
+;;
+
 let rec pp_arg fmt = function
   | Lit (s, _) -> Format.fprintf fmt "%S" s
   | Var (name, _) -> Format.fprintf fmt "$%s" name

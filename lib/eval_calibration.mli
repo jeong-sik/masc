@@ -13,7 +13,6 @@ type record_type =
   | Verdict_record
   | Label_record
 
-val record_type_to_string : record_type -> string
 type label_verdict =
   | Approve_label
   | Reject_label

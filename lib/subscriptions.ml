@@ -150,16 +150,6 @@ module SubscriptionStore = struct
         , List.rev notifications )
       | None -> current, [])
 
-  (** List all subscriptions *)
-  let list_all () : subscription list =
-    StringMap.fold
-      (fun _ subscription acc -> subscription :: acc)
-      (Atomic.get state).subscriptions
-      []
-
-  (** Count subscriptions *)
-  let count () : int =
-    StringMap.cardinal (Atomic.get state).subscriptions
 end
 
 (** Session registry bridge for notification harness.

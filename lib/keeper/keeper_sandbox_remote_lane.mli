@@ -50,3 +50,17 @@ val remote_root :
 (** The endpoint's root for path translation, without reaching the endpoint:
     the registry entry's [remote_root] for Remote_ssh, the work volume's guest
     mount for Micro_vm. *)
+
+val remote_keeper_root :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string, string) result
+(** [<remote_root>/<sanitized keeper name>]. *)
+
+val is_guest_booted :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  bool
+(** Pure in-memory query: whether the remote endpoint is booted/ready in this process.
+    True for Remote_ssh, false for Docker, and reflects the booted state for Micro_vm. *)

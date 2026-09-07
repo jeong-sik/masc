@@ -1,7 +1,5 @@
 (** Dashboard [/logs] endpoint JSON builder. *)
 
-val store_path : masc_root:string -> string
-
 val build
   :  config:Workspace.config
   -> limit:int

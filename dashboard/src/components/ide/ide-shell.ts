@@ -12,13 +12,8 @@ import { codebaseForRepositoryId, getIdeDataWorkspaceStore } from './ide-workspa
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
-import {
-  IdeAnnotationComposer,
-  type IdeAnnotationComposerDraft,
-} from './ide-annotation-composer'
 import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
-import { IdeAnnotationRail } from './ide-annotation-rail'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterject } from './ide-interject'
 import { ExecuteOutputDrawer } from './execute-output-drawer'
@@ -35,11 +30,8 @@ import { IdeReviewFocusStrip } from './ide-review-focus-strip'
 import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
-import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
-import { lspStatusSnapshot, type LspStatusSnapshot, type SelectedAnnotation } from './ide-lsp-client'
-import { deleteIdeAnnotation, type IdeAnnotationDeleteOutcome } from '../../api/ide'
-import { showToast } from '../common/toast'
+import { lspStatusRejected, lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -58,15 +50,8 @@ import { useIsMobile } from '../../hooks/use-is-mobile'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
-type IdeRightRailTab = 'activity' | 'annotations'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
-
-interface IdeRightRailTabDescriptor {
-  readonly id: IdeRightRailTab
-  readonly label: string
-  readonly title: string
-}
 
 export interface IdeStatusbarChip {
   readonly id: string
@@ -93,7 +78,6 @@ export const IDE_TREE_WIDTH_MIN = 180
 export const IDE_TREE_WIDTH_MAX = 360
 const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
   'keeper-trace',
-  'notes',
   'time',
   'parallel',
 ]
@@ -103,19 +87,6 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
   'split-diff': 'SPLIT DIFF',
   blame: 'BLAME',
 }
-const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
-  {
-    id: 'activity',
-    label: '활동',
-    title: 'Workspace and keeper activity linked to the active file and repository',
-  },
-  {
-    id: 'annotations',
-    label: '어노테이션',
-    title: 'File-addressable comments, decisions, questions, and bookmarks',
-  },
-]
-
 export function normalizeIdeTreeWidth(value: unknown): number {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return IDE_TREE_WIDTH_DEFAULT
@@ -165,6 +136,7 @@ interface IdeStatusbarInput {
   readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
   readonly lspStatus?: LspStatusSnapshot
+  readonly lspStatusStale?: boolean
 }
 
 function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
@@ -406,8 +378,6 @@ function workspaceIssueLabel(issue: WorkspaceFetchIssue): string {
       return 'blame'
     case 'diff':
       return 'diff'
-    case 'annotations':
-      return 'annotations'
   }
 }
 
@@ -425,9 +395,9 @@ function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string
     .join('\n')
 }
 
-function lspOverlayOnlyStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
+function lspUnavailableStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
   return (status?.langs ?? [])
-    .filter(lang => lang.overlay_only)
+    .filter(lang => !lang.connected)
     .map(lang => {
       const error = lang.last_error?.trim()
       return error ? `${lang.lang}: ${error}` : lang.lang
@@ -463,6 +433,7 @@ export function deriveIdeStatusbarModel({
   workspaceIssues = [],
   dashboardConnected = false,
   lspStatus,
+  lspStatusStale = false,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -485,13 +456,23 @@ export function deriveIdeStatusbarModel({
     'warn',
     workspaceIssueTitle(workspaceIssues),
   )
-  const lspOverlayOnly = lspOverlayOnlyStatus(lspStatus)
+  const lspUnavailable = lspUnavailableStatus(lspStatus)
+  // A rejected payload leaves the reading below untouched, so it would go on
+  // describing a fleet that has since changed. Say that first: which servers
+  // are up matters less than whether the answer is current.
+  addStatusbarChip(
+    chips,
+    'lsp-payload',
+    lspStatusStale ? 'LSP status stale' : undefined,
+    'warn',
+    'The last masc/lspStatus payload could not be read, so the reading beside this is the one before it.',
+  )
   addStatusbarChip(
     chips,
     'lsp-status',
-    lspOverlayOnly.length > 0 ? `LSP overlay-only ${lspOverlayOnly.length}` : undefined,
+    lspUnavailable.length > 0 ? `LSP unavailable ${lspUnavailable.length}` : undefined,
     'warn',
-    lspOverlayOnly.join('\n'),
+    lspUnavailable.join('\n'),
   )
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
@@ -726,10 +707,6 @@ export function IdeShell() {
   const workspaceStore = useMemo(() => getIdeDataWorkspaceStore(), [])
   const isMobileViewport = useIsMobile()
 
-  const annotations = useSubscribedSnapshot(
-    workspaceStore.annotations,
-    workspaceStore.subscribeAnnotations,
-  )
   const diffRows = useSubscribedSnapshot(
     workspaceStore.diffRows,
     workspaceStore.subscribeDiffRows,
@@ -847,6 +824,7 @@ export function IdeShell() {
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
   const lspStatus = useSignalValue(lspStatusSnapshot)
+  const lspStatusStale = useSignalValue(lspStatusRejected)
   const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
   const activeLayers = availableLayersForView(
     layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null),
@@ -863,10 +841,7 @@ export function IdeShell() {
   const treeCollapsed = isMobileViewport
     ? route.value.params.tree !== 'open'
     : route.value.params.tree === 'hidden'
-  const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('activity')
   const [workContextOpen, setWorkContextOpen] = useState(false)
-  const [annotationDraft, setAnnotationDraft] = useState<IdeAnnotationComposerDraft | null>(null)
-  const [annotationSubmitting, setAnnotationSubmitting] = useState(false)
   const [treeWidth, setTreeWidth] = useState<number>(readStoredIdeTreeWidth)
   const statusbar = deriveIdeStatusbarModel({
     activeView,
@@ -885,6 +860,7 @@ export function IdeShell() {
     workspaceIssues,
     dashboardConnected: dashboardRuntimeConnected(),
     lspStatus,
+    lspStatusStale,
   })
 
   useEffect(() => {
@@ -945,48 +921,6 @@ export function IdeShell() {
     }
     if (terminalKeeper) nextParams.keeper = terminalKeeper
     navigate('code', nextParams)
-  }
-
-  // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
-  // contract: mutations need a repository-backed codebase scope and
-  // ownership is decided server-side from the token identity, so the
-  // handler translates each outcome into a toast instead of pre-judging
-  // deletability in the FE.
-  const handleAnnotationDelete = async (
-    annotation: SelectedAnnotation,
-  ): Promise<IdeAnnotationDeleteOutcome> => {
-    const repoId = workspaceStore.activeRepositoryId()
-    if (repoId === null) {
-      showToast('주석 삭제에는 repo 선택이 필요합니다', 'error')
-      return 'error'
-    }
-    const codebase = codebaseForRepositoryId(repoId)
-    if (codebase === null) {
-      showToast('주석 삭제에는 canonical codebase가 있는 repo 선택이 필요합니다', 'error')
-      return 'error'
-    }
-    const outcome = await deleteIdeAnnotation(annotation.id, {
-      codebase,
-    })
-    switch (outcome) {
-      case 'deleted':
-        showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
-        workspaceStore.refresh()
-        break
-      case 'rejected':
-        showToast('주석 삭제 거부 — 본인이 작성한 주석이 아니거나 이미 삭제된 주석입니다', 'error')
-        break
-      case 'forbidden':
-        showToast('주석 삭제 권한 없음 — 토큰에 쓰기 권한(CanBroadcast tier)이 필요합니다', 'error')
-        break
-      case 'unauthorized':
-        showToast('인증 실패 — 대시보드 토큰이 없거나 만료되었습니다', 'error')
-        break
-      case 'error':
-        showToast('주석 삭제 실패 — 서버/네트워크 오류', 'error')
-        break
-    }
-    return outcome
   }
 
   const handleFindOpen = () => {
@@ -1182,19 +1116,6 @@ export function IdeShell() {
           ${reviewFocusActive
             ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
             : html`<${IdeBreadcrumb} />`}
-          <div class="ide-v2-responsive-annotation-composer">
-            <${IdeAnnotationComposer}
-              documentStore=${workspaceStore.documentStore}
-              activeRepositoryId=${workspaceStore.activeRepositoryId}
-              subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
-              codebaseForRepo=${codebaseForRepositoryId}
-              refresh=${workspaceStore.refresh}
-              draft=${annotationDraft}
-              onDraftChange=${setAnnotationDraft}
-              submitting=${annotationSubmitting}
-              onSubmittingChange=${setAnnotationSubmitting}
-            />
-          </div>
           <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}
@@ -1205,8 +1126,6 @@ export function IdeShell() {
             onFindOpen=${handleFindOpen}
             onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinKeeper}
-            annotations=${annotations}
-            onAnnotationDelete=${handleAnnotationDelete}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
           ${terminalVisible
@@ -1224,27 +1143,11 @@ export function IdeShell() {
               class="ide-plane-conversation ide-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div class="ide-rail-tabs" role="tablist" aria-label="IDE right rail">
-                ${IDE_RIGHT_RAIL_TABS.map(tab => html`
-                  <button
-                    key=${tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
-                    aria-label=${tab.title}
-                    title=${tab.title}
-                    class=${`ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
-                    onClick=${() => setRightRailTab(tab.id)}
-                  >${tab.label}</button>
-                `)}
-              </div>
               <div class="ide-rail-scroll">
-                ${rightRailTab === 'activity' ? html`
-                  <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
+                <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
                       codebase=${activeCodebase}
-                      annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}
                       compact=${true}
@@ -1259,31 +1162,13 @@ export function IdeShell() {
                         <div class="ide-plane-context-stack" data-testid="ide-right-context-stack">
                           <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                           <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                          <${IdeMemoryPanel} keeperName=${terminalKeeper} codebase=${activeCodebase} />
                         </div>
                         <div class="ide-plane-primary-rail" data-testid="ide-primary-conversation-rail">
                           <${IdeConversationRail} />
                         </div>
                       ` : null}
                     </div>
-                  </div>
-                ` : null}
-                ${rightRailTab === 'annotations' ? html`
-                  <div class="ide-plane-annotations" style=${{ minHeight: 0 }}>
-                    <${IdeAnnotationComposer}
-                      documentStore=${workspaceStore.documentStore}
-                      activeRepositoryId=${workspaceStore.activeRepositoryId}
-                      subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
-              codebaseForRepo=${codebaseForRepositoryId}
-                      refresh=${workspaceStore.refresh}
-                      draft=${annotationDraft}
-                      onDraftChange=${setAnnotationDraft}
-                      submitting=${annotationSubmitting}
-                      onSubmittingChange=${setAnnotationSubmitting}
-                    />
-                    <${IdeAnnotationRail} annotations=${annotations} />
-                  </div>
-                ` : null}
+                </div>
               </div>
             </div>
           `}

@@ -8,19 +8,8 @@
 
 val keeper_wake : string
 
-val supported : string list
-(** Dispatchable payload kinds the production consumer can run.
-    This is the consumer's dispatch set and the allow-list in
-    {!unsupported_error}. Note: the creation validator does NOT grant
-    acceptance from this list alone — each kind carries its own objective
-    payload schema contract enforced by a per-kind branch in
-    [Tool_schedule.validate_known_payload_request]. So adding a
-    kind requires BOTH an entry here (consumer dispatch + reject message) AND a
-    validator branch (creation acceptance); the list alone leaves it rejected at
-    creation as an unsupported kind. *)
-
 val unsupported_error : string -> string
-(** Error message for a payload kind outside {!supported}. *)
+(** Error message for a payload kind outside [supported]. *)
 
 type keeper_wake_urgency =
   | Keeper_wake_immediate

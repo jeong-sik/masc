@@ -32,11 +32,17 @@ val too_complex_reason_tag :
     without taking a direct dependency on the gate. *)
 
 val validate_paths :
+  ?requires_existing_dir:bool ->
+  ?sandbox:Masc_exec.Sandbox_target.t ->
   workdir:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
 (** Validate explicit Shell IR [cwd] and redirect targets against the keeper
-    workspace boundary. Positional argv stays opaque to policy. *)
+    workspace boundary. Positional argv stays opaque to policy.
+    When [requires_existing_dir] is false (or omitted and [sandbox] is an
+    endpoint-owned target such as [Micro_vm] or [Ssh]), [cwd] is validated for
+    lexical boundary containment without requiring the directory to physically
+    exist on the host. *)
 
 val dispatch :
   ?allow_pipes:bool ->

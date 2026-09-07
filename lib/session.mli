@@ -103,11 +103,6 @@ val push_notification_to_active_agents :
 (** Pop the next message from an agent's queue, if any. *)
 val pop_message : registry -> agent_name:string -> Yojson.Safe.t option
 
-(** Block until a message arrives or [timeout] seconds elapse. *)
-val wait_for_message :
-  registry -> agent_name:string -> timeout:float ->
-  Yojson.Safe.t option
-
 (** {1 Status & Diagnostics} *)
 
 (** Return all agent statuses as JSON objects. *)
@@ -157,10 +152,6 @@ module McpSessionStore : sig
   (** Return an existing session by [id], or create one if missing.
       Does not update activity when returning an existing session. *)
   val get_or_create : id:string -> ?agent_name:string -> unit -> mcp_session
-
-  (** Remove stale sessions exceeding max age.
-      Returns the number removed. *)
-  val cleanup_stale : unit -> int
 
   (** Serialize an MCP session to JSON. *)
   val to_json : mcp_session -> Yojson.Safe.t

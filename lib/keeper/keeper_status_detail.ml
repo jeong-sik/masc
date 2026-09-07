@@ -157,7 +157,6 @@ let tail_order_of_fields fields =
       Error "keeper_status argument \"tail_order\" must be a string"
 
 let tail_order_to_string = Keeper_status_options_defaults.tail_order_to_string
-let all_tail_orders = Keeper_status_options_defaults.all_tail_orders
 let valid_tail_order_strings = Keeper_status_options_defaults.valid_tail_order_strings
 
 let status_options_of_fields fields =
@@ -759,4 +758,3 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          ]) in
          tool_result_ok_data json))
 (* TEL-OK: 1-line delegate to ctx-free body. *)
-let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

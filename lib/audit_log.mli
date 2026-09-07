@@ -90,8 +90,6 @@ val string_to_action : string -> action
     [Unknown] so callers can distinguish future action variants from
     explicit [Custom] events. *)
 
-val entry_to_json : audit_entry -> Yojson.Safe.t
-
 (** {1 Storage} *)
 
 val audit_entry_matches :

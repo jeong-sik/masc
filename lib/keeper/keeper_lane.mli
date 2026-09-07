@@ -87,7 +87,6 @@ val classify_cancellation_cause : exn -> cancellation_origin
     Supervised lane bodies use this instead of inferring cancellation origin
     from lifecycle timing or exception text. *)
 
-val exited : t -> exit Eio.Promise.t
 val peek_exit : t -> exit option
 val await_exit : t -> exit
 

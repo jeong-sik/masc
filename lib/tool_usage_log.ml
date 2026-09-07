@@ -240,21 +240,6 @@ let read_recent ?(n = 10_000) () : Yojson.Safe.t list =
   | None -> []
   | Some store -> Dated_jsonl.read_recent store n
 
-let summary () : (string * int) list =
-  let entries = read_recent ~n:100_000 () in
-  let counts =
-    List.fold_left (fun counts json ->
-      match Safe_ops.json_string_opt "tool_name" json with
-      | Some name ->
-          let c = match StringMap.find_opt name counts with
-            | Some n -> n | None -> 0 in
-          StringMap.add name (c + 1) counts
-      | None -> counts
-    ) StringMap.empty entries
-  in
-  let pairs = StringMap.bindings counts in
-  List.sort (fun (_, a) (_, b) -> Int.compare b a) pairs
-
 let source_metadata_json ~masc_root =
   let now = Time_compat.now () in
   let durable_store = store_dir masc_root in

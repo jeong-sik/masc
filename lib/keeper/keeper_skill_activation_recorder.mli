@@ -71,6 +71,5 @@ val observe_native_action :
     at agent-core turn N driving a fresh CLI session at claim turn 1 would have
     every legitimate native action rejected as before-delivery. *)
 
-val error_code : error -> string
 val error_to_string : error -> string
 val error_to_yojson : error -> Yojson.Safe.t

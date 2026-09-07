@@ -70,13 +70,22 @@ let origin_request_id = function
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
-  | History.Gate_activity _ | History.Memory_activity _ -> None
+  | History.Gate_activity _ | History.Memory_activity _
+  | History.Fusion_conclusion _ -> None
 
 let full_tool_rows = History.tool_rows
 
+(* The pane draws the pair apart. Joined is how a whole-row assertion reads
+   it, so the join lives here rather than in the module under test. *)
+let joined_label speaker surface =
+  match History.addressed_label_parts speaker surface with
+  | name, None -> name
+  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
+;;
+
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
-      Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
+      Printf.sprintf "addressed(%s)" (joined_label speaker surface)
   | History.Said_by_keeper -> "keeper"
   | History.Autonomous_reply -> "autonomous"
   | History.Delivery_failed _ -> "delivery_failed"
@@ -92,6 +101,7 @@ let kind_to_string : History.kind -> string = function
         (Masc.Keeper_chat_store.approval_lifecycle_phase_to_label phase)
         (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"
+  | History.Fusion_conclusion _ -> "fusion"
 
 (* An assistant row the way an autonomous turn persists it: the server's
    [autonomous_turn] marker, a blank [content], and a [t: "trace"] block of
@@ -310,7 +320,8 @@ let test_roles_map_to_what_the_pane_draws () =
        check (option string) "a neutral system row stays whole" None summary
    | History.Addressed_to_keeper _ | History.Said_by_keeper
    | History.Autonomous_reply | History.Delivery_failed _
-   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _ ->
+   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
+   | History.Fusion_conclusion _ ->
        fail "expected the system row to use the neutral Memory lane")
 
 (* The pane writes its own row when a turn fails, because most error rows are
@@ -498,6 +509,76 @@ let test_consecutive_tools_from_different_turns_do_not_merge () =
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 
+(* An autonomous wake that produced nothing used to reach the pane as a
+   speaker label over an empty line, and later as a label over a middle dot.
+   Neither says anything the header does not already say about a running
+   Keeper, and on one live screen eleven of fourteen Keeper rows were that
+   dot. *)
+let test_a_silent_autonomous_turn_draws_no_row () =
+  let decoded = decode (`List [ autonomous_turn [] ]) in
+  check (list string) "nothing is drawn for a turn that neither spoke nor ran"
+    []
+    (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows);
+  (* Not drawn because it had nothing to draw, not because the decoder could
+     not read it. *)
+  check int "the row was read" 0 decoded.History.dropped
+
+let test_a_whitespace_autonomous_reply_is_as_blank_as_none () =
+  (* The guard used to compare against "" exactly, so a reply of one newline
+     passed it and drew under the turn's own calls. *)
+  let decoded =
+    decode (`List [ autonomous_turn ~content:(`String "\n  ") [ tool "Read" ] ])
+  in
+  check bool "no reply row stands beside the call" false
+    (List.exists
+       (fun (row : History.row) -> row.History.kind = History.Autonomous_reply)
+       decoded.History.rows);
+  check int "the call the turn made is still drawn" 1
+    (List.length decoded.History.rows)
+
+let test_a_direct_turn_keeps_its_blank_reply () =
+  (* Somebody asked. That the answer came back empty is part of the exchange,
+     so the narrowing above stops at autonomous turns. *)
+  let decoded = decode (`List [ row ~role:"assistant" "" ]) in
+  check (list string) "the keeper row survives" [ "keeper" ]
+    (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows)
+
+(* The production shape: no [turn_ref] field, no delivery key, the turn id in
+   the marker. Of 598 rows on one live pane, 198 were autonomous and every one
+   looked like this, so reading only the other two places left every one of
+   them in no turn at all -- and the pane draws a turn's bracket, folds a
+   repeated speaker and hangs work off its turn from exactly that id. *)
+(* The pane cannot tell a readable name repeated in the id field from an
+   opaque id, so an agent called [codex-mcp-client] arrives unresolved. What
+   the decoder must not do is shorten it here as well: the speaker column cuts
+   once, and cut twice the row kept neither end -- twelve broadcast rows on
+   one live pane read "…p-…roadcast". *)
+let test_an_unresolved_speaker_reaches_the_column_whole () =
+  check (pair string (option string)) "the name and the surface arrive apart"
+    ("codex-mcp-client", Some "broadcast")
+    (History.addressed_label_parts
+       (History.Unresolved { id = Some "codex-mcp-client" })
+       (Some History.Surface.Broadcast));
+  (* Joined, which is what a caller with room for both makes of them. *)
+  check string "joined, they read as they always did"
+    "codex-mcp-client \xc2\xb7 broadcast"
+    (joined_label
+       (History.Unresolved { id = Some "codex-mcp-client" })
+       (Some History.Surface.Broadcast))
+;;
+
+let test_an_autonomous_turn_is_identified_by_its_marker () =
+  let decoded = decode (`List [ autonomous_turn [ reason "look"; tool "Read" ] ]) in
+  check (list (option string)) "the trace rows share the marker's turn"
+    [ Some "trace-1#54"; Some "trace-1#54" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows);
+  (* Turn identity, not an operation: the journal endpoint is keyed by the
+     latter and an autonomous turn never ran as one. *)
+  check (list (option string)) "and claim no operation"
+    [ None; None ]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows)
+;;
+
 let test_autonomous_trace_rows_keep_the_turn_ref () =
   let decoded =
     decode
@@ -531,6 +612,7 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
+    | History.Fusion_conclusion _
     | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
         failf "expected an addressed row"
@@ -558,10 +640,11 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   let label json =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
-        History.addressed_label speaker surface
+        joined_label speaker surface
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
+    | History.Fusion_conclusion _
     | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
         failf "expected an addressed row"
@@ -652,9 +735,14 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
        (discord_label "1356818756755525815"));
   (* An author the producer could not name is not the person reading the pane.
      272 rows from Slack and Discord arrived this way and every one of them
-     was drawn as "you". *)
+     was drawn as "you".
+
+     The id arrives whole. It used to be shortened here as well, and #33699
+     took that out: the speaker column cuts once, and cut twice the row kept
+     neither end. The expectation was written before that and still asked for
+     the shortened form. *)
   check string "an unnamed connector author is not the operator"
-    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    "U09L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_authority:"external"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
@@ -662,7 +750,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   (* The producer repeating the id in the name field is the store saying it had
      no name, not a person called [U09L0RHPW7P]. *)
   check string "a name that repeats the id is not a name"
-    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    "U09L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
           ~speaker_authority:"external"
@@ -726,6 +814,7 @@ let test_consecutive_tool_rows_become_one_block () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
+       | History.Fusion_conclusion _
        | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
            fail "expected the middle row to be a tool block");
@@ -864,6 +953,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
+       | History.Fusion_conclusion _
        | History.Gate_activity _ -> failf "unexpected gate row"
     | History.Memory_activity _ ->
            fail "expected the second row to be a tool block");
@@ -1078,11 +1168,6 @@ let test_a_blank_turn_with_no_trace_keeps_its_line () =
   check (list string) "one keeper row, blank" [ "keeper" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
-let test_a_blank_autonomous_turn_has_an_explicit_origin () =
-  let decoded = decode (`List [ autonomous_turn ~ts:8.0 [] ]) in
-  check (list string) "one autonomous row" [ "autonomous" ]
-    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
-
 let test_persisted_identity_and_absolute_turn_survive_projection () =
   let decoded =
     decode
@@ -1290,7 +1375,7 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
-       | History.Reasoning _ ->
+       | History.Reasoning _ | History.Fusion_conclusion _ ->
            fail "journal row lost its Memory activity type");
       List.iter
         (fun needle ->
@@ -1345,7 +1430,7 @@ let test_memory_failure_keeps_kind_and_detail () =
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
-       | History.Reasoning _ ->
+       | History.Reasoning _ | History.Fusion_conclusion _ ->
            fail "failed journal row lost its Memory activity type");
       check bool "failure kind survives" true
         (contains row.text "exact_execution_failure");
@@ -1545,7 +1630,7 @@ let bytes_only n = Printf.sprintf "%dB" n
 let test_a_captionless_file_has_no_blank_line_above_it () =
   let notes =
     [ { History.att_name = "shot.png"; att_mime = "image/png"; att_bytes = 12
-    ; att_width = None; att_height = None } ]
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } ]
   in
   let body =
     History.text_with_attachments ~format_bytes:bytes_only ~text:"" ~notes
@@ -1563,7 +1648,7 @@ let test_a_captionless_file_has_no_blank_line_above_it () =
 let test_a_blank_caption_is_treated_as_none () =
   let notes =
     [ { History.att_name = "shot.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None } ]
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } ]
   in
   let body =
     History.text_with_attachments ~format_bytes:bytes_only ~text:"   \n  " ~notes
@@ -1575,9 +1660,9 @@ let test_a_blank_caption_is_treated_as_none () =
 let test_a_caption_stays_above_its_files () =
   let notes =
     [ { History.att_name = "a.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None }
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
     ; { History.att_name = "b.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None }
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
     ]
   in
   let body =
@@ -1605,10 +1690,10 @@ let test_a_measured_image_names_its_pixels_and_index () =
   let notes =
     [ { History.att_name = "shot.png"; att_mime = "image/png"
       ; att_bytes = 2129
-      ; att_width = Some 3456; att_height = Some 2168 }
+      ; att_width = Some 3456; att_height = Some 2168; att_image = Masc_tui_image_preview.No_image }
     ; { History.att_name = "notes.md"; att_mime = "text/markdown"
       ; att_bytes = 40
-      ; att_width = None; att_height = None }
+      ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
     ]
   in
   let body =
@@ -1646,6 +1731,21 @@ let sized_attachment_row =
     ]
   }]|json}
 
+let test_stored_attachment_history_decodes_preview_reference () =
+  let sha = String.make 64 'a' in
+  let marker = Printf.sprintf "[masc:blob sha256=%s bytes=4 mime=text/plain preview=%S]" sha "attachment payload" in
+  let wire = `List [`Assoc ["id", `String "sent-image"; "role", `String "user";
+    "content", `String "look"; "ts", `Float 1787650428.;
+    "attachments", `List [`Assoc ["id", `String "image"; "type", `String "image";
+      "name", `String "image-1.png"; "mime_type", `String "image/png"; "data", `String marker]]]] in
+  match History.rows_of_json wire with
+  | Ok { rows = [{ attachments = [note]; _ }]; _ } ->
+      (match note.History.att_image with
+       | Masc_tui_image_preview.Stored_attachment { name; _ } ->
+           Alcotest.(check string) "sent image remains a readable typed reference" "image-1.png" name
+       | _ -> Alcotest.fail "history lost the durable preview reference")
+  | _ -> Alcotest.fail "sent image history failed to decode"
+
 let test_a_sized_row_decodes_its_pixels () =
   match History.rows_of_json (Yojson.Safe.from_string sized_attachment_row) with
   | Error msg -> Alcotest.failf "sized row did not decode: %s" msg
@@ -1655,10 +1755,74 @@ let test_a_sized_row_decodes_its_pixels () =
        (match row.History.attachments with
         | [ att ] ->
           Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
-          Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height
+          Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height;
+          (match att.History.att_image with
+           | Masc_tui_image_preview.Unavailable_attachment "shot.png" -> ()
+           | _ -> Alcotest.fail "hash-only history has no readable payload")
         | other ->
           Alcotest.failf "expected one attachment, got %d" (List.length other))
      | other -> Alcotest.failf "expected one row, got %d" (List.length other))
+;;
+
+(* A fusion conclusion arrives as a direct-conversation assistant row: the
+   conclusion is the [content], and a [t: "fusion"] block names the run and
+   the board post that hold the panel/judge detail. The row the block becomes
+   rides ahead of the conclusion so the transcript says where the text is
+   from. [board_post_id] is required the way the dashboard's normalizer
+   requires it: a fusion block without it points at nothing and makes no
+   row. *)
+let fusion_row ?(run_id = Some "kmsg-fus-1") ?(board_post_id = "p-fus-1")
+    content =
+  `Assoc
+    ([ "id", `String "fusion-1"
+     ; "role", `String "assistant"
+     ; "content", `String content
+     ; "ts", `Float 1.0
+     ]
+    @ [ ( "blocks"
+        , `List
+            [ `Assoc
+                ([ "t", `String "fusion"
+                 ; "board_post_id", `String board_post_id
+                 ]
+                 @ (match run_id with
+                    | None -> []
+                    | Some r -> [ "run_id", `String r ]))
+            ] ) ])
+;;
+
+let test_a_fusion_block_names_the_run_ahead_of_the_conclusion () =
+  match
+    decode
+      (`List
+         [ fusion_row "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문" ])
+  with
+  | { History.rows = [ pointer; conclusion ]; _ } -> (
+      (match pointer.History.kind with
+       | History.Fusion_conclusion { fusion_run_id; fusion_board_post_id } ->
+           check (option string) "run id" (Some "kmsg-fus-1") fusion_run_id;
+           check string "board post id" "p-fus-1" fusion_board_post_id
+       | _ -> failf "expected a fusion pointer row first") |> ignore;
+      match conclusion.History.kind with
+      | History.Said_by_keeper ->
+          check string "the conclusion stays the row's text"
+            "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문"
+            conclusion.History.text
+      | _ -> failf "expected the conclusion row second")
+  | { History.rows = other; _ } ->
+      failf "expected two rows, got %d" (List.length other)
+;;
+
+let test_a_fusion_block_without_a_post_id_makes_no_row () =
+  match
+    decode (`List [ fusion_row ~board_post_id:"" "Fusion deliberation — 결론" ])
+  with
+  | { History.rows = [ conclusion ]; _ } -> (
+      match conclusion.History.kind with
+      | History.Said_by_keeper -> ()
+      | _ -> failf "expected only the conclusion row")
+  | { History.rows = other; _ } ->
+      failf "expected one row, got %d" (List.length other)
 ;;
 
 let () =
@@ -1666,6 +1830,10 @@ let () =
     [ ( "rows"
       , [ test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
+        ; test_case "a fusion block names the run ahead of the conclusion"
+            `Quick test_a_fusion_block_names_the_run_ahead_of_the_conclusion
+        ; test_case "a fusion block without a post id makes no row" `Quick
+            test_a_fusion_block_without_a_post_id_makes_no_row
         ; test_case "a gate row carries its approval" `Quick
             test_a_gate_row_carries_its_approval
         ; test_case "a gate row carries its call summary" `Quick
@@ -1694,6 +1862,16 @@ let () =
             test_consecutive_tools_from_different_turns_do_not_merge
         ; test_case "autonomous trace rows retain turn_ref" `Quick
             test_autonomous_trace_rows_keep_the_turn_ref
+        ; test_case "an autonomous turn is identified by its marker" `Quick
+            test_an_autonomous_turn_is_identified_by_its_marker
+        ; test_case "an unresolved speaker reaches the column whole" `Quick
+            test_an_unresolved_speaker_reaches_the_column_whole
+        ; test_case "a silent autonomous turn draws no row" `Quick
+            test_a_silent_autonomous_turn_draws_no_row
+        ; test_case "a whitespace autonomous reply is as blank as none" `Quick
+            test_a_whitespace_autonomous_reply_is_as_blank_as_none
+        ; test_case "a direct turn keeps its blank reply" `Quick
+            test_a_direct_turn_keeps_its_blank_reply
         ; test_case "an addressed row says who sent it" `Quick
             test_an_addressed_row_says_who_sent_it_not_only_what_to_draw
         ; test_case "an addressed row is labelled by who sent it" `Quick
@@ -1715,8 +1893,6 @@ let () =
             test_missing_skill_evidence_stays_visible_beside_the_raw_call
         ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
             test_skill_evidence_count_mismatch_retains_every_raw_call
-        ; test_case "blank autonomous turn keeps its origin" `Quick
-            test_a_blank_autonomous_turn_has_an_explicit_origin
         ; test_case "projection keeps stable row and absolute turn identity"
             `Quick
             test_persisted_identity_and_absolute_turn_survive_projection

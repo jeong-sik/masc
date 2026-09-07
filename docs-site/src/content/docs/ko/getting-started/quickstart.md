@@ -230,6 +230,7 @@ Keeper 가 hover 나 정의로 가려면 샌드박스 `PATH` 에 언어 서버�
 | Dart | `dart` |
 | Scala | `metals` |
 | C# | `csharp-ls` |
+| Markdown | `marksman` |
 
 ## 잘 안 될 때
 

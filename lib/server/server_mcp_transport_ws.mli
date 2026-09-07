@@ -25,13 +25,13 @@
     - {b session lifecycle}
       ({!new_session}, [cleanup_session], {!close_all},
       {!session_count}, {!sessions}, {!with_sessions_rw},
-      {!next_id}).
+      [next_id]).
     - {b inbound framing}
       ({!max_inbound_dispatches_per_session},
       {!try_begin_inbound_dispatch},
       {!finish_inbound_dispatch}).
     - {b dashboard JSON-RPC handlers}
-      ([dashboard_hello], {!dashboard_subscribe},
+      ([dashboard_hello], [dashboard_subscribe],
       [dashboard_unsubscribe], {!dashboard_ping},
       {!dashboard_ack}).
     - {b outbound delivery}
@@ -186,10 +186,6 @@ val session_count : unit -> int
     hook, the bootstrap loops, and the read-model
     transport probe. *)
 
-val next_id : unit -> string
-(** Generates a fresh session id.  Internal counter is
-    monotonically increasing for the process lifetime. *)
-
 val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
 (** Builds a fresh {!ws_session} with [closed = false]
     and the dashboard handshake state cleared.  Caller
@@ -314,16 +310,6 @@ val dashboard_event_of_external :
     no cache is needed.  [broadcast_ts] is the bus emission
     time, so every delta from one broadcast agrees. *)
 
-val dashboard_subscribe :
-  session_id:string ->
-  ?route:string ->
-  slices:string list ->
-  unit ->
-  (Yojson.Safe.t, string) result
-(** Adds [slices] to the session's subscription set
-    (after validating each slice is known).  Requires a
-    prior [dashboard_hello]. *)
-
 (** {1 Test-only seams (via [module Ws =] alias)}
 
     [test/test_ws_transport.ml] takes
@@ -335,7 +321,7 @@ val dashboard_subscribe :
 
 val valid_dashboard_slice : string -> bool
 (** {!Masc.Dashboard_event_slices.valid_slice}, under the name
-    {!dashboard_subscribe} validates with. *)
+    [dashboard_subscribe] validates with. *)
 
 val dashboard_slice_for_sse_type : string -> string option
 (** {!Masc.Dashboard_event_slices.slice_for_sse_type}, under the
@@ -396,7 +382,7 @@ val bigstring_of_shared_text : string -> Bigstringaf.t
 val __test_slice_index_add :
   session_id:string -> slice:string -> unit
 (** Test-only seam: drives the slice index without going
-    through {!dashboard_subscribe}. *)
+    through [dashboard_subscribe]. *)
 
 val __test_slice_index_remove :
   session_id:string -> slice:string -> unit

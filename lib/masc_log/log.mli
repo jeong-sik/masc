@@ -25,9 +25,6 @@ type category =
   | Turn
   | Broadcast
 
-val category_to_string : category -> string
-(** Canonical lowercase wire label for a {!category}. *)
-
 val level_to_string : level -> string
 (** Convert level to string representation. *)
 
@@ -60,21 +57,11 @@ val format_utc_date_of : float -> string
     for unit tests; production code calls [Ring.date_string] which
     delegates here. *)
 
-val log : level -> ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-(** Log a message at the given level with optional context. *)
-
 val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
 (** Log a preformatted structured message with optional JSON details. *)
 
-val emit_routine : ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
-(** Log repeatable housekeeping/telemetry through the central routine policy.
-    The effective level is controlled by [MASC_LOG_ROUTINE_LEVEL] and defaults
-    to [Debug]. Set it to [off] to suppress routine events entirely. *)
-
-val debug : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 val info : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 val warn : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-val error : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
 (** Mirror source kinds carried on every [Ring.entry]. *)
 type source =
@@ -138,10 +125,6 @@ module Ring : sig
       merely predates the window. *)
 
   val bounds : unit -> bounds
-
-  val source_of_string : string -> source
-  (** Inverse of {!source_to_string}.  Raises {!Entry_decode_error} on
-      unknown labels. *)
 
   val recent :
     ?limit:int ->

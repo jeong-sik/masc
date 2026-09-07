@@ -23,7 +23,6 @@ val last_good_shell_light : Yojson.Safe.t Atomic.t
 val with_dashboard_timeout :
   clock:_ Eio.Time.clock -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 
-val cache_partition_segment : Workspace.config -> string
 val dashboard_cache_key : Workspace.config -> string -> string -> string
 val dashboard_query_cache_segment : string option -> string
 val dashboard_query_cache_key :

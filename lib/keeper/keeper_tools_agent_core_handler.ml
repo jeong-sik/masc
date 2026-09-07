@@ -254,7 +254,10 @@ let make_keeper_tool_handler_with_authority
                  ~deferred_kind:execution.deferred_kind
                  execution
           in
-          run_with_current_eio_context ?clock:current_clock ()
+          (* Named per call so a run on the main domain inside a tool reads
+             as [tool <name>] in the trace. *)
+          Eio_guard.with_named_switch ("tool " ^ name) (fun () ->
+            run_with_current_eio_context ?clock:current_clock ())
 ;;
 
 let make_keeper_tool_handler ~capability_surface =

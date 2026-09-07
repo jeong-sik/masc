@@ -8,10 +8,6 @@
     function returns the original bytes and says so in the status. A media
     type this module cannot read is refused before any process is spawned. *)
 
-val max_dimension : unit -> int
-(** Maximum dimension configured via [MASC_KEEPER_VISION_MAX_DIMENSION] or
-    [default_max_dimension]. Clamped to [256, 8192]. *)
-
 type dimensions =
   { width : int
   ; height : int

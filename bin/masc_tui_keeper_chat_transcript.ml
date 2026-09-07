@@ -71,7 +71,8 @@ type tool_projection_mode =
 
 type tool_projection =
   { activities : tool_activity list
-  ; rows : string list
+  ; header : string option
+  ; details : string list
   ; hidden_activity_rows : int
   ; omitted_steps : int
   ; summary_outcome : tool_outcome option
@@ -424,15 +425,22 @@ let compact_marker activities = marker_of_outcome (compact_outcome activities)
    Execute, ...), instead of deriving categories from spelling conventions.
    A trace from an older or external provider may name no registered tool; in
    that case the exact safe name is more useful than an invented "Other". *)
-let canonical_tool_name (activity : tool_activity) =
-  match Masc.Keeper_tool_descriptor.find_public activity.tool_name with
-  | Some descriptor -> descriptor.public_name
+(* One reading of the registry for both questions a row asks of a name: what
+   to call the call, and what family of work it is. A descriptor may carry
+   several internal aliases and one public name, so the public lookup is
+   tried first. *)
+let descriptor_of_tool_name name : Masc.Keeper_tool_descriptor.t option =
+  match Masc.Keeper_tool_descriptor.find_public name with
+  | Some _ as found -> found
   | None -> (
-      match
-        Masc.Keeper_tool_descriptor.public_name_for_internal activity.tool_name
-      with
-      | Some public_name -> public_name
-      | None -> safe_line (display_tool_name activity.tool_name))
+      match Masc.Keeper_tool_descriptor.public_descriptors_for_internal name with
+      | descriptor :: _ -> Some descriptor
+      | [] -> None)
+
+let canonical_tool_name (activity : tool_activity) =
+  match descriptor_of_tool_name activity.tool_name with
+  | Some descriptor -> descriptor.public_name
+  | None -> safe_line (display_tool_name activity.tool_name)
 
 (* The outcomes worth naming a tool for.
 
@@ -512,9 +520,88 @@ let compact_tool_mix activities =
 
 type activity_kind =
   | Skill_activity
+  | Delegate_activity
   | Keeper_activity
   | Fusion_activity
   | Tool_activity
+
+(* Which family a registered tool belongs to, read from the descriptor that
+   owns it. The spelling tests this replaces counted [keeper_code_query] and
+   [keeper_webmcp_call] as Keeper work because their names begin with the
+   process that hosts them; one is a code search and the other an MCP call,
+   and they now count as the tools they are.
+
+   Written out rather than left to a catch-all so a new handler stops the
+   build here and is placed on purpose. *)
+let handler_activity_kind handler =
+  let open Masc.Keeper_tool_descriptor in
+  match handler with
+  | Tool_masc_fusion_dispatch | Tool_masc_fusion_status -> Fusion_activity
+  | Tool_keeper_spawn_dispatch | Tool_masc_keeper_dispatch -> Keeper_activity
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_time_now
+  | Tool_lane_status
+  | Tool_tools_list
+  | Tool_capability_search
+  | Tool_context_status
+  | Tool_artifact_read
+  | Tool_memory_search
+  | Tool_memory_retract
+  | Tool_memory_write
+  | Tool_library_search
+  | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
+  | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
+  | Tool_masc_file_dispatch
+  | Tool_masc_library_dispatch
+  | Tool_masc_local_runtime_dispatch
+  | Tool_analyze_image -> Tool_activity
+
+(* Delegation stands apart from the rest of the keeper family because it is
+   the one call that moves work to another Keeper. [masc_keeper_status] and
+   [masc_keeper_list] read state, and a fold that counts them together with a
+   handoff says a turn delegated when it only looked. *)
+let keeper_tool_activity_kind = function
+  | Keeper_tool_name.Keeper_delegate | Keeper_tool_name.Keeper_delegate_cancel
+    -> Delegate_activity
+  | Keeper_tool_name.Keeper_audit
+  | Keeper_tool_name.Keeper_clear
+  | Keeper_tool_name.Keeper_delegate_list
+  | Keeper_tool_name.Keeper_delegate_status
+  | Keeper_tool_name.Keeper_down
+  | Keeper_tool_name.Keeper_list
+  | Keeper_tool_name.Keeper_msg
+  | Keeper_tool_name.Keeper_reset
+  | Keeper_tool_name.Keeper_sandbox_start
+  | Keeper_tool_name.Keeper_sandbox_stop
+  | Keeper_tool_name.Keeper_status
+  | Keeper_tool_name.Keeper_up -> Keeper_activity
 
 let activity_kind (activity : tool_activity) =
   let name = activity.tool_name in
@@ -523,12 +610,13 @@ let activity_kind (activity : tool_activity) =
     || Option.is_some
          (Masc.Keeper_tool_composition_catalog.skill_source_of_tool_name name)
   then Skill_activity
-  else if String.starts_with ~prefix:"masc_fusion" name then Fusion_activity
-  else if
-    String.starts_with ~prefix:"masc_keeper" name
-    || String.starts_with ~prefix:"keeper_" name
-  then Keeper_activity
-  else Tool_activity
+  else
+    match Keeper_tool_name.of_string name with
+    | Some keeper_tool -> keeper_tool_activity_kind keeper_tool
+    | None -> (
+        match descriptor_of_tool_name name with
+        | None -> Tool_activity
+        | Some descriptor -> handler_activity_kind descriptor.runtime_handler)
 
 let make_skill_activity ?skill_tool_use_id ?turn_ref ?content_revision
     ?runtime_id ?detail ~skill_name ~state ~actions () =
@@ -544,7 +632,8 @@ let make_skill_activity ?skill_tool_use_id ?turn_ref ?content_revision
 
 let skill_activity_of_tool (activity : tool_activity) =
   match activity_kind activity with
-  | Tool_activity | Keeper_activity | Fusion_activity -> None
+  | Tool_activity | Delegate_activity | Keeper_activity | Fusion_activity ->
+      None
   | Skill_activity ->
       let state =
         match activity.outcome with
@@ -617,55 +706,104 @@ let skill_rows ~full (activity : skill_activity) =
     in
     summary :: actions @ proof @ detail
 
-(* Generic tools are already named by [compact_tool_mix]. These three tags
-   retain the operational kind a compact fold used to erase. *)
+(* The kind a run of calls amounts to, when the names alone do not show it.
+   [compact_tool_mix] on the same line already names every distinct tool with
+   its count, so a tag over a single name is that name's number said twice --
+   on one live screen every [Keeper N] was exactly the count of one
+   [keeper_*] tool named a few clauses along, in all eight blocks that had
+   one. A tag is drawn only where it adds several names up.
+
+   A handoff reads as [Delegate] rather than [Keeper]: it replaces that
+   clause instead of adding one, so the fold does not grow. *)
 let compact_activity_kinds activities =
-  let count kind =
-    List.fold_left
-      (fun total activity ->
-        if activity_kind activity = kind then total + 1 else total)
-      0 activities
+  let of_kind kind =
+    List.filter (fun activity -> activity_kind activity = kind) activities
   in
   [ Skill_activity, "Skill"
+  ; Delegate_activity, "Delegate"
   ; Keeper_activity, "Keeper"
   ; Fusion_activity, "Fusion"
   ]
   |> List.filter_map (fun (kind, label) ->
-       match count kind with
-       | 0 -> None
-       | count -> Some (Printf.sprintf "%s %d" label count))
+       let members = of_kind kind in
+       let names =
+         List.sort_uniq String.compare (List.map canonical_tool_name members)
+       in
+       match names with
+       (* Nothing of this kind ran, or one tool did and the rollup already
+          names it with the same number a few clauses along. A tag adds up
+          what the names leave separate, and there is nothing to add up. *)
+       | [] | [ _ ] -> None
+       | _ :: _ :: _ ->
+           Some (Printf.sprintf "%s %d" label (List.length members)))
 
 (* Both projections retain the same typed activities. [Full] is the shipping
    view and therefore stays byte-compatible with the old formatter. [Compact]
-   folds only the presentation rows; it reports exactly how many detail rows
-   it hid and keeps failures/open calls visible in its outcome summary. *)
-let project_tool_block mode (block : tool_block) =
-  let activity_count = List.length block.activities in
-  let full_activity_rows = render_activity_rows block.activities in
-  let activity_rows, hidden_activity_rows, summary_outcome =
-    match mode, block.activities with
-    | (Full | Compact), ([] | [ _ ]) ->
-        full_activity_rows, 0, None
-    | Full, _ -> full_activity_rows, 0, None
-    | Compact, activities ->
-        let mix = compact_tool_mix activities in
-        let kinds =
-          match compact_activity_kinds activities with
-          | [] -> ""
-          | kinds -> " · " ^ String.concat " · " kinds
-        in
-        let hidden_activity_rows = List.length full_activity_rows in
-        (* What ran and what came of it are two questions, and the fold
-           answered both on one line: a run of names and counts, then a run
-           of outcomes and counts, five clauses deep with nowhere for the eye
-           to land. Calls that returned belong with the inventory -- they are
-           what ran, finished. Everything still open or failed gets a line of
-           its own under its own mark, so a block's trouble is a line rather
-           than a clause in the middle of one.
+   folds only the presentation rows; the count of what it hid is the call
+   count it already carries, and it keeps failures/open calls visible in its
+   outcome summary. *)
+(* The block's rollup, on a line of its own.
 
-           A block keeps its single line when nothing needs the second one:
-           every call accounted for, or too few calls for the split to save
-           anything. *)
+   Three counts have left this line for the same reason, and the reason is
+   worth keeping: a number the same line already gives costs width and buys
+   a second place to disagree. "N details folded" was the count at the head.
+   [Keeper 1] over a single [keeper_*] name was that name's own number. And
+   the head itself, [Tools N], was the sum of the name counts beside it --
+   on a block where every call returned it was also the [N returned] that
+   closes the line, so one screen read "Tools 9 ... 9 returned" six times.
+   The row is drawn under the transcript's own TOOLS label, which says what
+   kind of row it is, so the word was the label a second time as well.
+
+   What the line keeps is what nothing else says: how it went (the mark),
+   what ran (the names and their counts), and what came of it (the
+   outcomes).
+
+   [outcomes] is passed rather than derived because the two modes count
+   different calls: folded, the trouble gets a line of its own and the rollup
+   speaks for what is left; unfolded, every call is visible and the rollup
+   speaks for all of them.
+
+   Assembled from parts instead of one format string so a part with nothing
+   to say drops out, rather than leaving an empty clause between two
+   separators. *)
+let inventory_row ~outcomes activities =
+  let parts =
+    compact_activity_kinds activities @ compact_tool_parts activities @ outcomes
+  in
+  safe_line
+    (Printf.sprintf "%s %s"
+       (compact_marker activities)
+       (String.concat " \xc2\xb7 "
+          (List.filter (fun part -> String.trim part <> "") parts)))
+
+(* A block is a header and the calls under it. Which of the two a mode drops
+   is the whole of the difference: [Compact] keeps the header and folds the
+   calls away, [Full] keeps both. Neither draws a header over a single call --
+   a summary of one call is that call, said twice. *)
+let project_tool_block mode (block : tool_block) =
+  let full_activity_rows = render_activity_rows block.activities in
+  let header, activity_rows, hidden_activity_rows, summary_outcome =
+    match mode, block.activities with
+    | (Full | Compact), ([] | [ _ ]) -> None, full_activity_rows, 0, None
+    | Full, activities ->
+        ( Some
+            (inventory_row
+               ~outcomes:(compact_outcome_parts activities)
+               activities)
+        , full_activity_rows
+        , 0
+        (* Nothing is behind a fold, so the block has no folded state for its
+           colour to stand for. The header carries its own mark in the text. *)
+        , None )
+    | Compact, activities ->
+        let hidden_activity_rows = List.length full_activity_rows in
+        (* What ran and what came of it are two questions, and one line
+           answered both: a run of names and counts, then a run of outcomes
+           and counts, five clauses deep with nowhere for the eye to land.
+           Calls that returned belong with the inventory -- they are what ran,
+           finished. Everything still open or failed gets a line of its own
+           under its own mark, so a block's trouble is a line rather than a
+           clause in the middle of one. *)
         let inventory_activities, trouble_activities =
           List.partition
             (fun activity ->
@@ -685,24 +823,12 @@ let project_tool_block mode (block : tool_block) =
            saves one: at two calls a split block draws the two rows Full
            draws, and Full's rows carry each call's subject and duration. *)
         let trouble_activities =
-          if activity_count > 2 then trouble_activities else []
+          if List.length activities > 2 then trouble_activities else []
         in
         let inventory_activities =
           match trouble_activities with
           | [] -> activities
           | _ :: _ -> inventory_activities
-        in
-        let inventory =
-          let outcomes =
-            match compact_outcome_parts inventory_activities with
-            | [] -> ""
-            | parts -> String.concat ", " parts ^ " · "
-          in
-          safe_line
-            (Printf.sprintf "%s Tools %d%s · %s · %s%s folded"
-               (compact_marker activities)
-               activity_count kinds mix outcomes
-               (plural hidden_activity_rows "detail"))
         in
         (* The mark is the block's own: compact_outcome tests exactly the four
            outcomes this list holds, so the two calls cannot disagree while
@@ -717,16 +843,21 @@ let project_tool_block mode (block : tool_block) =
                    (String.concat ", " (compact_outcome_parts trouble)))
             ]
         in
-        ( inventory :: trouble_rows
+        ( Some
+            (inventory_row
+               ~outcomes:(compact_outcome_parts inventory_activities)
+               activities)
+        , trouble_rows
         , hidden_activity_rows
         , Some (compact_outcome activities) )
   in
-  let rows =
+  let details =
     if block.omitted_steps = 0 then activity_rows
     else activity_rows @ [ omitted_steps_row block.omitted_steps ]
   in
   { activities = block.activities
-  ; rows
+  ; header
+  ; details
   ; hidden_activity_rows
   ; omitted_steps = block.omitted_steps
   ; summary_outcome
@@ -734,7 +865,9 @@ let project_tool_block mode (block : tool_block) =
 
 let tool_rows t =
   let projection = project_tool_block Full (tool_block (tool_calls t)) in
-  projection.rows
+  (* The calls, not the rollup over them: a caller asking for rows wants one
+     row per call, and the header is a fifth thing on a list of four. *)
+  projection.details
 
 type trail_item =
   | Trail_thinking of string list

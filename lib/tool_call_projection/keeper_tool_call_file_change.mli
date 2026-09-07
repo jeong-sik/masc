@@ -49,6 +49,14 @@ type kind =
       (** The whole file body the call wrote. There is no [before]: a write
           replaces the file without reading it, so the call itself never knew
           the previous contents. *)
+  | Inserted of {
+      line : int;
+      text : string;
+    }
+      (** One line put above [line] (1-based), which is how a memo is left:
+          [text] is the comment line as the file received it, composed from
+          the call's memo text, its kind and the keeper's name in the file's
+          own comment syntax. *)
 
 type t = {
   at : float;  (** Unix time the call was logged. *)
@@ -130,6 +138,12 @@ type tally = {
 
 val empty_tally : tally
 (** The tally of no rows. *)
+
+val rows_counted : tally -> int
+(** How many rows a tally was folded from: changes, unreadable rows and
+    not-file-changes are a partition of what was read, so this is the row count
+    without keeping the rows. A caller that reports "n changes out of m calls"
+    reads m here rather than measuring the list it no longer holds. *)
 
 val fold_row : tally -> Yojson.Safe.t -> tally
 (** Fold one row into a tally. [classify_all] is this over a list; a caller

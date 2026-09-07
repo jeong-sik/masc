@@ -3,61 +3,53 @@ open Env_config_core
 (** {1 OAuth Configuration} *)
 
 module OAuth = struct
-  let code_ttl_env = "MASC_OAUTH_CODE_TTL_SEC"
-  let access_token_ttl_env = "MASC_OAUTH_ACCESS_TOKEN_TTL_SEC"
-  let refresh_token_ttl_env = "MASC_OAUTH_REFRESH_TOKEN_TTL_SEC"
-  let max_pending_codes_env = "MASC_OAUTH_MAX_PENDING_CODES"
-  let max_clients_env = "MASC_OAUTH_MAX_CLIENTS"
-
-  let positive_or_default ~name ~default value =
-    if value > 0 then value
+  (* The knob is a constructor; its name, default and operator description come
+     from [Env_setting]'s exhaustive spec. The default used to be written twice
+     per knob -- once for the read, once for the non-positive fallback -- and
+     neither reached the operator snapshot. *)
+  let positive knob =
+    let value = Env_setting.Int_knob.get knob in
+    if value > 0
+    then value
     else (
+      let default = Env_setting.Int_knob.default knob in
       Log.Misc.warn
         "OAuth env %s must be a positive integer; using default=%d"
-        name
+        (Env_setting.Int_knob.env_name knob)
         default;
       default)
+  ;;
 
   (** Enable the OAuth authorization server.
       @category Security
       @ops_class operator *)
-  let enabled () = get_bool ~default:false "MASC_OAUTH_ENABLED"
+  let enabled () = Env_setting.Bool_knob.get Oauth_enabled
 
   (** Authorization-code lifetime in seconds.
       @category Security
       @ops_class operator *)
-  let code_ttl_sec () =
-    get_int ~default:300 code_ttl_env
-    |> positive_or_default ~name:code_ttl_env ~default:300
+  let code_ttl_sec () = positive Oauth_code_ttl_sec
 
   (** Access-token lifetime in seconds.
       @category Security
       @ops_class operator *)
-  let access_token_ttl_sec () =
-    get_int ~default:3600 access_token_ttl_env
-    |> positive_or_default ~name:access_token_ttl_env ~default:3600
+  let access_token_ttl_sec () = positive Oauth_access_token_ttl_sec
 
   (** Refresh-token lifetime in seconds.
       @category Security
       @ops_class operator *)
-  let refresh_token_ttl_sec () =
-    get_int ~default:2_592_000 refresh_token_ttl_env
-    |> positive_or_default ~name:refresh_token_ttl_env ~default:2_592_000
+  let refresh_token_ttl_sec () = positive Oauth_refresh_token_ttl_sec
 
   (** Maximum process-local pending authorization codes.
       @category Security
       @ops_class operator *)
-  let max_pending_codes () =
-    get_int ~default:128 max_pending_codes_env
-    |> positive_or_default ~name:max_pending_codes_env ~default:128
+  let max_pending_codes () = positive Oauth_max_pending_codes
 
   (** Maximum durable dynamic-client registrations. Exact idempotent retries
       remain admissible at capacity; a distinct registration is rejected.
       @category Security
       @ops_class operator *)
-  let max_clients () =
-    get_int ~default:128 max_clients_env
-    |> positive_or_default ~name:max_clients_env ~default:128
+  let max_clients () = positive Oauth_max_clients
 end
 
 (** {1 Rate Limit Cleanup Configuration} *)

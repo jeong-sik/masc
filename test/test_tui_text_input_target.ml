@@ -20,6 +20,7 @@ let target =
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
+      | Some Tui_types.Text_browser_url -> "browser-url"
       | Some Tui_types.Text_board_draft -> "board-draft"))
     ( = )
 ;;
@@ -151,11 +152,27 @@ let test_the_palette_claims_over_a_board_draft () =
   check target "palette first" (Some Tui_types.Text_palette) (resolved state)
 ;;
 
+let test_browser_url_input_ownership () =
+  let state = fresh_state () in
+  let open Tui_types.Browser_lane_view in
+  state.Tui_types.view <- Tui_types.Connectors;
+  state.Tui_types.browser_lane <- Some
+    { (switch_source Automation (create Browser)) with url_draft = Some "https://example.org" };
+  check target "URL owns typing and paste" (Some Tui_types.Text_browser_url) (resolved state);
+  state.Tui_types.palette_open <- true;
+  check target "palette takes priority" (Some Tui_types.Text_palette) (resolved state);
+  state.Tui_types.palette_open <- false;
+  check target "hidden compact URL does not take input" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "hidden URL does not capture another surface" None (resolved state)
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
-        [ test_case "nothing claims a plain surface" `Quick
+        [ test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
+          test_case "nothing claims a plain surface" `Quick
             test_nothing_claims_a_plain_surface;
           test_case "the palette claims while it is open" `Quick
             test_the_palette_claims_while_it_is_open;

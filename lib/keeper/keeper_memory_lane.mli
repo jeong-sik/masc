@@ -76,8 +76,17 @@ type librarian_drain_outcome =
 type librarian_drain_error =
   | Librarian_interrupted of Keeper_lane.outcome
   | Librarian_cleanup_failed of string
+  | Librarian_drain_timed_out of float
 
 val librarian_drain_error_to_string : librarian_drain_error -> string
+
+(** Seconds a graceful drain may wait for the Librarian owner lane to exit
+    before reporting [Librarian_drain_timed_out]. The cap keeps
+    [finish_lifecycle] from blocking forever inside [Eio.Cancel.protect],
+    where an outer cancellation cannot interrupt the join. When no global
+    Eio clock is available (pre-bootstrap or non-Eio callers) the join stays
+    unbounded, matching the previous behaviour. *)
+val librarian_drain_timeout_sec : float
 
 type librarian_abort_outcome =
   | Librarian_abort_idle
@@ -123,4 +132,10 @@ module For_testing : sig
 
   val pending : base_path:string -> keeper_name:string -> int option
   (** Current pending count for a keeper ([None] if it has no entry). *)
+
+  val set_drain_timeout_sec : float -> unit
+  (** Override [librarian_drain_timeout_sec] for tests. *)
+
+  val drain_timeout_sec : unit -> float
+  (** The current drain timeout (default or test override). *)
 end

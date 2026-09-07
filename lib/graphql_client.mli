@@ -2,8 +2,6 @@
 
 (** {1 Configuration} *)
 
-val graphql_url : unit -> string
-
 (** {1 HTTP Transport} *)
 
 val request : ?timeout_sec:float -> ?fallback:bool -> string -> (string, string) result
@@ -23,11 +21,7 @@ end
     [Error "endpoint returned HTML instead of JSON"] for HTML responses. *)
 val ensure_json_response : string -> (string, string) result
 
-val parse_response : string -> (Yojson.Safe.t, string) result
-
 (** {1 Public API} *)
-
-val build_body : query:string -> ?variables:Yojson.Safe.t -> unit -> string
 
 val query
   :  ?timeout_sec:float

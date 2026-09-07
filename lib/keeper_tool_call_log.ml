@@ -229,6 +229,75 @@ let retention_days () =
   | Env_config_core.Retain_forever -> None
   | Env_config_core.Prune_after_days days -> Some days
 
+let iso_date_of_unix ts = Jsonl_writer.day_key ~ts
+
+(* A trailing-window file-change answer, kept between calls.
+
+   The store is append-only per day file, so what a window gains between two
+   calls is the bytes appended plus files that did not exist yet. Measured
+   2026-09-06 on this workspace: a 24h window is 242MB and the busy hour
+   appends about 15MB, so a caller ten seconds apart needs 0.04MB of it. The
+   endpoint that reads this answered 1.8-8.8s per call and was the top
+   allocator in the profile at 2.62GB of major-direct allocation.
+
+   Held per (keeper, window) because that is what a caller asks for, and the
+   tally is small: the same measurement put every file change in a 24h window
+   across fifteen keepers at 3.4MB, the largest keeper at 0.8MB.
+
+   [Keeper_tool_call_file_change.tally] carries no timestamp on its unreadable
+   rows, so a folded tally cannot drop what aged out of the window. A carried
+   entry is therefore reusable only while nothing it counted has left the
+   window, and it records the oldest row it folded to say when that stops
+   holding.
+
+   Keying on the day range instead was wrong, which is why this note is long.
+   [iso_date_of_unix] is a calendar day, so a one-hour window's [since] does
+   not move until midnight: an entry folded at 09:00 was still "valid" at
+   17:00 and answered with eight hours of rows. At [window_hours = 24] it
+   looked right, because there the day boundary moves about as often as the
+   window. Caught in review on #33563. *)
+type file_change_cache_entry =
+  { fcc_since_ts : float
+        (** The window floor this entry was folded against. *)
+  ; fcc_oldest_row_ts : float option
+        (** The oldest row the tally counted, or [None] if it counted none.
+            While this is still inside the window, nothing the entry holds has
+            aged out and nothing needs dropping. *)
+  ; fcc_cursors : (string * int) list
+  ; fcc_tally : Keeper_tool_call_file_change.tally
+  }
+
+let file_change_cache : (string * float, file_change_cache_entry) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let file_change_cache_mu = Stdlib.Mutex.create ()
+
+(* Whether a carried entry still answers for a window whose floor is now
+   [since_ts] over the day range starting [since].
+
+   Pure, and separate from the read, because it is the part that was wrong:
+   the first version compared calendar days, so a one-hour window's entry
+   stayed "valid" from 09:00 until midnight (#33563 review). A test cannot
+   move the clock, so it exercises this instead.
+
+   Three conditions. The floor only moves forward, or this is not the window
+   the entry was folded for. Nothing the entry counted may have fallen behind
+   the floor, since a folded tally cannot drop a row -- an unreadable row
+   carries no timestamp. And the day range must still start where the entry
+   read from, or files it never opened are inside the window. *)
+let carried_entry_answers ~entry_since_ts ~entry_oldest_row_ts ~since_ts ~since =
+  entry_since_ts <= since_ts
+  && (match entry_oldest_row_ts with
+      | None -> true
+      | Some oldest -> oldest >= since_ts)
+  && String.equal (iso_date_of_unix entry_since_ts) since
+;;
+
+let reset_file_change_cache_for_testing () =
+  Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
+;;
+
 let init ?cluster_name ~base_path () =
   let cluster_name =
     Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
@@ -236,6 +305,8 @@ let init ?cluster_name ~base_path () =
   let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
   let dir = Filename.concat masc_root "tool_calls" in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
+  (* A carried tally names rows in the store being replaced. *)
+  reset_file_change_cache_for_testing ();
   try
     let retention_days = retention_days () in
     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
@@ -266,6 +337,7 @@ let init ?cluster_name ~base_path () =
 
 let reset_for_testing () =
   Atomic.set store_state { store = None; configured = None };
+  reset_file_change_cache_for_testing ();
   Atomic.set committed_revision_ref 0;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
@@ -1012,7 +1084,6 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
     ring_keep_last ~n ~keep raw)
 ;;
 
-let iso_date_of_unix ts = Jsonl_writer.day_key ~ts
 
 let ts_of_entry (json : Yojson.Safe.t) : float option =
   match json with
@@ -1022,6 +1093,82 @@ let ts_of_entry (json : Yojson.Safe.t) : float option =
      | Some (`Int i) -> Some (Float.of_int i)
      | _ -> None)
   | _ -> None
+;;
+
+let file_change_tally ?keeper_name ~(window_hours : float) () =
+  if window_hours <= 0.0
+  then Keeper_tool_call_file_change.empty_tally
+  else (
+    match (Atomic.get store_state).store with
+    | None -> Keeper_tool_call_file_change.empty_tally
+    | Some store ->
+      let now = Time_compat.now () in
+      let since_ts = now -. (window_hours *. Masc_time_constants.hour) in
+      let since = iso_date_of_unix since_ts in
+      let until = iso_date_of_unix now in
+      let key = Option.value keeper_name ~default:"", window_hours in
+      Stdlib.Mutex.protect file_change_cache_mu (fun () ->
+        let carried =
+          match Hashtbl.find_opt file_change_cache key with
+          (* Reusable while the window floor has only moved forward, nothing
+             counted has fallen behind it, and the day files this entry read
+             are still the ones the window covers. *)
+          | Some entry
+            when carried_entry_answers
+                   ~entry_since_ts:entry.fcc_since_ts
+                   ~entry_oldest_row_ts:entry.fcc_oldest_row_ts
+                   ~since_ts
+                   ~since -> Some entry
+          | Some _ | None -> None
+        in
+        let cursors, tally =
+          match carried with
+          | Some entry -> entry.fcc_cursors, entry.fcc_tally
+          | None -> [], Keeper_tool_call_file_change.empty_tally
+        in
+        let oldest =
+          ref (match carried with Some entry -> entry.fcc_oldest_row_ts | None -> None)
+        in
+        let tally, cursors =
+          Dated_jsonl.fold_range_appended
+            store
+            ~since
+            ~until
+            ~cursors
+            ~init:tally
+            ~f:(fun tally json ->
+              let row_ts = ts_of_entry json in
+              let in_window =
+                match row_ts with
+                | Some ts -> ts >= since_ts
+                | None -> false
+              in
+              let keeper_ok =
+                match keeper_name with
+                | None -> true
+                | Some name -> keeper_matches name json
+              in
+              if in_window && keeper_ok
+              then begin
+                (match row_ts with
+                 | Some ts ->
+                   (match !oldest with
+                    | Some current when current <= ts -> ()
+                    | Some _ | None -> oldest := Some ts)
+                 | None -> ());
+                Keeper_tool_call_file_change.fold_row tally json
+              end
+              else tally)
+        in
+        Hashtbl.replace
+          file_change_cache
+          key
+          { fcc_since_ts = since_ts
+          ; fcc_oldest_row_ts = !oldest
+          ; fcc_cursors = cursors
+          ; fcc_tally = tally
+          };
+        Keeper_tool_call_file_change.seal_tally tally))
 ;;
 
 let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =

@@ -33,8 +33,6 @@ type runner =
     out, [Error] when the process could not be spawned at all. The default
     wraps [Process_eio.run_argv_with_status_split]; tests inject a fake. *)
 
-val default_runner : runner
-
 val list_tools :
   ?runner:runner ->
   ?cdp_port:int ->

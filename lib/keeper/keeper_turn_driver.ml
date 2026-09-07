@@ -319,6 +319,13 @@ let attempt_runtime_candidates
             Runtime_lane_preference.note_success ~lane_id
               ~candidate:attempt_runtime_id
           | None -> ());
+         (* A call getting through is the only evidence a quota came back that
+            a provider stating no reset time leaves available, so it is what
+            clears the observation. A stated window is left alone: it names a
+            time, and one success inside it does not make that untrue. *)
+         (match attempt_quota_scope with
+          | Some scope -> Runtime_quota_window.note_succeeded ~scope
+          | None -> ());
          Ok value
        | Error error, _checkpoint_after, effect_disposition ->
          emit_runtime_manifest
@@ -337,21 +344,43 @@ let attempt_runtime_candidates
             one namespace. Quota errors without [retry_after] record
             nothing — a cooldown the provider never stated would be a
             synthesized default. *)
+         (* Both refusals that say an account cannot serve right now.
+            [HardQuota] is HTTP 402 by status alone; [RateLimit] is 429, which
+            is what a spent quota actually arrives as -- traced 2026-09-06:
+            [Retry.classify_error] maps 429 to [RateLimited] and
+            [of_retry_api_error] maps that to [RateLimit], while [HardQuota] is
+            reached only from [PaymentRequired]. Matching [HardQuota] alone,
+            as this did, meant no 429 ever recorded a window and the walk
+            re-dispatched into a spent account every turn: 41 of 41 librarian
+            failures on one slot that day, 224 of 1,185 turns rate-limited in
+            two hours.
+
+            Quota is credential-account-owned, so the window is keyed by the
+            row's quota scope: siblings sharing the credential are demoted
+            together (PR #28202 review P2). *)
+         let note_quota retry_after =
+           match attempt_quota_scope, retry_after with
+           | None, _ -> ()
+           | Some scope, Some retry_after_s ->
+             Runtime_quota_window.note_exhausted
+               ~scope
+               (* NDT-OK: [retry_after] is relative to the provider response;
+                  convert it to the wall-clock expiry at this ingress. *)
+               ~resets_at:(Unix.gettimeofday () +. retry_after_s)
+           | Some scope, None ->
+             (* The provider said it cannot serve and did not say when it can.
+                Recording the observation is not inventing a cooldown: it names
+                no time and the next success on this scope drops it. Neither
+                metered provider this fleet reaches states one -- ollama.com
+                and api.z.ai both 429 with no Retry-After header and no
+                [error.retry_after] in the body (probed 2026-09-06), and those
+                are the only two places [resolve_retry_after] looks. RFC-0433. *)
+             Runtime_quota_window.note_observed_exhausted ~scope
+         in
          (match error with
-          | Agent_core.Error.Provider
-              (Llm_provider.Error.HardQuota { retry_after = Some retry_after_s; _ })
-            ->
-            (* Quota is credential-account-owned, so the window is keyed by
-               the row's quota scope: siblings sharing the credential are
-               demoted together (PR #28202 review P2). *)
-            (match attempt_quota_scope with
-             | Some scope ->
-               Runtime_quota_window.note_exhausted
-                 ~scope
-                 (* NDT-OK: [retry_after] is relative to the provider response;
-                    convert it to the wall-clock expiry at this ingress. *)
-                 ~resets_at:(Unix.gettimeofday () +. retry_after_s)
-             | None -> ())
+          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ })
+          | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ })
+            -> note_quota retry_after
           | _ -> ());
          (* The window just learned above must affect this same lane walk.
             Otherwise a sibling on the same credential is retried before an
@@ -726,7 +755,16 @@ let run_named
     ~goal
     ?goal_blocks
     ?session_id
-    ?(system_prompt = "")
+    (* Required, not defaulted to "". Three of the runtimes this dispatches to
+       -- Codex, Claude Code, Antigravity -- refuse a blank composition in
+       [Keeper_official_client_host.prepare_turn], because a blank one runs the
+       turn under the vendor's built-in instructions with masc's tool surface
+       still attached (#33165). A default that part of the domain rejects is not
+       a default: it left 34 cases red across the three official-client suites
+       and #33165 fixed one of the five call sites, because an optional
+       argument asks nobody. Callers that mean "no system prompt" now say so
+       (#33862). *)
+    ~system_prompt
     ?(tools = [])
     ~agent_core_tools
     ?(initial_messages = [])

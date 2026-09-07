@@ -21,12 +21,6 @@ type focus_payload = {
 
 (** {1 Core Send} *)
 
-val send_notification :
-  ?sound:bool -> ?focus_cmd:string ->
-  title:string -> subtitle:string -> message:string -> unit -> unit
-
-val notify : event -> unit
-
 (** {1 Convenience} *)
 
 val notify_mention :

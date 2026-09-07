@@ -93,22 +93,6 @@ val keeper_chat_history_page_json :
 
 (** {1 Checkpoint inventory} *)
 
-val stat_json_of_path : string -> Yojson.Safe.t
-(** [stat] result as JSON; [`Null] when the file is missing. *)
-
-val agent_core_checkpoint_summary_json :
-  source_kind:string ->
-  snapshot_id:string ->
-  path:string ->
-  is_current:bool ->
-  Agent_core.Checkpoint.t ->
-  Yojson.Safe.t
-(** JSON summary of an AGENT_CORE checkpoint, used by the inventory listing. *)
-
-val keeper_checkpoint_inventory_json :
-  Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
-(** Inventory JSON for [GET /checkpoints]. *)
-
 val keeper_runtime_trace_json :
   Workspace.config ->
   string ->
@@ -158,12 +142,6 @@ val handle_keeper_checkpoints_post :
 val is_valid_keeper_name : String.t -> bool
 (** [true] when [name] passes the shared keeper-name character class. *)
 
-val extract_keeper_name_for_post : string -> string -> string
-(** [extract_keeper_name_for_post path suffix]: the POST dispatcher's
-    spelling of the suffix extractor, and the same function. The argument
-    order is [path] then [suffix]; this signature used to document it the
-    other way round. *)
-
 (** {1 Execution surface refresh} *)
 
 val refresh_keeper_execution_surfaces :
@@ -172,11 +150,6 @@ val refresh_keeper_execution_surfaces :
   Keeper_lifecycle_events.lifecycle_event ->
   unit
 (** Re-read the keeper meta for [name] and update derived caches. *)
-
-val invalidate_keeper_execution_surfaces :
-  config:Workspace_utils.config -> unit -> unit
-(** Drop every cached keeper execution surface; called on server-wide
-    reconfiguration. *)
 
 (** {1 Action handlers} *)
 

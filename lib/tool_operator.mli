@@ -18,12 +18,10 @@ val dispatch :
   args:Yojson.Safe.t ->
   Tool_result.result option
 
-val schemas : unit -> Masc_domain.tool_schema list
 val remote_schemas : unit -> Masc_domain.tool_schema list
 val remote_tool_names : unit -> string list
 
 val register_operator_tools :
   dispatch:(float Eio.Time.clock_ty context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option) ->
-  schemas:Masc_domain.tool_schema list ->
   remote_schemas:Masc_domain.tool_schema list ->
   unit

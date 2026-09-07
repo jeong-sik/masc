@@ -85,6 +85,7 @@ type probe_report =
   | Probe_answered of
       { major : Exec_ssh_protocol.major
       ; capabilities : string list
+      ; release : string option
       }
   | Probe_failed of
       { at : float
@@ -106,6 +107,11 @@ type shared_state =
        this process once asked (RFC-0422). [None] until a probe has run.
        The shim is a host-installed binary, so its answer changes only when
        the operator replaces it, and that comes with a server restart. *)
+  ; probe_release : string option Atomic.t
+    (* The MASC release the endpoint's shim was built from, from the same
+       probe (RFC-0427 B-3). [None] both before a probe has run and from a
+       shim built before the field existed; the two are told apart by
+       [probe_major], which any answered probe sets. *)
   ; probe_major : Exec_ssh_protocol.major option Atomic.t
     (* The protocol major the shim speaks, from the same probe. Every request
        to this endpoint is framed in it, so a shim one release behind or
@@ -136,6 +142,7 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
         ; probe_capabilities = Atomic.make None
+        ; probe_release = Atomic.make None
         ; probe_major = Atomic.make None
         ; last_probe_failure = Atomic.make None
         ; last_dispatch = Atomic.make None
@@ -471,6 +478,41 @@ let log_first_dispatch t =
 
 let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
 
+(* RFC-0427 B-3. The shim names the release it was built from and the server
+   compares it with its own. A difference is what 2026-09-05 looked like from
+   the inside: an endpoint one release behind, found by symptom because
+   nothing on the wire carried the answer.
+
+   This is a WARN and not a refusal. The two sides negotiate the protocol
+   major (#33425) and keep running one release apart on purpose, so a release
+   difference is a thing to repair, not a reason to stop the lane. The line
+   names the repair, because a log line that only says something is wrong is
+   an alarm and not a fix.
+
+   It fires per probe. Two of the three probe sites run once per endpoint per
+   process; the third is the keeper preflight, so an outdated endpoint says so
+   once per keeper boot. *)
+let warn_on_release_skew t release =
+  let repair =
+    Printf.sprintf
+      "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <the masc-exec-shim-linux-ARCH asset of %s>"
+      t.name Build_version.current
+  in
+  match release with
+  | Some release when String.equal release Build_version.current -> ()
+  | Some release ->
+    Log.Keeper.warn
+      ~keeper_name:t.keeper_name
+      "remote_shim_outdated: endpoint %s runs the shim from release %s and this server is %s; %s"
+      t.name release Build_version.current repair
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name:t.keeper_name
+      "remote_shim_outdated: endpoint %s runs a shim that does not name its \
+       release (it predates the stamp) and this server is %s; %s"
+      t.name Build_version.current repair
+;;
+
 let run_probe t =
   let status, stdout, stderr =
     Process_eio.run_argv_with_stdin_and_status_split
@@ -491,6 +533,8 @@ let run_probe t =
         | Ok major ->
           Atomic.set t.shared.probe_major (Some major);
           Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
+          Atomic.set t.shared.probe_release probe.release;
+          warn_on_release_skew t probe.release;
           Ok major
         | Error detail ->
           Error
@@ -519,8 +563,11 @@ let run_probe t =
 let report t =
   let probe =
     match Atomic.get t.shared.probe_major, Atomic.get t.shared.probe_capabilities with
-    | Some major, Some capabilities -> Probe_answered { major; capabilities }
-    | Some major, None -> Probe_answered { major; capabilities = [] }
+    | Some major, Some capabilities ->
+      Probe_answered { major; capabilities; release = Atomic.get t.shared.probe_release }
+    | Some major, None ->
+      Probe_answered
+        { major; capabilities = []; release = Atomic.get t.shared.probe_release }
     | None, _ ->
       (match Atomic.get t.shared.last_probe_failure with
        | Some (at, detail) -> Probe_failed { at; detail }

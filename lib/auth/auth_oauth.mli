@@ -30,10 +30,8 @@ val protocol_error_code : error -> string
     [server_error] without exposing its detail. *)
 
 val enabled : unit -> bool
-val code_ttl_sec : unit -> int
 val access_token_ttl_sec : unit -> int
 val refresh_token_ttl_sec : unit -> int
-val max_pending_codes : unit -> int
 
 val pkce_s256 : string -> string
 (** RFC 7636 S256 transform using unpadded base64url. *)

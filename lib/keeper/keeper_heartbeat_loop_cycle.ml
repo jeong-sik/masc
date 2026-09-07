@@ -216,6 +216,12 @@ let run_keeper_cycle
      runs holding the keeper's Owner slot (RFC-0225 §1), so what lands in
      the cell is always the outcome of the keeper's most recent completed
      cycle — an overwrite, last writer by turn order. *)
+  (* One named switch per cycle: Eio writes a switch's name into the
+     runtime-events ring when the switch opens, and the ring is overwritten
+     within minutes, so a name opened once at lane start is invisible to a
+     tracer attached later. Opened per cycle, every window sees which keeper
+     a long run on the main domain belongs to. *)
+  Eio.Switch.run ~name:("keeper " ^ meta_after_triage.name ^ " cycle") @@ fun _ ->
   let previous_turn_stop =
     match previous_turn_stop with
     | Some _ as explicit -> explicit

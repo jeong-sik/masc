@@ -174,11 +174,6 @@ val to_json : aggregate -> Yojson.Safe.t
     concrete provider/model identifiers stay internal to the aggregator and
     are not emitted. *)
 
-val model_stats_to_json : ?model_label:string -> model_stats -> Yojson.Safe.t
-(** Serialize a single [model_stats] entry to JSON. [model_label] is the
-    redacted public runtime lane label; [provider] and recent-entry provider
-    fields serialize as [null]. *)
-
 val render_keeper_prompt_feedback : aggregate -> string
 (** Render a compact, redacted telemetry block for opt-in keeper prompt
     feedback. Returns the empty string when the aggregate has no entries.

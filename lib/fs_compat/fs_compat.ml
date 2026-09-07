@@ -224,33 +224,67 @@ let mkdir_p_unix (path : string) : unit =
   ensure_dir path
 ;;
 
+(* Whole-file reads, writes and appends of regular files block in the
+   kernel for as long as the disk takes, and eio_posix runs them on the
+   calling fiber: a regular file never reports "not ready", so [readv] and
+   [writev] are issued inline. On the live server a 2 MB [save_file] held
+   the main domain 120-130 ms and a large [load_file] 40-50 ms per call
+   (2026-09-06 fiber trace, labels [with_open_out] and [with_open_in]; RFC
+   main-domain-scheduler-latency §8.8). Inside an Eio fiber the three
+   primitives therefore run their Unix implementation on a system thread;
+   outside Eio they run it inline, as before. *)
+(* The label reaches the runtime-events ring as the fiber's suspend reason
+   ([Eio_unix.run_in_systhread] calls [Trace.suspend_fiber label]), and a
+   trace reads a long run as "resumed from X, suspended on Y". With the file
+   named, X and Y identify the code: a run between
+   [fs-compat-append-file chat.jsonl] and [fs-compat-load-file memory.json]
+   needs no further instrumentation to place. The basename alone keeps the
+   label short and is unique enough among the stores a keeper touches. *)
+let labelled operation path = operation ^ " " ^ Filename.basename path
+
+let on_systhread ~label f =
+  let result = Eio_unix.run_in_systhread ~label f in
+  Eio.Fiber.check ();
+  result
+;;
+
 (** Load entire file contents as string.
-    Eio-native when available, fallback to Unix.
-    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
+    Read on a system thread inside Eio, inline otherwise.
+    @raises Sys_error on all I/O failures. *)
 let load_file (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> load_file_unix path)
-    (fun fs ->
-       let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.load eio_path)
+    (fun _fs ->
+       on_systhread
+         ~label:(labelled "fs-compat-load-file" path)
+         (fun () -> load_file_unix path))
+;;
+
+(* The write behind [save_file] and the atomic writers: the path guard on
+   the fiber, the open, write and close wherever the caller runs it. The
+   atomic writers run it inside their own blocking job. *)
+let save_file_blocking (path : string) (content : string) : unit =
+  test_exec_home_guard ~op:"save_file" path;
+  save_file_unix path content
 ;;
 
 (** Save string to file (overwrite).
-    Eio-native when available, fallback to Unix.
-    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
+    Written on a system thread inside Eio, inline otherwise.
+    @raises Sys_error on all I/O failures. *)
 let save_file (path : string) (content : string) : unit =
   test_exec_home_guard ~op:"save_file" path;
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> save_file_unix path content)
-    (fun fs ->
-       let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.save ~create:(`Or_truncate save_file_mode) eio_path content)
+    (fun _fs ->
+       on_systhread
+         ~label:(labelled "fs-compat-save-file" path)
+         (fun () -> save_file_unix path content))
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file path content
+  Atomic_write.save_file_atomic ~save_file:save_file_blocking path content
 ;;
 
 type atomic_replace_failure_stage =
@@ -271,11 +305,15 @@ let atomic_replace_failure_to_string =
 ;;
 
 let save_file_atomic_strict_staged path content =
-  Atomic_write.save_file_atomic_strict_staged ~save_file path content
+  Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
+;;
+
+let write_file_atomic_strict_staged path ~write =
+  Atomic_write.write_file_atomic_strict_staged path ~write
 ;;
 
 let save_file_atomic_strict path content =
-  Atomic_write.save_file_atomic_strict ~save_file path content
+  Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
 
 module Atomic_replace_for_testing = struct
@@ -283,9 +321,17 @@ module Atomic_replace_for_testing = struct
     Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ?sync_file
       ~sync_parent
-      ~save_file
+      ~save_file:save_file_blocking
       path
       content
+  ;;
+
+  let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
+    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+      ?sync_file
+      ~sync_parent
+      path
+      ~write
   ;;
 end
 
@@ -568,16 +614,19 @@ let cleanup_atomic_orphans ~ownership_root ~base_path ~scope () =
 ;;
 
 (** Append string to file.
-    Eio-native when available, fallback to Unix.
-    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
+    Appended on a system thread inside Eio, inline otherwise; both go
+    through the per-path mutex of [append_file_unix], so two appends to one
+    path from two threads stay whole.
+    @raises Sys_error on all I/O failures. *)
 let append_file (path : string) (content : string) : unit =
   test_exec_home_guard ~op:"append_file" path;
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> append_file_unix path content)
-    (fun fs ->
-       let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
+    (fun _fs ->
+       on_systhread
+         ~label:(labelled "fs-compat-append-file" path)
+         (fun () -> append_file_unix path content))
 ;;
 
 (** Check if file exists.
@@ -935,7 +984,7 @@ let load_owned_regular_file_with_snapshot ~ownership_root path =
       load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
              ~ownership_root
              path)
@@ -989,7 +1038,7 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
         ~ownership_root ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
        in
@@ -1045,7 +1094,7 @@ let load_owned_regular_file_range
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
        in
@@ -1084,7 +1133,7 @@ let file_size (path : string) : int option =
       try Some (Unix.stat path).st_size with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1095,7 +1144,7 @@ let file_mtime (path : string) : float option =
       try Some (Unix.stat path).st_mtime with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1132,13 +1181,6 @@ let rename_if_exists ~src ~dst =
       | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> false)
 ;;
 
-let rmdir (path : string) : unit =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () -> Unix.rmdir path)
-    (fun fs -> Eio.Path.rmdir Eio.Path.(fs / path))
-;;
-
 let remove_tree_unix (path : string) : unit =
   let rec remove path =
     match Unix.lstat path with
@@ -1161,14 +1203,14 @@ let remove_tree (path : string) : unit =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> remove_tree_unix path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
 ;;
 
 let realpath_lenient (path : string) : string =
@@ -1237,28 +1279,52 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
     a malformed log from either path uses the same orchestrate system. *)
+(* One row, with the row number the warning prints. A caller that walks rows
+   itself - to stop before the end of a window - parses through this so the
+   warning it prints is the same one, in the same shape, as the whole-list
+   parse below. *)
+let parse_jsonl_line ~(source : string) ~(line_no : int) (line : string)
+  : Yojson.Safe.t option
+  =
+  match Yojson.Safe.from_string line with
+  | json -> Some json
+  | exception Yojson.Json_error msg ->
+    Stdlib.Printf.eprintf
+      "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+      source
+      line_no
+      msg;
+    None
+;;
+
+(* Blank lines do not take a number, matching what [cat -n] shows for the
+   printed JSONL rows. A caller that needs those numbers without parsing
+   uses this. *)
+let number_jsonl_lines (lines : string list) : (int * string) list =
+  let line_no = ref 0 in
+  List.filter_map
+    (fun line ->
+       let trimmed = String.trim line in
+       if String.equal trimmed ""
+       then None
+       else begin
+         incr line_no;
+         Some (!line_no, trimmed)
+       end)
+    lines
+;;
+
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
-  let line_no = ref 0 in
   let parsed =
     List.filter_map
-      (fun line ->
-         let trimmed = String.trim line in
-         if String.equal trimmed ""
-         then None
-         else (
-           incr line_no;
-           match Yojson.Safe.from_string trimmed with
-           | json -> Some json
-           | exception Yojson.Json_error msg ->
-             incr malformed;
-             Stdlib.Printf.eprintf
-               "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-               source
-               !line_no
-               msg;
-             None))
-      lines
+      (fun (line_no, trimmed) ->
+         match parse_jsonl_line ~source ~line_no trimmed with
+         | Some json -> Some json
+         | None ->
+           incr malformed;
+           None)
+      (number_jsonl_lines lines)
   in
   parsed, !malformed
 ;;
@@ -1468,8 +1534,6 @@ let fold_jsonl_lines ~init ~f path =
    - The cache lookup uses a separate, microsecond-scoped mutex
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
-let close_all_cached_writers () = Fd_cache.close_all ()
-
 let invalidate_cached_writer path =
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () -> Fd_cache.invalidate path)

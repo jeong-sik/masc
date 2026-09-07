@@ -414,6 +414,7 @@ let fork_board_attention_worker
   : unit
   =
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:("keeper " ^ keeper_name ^ " board-attention") @@ fun _ ->
     match
       Eio.Fiber.first
         (fun () ->
@@ -1456,6 +1457,7 @@ let rec start_keepalive
              ~sw:lane_parent_sw
              reg.lane
              ~run:(fun lane_sw ->
+        Eio.Switch.run ~name:("keeper " ^ live_meta.name) @@ fun _ ->
         let ctx = { ctx with sw = lane_sw } in
         (* The sidecars are part of this Keeper lane. They cannot outlive the
            lane's structured-concurrency scope, and a lane reached through

@@ -97,8 +97,6 @@ val status_line_is_healthy : string -> bool
 
 val looks_like_server_command : string -> bool
 
-val probe_liveness : ?timeout_sec:float -> ?path:string -> int -> bool
-
 val acquire_pid_lock :
   ?lock_path:string ->
   ?probe_timeout_sec:float ->

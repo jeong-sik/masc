@@ -54,6 +54,11 @@ type t =
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)
+  | Interrupt_keeper_turn of string
+      (** [/interrupt <name>] — stop a turn belonging to a keeper this pane
+          is not showing. Every other way in needs that keeper on screen,
+          and the key that would put it there is refused while any request
+          is in flight, which is exactly when one is running (#33852). *)
   | Steer_turn of string
       (** [/steer <message>] — interrupt the streaming turn, then dispatch
           this exact message before ordinary next-turn input. *)
@@ -98,6 +103,10 @@ type t =
           sends nothing: one is for the operator to look at, the other is for
           the Keeper to read. The path grammar matches [/image]. *)
   | Attach_image_missing_path  (** [/attach] with no path on the line. *)
+  | Attach_image_ref of string
+    (** [/ref <url|file_id>] — stage an image reference the provider fetches. *)
+  | Attach_image_ref_missing_value
+    (** [/ref] with no value on the line. *)
   | Preset_list  (** [/preset] — list the prompt presets the server holds. *)
   | Preset_save of {
       name : string;

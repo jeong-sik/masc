@@ -13,10 +13,13 @@
  (flags
   (:standard -w +33))
  (libraries
+  masc.ide_memo
+  masc.agent_observation
   masc.masc_eio_context
   masc.fs_compat
   masc.masc_core
   masc.masc_log
+  masc.masc_process
   cstruct
   eio
   eio.unix

@@ -54,12 +54,6 @@ let tool_host_cause_of_code = function
   | "tool_host_transport_unavailable" -> Ok Tool_host_transport_unavailable
   | other -> Error (Printf.sprintf "unknown tool host cause_code: %S" other)
 
-(** Coerce to canonical [Severity.t] for cross-module communication. *)
-let to_severity : severity -> Severity.t = function
-  | Warn -> Warning
-  | Bad -> Error
-  | Critical -> Critical
-
 let first_non_empty values =
   List.find_map (fun value -> Option.bind value String_util.trim_nonempty) values
 

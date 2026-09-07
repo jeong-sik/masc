@@ -20,6 +20,20 @@ val set_switch : Eio.Switch.t -> unit
 (** Set the global Eio switch (server root_sw). Written once at server
     bootstrap; survives until process exit. *)
 
+type snapshot
+(** Opaque capture of every global this module owns — net, both clocks,
+    the root-switch binding, and net_initialized — taken by
+    [snapshot_state] and replayed by [restore_state]. A test harness
+    snapshots before a test and restores in a [finally] so a test that
+    installs a global (e.g. [set_switch] from a cross-domain fixture)
+    cannot leak the binding into later tests; the 2026-09-06
+    heartbeat_integration red (#33569) was exactly such a leak. *)
+
+val snapshot_state : unit -> snapshot
+
+val restore_state : snapshot -> unit
+(** Restore a [snapshot_state] capture. Also used by [with_test_env]. *)
+
 val get_root_switch_opt : unit -> Eio.Switch.t option
 (** Get the server root switch without consulting the fiber-local
     turn-scoped binding. Use only for work that must survive a single
@@ -91,10 +105,6 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** Get the Eio clock.
     Returns Error if not initialized. *)
 
-val get_switch : unit -> (Eio.Switch.t, string) result
-(** Get the Eio switch.
-    Returns Error if not initialized. *)
-
 (** [get_https_connector] removed — use [get_https_connector_result] instead. *)
 
 val get_https_connector_result :
@@ -105,3 +115,10 @@ val get_https_connector_result :
    string)
   result
 (** Non-raising HTTPS connector lookup. *)
+
+module For_testing : sig
+  val clear_root_switch : unit -> unit
+  (** Clear the root switch binding. Test scopes that install a temporary
+      root switch should invoke this in their finalizer to prevent cross-test
+      pollution. *)
+end

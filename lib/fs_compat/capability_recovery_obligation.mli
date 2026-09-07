@@ -228,9 +228,6 @@ val owner_to_string : owner -> string
 
 val operation_id_to_string : operation_id -> string
 
-(** Canonical whole registry filename. There is no prefix or suffix. *)
-val record_name : operation_id -> string
-
 (** Exact target-parent staging name, total from the operation id. *)
 val stage_name : operation_id -> string
 

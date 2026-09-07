@@ -63,8 +63,7 @@ let record_eviction ~keeper_name ~mode ~result ~reason =
      errors by walking this list, so a reason added here appears there
      without a second edit. *)
 let error_reasons =
-  [ "invalid_source_type"
-  ; "bad_base64"
+  [ "bad_base64"
   ; "image_too_large"
   ; "invalid_media_type"
   ; "store_failed"
@@ -153,9 +152,15 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.conte
   | Agent_core.Types.Image { media_type; data; source_type } ->
     (match source_type with
      | Agent_core.Types.Url | Agent_core.Types.File_id ->
-       record_eviction ~keeper_name ~mode ~result:"error" ~reason:"invalid_source_type";
-       Agent_core.Types.Text
-         (image_store_failed_placeholder ~reason:"unsupported image source")
+       (* RFC-0430 / #33682: a reference carrier is not an eviction target.
+          Evict exists to trade the heavy inline payload for a local artifact
+          handle; a URL or Files-API id costs a few dozen bytes of context,
+          and the serializers put both on the wire in their native forms
+          (#33669). Passing the block through unchanged keeps the reference
+          requestable instead of replacing it with a store-failure
+          placeholder the reader cannot act on. *)
+       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough";
+       block
      | Agent_core.Types.Base64 ->
        match raw_bytes_of_image_data data with
       | Error _ ->

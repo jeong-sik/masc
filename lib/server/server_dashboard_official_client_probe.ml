@@ -239,7 +239,7 @@ let probe_body ~base_path ~body =
         "eio_context_unavailable"
         "official-client probe requires the initialized Eio runtime"
   in
-  let mgr = Eio.Stdenv.process_mgr env in
+  let mgr = Posix_spawn_process_mgr.mgr in
   let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
   let model = Runtime_execution.model_id runtime.execution in
   match runtime.execution with

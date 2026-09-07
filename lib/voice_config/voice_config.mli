@@ -78,6 +78,15 @@ type stt_config = {
       (** Required once the [stt] section exists, for the same reason as
           {!tts_config.default_model}. *)
   endpoints : endpoint list;
+  send_on_stop : bool;
+      (** Whether ending a capture also sends what was heard.
+
+          Off unless the section says otherwise. The transcript lands in the
+          composer draft either way, and that draft is also where a spoken
+          half-sentence waits for typing; sending without the operator
+          confirming costs that operator more than the confirmation costs the
+          one who speaks whole sentences. Optional in the file for the same
+          reason: absent means off. *)
 }
 
 type session_config = { endpoints : endpoint list }

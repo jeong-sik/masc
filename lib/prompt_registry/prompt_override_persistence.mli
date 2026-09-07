@@ -15,8 +15,6 @@ type entry = {
 
 type error
 
-val schema_version : int
-
 val contract_revision :
   body:string -> template_variables:string list -> string
 (** SHA256 of the canonical JSON object containing [body] and the sorted

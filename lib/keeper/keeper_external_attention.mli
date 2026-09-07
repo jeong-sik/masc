@@ -86,7 +86,6 @@ val event_id_of_dedupe_key : string -> string
 (** {1 Labels and JSON codecs} *)
 
 val urgency_to_string : urgency -> string
-val urgency_of_string : string -> urgency option
 
 val surface_ref_to_json : surface_ref -> Yojson.Safe.t
 val surface_ref_of_json : Yojson.Safe.t -> (surface_ref, string) result

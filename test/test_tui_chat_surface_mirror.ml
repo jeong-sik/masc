@@ -68,7 +68,8 @@ let decoded_surface surface =
      | History.Said_by_keeper | History.Autonomous_reply
      | History.Delivery_failed _ | History.Tool_calls _
      | History.Skill_activity _ | History.Reasoning _
-     | History.Gate_activity _ | History.Memory_activity _ ->
+     | History.Gate_activity _ | History.Memory_activity _
+     | History.Fusion_conclusion _ ->
        failf "expected an addressed row")
   | Ok _ -> failf "expected exactly one row"
 ;;
@@ -92,8 +93,10 @@ let test_dashboard_decodes_but_adds_no_badge () =
   let dashboard = Masc.Surface_ref.Dashboard { session_id = None } in
   check bool "dashboard decodes" true
     (Option.is_some (decoded_surface dashboard));
-  check string "and contributes no surface half" "vincent"
-    (History.addressed_label (History.Named "vincent") (decoded_surface dashboard))
+  check (pair string (option string)) "and contributes no surface half"
+    ("vincent", None)
+    (History.addressed_label_parts (History.Named "vincent")
+       (decoded_surface dashboard))
 ;;
 
 let () =

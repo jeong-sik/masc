@@ -41,7 +41,6 @@ type t = {
 }
 
 val of_yojson : Yojson.Safe.t -> (t, string) result
-val of_string : string -> (t, string) result
 val feature_names : t -> string list
 
 val structural_blockers : t -> string list

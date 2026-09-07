@@ -573,7 +573,7 @@ Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself
 ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
-non-default states as `memory:full` and `memory:off`. Neutral system rows that
+non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
 The folded tool row retains exact outcome counts and ends with
@@ -1510,6 +1510,20 @@ Viewports below the fixed chrome budget render a compact resize gate instead of
 a clipped frame, and message editing is suppressed until the terminal grows.
 
 ## Troubleshooting
+
+**`masc` started a server instead of the TUI.** The handover looks for a
+`masc-tui` beside the running binary and then on `PATH`. An install lays both
+names down together; a source checkout builds `_build/default/bin/masc_tui.exe`,
+which matches neither, so the bare name serves — the same rule that keeps a
+container or a unit file from opening a TUI. Run the built path, or link both
+names into one directory on `PATH`; the README's source-checkout section spells
+out the two commands.
+
+**The TUI does not show a change that is already on `main`.** The TUI is its
+own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
+and does not touch it, so a server restart leaves the TUI on the binary it
+started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
+the TUI.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,

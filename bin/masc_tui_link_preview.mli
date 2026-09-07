@@ -37,8 +37,25 @@ val cache_store : og_preview -> unit
 val get_preview : string -> og_preview
 val clear_cache : unit -> unit
 
-val site_icon : og_preview -> string
-(** Decorative glyph for the site (e.g. 🐙, 📄, 🟧, ▶️, 🖼️, 🌐). *)
+val mosaic_lookup : string -> string list option
+(** Rendered half-block mosaic lines for an image URL, or [None] if not yet
+    downloaded and decoded. *)
+
+val mosaic_store : string -> string list -> unit
+(** Store rendered mosaic lines for an image URL. Called off the render loop
+    once the preview's image has been downloaded and decoded. *)
+
+val parse_og_html : url:string -> body:string -> og_preview
+(** Merge a fetched page's <title> and og:* meta tags onto the URL-synthesized
+    base, keeping its [kind]. Returns the synthesized base unchanged when the
+    page carried no title or og:* metadata, so [has_metadata] never claims
+    fetched data that is absent. Pure: no network, unit-testable. *)
+
+val set_background_fetch : (string -> unit) -> unit
+(** Register the background fetcher the TUI injects at startup. [get_preview]
+    calls it once per URL on the first cache miss; the fetcher is expected to
+    fetch the page, replace the synthesized cache entry via {!cache_store}, and
+    request a redraw. A no-op until registered (keeps [get_preview] pure). *)
 
 val site_label : og_preview -> string
 (** Human-readable site name or domain. *)

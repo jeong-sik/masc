@@ -11,7 +11,7 @@ let with_turn_pool ~servers f =
   | Some env ->
     Lsp_workspace_pool.with_pool
       ~clock:(Eio.Stdenv.clock env)
-      ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~proc_mgr:Posix_spawn_process_mgr.mgr
       ~servers
       (fun pool -> Eio.Fiber.with_binding pool_key pool f)
 ;;

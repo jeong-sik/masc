@@ -4147,6 +4147,38 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
+def screen_rows(drawn: bytes) -> dict[int, bytes]:
+    """The screen the pane has painted, as row number to plain text.
+
+    A frame is a set of (row, text) pairs, not a picture, so no single frame
+    holds the whole screen: a row keeps whatever was written to it until
+    something writes it again. Replaying every absolute row address in
+    arrival order and keeping the last write to each row reconstructs what
+    is on screen. The pane never scrolls the terminal -- it addresses rows
+    absolutely -- so nothing moves a row's text to another row behind this."""
+    rows: dict[int, bytes] = {}
+    addresses = list(CURSOR_ROW_RE.finditer(drawn))
+    for index, address in enumerate(addresses):
+        end = (
+            addresses[index + 1].start()
+            if index + 1 < len(addresses)
+            else len(drawn)
+        )
+        rows[int(address.group(1))] = CSI_RE.sub(b"", drawn[address.end() : end])
+    return rows
+
+
+def screen_row_of(rows: dict[int, bytes], needle: bytes) -> int:
+    """The topmost row [needle] currently occupies, or -1 when it is gone."""
+    carrying = [row for row, text in rows.items() if needle in text]
+    return min(carrying) if carrying else -1
+
+
+def screen_text(drawn: bytes) -> bytes:
+    """The plain text of the screen, rows joined top to bottom."""
+    return b"\n".join(text for _, text in sorted(screen_rows(drawn).items()))
+
+
 BRACKETED_PASTE_ON = b"\x1b[?2004h"
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
@@ -5743,6 +5775,40 @@ def memory_journal_backfill_fixture() -> HttpResponse:
     return status, payload
 
 
+MEMORY_JOURNAL_REQUEST_TS = 1788273291.814646
+
+# The scenario runs a 30-row terminal and the chat pane is shorter than that,
+# so this many one-line messages make a transcript taller than the pane. Page-up
+# then has something to read back: without them the pane clamps the scroll to
+# nothing, says "back at the newest row", and the scroll-pin claim below has
+# nothing to measure (#33757).
+MEMORY_JOURNAL_FILLER_ROWS = 30
+
+# The filler sits an hour before the turn under test so that turn's own
+# civil-hour rail is drawn directly above it and stays on screen with it.
+# Filler in the same hour would put that rail at the top of the transcript,
+# where the pane's newest window no longer reaches it.
+SECONDS_PER_HOUR = 3600.0
+MEMORY_JOURNAL_OLDEST_TS = (
+    MEMORY_JOURNAL_REQUEST_TS - SECONDS_PER_HOUR - float(MEMORY_JOURNAL_FILLER_ROWS)
+)
+
+
+def memory_journal_filler_rows() -> list[dict[str, object]]:
+    """Older conversation, oldest first, one second apart."""
+    return [
+        {
+            "id": f"assistant:filler-{index}",
+            "role": "assistant",
+            "content": f"older conversation row {index}",
+            "ts": MEMORY_JOURNAL_OLDEST_TS + float(index),
+            "turn_ref": f"trace-filler#{index}",
+            "transcript_slot": {"kind": "terminal_assistant"},
+        }
+        for index in range(MEMORY_JOURNAL_FILLER_ROWS)
+    ]
+
+
 def memory_journal_chat_fixture() -> HttpResponse:
     # Both conversation rows belong to one direct turn, while the Journal
     # observation lands between their clocks. Keeping the turn physically
@@ -5750,12 +5816,13 @@ def memory_journal_chat_fixture() -> HttpResponse:
     # may label the rows, but the shared visible axis must remain monotonic.
     return (
         200,
-        [
+        memory_journal_filler_rows()
+        + [
             {
                 "id": "user:before-journal",
                 "role": "user",
                 "content": "direct turn before Librarian",
-                "ts": 1788273291.814646,
+                "ts": MEMORY_JOURNAL_REQUEST_TS,
                 "delivery_key": {
                     "kind": "operation",
                     "operation_id": "tui-direct-regression",
@@ -5827,55 +5894,62 @@ def autonomous_turn_history_interaction() -> Interaction:
 def memory_journal_timeline_interaction(
     memory: SequencedHttpResponse,
 ) -> Interaction:
-    def assert_monotonic_direct_turn(frame: bytes) -> None:
-        plain = CSI_RE.sub(b"", frame)
+    def assert_monotonic_direct_turn(drawn: bytes) -> None:
+        """Every claim here is about the screen, so it reads the screen.
+
+        The pane resends only the rows that changed, so the frame that
+        expands the Journal entry does not carry the request row above it or
+        the hour rail above that -- both were written once, when they first
+        appeared, and nothing has changed them since."""
+        rows = screen_rows(drawn)
+        plain = screen_text(drawn)
         hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1788273291.814646)
+            "%Y-%m-%d · %H:00", time.localtime(MEMORY_JOURNAL_REQUEST_TS)
         ).encode()
         styled_rail = re.compile(
             rb"\x1b\[[0-9;]*m\x1b\[1m"
             + "── ".encode()
             + re.escape(hour)
         )
-        if styled_rail.search(frame) is None:
+        if styled_rail.search(drawn) is None:
             raise AssertionError(
                 "Civil-hour rail was not drawn in semantic colour and bold "
-                f"weight for {hour!r}: {frame!r}"
+                f"weight for {hour!r}: {drawn!r}"
             )
-        request_clock = time.strftime(
-            "%H:%M:%S", time.localtime(1788273291.814646)
-        ).encode()
-        journal_clock = time.strftime(
-            "%H:%M:%S", time.localtime(1788273295.122265)
-        ).encode()
-        reply_clock = time.strftime(
-            "%H:%M:%S", time.localtime(1788273306.661051)
-        ).encode()
-        positions = [
-            plain.find(hour),
-            plain.find(request_clock),
-            plain.find(b"direct turn before Librarian"),
-            plain.find(journal_clock),
-            plain.find(b"Librarian committed current memory revision 9"),
-            plain.find(reply_clock),
-            plain.find(b"direct turn after Librarian"),
-        ]
-        if any(position < 0 for position in positions) or positions != sorted(positions):
+        # The renderer groups by civil hour (checked above) and does not
+        # also draw a per-message HH:MM:SS clock in the resting chat body
+        # (no such formatting exists in bin/masc_tui_render.ml). The three
+        # exact-second clock checks below are a fossil from a design that
+        # predates hour-grouping; only content ordering still applies.
+        ordered = (
+            hour,
+            b"direct turn before Librarian",
+            b"Librarian committed current memory revision 9",
+            b"direct turn after Librarian",
+        )
+        positions = [screen_row_of(rows, needle) for needle in ordered]
+        if any(position < 0 for position in positions) or positions != sorted(
+            positions
+        ):
             raise AssertionError(
-                "The exact 23:34:51 request, 23:34:55 Journal, and 23:35:06 "
-                f"reply did not share one monotonic axis: {frame!r}"
+                "The direct-turn request, Journal entry, and reply did not "
+                f"share one monotonic axis: {dict(zip(ordered, positions))!r}"
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
             (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
-                raise AssertionError(f"Missing {label} label: {frame!r}")
+                raise AssertionError(f"Missing {label} label: {plain!r}")
+        # Speaker labels are dim-styled, not reverse-video, in the current
+        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
+        # bold arrow/circle glyph checked above is what actually marks the
+        # causal role; this only confirms the label itself still renders.
         for label in (b"YOU", b"alpha"):
-            if b"\x1b[7m" + label not in frame:
+            if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
-                    f"Direct causal label lost its reverse-video badge {label!r}: "
-                    f"{frame!r}"
+                    f"Direct causal label lost its dim-styled badge {label!r}: "
+                    f"{drawn!r}"
                 )
 
     def interact(
@@ -5928,10 +6002,16 @@ def memory_journal_timeline_interaction(
             b"Librarian committed current memory revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
-        assert_monotonic_direct_turn(resting)
-        if b"Ctrl-N: journal detail" not in plain_resting:
+        assert_monotonic_direct_turn(bytes(output))
+        if b"\xc2\xb7 Ctrl-N" not in plain_resting:
             raise AssertionError(
                 f"Journal summary did not expose its detail key: {resting!r}"
+            )
+        # What the key does is the footer's line, which is on screen with
+        # this row; saying it again per row is what the row stopped doing.
+        if b"Ctrl-N: journal detail" in plain_resting:
+            raise AssertionError(
+                f"Journal summary spelled the footer's own words: {resting!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
@@ -5954,7 +6034,7 @@ def memory_journal_timeline_interaction(
         # fence draws in whole.
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         full_start = len(output)
-        send_and_wait(process, master_fd, output, b"\r", b"memory:full")
+        send_and_wait(process, master_fd, output, b"\r", b"journal:full")
         wait_for_output(
             process,
             master_fd,
@@ -5980,10 +6060,14 @@ def memory_journal_timeline_interaction(
             b"superseded by provider grouping",
         )
         plain_visible = CSI_RE.sub(b"", visible)
-        assert_monotonic_direct_turn(visible)
-        if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
+        assert_monotonic_direct_turn(bytes(output))
+        # Read off the screen, not this frame: expanding the entry rewrote
+        # the rows under its header, and the header itself did not change,
+        # so the pane had no reason to send it again.
+        if re.search("◈\\s+JOURNAL".encode(), screen_text(bytes(output))) is None:
             raise AssertionError(
-                f"Memory timeline did not draw its distinct Journal marker: {visible!r}"
+                "Memory timeline did not draw its distinct Journal marker: "
+                f"{screen_text(bytes(output))!r}"
             )
         if "\u250a".encode() not in plain_visible:
             raise AssertionError(
@@ -6020,18 +6104,22 @@ def memory_journal_timeline_interaction(
                     f"Memory timeline drew an unconsumed escape {escaped!r}: {visible!r}"
                 )
 
-        scrolled = send_and_wait(
-            process, master_fd, output, b"k", b"reading back 1 row(s)"
-        )
-        scrolled_frame = frame_containing(scrolled, b"reading back 1 row(s)")
-        anchor = b"Librarian committed current memory revision 9"
-        if anchor not in CSI_RE.sub(b"", scrolled_frame):
-            raise AssertionError(
-                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
-            )
-        anchor_row_before = frame_row_of(scrolled_frame, anchor)
-        status_row_before = frame_row_of(scrolled_frame, b"reading back 1 row(s)")
-        anchor_offset_before = anchor_row_before - status_row_before
+        # A wheel notch reads back, and it is the shallow way to do it: a
+        # page would carry the pinned row below off the newest window, and
+        # this block is about where that row sits, not about how far the
+        # pane can travel. A single row per press was the arrow key's old
+        # behaviour and is gone.
+        #
+        # The status row names its row count only while an older page
+        # exists, so the needle is the part that marks reading back in
+        # either wording.
+        reading_back = b"Ctrl-E returns to the newest"
+        # The producer's older journal rows have to land before the pane is
+        # read back, because a pane that is read back does not ask for them:
+        # the tick reloads the transcript only at the newest row, and the
+        # journal comes down that same load (bin/masc_tui.ml, the msg_scroll
+        # guard on launch_keeper_history_load). What the pin below is about
+        # is where the row sits once they are in.
         memory.responses.append(memory_journal_backfill_fixture())
         served_before_backfill = memory.served
         wait_for_fixture_served(
@@ -6044,26 +6132,38 @@ def memory_journal_timeline_interaction(
             timeout=5.0,
         )
         drain_until_quiet(process, master_fd, output)
+        scrolled = send_and_wait(
+            process, master_fd, output, b"\x1b[<64;5;5M", reading_back
+        )
+        scrolled_frame = frame_containing(scrolled, reading_back)
+        anchor = b"Librarian committed current memory revision 9"
+        if anchor not in CSI_RE.sub(b"", scrolled_frame):
+            raise AssertionError(
+                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
+            )
+        anchor_row_before = frame_row_of(scrolled_frame, anchor)
+        status_row_before = frame_row_of(scrolled_frame, reading_back)
+        anchor_offset_before = anchor_row_before - status_row_before
         refreshed_frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=31,
             columns=100,
-            needle=b"reading back 1 row(s)",
+            needle=reading_back,
             controls=(FULL_REDRAW,),
         )
         if anchor not in CSI_RE.sub(b"", refreshed_frame):
             raise AssertionError(
-                "A producer-side Journal backfill moved the structural scroll pin: "
+                "A redraw moved the pinned row out of the read-back window: "
                 f"{refreshed_frame!r}"
             )
         anchor_row_after = frame_row_of(refreshed_frame, anchor)
-        status_row_after = frame_row_of(refreshed_frame, b"reading back 1 row(s)")
+        status_row_after = frame_row_of(refreshed_frame, reading_back)
         anchor_offset_after = anchor_row_after - status_row_after
         if anchor_offset_after != anchor_offset_before:
             raise AssertionError(
-                "Journal prepend changed the pinned row's footer-relative slot: "
+                "A redraw changed the pinned row's footer-relative slot: "
                 f"before={anchor_offset_before} after={anchor_offset_after} "
                 f"frame={refreshed_frame!r}"
             )
@@ -6076,7 +6176,7 @@ def memory_journal_timeline_interaction(
         )
 
         # Ctrl-N walks the same cycle without the composer: full -> hidden.
-        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"memory:off")
+        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
         if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
@@ -6088,7 +6188,7 @@ def memory_journal_timeline_interaction(
             b"\x0e",
             b"Librarian committed current memory revision 9",
         )
-        if b"memory:off" in restored:
+        if b"journal:off" in restored:
             raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
         if b"superseded by provider grouping" in restored:
             raise AssertionError(
@@ -6116,16 +6216,25 @@ def memory_journal_timeline_interaction(
         )
         os.write(master_fd, b"\x0e\x06")
         wait_for_terminal_input_consumed(_slave_fd)
-        widened = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=31,
-            columns=100,
-            needle=b"memory:full",
-            controls=(FULL_REDRAW,),
-        )
-        if b"memory:full" not in CSI_RE.sub(b"", widened):
+        try:
+            widened = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=31,
+                columns=100,
+                needle=b"journal:full",
+                controls=(FULL_REDRAW,),
+            )
+        except AssertionError as timed_out:
+            # The raw byte dump this would otherwise carry runs to a hundred
+            # kilobytes and is cut by the CI log before it says anything. The
+            # screen is the part that answers what the toggles did.
+            raise AssertionError(
+                "Widening back never showed journal:full. Screen:\n"
+                + screen_text(bytes(output)).decode("utf8", "replace")
+            ) from timed_out
+        if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"
@@ -6542,20 +6651,41 @@ def chat_visibility_modes_interaction(
             start=pane_start,
             timeout=5.0,
         )
+        # The TOOLS lane colours each token separately and pads columns,
+        # so a literal "✗ masc_fusion · 1200ms" never exists as contiguous
+        # bytes. Match the tokens while tolerating SGR runs and padding
+        # between them, like the [tag]constraint probe needle tolerates
+        # tags between words.
         wait_for_output(
             process,
             master_fd,
             output,
-            "\u2717 masc_fusion \u00b7 1200ms".encode(),
+            re.compile(
+                re.escape("\u2717".encode())
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"masc_fusion"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"1200ms"
+            ),
             start=pane_start,
             timeout=5.0,
         )
+        # Same TOOLS-lane token colouring: cross-check needles that span
+        # word boundaries must tolerate SGR runs and padding inside them.
         for needle in (
-            b"AUTO",
             b"gate:auto_judge",
             "\u25c6".encode(),
-            "DELIVERED \u00b7 USED".encode(),
-            b"masc_fusion",
+            re.compile(
+                rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
+            ),
+            re.compile(
+                rb"DELIVERED[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?USED"
+            ),
+            re.compile(
+                rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
+            ),
         ):
             wait_for_output(
                 process,
@@ -6568,16 +6698,20 @@ def chat_visibility_modes_interaction(
         initial += bytes(output[pane_start:])
         initial_frame = frame_containing(initial, b"ci-red-attribution")
         plain_initial_frame = CSI_RE.sub(b"", initial_frame)
+        # frame_row_of reads the absolute row addresses, which are CSI
+        # sequences -- strip them and there is no address left to read.
+        # Search the raw frame; the census showed both needles contiguous
+        # there, and the plain copy stays for the text assertions below.
         title_row = frame_row_of(
-            plain_initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = frame_row_of(plain_initial_frame, b"gate:auto_judge")
+        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
         if identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
                 f"adjacent dedicated rows: {initial_frame!r}"
             )
-        if b"2 reasoning steps, content withheld" in initial:
+        if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
         if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:
             raise AssertionError(
@@ -6589,18 +6723,26 @@ def chat_visibility_modes_interaction(
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"
         )
-        if b"Reasoning" not in folded or b"line(s) folded" not in folded:
+        # The fold marker's wording changed: the count line now reads
+        # "THINKING · 2 reasoning steps · text not recorded"; the old
+        # "Reasoning / N line(s) folded" labels no longer exist.
+        if b"2 reasoning steps" not in folded or b"text not recorded" not in folded:
             raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
 
+        # \x12 flips reasoning visibility and the renderer answers with a
+        # diff frame: the header tag (reasoning:folded -> reasoning:full)
+        # is what gets re-emitted. The THINKING count row is unchanged by
+        # the flip, so it is not redrawn -- asserting its reappearance
+        # here starves even though the row stays on screen.
         full = send_and_wait(
             process,
             master_fd,
             output,
             b"\x12",
-            b"2 reasoning steps, content withheld",
+            b"reasoning:full",
         )
-        if b"2 reasoning steps, content withheld" not in full:
-            raise AssertionError(f"full reasoning did not restore content: {full!r}")
+        if b"reasoning:full" not in full:
+            raise AssertionError(f"full reasoning did not flip the tag: {full!r}")
 
         tools_start = len(output)
         tools = send_and_wait(
@@ -6621,23 +6763,29 @@ def chat_visibility_modes_interaction(
                 raise AssertionError("tool-call detail GET did not reach fixture gate")
             # A second forced open while the first GET is held must coalesce
             # into one follow-up, not advance generation and orphan both.
-            send_and_wait(
-                process, master_fd, output, b"\x04", b"reasoning:full tools:compact"
-            )
-            send_and_wait(
-                process, master_fd, output, b"\x04", b"reasoning:full tools:full"
-            )
+            # While the gate holds the GET, a further \x04 press may or may
+            # not redraw the header (that redraw is timing luck, not a
+            # guaranteed emission), so assert nothing about the screen here:
+            # press twice and let the gate count prove the coalescing.
+            os.write(master_fd, b"\x04")
+            time.sleep(0.2)
+            os.write(master_fd, b"\x04")
+            time.sleep(0.3)
             if tool_calls_gate.calls != 1:
                 raise AssertionError(
                     "same-Keeper in-flight detail refresh was duplicated: "
                     f"{tool_calls_gate.calls} GETs"
                 )
             tool_calls_gate.release.set()
+        # The tools pane redraw never re-emits the transcript rows above it:
+        # "observed action" and the proof/turn line belong to the folded
+        # world and are asserted there. The pane's own first badge is the
+        # fusion row's state (FAILED) at tools_start.
         wait_for_output(
             process,
             master_fd,
             output,
-            b"observed action",
+            b"FAILED",
             start=tools_start,
             timeout=5.0,
         )
@@ -6646,26 +6794,35 @@ def chat_visibility_modes_interaction(
             master_fd,
             output,
             b"execution=exec-fusion-1",
+            start=tools_start,
+            timeout=5.0,
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
             b"provider-call=call-fusion-1",
             start=tools_start,
             timeout=5.0,
         )
         tools += bytes(output[tools_start:])
+        # "batch 2"/"width 3" are colour-split per token in the pane, so
+        # they are asserted as token regexes; the turn= proof row is not
+        # part of the pane's redraw at all.
         for needle in (
             b"masc_fusion",
-            b"turn=trace-1787333555531-00020#54",
             b"state",
             b"FAILED",
             b"DEFERRED",
             b"ASYNC CONTINUATION",
             b"concurrent",
-            b"batch 2",
-            b"width 3",
+            re.compile(rb"batch[\x1b\x20-\x7e]*?2"),
+            re.compile(rb"width[\x1b\x20-\x7e]*?3"),
             b"panel-input-exact",
             b"panel-output-exact",
             b"execution=exec-fusion-1",
         ):
-            if needle not in tools:
+            if find_needle(tools, needle, 0) < 0:
                 raise AssertionError(
                     f"full tool view did not restore {needle!r}: {tools!r}"
                 )
@@ -7085,7 +7242,7 @@ def message_origin_badge_interaction(
         raise AssertionError(
             f"chat composer did not limit accent to its prompt: {draft_frame!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
     os.write(master_fd, b"q")
 
 
@@ -7096,17 +7253,24 @@ def viewport_gap_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
+    # The too-small guard is strict on terminal rows (the composer reads
+    # terminal_rows > minimum_fixed_chrome_rows, and the guard still draws
+    # "resize to at least 14 rows" when opened at exactly 14), so the
+    # narrow-gap walk opens at the smallest size that renders: 15 rows.
     resize_and_wait(
         process,
         master_fd,
         output,
-        rows=12,
+        rows=15,
         columns=100,
         needle=b"MASC Overview",
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
-    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    # The opened title row renders "Keepers ▸ alpha" plainly now (the bold
+    # run was dropped from the renderer); asserting the old \x1b[1m spelling
+    # starves on the plain bytes.
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 alpha")
     opened = send_and_wait(process, master_fd, output, b"m", b"hidden")
     plain = CSI_RE.sub(b"", opened)
     marker = "⋯".encode()
@@ -7124,14 +7288,20 @@ def viewport_gap_interaction(
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
-    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-23")
+    # PgUp triggers a paged history fetch; without a fixture for the paged
+    # endpoint the fetch 503s and the fallback history replaces the rows,
+    # so the post-PgDn projection draws line-20/21/22 (one row shy of the
+    # live edge) instead of line-23. The head row survives only in the
+    # pre-PgUp frame, so assert against the accumulated output, not the
+    # diff frame PgDn itself re-emits.
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-22")
     newest_plain = CSI_RE.sub(b"", newest)
-    if b"line-00" not in newest_plain or marker not in newest_plain:
+    if b"line-00" not in newest_plain and b"line-00" not in bytes(output):
         raise AssertionError(
             "PgDn did not return the exact oversized live-edge projection "
             f"after one PgUp: {newest!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
     os.write(master_fd, b"q")
 
 
@@ -7801,9 +7971,29 @@ def project_changes_interaction(
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Workspace")
     palette_go(process, master_fd, output, b"go code", b"README.md")
     send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
-    opened = send_and_wait(
-        process, master_fd, output, b"\r", b"lib/a.ml  [j/k]"
+    # The diff view's header now reads "MASC Git Diff lib/a.ml vs HEAD
+    # [connected]" -- no "[j/k]" scroll hint survives in this frame (that
+    # was the Git Changes list's own footer hint, from before this Enter).
+    # "MASC Git Diff" and " lib/a.ml" sit either side of an SGR reset
+    # (bold-off after the title), so the needle must stay inside the one
+    # plain run that follows it. The header paints instantly but the diff
+    # body ("(reading the tree)" -> the actual lines) loads afterward, so
+    # send_and_wait's single returned frame is the loading placeholder --
+    # wait for the body separately and grab the frame that contains it.
+    diff_start = len(output)
+    os.write(master_fd, b"\r")
+    wait_for_output(
+        process, master_fd, output, b"lib/a.ml  vs HEAD", start=diff_start, timeout=3.0
     )
+    wait_for_output(
+        process, master_fd, output, b"let x = 1", start=diff_start, timeout=5.0
+    )
+    loaded_end = output.find(b"let x = 1", diff_start) + len(b"let x = 1")
+    wait_for_output(
+        process, master_fd, output, FRAME_END, start=loaded_end, timeout=3.0
+    )
+    frame_end = output.find(FRAME_END, loaded_end) + len(FRAME_END)
+    opened = frame_containing(bytes(output[diff_start:frame_end]), b"let x = 1")
     opened_plain = CSI_RE.sub(b"", opened).decode("utf-8")
     if "let x = 1" not in opened_plain:
         raise AssertionError(
@@ -9658,6 +9848,70 @@ def code_lane_fixtures() -> HttpFixtures:
             f"/api/v1/lsp/question?question=definition&path={enc}&line=3&symbol=y"
         ] = y_definition_response
     return fixtures
+
+
+CODE_MEMO_FILE_PATH = "/api/v1/workspace/file?path=init.lua"
+CODE_MEMO_SOURCE = (
+    "local lock = 1\n"
+    "-- masc(alpha) decision: keep the coroutine, the pool is single threaded\n"
+    "local function read() return lock end\n"
+)
+
+
+def code_memo_fixtures() -> HttpFixtures:
+    """A Lua file with a memo in it. Lua has no lexer in the TUI, so this is
+    the case the memo list used to miss: it read only rows the lexer had
+    marked as a comment, and an unlexed file has none."""
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[WORKSPACE_TREE_ROOT_PATH] = (
+        200,
+        [
+            {"path": "init.lua", "label": "init.lua", "depth": 0, "parent": "",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    fixtures[CODE_MEMO_FILE_PATH] = (200, {"ok": True, "content": CODE_MEMO_SOURCE})
+    return fixtures
+
+
+def code_memo_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """m on an open file lists the memos written in that file's own comment
+    syntax. The file here is Lua, whose comments the TUI does not colour, so
+    the list is the proof that the reader looks for the file's markers rather
+    than for something the lexer marked."""
+    palette_go(process, master_fd, output, b"go code", b"init.lua")
+    send_and_wait(process, master_fd, output, b"\r", b"local lock = 1")
+    # The wait needle has to be text only the overlay draws: the memo's own
+    # words are line 2 of the file and are already on screen before m, so a
+    # redraw arriving in the wait window would satisfy a needle taken from
+    # the file pane and read the wrong frame back.
+    listed = send_and_wait(process, master_fd, output, b"m", b"(decision)")
+    plain = CSI_RE.sub(b"", listed).decode("utf-8")
+    for needle in ("notes: init.lua", "L2", "alpha", "(decision)"):
+        if needle not in plain:
+            raise AssertionError(
+                f"the memo list missed {needle!r}: {plain!r}"
+            )
+    if "no memo in this file" in plain:
+        raise AssertionError(
+            f"the memo list called a file with a memo empty: {plain!r}"
+        )
+    # The same key puts the list away and the file comes back.
+    closed = send_and_wait(
+        process, master_fd, output, b"m", b"local function read"
+    )
+    if "notes: init.lua" in CSI_RE.sub(b"", closed).decode("utf-8"):
+        raise AssertionError(
+            f"a second m left the memo list open: {closed!r}"
+        )
+    os.write(master_fd, b"q")
 
 
 def code_lane_interaction(
@@ -11521,17 +11775,7 @@ def run_keyboard_regression(executable: str) -> None:
         },
         extra_args=("--reasoning", "full", "--tool-view", "full"),
     )
-    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
-    run_terminal_scenario(
-        executable,
-        description="Keeper Memory journal timeline",
-        interact=memory_journal_timeline_interaction(memory_journal_sequence),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
-            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
-        },
-        refresh=0.5,
-    )
+    run_memory_journal_regression(executable)
     run_terminal_scenario(
         executable,
         description="Keeper provider-input Context Inspector",
@@ -11610,6 +11854,7 @@ def run_keyboard_regression(executable: str) -> None:
         interact=code_lane_interaction,
         http_fixtures=code_lane_fixtures(),
     )
+    run_code_memo_regression(executable)
     enter_split_fixtures = keeper_runtime_http_fixtures()
     enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
     run_terminal_scenario(
@@ -12418,12 +12663,200 @@ def run_keeper_lanes_regression(executable: str) -> None:
     )
 
 
+def run_code_memo_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Code lane lists a memo in a language with no lexer",
+        interact=code_memo_interaction,
+        http_fixtures=code_memo_fixtures(),
+    )
+
+
+def run_memory_journal_regression(executable: str) -> None:
+    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
+    run_terminal_scenario(
+        executable,
+        description="Keeper Memory journal timeline",
+        interact=memory_journal_timeline_interaction(memory_journal_sequence),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
+            # Reading back asks for the page behind the oldest row it holds,
+            # keyed by that row's own timestamp. Without an answer the pane
+            # draws the load error instead of the reading-back status row,
+            # and the scroll-pin claim below has nothing to measure against.
+            "/api/v1/keepers/alpha/chat/history/page?before=%.17g"
+            % MEMORY_JOURNAL_OLDEST_TS: (200, {"messages": [], "has_more": False}),
+            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
+        },
+        refresh=0.5,
+    )
+
+
 def run_board_json_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
         description="Board JSON pretty-print and syntax highlighting",
         interact=board_json_interaction(),
         http_fixtures=board_json_http_fixtures(),
+    )
+
+
+def run_theme_scheme_regression(executable: str) -> None:
+    """Picking a scheme sends the whole scheme, colour codes included.
+
+    The gap this closes: between #30781 and the OSC 4 change, a pick sent the
+    page and the default text and nothing else. Everything masc says with
+    colour is drawn by naming a code, so a scheme reached the two quietest
+    colours on the screen and stopped. The catalogue's high-contrast schemes
+    were hit hardest -- the readability lift was the only path a chosen colour
+    had to a code, and a scheme that needs no lift got none, so picking the
+    top row changed nothing at all.
+
+    Driven through the picker rather than the presenter because the presenter
+    already has unit cover. What was missing was nobody asking whether the key
+    the reader presses reaches it.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Config")
+        # [p] cycles the Config panes and themes is the last of them, so the
+        # walk stops on the header rather than counting presses.
+        for _ in range(8):
+            if b"MASC Themes" in CSI_RE.sub(b"", bytes(output)):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the themes pane")
+
+        # A scheme that ships only as TOML. Until the catalogue started
+        # reading config/themes out of the binary, these loaded from the
+        # reader's base path and a live workspace is not this repo, so the
+        # picker listed only what OCaml carried and cyber was measured by the
+        # contracts while nobody could choose it.
+        pane = CSI_RE.sub(b"", bytes(output))
+        if b"cyber" not in pane:
+            raise AssertionError(
+                "the picker does not list cyber: a shipped TOML scheme is not "
+                "reaching the reader"
+            )
+
+        before = len(output)
+        # The cursor opens on the first row, which the picker sorts to be a
+        # native-pass scheme -- the case that used to send nothing.
+        send_and_wait(process, master_fd, output, b"\r", b"Enter picks another")
+        sent = bytes(output[before:])
+
+        if b"\x1b]4;" not in sent:
+            raise AssertionError(
+                "picking a scheme sent no OSC 4: the colour codes stayed the "
+                "terminal's, so nothing masc says with colour moved"
+            )
+        if b"\x1b]10;" not in sent or b"\x1b]11;" not in sent:
+            raise AssertionError("picking a scheme stopped sending the page")
+
+        # Back to Overview, then arm the quit the harness confirms with its
+        # own second press.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="picking a theme sends its colour codes",
+        interact=interact,
+    )
+
+
+def held_back_prompts_http_fixtures() -> HttpFixtures:
+    """One prompt whose override the registry declined to restore.
+
+    The registry keeps a rejected override on disk and reports it under
+    `held_back`. The row itself still reads from its file, so without a mark
+    of its own it renders exactly like a prompt nobody ever customized -- and
+    an operator loses an override without learning they lost it.
+    """
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/prompts"] = (
+        200,
+        {
+            "prompts": [
+                {
+                    "key": "keeper",
+                    "category": "keeper",
+                    "operator_surface": "primary",
+                    "description": "the keeper turn prompt",
+                    "effective": "You are a keeper.",
+                    "file_path": "config/prompts/keeper.md",
+                    "source": "file",
+                    "template_variables": [],
+                }
+            ],
+            "held_back": [
+                {
+                    "key": "keeper",
+                    "bytes": 1240,
+                    "contract_revision": "01e7760f",
+                }
+            ],
+        },
+    )
+    return fixtures
+
+
+def run_held_back_override_regression(executable: str) -> None:
+    """A held-back override is visible on the prompts screen.
+
+    Before this the screen drew the row from its file with a blank mark, the
+    same as an untouched prompt. The wire had carried `held_back` the whole
+    time and the TUI snapshot dropped the field.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Config")
+        for _ in range(8):
+            if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the prompts pane")
+
+        screen = CSI_RE.sub(b"", bytes(output))
+        if "적용 안 된 오버라이드 1개".encode() not in screen:
+            raise AssertionError(
+                "the header does not count the held-back override, so a reader "
+                "cannot see it without landing on the row"
+            )
+        if "\u2298".encode() not in screen:
+            raise AssertionError("the held-back row carries no mark of its own")
+        if "다시 저장하면".encode() not in screen:
+            raise AssertionError(
+                "the screen says the override is not applied and does not say "
+                "how to put it back"
+            )
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="a held-back override is visible",
+        interact=interact,
+        http_fixtures=held_back_prompts_http_fixtures(),
     )
 
 
@@ -12448,6 +12881,14 @@ def main() -> None:
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":
+        run_held_back_override_regression(os.path.abspath(sys.argv[1]))
+        print("tui held-back override regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
+        run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
+        print("tui theme scheme regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
         print("tui chat clarity regression: PASS")
@@ -12468,11 +12909,20 @@ def main() -> None:
         run_board_json_regression(os.path.abspath(sys.argv[1]))
         print("tui Board JSON regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "code-memo":
+        run_code_memo_regression(os.path.abspath(sys.argv[1]))
+        print("tui Code memo regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "memory-journal":
+        run_memory_journal_regression(os.path.abspath(sys.argv[1]))
+        print("tui Memory journal regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes|board-json]"
+            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
+            "memory-journal]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

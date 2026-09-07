@@ -13,7 +13,7 @@
     rule into {!rule}; both reject anything a resolver could read
     differently than this module does. A value that failed to parse is not a
     host that missed the allowlist -- there is no such value to hand
-    {!matches}. *)
+    [matches]. *)
 
 type parse_error =
   | Empty  (** No bytes, or nothing left after trimming one trailing dot. *)
@@ -38,7 +38,7 @@ val parse_error_to_string : parse_error -> string
 
 type t
 (** A destination that parsed. Either a domain name or an IP literal --
-    {!matches} keeps them apart, so a name rule can never answer for an
+    [matches] keeps them apart, so a name rule can never answer for an
     address. *)
 
 val parse : string -> (t, parse_error) result
@@ -94,18 +94,6 @@ val pp_rule : Format.formatter -> rule -> unit
 
 val rule_port : rule -> int
 (** The port this rule permits. *)
-
-val matches : rule -> t -> port:int -> bool
-(** Whether this rule admits this destination on this port.
-
-    An exact rule admits only the identical normalized name, or the
-    identical IP literal. A wildcard admits a strict subdomain and refuses
-    the apex, so [*.example.com] answers for [api.example.com] and not for
-    [example.com]. A wildcard never answers for an IP literal.
-
-    Matching is on parsed labels, not on string suffix: [notexample.com]
-    cannot be admitted by [*.example.com] the way an [endsWith] check would
-    admit it. *)
 
 val admits : rule list -> t -> port:int -> bool
 (** Whether any rule admits the destination on the port. An empty list

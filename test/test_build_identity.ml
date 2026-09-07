@@ -135,6 +135,42 @@ let test_repeated_current_does_not_rehash_the_executable () =
     true
     (elapsed < 1.0)
 
+(* `masc start` from the masc checkout produced five of these at every boot:
+
+     build_identity: Unix.realpath failed for
+       /Users/dancer/me/workspace/yousleepwhen/masc/masc
+
+   argv0 is "masc", which is relative -- but relative to PATH, not to the cwd,
+   so joining it to the cwd names a file that does not exist. The cost is not
+   the warning: executable_dir then equals cwd, pick_repo_candidates collapses
+   to one entry, and the repo probe answers with whatever checkout the process
+   was started from. *)
+let test_bare_argv0_is_not_resolved_against_the_cwd () =
+  Alcotest.(check string)
+    "a PATH launch answers the runtime's own resolution"
+    "/opt/homebrew/bin/masc"
+    (Build_identity.executable_candidate
+       ~cwd:"/Users/dancer/me/workspace/yousleepwhen/masc"
+       ~executable_name:"/opt/homebrew/bin/masc"
+       ~argv0:"masc")
+
+let test_argv0_with_a_directory_is_still_cwd_relative () =
+  Alcotest.(check string)
+    "./_build/... keeps resolving against the cwd"
+    "/repo/_build/default/bin/main_eio.exe"
+    (Build_identity.executable_candidate
+       ~cwd:"/repo"
+       ~executable_name:"_build/default/bin/main_eio.exe"
+       ~argv0:"_build/default/bin/main_eio.exe")
+
+let test_bare_names_everywhere_do_not_invent_a_path () =
+  (* Neither name can be resolved without a PATH search. Answering the name is
+     honest; answering cwd/name is a file that is not there. *)
+  Alcotest.(check string)
+    "no cwd-joined guess"
+    "masc"
+    (Build_identity.executable_candidate ~cwd:"/repo" ~executable_name:"masc" ~argv0:"masc")
+
 let test_direct_launch_still_identifies_its_executable () =
   let current = Build_identity.current () in
   let json = Build_identity.to_yojson current in
@@ -776,6 +812,12 @@ let () =
             `Quick test_repeated_current_does_not_rehash_the_executable;
           Alcotest.test_case "direct launch still identifies its executable"
             `Quick test_direct_launch_still_identifies_its_executable;
+          Alcotest.test_case "a bare argv0 is not resolved against the cwd"
+            `Quick test_bare_argv0_is_not_resolved_against_the_cwd;
+          Alcotest.test_case "an argv0 with a directory stays cwd-relative"
+            `Quick test_argv0_with_a_directory_is_still_cwd_relative;
+          Alcotest.test_case "bare names everywhere do not invent a path"
+            `Quick test_bare_names_everywhere_do_not_invent_a_path;
           Alcotest.test_case "parse commit timestamp output" `Quick
             test_parse_commit_unix_ts_output;
           Alcotest.test_case "parse dune-project version" `Quick

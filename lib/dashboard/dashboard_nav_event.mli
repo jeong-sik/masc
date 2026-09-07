@@ -14,14 +14,6 @@ type event =
   ; redirected_from : string option
   }
 
-(** Strict allowlist of valid surface IDs. Mirrors [VALID_TABS] in
-    [dashboard/src/types/sse.ts]. *)
-val valid_surfaces : string list
-
-(** Strict allowlist of [(surface, section)] pairs. Generated from
-    [dashboard/src/config/navigation.ts]. *)
-val valid_sections : (string * string list) list
-
 (** [parse_event_json json] parses the request body. Returns [Error msg]
     for any of: malformed JSON shape, missing [surface], unknown
     [surface], unknown [(surface, section)] pair, malformed

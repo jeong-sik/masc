@@ -12,8 +12,6 @@ type projection_error =
   | Projection_failed of string
   | Obligation_removal_failed of Fusion_delivery_obligation.error
 
-val projection_error_to_string : projection_error -> string
-
 
 val on_worker_settled :
   ?registry:Fusion_run_registry.t -> base_path:string -> Keeper_msg_async.worker_settlement -> unit

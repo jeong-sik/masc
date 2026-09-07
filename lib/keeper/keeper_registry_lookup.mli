@@ -14,9 +14,6 @@ val find_by_name : string -> registry_entry option
     queue nobody reads. *)
 val find_by_name_in_base_path : base_path:string -> string -> registry_entry option
 
-(** Look up a keeper by stable UID across all base_paths (O(n) scan). *)
-val find_by_id : Keeper_id.Uid.t -> registry_entry option
-
 (** Get tool usage by keeper name (scans all base_paths), sorted by
     call count descending. *)
 val tool_usage_of_by_name : string ->

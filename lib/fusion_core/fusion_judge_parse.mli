@@ -27,7 +27,7 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
 
-(** Wire field names consumed by {!of_json}. Provider-native output schemas must
+(** Wire field names consumed by [of_json]. Provider-native output schemas must
     use these constants instead of duplicating field strings. *)
 val wire_field_consensus : string
 val wire_field_consensus_text : string
@@ -53,13 +53,5 @@ val wire_decision_insufficient : string
 val wire_field_recommend_action : string
 val wire_field_recommend_rationale : string
 
-(** LLM JSON 값 → judge_synthesis.
-
-    - 리스트 필드(consensus/contradictions/partial_coverage/unique_insights/blind_spots)는
-      누락 시 [[]] 허용. 리스트 원소 중 필수 하위필드가 없는 것은 건너뛴다(advisory).
-    - [resolved_answer]와 [decision]은 필수. 누락/형태 오류는 [Error msg].
-    - [decision.kind]가 알 수 없는 값이면 [Error] (silent default 없음). *)
-val of_json : Yojson.Safe.t -> (Fusion_types.judge_synthesis, string) result
-
-(** JSON 문자열 파싱 편의. ```json 코드펜스를 허용하고 벗긴 뒤 {!of_json}. *)
+(** JSON 문자열 파싱 편의. ```json 코드펜스를 허용하고 벗긴 뒤 [of_json]. *)
 val of_string : string -> (Fusion_types.judge_synthesis, string) result

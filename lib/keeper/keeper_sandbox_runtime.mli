@@ -87,9 +87,6 @@ val docker_remove_argv : string -> string list
     execution. *)
 val docker_run_pull_never_args : unit -> string list
 
-(** Generic next action when Docker image inspection fails. *)
-val docker_image_inspect_next_action : string
-
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
 val docker_label_args
@@ -110,17 +107,10 @@ val sandbox_base_path_hash_label_key : string
 val sandbox_keeper_label_key : string
 val sandbox_kind_label_key : string
 
-val turn_container_kind : string
-(** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
-
 val persistent_container_kind : string
-(** Companion of {!turn_container_kind} for keeper-lifetime containers:
+(** Companion of [turn_container_kind] for keeper-lifetime containers:
     adopted across turns and server restarts, removed only when the keeper
     is. *)
-
-val current_owner_pid : unit -> int
-(** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to
-    select those containers again. *)
 
 val sandbox_owner_pid_label_key : string
 val sandbox_started_at_label_key : string
@@ -191,44 +181,26 @@ val docker_network_args :
     sandbox containers. *)
 val docker_nofile_args : unit -> string list
 
-(** Container-visible MASC runtime base outside the keeper playground bind
-    mount. *)
-val container_masc_runtime_base : container_root:string -> string
-
-(** Container-visible config root under {!container_masc_runtime_base}. *)
+(** Container-visible config root under [container_masc_runtime_base]. *)
 val container_masc_config_dir : container_root:string -> string
 
 (** Host-side config root for a MASC base path. *)
 val host_masc_config_dir : base_path:string -> string
 
-(** Docker [-v ...] spec that exposes [<base_path>/.masc/config] read-only
-    under {!container_masc_runtime_base}. *)
-val docker_masc_config_mount_spec : base_path:string -> container_root:string -> string
-
 (** Docker [-v ...] argv fragment for the MASC config bind mount. *)
 val docker_masc_config_mount_args : base_path:string -> container_root:string -> string list
-
-(** [MASC_BASE_PATH] and [MASC_CONFIG_DIR] values to pin inside the
-    container. *)
-val docker_masc_runtime_env_pairs : container_root:string -> (string * string) list
 
 (** Docker [--env ...] argv fragment for the container-side MASC runtime
     paths. *)
 val docker_masc_runtime_env_args : container_root:string -> string list
-
-(** Docker [--env ...] argv fragment for the numeric keeper user. *)
-val docker_user_env_args : unit -> string list
 
 (** Host-side config root mounted into keeper containers. Honors
     [MASC_CONFIG_DIR] when set; otherwise uses
     [<base_path>/.masc/config]. *)
 val docker_config_host_root : base_path:string -> string
 
-(** Container-side config root under {!container_masc_runtime_base}. *)
-val docker_config_container_root : container_root:string -> string
-
 (** Docker [-v ...] argv fragment that exposes the active config root
-    read-only under {!container_masc_runtime_base}. Returns [[]] when the host
+    read-only under [container_masc_runtime_base]. Returns [[]] when the host
     config root is absent. *)
 val docker_config_mount_args
   :  base_path:string

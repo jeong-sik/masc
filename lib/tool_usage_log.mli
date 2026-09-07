@@ -39,7 +39,3 @@ val attach_source_metadata : masc_root:string -> Yojson.Safe.t -> Yojson.Safe.t
 val read_recent : ?n:int -> unit -> Yojson.Safe.t list
 (** [read_recent ~n ()] reads the most recent [n] entries (default 10000)
     from the JSONL store. Returns [] if store is not initialized. *)
-
-val summary : unit -> (string * int) list
-(** [summary ()] returns [(tool_name, call_count)] pairs sorted by count
-    descending. Reads up to 100k entries from the store. *)

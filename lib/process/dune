@@ -23,6 +23,7 @@
   masc_core
   masc_log
   time_compat
+  masc.monotonic_deadline
   masc.time_codec
   masc_cancel_safe
   eio

@@ -64,64 +64,6 @@ module For_testing : sig
   (** Format a dashboard co-view context object ({ label, route, scene, fields })
       into turn instructions when no explicit [turn_instructions] is supplied. *)
 
-  val direct_no_progress_retry_reason :
-    Agent_core.Error.t -> Keeper_error_classify.degraded_retry_reason option
-  (** Return a direct-message no-progress retry reason for accept rejections
-      that are safe to rotate before surfacing an error. *)
-
-  val direct_no_progress_retry_decision :
-    base_runtime:string ->
-    effective_runtime:string ->
-    attempted_runtimes:string list ->
-    Agent_core.Error.t ->
-    Keeper_turn_runtime_budget.degraded_retry_decision
-  (** Retry decision for direct-message no-progress accept rejections.
-      Read-only no-progress remains terminal here because it already consumed
-      tool execution in the current attempt. *)
-
-  val run_direct_no_progress_retry_loop :
-    keeper_name:string ->
-    base_runtime:string ->
-    initial_execution:Keeper_turn_runtime_budget.runtime_execution ->
-    current_turn_phase_elapsed_ms:(float option -> int * int option) ->
-    now_s:(unit -> float) ->
-    setup_retry_runtime:
-      (string ->
-       (Keeper_turn_runtime_budget.runtime_execution, Agent_core.Error.t) result) ->
-    publish_cascade_resolution:
-      (runtime_id:string ->
-       decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
-       reason:string ->
-       next_runtime:string option ->
-       attempt:int ->
-       Agent_core.Error.t ->
-       unit) ->
-    emit_runtime_selected:
-      (runtime_id:string -> fallback_reason:string -> unit) ->
-    emit_runtime_rotation:
-      (from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
-    record_retry_setup_failure:
-      (from_runtime:string ->
-       retry:Keeper_error_classify.degraded_retry ->
-       rotation_attempt:Keeper_execution_receipt.runtime_rotation_attempt ->
-       fail_open_err:Agent_core.Error.t ->
-       unit) ->
-    before_retry:(unit -> unit) ->
-    run_once:
-      (runtime_id:string ->
-       max_context:int ->
-       is_retry:bool ->
-       degraded_retry_runtime:string option ->
-       fallback_reason:Keeper_error_classify.degraded_retry_reason option ->
-       runtime_rotation_attempts:
-         Keeper_execution_receipt.runtime_rotation_attempt list ->
-       ('a, Agent_core.Error.t) result) ->
-    unit ->
-    ('a * int, Agent_core.Error.t) result
-  (** Execute the direct-message no-progress retry loop with injected side
-      effects. The initial attempt receives its typed runtime execution record,
-      just like a retry. Exposed only to verify fallback selection without
-      duplicating the provider call inside the test. *)
 end
 
 (** Format a dashboard co-view context object ({ label, route, scene, fields })

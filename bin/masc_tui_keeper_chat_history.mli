@@ -87,9 +87,10 @@ type kind =
       }
   | Said_by_keeper
   | Autonomous_reply
-      (** What an autonomous turn said after its trace. A blank reply remains
-          a row, but callers can mark it instead of drawing an empty keeper
-          message. *)
+      (** What an autonomous turn said after its trace. Always something: a
+          turn that wrote nothing produces no row at all, because nobody asked
+          it to speak and an empty line said less than the header already
+          does. A direct turn's blank reply is still a row. *)
   | Delivery_failed of
       { origin_request_id : string option
       ; recovered_at : float option
@@ -138,6 +139,19 @@ type kind =
           exact added/removed claims or typed failure detail; [summary] is the
           producer-built one-line projection. Neutral system rows reuse this
           lane with [None] and therefore remain whole in summary mode. *)
+  | Fusion_conclusion of fusion_conclusion
+      (** A [Fusion] block the assistant row carried: the deliberation
+          conclusion is the row's own [content], and this names the run and
+          the board post holding the panel/judge detail. [fusion_run_id] is
+          absent only on a wire older than the block schema. *)
+
+and fusion_conclusion =
+  { fusion_run_id : string option
+  ; fusion_board_post_id : string
+        (** The board post the fusion sink wrote for this run; the pointer the
+            dashboard's fusion card lazy-fetches, kept here so the transcript
+            names the same evidence. *)
+  }
 
 val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 (** The current full-detail rows for a typed history block. This delegates to
@@ -155,6 +169,7 @@ type attachment_note =
   ; att_bytes : int
   ; att_width : int option
   ; att_height : int option
+  ; att_image : Masc_tui_image_preview.preview
   }
 (** A file the row carries, named but not held: the bytes stay in the store.
     The pane's job is to say one is there, which it could not do while this
@@ -197,15 +212,15 @@ type decoded =
   ; dropped : int
       (** Rows the decoder could not read. Reported rather than inferred from
           the list's length: folding tool blocks shortens the list for reasons
-          that are not losses. *)
+          that are not losses, and so does an entry that was read and draws
+          nothing -- an autonomous wake that produced neither speech nor work
+          is not a row anyone lost. *)
   }
 
-val addressed_label : speaker -> Surface.t option -> string
-(** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
-    row is ["you"], the way it always read. A named author is drawn, and a
-    surface that is not an operator's own is appended — ["<keeper> · agent"],
-    ["<operator> · slack"] — so a fleet broadcast and a direct message do not
-    look alike. *)
+val addressed_label_parts : speaker -> Surface.t option -> string * string option
+(** The speaker and the surface they came in by, apart. The speaker column
+    cannot hold both, and cutting them as one string keeps the surface and
+    loses the name; whoever knows the column decides which to draw. *)
 
 (** One page of rows older than a cursor, from
     [GET /keepers/<name>/chat/history/page?before=<ts>].

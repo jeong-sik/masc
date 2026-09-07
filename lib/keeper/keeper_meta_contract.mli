@@ -134,12 +134,6 @@ val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
     a string-prefix reparse with a [_ -> false] catch-all that mis-biased
     transient faults to terminal. *)
 
-val runtime_exhaustion_reason_to_json :
-  runtime_exhaustion_reason -> Yojson.Safe.t
-
-val runtime_exhaustion_reason_of_json :
-  Yojson.Safe.t -> runtime_exhaustion_reason option
-
 val blocker_class_of_serialized_string :
   string -> blocker_class option
 (** [blocker_class_of_serialized_string label] is the inverse
@@ -148,7 +142,7 @@ val blocker_class_of_serialized_string :
     [Runtime_exhausted (Other_detail "runtime_exhausted")] —
     the reason payload is not round-trippable through this
     function alone (callers needing the reason use
-    {!runtime_exhaustion_reason_of_json}).  Used by
+    [runtime_exhaustion_reason_of_json]).  Used by
     {!Keeper_meta_json_parse} to decode persisted blocker
     state. *)
 
@@ -310,11 +304,6 @@ val map_usage :
   keeper_meta
 (** [map_usage f m] replaces [m]'s runtime usage with [f] applied to it —
     convenience for usage-only updates. *)
-
-val zero_usage : usage_metrics
-(** [zero_usage] is the all-zero usage_metrics record.  Pinned
-    at the contract seam — drift would change "fresh keeper"
-    initial state. *)
 
 val reset_runtime_state : keeper_meta -> keeper_meta
 (** [reset_runtime_state m] is [map_usage (fun _ -> zero_usage)

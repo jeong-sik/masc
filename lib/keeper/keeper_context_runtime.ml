@@ -19,23 +19,12 @@ open Keeper_types_profile
 type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
-let text_of_message = Keeper_context_core.text_of_message
 let message_count = Keeper_context_core.message_count
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
-let resume_checkpoint_of_context =
-  Keeper_context_core.resume_checkpoint_of_context
-let agent_core_context_of_context = Keeper_context_core.agent_core_context_of_context
-let system_prompt_of_context = Keeper_context_core.system_prompt_of_context
 let messages_of_context = Keeper_context_core.messages_of_context
 let create = Keeper_context_core.create
 let set_system_prompt = Keeper_context_core.set_system_prompt
 let append = Keeper_context_core.append
-let append_many = Keeper_context_core.append_many
-let sync_agent_core_context = Keeper_context_core.sync_agent_core_context
-let role_to_string = Keeper_context_core.role_to_string
-let role_of_string_opt = Keeper_context_core.role_of_string_opt
-let message_to_json = Keeper_context_core.message_to_json
-let message_of_json = Keeper_context_core.message_of_json
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 
@@ -274,10 +263,6 @@ let resolve_max_context_resolution_for_runtime_id
   | None -> Error (Runtime_context_window_unavailable { runtime_id })
   | Some runtime ->
     resolve_max_context_resolution_for_runtime ~requested_override runtime
-
-let exact_direct_mention_present ~(targets : string list) (content : string) :
-    bool =
-  Mention.any_mentioned ~targets content
 
 (* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
 let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt

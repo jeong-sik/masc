@@ -122,13 +122,23 @@ type log_entry = Tui_decode.log_entry
     Each arm carries the label to draw. The label is a rendering of the fact;
     the constructor is the fact. *)
 type message_author =
-  | Sent_by_operator of string
-      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
-          where the line came in from somewhere other than the dashboard. *)
-  | Sent_by_other of string
+  | Sent_by_operator of { surface : string option }
+      (** The person reading this pane, and the door they came in by when it
+          was not the dashboard -- an operator can write to a keeper from a
+          connector. Apart for the same reason as the arm below, and it was
+          joined here while that one was split: at a ten-cell column
+          ["you \xc2\xb7 broadcast"] was cut to ["yo\xe2\x80\xa6dcast"],
+          losing the speaker to keep the tail of the surface. *)
+  | Sent_by_other of
+      { speaker : string
+      ; surface : string option
+      }
       (** Anyone else: another agent's broadcast, a connector, a second
-          operator. Named as the server named them, with the surface it
-          arrived on. *)
+          operator. Kept apart rather than joined here because the speaker
+          column is narrower than the pair: joined, the fit cuts the middle of
+          one string and the tail it favours is the surface, so the row keeps
+          which door it came in by and loses who came through it. Whoever
+          knows the column decides. *)
 
 type msg_role =
   | Message_user of message_author
@@ -244,8 +254,12 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
     List.filter_map Fun.id
       [ (match memory with
          | Memory_summary -> None
-         | Memory_hidden -> Some "memory:off"
-         | Memory_full -> Some "memory:full")
+         (* Named for the rows it governs, which the pane labels JOURNAL and
+            the footer reaches with Ctrl-N:journal. It read "memory" here and
+            "journal" there, so pressing the key and looking for what moved
+            meant knowing the two words were one axis. *)
+         | Memory_hidden -> Some "journal:off"
+         | Memory_full -> Some "journal:full")
       ; (* The clock-free gutter is the resting layout: the speaker mark and
            label retain who/what, while timestamps and request ids remain one
            keypress away. Name only the denser projection's added metadata so
@@ -354,6 +368,7 @@ type msg_entry = {
       (** Structural producer position within one request. Inside that request,
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
+  me_image: Masc_tui_image_preview.preview;
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -2601,6 +2616,149 @@ type palette_mode =
       choice_line : int;  (* 1-based, what the title says *)
     }
 
+(* Browser reads remain separate from connector routing. A request generation
+   belongs to this view instance, so late Firefox replies cannot replace a
+   different app, source or tab after the operator moves. *)
+module Browser_lane_view = struct
+  type source = Live | Automation
+  type app = Browser | Slack
+  type tab = { id : int; title : string; url : string; active : bool }
+  type page = {
+    tab_id : int; title : string; url : string; text : string;
+    chars : int; truncated : bool;
+  }
+  type reading = {
+    tabs : tab list; page : page option; source : source; app : app;
+    elapsed_ms : float;
+  }
+  type operation = Read | Open_session | Close_session | Goto of string
+  type load = Idle | Loading of int * operation | Failed of string
+  type t = {
+    app : app; source : source; selected_tab : int option; scroll : int;
+    reading : reading option; load : load; url_draft : string option;
+  }
+
+  let source_name = function Live -> "live" | Automation -> "automation"
+  let app_name = function Browser -> "browser" | Slack -> "slack"
+  let create app =
+    { app; source = Live; selected_tab = None; scroll = 0;
+      reading = None; load = Idle; url_draft = None }
+  let switch_source source t =
+    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle; url_draft = None }
+  let refresh t = { t with selected_tab = None; scroll = 0 }
+  let fail_action detail t =
+    let url_draft = match t.load with
+      | Loading (_, Goto url) -> Some url
+      | Loading _ | Idle | Failed _ -> t.url_draft
+    in
+    { t with load = Failed detail; url_draft }
+  let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
+  let request_body t =
+    `Assoc ([ "lane", `String (source_name t.source);
+              "app", `String (app_name t.app) ]
+            @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
+  let ( let* ) = Result.bind
+  let field name = function
+    | `Assoc fields -> (match List.assoc_opt name fields with
+        | Some value -> Ok value | None -> Error ("missing " ^ name))
+    | _ -> Error "expected object"
+  let string = function `String s -> Ok s | _ -> Error "expected string"
+  let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
+  let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
+  let parse_source = function
+    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
+    | _ -> Error "unknown browser source"
+  let parse_app = function
+    | `String "browser" -> Ok Browser | `String "slack" -> Ok Slack
+    | _ -> Error "unknown browser app"
+  let get parse name json = let* value = field name json in parse value
+  let parse_tab json =
+    let* id = get integer "id" json in
+    let* title = get string "title" json in
+    let* url = get string "url" json in
+    let* active = get boolean "active" json in
+    Ok { id; title; url; active }
+  let parse_page = function
+    | `Null -> Ok None
+    | json ->
+        let* tab_id = get integer "tabId" json in
+        let* title = get string "title" json in
+        let* url = get string "url" json in
+        let* text = get string "text" json in
+        let* chars = get integer "chars" json in
+        let* truncated = get boolean "truncated" json in
+        Ok (Some { tab_id; title; url; text; chars; truncated })
+  let parse_tabs = function
+    | `List tabs ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest -> let* tab = parse_tab json in loop (tab :: acc) rest
+        in loop [] tabs
+    | _ -> Error "expected tabs array"
+  let milliseconds = function
+    | `Float f when Float.is_finite f && f >= 0. -> Ok f
+    | `Int n when n >= 0 -> Ok (float_of_int n)
+    | _ -> Error "expected nonnegative elapsed_ms"
+  let decode json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* tabs = get parse_tabs "tabs" data in
+      let* page = get parse_page "page" data in
+      let* source = get parse_source "source" data in
+      let* app = get parse_app "app" data in
+      let* elapsed_ms = get milliseconds "elapsed_ms" data in
+      match page with
+      | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
+          Error "page tab is absent from returned tabs"
+      | _ -> Ok { tabs; page; source; app; elapsed_ms }
+  let accept ~generation (result : (reading, string) result) t =
+    match t.load with
+    | Loading (current, Read) when current = generation ->
+        (match result with
+         | Ok reading when reading.source = t.source && reading.app = t.app ->
+             { t with reading = Some reading; load = Idle;
+               selected_tab = Option.map (fun page -> page.tab_id) reading.page }
+         | Ok _ -> { t with load = Failed "browser response source/app mismatch" }
+         | Error detail -> { t with load = Failed detail })
+    | Loading _ | Idle | Failed _ -> t
+  let select_tab direction t =
+    match t.reading with
+    | None -> t
+    | Some reading ->
+        let count = List.length reading.tabs in
+        if count = 0 then t else
+        let current =
+          let rec find i = function
+            | [] -> 0
+            | (tab : tab) :: rest ->
+                if Some tab.id = t.selected_tab then i else find (i + 1) rest
+          in find 0 reading.tabs
+        in
+        let index = (current + direction + count) mod count in
+        match List.nth_opt reading.tabs index with
+        | None -> t
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; load = Idle }
+end
+
+let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+  match view.reading with
+  | None -> []
+  | Some reading ->
+      match reading.page with
+      | None -> []
+      | Some page ->
+          String.split_on_char '\n'
+            (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
+          |> List.concat_map (fun line ->
+              if line = "" then [""] else
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
+
+let browser_lane_url_line ~cols draft =
+  let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
+  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -2632,6 +2790,11 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  (* Whether ^Y ending a voice capture also sends what was heard
+     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     in the draft either way, and that draft is also where a spoken
+     half-sentence waits for typing. *)
+  mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2718,6 +2881,14 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  mutable image_request_generation: int;
+  (* Any new input cancels an outstanding asynchronous image preview. *)
+  (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
+     set the loop draws no frames and every key belongs to the emulator. The
+     machine is [Option] so it exists only once the screen has been opened,
+     and it survives closing -- reopening continues the same frame. *)
+  mutable msx_open: bool;
+  mutable msx: Msx.t option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -3198,6 +3369,8 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_async_observation: Yojson.Safe.t option;
   mutable tools_async_observation_error: string option;
+  mutable browser_lane: Browser_lane_view.t option;
+  mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -3318,11 +3491,11 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
-  (* The file pane's notes view: m on an open file (repository scope only --
-     the annotation routes are scoped by the server-minted codebase slug,
-     which only a Repositories row carries) swaps the content for the notes
-     anchored to the file. *)
-  (* The notes anchored to the open file, keyed by its path. *)
+  (* The file pane's notes view: m on an open file swaps the content for
+     the memos written as comments in the file itself. Read off the rows
+     once at load, like the width above: the memos change when the file
+     does, and rebuilding them per frame walks every row of it. *)
+  mutable code_memos: Masc_tui_memo.found list;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -3449,6 +3622,10 @@ type state = {
      message: switching keepers or abandoning the draft must not leave an image
      attached to whatever is typed later. *)
   mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
+  (* Image references staged with :ref (#33728) — a URL the provider fetches
+     or a Files-API id. Same lifecycle as [msg_attachments]: part of the unsent
+     message, consumed by the send that consumes the draft. *)
+  mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
      history row that was newest when the newest attachment entered the
@@ -3609,6 +3786,7 @@ type state = {
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
 type text_input_target =
+  | Text_browser_url
   | Text_preset_name
   | Text_runtime_param
   | Text_palette
@@ -3635,6 +3813,9 @@ let text_input_target (state : state) ~compact_viewport =
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
+  else if state.view = Connectors && not compact_viewport
+          && Option.is_some (Option.bind state.browser_lane (fun view -> view.Browser_lane_view.url_draft))
+  then Some Text_browser_url
   else if identity_surface && Option.is_some state.identity_app_form then
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then
@@ -4025,6 +4206,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -4059,6 +4241,9 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  image_request_generation = 0;
+  msx_open = false;
+  msx = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -4283,6 +4468,8 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  browser_lane = None;
+  browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
@@ -4351,6 +4538,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
+  code_memos = [];
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
@@ -4416,6 +4604,7 @@ let create_state
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
+  msg_references = [];
   msg_attachments_since = None;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
@@ -5217,6 +5406,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.repository_changes with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rcs_changes)
+  | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -5484,6 +5674,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.mhs_keepers
             @ [ "memory detail" ])
           state.memory_health
+  | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
       Option.map
         (fun s ->
@@ -5714,6 +5905,7 @@ let keeper_message_support_status_rows state ~status_rows =
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
 type palette_action =
+  | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_chat of string
@@ -5806,6 +5998,8 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  @ [ "go Browser Lane", Palette_browser_lane Browser_lane_view.Browser;
+      "go Slack Lane", Palette_browser_lane Browser_lane_view.Slack ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

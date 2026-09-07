@@ -57,19 +57,6 @@ val classify_workspace_query :
     fallback") without parsing the JSON body. Exposed for unit
     testing. *)
 
-(** Single SSOT encoding of the workspace source variant. Used by
-    {!source_header} (sanitized there) and by the tree/blame/diff
-    cache keys (internal string, no sanitization). *)
-val source_to_string :
-  [ `Project
-  | `Repository of string
-  | `RepositoryMissing of string
-  | `RepositoryUnknown of string
-  | `Playground of string
-  | `PlaygroundMissing of string
-  | `KeeperUnknown of string ] ->
-  string
-
 val source_header :
   [ `Project
   | `Repository of string

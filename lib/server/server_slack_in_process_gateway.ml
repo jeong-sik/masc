@@ -723,7 +723,6 @@ let submit_ambient_event ?team_id ?user_directory ingress ~base_dir
 
 module For_testing = struct
   let submit_event = submit_event
-  let submit_ambient_event = submit_ambient_event
   let record_external_attention = record_external_attention
   let resolve_event_identity = resolve_event_identity
 end

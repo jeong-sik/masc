@@ -3,9 +3,11 @@ import {
   ATTACHMENT_INPUT_ACCEPT,
   MAX_FILE_SIZE,
   MAX_IMAGE_SIZE,
+  attachmentFromImageReference,
   resolveAttachmentMimeType,
   stableAttachmentId,
   validateFile,
+  wholeImageUrl,
 } from './attachments'
 
 function fileOfSize(name: string, type: string, size: number): File {
@@ -130,5 +132,46 @@ describe('stableAttachmentId', () => {
 
     expect(stableAttachmentId({ ...base, data: 'data:text/plain;base64,QUJD' }))
       .not.toBe(stableAttachmentId({ ...base, data: 'data:text/plain;base64,REVG' }))
+  })
+})
+
+describe('image reference attachments', () => {
+  it('wholeImageUrl accepts a bare http(s) URL and rejects anything else', () => {
+    expect(wholeImageUrl('https://example.test/a.png')).toBe('https://example.test/a.png')
+    expect(wholeImageUrl('  http://example.test/a.jpg ')).toBe('http://example.test/a.jpg')
+    expect(wholeImageUrl('HTTPS://EXAMPLE.TEST/A.PNG')).toBe('HTTPS://EXAMPLE.TEST/A.PNG')
+    // Embedded in prose, or not a URL at all — stays text.
+    expect(wholeImageUrl('see https://example.test/a.png please')).toBeNull()
+    expect(wholeImageUrl('https://example.test/a.png https://other.test/b.png')).toBeNull()
+    expect(wholeImageUrl('ftp://example.test/a.png')).toBeNull()
+    expect(wholeImageUrl('file-abc123')).toBeNull()
+    expect(wholeImageUrl('')).toBeNull()
+  })
+
+  it('builds a url reference attachment with a stable id', () => {
+    const result = attachmentFromImageReference('https://example.test/a.png')
+    if (!('attachment' in result)) throw new Error('expected an attachment')
+    expect(result.attachment.kind).toBe('url')
+    if (result.attachment.kind !== 'url') throw new Error('unreachable')
+    expect(result.attachment.url).toBe('https://example.test/a.png')
+    expect(result.attachment.name).toBe('https://example.test/a.png')
+    expect(result.attachment.id).toMatch(/^ref-url-/)
+    // Same reference value -> same id, so re-adding dedupes.
+    const again = attachmentFromImageReference('https://example.test/a.png')
+    if (!('attachment' in again)) throw new Error('expected an attachment')
+    expect(again.attachment.id).toBe(result.attachment.id)
+  })
+
+  it('builds a file_id reference for a non-URL value', () => {
+    const result = attachmentFromImageReference(' file-abc123 ')
+    if (!('attachment' in result)) throw new Error('expected an attachment')
+    expect(result.attachment.kind).toBe('file_id')
+    if (result.attachment.kind !== 'file_id') throw new Error('unreachable')
+    expect(result.attachment.fileId).toBe('file-abc123')
+    expect(result.attachment.id).toMatch(/^ref-file-/)
+  })
+
+  it('rejects an empty reference', () => {
+    expect(attachmentFromImageReference('   ')).toEqual({ error: '이미지 참조가 비어 있습니다.' })
   })
 })

@@ -15,17 +15,6 @@ type t =
   | Critical
 [@@deriving show, eq, yojson]
 
-val to_string : t -> string
-(** Lowercase canonical name ([{Debug → "debug"}], …). *)
-
-val of_string : string -> (t, string) result
-(** Parse a severity name. Aliases recognized:
-    ["warn" → Warning], ["bad" → Error], ["fatal" → Critical].
-    Returns [Error msg] for unknown inputs. *)
-
-val to_int : t -> int
-(** Numeric ordering [{Debug = 0 .. Critical = 4}]; higher is more severe. *)
-
 val compare : t -> t -> int
-(** Total order on severity, by {!to_int}. *)
+(** Total order on severity, by [to_int]. *)
 

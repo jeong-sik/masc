@@ -13,18 +13,6 @@ type stream_idle_state =
   | Streaming_done
   | Streaming_unknown
 
-let stream_idle_state_to_label = function
-  | Awaiting_first_event -> "awaiting_first_event"
-  | Awaiting_first_delta -> "awaiting_first_delta"
-  | Streaming_answer -> "streaming_answer"
-  | Streaming_thinking -> "streaming_thinking"
-  | Streaming_tool_call -> "streaming_tool_call"
-  | Streaming_heartbeat -> "streaming_heartbeat"
-  | Streaming_substrate -> "streaming_substrate"
-  | Streaming_done -> "streaming_done"
-  | Streaming_unknown -> "streaming_unknown"
-;;
-
 let stream_idle_state_of_label = function
   | "awaiting_first_event" -> Some Awaiting_first_event
   | "awaiting_first_delta" -> Some Awaiting_first_delta
@@ -50,20 +38,6 @@ type timeout_phase =
   | Wall_clock
   | Capacity_backpressure
   | Unknown_timeout
-
-let timeout_phase_to_label = function
-  | First_token -> "first_token"
-  | Http_operation -> "http_operation"
-  | Non_streaming_body -> "non_streaming_body"
-  | Stream_body -> "stream_body"
-  | Stream_idle state -> "stream_idle:" ^ stream_idle_state_to_label state
-  | Provider_step -> "provider_step"
-  | Cli_stdout_idle -> "cli_stdout_idle"
-  | Caller_budget -> "caller_budget"
-  | Wall_clock -> "wall_clock"
-  | Capacity_backpressure -> "capacity_backpressure"
-  | Unknown_timeout -> "unknown_timeout"
-;;
 
 let timeout_phase_of_label label =
   let normalize label =

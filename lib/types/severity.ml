@@ -14,23 +14,6 @@ type t =
   | Critical
 [@@deriving show, eq, yojson]
 
-let to_string = function
-  | Debug -> "debug"
-  | Info -> "info"
-  | Warning -> "warning"
-  | Error -> "error"
-  | Critical -> "critical"
-
-let of_string = function
-  | "debug" -> Ok Debug
-  | "info" -> Ok Info
-  | "warning" | "warn" -> Ok Warning
-  | "error" | "bad" -> Ok Error
-  | "critical" | "fatal" -> Ok Critical
-  | other -> Error ("unknown severity: " ^ other)
-
-(** Numeric ordering: Debug=0 .. Critical=4.
-    Higher is more severe. *)
 let to_int = function
   | Debug -> 0
   | Info -> 1

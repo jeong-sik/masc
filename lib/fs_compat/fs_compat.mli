@@ -338,6 +338,17 @@ val save_file_atomic_strict_staged
     owners must converge any dependent in-memory publication before
     propagating an [After_rename] failure. *)
 
+val write_file_atomic_strict_staged
+  :  string
+  -> write:(out_channel -> unit)
+  -> (unit, atomic_replace_failure) Result.t
+(** Streaming sibling of {!save_file_atomic_strict_staged}. [write] receives a
+    binary channel and runs synchronously inside the blocking replacement job
+    (a system thread when called from Eio). It must not perform Eio effects,
+    close the channel, or retain it. The channel is closed before payload sync
+    and rename. Callback exceptions, including cancellation, preserve the
+    original exception and backtrace in a [Before_rename] failure. *)
+
 (** Atomic replacement whose payload and parent-directory fsyncs are mandatory. *)
 val save_file_atomic_strict : string -> string -> (unit, string) Result.t
 
@@ -347,6 +358,13 @@ module Atomic_replace_for_testing : sig
     -> sync_parent:(string -> unit)
     -> string
     -> string
+    -> (unit, atomic_replace_failure) Result.t
+
+  val write_file_atomic_strict_staged
+    :  ?sync_file:(string -> unit)
+    -> sync_parent:(string -> unit)
+    -> string
+    -> write:(out_channel -> unit)
     -> (unit, atomic_replace_failure) Result.t
 end
 
@@ -833,9 +851,6 @@ val rename : string -> string -> unit
     rather than substring matching on the libc message. *)
 val rename_if_exists : src:string -> dst:string -> bool
 
-(** Remove directory. *)
-val rmdir : string -> unit
-
 (** Remove a file, symlink, or directory tree without invoking a shell.
     Missing paths are ignored.  Symlinks are unlinked, not followed. *)
 val remove_tree : string -> unit
@@ -885,6 +900,17 @@ val load_jsonl_diagnostics : string -> Yojson.Safe.t list * int
 (** Parse pre-read string lines as JSONL, returning parsed values and
     malformed count.  [source] is used in log messages.
     Use when lines come from tail-readers or non-file sources. *)
+val number_jsonl_lines : string list -> (int * string) list
+(** The non-blank rows, trimmed, each with the 1-based number the malformed
+    warning would print for it. Blank rows are dropped and take no number, so
+    the number is the printed JSONL row an operator sees in [cat -n]. *)
+
+val parse_jsonl_line : source:string -> line_no:int -> string -> Yojson.Safe.t option
+(** Parse one trimmed row. A malformed row warns on stderr, naming [source]
+    and [line_no], and returns [None] - the same warning {!parse_jsonl_lines}
+    prints. Use it with {!number_jsonl_lines} to walk rows without parsing the
+    ones the walk never reaches. *)
+
 val parse_jsonl_lines : source:string -> string list -> Yojson.Safe.t list * int
 
 (** Stream JSONL line-by-line via [Eio.Buf_read.lines] when the global
@@ -981,7 +1007,6 @@ module Private_jsonl_cursor : sig
   type t
 
   val equal : t -> t -> bool
-  val to_string : t -> string
 end
 
 type private_jsonl_snapshot =
@@ -1379,13 +1404,6 @@ val append_jsonl : string -> Yojson.Safe.t -> unit
     in a single lock+flush cycle. More efficient than calling [append_jsonl]
     repeatedly when batching pending entries. No-op if [jsons] is empty. *)
 val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
-
-(** Flush and close every cached [out_channel] held by
-    [append_jsonl]. Safe to call concurrently with active appends;
-    a subsequent [append_jsonl] re-opens fresh. Intended for
-    shutdown sequencing and rare administrative refresh.
-    RFC-0162 §3.4. *)
-val close_all_cached_writers : unit -> unit
 
 (** [invalidate_cached_writer path] drops the cached [append_jsonl]
     writer for [path] (a no-op if none is cached). Call it after

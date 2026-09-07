@@ -462,6 +462,7 @@ Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는
 | Dart | `dart` | `pubspec.yaml` |
 | Scala | `metals` | `build.sbt` |
 | C# | `csharp-ls` | 작업 공간 경계 |
+| Markdown | `marksman` | 작업 공간 경계 |
 
 TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
 표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안
@@ -514,7 +515,6 @@ MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. �
 | `agent-core-models-overlay.toml` | 배포 환경에서만 쓰는 모델 능력 항목. 파일이 없으면 내장 Agent Core 목록을 씁니다 |
 | `keepers/<name>.toml` | Keeper 하나에 필요한 전부. 운영 설정, 프롬프트(`keeper.instructions`), `[keeper.tools]` 도구 포스처 |
 | `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
-| `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
 
 같은 뿌리 아래 한 디렉터리는 생성물이 아니라 사람이 씁니다.
 

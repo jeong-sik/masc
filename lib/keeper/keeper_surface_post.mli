@@ -28,7 +28,6 @@ type post_target =
           channel root. [blocks] may carry Slack Block Kit rich blocks to
           render alongside the plain-text fallback. *)
 
-val dashboard_label : string
 val discord_label : string
 val slack_label : string
 

@@ -183,8 +183,3 @@ val track_tool_called :
     from the non-empty optional fields (#10358). *)
 
 (** {1 Maintenance} *)
-
-val rotate : fs:'a -> config -> max_age_days:int -> unit
-(** Drop telemetry day-files older than [max_age_days] days. The
-    [fs] argument is currently ignored but kept in the signature for
-    forward compatibility with a future stub-fs override. *)

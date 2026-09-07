@@ -105,9 +105,6 @@ val footer_hints_memory_facts : string
 (** The Memory fact browser opened by Enter on a health row: row movement,
     the category cycle, search, and the way back to the table. *)
 
-val footer_hints_metrics : string
-(** The Metrics telemetry dashboard footer. *)
-
 val keeper_detail_tab_bindings :
   Masc_tui_types.keeper_detail_tab -> binding list
 (** A detail tab's own keys. Separate from {!for_surface} because they are
@@ -130,3 +127,5 @@ val help_sections :
     knew where the reader was. *)
 (** The help overlay's sections: Global first, then one section per surface
     that declares bindings, titled with the strip's spelling. *)
+
+val footer_hints_browser_lane : string

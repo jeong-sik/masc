@@ -23,6 +23,14 @@ val create :
   t
 
 val host_root : t -> string
+
+val github_identity_secret_files : t -> string list
+(** Credential files of the microvm identity snapshots already bound to this
+    runtime, including retained snapshots. Reads the in-memory binding only:
+    no token refresh, boot or guest replacement. A boxed execution has already
+    acquired that binding; inspecting its output must not prepare a different
+    identity after the command ran. *)
+
 val prepare_github_identity_secret_files :
   ?timeout_sec:float -> t -> (string list, string) result
 (** After authorization, observe and bind the container to the current GitHub
@@ -78,6 +86,22 @@ val microvm_guest_absence_reason :
     microvm -- in each of those the caller keeps its own error rather than
     replacing it with a guess. *)
 
+val is_microvm_guest_booted :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  bool
+(** Pure in-memory check: returns true if this server process has booted the
+    microVM guest and prepared its work volume root. Returns false if the keeper
+    is not Micro_vm or has not been booted yet in this process lifetime. *)
+
+val forget_microvm_guest_booted :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  unit
+(** Evicts the guest from the booted set (e.g. after it was observed stopped or dead). *)
+
 module For_testing : sig
   val create_minimal
     :  config:Workspace.config
@@ -115,10 +139,13 @@ module For_testing_microvm : sig
       is: a test that boots a guest has to be able to name the one it booted,
       and the mode belongs in that name so a guest from one policy is never
       adopted under another. *)
-end
 
-val container_path_of_host :
-  t -> host_path:string -> (string, string) result
+  val mark_microvm_guest_booted
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> unit
+    -> unit
+end
 
 val container_cwd_of_host :
   t -> host_cwd:string -> string
@@ -192,16 +219,6 @@ val run_exec_pipeline_with_status :
     container. Each stage is a separate [docker exec -i] process and adjacent
     stages are connected by host-side process pipes. *)
 
-val run_command :
-  ?ok_exit_codes:int list ->
-  timeout_sec:float ->
-  t ->
-  cwd:string ->
-  command_argv:string list ->
-  max_bytes:int ->
-  unit ->
-  (string, string) result
-
 val run_bash_with_status :
   timeout_sec:float ->
   t ->
@@ -241,3 +258,15 @@ val teardown_keeper_sandbox :
     shutdown finalization. A missing container is a successful teardown.
     The MicroVM identity snapshot is released only after its guest has
     stopped and been deleted. *)
+
+val sweep_abandoned_microvm_guests :
+  base_path:string ->
+  command_available:(string -> bool) ->
+  timeout_sec:float ->
+  is_pid_alive:(int -> bool) ->
+  run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
+  (Keeper_microvm_backend.t * Keeper_sandbox_microvm.sweep_outcome) list
+(** Collect abandoned guests under the same lifecycle lock as boot and
+    teardown. The lock covers listing through deletion: stable guest names
+    may otherwise be reused between observing a dead owner and removing it.
+    Guest commands and unrelated Keeper lanes do not acquire this lock. *)

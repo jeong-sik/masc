@@ -120,10 +120,10 @@ let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
 let store_artifact ~dir bytes =
-  Eio_guard.run_in_systhread (fun () -> Store.store ~dir bytes)
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () -> Store.store ~dir bytes)
 
 let load_artifact ~dir handle =
-  Eio_guard.run_in_systhread (fun () -> Store.load ~dir handle)
+  Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter
@@ -450,45 +450,33 @@ let run_vision
       ; detail = "vision sub-call raised"
       }
 
+(* The [Vo_provider] arm below binds its class once and hands the same value
+   to the result and to the payload. The other arms wrote theirs twice, so a
+   change to one spelling left the other saying something else. *)
+let failed ~failure_class ?detail code =
+  Keeper_tool_execution.failure
+    ~class_:failure_class
+    (err_json ~failure_class ?detail code)
+;;
+
 let execution_of_vision_outcome = function
   | Vo_ok text -> Keeper_tool_execution.success (ok_json text)
   | Vo_invalid_request detail ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Policy_rejection
-      (err_json
-         ~failure_class:Tool_result.Policy_rejection
-         ~detail
-         "invalid_request")
+    failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
   | Vo_no_runtime detail ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (err_json
-         ~failure_class:Tool_result.Runtime_failure
-         ~detail
-         "no_capable_runtime")
-  | Vo_timeout ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Dependency_unavailable
-      (err_json ~failure_class:Tool_result.Dependency_unavailable "timeout")
+    failed ~failure_class:Tool_result.Runtime_failure ~detail "no_capable_runtime"
+  | Vo_timeout -> failed ~failure_class:Tool_result.Dependency_unavailable "timeout"
   | Vo_invalid_structured_response detail ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (err_json
-         ~failure_class:Tool_result.Runtime_failure
-         ~detail
-         "invalid_structured_response")
+    failed
+      ~failure_class:Tool_result.Runtime_failure
+      ~detail
+      "invalid_structured_response"
   | Vo_provider { failure_class; detail } ->
-    Keeper_tool_execution.failure
-      ~class_:failure_class
-      (err_json ~failure_class ~detail "provider_error")
+    failed ~failure_class ~detail "provider_error"
   | Vo_empty ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Workflow_rejection
-      (err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction")
+    failed ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
   | Vo_truncated ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction")
+    failed ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
 ;;
 
 let handle_with_outcome

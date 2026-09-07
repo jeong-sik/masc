@@ -29,7 +29,6 @@ val save_private_text_file : string -> string -> unit
 (** {1 Path Helpers} *)
 
 val auth_dir : string -> string
-val agents_dir : string -> string
 val workspace_secret_file : string -> string
 val auth_config_file : string -> string
 val credential_file : string -> string -> string
@@ -42,7 +41,6 @@ val internal_keeper_token : unit -> string option
     run. In-process consumers use this; the env var remains only as the
     cross-process surface. *)
 val extract_agent_type_prefix : string -> string option
-val save_internal_keeper_token_hash : string -> raw_token:string -> unit
 
 (** {1 Auth Config} *)
 
@@ -324,10 +322,6 @@ val create_token_expiring_in :
 val verify_token :
   string -> agent_name:string -> token:string ->
   (agent_credential, masc_error) result
-
-val refresh_token :
-  string -> agent_name:string -> old_token:string ->
-  (string * agent_credential, masc_error) result
 
 (** {1 Permission Checks} *)
 

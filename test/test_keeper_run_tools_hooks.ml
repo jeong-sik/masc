@@ -237,9 +237,8 @@ let with_partition_fixture ?sandbox_profile f =
     f ~config ~meta)
 ;;
 
-let resolve_attribution ?tool_name ~config ~meta fields =
+let resolve_attribution ~config ~meta fields =
   Masc.Keeper_run_tools_hooks.observation_attribution_for_tool_input
-    ?tool_name
     ~config
     ~meta
     (`Assoc fields)
@@ -289,24 +288,6 @@ let test_partition_resolution_uses_project_root_for_masc_base_path () =
       string
       "repo-relative path"
       "lib/foo.ml"
-      (Agent_observation.Code_address.path address))
-;;
-
-let test_annotate_uses_input_code_address_without_sandbox_resolution () =
-  with_partition_fixture (fun ~config ~meta ->
-    let address =
-      addressed_or_fail
-        (resolve_attribution
-           ~tool_name:"keeper_ide_annotate"
-           ~config
-           ~meta
-           [ "codebase", `String "github.com_jeong-sik_masc"
-           ; "file_path", `String "lib/annotated.ml"
-           ])
-    in
-    check string "annotation codebase" "github.com_jeong-sik_masc"
-      (Agent_observation.Code_address.codebase address);
-    check string "annotation repo-relative path" "lib/annotated.ml"
       (Agent_observation.Code_address.path address))
 ;;
 
@@ -1400,10 +1381,6 @@ let () =
             "uses project root when config base is .masc"
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path
-        ; test_case
-            "annotate uses its input code address"
-            `Quick
-            test_annotate_uses_input_code_address_without_sandbox_resolution
         ; test_case
             "unregistered playground repo fails with its repo id"
             `Quick

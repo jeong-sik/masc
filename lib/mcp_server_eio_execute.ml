@@ -34,11 +34,10 @@ let execute_tool_eio
   =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for in-process identity continuity. *)
-  (* Defensive: refresh Eio global context for downstream helpers that still
-     consult the ambient switch/clock during a request. Tests may leave a
-     finished switch in the global slot between runs, so keep it aligned with
-     the current request scope. *)
-  Eio_context.set_switch sw;
+  (* Defensive: bind fiber-local request switch and refresh ambient clock for
+     downstream helpers that consult them during a request, without overwriting
+     the process-wide root switch (RFC-0107 / Issue #33570). *)
+  Eio_context.with_turn_switch sw (fun () ->
   Eio_context.set_clock clock;
   (* Otel_metric_store: count every inbound tool call *)
   Otel_metric_store.record_request ();
@@ -522,7 +521,7 @@ let execute_tool_eio
                       ~agent_name
                       (runtime_error_result
                          ~tool_name:name
-                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))))
+                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
 ;;
 
 (* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency

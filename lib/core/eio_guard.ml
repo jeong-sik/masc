@@ -25,6 +25,18 @@ let execution_context = Fs_compat.execution_context
 
 let is_eio_fiber () = execution_context () = Eio_fiber
 
+(* A named switch around [f] so the runtime-events ring carries [name] for
+   the fiber while [f] runs: [Eio.Switch.run ~name] writes the name when the
+   switch opens, and rtev_fibers labels a fiber's long runs by the switches
+   it opened. The switch owns no fibers and is a child of the caller's
+   context, so cancellation is unchanged. Outside Eio there is no ring and
+   no switch: [f] runs as it is. *)
+let with_named_switch name f =
+  match execution_context () with
+  | Eio_fiber -> Eio.Switch.run ~name (fun _ -> f ())
+  | Non_eio -> f ()
+;;
+
 type mutex_access = Read_write | Read_only
 exception Non_eio_mutex_context of mutex_access
 
@@ -69,10 +81,16 @@ let with_mutex_ro mutex f =
     only improves the surfaced error — the poison still happens in the inner
     [use_rw] frame before control returns here — so it diagnoses the bug
     faster, it does not prevent it. *)
-let run_in_systhread f =
+(* [label] is required, not optional. Eio writes it into the runtime-events
+   ring as the fiber's suspend reason, and a trace reads a long run as
+   "resumed from X, suspended on Y"; an unlabelled call is "systhread" there,
+   which names nothing. The 2026-09-06 23:23 KST window had "systhread ->
+   systhread" as the longest class left on the main domain, three runs and
+   412 ms, with no way to tell which of the thirty call sites it was. *)
+let run_in_systhread ~label f =
   match execution_context () with
   | Eio_fiber ->
-    Eio_unix.run_in_systhread (fun () ->
+    Eio_unix.run_in_systhread ~label (fun () ->
       try f () with
       | Effect.Unhandled _ as exn ->
         failwith

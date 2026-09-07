@@ -122,16 +122,25 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
    [Tool_schemas_misc.control_schemas]. *)
 
 (* Dispatch function *)
+(* Resolved against the same control schemas registration walks, so an
+   operation added to [Tool_schemas_misc.control_operation] is a compile error
+   here rather than an advertised name with no route. *)
+let find_operation name =
+  List.find_opt
+    (fun operation ->
+      String.equal (Tool_schemas_misc.control_schema operation).name name)
+    Tool_schemas_misc.control_operations
+
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  match name with
-  | "masc_pause" ->
+  match find_operation name with
+  | None -> None
+  | Some Tool_schemas_misc.Pause ->
     Some (handle_pause ~tool_name:name ~start_time:start ctx args)
-  | "masc_resume" ->
+  | Some Tool_schemas_misc.Resume ->
     Some (handle_resume ~tool_name:name ~start_time:start ctx args)
-  | "masc_pause_status" ->
+  | Some Tool_schemas_misc.Pause_status ->
     Some (handle_pause_status ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
 ;;
 
 (* ================================================================ *)

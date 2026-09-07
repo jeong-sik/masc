@@ -52,7 +52,12 @@ val evict_blocks
   -> Agent_core.Types.content_block list
 (** Site 1. Evict every [Image] in the list when [delegate]; return the list
     unchanged otherwise. Images are fail-closed before store on
-    base64 payload, size, and media type. [Eager] consults the
+    base64 payload, size, and media type. An [Image] whose source is a
+    {!Agent_core.Types.media_source_kind} [Url] or [File_id] is a reference,
+    not a payload: it passes through unchanged (counted [ok] under reason
+    [reference_passthrough]), because the serializers put the reference on the
+    wire natively and there are no inline pixels to trade for a handle.
+    [Eager] consults the
     fiber-local Eio context for one bounded sub-call; with none present (tests)
     it falls back to an unread placeholder, so eviction still holds. *)
 

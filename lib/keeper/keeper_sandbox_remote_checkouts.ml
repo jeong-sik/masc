@@ -337,55 +337,74 @@ let discover_and_inspect
     ~catalog
     ()
   =
-  match Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta () with
-  | Error err ->
-    let root =
-      match Keeper_sandbox_remote_lane.remote_root ~config ~meta with
-      | Ok r -> r
-      | Error _ -> "."
-    in
-    Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err })
-  | Ok endpoint ->
-    let root = Keeper_sandbox_remote.remote_keeper_root endpoint in
-    let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
-    let catalog_arg = catalog_to_json_arg catalog in
-    (* The probe takes both budgets from here so the endpoint walk and the
-       host walk in [Keeper_playground_checkouts] stop at the same numbers. *)
-    let argv =
-      [ "python3"
-      ; "-c"
-      ; probe_script
-      ; catalog_arg
-      ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
-      ; string_of_int Keeper_playground_checkouts.max_scanned_entries
-      ]
-    in
-    let status, stdout, stderr =
-      Masc_exec.Sandbox_target.status_tuple
-        (runner
-           ~on_stdout_chunk:None
-           ~on_stderr_chunk:None
-           ~stdin_content:None
-           ~argv
-           ~env:[||]
-           ~cwd:(Some root))
-    in
-    match status with
-    | Unix.WEXITED 0 ->
-      (match parse_probe_json ~root stdout with
-       | Ok result -> Ok result
-       | Error err ->
+  let root =
+    match Keeper_sandbox_remote_lane.remote_keeper_root ~config ~meta with
+    | Ok r -> r
+    | Error _ -> "."
+  in
+  if not (Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
+  then
+    (* A microvm keeper that has not yet booted its guest in this process
+       lifetime has no playground to inspect — absence, not a failure. *)
+    Error (Keeper_playground_checkouts.Root_missing { root })
+  else
+    match Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta () with
+    | Error err ->
+      (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+       | Some _ -> Error (Keeper_playground_checkouts.Root_missing { root })
+       | None ->
          Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
-    | Unix.WEXITED code ->
-      let detail =
-        Printf.sprintf "remote probe exited %d: %s" code (Exec_policy.truncate_for_log stderr)
+    | Ok endpoint ->
+      let root = Keeper_sandbox_remote.remote_keeper_root endpoint in
+      let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
+      let catalog_arg = catalog_to_json_arg catalog in
+      (* The probe takes both budgets from here so the endpoint walk and the
+         host walk in [Keeper_playground_checkouts] stop at the same numbers. *)
+      let argv =
+        [ "python3"
+        ; "-c"
+        ; probe_script
+        ; catalog_arg
+        ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
+        ; string_of_int Keeper_playground_checkouts.max_scanned_entries
+        ]
       in
-      Error (Keeper_playground_checkouts.Root_unreadable { root; detail })
-    | Unix.WSIGNALED signal ->
-      let detail =
-        Printf.sprintf "remote probe signaled %d: %s" signal (Exec_policy.truncate_for_log stderr)
+      let status, stdout, stderr =
+        Masc_exec.Sandbox_target.status_tuple
+          (runner
+             ~on_stdout_chunk:None
+             ~on_stderr_chunk:None
+             ~stdin_content:None
+             ~argv
+             ~env:[||]
+             ~cwd:(Some root))
       in
-      Error (Keeper_playground_checkouts.Root_unreadable { root; detail })
-    | Unix.WSTOPPED signal ->
-      let detail = Printf.sprintf "remote probe stopped %d" signal in
-      Error (Keeper_playground_checkouts.Root_unreadable { root; detail })
+      match status with
+      | Unix.WEXITED 0 ->
+        (match parse_probe_json ~root stdout with
+         | Ok result -> Ok result
+         | Error err ->
+           Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
+      | Unix.WEXITED code ->
+        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+         | Some _ ->
+           Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
+           Error (Keeper_playground_checkouts.Root_missing { root })
+         | None ->
+           let detail =
+             Printf.sprintf "remote probe exited %d: %s" code (Exec_policy.truncate_for_log stderr)
+           in
+           Error (Keeper_playground_checkouts.Root_unreadable { root; detail }))
+      | Unix.WSIGNALED signal ->
+        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+         | Some _ ->
+           Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
+           Error (Keeper_playground_checkouts.Root_missing { root })
+         | None ->
+           let detail =
+             Printf.sprintf "remote probe signaled %d: %s" signal (Exec_policy.truncate_for_log stderr)
+           in
+           Error (Keeper_playground_checkouts.Root_unreadable { root; detail }))
+      | Unix.WSTOPPED signal ->
+        let detail = Printf.sprintf "remote probe stopped %d" signal in
+        Error (Keeper_playground_checkouts.Root_unreadable { root; detail })

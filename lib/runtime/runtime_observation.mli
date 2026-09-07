@@ -76,12 +76,6 @@ type runtime_observation = {
 
 (** {1 Provider config helpers} *)
 
-val provider_name_of_config :
-  Llm_provider.Provider_config.t -> string
-(** Canonical provider slug from a config. Free-form string used as
-    the runtime counter key; the function does not enumerate
-    specific providers. *)
-
 (** {1 Runtime metrics capture} *)
 
 type runtime_metrics_capture

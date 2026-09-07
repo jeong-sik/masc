@@ -69,11 +69,6 @@ val write_call_summary : requested_target:string -> string option
     from the target it resolved, and the replay engine states it from
     {!approved_write_of_gate_input}. [None] when the target is blank. *)
 
-(** The opaque Gate operation identity this module submits for local writes.
-    Consumers that must recognise the same effect read it here rather than
-    repeating the literal. *)
-val gate_operation : string
-
 
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

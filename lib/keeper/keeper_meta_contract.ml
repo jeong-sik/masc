@@ -159,12 +159,6 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;
 
-let runtime_exhaustion_reason_to_json reason =
-  Keeper_internal_error.runtime_exhaustion_reason_to_json reason
-
-let runtime_exhaustion_reason_of_json json =
-  Keeper_internal_error.runtime_exhaustion_reason_of_json json
-
 (* ── Unified blocker_info: typed klass + free-form detail ───────
    Replaces the historic split blocker fields. The string-only field was used
    by substring classifiers to recover a typed class — exactly the workaround

@@ -878,6 +878,67 @@ max-concurrent = 1
         | None -> fail "expected model capabilities")
      | models -> failf "expected one model, got %d" (List.length models))
 
+(* [ollama_cloud] serves two surfaces. Its catalog row declares
+   [identity_kinds = ["ollama"; "openai_compat"]] and one [request_path],
+   "/api/chat", which is the native Ollama one. A workspace that reaches it
+   over the OpenAI-compatible surface must not get that path stamped on: it
+   built https://ollama.com/v1/api/chat and 404'd 794 times across five
+   keepers on 2026-09-06 (#33652), because a registry-declared path was taken
+   whatever kind it belonged to. *)
+let ollama_cloud_openai_compat_toml =
+  {|
+[runtime]
+default = "ollama_cloud.glm-5-3"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.glm-5-3]
+api-name = "glm-5.3"
+max-context = 262144
+tools-support = true
+streaming = true
+
+[ollama_cloud.glm-5-3]
+max-concurrent = 2
+|}
+
+let test_openai_compat_surface_keeps_the_chat_completions_path () =
+  with_env "OLLAMA_CLOUD_API_KEY" "oc-test-key" (fun () ->
+    let cfg =
+      match Runtime_toml.parse_string ollama_cloud_openai_compat_toml with
+      | Ok cfg -> cfg
+      | Error errors ->
+        failf
+          "expected ollama_cloud runtime TOML to parse: %s"
+          (String.concat
+             "; "
+             (List.map
+                (fun (err : Runtime_toml.parse_error) ->
+                   Printf.sprintf "%s: %s" err.path err.message)
+                errors))
+    in
+    match cfg.bindings with
+    | [ binding ] ->
+      (match Runtime_adapter.binding_to_provider_config cfg binding with
+       | Ok provider_cfg ->
+         check bool "kind is the one the workspace declared" true
+           (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+         check string "base_url" "https://ollama.com/v1" provider_cfg.base_url;
+         (* The catalog row's "/api/chat" belongs to its own kind, not this
+            one, so the Chat-completions default stands. *)
+         check string "request_path" "/chat/completions" provider_cfg.request_path
+       | Error msg -> failf "unexpected ollama_cloud adapter error: %s" msg)
+    | bindings ->
+      failf "expected one ollama_cloud binding, got %d" (List.length bindings))
+;;
+
 let test_runtime_adapter_materializes_deepseek_openai_compat () =
   with_deepseek_env "ds-test-key" (fun () ->
     let provider_cfg = deepseek_provider_config_or_fail () in
@@ -2336,6 +2397,10 @@ let () =
             "runtime adapter materializes DeepSeek OpenAI compat"
             `Quick
             test_runtime_adapter_materializes_deepseek_openai_compat
+        ; test_case
+            "an OpenAI-compatible surface keeps the chat-completions path"
+            `Quick
+            test_openai_compat_surface_keeps_the_chat_completions_path
         ; test_case
             "runtime max_tokens wire omission and explicit override"
             `Quick

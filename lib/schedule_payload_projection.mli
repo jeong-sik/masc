@@ -68,14 +68,12 @@ val dispatch_view_detailed
   -> (known_kind * payload_view, dispatch_rejection) result
 
 val support_status : Schedule_domain.schedule_request -> support_status
-val kind_result : Schedule_domain.schedule_request -> (string, string) result
 val kind : Schedule_domain.schedule_request -> string option
 
 val dispatch_tool_for_request_result
   :  Schedule_domain.schedule_request
   -> (string, dispatch_rejection) result
 
-val dispatch_tool_for_request : Schedule_domain.schedule_request -> string option
 val target_summary : Schedule_domain.schedule_request -> string option * string option
 
 (** [wake_keeper_name request] is the bare keeper name a [masc.keeper_wake]

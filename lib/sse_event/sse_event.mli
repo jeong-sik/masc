@@ -13,7 +13,6 @@ type envelope_meta =
   }
 
 val json_string_opt : string option -> Yojson.Safe.t
-val wrap_envelope : envelope_meta -> Yojson.Safe.t -> Yojson.Safe.t
 
 val agent_started
   :  ts_unix:float

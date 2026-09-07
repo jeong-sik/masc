@@ -15,4 +15,3 @@ type t = Keeper_provider_attempt_effect_core.t =
 
 val allows_same_turn_retry : t -> bool
 val to_string : t -> string
-val of_string : string -> t option

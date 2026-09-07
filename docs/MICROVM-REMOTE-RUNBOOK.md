@@ -62,7 +62,7 @@ CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드�
 |---|------|--------|
 | 1 | `container` CLI 1.3+ 와 실행 중인 container system | `microvm_cli_unavailable` / `microvm_image_probe_failed` |
 | 2 | 게스트 이미지가 container 이미지 저장소에 있음 (`container image inspect masc-keeper-sandbox:local`) | `microvm_image_missing` |
-| 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한) | `microvm_shim_missing` — 부팅 거부 |
+| 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부 |
 | 4 | 디스크 여유. 볼륨 상한은 `MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE` (기본 256g, sparse) | `microvm_work_volume_create_failed` |
 
 shim 설정(`masc-exec-shim.conf`)은 서버가 부팅마다 같은 디렉터리에 다시
@@ -87,7 +87,34 @@ GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
 데도 쓸 수 없다. 크기는 커널 기본값(게스트 메모리의 절반, 기본 게스트에서
 551M 실측)이고 게스트가 내려가면 사라진다. 그게 전부다.
 
-## shim 만들기
+## shim 받기
+
+shim 은 서버 릴리즈의 자산이고(RFC-0427 B-1), 설치기가 놓는다(B-2). 릴리즈마다
+`masc-exec-shim-linux-arm64` 와 `masc-exec-shim-linux-amd64` 가 서버 바이너리
+옆에 올라오고, 릴리즈 워크플로가 같은 아키텍처의 러너에서 정적으로 빌드해
+`--probe` 까지 확인한 것이다. 게스트는 arm64 다.
+
+`scripts/install.sh` 가 서버 바이너리와 같은 태그의 shim 을
+`<base>/.masc/microvm/shim/masc-exec-shim` 에 놓고, 옆에 릴리즈 `SHA256SUMS` 의
+해시를 `masc-exec-shim.sha256` 으로 남긴다. 부팅은 그 두 파일을 맞춰 보고,
+다르면 `microvm_shim_hash_mismatch` 로 거절한다. 따로 할 일은 없다. microvm
+keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
+
+설치기 없이 자산만 바꿔 넣을 때는 sidecar 도 같이 바꾼다. 안 바꾸면 다음 부팅이
+옛 해시와 새 바이너리를 보고 거절한다.
+
+```bash
+# 서버와 같은 태그의 자산을 받는다
+gh release download vX.Y.Z -R jeong-sik/masc -p masc-exec-shim-linux-arm64 -p SHA256SUMS -D /tmp/shim
+mkdir -p ~/me/.masc/microvm/shim
+install -m 755 /tmp/shim/masc-exec-shim-linux-arm64 ~/me/.masc/microvm/shim/masc-exec-shim
+grep ' masc-exec-shim-linux-arm64$' /tmp/shim/SHA256SUMS > ~/me/.masc/microvm/shim/masc-exec-shim.sha256
+```
+
+서버와 shim 은 한 major 차이를 서로 참으므로(위 계약 표 아래 문단) 순서는 상관없다.
+릴리즈 없이 지금 트리로 만들어야 할 때만 아래처럼 직접 빌드한다. 손으로 빌드한
+shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
+적는다.
 
 ```bash
 # Docker 가 있으면
@@ -96,6 +123,7 @@ scripts/remote-ssh/build-shim.sh --arch arm64
 mkdir -p ~/me/.masc/microvm/shim
 cp dist/remote-ssh/masc-exec-shim-linux-arm64 ~/me/.masc/microvm/shim/masc-exec-shim
 chmod +x ~/me/.masc/microvm/shim/masc-exec-shim
+rm -f ~/me/.masc/microvm/shim/masc-exec-shim.sha256
 ```
 
 Docker 없이 Apple container 로 빌드할 때: 빌드 컨테이너에 `--dns` 를

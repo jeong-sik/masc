@@ -124,8 +124,6 @@ let parse body =
   scan 1 [] None None lines
 ;;
 
-let blocks ast = ast
-
 let fenced_code_blocks ast =
   List.filter_map
     (function

@@ -1027,8 +1027,11 @@ describe('thread history merge & persistence', () => {
     const atts = entries[0]?.attachments ?? []
     expect(atts).toHaveLength(2)
     // snake_case mime_type -> camelCase mimeType, type narrowed to image/file.
+    // The decode result is byte-backed by construction (KeeperByteAttachment),
+    // so no reference arm can appear here.
     expect(atts[0]).toMatchObject({ id: 'att1', type: 'image', mimeType: 'image/png', data: 'BASE64' })
-    expect(atts[1]?.type).toBe('file')
+    const second = atts[1]
+    expect(second && !second.kind ? second.type : 'reference').toBe('file')
   })
 
   it('drops attachment rows missing id or data (unrenderable)', () => {

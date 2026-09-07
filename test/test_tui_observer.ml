@@ -75,7 +75,8 @@ let summary = function
          | Some b -> string_of_bool b
          | None -> "-")
   | Observer.Event (Observer.Keeper_tool_call c) ->
-      Printf.sprintf "keeper_tool_call(%s,%s,%s,%s)" c.Observer.kt_keeper
+      Printf.sprintf "keeper_tool_call(%s,turn=%s,%s,%s,%s)" c.Observer.kt_keeper
+        (match c.Observer.kt_turn with Some n -> string_of_int n | None -> "-")
         c.Observer.kt_tool
         (match c.Observer.kt_duration_ms with
          | Some ms -> Printf.sprintf "%.0fms" ms
@@ -150,22 +151,35 @@ let test_agent_terminal_frames_keep_their_distinct_kinds () =
 let bare_heartbeat_frame =
   "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1787505653.07}\n\n"
 
+(* Field-for-field the shape the server sends, from an observer capture on
+   2026-09-07: every one of 19 [keeper_tool_call] frames carried "turn".
+   The fixture carried none until then, so nothing here could notice that
+   the decoder dropped it. *)
 let keeper_tool_call_frame =
   "data: {\"type\":\"keeper_tool_call\",\"name\":\"largo\",\"tool_name\":\"tool_execute\",\
    \"duration_ms\":14534,\"disposition\":\"completed\",\"ts_unix\":1787507566.14,\
+   \"turn\":1157,\
    \"tool_args\":{\"argv\":[\"dune\",\"build\"]},\"tool_result\":{\"ok\":true}}\n\n"
 
+(* A server that reports a call outside any invocation sends no turn. *)
+let keeper_tool_call_frame_without_turn =
+  "data: {\"type\":\"keeper_tool_call\",\"name\":\"largo\",\"tool_name\":\"Read\",\
+   \"duration_ms\":8,\"disposition\":\"completed\",\"ts_unix\":1787507570.02}\n\n"
+
 let test_keeper_events_decode_by_name () =
-  check (list string) "heartbeat, bare heartbeat, settlement, keeper tool call"
+  check (list string)
+    "heartbeat, bare heartbeat, settlement, keeper tool call with and without \
+     a turn"
     [ "heartbeat(bandleader,turn_running,in_turn=true)"
     ; "heartbeat(lane-smith,-,in_turn=-)"
     ; "turn_complete(largo,turn=2086,cost=0.0258)"
-    ; "keeper_tool_call(largo,tool_execute,14534ms,completed)"
+    ; "keeper_tool_call(largo,turn=1157,tool_execute,14534ms,completed)"
+    ; "keeper_tool_call(largo,turn=-,Read,8ms,completed)"
     ]
     (List.map summary
        (decode_all
           [ heartbeat_frame; bare_heartbeat_frame; turn_complete_frame
-          ; keeper_tool_call_frame ]))
+          ; keeper_tool_call_frame; keeper_tool_call_frame_without_turn ]))
 
 (* Shapes taken from the server: keeper_chat_broadcast.ml names the keeper in
    "name", keeper_waiting_inventory_broadcast.ml in "keeper_name". *)

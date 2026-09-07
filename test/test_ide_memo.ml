@@ -32,6 +32,8 @@ let test_a_comment_in_each_marker_reads_as_a_memo () =
   read "c block" (plain "alpha" "same") "/* masc(alpha): same */";
   read "double slash" (plain "alpha" "same") "// masc(alpha): same";
   read "hash" (plain "alpha" "same") "# masc(alpha): same";
+  read "double dash" (plain "alpha" "same") "-- masc(alpha): same";
+  read "html block" (plain "alpha" "same") "<!-- masc(alpha): same -->";
   read "surrounding blanks are not part of it" (plain "alpha" "same")
     "   #   masc(alpha):   same   "
 
@@ -45,6 +47,8 @@ let test_a_kind_word_names_the_kind () =
   read "bookmark"
     { author = "ci.bot-2"; kind = Agent_observation.Bookmark; text = "start here" }
     "# masc(ci.bot-2) bookmark: start here";
+  read "the plain kind may be spelled out" (plain "alpha" "same")
+    "// masc(alpha) comment: same";
   read "the text keeps its own colons" (plain "a" "see: this, and: that")
     "// masc(a): see: this, and: that"
 
@@ -52,7 +56,7 @@ let test_other_comments_are_left_alone () =
   not_a_memo "a todo" "// TODO: later";
   not_a_memo "the word inside prose" "(* masc is the tool that reads this *)";
   not_a_memo "a block comment that goes on" "(* masc(alpha): text";
-  not_a_memo "a marker the lexers do not produce" "-- masc(alpha): text";
+  not_a_memo "a marker nobody here writes" "; masc(alpha): text";
   not_a_memo "code, not a comment" "let masc(alpha) = 1"
 
 let test_a_memo_that_stops_short_says_where () =
@@ -71,14 +75,25 @@ let test_a_made_memo_reads_back_as_itself () =
       | Error why -> Alcotest.failf "make refused %s" why
       | Ok t ->
         Alcotest.(check string) "trimmed" "the text" t.text;
-        read (Agent_observation.annotation_kind_to_string kind) t ("// " ^ to_body t);
+        read (word_of_kind kind) t ("// " ^ to_body t);
         read "inside a block" t ("(* " ^ to_body t ^ " *)"))
     Agent_observation.all_annotation_kinds;
   Alcotest.(check string) "the plain comment carries no word"
     "masc(alpha): x" (to_body (plain "alpha" "x"));
   Alcotest.(check string) "the kind is the word"
     "masc(alpha) question: x"
-    (to_body { author = "alpha"; kind = Agent_observation.Question; text = "x" })
+    (to_body { author = "alpha"; kind = Agent_observation.Question; text = "x" });
+  Alcotest.(check string) "a line marker leads the body"
+    "// masc(alpha): x"
+    (to_line (Line "//") (plain "alpha" "x"));
+  Alcotest.(check string) "a block marker encloses the body"
+    "(* masc(alpha): x *)"
+    (to_line (Block { opens = "(*"; closes = "*)" }) (plain "alpha" "x"));
+  List.iter
+    (fun markers ->
+      let t = plain "alpha" "every known marker reads back" in
+      read "known marker round trip" t (to_line markers t))
+    known_markers
 
 let test_make_refuses_what_of_comment_could_not_read () =
   let refused label ~author ~text =

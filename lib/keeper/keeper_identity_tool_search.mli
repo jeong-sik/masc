@@ -128,6 +128,14 @@ type placement =
             an hour after that change shipped, one Keeper was at 111 tools of
             a possible 133 and still climbing. Use stops where the work stops.
 
+            One request is exempt, and only one: the names the conversation's
+            last call asked for are placed too, and the next call of anything
+            ends that. It is not carried and never accumulates -- what the
+            measurement above warns about is a set that grows, and a grant the
+            next call clears cannot. Without it a deferred tool called once,
+            alone, by instruction is never callable at all, because the load
+            dies with the turn that made it ([make]).
+
             Empty until something runs, so a Keeper that never reaches its
             attached services pays nothing for this. The set is a fold over
             the conversation's own history, so it survives anything short of
@@ -207,6 +215,14 @@ val make : keeper_name:string -> surface -> placement option
     the name is unknown, because here it is not. Recovering costs one round
     trip. This is why the carry exists at all: a tool the conversation is
     still using should be placed rather than re-asked for.
+
+    That round trip is one trip only because the names the conversation's last
+    call asked for are placed on the next request, spent by whatever it calls
+    next. A load reaches this turn's agent and no further, so without that a
+    turn ending on the load never gets to the call: measured 2026-09-06,
+    sangsu searched for [keeper_voice_speak] fourteen times in a row and
+    called it none. See {!already_used} for why this is one request rather
+    than a window.
 
     Raises [Invalid_argument] if the argument schema this builds is refused,
     which can only be a defect in the literal it is built from. *)

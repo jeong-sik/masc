@@ -51,8 +51,6 @@ type tool_event =
       timestamp : float;
     }
 
-val event_to_json : tool_event -> Yojson.Safe.t
-val event_of_json : Yojson.Safe.t -> (tool_event, string) Result.t
 
 (** Emit an [Assigned] event, update the in-memory agent→assignment index,
     and return the generated [assignment_id].

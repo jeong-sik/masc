@@ -48,7 +48,6 @@ val request_of_yojson : Yojson.Safe.t -> (verification_request, string) result
 (** {1 Storage} *)
 
 val generate_id : unit -> string
-val save_request : string -> verification_request -> (string, string) result
 
 (** [delete_request base_path req_id] removes the verification record for
     [req_id]. RFC-0221 §3.1 compensation: undo a record write whose Task status

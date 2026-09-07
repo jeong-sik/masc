@@ -64,8 +64,6 @@ module Mcp_attr_key = struct
   let network_protocol_version = "network.protocol.version"
   let network_transport = "network.transport"
   let error_type = "error.type"
-  let server_address = "server.address"
-  let server_port = "server.port"
   let masc_mcp_tool_failure_class = "masc.mcp.tool.failure_class"
 end
 
@@ -75,7 +73,6 @@ module Mcp_value = struct
 end
 
 module Mcp_metric_name = struct
-  let client_operation_duration = "mcp.client.operation.duration"
   let server_operation_duration = "mcp.server.operation.duration"
   let server_session_duration = "mcp.server.session.duration"
 end

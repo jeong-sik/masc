@@ -26,7 +26,6 @@ val cache_filename : string -> string
 (** {1 Serialization} *)
 
 val entry_to_json : cache_entry -> Yojson.Safe.t
-val entry_of_json : Yojson.Safe.t -> cache_entry option
 
 (** {1 Core Operations} *)
 
@@ -51,5 +50,4 @@ val evict_expired : Workspace_utils.config -> int
 val maybe_evict_expired : Workspace_utils.config -> int
 val count_entries : Workspace_utils.config -> int
 val last_batch_eviction : float Atomic.t
-val cached_entry_count : int Atomic.t
 val reset_cached_entry_count : unit -> unit

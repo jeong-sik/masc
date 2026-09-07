@@ -34,7 +34,6 @@ type error =
       ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
       }
 
-val failure_to_string : failure -> string
 val error_to_string : error -> string
 
 val cancel_pending :

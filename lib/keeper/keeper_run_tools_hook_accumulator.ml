@@ -15,6 +15,7 @@ open Keeper_agent_result
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
+  ; historical_tool_calls : tool_call_detail list
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -54,6 +55,27 @@ type hook_outputs =
   ; out_receipt_actionable_signal :
       Keeper_contract_classifier.actionable_signal option
   }
+
+let create ~meta ~tool_surface ~historical_tool_calls =
+  { meta
+  ; tool_calls = []
+  ; historical_tool_calls
+  ; current_turn = 0
+  ; tool_surface
+  ; requested_tool_names = []
+  ; receipt_completion_contract_result =
+      Keeper_execution_receipt.Completion_observation_unknown
+  ; receipt_actionable_signal = None
+  ; prompt_blocks = []
+  ; extra_system_context_digest = None
+  ; extra_system_context_size = None
+  ; assistant_turn_texts = []
+  }
+;;
+
+let tool_calls_for_repetition (acc : hook_accumulator) =
+  acc.tool_calls @ acc.historical_tool_calls
+;;
 
 let freeze (acc : hook_accumulator) : hook_outputs =
   { out_meta = acc.meta

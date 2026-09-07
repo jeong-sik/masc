@@ -200,7 +200,9 @@ let snapshot_min_interval_sec =
      this env var crashed the module at load. [get_float_nonneg] also maps
      negative / NaN / +-inf to the default, which is correct for an
      interval-seconds knob. *)
-  Env_config_core.get_float_nonneg ~default:5.0 "MASC_SNAPSHOT_INTERVAL_SEC"
+  Env_config_core.get_float_nonneg
+    ~default:(Env_setting.Float_knob.default Snapshot_interval_sec)
+    (Env_setting.Float_knob.env_name Snapshot_interval_sec)
 
 (** Timestamp of the last completed snapshot.  CAS-guarded so that
     concurrent [broadcast_impl] fibers racing to snapshot after the
@@ -382,8 +384,13 @@ let event_matches_session ~session_id ~kind event =
   | Session_audience target_session_id ->
     kind = Agent_stream && String.equal target_session_id session_id
   | Broadcast_audience target ->
+    (* [frame] is [format_event_yojson] of [payload], so reading the JSON back
+       out of the frame's data lines reproduces [payload] - and this runs for
+       every buffered event against every replaying session. On 2026-09-07 that
+       reparse was the main thread's single largest cost: caml_lex_engine took
+       55.7% of its leaf samples and this was the only masc frame above it. *)
     let jsonrpc_payload =
-      Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event.frame
+      Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream event.payload
     in
     session_kind_matches_target target ~jsonrpc_payload kind
 

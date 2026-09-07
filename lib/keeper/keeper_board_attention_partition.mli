@@ -14,7 +14,6 @@ module Worker_epoch : sig
   type t
 
   val generate : unit -> t
-  val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool
 end
@@ -118,7 +117,6 @@ type requeue_blocked_outcome =
   | Cursor_conflict of string
   | Generation_conflict of string
 
-val state_to_string : state -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 val load : base_path:string -> keeper_name:string -> (t list, string) result

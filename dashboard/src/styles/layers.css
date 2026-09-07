@@ -51,8 +51,6 @@
 .layer-toggle.is-on[data-layer="tools"]    .glyph { background: var(--brass-1); box-shadow: 0 0 5px rgb(var(--brass-glow) / .6); }
 .layer-toggle.is-on[data-layer="approve"]  { color: var(--ok);     border-color: rgb(var(--ok-glow) / .4); background: rgb(var(--ok-glow) / .06); }
 .layer-toggle.is-on[data-layer="approve"]  .glyph { background: var(--ok); box-shadow: 0 0 5px rgb(var(--ok-glow) / .6); }
-.layer-toggle.is-on[data-layer="notes"]    { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .4); background: rgb(var(--stalled-glow) / .06); }
-.layer-toggle.is-on[data-layer="notes"]    .glyph { background: var(--stalled); box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6); }
 
 .layer-opacity {
   display: none;

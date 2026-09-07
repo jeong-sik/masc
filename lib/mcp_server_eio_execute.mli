@@ -66,10 +66,9 @@ val execute_tool_eio :
     state's current workspace while executing the call.
 
     Side effects on the request scope:
-    - Refreshes [Eio_context.set_switch] / [set_clock] so
-      downstream helpers that still consult ambient
-      handles see the current request scope (tests can
-      otherwise leave a finished switch in the global slot).
+    - Binds [sw] via [Eio_context.with_turn_switch] and refreshes [set_clock] so
+      downstream helpers that consult ambient handles see the current request
+      scope without overwriting the global root switch.
     - Bumps the [Otel_metric_store.record_request] counter for
       every inbound call.
 

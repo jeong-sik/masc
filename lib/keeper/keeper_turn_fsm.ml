@@ -199,14 +199,3 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
    only guarded by reviewer-eye inspection of call sites. Stays here (not in
    the pure [Turn_fsm] lib) because the ppx expansion references
    [Keeper_fsm_guard_runtime]. *)
-
-let require_active_state : type a. a turn_state -> (unit, Masc_domain.masc_error) result = fun s ->
-  match s with
-  | Done | Failed _ | Cancelled _ ->
-      Error
-        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-           (Printf.sprintf "Terminal state %s cannot re-enter active paths"
-              (turn_state_label s))))
-  | _ -> Ok ()
-[@@fsm_guard
-  "match s with Done | Failed _ | Cancelled _ -> false | _ -> true"]

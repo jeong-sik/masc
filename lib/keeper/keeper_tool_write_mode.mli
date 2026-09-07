@@ -7,8 +7,6 @@ type t =
   | Patch
 
 val to_string : t -> string
-val of_string_opt : string -> t option
-val all : t list
 
 val valid_strings : string list
 (** The canonical enum [Tool_shard_types_enum_mirrors.fs_write_mode_enum_strings]

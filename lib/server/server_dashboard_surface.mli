@@ -23,8 +23,6 @@ type t = {
   cache : cache_metadata;
 }
 
-val to_json : t -> Yojson.Safe.t
-
 val attach :
   ?cache_key:string ->
   ?ttl_s:float ->

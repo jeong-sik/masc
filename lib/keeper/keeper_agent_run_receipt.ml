@@ -77,10 +77,11 @@ let finalize
            |> Keeper_execution_receipt.error_kind_of_string)
       , Some (Agent_core.Error.to_string err) )
   in
+  (* Carried from the accumulator whatever the turn did: the match here had
+     one arm and never read [turn_result]. *)
   let completion_contract_result
       : Keeper_execution_receipt.completion_contract_result =
-    match turn_result with
-    | _ -> acc.receipt_completion_contract_result
+    acc.receipt_completion_contract_result
   in
   let terminal_reason_code =
     match turn_result with

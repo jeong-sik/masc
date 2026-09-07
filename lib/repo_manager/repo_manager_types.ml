@@ -30,9 +30,3 @@ type repository = {
    Enumerating the other 10 once here satisfies warning 4 and means an
    [otoml] version bump that adds a value constructor breaks exactly this
    site instead of several config loaders. *)
-let is_toml_table : Otoml.t -> bool = function
-  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
-  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-  | Otoml.TomlTableArray _ -> false

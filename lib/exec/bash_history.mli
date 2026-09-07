@@ -11,8 +11,6 @@ type history_entry =
   }
 
 val process_status_of_unix : Unix.process_status -> process_status
-val process_status_to_json : process_status -> Yojson.Safe.t
-val entry_to_json : history_entry -> Yojson.Safe.t
 
 val append :
   base_path:string ->

@@ -35,9 +35,6 @@ type t =
       ; valid_actions : string
       }
 
-(** The [tool_guidance.*] prompt key for this arm. *)
-val key : t -> string
-
 (** Render the arm's managed template; on render failure log and return the
     bare data (never inline prose). *)
 val to_string : t -> string

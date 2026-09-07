@@ -32,7 +32,6 @@ type shell_projection_trace_snapshot =
   ; snapshot_finished_at : float option
   }
 
-val status_string : shell_projection_trace_status -> string
 val start : cache_key:string -> light:bool -> shell_projection_trace
 val start_projection : shell_projection_trace -> string -> unit
 val finish_projection : shell_projection_trace -> string -> int -> unit
@@ -43,6 +42,5 @@ val finish
   -> shell_projection_trace_status
   -> unit
 
-val snapshot : string -> shell_projection_trace_snapshot option
 val diagnostics : string -> (string * Yojson.Safe.t) list
 val log : string -> string * string * string * int

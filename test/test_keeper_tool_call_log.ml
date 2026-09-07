@@ -250,6 +250,185 @@ let test_read_window_keeps_the_keepers_rows_in_order () =
       (List.length (Keeper_tool_call_log.read_window ~window_hours:0.0 ())))
 ;;
 
+(* ── file_change_tally carries its answer ─────────────── *)
+
+(* The tally is folded from what the store gained since the last call. Two
+   things have to hold for that to be safe: the answer must equal what a whole
+   read produces, and a row appended between calls must appear. The counts are
+   what this checks — a keeper's rows are not file changes in this fixture, so
+   [rows_counted] is where they land, and it is the field the endpoint reports
+   as "of m calls". *)
+let test_file_change_tally_matches_a_whole_read () =
+  with_tmp_log (fun () ->
+    let module Change = Keeper_tool_call_file_change in
+    let log keeper tool =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:keeper ~tool_name:tool
+        ~input:(`Assoc []) ~output_text:"out"
+        ~success:true ~duration_ms:1.0 ()
+    in
+    log "alice" "first";
+    log "bob" "other";
+    log "alice" "second";
+    let whole_read keeper =
+      Change.classify_all
+        (Keeper_tool_call_log.read_window ~keeper_name:keeper ~window_hours:1.0 ())
+    in
+    let carried = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int)
+      "a first fold equals a whole read"
+      (Change.rows_counted (whole_read "alice"))
+      (Change.rows_counted carried);
+    Alcotest.(check int) "and it saw alice's two rows" 2 (Change.rows_counted carried);
+    (* Called again with nothing appended, the carried tally must not double. *)
+    let again = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int) "a repeat call does not re-count" 2 (Change.rows_counted again);
+    log "alice" "third";
+    let after = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int) "a row appended between calls appears" 3 (Change.rows_counted after);
+    Alcotest.(check int)
+      "and still equals a whole read"
+      (Change.rows_counted (whole_read "alice"))
+      (Change.rows_counted after);
+    (* A different keeper and an unfiltered read are separate carried answers. *)
+    Alcotest.(check int)
+      "bob's own answer"
+      1
+      (Change.rows_counted
+         (Keeper_tool_call_log.file_change_tally ~keeper_name:"bob" ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "no keeper filter sees every row"
+      4
+      (Change.rows_counted (Keeper_tool_call_log.file_change_tally ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "a non-positive window is empty"
+      0
+      (Change.rows_counted (Keeper_tool_call_log.file_change_tally ~window_hours:0.0 ())))
+;;
+
+(* The rule the carried tally is reused under. The read that applies it needs
+   a clock; this does not, so the aging-out case is checked here.
+
+   The first version of this compared calendar days, which made a one-hour
+   window's entry stay valid from the moment it was folded until midnight —
+   the answer grew all day instead of trailing an hour behind (#33563 review).
+   The floor moving forward is the case that has to invalidate. *)
+let test_carried_entry_answers_only_while_nothing_aged_out () =
+  let day ts = Jsonl_writer.day_key ~ts in
+  let now = 1_788_000_000.0 in
+  let hour = 3600.0 in
+  let floor_at h = now -. (h *. hour) in
+  let answers ~folded_at ~oldest ~asking_at =
+    Keeper_tool_call_log.carried_entry_answers
+      ~entry_since_ts:folded_at
+      ~entry_oldest_row_ts:oldest
+      ~since_ts:asking_at
+      ~since:(day asking_at)
+  in
+  (* Folded for a 3h window whose oldest row is 2h old. Asked again a moment
+     later: the floor has moved a little, the row is still inside. *)
+  Alcotest.(check bool)
+    "still inside the window"
+    true
+    (answers ~folded_at:(floor_at 3.0) ~oldest:(Some (floor_at 2.0))
+       ~asking_at:(floor_at 3.0 +. 60.0));
+  (* The same entry once the floor has passed that row. This is the case the
+     day-keyed version got wrong. *)
+  Alcotest.(check bool)
+    "the oldest row has aged out"
+    false
+    (answers ~folded_at:(floor_at 3.0) ~oldest:(Some (floor_at 2.0))
+       ~asking_at:(floor_at 1.0));
+  (* An entry that counted nothing has nothing to age out. *)
+  Alcotest.(check bool)
+    "no rows, nothing to drop"
+    true
+    (answers ~folded_at:(floor_at 3.0) ~oldest:None ~asking_at:(floor_at 1.0));
+  (* A floor that went backwards is not this entry's window. *)
+  Alcotest.(check bool)
+    "the floor moved backwards"
+    false
+    (answers ~folded_at:(floor_at 1.0) ~oldest:None ~asking_at:(floor_at 3.0));
+  (* A day range that no longer starts where the entry read from: files it
+     never opened are inside the window now. *)
+  let yesterday = now -. (26.0 *. hour) in
+  Alcotest.(check bool)
+    "the day range moved"
+    false
+    (Keeper_tool_call_log.carried_entry_answers
+       ~entry_since_ts:yesterday ~entry_oldest_row_ts:None
+       ~since_ts:(floor_at 1.0) ~since:(day (floor_at 1.0)))
+;;
+
+(* A row that has aged out must leave the answer, and the carried tally cannot
+   drop it -- an unreadable row has no timestamp to drop it by -- so the entry
+   is refolded once the window floor passes a row it counted.
+
+   A test cannot advance the clock, but it does not need to: the floor is
+   [now - window_hours], so asking with a shorter window moves the floor
+   forward exactly as time would. The cache key includes [window_hours], so
+   two lengths are two entries; the third call reuses the first key with the
+   floor now past the row it counted, which is the case under test.
+
+   Rows go straight to the store because [log_call] stamps [ts] with the clock
+   and this needs rows at chosen times. *)
+let test_file_change_tally_drops_rows_that_aged_out () =
+  with_tmp_log (fun () ->
+    let module Change = Keeper_tool_call_file_change in
+    let store_dir =
+      match Keeper_tool_call_log.store_dir () with
+      | Some dir -> dir
+      | None -> Alcotest.fail "the log has no store"
+    in
+    let store = Dated_jsonl.create ~base_dir:store_dir () in
+    let now = Unix.gettimeofday () in
+    let write ~ts tool =
+      Dated_jsonl.append store
+        (`Assoc
+           [ "ts", `Float ts
+           ; "keeper", `String "alice"
+           ; "tool", `String tool
+           ; "success", `Bool true
+           ])
+    in
+    let counted ~window_hours =
+      Change.rows_counted
+        (Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours ())
+    in
+    let whole_read ~window_hours =
+      Change.rows_counted
+        (Change.classify_all
+           (Keeper_tool_call_log.read_window ~keeper_name:"alice" ~window_hours ()))
+    in
+    (* One row a minute old, one two hours old -- the same calendar day, so a
+       day-keyed cache treats every window below as one entry. *)
+    write ~ts:(now -. 60.0) "recent";
+    write ~ts:(now -. (2.0 *. 3600.0)) "two-hours-ago";
+    Alcotest.(check int) "a 3h window reaches both" 2 (counted ~window_hours:3.0);
+    Alcotest.(check int)
+      "and agrees with a whole read"
+      (whole_read ~window_hours:3.0)
+      (counted ~window_hours:3.0);
+    (* A floor an hour further forward. The older row is behind it. *)
+    Alcotest.(check int) "a 1h window reaches only the recent row" 1 (counted ~window_hours:1.0);
+    Alcotest.(check int)
+      "and agrees with a whole read"
+      (whole_read ~window_hours:1.0)
+      (counted ~window_hours:1.0);
+    (* Appending inside the shorter window must reach the carried answer. *)
+    write ~ts:(now -. 30.0) "newer";
+    Alcotest.(check int)
+      "a row appended inside the window appears"
+      (whole_read ~window_hours:1.0)
+      (counted ~window_hours:1.0);
+    Alcotest.(check int) "which is two rows" 2 (counted ~window_hours:1.0);
+    (* And the longer window still sees everything, from its own entry. *)
+    Alcotest.(check int)
+      "the longer window is unchanged by the shorter one"
+      (whole_read ~window_hours:3.0)
+      (counted ~window_hours:3.0))
+;;
+
 (* ── read_recent edge cases ─────────────────────────── *)
 
 let test_read_recent_n_zero () =
@@ -1960,6 +2139,14 @@ let () =
             "cancelled invocation releases file evidence"
             `Quick
             test_abandoned_file_change_evidence_is_released_with_invocation
+        ] )
+    ; ( "file_change_tally",
+        [ eio_test "matches a whole read and sees appends"
+            test_file_change_tally_matches_a_whole_read
+        ; Alcotest.test_case "a carried entry answers only while nothing aged out"
+            `Quick test_carried_entry_answers_only_while_nothing_aged_out
+        ; eio_test "drops rows that aged out of the window"
+            test_file_change_tally_drops_rows_that_aged_out
         ] )
     ; ( "read_window",
         [ eio_test "keeps the keeper's rows in order"

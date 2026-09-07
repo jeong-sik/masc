@@ -513,32 +513,39 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
+(* The masc_* task tools route on Tool_name.Task_name, so a constructor added
+   there is a compile error here rather than a tool that is advertised and then
+   answers "unknown". keeper_task_claim is in the keeper_* namespace and is not
+   part of that vocabulary. *)
+let dispatch_task_name ?created_by ctx ~name ~args ~start = function
+  | Tool_name.Task_name.Add_task ->
+    handle_add_task ?created_by ~tool_name:name ~start_time:start ctx args
+  | Tool_name.Task_name.Batch_add_tasks ->
+    handle_batch_add_tasks ?created_by ~tool_name:name ~start_time:start ctx args
+  | Tool_name.Task_name.Task_history ->
+    handle_task_history ~tool_name:name ~start_time:start ctx args
+  | Tool_name.Task_name.Task_set_goal ->
+    handle_set_goal ~tool_name:name ~start_time:start ctx args
+  | Tool_name.Task_name.Tasks -> handle_tasks ~tool_name:name ~start_time:start ctx args
+  | Tool_name.Task_name.Transition ->
+    handle_transition ~tool_name:name ~start_time:start ctx args
+  | Tool_name.Task_name.Update_priority ->
+    handle_update_priority ~tool_name:name ~start_time:start ctx args
+;;
+
 let dispatch_internal ?created_by ctx ~name ~args =
   let start = Time_compat.now () in
-  match name with
-  | "masc_add_task" ->
-    Some (handle_add_task ?created_by ~tool_name:name ~start_time:start ctx args)
-  | "masc_batch_add_tasks" ->
-    Some (handle_batch_add_tasks ?created_by ~tool_name:name ~start_time:start ctx args)
-  | "keeper_task_claim" ->
-      let task_id = get_string args "task_id" "" in
-      if String.equal task_id ""
-      then Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
-      else Some (handle_claim ~tool_name:name ~start_time:start ctx args)
-  | "masc_transition" ->
-    Some
-      (handle_transition
-         ~tool_name:name
-         ~start_time:start
-         ctx
-         args)
-  | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)
-  | "masc_task_set_goal" -> Some (handle_set_goal ~tool_name:name ~start_time:start ctx args)
-  | "masc_tasks" ->
-    Some
-      (handle_tasks ~tool_name:name ~start_time:start ctx args)
-  | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
+  match Tool_name.Task_name.of_string name with
+  | Some task_name ->
+    Some (dispatch_task_name ?created_by ctx ~name ~args ~start task_name)
+  | None ->
+    (match name with
+     | "keeper_task_claim" ->
+       let task_id = get_string args "task_id" "" in
+       if String.equal task_id ""
+       then Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
+       else Some (handle_claim ~tool_name:name ~start_time:start ctx args)
+     | _ -> None)
 
 let dispatch ctx ~name ~args =
   dispatch_internal ctx ~name ~args

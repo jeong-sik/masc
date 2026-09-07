@@ -474,10 +474,6 @@ let events ?channel ?keeper ?workspace_id ~limit () =
   Eio_guard.with_mutex_ro mu (fun () ->
       events_locked ?channel ?keeper ?workspace_id ~limit ())
 
-let total_messages () =
-  Eio_guard.with_mutex_ro mu (fun () ->
-      Hashtbl.fold (fun _ acc sum -> sum + acc.msg_count) table 0)
-
 let iso_of_ts ts =
   if ts <= 0.0 then "never" else Time_codec.rfc3339_of_unix ts
 

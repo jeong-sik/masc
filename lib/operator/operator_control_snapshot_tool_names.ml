@@ -24,18 +24,34 @@ let tool_names_of_recent_json (json : Yojson.Safe.t) =
   | Some Keeper_metrics_record.Heartbeat | None -> []
 ;;
 
+(* The walk stops as soon as [limit] names are collected, which the newest
+   rows usually supply, but every row in the window used to be parsed before
+   the walk began. Measured 2026-09-07 on a live server: those trees were
+   4.40 GB, 5.3% of the process's allocation, and the caller hands in 120
+   rows per Keeper on every operator snapshot.
+
+   Rows are now parsed one at a time, newest first, and a row the walk never
+   reaches is never parsed. A malformed row it does reach still warns exactly
+   as before - same message, same printed row number - because
+   [Fs_compat.parse_jsonl_line] is what the whole-window parse uses too. A
+   malformed row past the stopping point no longer warns; this function
+   reports the recent tool names and is not the ledger's validator. *)
 let collect_recent_tool_names ?(limit = 8) (lines : string list) =
-  let parsed, _ =
-    Fs_compat.parse_jsonl_lines
-      ~source:"operator_tool_audit_keeper_metrics"
-      lines
-  in
-  let ordered = List.rev parsed in
+  let newest_first = List.rev (Fs_compat.number_jsonl_lines lines) in
   let rec loop acc remaining = function
     | _ when remaining <= 0 -> List.rev acc
     | [] -> List.rev acc
-    | json :: rest ->
-        let tools = tool_names_of_recent_json json in
+    | (line_no, row) :: rest ->
+        let tools =
+          match
+            Fs_compat.parse_jsonl_line
+              ~source:"operator_tool_audit_keeper_metrics"
+              ~line_no
+              row
+          with
+          | Some json -> tool_names_of_recent_json json
+          | None -> []
+        in
         let merged = merge_tool_name_lists (List.rev acc) tools in
         let capped =
           if List.length merged <= limit
@@ -44,5 +60,5 @@ let collect_recent_tool_names ?(limit = 8) (lines : string list) =
         in
         loop (List.rev capped) (limit - List.length capped) rest
   in
-  loop [] limit ordered
+  loop [] limit newest_first
 ;;

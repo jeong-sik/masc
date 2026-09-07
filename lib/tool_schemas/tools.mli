@@ -6,6 +6,5 @@
     @since 0.1.0 *)
 
 val raw_schemas : Masc_domain.tool_schema list
-val all_schemas : Masc_domain.tool_schema list
 val all_schemas_extended : Masc_domain.tool_schema list
 val find_tool : string -> Masc_domain.tool_schema option

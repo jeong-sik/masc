@@ -62,6 +62,14 @@ let prepare (change : Masc.Tui_decode.file_change) =
           Diff.preview ~context:preview_context ~max_rows:preview_rows rows
         in
         Edited { preview; omitted; removed; added; replace_all }
+    | Masc.Tui_decode.Fc_inserted { text; _ } ->
+        (* A memo is an edit that removed nothing: the one line, added. *)
+        let rows = Diff.rows ~before:"" ~after:text in
+        let removed, added = Diff.counts rows in
+        let preview, omitted =
+          Diff.preview ~context:preview_context ~max_rows:preview_rows rows
+        in
+        Edited { preview; omitted; removed; added; replace_all = false }
     | Masc.Tui_decode.Fc_written { content } ->
         let rows = Diff.rows ~before:"" ~after:content in
         let preview, omitted =
@@ -328,10 +336,10 @@ let section ~max_line_cells prepared =
 let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
     (projection : Transcript.tool_projection) =
   match mode with
-  | Transcript.Compact -> projection.rows
+  | Transcript.Compact -> projection.details
   | Transcript.Full ->
-      if List.length projection.rows < List.length projection.activities then
-        projection.rows
+      if List.length projection.details < List.length projection.activities then
+        projection.details
       else
         let rec weave previews_left withheld reversed activities activity_rows =
           match activities, activity_rows with
@@ -371,6 +379,7 @@ let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
                   ]
               in
               rows @ withheld_row @ remaining
-          | _ :: _, [] -> projection.rows
+          | _ :: _, [] -> projection.details
         in
-        weave max_previews_per_block 0 [] projection.activities projection.rows
+        weave max_previews_per_block 0 [] projection.activities
+          projection.details

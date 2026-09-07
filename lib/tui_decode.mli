@@ -710,7 +710,7 @@ type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   rp_codebase : string option;
-      (** the server-minted slug the IDE annotation routes scope by;
+      (** the server-minted slug the IDE events route scopes by;
           [None] when the remote cannot canonicalize *)
   rp_url : string;  (** the remote as registered, for building links *)
   rp_local_path : string;
@@ -1782,9 +1782,27 @@ type runtime_prompt_asset = {
   pra_file_exists : bool;
 }
 
+type held_back_override = {
+  hbo_key : string;
+  hbo_bytes : int;
+  hbo_contract_revision : string;
+      (** The revision the override was written against. It no longer matches
+          the prompt's current contract, which is why the override is on disk
+          and not in force. *)
+}
+(** An override the operator saved and the registry declined to restore.
+
+    A prompt override pins the revision of the body it was written against,
+    and a release that edits that body invalidates the pin, so masc falls
+    back to the shipped text. The override is kept rather than deleted --
+    writing the key again re-pins it to the current revision. *)
+
 type prompts_snapshot = {
   ps_rows : prompt_row list;
   ps_runtime_assets : runtime_prompt_asset list;
+  ps_held_back : held_back_override list;
+      (** Empty in the ordinary case. Non-empty means the reader has
+          customization that is not reaching any turn. *)
 }
 (** GET /api/v1/prompts. *)
 
@@ -2311,6 +2329,10 @@ type file_change_kind =
       replace_all : bool;
     }
   | Fc_written of { content : string }
+  | Fc_inserted of {
+      line : int;
+      text : string;
+    }
 
 type file_change = {
   fc_at : float;
@@ -2439,7 +2461,7 @@ val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 
 (** One run of adjacent lines the same author last touched, as
     [/api/v1/git/blame] groups them. The wire spells the author [keeper_id],
-    the shape it shares with the activity and annotation routes; here it is
+    the shape it shares with the activity routes; here it is
     whatever git reported, which is a person and not a Keeper. *)
 type blame_block = {
   bb_line_start : int;

@@ -155,6 +155,7 @@ let[@warning "-32"] test_catalog_entry
   ; supports_parallel_tool_calls = None
   ; assistant_tool_content_format = None
   ; chat_output_budget_field = None
+  ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
   ; supports_reasoning_budget = None

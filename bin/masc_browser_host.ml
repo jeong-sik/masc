@@ -252,7 +252,8 @@ let run env config =
            reconnection. Record the lost receipt instead of claiming delivery. *)
         Error "server rejected result; request ownership was lost"
     | Error error ->
-        prerr_endline ("browser-host: result delivery failed: " ^ http_error_message error);
+        Log.Transport.warn "browser-host: result delivery failed: %s"
+          (http_error_message error);
         Eio.Time.sleep clock reconnect_delay_sec;
         publish payload
   in
@@ -282,13 +283,14 @@ let run env config =
     | Ok (Stop detail) -> Error detail
     | Ok Continue -> poll ()
     | Error detail ->
-        prerr_endline ("browser-host: poll failed: " ^ detail);
+        Log.Transport.warn "browser-host: poll failed: %s" detail;
         Eio.Time.sleep clock reconnect_delay_sec;
         poll ()
   in
   Eio.Fiber.first receive poll
 
 let () =
+  Log.init_from_env ();
   let base_path = ref None and server = ref None and token_file = ref None in
   let positional = ref [] in
   let set target value = target := Some value in
@@ -316,4 +318,4 @@ let () =
   in
   match result with
   | Ok () -> ()
-  | Error detail -> prerr_endline ("browser-host: " ^ detail); exit 1
+  | Error detail -> Log.Transport.error "browser-host: %s" detail; exit 1

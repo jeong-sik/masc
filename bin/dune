@@ -6,7 +6,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.config masc_core eio eio_main cohttp cohttp-eio yojson uri))
+ (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri))
 
 (executable
  (name main_eio)

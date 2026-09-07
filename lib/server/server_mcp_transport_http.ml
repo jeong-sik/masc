@@ -298,12 +298,16 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let protocol_version = context.protocol_version in
   let origin = context.origin in
   let base_path = context.base_path in
+  let auth_started = Mtime_clock.elapsed_ns () in
   let auth_result =
     match profile with
     | Full | Managed_agent ->
         deps.verify_mcp_auth ~base_path request
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+  in
+  let auth_ms =
+    Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
   in
   let open Result.Syntax in
   ignore (
@@ -442,6 +446,14 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       let sw = runtime.sw in
       let clock = runtime.clock in
       Ok (Eio.Fiber.fork ~sw (fun () ->
+                            (* Only immutable auth duration crosses the fiber boundary.
+                               Buffered responses report phases, not total request time. *)
+                            let timing = Server_timing.create () in
+                            Server_timing.record_ms timing Mcp_http_auth auth_ms;
+                            let timed_headers headers =
+                              Httpun.Headers.of_list
+                                (Server_timing.extra_header timing @ headers)
+                            in
                             let otel_transport_context =
                               Otel_dispatch_hook.http_transport_context
                                 ~protocol_version:"1.1"
@@ -476,19 +488,24 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               let response_json =
                                 Auth_oauth.with_expected_resource expected_resource
                                   (fun () ->
-                                    let body_with_agent =
-                                      body_with_canonical_http_actor ~base_path
-                                        ~auth_token request body_str
+                                    let body_with_agent, internal_keeper_runtime =
+                                      Server_timing.measure timing Mcp_identity (fun () ->
+                                        let body_with_agent =
+                                          body_with_canonical_http_actor ~base_path
+                                            ~auth_token request body_str
+                                        in
+                                        let internal_keeper_runtime =
+                                          Server_auth.is_verified_internal_keeper_request
+                                            ~base_path request
+                                        in
+                                        body_with_agent, internal_keeper_runtime)
                                     in
-                                    let internal_keeper_runtime =
-                                      Server_auth.is_verified_internal_keeper_request
-                                        ~base_path request
-                                    in
-                                    runtime.handle_request ?auth_token ~profile
-                                      ~mcp_session_id:session_id
-                                      ~otel_mcp_protocol_version:protocol_version
-                                      ~otel_transport_context
-                                      ~internal_keeper_runtime body_with_agent)
+                                    Server_timing.measure timing Mcp_dispatch (fun () ->
+                                      runtime.handle_request ?auth_token ~profile
+                                        ~mcp_session_id:session_id
+                                        ~otel_mcp_protocol_version:protocol_version
+                                        ~otel_transport_context
+                                        ~internal_keeper_runtime body_with_agent))
                               in
                               remember_protocol_version_if_initialize_succeeded
                                 ~otel_transport_context
@@ -514,7 +531,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 match response_json with
                                 | `Null ->
                                     let headers =
-                                      Httpun.Headers.of_list
+                                      timed_headers
                                         (("content-length", "0")
                                         :: mcp_headers session_id protocol_version)
                                     in
@@ -525,7 +542,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 | json when is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
-                                      Httpun.Headers.of_list
+                                      timed_headers
                                         (("content-length",
                                           string_of_int (String.length body))
                                         :: json_headers ~deps session_id
@@ -543,7 +560,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     in
                                     let body = sse_prime_event () ^ event in
                                     let headers =
-                                      Httpun.Headers.of_list
+                                      timed_headers
                                         (("content-length",
                                           string_of_int (String.length body))
                                         :: sse_headers ~deps session_id
@@ -558,7 +575,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 match response_json with
                                 | `Null ->
                                     let headers =
-                                      Httpun.Headers.of_list
+                                      timed_headers
                                         (("content-length", "0")
                                         :: mcp_headers session_id protocol_version)
                                     in
@@ -569,7 +586,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 | json when is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
-                                      Httpun.Headers.of_list
+                                      timed_headers
                                         (("content-length",
                                           string_of_int (String.length body))
                                         :: json_headers ~deps session_id
@@ -592,7 +609,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                        legacy client surface needs it. *)
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
-                                      Httpun.Headers.of_list
+                                      timed_headers
                                         (("transfer-encoding", "chunked")
                                         :: json_headers ~deps session_id
                                             protocol_version origin)

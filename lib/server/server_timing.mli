@@ -39,6 +39,9 @@ type phase =
   | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
   | Json_serialize
+  | Mcp_http_auth (** HTTP credential admission, before reading the body. *)
+  | Mcp_identity (** Canonical actor and internal Keeper verification. *)
+  | Mcp_dispatch (** Protocol handler elapsed time; excludes response serialization. *)
   | Custom of string
 
 val phase_token : phase -> string

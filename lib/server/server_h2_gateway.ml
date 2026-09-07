@@ -591,6 +591,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           let session_id = context.session_id in
           let auth_token = context.auth_token in
           let protocol_version = context.protocol_version in
+          let auth_started = Mtime_clock.elapsed_ns () in
           let auth_result =
             match profile with
             | Server_mcp_transport_http.Full
@@ -602,6 +603,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 verify_operator_mcp_auth ~base_path httpun_request
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
+          in
+          let auth_ms =
+            Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
           in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
@@ -703,6 +707,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                        ~cors ~body_str:post_context.body_str
                                        h2_reqd
                                    else
+                                   let timing = Server_timing.create () in
+                                   Server_timing.record_ms timing Mcp_http_auth auth_ms;
                                    let response_json =
                                      let otel_transport_context =
                                        Otel_dispatch_hook.http_transport_context
@@ -714,21 +720,26 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                      Auth_oauth.with_expected_resource
                                        expected_resource
                                        (fun () ->
-                                         let body_with_agent =
-                                           Server_mcp_transport_http.body_with_canonical_http_actor
-                                             ~base_path ~auth_token httpun_request
-                                             post_context.body_str
+                                         let body_with_agent, internal_keeper_runtime =
+                                           Server_timing.measure timing Mcp_identity (fun () ->
+                                             let body_with_agent =
+                                               Server_mcp_transport_http.body_with_canonical_http_actor
+                                                 ~base_path ~auth_token httpun_request
+                                                 post_context.body_str
+                                             in
+                                             let internal_keeper_runtime =
+                                               Server_auth.is_verified_internal_keeper_request
+                                                 ~base_path httpun_request
+                                             in
+                                             body_with_agent, internal_keeper_runtime)
                                          in
-                                         let internal_keeper_runtime =
-                                           Server_auth.is_verified_internal_keeper_request
-                                             ~base_path httpun_request
-                                         in
-                                         Mcp_eio.handle_request ~clock ~sw ~profile
-                                           ~mcp_session_id:session_id ?auth_token
-                                           ~otel_mcp_protocol_version:protocol_version
-                                           ~otel_transport_context
-                                           ~internal_keeper_runtime state
-                                           body_with_agent)
+                                         Server_timing.measure timing Mcp_dispatch (fun () ->
+                                           Mcp_eio.handle_request ~clock ~sw ~profile
+                                             ~mcp_session_id:session_id ?auth_token
+                                             ~otel_mcp_protocol_version:protocol_version
+                                             ~otel_transport_context
+                                             ~internal_keeper_runtime state
+                                             body_with_agent))
                                    in
                                    let otel_transport_context =
                                      Otel_dispatch_hook.http_transport_context
@@ -745,6 +756,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    in
                                    let mcp_hdrs =
                                      mcp_headers session_id protocol_version @ cors
+                                     @ Server_timing.extra_header timing
                                    in
                                    match response_json with
                                    | `Null ->

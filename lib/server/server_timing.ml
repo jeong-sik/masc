@@ -18,6 +18,9 @@ type phase =
   | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
   | Json_serialize
+  | Mcp_http_auth
+  | Mcp_identity
+  | Mcp_dispatch
   | Custom of string
 
 (* RFC 8673 §3.2.1 token grammar: ALPHA / DIGIT / "-" / "_" / "." *)
@@ -50,6 +53,9 @@ let phase_token = function
   | Telemetry_summary_per_keeper -> "telemetry_summary_per_keeper"
   | Telemetry_summary_aggregate -> "telemetry_summary_aggregate"
   | Json_serialize -> "json_serialize"
+  | Mcp_http_auth -> "mcp_http_auth"
+  | Mcp_identity -> "mcp_identity"
+  | Mcp_dispatch -> "mcp_dispatch"
   | Custom raw -> sanitize_token raw
 ;;
 

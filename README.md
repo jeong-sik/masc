@@ -471,6 +471,14 @@ The package version is in `dune-project` and generated into `masc.opam`.
 `CHANGELOG.md` records the source release line, and GitHub Releases is the
 source of truth for binaries. APIs and configuration may change before 1.0.
 
+Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
+
+- `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
+  line is `0.33.0`.
+- `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
+  without caveats.
+- `v2.*` tags are history; they do not define the active line.
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).

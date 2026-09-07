@@ -149,6 +149,13 @@ chore: bump version to 0.34.0
    asks for one: which model reviewed, and why a fallback was used if one was.
 7. Pull requests are squash-merged. Never push to a branch whose pull request
    has merged; open a new one.
+8. When the work is ready to verify, hand it over with typed evidence. Every
+   `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a file
+   the reviewer opens and snapshots) or `note:<text>` (prose the reviewer
+   reads but cannot inspect); see RFC-0417. A PR URL, a commit, or a board
+   post id inside a `note:` is narrative until something opens it — pair it
+   with an `artifact:` entry, and never let a `note:` stand alone as
+   completion evidence.
 
 ## Issues
 
@@ -207,10 +214,10 @@ reproduce, expected versus actual behaviour, and the relevant log
 - `v2.*` tags are history and do not define the active line.
 - After a train bump lands on `main`, publish its tag before opening the next
   one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
-- `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
-  run before a release review; CI runs
-  `bash scripts/check-release-train-guard.sh` to block widening an untagged
-  train.
+- Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
+  before a release review; the tag workflow runs the former and CI runs the
+  latter. `check-release-train-guard.sh` is not wired into CI yet
+  (`scripts/ci/guards-not-wired.txt`).
 - Release evidence follows [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md).
 
 ## Architecture notes

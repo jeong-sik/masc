@@ -1505,7 +1505,18 @@ let test_browser_screenshot_rejects_bad_pixels () =
           "title",`String "Page";"data",`String encoded]) in
       assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
 
+let test_browser_screenshot_rejects_invalid_client () =
+  List.iter (fun client_id ->
+    let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-browser-client"
+      (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
+        "title",`String "Page";"data",`String "";"clientId",client_id]) in
+    match result with
+    | Error ("invalid_client_id" | "invalid screenshot clientId") -> ()
+    | _ -> failwith "malformed routing identity must fail before pixel persistence")
+    [`String "not-a-client"; `Int 73]
+
 let () =
+  test_browser_screenshot_rejects_invalid_client ();
   test_browser_screenshot_requires_keeper_owner ();
   test_browser_screenshot_reaches_vision_reader ();
   test_browser_screenshot_rejects_bad_pixels ();

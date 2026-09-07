@@ -817,6 +817,13 @@ let test_complete_stream_openai_responses_ok () =
       check string "stream id" "resp-stream-1" resp.id;
       check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
       check bool "events emitted" true (List.length !events >= 5);
+      check bool "explicit final reasoning snapshot delivered" true
+        (List.exists
+           (function
+             | Types.ContentBlockDelta
+                 { index = 0; delta = Types.RedactedThinkingSnapshot _ } -> true
+             | _ -> false)
+           !events);
       (match resp.content with
        | [ Types.RedactedThinking raw_reasoning; Types.ToolUse { id; name; input } ] ->
          let reasoning = Yojson.Safe.from_string raw_reasoning in
@@ -846,7 +853,15 @@ let test_complete_stream_openai_responses_ok () =
          check int "cached tokens" 2 usage.cache_read_input_tokens
        | None -> fail "expected usage");
       Eio.Switch.fail sw Exit
-    | Error _ -> fail "expected Ok for Responses streaming"
+    | Error error ->
+      failf "expected Ok for Responses streaming, got %s"
+        (match error with
+         | Http_client.NetworkError { message; _ }
+         | Http_client.TimeoutError { message; _ }
+         | Http_client.ProviderTerminal { message; _ }
+         | Http_client.ProviderFailure { message; _ } -> message
+         | Http_client.HttpError { code; body; _ } -> Printf.sprintf "HTTP %d: %s" code body
+         | Http_client.AcceptRejected { reason } -> reason)
   with
   | Exit -> ()
 ;;

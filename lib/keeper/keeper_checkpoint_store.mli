@@ -252,8 +252,15 @@ val save_agent_core_if_source :
     Only an installation without durability uncertainty permits a journal to
     reference it. Persist these bytes before the journal Suspend CAS; a failed
     CAS may leave an unreferenced artifact, which this API never expires or
-    prunes. Owner/journal integration and eventual explicit reclamation are
-    outside this storage primitive. *)
+    prunes. These bytes are accepted evidence, not authority to roll the shared
+    canonical conversation back: cooperative A continuation must preserve B's
+    newer shared history and use an explicit settled boundary and original
+    admitted input. Exact runtime recovery remains a separate contract.
+
+    Whole-session cleanup (including shutdown [remove_session_dir]) can remove
+    this directory. Runtime journal lifecycle integration must settle or protect
+    owned continuations before that cleanup. Owner/native callers, those cleanup
+    guards, and eventual explicit reclamation are not wired by this primitive. *)
 val retain_exact_snapshot :
   session_dir:string -> exact_checkpoint_snapshot -> checkpoint_installation
 

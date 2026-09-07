@@ -567,7 +567,12 @@ The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did, not as a blank line. Reasoning starts hidden
 and tool calls start as one compact activity row, so the answer remains the
 strongest level in the pane. `Ctrl-R` cycles reasoning through hidden, folded,
-and full; `Ctrl-D` toggles compact and full tool details. `/thinking` and
+and full; `Ctrl-D` toggles compact and full tool details. In compact mode,
+successful Gate lifecycle steps for the same Keeper and approval are summarized
+at the last step, even when conversation separates them. The summary names the
+step count; Full restores every original step. Unresolved approvals, rejections,
+failures, warnings, and indeterminate effects keep their complete history.
+Conversation text is preserved verbatim. `/thinking` and
 `/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
 override the initial modes.
 

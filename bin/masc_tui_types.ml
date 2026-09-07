@@ -441,81 +441,64 @@ let fold_memory_summary_runs ~visibility entries =
     go [] [] entries
 ;;
 
-(* A run of Gate rows says one thing: where an external effect ended up. The
-   store keeps a row per phase, which is right -- each is a durable fact -- but
-   drawn one row per phase a single approval took four lines of the pane and
-   repeated the tool name on each.
-
-   Only consecutive rows fold, and only within one approval id. That leaves a
-   request still waiting for an operator on its own line, which is the state
-   worth seeing, and folds the burst of steps that lands when it finally
-   resolves. Two approvals resolving back to back stay two rows.
-
-   The newest row of each approval is the one kept, so the run holds its place
-   in the timeline; its text is recomposed from every phase the run carried. *)
-let fold_gate_runs entries =
-  let close run acc =
-    (* Newest first within the run, and one entry per approval id. Emitting in
-       the order each approval was first seen keeps the rows where the reader
-       last saw them. *)
-    let ids =
-      List.fold_left
-        (fun ids (entry, _) ->
-          match entry.me_gate with
-          | Some gate when not (List.mem gate.gs_approval_id ids) ->
-            gate.gs_approval_id :: ids
-          | Some _ | None -> ids)
-        [] run
-    in
-    List.fold_left
-      (fun acc approval_id ->
-        let steps =
-          List.filter
-            (fun (entry, _) ->
-              match entry.me_gate with
-              | Some gate -> String.equal gate.gs_approval_id approval_id
-              | None -> false)
-            run
+(* Compact folds only a successfully settled approval. Its durable identity
+   survives the continuation's new request id, so prose or a tool block between
+   lifecycle steps cannot make the same approval occupy several status rows.
+   All non-Gate rows keep their original position and text. Problems and
+   unresolved operations remain complete; Full restores every original step. *)
+let project_gate_history ~visibility entries =
+  match visibility with
+  | Tools_full -> entries
+  | Tools_compact ->
+      let module Approvals = Map.Make (struct
+        type t = string * string
+        let compare = Stdlib.compare
+      end) in
+      let key entry =
+        match entry.me_role, entry.me_gate with
+        | Message_status, Some gate
+          when entry.me_keeper_name <> "" && gate.gs_approval_id <> "" ->
+            Some (entry.me_keeper_name, gate.gs_approval_id)
+        | _ -> None
+      in
+      let _, groups = List.fold_left (fun (index, groups) (entry, _) ->
+        let groups = match key entry, entry.me_gate with
+          | Some key, Some gate ->
+              Approvals.update key (fun previous ->
+                Some ((index, gate) :: Option.value ~default:[] previous)) groups
+          | _ -> groups
+        in index + 1, groups) (0, Approvals.empty) entries
+      in
+      let compact = Approvals.map (fun reversed ->
+        let steps = List.rev reversed in
+        let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
+        let has_problem, last_outcome =
+          List.fold_left (fun (problem, last) phase ->
+            let open Masc.Keeper_chat_store in
+            match phase with
+            | Approval_replay_failed | Approval_replay_indeterminate
+            | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
+                true, Some phase
+            | Approval_requested | Approval_resolved_approved
+            | Approval_replay_applied -> problem, Some phase
+            | Approval_continuation_recorded -> problem, last)
+            (false, None) phases
         in
-        match steps with
-        | [] -> acc
-        | (newest, extra) :: _ ->
-          (* [steps] was filtered on [me_gate] being a step of this approval,
-             so the map is total over what it keeps. *)
-          let phases =
-            List.rev
-              (List.filter_map
-                 (fun (entry, _) ->
-                   Option.map (fun gate -> gate.gs_phase) entry.me_gate)
-                 steps)
-          in
-          let tool =
-            match newest.me_gate with Some gate -> gate.gs_tool | None -> None
-          in
-          (* The summary is a fact about the approval, so every step row of
-             the run carries the same one; the newest is read first only
-             because it is already in hand. *)
-          let summary =
-            List.find_map
-              (fun (entry, _) ->
-                match entry.me_gate with
-                | Some gate -> gate.gs_summary
-                | None -> None)
-              steps
-          in
-          (match Masc_tui_gate_text.fold_line ~phases ~tool ~summary with
-           | Some text -> ({ newest with me_text = text }, extra) :: acc
-           | None -> (newest, extra) :: acc))
-      acc ids
-  in
-  let rec go acc run = function
-    | [] -> List.rev (close run acc)
-    | ((entry, _) as row) :: rest -> (
-      match entry.me_gate with
-      | Some _ -> go acc (row :: run) rest
-      | None -> go (row :: close run acc) [] rest)
-  in
-  go [] [] entries
+        match reversed, has_problem, last_outcome with
+        | (last_index, newest) :: _ :: _, false,
+          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+            let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
+            Option.map (fun text ->
+              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
+        | _ -> None) groups
+      in
+      List.filter_mapi (fun index ((entry, extra) as row) ->
+        match Option.bind (key entry) (fun key -> Approvals.find_opt key compact) with
+        | Some (Some (last_index, text)) ->
+            if index = last_index then Some ({ entry with me_text = text }, extra)
+            else None
+        | Some None | None -> Some row) entries
 ;;
 
 type chat_turn = {

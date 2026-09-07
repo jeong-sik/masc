@@ -60,10 +60,18 @@ open Alcotest
    ceiling acknowledges that shipped surface and the reader, with 301 bytes
    of headroom over the measured result.
 
+   2026-09-07: 88,000. masc_msx_load / eject / screen / press / step (RFC-0439
+   §6.1) add 2,626 bytes: 87,626 across 104 tools. What it bought: a Keeper
+   can play the workspace MSX machine through tools. All five declare
+   defer_loading = true, so a Keeper that never names one carries none of
+   them on the wire; this figure counts them because model_visible_schemas
+   reads the descriptor and not the loading declaration. 374 bytes of
+   headroom over the measured result.
+
    The figure is a reading, not a constant. What the ceiling holds is the
    slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
    the numbers here say where it came from. *)
-let ceiling_bytes = 85_000
+let ceiling_bytes = 88_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -204,6 +212,11 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_msx_eject"
+  ; "masc_msx_load"
+  ; "masc_msx_press"
+  ; "masc_msx_screen"
+  ; "masc_msx_step"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_run_get"

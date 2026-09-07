@@ -66,6 +66,74 @@ let test_no_declaration_is_reported_twice () =
   check (list string) "declared knobs the snapshot reports more than once" [] duplicated
 ;;
 
+(* [reported_env_names] answers what is reported; this answers where, and with
+   what default, because that is what duplicated rows disagree about. *)
+let reported_rows () =
+  Env_config_snapshot.all_categories ()
+  |> List.concat_map (fun (category, entries) ->
+    match entries with
+    | `List entries ->
+      entries
+      |> List.filter_map (function
+        | `Assoc fields ->
+          (match List.assoc_opt "env" fields with
+           | Some (`String name) ->
+             let default =
+               match List.assoc_opt "default" fields with
+               | Some (`String d) -> d
+               | _ -> ""
+             in
+             Some (category, name, default)
+           | _ -> None)
+        | _ -> None)
+    | _ -> [])
+;;
+
+(* The check above walks [Env_setting.all_rows] only, so a knob that reaches the
+   catalogue by module constant or by the feature-flag registry could be listed
+   twice without failing anything. Four log/telemetry knobs were: both
+   [runtime_entries] and [telemetry_entries] land in the "runtime" category, so
+   an operator read the same row twice in one section. *)
+let test_no_category_lists_a_knob_twice () =
+  let rows = reported_rows () in
+  let duplicated =
+    rows
+    |> List.filter_map (fun (category, name, _) ->
+      let n =
+        List.length
+          (List.filter
+             (fun (c, e, _) -> String.equal c category && String.equal e name)
+             rows)
+      in
+      if n > 1 then Some (Printf.sprintf "%s in %s x%d" name category n) else None)
+    |> List.sort_uniq String.compare
+  in
+  check (list string) "knobs a category lists more than once" [] duplicated
+;;
+
+(* A knob an operator finds in two sections must not answer "what happens when I
+   leave this unset" differently in each. MASC_LOG_LEVEL said "(auto)" in one row
+   and "(none)" in the other while the reader leaves the level at info. *)
+let test_shared_knobs_agree_on_default () =
+  let rows = reported_rows () in
+  let names = rows |> List.map (fun (_, n, _) -> n) |> List.sort_uniq String.compare in
+  let disagreeing =
+    names
+    |> List.filter_map (fun name ->
+      let defaults =
+        rows
+        |> List.filter_map (fun (_, n, d) ->
+          if String.equal n name then Some d else None)
+        |> List.sort_uniq String.compare
+      in
+      match defaults with
+      | _ :: _ :: _ ->
+        Some (Printf.sprintf "%s: %s" name (String.concat " | " defaults))
+      | _ -> None)
+  in
+  check (list string) "knobs reported with more than one default" [] disagreeing
+;;
+
 let test_declarations_reach_the_operator_surface () =
   let declared = Env_setting.all_rows in
   check bool "at least one knob is declared" true (declared <> []);
@@ -213,6 +281,14 @@ let () =
             "no declaration is reported twice"
             `Quick
             test_no_declaration_is_reported_twice
+        ; test_case
+            "no category lists a knob twice"
+            `Quick
+            test_no_category_lists_a_knob_twice
+        ; test_case
+            "knobs shared by two sections agree on the default"
+            `Quick
+            test_shared_knobs_agree_on_default
         ] )
     ]
 ;;

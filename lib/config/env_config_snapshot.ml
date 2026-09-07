@@ -72,7 +72,7 @@ let host_pressure_entries =
 
 let runtime_entries =
   [
-    entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
+    entry ~default:"info" Env_config_core.log_level_env_key "Log level override";
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
@@ -296,8 +296,8 @@ let internal_timer_entries =
 
 let local_runtime_entries =
   [
-    entry ~default:"(none)" "MASC_URL"
-      "MASC MCP endpoint URL";
+    entry ~default:"(derived)" Env_config_core.mcp_url_env_key
+      "MASC MCP endpoint URL (derived from base URL when unset)";
   ]
 
 let message_gc_entries =
@@ -384,16 +384,13 @@ let sse_entries =
       "Per-client SSE event stream capacity (clamped 8-1024)";
   ]
 
+(* MASC_TELEMETRY_ENABLED, MASC_LOG_LEVEL, MASC_LOG_ROUTINE_LEVEL and
+   MASC_PARSE_WARN used to be restated here. [runtime_entries] already carries
+   them and the "runtime" category concatenates both lists, so the operator read
+   each of them twice -- and MASC_LOG_LEVEL answered "(auto)" in one row and
+   "(none)" in the other. *)
 let telemetry_entries =
   [
-    entry ~default:"true" Env_config_core.telemetry_enabled_env_key
-      "Whether telemetry tracking is enabled";
-    entry ~default:"(none)" Env_config_core.log_level_env_key
-      "Log level string (debug|info|warn|error)";
-    entry ~default:"debug" Env_config_core.log_routine_level_env_key
-      "Routine telemetry level (debug|info|warn|error|off)";
-    entry ~default:"false" Env_config_core.parse_warn_env_key
-      "Whether malformed env parses fail fast";
     entry ~default:"true" "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]

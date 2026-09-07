@@ -21,9 +21,11 @@ Keeper의 모든 선언 runtime 후보가 typed `ContextOverflow`를 반환하�
 대화가 다음 요청에도 들어갈 수 있다. 시각·관측 문구가 변하므로 매번 wire bytes가
 동일하다는 뜻은 아니다. **실패한 입력을 의미 있게 재구성하는 연결이 없다.**
 
-이 문서는 구현 제안이다. main 기반 문서이며, optional caller cap 변경
+이 문서는 main 기반의 구현 제안이다. optional caller cap 변경
 [#34163](https://github.com/jeong-sik/masc/pull/34163)과 seed 정책 변경
-[#34171](https://github.com/jeong-sik/masc/pull/34171)이 복구 구현보다 먼저 필요하다.
+[#34171](https://github.com/jeong-sik/masc/pull/34171)은 같은 프로그램의 앞선 작업이며
+기술적 필수 의존성은 아니다. 명시적인 byte cap을 가진 runtime에도 실제 token context
+overflow가 발생할 수 있고 같은 의미 기반 복구가 필요하다.
 감사는 `cf8aa2a9de83e3fab9e96611cc5be309b8952b73`에서 수행했다. source와 CI는
 실행 중인 바이너리, 장기 운전 성공, 모델의 요약 정확성 증거를 대신하지 않는다.
 
@@ -218,10 +220,14 @@ checkpoint 연결의 참고 fixture이며 HTTP 다중 cycle 증거를 대신하�
 
 ## 작은 구현 순서와 미검증 가정
 
-1. source snapshot/work owner/state와 실패 후 scheduling 연결. 실패·취소·재시작 검증.
+1. source snapshot/work owner/state와 durable ledger 계약. 이 단계는 기록과 독립적인
+   소유권 검증만 추가하며 기존 Keeper scheduling을 기다림 상태로 돌리지 않는다.
 2. artifact cursor worker와 typed proposal Tool. tool-free exact-output 후보는 실제
    capability가 요구할 때 같은 validator로 연결한다.
-3. source-bound projection 적용, canonical/Tool pair 보존, 원문 다시 읽기.
+3. source-bound projection 적용, canonical/Tool pair 보존, 원문 다시 읽기와 typed wake를
+   완성한다. usable worker, 검증된 projection 적용, wake가 모두 연결된 뒤에만 실패한
+   admission을 recovery waiting으로 보내는 scheduling 전환을 활성화한다. 실행할 worker가
+   없는 중간 단계에서 stimulus 재시도를 차단하는 임시 복구 게이트를 배포하지 않는다.
 4. 실제 다중 cycle proof와 Dashboard/TUI. 이후 여러 provider·10턴·장기 운전으로 확장.
 
 현재 미검증 사항은 다음과 같다. 이 RFC 승인으로 해결된 것으로 보지 않는다.

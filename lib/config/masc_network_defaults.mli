@@ -145,6 +145,14 @@ val vite_dev_default_origins : string list
 
 val searxng_default_url : string
 
+val otel_default_enabled : bool
+(** Whether OpenTelemetry span collection is on when nothing says otherwise.
+    Named here rather than at the reader because the operator snapshot states
+    this default too, and the two disagreed. *)
+
+val otel_default_enabled_s : string
+(** String form of {!otel_default_enabled} for the env snapshot. *)
+
 val otel_default_port : int
 
 val otel_default_url : string

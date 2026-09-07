@@ -16,6 +16,10 @@ let agent_core ?(kind = Observer.Tool_called) ?tool ?task ?turn ?tool_use_id ?ba
     ; at
     ; correlation = None
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
 
 let heartbeat keeper : Observer.event =
@@ -72,6 +76,11 @@ let ledger_tool ?duration_ms ?turn ~keeper tool : Observer.event =
     ; kt_duration_ms = duration_ms
     ; kt_disposition = Some "completed"
     ; kt_at = 100.
+      ; kt_tool_use_id = None
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = None
+      ; kt_tool_output_preview = None
     }
 
 let turn_settled ~keeper ~turn ~input ~output ~cost : Observer.event =
@@ -433,6 +442,10 @@ let test_a_call_and_its_return_read_as_one_pair () =
     ; at = 100.032
     ; correlation = None
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
   in
   check string "the call names its tool, batch slot, turn, and task"
@@ -459,6 +472,10 @@ let test_a_return_with_no_start_held_has_no_duration () =
     ; at = 100.
     ; correlation = None
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
   in
   check (option (float 0.)) "another keeper's start with the same id does not pair"
@@ -503,6 +520,10 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
       ; at = 100.
       ; correlation = Some "trace-1787333554989-0001e"
       ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
       }
   in
   let traces =
@@ -545,6 +566,11 @@ let test_skill_tools_wear_a_skill_label () =
       ; kt_duration_ms = None
       ; kt_disposition = disposition
       ; kt_at = 100.
+      ; kt_tool_use_id = None
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = None
+      ; kt_tool_output_preview = None
       }
   in
   check string "keeper skill call is named" "skill call"

@@ -70,7 +70,11 @@ type agent_core = {
   batch : (int * int) option;  (** [payload.batch_index], [payload.batch_size] *)
   at : float;  (** [ts_unix] *)
   correlation : string option;  (** [correlation_id], the trace *)
-  parent : string option;  (** [parent_event_id], the composition parent *)
+  parent : string option;  (** [parent_event_id], the producer-owned parent reference *)
+  event_id : string option;
+  run_id : string option;
+  caused_by : string option;
+  execution_id : string option;
 }
 
 type keeper_heartbeat = {
@@ -110,6 +114,11 @@ type keeper_tool_call = {
   kt_duration_ms : float option;
   kt_disposition : string option;  (** [completed], as the server writes it *)
   kt_at : float;
+  kt_tool_use_id : string option;
+  kt_tool_args : Yojson.Safe.t option;
+  kt_tool_result : Yojson.Safe.t option;
+  kt_tool_args_preview : string option;
+  kt_tool_output_preview : string option;
 }
 
 type event =

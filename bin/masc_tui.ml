@@ -1504,10 +1504,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
-         then gives full timestamp/request metadata a row of its own.
-         Ctrl-O would have read better for an origin, but it is VDISCARD on
-         this platform and [Unix.terminal_io] carries no IEXTEN field to turn
-         that off, so the terminal would eat the key before the loop saw it. *)
+         then gives full timestamp/request metadata a row of its own. *)
       state.msg_origin_display <- next_origin_display state.msg_origin_display;
       true
     end else if c = Some 21 then begin
@@ -10261,6 +10258,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
+              (match state.acting_filter with
+               | Masc_tui_acting.Turns -> ()
+               | Actions | Everything ->
+                   if Masc_tui_acting.visible state.acting_filter event
+                      && (state.acting_cursor > 0 || Option.is_some state.acting_detail)
+                   then state.acting_cursor <- state.acting_cursor + 1);
               (* A row arriving at the top pushes every row down one. An
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
@@ -12431,13 +12434,14 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
-(* Raw mode, and the one key the record cannot ask for.
+(* Raw mode, and the keys the record cannot ask for.
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
    filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
    among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
    that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
-   key. Pairing the two here is what keeps the three places that take raw mode
+   key. VDISCARD similarly consumes Ctrl-O on BSD terminals. Reclaiming both
+   here keeps the three places that take raw mode
    back (session start, the return from Ctrl-Z, the return from $EDITOR) from
    taking it back without the key.
 
@@ -12448,7 +12452,9 @@ let bracketed_paste_disable = "\x1b[?2004l"
 let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
   (* See above: a refusal is a hangup, which ends the session either way. *)
-  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool)
+  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool);
+  (* See masc_tui_termios_stubs.c: unsupported VDISCARD is a no-op; tty hangup follows the contract above. *)
+  ignore (Masc_tui_termios.disable_discard_output Unix.stdin : bool)
 ;;
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
@@ -12572,6 +12578,7 @@ let main () =
      key, which the PTY harness catches as a terminal this program did not put
      back the way it found it. *)
   let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
+  let old_discard_output = Masc_tui_termios.discard_output Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -12612,7 +12619,10 @@ let main () =
     if old_literal_next >= 0
     then
       (* See the guard above: a refusal here is the terminal already gone. *)
-      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool)
+      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
+    if old_discard_output >= 0 then
+      (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
   in
 
   (* Cleanup on exit *)
@@ -16184,6 +16194,42 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some ("esc" | "left")
+         when state.view = Acting && Option.is_some state.acting_detail ->
+           state.acting_detail <- None;
+           state.acting_detail_scroll <- 0
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
+         when state.view = Acting && Option.is_some state.acting_detail ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           (match move with
+            | "g" -> state.acting_detail_scroll <- 0
+            | "G" ->
+                (* Rendering clamps this to the final wrapped evidence page. *)
+                state.acting_detail_scroll <- max_int
+            | _ ->
+                let delta = match move with
+                  | "j" | "down" -> 1 | "k" | "up" -> -1
+                  | "pageup" -> -page | _ -> page in
+                state.acting_detail_scroll <- max 0 (state.acting_detail_scroll + delta))
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
+         when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           let delta = match move with
+             | "j" | "down" -> 1 | "k" | "up" -> -1
+             | "pageup" -> -page | _ -> page in
+           state.acting_cursor <- max 0 (min (List.length (acting_flat_entries state) - 1)
+               (state.acting_cursor + delta));
+           if state.acting_cursor = 0 then state.acting_unseen <- 0
+       | Some ("\r" | "\n" | "enter") when state.view = Acting ->
+           (match state.acting_detail, state.acting_filter with
+            | Some _, _ -> ()
+            | None, Masc_tui_acting.Turns ->
+                add_event state "system" "Turns are aggregates; press f for Actions, then Enter for exact event evidence"
+            | None, (Actions | Everything) ->
+                state.acting_detail <- selected_acting_entry state;
+                state.acting_detail_scroll <- 0)
        | Some "1" when state.view = Acting || state.view = System_logs ->
            goto_surface state ~mailbox:async_messages Acting
        | Some "2" when state.view = Acting || state.view = System_logs ->
@@ -18655,7 +18701,10 @@ and is loaded on demand through keeper_skill.
            state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
-           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter;
+           state.acting_cursor <- 0;
+           state.acting_scroll <- 0;
+           state.acting_unseen <- 0
        | Some "f" | Some "F"
          when state.view = Config && state.config_pane = Config_themes ->
             let next =
@@ -18736,6 +18785,7 @@ and is loaded on demand through keeper_skill.
              | None ->
                  state.planning_cursor <- 0)
         | Some "g" when state.view = Acting ->
+           state.acting_cursor <- 0;
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
        | Some "g"
@@ -18824,7 +18874,8 @@ and is loaded on demand through keeper_skill.
             (* Past the end on purpose; the frame clamps it to the last page.
                The held count rather than max_int, because an event arriving
                before that frame adds one to it. *)
-            state.acting_scroll <- List.length state.acting
+            state.acting_scroll <- List.length state.acting;
+            state.acting_cursor <- max 0 (List.length (acting_flat_entries state) - 1)
         | Some "t" | Some "T" when state.repository_changes_open ->
             let path_opt =
               match state.repository_changes_diff_path with

@@ -1431,7 +1431,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_board_sub_board_get"
     ; "masc_board_sub_board_list"
     ; "masc_browser_read"
-    ; "masc_browser_session"
     ; "masc_browser_tabs"
     ; "masc_config"
     ; "masc_fusion_status"

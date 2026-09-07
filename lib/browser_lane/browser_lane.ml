@@ -56,14 +56,14 @@ let verb_json = function
 (* Two different questions, two different classifications, both exhaustive
    over the closed verb set:
 
-   - [verb_is_read]: may the TOOL surface call this without an act budget?
-     Sessions manage a keeper-owned resource, so they read.
+   - [verb_is_read]: does this leave the browser session lifecycle unchanged?
+     Opening and closing a keeper-owned browser are lifecycle writes.
    - [verb_allowed_on_live]: may this run against the operator's browser?
      Only the two readers — the live lane exists to be read; sessions own
      nothing there and a navigation acts with the operator's logins. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Session_open _ | Session_close -> true
-  | Page_goto _ -> false
+  | Tabs_list | Page_read _ -> true
+  | Session_open _ | Session_close | Page_goto _ -> false
 ;;
 
 let verb_allowed_on_live = function

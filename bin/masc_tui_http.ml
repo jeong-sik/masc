@@ -61,6 +61,8 @@ let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_frame_path = "/api/v1/msx/frame"
 let msx_press_path = "/api/v1/msx/press"
+let msx_carts_path = "/api/v1/msx/carts"
+let msx_load_path = "/api/v1/msx/load"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -314,6 +316,35 @@ let post_msx_press ~(host : string) ~(port : int) ~(keys : string list) :
     | `Bool true -> ( try Ok (member "frame" json |> to_int) with _ -> Ok 0)
     | _ -> (
       match member "message" json with `String m -> Error m | _ -> Error "press refused"))
+;;
+
+(* The cartridge inventory for the load menu (RFC-0439 §3.7). The empty list on
+   any transport or shape error is the honest answer for the menu: "nothing to
+   pick right now", the same way the frame poll treats a missing frame. *)
+let fetch_msx_carts ~(host : string) ~(port : int) : string list =
+  match get_json ~host ~port ~path:msx_carts_path with
+  | Error _ -> []
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "carts" json with
+    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> [])
+
+(* Plug a cartridge into the shared machine on the human's behalf (RFC-0439
+   §3.7). The server runs the same loader masc_msx_load does; on success the
+   caller re-fetches the frame to start spectating. Auth rides [post_json]'s
+   operator bearer, like a press. *)
+let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
+    (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [ ("cart", `String cart) ]) in
+  match post_json ~host ~port ~path:msx_load_path ~body with
+  | Error e -> Error e
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (
+      match member "message" json with `String m -> Error m | _ -> Error "load refused"))
 ;;
 
 

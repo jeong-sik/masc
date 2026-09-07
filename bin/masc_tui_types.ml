@@ -3167,6 +3167,14 @@ type state = {
      the last frame the server handed it and when it last asked. *)
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
+  (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
+     inventory to plug into the shared machine. It is an overlay on the MSX
+     screen -- while [msx_menu_open] the keyboard drives the picker, not the
+     game, so its keys never reach the emulator. [msx_carts] is the inventory
+     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+  mutable msx_menu_open: bool;
+  mutable msx_carts: string list;
+  mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -4729,6 +4737,9 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
+  msx_menu_open = false;
+  msx_carts = [];
+  msx_menu_index = 0;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

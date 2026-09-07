@@ -6506,15 +6506,22 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
-(* The MSX spectator takes the whole terminal, like the image overlay: it
-   draws the server's frame and the loop yields until [esc], re-fetching on a
-   timer. Fetch once now so it opens on a picture. The [&] key and the
-   palette's "go MSX" both land here, so the two doors open one screen. *)
+(* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
+   before watching one. Fetch the frame so the menu can offer "watch" when a
+   game is already loaded, and the inventory so there is something to pick.
+   Both are bounded loopback calls; the overlay then owns the terminal until a
+   game is chosen or [esc].
+
+   The menu, not the spectator, is what this opens. The [&] key and the
+   palette's "go MSX" both land here, so the two doors stay one door -- which
+   is why the menu goes in the function rather than at the key. *)
 let open_msx_screen (state : Masc_tui_types.state) =
   state.msx_frame <-
     Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  state.msx_carts <-
+    Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-  Masc_tui_msx.open_screen ~write:write_to_terminal state
+  Masc_tui_msx.open_menu ~write:write_to_terminal state
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -14206,7 +14213,10 @@ and is loaded on demand through keeper_skill.
         if state.msx_open then Float.min input_timeout msx_spectator_poll_seconds
         else input_timeout
       in
-      if state.msx_open then begin
+      (* The load menu owns the terminal while it is up: skip the frame poll so
+         it does not repaint the picker with a game screen. The spectator poll
+         resumes the moment a game is chosen and the menu closes. *)
+      if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
         if
           Int64.compare (Int64.sub now_ns state.msx_last_poll_ns)
@@ -14268,6 +14278,43 @@ and is loaded on demand through keeper_skill.
         else None
       in
       (match msx_key with
+      | None -> ()
+      | Some name when state.msx_menu_open -> (
+          (* The load menu owns the keyboard: the lib navigates the picker and
+             names the choice, and the I/O it cannot reach -- the load POST, the
+             frame fetch -- is done here before handing off to the spectator. *)
+          match Masc_tui_msx.menu_consume ~write:write_to_terminal state name with
+          | Masc_tui_msx.Stay -> ()
+          | Closed ->
+              state.msx_menu_open <- false;
+              if Option.is_some state.msx_frame then
+                (* A game is loaded underneath: fall back to watching it. *)
+                Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              else begin
+                state.msx_open <- false;
+                invalidate_frame_for_resize frame_presenter render_schedule
+              end
+          | Watch ->
+              state.msx_menu_open <- false;
+              (* Poll at once so the spectator opens on a fresh frame. *)
+              state.msx_last_poll_ns <- 0L;
+              Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+          | Load cart -> (
+              match
+                Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port
+                  ~cart
+              with
+              | Ok () ->
+                  state.msx_menu_open <- false;
+                  state.msx_frame <-
+                    Masc_tui_http.fetch_msx_frame ~host:server_peer_host
+                      ~port:state.port;
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              | Error message ->
+                  (* Stay in the menu and say why, so the human can pick again. *)
+                  Masc_tui_msx.render_menu ~write:write_to_terminal
+                    ~status:("load failed: " ^ message) state))
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -14289,8 +14336,7 @@ and is loaded on demand through keeper_skill.
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
               Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
-          | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name))
-      | None -> ());
+          | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =
         if dismissed_image || Option.is_some msx_key then None
         else

@@ -101,6 +101,54 @@ let handle_press request reqd =
               (press_result_json ~ok:false ~message:(Msx_lane.error_to_string e) None))))
 ;;
 
+(* The cartridge inventory the TUI load menu shows (RFC-0439 §3.7): the file
+   names under <.masc>/msx/carts an operator filled, plus which one is plugged
+   in now so the menu can mark it. Read-only; loading a game is the write
+   below. [carts_available] is the same listing masc_msx_load returns when it
+   is called with no cart, so the menu and a keeper see one inventory. *)
+let carts_json ~base_path : Yojson.Safe.t =
+  let carts = Tool_misc_msx_lane.carts_available ~base_path in
+  let loaded, cartridge =
+    match Msx_lane.frame () with
+    | None -> (false, `Null)
+    | Some f -> (
+      true,
+      match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null)
+  in
+  `Assoc
+    [ ("carts", `List (List.map (fun c -> `String c) carts))
+    ; ("loaded", `Bool loaded)
+    ; ("cartridge", cartridge)
+    ]
+;;
+
+let load_result_json ~ok ~message : Yojson.Safe.t =
+  `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
+;;
+
+(* The human at the TUI plugs a cartridge into the shared machine. The whole
+   resolution — a name to its carts/ path, the BIOS inventory, a bad name's
+   error message — is [Tool_misc_msx_lane.handle_load]'s, the same code a
+   keeper's masc_msx_load runs, so there is one loader and one inventory. The
+   route only turns its tool result into an HTTP answer; the TUI re-fetches the
+   frame to start spectating. Body: {cart:"name"}. *)
+let handle_load ~base_path request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+      let respond ~status json = respond_json_value_with_cors ~status request reqd json in
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error message ->
+        respond ~status:`Bad_request
+          (load_result_json ~ok:false ~message:("invalid JSON: " ^ message))
+      | args ->
+        let result =
+          Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
+            ~start_time:(Unix.gettimeofday ()) ~base_path args
+        in
+        let ok = Tool_result.is_success result in
+        let status = if ok then `OK else `Bad_request in
+        respond ~status (load_result_json ~ok ~message:(Tool_result.message result)))
+;;
+
 let frame_json () : Yojson.Safe.t =
   match Msx_lane.frame () with
   | None -> `Assoc [ ("loaded", `Bool false) ]
@@ -124,8 +172,21 @@ let add_routes router =
          (fun _state req reqd ->
            Http.Response.json_value ~compress:true ~request:req (frame_json ()) reqd)
          request reqd)
+  |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
+       with_public_read
+         (fun state req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Response.json_value ~compress:true ~request:req
+             (carts_json ~base_path) reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_press"
          (fun _state _req reqd -> handle_press request reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_msx_load"
+         (fun state _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           handle_load ~base_path request reqd)
          request reqd)
 ;;

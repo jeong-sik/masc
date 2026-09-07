@@ -72,8 +72,10 @@ workspace 에 머신은 **하나**다. `masc_msx_load` 가 만들고(C-BIOS + �
   플레이할 때의 방식이다. 룬 마스터 II 같은 턴제 게임에 맞다.
 - **실시간(poll-cadence tick)**: 사람 TUI 가 관전하는 동안 그 poll(~3Hz)이 `POST /api/v1/msx/tick`
   로 머신을 한 스텝(기본 18프레임)씩 민다. ~3Hz × 18 ≈ 54fps 라 60Hz 코어가 살아 움직이는 것처럼
-  보인다. **서버에 상시 틱커 domain 을 두지 않는다** — P4 지표(domain 0 의 ≥100ms 실행 수)에 영향이
-  없고, 재시작 처닝/호스트 포화 중인 서버에 부하를 더하지 않는다. TUI 가 관전을 멈추면 tick 이
+  보인다. **서버에 상시 틱커 domain 을 두지 않는다**. tick 의 에뮬레이션과 프레임 직렬화는 기존
+  executor pool 의 worker domain 에서 한 번 실행한다. worker 가 없으면 HTTP 요청 domain 에서
+  대신 실행하지 않고 503으로 거절한다. CPU 사용량과 P4 지표(domain 0 의 ≥100ms 실행 수)에 대한
+  실제 영향은 배포 후 측정해야 한다. TUI 가 관전을 멈추면 tick 이
   멈춰 머신은 다시 턴제로 정지한다. 이 방식이 task-1403 의 본체다.
 
 keeper 의 `press` 와 사람의 `press` 는 실시간에서도 각자 직접 `step` 을 부른다(입력 큐 없음).
@@ -168,5 +170,5 @@ image:                MSX frame의 이미지 artifact 참조 (기존 이미지 �
 - 머신 하나(§3.1) vs keeper 마다 하나.
 - 이미지 전달: MSX frame artifact를 기존 이미지 ingestion/분석 도구에 어떤 응답 형태로 연결하나.
 - 도구를 보는 keeper: 전부인가, 지정한 keeper 만인가.
-- ~~실시간 틱커를 어느 domain 에 두나~~ → 결정됨: 상시 틱커 domain 을 두지 않는다. 관전하는 TUI 의
-  poll 이 `POST /api/v1/msx/tick` 로 민다(§3.2 poll-cadence tick). 서버 부하·P4 영향 0.
+- 실시간 진행 방식: 관전하는 TUI 의 poll 이 `POST /api/v1/msx/tick` 로 기존 executor worker 에
+  한 스텝을 요청한다(§3.2). 상시 틱커는 없으며 서버 부하와 P4 영향은 아직 측정하지 않았다.

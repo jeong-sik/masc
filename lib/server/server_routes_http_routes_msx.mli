@@ -24,8 +24,13 @@ val load_result_json : ok:bool -> message:string -> Yojson.Safe.t
 val msx_tick_default_frames : int
 (** Frames a [POST /api/v1/msx/tick] advances when the body names none. *)
 
-val clamp_tick_frames : int -> int
-(** A tick's frame count, clamped to [1..Msx_lane.max_frames_per_call] so a
-    poll never steps zero or overruns the per-call cap. Exposed for the test. *)
+val tick_response :
+  body:string ->
+  [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+(** Authenticated tick body handling. Only an object with an optional integer
+    [frames] is accepted; duplicate and unknown fields are refused before
+    mutation. Accepted frame counts are clamped to the lane's per-call range.
+    Stepping and frame serialization run once on the shared executor pool;
+    an unavailable pool refuses the tick without running it inline. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

@@ -176,6 +176,42 @@ let msx_tick_default_frames = 18
 
 let clamp_tick_frames requested = max 1 (min Msx_lane.max_frames_per_call requested)
 
+let decode_tick body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> Error "tick body must be valid JSON"
+  | `Assoc [] -> Ok msx_tick_default_frames
+  | `Assoc [ "frames", `Int frames ] -> Ok (clamp_tick_frames frames)
+  | `Assoc [ "frames", _ ] -> Error "frames must be an integer"
+  | `Assoc _ -> Error "tick accepts only one optional frames field"
+  | _ -> Error "tick body must be an object"
+;;
+
+let tick_response ~body =
+  let error status message =
+    status, `Assoc [ "ok", `Bool false; "message", `String message ]
+  in
+  match decode_tick body with
+  | Error detail -> error `Bad_request detail
+  | Ok frames ->
+    (* This is a mutation: the best-effort executor adapter can replay failed
+       work inline. Strict submission never retries or falls back to the HTTP
+       domain. The worker owns both emulation and the frame's serialization. *)
+    match Executor_pool_ref.submit_strict (fun () ->
+      match Msx_lane.step ~frames with
+      | Ok _ | Error Msx_lane.No_machine -> `OK, frame_json ()
+      | Error (Msx_lane.Invalid_request _ as e) ->
+        error `Bad_request (Msx_lane.error_to_string e)
+      | Error (Msx_lane.Unreadable _ as e) ->
+        error `Internal_server_error (Msx_lane.error_to_string e))
+    with
+    | Ok response -> response
+    | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
+      error `Service_unavailable "MSX tick worker is unavailable"
+    | Error ((Executor_pool_ref.Work_failed _ | Executor_pool_ref.Submission_failed _) as failure) ->
+      Log.Http.error "MSX tick: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+      error `Internal_server_error "MSX tick failed; read the current frame before retrying"
+;;
+
 (* The realtime driver (RFC-0439 §3.2, poll-cadence tick). The spectating TUI
    posts this a few times a second to advance the shared machine, so a game
    flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
@@ -183,25 +219,8 @@ let clamp_tick_frames requested = max 1 (min Msx_lane.max_frames_per_call reques
    steps and reads. A write, gated like press. *)
 let handle_tick request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let respond ~status json = respond_json_value_with_cors ~status request reqd json in
-      let requested =
-        match Yojson.Safe.from_string body with
-        | exception Yojson.Json_error _ -> msx_tick_default_frames
-        | json -> int_field "frames" ~default:msx_tick_default_frames json
-      in
-      match Msx_lane.step ~frames:(clamp_tick_frames requested) with
-      (* No machine -> frame_json is loaded:false; the spectator reads that as
-         "nothing to watch", the same as the frame route. *)
-      | Ok _ | Error Msx_lane.No_machine -> respond ~status:`OK (frame_json ())
-      (* [clamp_tick_frames] keeps the count in 1..cap, so [step]'s range check
-         never fires, and [step] never reads a file; the two arms below are
-         unreachable here but map the errors honestly rather than a catch-all. *)
-      | Error (Msx_lane.Invalid_request _ as e) ->
-        respond ~status:`Bad_request
-          (`Assoc [ ("ok", `Bool false); ("message", `String (Msx_lane.error_to_string e)) ])
-      | Error (Msx_lane.Unreadable _ as e) ->
-        respond ~status:`Internal_server_error
-          (`Assoc [ ("ok", `Bool false); ("message", `String (Msx_lane.error_to_string e)) ]))
+      let status, json = tick_response ~body in
+      respond_json_value_with_cors ~status request reqd json)
 ;;
 
 let add_routes router =

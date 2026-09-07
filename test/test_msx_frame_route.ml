@@ -11,6 +11,61 @@ let member name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
+let with_tick_machine f =
+  let dir = Filename.temp_dir "msx-tick-route-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match Lane.eject () with Ok () | Error Lane.No_machine -> ()
+       | Error e -> fail (Lane.error_to_string e));
+      Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
+      Unix.rmdir dir)
+    (fun () ->
+      (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None with
+       | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
+      f ())
+
+let frame_number json =
+  match member "number" json with
+  | Some (`Int n) -> n | _ -> fail "missing frame number"
+
+let test_tick_validation_precedes_mutation () =
+  with_tick_machine (fun () ->
+    let before = frame_number (Route.frame_json ()) in
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      List.iter (fun body ->
+        let status, response = Route.tick_response ~body in
+        check bool "invalid tick is a bad request" true (status = `Bad_request);
+        check bool "invalid tick carries failure" true (member "ok" response = Some (`Bool false));
+        check int "invalid tick never advances the loaded machine" before
+          (frame_number (Route.frame_json ())))
+        [ ""; "{"; "null"; "[]"; "18"; {|{"frames":"18"}|}
+        ; {|{"frames":1.5}|}; {|{"frames":true}|}; {|{"frames":null}|}
+        ; {|{"frames":1,"frames":2}|}; {|{"frames":1,"unexpected":true}|}
+        ; {|{"unexpected":18}|} ];
+      let status, _ = Route.tick_response ~body:"{}" in
+      check bool "missing executor cannot fall back to inline mutation" true
+        (status = `Service_unavailable);
+      check int "missing executor preserves machine" before
+        (frame_number (Route.frame_json ()))))
+
+let test_tick_worker_advances_and_returns_frame () =
+  with_tick_machine (fun () ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          List.iter (fun (body, frames) ->
+            let before = frame_number (Route.frame_json ()) in
+            let status, response = Route.tick_response ~body in
+            check bool "accepted tick succeeds through executor" true (status = `OK);
+            check int "response includes exactly the accepted advance" frames
+              (frame_number response - before);
+            check int "returned frame matches current machine" (frame_number response)
+              (frame_number (Route.frame_json ())))
+            [ "{}", Route.msx_tick_default_frames
+            ; {|{"frames":0}|}, 1
+            ; {|{"frames":999999}|}, Lane.max_frames_per_call ]))))
+
 let () =
   run "msx frame route"
     [ ( "frame_json"
@@ -104,29 +159,10 @@ let () =
               (match member "message" bad with Some (`String m) -> Some m | _ -> None))
         ] )
     ; ( "tick"
-      , [ test_case "a tick's frame count stays in 1..cap" `Quick (fun () ->
-            check int "zero clamps up to one" 1 (Route.clamp_tick_frames 0);
-            check int "the default passes through" Route.msx_tick_default_frames
-              (Route.clamp_tick_frames Route.msx_tick_default_frames);
-            check int "an overrun clamps to the cap" Lane.max_frames_per_call
-              (Route.clamp_tick_frames (Lane.max_frames_per_call * 10)))
-        ; test_case "a tick advances the machine by the clamped frames" `Quick
-            (fun () ->
-              let dir = Filename.temp_dir "msx-tick-route-" "" in
-              (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None with
-               | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
-              let number () =
-                match member "number" (Route.frame_json ()) with
-                | Some (`Int n) -> n | _ -> -1
-              in
-              let before = number () in
-              (match
-                 Lane.step ~frames:(Route.clamp_tick_frames Route.msx_tick_default_frames)
-               with
-               | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
-              check int "the frame advanced by the tick size"
-                Route.msx_tick_default_frames (number () - before);
-              ignore (Lane.eject () : (unit, Lane.error) result))
+      , [ test_case "invalid ticks never mutate and missing workers refuse" `Quick
+            test_tick_validation_precedes_mutation
+        ; test_case "accepted ticks advance once on the worker and return pixels" `Quick
+            test_tick_worker_advances_and_returns_frame
         ] )
     ]
 ;;

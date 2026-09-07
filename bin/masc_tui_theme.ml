@@ -189,6 +189,18 @@ module Sgr = struct
 
   let background = projected_background ~colors_enabled
 
+  (* Pixels, not theme. An image mosaic and a link preview swatch carry colour
+     that came from the picture, so there is no palette to project it through
+     -- but the escape bytes are still this module's to write, and the colour
+     capability still decides whether they are written at all. *)
+  let truecolor_foreground ~r ~g ~b =
+    style (Printf.sprintf "\027[38;2;%d;%d;%dm" r g b)
+  ;;
+
+  let truecolor_background ~r ~g ~b =
+    style (Printf.sprintf "\027[48;2;%d;%d;%dm" r g b)
+  ;;
+
   let bg_removed = style "\027[48;5;52m"
   let bg_added = style "\027[48;5;22m"
 

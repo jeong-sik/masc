@@ -396,11 +396,8 @@ let make_hline n =
   done;
   Buffer.contents buf
 
-let truecolor_bg r g b =
-  Masc_tui_theme.style (Printf.sprintf "\027[48;2;%d;%d;%dm" r g b)
-
-let truecolor_fg r g b =
-  Masc_tui_theme.style (Printf.sprintf "\027[38;2;%d;%d;%dm" r g b)
+let truecolor_bg r g b = Masc_tui_theme.Sgr.truecolor_background ~r ~g ~b
+let truecolor_fg r g b = Masc_tui_theme.Sgr.truecolor_foreground ~r ~g ~b
 
 let pad_banner_cell ~width ~bg ~fg text =
   let dw = Masc_tui_message_layout.display_width text in

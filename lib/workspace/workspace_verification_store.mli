@@ -116,7 +116,13 @@ val resolvable_reference_forms : string list
 (** The accepted forms, spelled for an error message that has to tell a caller
     what to write instead. *)
 
+type artifact_read_result = (string * int * bool, evidence_read_failure) result
+(** One artifact's bytes as the snapshot persists it: [(content, bytes,
+    truncated)]. [bytes] may exceed [String.length content] when the read was
+    capped. A reader that cannot answer returns the typed failure instead. *)
+
 val snapshot_submitted_evidence_json :
+  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
   base_path:string ->
   worker:string ->
   string list ->
@@ -129,7 +135,11 @@ val snapshot_submitted_evidence_json :
     a payload-free typed invalid-reference item. *)
 
 val artifact_reference_size :
-  base_path:string -> worker:string -> string -> int option
+  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
+  base_path:string ->
+  worker:string ->
+  string ->
+  int option
 (** Real byte size of an artifact reference, measured on the same validated
     descriptor the snapshot reads, without materializing content. [None] for
     non-artifact references, invalid paths, and files that cannot be read —

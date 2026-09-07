@@ -292,14 +292,46 @@ let parse_keeper_task_done_evidence_refs args =
    pass through untouched: the snapshot layer reports those as typed
    unreadable reasons at review time, and restating that taxonomy here would
    drift. *)
+(* Where an evidence artifact lives depends on the producer's sandbox
+   profile, and that policy sits above the store's library. An
+   endpoint-owned tree (microvm, remote-ssh) keeps its files inside the
+   guest's work volume, which only the sandbox backend can read -- the
+   store's direct host read reached the bookkeeping bundle instead and
+   recorded every artifact as unreadable (live capture 2026-09-02 onward,
+   #33745). A shared-mount (Docker) tree stays on the host playground the
+   store already reads, so that keeper keeps the direct read. [None] means
+   "no reader: read the host directly", which is also the store's default. *)
+let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
+  match
+    Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
+  with
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+      Some
+        (fun ~worker ~relative ->
+           let max_bytes = Workspace_verification_store.verification_evidence_max_bytes in
+           match
+             Keeper_sandbox_read_backend.read_file ~config ~meta
+               ~host_path:relative ~max_bytes ~timeout_sec:30. ()
+           with
+           | Ok content ->
+               let bytes = String.length content in
+               Ok (content, bytes, bytes >= max_bytes)
+           | Error reason ->
+               Error
+                 (Workspace_verification_store.Evidence_read_error
+                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason)))
+  | Keeper_types_profile_sandbox.Shared_mount -> None
+
 let evidence_artifact_total_bytes ~(config : Workspace.config)
       ~(meta : keeper_meta) evidence_refs
   =
   (* [artifact_reference_size] itself resolves the project root from
      [base_path], so no separate normalization is needed here. *)
+  let artifact_read = evidence_artifact_reader ~config ~meta () in
   List.filter_map
     (fun reference ->
        Workspace_verification_store.artifact_reference_size
+         ?artifact_read
          ~base_path:config.base_path
          ~worker:meta.name
          reference)

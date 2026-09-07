@@ -2120,6 +2120,99 @@ let test_commit_callback_fails_closed_without_store () =
   in
   Alcotest.(check bool) "required commit fails closed" true raised
 
+(* The read used to pay for its keeper filter with an over-scan and could not
+   say what it had covered: 500 requested returned 454. Answered from the
+   index it is exact - what comes back is what the store holds. *)
+let write_rows store ~keeper ~count ~base_ts ~label =
+  for i = 0 to count - 1 do
+    Dated_jsonl.append
+      store
+      (`Assoc
+         [ "ts", `Float (base_ts +. float_of_int i)
+         ; "keeper", `String keeper
+         ; "tool", `String (Printf.sprintf "%s-%s-%d" keeper label i)
+         ; "success", `Bool true
+         ])
+  done
+;;
+
+let log_store () =
+  match Keeper_tool_call_log.store_dir () with
+  | Some dir -> Dated_jsonl.create ~base_dir:dir ()
+  | None -> Alcotest.fail "the log has no store"
+;;
+
+let tool_names rows =
+  List.filter_map
+    (fun row ->
+       match row with
+       | `Assoc fields ->
+         (match List.assoc_opt "tool" fields with
+          | Some (`String name) -> Some name
+          | _ -> None)
+       | _ -> None)
+    rows
+;;
+
+let test_read_recent_returns_every_row_the_store_holds () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let base_ts = Unix.gettimeofday () in
+    (* Interleave so a tail scan of [n] fleet rows could not hold [n] of one
+       keeper's: the noisy keeper writes four rows for each quiet one. *)
+    for i = 0 to 119 do
+      let label = string_of_int i in
+      write_rows store ~keeper:"noisy" ~count:4 ~label
+        ~base_ts:(base_ts +. (float_of_int i *. 10.));
+      write_rows store ~keeper:"quiet" ~count:1 ~label
+        ~base_ts:(base_ts +. (float_of_int i *. 10.) +. 5.)
+    done;
+    let quiet = Keeper_tool_call_log.read_recent ~keeper_name:"quiet" ~n:120 () in
+    Alcotest.(check int) "every quiet row comes back" 120 (List.length quiet);
+    let fleet = Keeper_tool_call_log.read_recent ~n:600 () in
+    Alcotest.(check int) "every fleet row comes back" 600 (List.length fleet);
+    let short = Keeper_tool_call_log.read_recent ~keeper_name:"quiet" ~n:5 () in
+    Alcotest.(check int) "a smaller request is honoured exactly" 5 (List.length short);
+    Alcotest.(check (list string))
+      "and it is the newest five, oldest first"
+      [ "quiet-115-0"; "quiet-116-0"; "quiet-117-0"; "quiet-118-0"; "quiet-119-0" ]
+      (tool_names short);
+    let absent = Keeper_tool_call_log.read_recent ~keeper_name:"nobody" ~n:10 () in
+    Alcotest.(check int) "a keeper with no rows answers empty" 0 (List.length absent))
+;;
+
+let test_read_recent_picks_up_rows_appended_between_reads () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let base_ts = Unix.gettimeofday () in
+    write_rows store ~keeper:"alice" ~count:3 ~base_ts ~label:"first";
+    Alcotest.(check int) "the first read sees three" 3
+      (List.length (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 ()));
+    Alcotest.(check int) "reading again does not double them" 3
+      (List.length (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 ()));
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(base_ts +. 100.) ~label:"second";
+    Alcotest.(check int) "rows appended between reads appear" 5
+      (List.length (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 ())))
+;;
+
+let test_read_recent_rebuilds_a_removed_index () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"only";
+    let before = Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 () in
+    Alcotest.(check int) "four before" 4 (List.length before);
+    let ledger_dir =
+      match Keeper_tool_call_log.store_dir () with
+      | Some dir -> dir
+      | None -> Alcotest.fail "the log has no store"
+    in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    (try Sys.remove (Keeper_tool_call_index.database_path ~ledger_dir) with
+     | Sys_error _ -> ());
+    let after = Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 () in
+    Alcotest.(check int) "the same four after the index is deleted" 4 (List.length after))
+;;
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "invocation observation",
@@ -2242,6 +2335,14 @@ let () =
             test_string_input_keeps_action_radius
         ; Alcotest.test_case "action radius tells a file from a directory" `Quick
             test_action_radius_tells_a_file_from_a_directory
+        ] )
+    ; ( "read index",
+        [ eio_test "read_recent returns every row the store holds"
+            test_read_recent_returns_every_row_the_store_holds
+        ; eio_test "read_recent picks up rows appended between reads"
+            test_read_recent_picks_up_rows_appended_between_reads
+        ; eio_test "read_recent rebuilds a removed index"
+            test_read_recent_rebuilds_a_removed_index
         ] )
     ; ( "async_append",
         [ eio_env_test "append queues until flush when async fiber is active"

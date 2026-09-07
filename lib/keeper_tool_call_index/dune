@@ -1,0 +1,16 @@
+(include_subdirs no)
+
+(library
+ (name keeper_tool_call_index)
+ (public_name masc.keeper_tool_call_index)
+ (wrapped false)
+ (modules keeper_tool_call_index)
+ (libraries
+  dated_jsonl
+  fs_compat
+  jsonl_writer
+  masc_core
+  sqlite3
+  threads
+  unix
+  yojson))

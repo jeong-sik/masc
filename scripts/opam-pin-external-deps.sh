@@ -72,6 +72,9 @@ fi
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
+# MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
+# core development; SHA-pinned here for CI.
+readonly OCAML_MSX_SHA="71859e419bf42962facc29007521eee5d27e3aa7"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first
@@ -153,6 +156,8 @@ opam_pin_add ws-direct-gluten "https://github.com/jeong-sik/ws-direct.git#${WS_D
 pinned_pkgs+=("ws-direct-gluten")
 opam_pin_add ws-direct-eio "https://github.com/jeong-sik/ws-direct.git#${WS_DIRECT_SHA}" -n -y
 pinned_pkgs+=("ws-direct-eio")
+opam_pin_add ocaml-msx "https://github.com/jeong-sik/ocaml-msx.git#${OCAML_MSX_SHA}" -n -y
+pinned_pkgs+=("ocaml-msx")
 opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
 

@@ -145,6 +145,10 @@ let microvm_runner ?on_receipt ~runtime ~timeout_sec () =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
     | Error err ->
+      Option.iter
+        (fun notify ->
+          notify (Keeper_sandbox_remote.Execution_unavailable Request_not_sent))
+        on_receipt;
       Masc_exec.Sandbox_target.Transport_failed
         { output_files = None; reason = err; stdout = ""; stderr = err }
     | Ok endpoint ->

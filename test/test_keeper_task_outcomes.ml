@@ -706,7 +706,9 @@ let test_response_finalization_keeps_visible_reply_only () =
       ~suppress_response_text:true
       ()
   in
-  check string "explicit suppression is empty" "" suppressed.response_text
+  check string "suppression preserves the observed response"
+    "Internal completion text" suppressed.response_text;
+  check bool "suppression belongs to the replay decision" true suppressed.withheld_from_replay
 ;;
 
 (* A rejected [keeper_task_done] carries producer-owned typed outcome data.
@@ -969,6 +971,125 @@ let test_default_done_is_terminal () =
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+(* task-1426: the keeper_task_done schema declares a [notes] parameter, but
+   the handler used to drop it and inject [result] into the transition's
+   notes field instead, so the submitter's handoff notes vanished from every
+   record (live case: a 767B and an 876B notes payload both disappeared).
+   The declared parameter must reach the transition record — the audit entry
+   for the submission carries it in details — while handoff_context.summary
+   keeps the result summary. *)
+let check_done_notes ~notes_fields ~expected_notes () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       (* The submission audit entry (task_submit_for_verification) is written
+          by the workspace metric hooks; this file does not install them
+          globally, so enable them here for the transition-record assertion. *)
+       Masc.Workspace_metric_hooks.install ();
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Notes parameter passthrough"
+            ~priority:2
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
+       (match
+          Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               ([ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+
+               ; "evidence_refs", `List [ `String "note:commit abc123" ]
+               ] @ notes_fields))
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () ->
+          fail "notes passthrough completion was deferred"
+        | Tool_result.Failed _ ->
+          fail ("notes passthrough completion failed: " ^ execution.raw_output));
+       (match Masc.Workspace.get_tasks_raw config with
+        | [ { task_status = Masc_domain.AwaitingVerification _;
+              handoff_context = Some handoff;
+              _ } ] ->
+          check string "result still preserved as summary"
+            "implementation complete" handoff.summary
+        | [ t ] ->
+          failf
+            "keeper_task_done did not submit for verification: %s"
+            (Masc_domain.show_task_status t.task_status)
+        | tasks ->
+          failf "expected exactly one persisted task, got %d"
+            (List.length tasks));
+       let audit_entries = Masc.Audit_log.read_entries ~n:50 config in
+       let submission =
+         List.find_opt
+           (fun (entry : Masc.Audit_log.audit_entry) ->
+              match entry.action with
+              | Masc.Audit_log.Custom "task_submit_for_verification" -> true
+              | _ -> false)
+           audit_entries
+       in
+       match submission with
+       | None -> fail "no task submission audit entry"
+       | Some entry ->
+         (match entry.details with
+          | `Assoc fields ->
+            let expected = if expected_notes = "" then None else Some (`String expected_notes) in
+            check bool "audit retains authored notes without inventing empty content" true
+              (List.assoc_opt "notes" fields = expected)
+          | _ -> fail "submission details must be an object"))
+
+
+let test_done_passes_declared_notes_to_transition () =
+  List.iter (fun text ->
+    check_done_notes ~notes_fields:[ "notes", `String text ] ~expected_notes:text ())
+    [ "handoff notes for the next keeper"; ""; "  preserved spacing\nsecond line  " ]
+
+let test_done_without_notes_stays_absent () =
+  check_done_notes ~notes_fields:[] ~expected_notes:"" ()
+
+let test_done_rejects_malformed_notes () =
+  List.iter (fun notes ->
+    let base_path = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = keeper_meta () in
+      let before = Sys.readdir base_path |> Array.to_list |> List.sort String.compare in
+      let outcome = Task.handle_keeper_task_tool_with_outcome ~config ~meta
+        ~name:"keeper_task_done"
+        ~args:(`Assoc [ "task_id", `String "task-001"; "result", `String "completed work"
+                     ; "notes", notes; "evidence_refs", `List [ `String "note:evidence" ] ]) in
+      match outcome.disposition with
+      | Tool_result.Failed _ ->
+        let reason = Yojson.Safe.from_string outcome.raw_output
+          |> U.member "typed_outcome" |> U.member "reason" |> U.to_string in
+        let expected_shape = match notes with
+          | `Null -> "null" | `Int _ -> "int" | `Bool _ -> "bool"
+          | `List _ -> "list" | _ -> fail "unexpected test input" in
+        check string "rejected by the notes boundary"
+          ("notes must be string, got " ^ expected_shape) reason;
+        check (list string) "rejection adds no workspace entry" before
+          (Sys.readdir base_path |> Array.to_list |> List.sort String.compare)
+      | Tool_result.Completed () | Tool_result.Deferred () -> fail "malformed note was accepted"))
+    [ `Null; `Int 7; `Bool false; `List [] ]
+
 (* task-540: an oversized artifact: evidence list must be refused at the
    keeper_task_done boundary with the byte count and the note: escape hatch,
    not submitted as a truncated prefix that stalls the completion authority.
@@ -1007,6 +1128,10 @@ let test_done_refuses_oversized_artifact_evidence () =
        (* Producer playground fixture: the artifact size check resolves
           [artifact:<path>] against the agent's sandbox root, so the file
           must exist there for the byte count to be measurable at all. *)
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       Fs_compat.mkdir_p keepers_dir;
+       Out_channel.with_open_text (Filename.concat keepers_dir (agent_name ^ ".toml"))
+         (fun channel -> output_string channel "[keeper]\nsandbox_profile = \"docker\"\n");
        let producer_root =
          Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path:
@@ -1254,5 +1379,13 @@ let () =
         ; test_case
             "release without a summary is refused and keeps the task held"
             `Quick test_release_without_summary_is_refused
+        ; test_case
+            "done passes the declared notes parameter to the transition (task-1426)"
+            `Quick test_done_passes_declared_notes_to_transition
+        ; test_case
+            "done without notes does not invent handoff notes"
+            `Quick test_done_without_notes_stays_absent
+        ; test_case "malformed notes fail before workspace mutation" `Quick
+            test_done_rejects_malformed_notes
         ] )
     ]

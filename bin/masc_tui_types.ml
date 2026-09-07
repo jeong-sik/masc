@@ -441,81 +441,64 @@ let fold_memory_summary_runs ~visibility entries =
     go [] [] entries
 ;;
 
-(* A run of Gate rows says one thing: where an external effect ended up. The
-   store keeps a row per phase, which is right -- each is a durable fact -- but
-   drawn one row per phase a single approval took four lines of the pane and
-   repeated the tool name on each.
-
-   Only consecutive rows fold, and only within one approval id. That leaves a
-   request still waiting for an operator on its own line, which is the state
-   worth seeing, and folds the burst of steps that lands when it finally
-   resolves. Two approvals resolving back to back stay two rows.
-
-   The newest row of each approval is the one kept, so the run holds its place
-   in the timeline; its text is recomposed from every phase the run carried. *)
-let fold_gate_runs entries =
-  let close run acc =
-    (* Newest first within the run, and one entry per approval id. Emitting in
-       the order each approval was first seen keeps the rows where the reader
-       last saw them. *)
-    let ids =
-      List.fold_left
-        (fun ids (entry, _) ->
-          match entry.me_gate with
-          | Some gate when not (List.mem gate.gs_approval_id ids) ->
-            gate.gs_approval_id :: ids
-          | Some _ | None -> ids)
-        [] run
-    in
-    List.fold_left
-      (fun acc approval_id ->
-        let steps =
-          List.filter
-            (fun (entry, _) ->
-              match entry.me_gate with
-              | Some gate -> String.equal gate.gs_approval_id approval_id
-              | None -> false)
-            run
+(* Compact folds only a successfully settled approval. Its durable identity
+   survives the continuation's new request id, so prose or a tool block between
+   lifecycle steps cannot make the same approval occupy several status rows.
+   All non-Gate rows keep their original position and text. Problems and
+   unresolved operations remain complete; Full restores every original step. *)
+let project_gate_history ~visibility entries =
+  match visibility with
+  | Tools_full -> entries
+  | Tools_compact ->
+      let module Approvals = Map.Make (struct
+        type t = string * string
+        let compare = Stdlib.compare
+      end) in
+      let key entry =
+        match entry.me_role, entry.me_gate with
+        | Message_status, Some gate
+          when entry.me_keeper_name <> "" && gate.gs_approval_id <> "" ->
+            Some (entry.me_keeper_name, gate.gs_approval_id)
+        | _ -> None
+      in
+      let _, groups = List.fold_left (fun (index, groups) (entry, _) ->
+        let groups = match key entry, entry.me_gate with
+          | Some key, Some gate ->
+              Approvals.update key (fun previous ->
+                Some ((index, gate) :: Option.value ~default:[] previous)) groups
+          | _ -> groups
+        in index + 1, groups) (0, Approvals.empty) entries
+      in
+      let compact = Approvals.map (fun reversed ->
+        let steps = List.rev reversed in
+        let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
+        let has_problem, last_outcome =
+          List.fold_left (fun (problem, last) phase ->
+            let open Masc.Keeper_chat_store in
+            match phase with
+            | Approval_replay_failed | Approval_replay_indeterminate
+            | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
+                true, Some phase
+            | Approval_requested | Approval_resolved_approved
+            | Approval_replay_applied -> problem, Some phase
+            | Approval_continuation_recorded -> problem, last)
+            (false, None) phases
         in
-        match steps with
-        | [] -> acc
-        | (newest, extra) :: _ ->
-          (* [steps] was filtered on [me_gate] being a step of this approval,
-             so the map is total over what it keeps. *)
-          let phases =
-            List.rev
-              (List.filter_map
-                 (fun (entry, _) ->
-                   Option.map (fun gate -> gate.gs_phase) entry.me_gate)
-                 steps)
-          in
-          let tool =
-            match newest.me_gate with Some gate -> gate.gs_tool | None -> None
-          in
-          (* The summary is a fact about the approval, so every step row of
-             the run carries the same one; the newest is read first only
-             because it is already in hand. *)
-          let summary =
-            List.find_map
-              (fun (entry, _) ->
-                match entry.me_gate with
-                | Some gate -> gate.gs_summary
-                | None -> None)
-              steps
-          in
-          (match Masc_tui_gate_text.fold_line ~phases ~tool ~summary with
-           | Some text -> ({ newest with me_text = text }, extra) :: acc
-           | None -> (newest, extra) :: acc))
-      acc ids
-  in
-  let rec go acc run = function
-    | [] -> List.rev (close run acc)
-    | ((entry, _) as row) :: rest -> (
-      match entry.me_gate with
-      | Some _ -> go acc (row :: run) rest
-      | None -> go (row :: close run acc) [] rest)
-  in
-  go [] [] entries
+        match reversed, has_problem, last_outcome with
+        | (last_index, newest) :: _ :: _, false,
+          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+            let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
+            Option.map (fun text ->
+              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
+        | _ -> None) groups
+      in
+      List.filter_mapi (fun index ((entry, extra) as row) ->
+        match Option.bind (key entry) (fun key -> Approvals.find_opt key compact) with
+        | Some (Some (last_index, text)) ->
+            if index = last_index then Some ({ entry with me_text = text }, extra)
+            else None
+        | Some None | None -> Some row) entries
 ;;
 
 type chat_turn = {
@@ -1402,6 +1385,20 @@ type runtime_mode =
 type runtime_detail_target =
   | Runtime_lane_candidate of { lane_id : string; runtime_id : string }
   | Runtime_catalog_entry of { runtime_id : string }
+
+type runtime_probe_annotation =
+  | Runtime_probe_note of string
+  | Runtime_probe_failure of string
+
+let runtime_probe_status_label = function
+  | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
+  | status -> Tui_decode.runtime_provider_status_to_string status
+
+let runtime_probe_annotation ~status detail =
+  Option.map (fun detail ->
+    match status with
+    | Tui_decode.Runtime_provider_skipped_cli -> Runtime_probe_note detail
+    | _ -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -2734,36 +2731,36 @@ type palette_mode =
 
 (* Browser reads remain separate from connector routing. A request generation
    belongs to this view instance, so late Firefox replies cannot replace a
-   different app, source or tab after the operator moves. *)
+   different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Live | Automation
-  type app = Browser | Slack
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
     tab_id : int; title : string; url : string; text : string;
     chars : int; truncated : bool;
   }
   type reading = {
-    tabs : tab list; page : page option; source : source; app : app;
+    tabs : tab list; page : page option; source : source;
     elapsed_ms : float;
   }
-  type operation = Read | Open_session | Close_session | Goto of string
+  type screenshot = {
+    source : source; tab_id : int; title : string; url : string;
+    data : string; elapsed_ms : float;
+  }
+  type operation = Read | Open_session | Close_session | Goto of string | Screenshot of int
   type load = Idle | Loading of int * operation | Failed of string
   type t = {
-    app : app; source : source; selected_tab : int option; scroll : int;
+    source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
-  let app_name = function Browser -> "browser" | Slack -> "slack"
   let context_label t =
-    let app = match t.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
-    Printf.sprintf "%s · %s · Firefox page reader" app (source_name t.source)
-  let create app =
-    { app; source = Live; selected_tab = None; scroll = 0;
+    Printf.sprintf "Browser Lane · %s · Firefox page reader" (source_name t.source)
+  let create () =
+    { source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None }
-  let switch_source source t =
-    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle; url_draft = None }
+  let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0 }
   let fail_action detail t =
     let url_draft = match t.load with
@@ -2777,7 +2774,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Open_session | Close_session | Goto _)), _ -> Operating
+    | Loading (_, (Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2786,13 +2783,8 @@ module Browser_lane_view = struct
     | Read_ok -> "HTTP read ok"
     | Read_failed -> "HTTP failed"
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
-  let should_refresh_on_tick t =
-    match t.app, t.source, t.url_draft, t.load with
-    | Slack, Live, None, (Idle | Failed _) -> true
-    | _ -> false
   let request_body t =
-    `Assoc ([ "lane", `String (source_name t.source);
-              "app", `String (app_name t.app) ]
+    `Assoc ([ "lane", `String (source_name t.source) ]
             @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
   let ( let* ) = Result.bind
   let field name = function
@@ -2805,9 +2797,6 @@ module Browser_lane_view = struct
   let parse_source = function
     | `String "live" -> Ok Live | `String "automation" -> Ok Automation
     | _ -> Error "unknown browser source"
-  let parse_app = function
-    | `String "browser" -> Ok Browser | `String "slack" -> Ok Slack
-    | _ -> Error "unknown browser app"
   let get parse name json = let* value = field name json in parse value
   let parse_tab json =
     let* id = get integer "id" json in
@@ -2844,20 +2833,48 @@ module Browser_lane_view = struct
       let* tabs = get parse_tabs "tabs" data in
       let* page = get parse_page "page" data in
       let* source = get parse_source "source" data in
-      let* app = get parse_app "app" data in
       let* elapsed_ms = get milliseconds "elapsed_ms" data in
       match page with
       | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
           Error "page tab is absent from returned tabs"
-      | _ -> Ok { tabs; page; source; app; elapsed_ms }
+      | _ -> Ok { tabs; page; source; elapsed_ms }
+  let decode_screenshot json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* value = field "data" json in
+      let* source = get parse_source "source" value in
+      let* tab_id = get integer "tabId" value in
+      let* title = get string "title" value in
+      let* url = get string "url" value in
+      let* mime = get string "mimeType" value in
+      let* data = get string "data" value in
+      let* elapsed_ms = get milliseconds "elapsed_ms" value in
+      if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
+      else Ok { source; tab_id; title; url; data; elapsed_ms }
+
+  (* Settle the browser operation even when a later key cancelled opening the
+     image. The caller separately checks image intent before drawing. *)
+  let accept_screenshot ~generation (result : (screenshot, string) result) t =
+    match t.load with
+    | Loading (current, Screenshot requested_tab) when current = generation ->
+        (match result with
+         | Ok screenshot when screenshot.source = t.source
+                              && screenshot.tab_id = requested_tab
+                              && t.selected_tab = Some requested_tab ->
+             { t with load = Idle }, Some screenshot
+         | Ok _ -> { t with load = Failed "screenshot source or tab mismatch" }, None
+         | Error detail -> { t with load = Failed detail }, None)
+    | Loading _ | Idle | Failed _ -> t, None
+
   let accept ~generation (result : (reading, string) result) t =
     match t.load with
     | Loading (current, Read) when current = generation ->
         (match result with
-         | Ok reading when reading.source = t.source && reading.app = t.app ->
+         | Ok reading when reading.source = t.source ->
              { t with reading = Some reading; load = Idle;
-               selected_tab = Option.map (fun page -> page.tab_id) reading.page }
-         | Ok _ -> { t with load = Failed "browser response source/app mismatch" }
+               selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
+         | Ok _ -> { t with load = Failed "browser response source mismatch" }
          | Error detail -> { t with load = Failed detail })
     | Loading _ | Idle | Failed _ -> t
   let select_tab direction t =
@@ -3943,7 +3960,7 @@ type state = {
    paint had to draw compact is not showing the field, and the two identity
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
-(* Browser and Slack are operator readers inside Connectors. A retained
+(* Browser is an operator reader inside Connectors. A retained
    reader model must not change chrome after the operator leaves its view. *)
 let browser_lane_on_screen (state : state) =
   match state.view, state.browser_lane_visibility with
@@ -3954,7 +3971,7 @@ let leave_browser_lane_for_surface state destination =
   if destination <> state.view then
     state.browser_lane_visibility <- Browser_lane_hidden
 
-let show_browser_lane state app =
+let show_browser_lane state =
   if Option.is_none (browser_lane_on_screen state) then
     state.browser_lane_visibility <- Browser_lane_shown {
       return_surface = state.view;
@@ -3962,8 +3979,8 @@ let show_browser_lane state app =
       return_composer_focused = state.composer_focused;
     };
   state.browser_lane <- Some (match state.browser_lane with
-    | Some view when view.Browser_lane_view.app = app -> view
-    | Some _ | None -> Browser_lane_view.create app);
+    | Some view -> view
+    | None -> Browser_lane_view.create ());
   state.view <- Connectors;
   state.search <- None
 
@@ -6390,7 +6407,7 @@ let gate_mode_label = function
   | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
 
 type palette_action =
-  | Palette_browser_lane of Browser_lane_view.app
+  | Palette_browser_lane
   | Palette_hide_browser_lane
   | Palette_goto of surface
   | Palette_config of config_pane
@@ -6494,9 +6511,8 @@ let palette_entries (state : state) =
   @ [ "go Tools", Palette_goto Tools ]
   @ (match browser_lane_on_screen state with
       | None -> []
-      | Some _ -> [ "hide Browser / Slack Lane", Palette_hide_browser_lane ])
-  @ [ "go Browser Lane", Palette_browser_lane Browser_lane_view.Browser;
-      "go Slack Lane", Palette_browser_lane Browser_lane_view.Slack ]
+      | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
+  @ [ "go Browser Lane", Palette_browser_lane ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

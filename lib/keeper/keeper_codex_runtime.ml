@@ -329,6 +329,11 @@ let codex_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"; detail })
+  | Runtime_codex_app_server.Turn_input_write_failed _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "codex_app_server"
+         ; detail = Runtime_codex_app_server.error_to_string error })
   | Runtime_codex_app_server.Protocol_error { stage; detail } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
@@ -399,6 +404,7 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Turn_interrupted
   | Runtime_codex_app_server.Runtime_shutting_down
   | Runtime_codex_app_server.Process_exited _
+  | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Timeout _ ->
     Keeper_official_client_session_store.Transport_interrupted
   | Runtime_codex_app_server.Invalid_config _
@@ -464,7 +470,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted ~observe_successful_tool_completion
+    ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -616,15 +622,24 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        all. Only a [Start] injects the history into the new thread; a [Resume]
        sends the prompt and leaves the conversation in the thread the
        app-server owns, so on that branch there is nothing here to attribute.
-       The composition line further down states the same split. Reported once
-       the composition is admitted: a turn refused above never dispatches, and
-       a record saying it transmitted its whole input would be masc#32995's
-       zero-bytes misreading with the sign flipped. *)
-    on_transmitted_model_input
-      (match thread_mode with
-       | Runtime_codex_app_server.Start ->
-         Host.Whole_input_transmitted prepared.messages
-       | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session);
+       The composition line further down states the same split. The callback
+       below reports it only after the complete turn/start write, not when
+       this prepared composition becomes available. *)
+    let report_transmitted_input () =
+      match
+        on_transmitted_model_input
+          (match thread_mode with
+           | Runtime_codex_app_server.Start -> Host.Whole_input_transmitted prepared.messages
+           | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session)
+      with
+      | () -> ()
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        (* This callback is entered only after a complete turn/start write.
+           Losing its observation cannot restore pre-dispatch retry safety. *)
+        observe_transport_uncertain ();
+        Printexc.raise_with_backtrace exn backtrace
+    in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
       ; model = config.model
@@ -912,6 +927,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                ~expected
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
+         ~on_prompt_sent:report_transmitted_input
          ~on_turn_starting:(fun ~thread_id ->
            update_session "turn-starting transition" (fun expected ->
              Keeper_official_client_session_store.mark_turn_starting
@@ -942,6 +958,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         | _, Some detail -> Error (internal_error detail)
         | _, None -> settle_host_stop stop)
      | Error error ->
+       (match error with
+        | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
+        | _ -> ());
        recovery_failure := recovery_failure_of_client_error error;
        Error (codex_error_to_core_error error)
      | Ok turn ->
@@ -1121,6 +1140,15 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
      | Error _ -> ())
   | Ok _ -> ()
 ;;
+(* Uncertainty cannot erase stronger evidence from an earlier attempt. The
+   compare-and-set also preserves an effect observed concurrently. *)
+let note_transport_uncertainty effect_disposition =
+  match Atomic.compare_and_set effect_disposition
+          Keeper_provider_attempt_effect.No_effect_observed
+          Keeper_provider_attempt_effect.Observation_unavailable with
+  | true | false -> ()
+;;
+
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -1136,6 +1164,9 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
   in
   let observe_effect_attempted () =
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
+  in
+  let observe_transport_uncertain () =
+    note_transport_uncertainty effect_disposition
   in
   let successful_tool_completion = Atomic.make No_successful_tool_completion in
   let observe_successful_tool_completion () =
@@ -1221,6 +1252,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
           ~on_event
           ~observe_effect_attempted
           ~observe_successful_tool_completion
+        ~observe_transport_uncertain
           ~config)
       ())
   in
@@ -1231,6 +1263,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 ;;
 
 module For_testing = struct
+  let note_transport_uncertainty = note_transport_uncertainty
   let observe_stream_native_action ~turn_count ~observe event =
     match
       codex_stream_callback

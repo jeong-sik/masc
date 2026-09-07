@@ -1599,7 +1599,7 @@ let test_live_skill_is_not_folded_into_generic_tools () =
            check bool "the Skill name is bold" true
              (contains ~needle:"**ci-red-attribution**" row);
            check bool "the pending delivery state is explicit" true
-             (contains ~needle:"**SERVED \xc2\xb7 DELIVERY PENDING**" row)
+             (contains ~needle:"**보냈고 확인 중**" row)
        | rows -> failf "expected one compact Skill row, got %d" (List.length rows))
   | items ->
       failf "expected skill/text, got %d item(s): %s" (List.length items)
@@ -1615,7 +1615,7 @@ let test_full_skill_rows_show_actions_and_exact_proof () =
   in
   let body = String.concat "\n" (Transcript.skill_rows ~full:true skill) in
   check bool "used is stated in the strongest evidence vocabulary" true
-    (contains ~needle:"**DELIVERED \xc2\xb7 USED**" body);
+    (contains ~needle:"**받아서 씀**" body);
   check bool "observed Execute is visible" true
     (contains ~needle:"**Execute** \xc2\xb7 observed action" body);
   check bool "observed Read is visible" true

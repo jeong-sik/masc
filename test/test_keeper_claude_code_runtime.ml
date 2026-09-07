@@ -1390,12 +1390,15 @@ let test_spawn_failure_releases_claim () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
+       let reports = ref 0 in
        with_fixture ~remove_after_auth:true [] (fun cli_path ->
-         (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL" () with
+         (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL"
+             ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
           | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) ->
             ()
           | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
+         check int "prepared turn with missing CLI reports no input" 0 !reports;
          let state = load_state base_path in
          (match state.phase with
           | Ready -> ()

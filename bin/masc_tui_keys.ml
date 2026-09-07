@@ -37,7 +37,7 @@ let global =
       "show or hide the Activity pane: what every keeper is doing right now, and \
        on its Changes tab the selected keeper's files (press the header to switch)"
       ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat"
-  ; b Meta "Ctrl-^" "show or hide Browser / Slack Lane; retain tab and scroll"
+  ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"and Esc on the surface it opens comes back here"
@@ -354,8 +354,10 @@ let for_surface = function
       ]
       @ listing_meta
   | Connectors ->
-      [ b Navigate "B / S" "Browser / Slack Lane"
-          ~help:"read Firefox tabs and page text; switch live / automation inside the lane"
+      [ b Navigate "B" "Browser Lane"
+          ~help:"read Firefox tabs and page text; select live / automation inside Browser"
+      ; b Act "Ctrl-O" "Browser screenshot"
+          ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
@@ -824,10 +826,10 @@ let help_sections ?current () =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "B / S" "Browser / Slack"
-    ; b Navigate "l / a" "live / automation"
+    [ b Navigate "l / a" "live / automation"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
+    ; b Act "Ctrl-O" "screenshot"
     ; b Act "g" "URL"
     ; b Act "o / x" "open / close session"
     ; b Act "r" "refresh"

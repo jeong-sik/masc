@@ -9,9 +9,11 @@ deployment or runtime result on the production server at port 8935.
 
 ## Results
 
-The checked-in [automation capture script](../../../scripts/capture-browser-slack-proof.py)
-completed 13 HTTP observations and four full-width screenshots. Its SHA-256
-matches the executed script recorded in [measurement.json](measurement.json).
+The historical `scripts/capture-browser-slack-proof.py` run completed 13 HTTP
+observations and four full-width screenshots. [measurement.json](measurement.json)
+records the SHA-256 of that executed script. The current successor is the
+[Browser capture script](../../../scripts/capture-browser-proof.py); its output
+is separate from the historical measurements in this bundle.
 
 | Observation | Measured result |
 | --- | --- |
@@ -28,8 +30,8 @@ These are warm reads of one small public page, not a general browser or Slack
 performance benchmark. The timings in screenshots are additional TUI-triggered
 requests and therefore differ from the five API samples above.
 
-The [live refresh script](../../../scripts/capture-browser-live-refresh-proof.py)
-observed **four completed HTTP 200 / `ok:true` Slack live reads in seven
+The historical `scripts/capture-browser-live-refresh-proof.py` run observed
+**four completed HTTP 200 / `ok:true` Slack live reads in seven
 seconds**, with the TUI refresh setting at two seconds. Its
 [receipt](live-refresh.json) records successful responses, not merely started
 requests. The TUI connected through a temporary loopback logging proxy; the
@@ -87,7 +89,13 @@ closed-session error. The later source fix
 newer TUI executable in this bundle. These images prove the displayed lane
 content and full-width layout, not that later header behavior.
 
-## Reproduce
+## Historical reproduction commands
+
+The commands below record the procedures used for this bundle; both script
+files have since been replaced. For a fresh Browser capture, use
+[`scripts/capture-browser-proof.py`](../../../scripts/capture-browser-proof.py)
+with the current TUI. That script captures Browser page/session recovery;
+it does not reproduce the historical Slack live-refresh measurement below.
 
 Prepare an isolated temporary base directory with the documented
 [native Firefox configuration](../../design/native-firefox-lane.md), an admin
@@ -120,7 +128,7 @@ python3 scripts/capture-browser-live-refresh-proof.py \
   --out /tmp/browser-slack-live-proof
 ```
 
-Both reproduction scripts were executed successfully for this bundle. Only
+Both historical scripts were executed successfully for this bundle. Only
 selected public screenshots, text snapshots and small receipts are committed.
 Token files, native manifests, full health output, vendor session responses
 and server logs are excluded. Authenticated Slack content, Slack history

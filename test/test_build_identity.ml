@@ -81,6 +81,22 @@ let test_binary_identity_survives_without_checkout () =
     details.binary_commit;
   Alcotest.(check (option string)) "no ambient checkout" None details.repo_head_commit
 
+let test_embedded_identity_preserves_binary_authority_and_current_age () =
+  let full = Build_identity.current () in
+  Alcotest.(check (option string)) "same embedded authority"
+    full.binary_commit Build_identity.embedded_commit;
+  let check_age now expected =
+    Alcotest.(check (option int)) "embedded commit age"
+      expected (Build_identity.embedded_commit_age_seconds ~now)
+  in
+  (match full.binary_commit_unix_ts with
+   | None -> check_age 0.0 None; check_age 100.0 None
+   | Some timestamp ->
+     check_age (timestamp -. 10.0) (Some 0);
+     check_age (timestamp +. 10.75) (Some 10);
+     check_age (timestamp +. 70.75) (Some 70));
+  check_age infinity None
+
 let test_current_started_at_is_stable () =
   let first = Build_identity.current () in
   Unix.sleepf 0.01;
@@ -109,9 +125,8 @@ let test_runtime_cwd_is_resolver_backed_snapshot () =
    runbook stopped before it began.
 
    The test process is itself a direct launch, so this is that case. *)
-(* current () runs on every TUI render frame. When the self-hash was not
-   memoised it read and digested the whole 60 MB executable each time, and the
-   TUI sat at 88% of a core with sha256_do_chunk on top of the sample. *)
+(* Repeated full identity observations share the executable digest. The
+   lightweight TUI footer uses embedded identity without requesting this hash. *)
 let test_repeated_current_does_not_rehash_the_executable () =
   let first = Build_identity.current () in
   let started = Unix.gettimeofday () in
@@ -484,6 +499,7 @@ let test_executable_provenance_rejects_mismatches () =
 
 let test_executable_provenance_binding_rejects_replacement_and_forgery () =
   let path = Filename.temp_file "build-provenance" ".json" in
+  let displaced_path = path ^ ".displaced" in
   let snapshot_root = Filename.temp_file "dashboard-blobs" "" in
   Sys.remove snapshot_root;
   Unix.mkdir snapshot_root 0o700;
@@ -505,6 +521,7 @@ let test_executable_provenance_binding_rejects_replacement_and_forgery () =
   Fun.protect
     ~finally:(fun () ->
       if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists displaced_path then Sys.remove displaced_path;
       if Sys.file_exists snapshot_root then Unix.rmdir snapshot_root)
     (fun () ->
       write raw;
@@ -522,10 +539,20 @@ let test_executable_provenance_binding_rejects_replacement_and_forgery () =
           ~expected_executable_inode:2
       in
       Alcotest.(check bool) "exact inode binding accepted" true (Result.is_ok (validate ()));
-      Sys.remove path;
+      (* Keep the original inode allocated: unlink/recreate can reuse it and
+         would not establish the distinct-file premise of this assertion. *)
+      Unix.rename path displaced_path;
       write raw;
+      let replacement = Unix.lstat path in
+      Alcotest.(check bool) "replacement has a distinct filesystem identity" true
+        (replacement.st_dev <> sidecar.st_dev || replacement.st_ino <> sidecar.st_ino);
       Alcotest.(check bool) "same-byte replacement rejected" true (Result.is_error (validate ()));
+      Sys.remove path;
+      Unix.rename displaced_path path;
       write (raw ^ " ");
+      let forged = Unix.lstat path in
+      Alcotest.(check (pair int int)) "forgery preserves the bound inode"
+        (sidecar.st_dev, sidecar.st_ino) (forged.st_dev, forged.st_ino);
       Alcotest.(check bool) "forged bytes rejected" true (Result.is_error (validate ())))
 ;;
 
@@ -783,6 +810,8 @@ let () =
           Alcotest.test_case
             "binary identity survives without checkout" `Quick
             test_binary_identity_survives_without_checkout;
+          Alcotest.test_case "embedded identity preserves authority and current age"
+            `Quick test_embedded_identity_preserves_binary_authority_and_current_age;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
           Alcotest.test_case "executable provenance requires exact identity" `Quick

@@ -119,11 +119,26 @@ type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
   ; checkpoint_retentions : int
+  ; repetition_scope : Keeper_execution_scope_id.t option
   }
 (** One exact durable queue entry. [admitted_revision] records the durable
     transform that admitted the snapshot; entries admitted by the same
     transform may share it, so exact selection combines it with
     {!source_snapshot_ref}. *)
+(** [repetition_scope = None] means no durable binding has been recorded. It
+    does not assert that the source has never been observed by a model. A
+    binding identifies work; it does not by itself authorize Fresh or Resume. *)
+
+type scope_binding_error =
+  | Empty_scope_batch
+  | Duplicate_scope_selection
+  | Invalid_scope_selection of string
+  | Scope_binding_conflict of
+      { requested : Keeper_execution_scope_id.t
+      ; existing : Keeper_execution_scope_id.t
+      }
+
+val scope_binding_error_to_string : scope_binding_error -> string
 
 type transition_result =
   | Transition_applied of transition_receipt
@@ -203,6 +218,17 @@ val ack_pending :
 (** Compare-and-remove the exact immutable selected stimulus snapshot.
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
+
+val bind_pending_repetition_scope :
+  selections:pending_selection list ->
+  scope:Keeper_execution_scope_id.t ->
+  t ->
+  (t * pending_selection list, scope_binding_error) result
+(** Validate the entire nonempty batch before binding any entry. Conflicting
+    existing bindings cannot be replaced. Returns updated selections in caller
+    order; pre-binding selections become stale. A batch already bound to the
+    same scope returns the original state. Reordering/retention preserves a
+    binding; removing and newly enqueuing a source does not inherit it. *)
 
 val note_checkpoint_retention :
   selection:pending_selection ->

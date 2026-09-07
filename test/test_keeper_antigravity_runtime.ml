@@ -282,6 +282,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
         |> Result.get_ok
       in
       let observed_trace_ref = ref None in
+      let transmitted_inputs = ref [] in
+      let record_transmitted ~runtime_id:_ ~tools:_ ~transmitted =
+        transmitted_inputs := transmitted :: !transmitted_inputs
+      in
       let observed_initial_prompt = ref None in
       let observed_resumed_prompt = ref None in
       let stream_events = ref [] in
@@ -375,6 +379,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~tools:[ tool ]
                       ~agent_core_tools:[ tool ]
                       ~initial_messages:large_history
+                      ~on_request_attribution:record_transmitted
                       ~hooks
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
@@ -496,6 +501,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~tools:[ tool ]
                         ~agent_core_tools:[ tool ]
                         ~initial_messages:large_history
+                        ~on_request_attribution:record_transmitted
                         ~hooks
                         ~context:(Agent_core.Context.create ())
                         ~raw_trace
@@ -516,6 +522,12 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         "provider cumulative turn count"
                         73
                         resumed.turns))));
+      (match List.rev !transmitted_inputs with
+       | [ Keeper_official_client_host.Whole_input_transmitted messages;
+           Keeper_official_client_host.Held_by_client_session ] ->
+         check bool "fresh transmission contains prepared history" true
+           (List.length messages > 0)
+       | _ -> fail "successful start/resume did not each report their exact input mode");
       check string
         "tool arguments"
         {|{"marker":"from-antigravity"}|}
@@ -824,12 +836,10 @@ let test_spawn_failure_is_pre_dispatch () =
                     "no_effect_observed"
                     (Keeper_provider_attempt_effect.to_string
                        attempt.effect_disposition);
-                  (* A turn that never prepared reports nothing, so the record
-                     falls to [Dispatch_not_reached]. Reporting an empty list
-                     here instead would be written as a turn measured at zero
-                     bytes -- the reading masc#32995 exists to stop. *)
+                  (* Preparation succeeded, but the CLI never spawned. A
+                     prepared prompt is not evidence of transmitted input. *)
                   check int
-                    "a turn that never prepared reports no input"
+                    "a turn that never spawned reports no transmitted input"
                     0
                     (List.length !reports))))))
 ;;

@@ -1213,6 +1213,10 @@ let dashboard_manifest_identity () =
 let binary_commit_unix_ts = probe_commit_unix_ts commit_resolution.binary_commit
 let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_commit
 
+let embedded_commit = commit_resolution.binary_commit
+
+let embedded_commit_age_seconds ~now = age_seconds ~now binary_commit_unix_ts
+
 let current () =
   let now = Unix.gettimeofday () in
   let provenance_binding = Atomic.get executable_provenance_binding in
@@ -1252,7 +1256,7 @@ let current () =
   ; executable_provenance_sha256 =
       Option.map (fun binding -> binding.sidecar_sha256) provenance_binding
   ; binary_commit_unix_ts
-  ; binary_commit_age_seconds = age_seconds ~now binary_commit_unix_ts
+  ; binary_commit_age_seconds = embedded_commit_age_seconds ~now
   ; repo_head_commit
   ; repo_head_commit_source
   ; repo_head_commit_unix_ts

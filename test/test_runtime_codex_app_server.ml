@@ -113,7 +113,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
@@ -143,7 +143,9 @@ let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
   read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 1) ^ "\n");
   read_request ();
+  if close_before_turn then output_string output "exec 0<&-\n";
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
+  if close_before_turn then output_string output "exit 62\n";
   read_request ();
   List.iteri
     (fun index line ->
@@ -165,10 +167,11 @@ let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
   path
 ;;
 
-let with_fixture ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?close_before_turn ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?before_final_stdin_drain_s lines f =
   let path =
     fixture_script
+      ?close_before_turn
       ?capture_path
       ?initial_line_delay_s
       ?terminal_line_delay_s
@@ -217,6 +220,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
+    ?on_prompt_sent ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -252,8 +256,9 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ?on_thread_ready
       ?on_turn_started
       ?on_stream_event
+      ?on_prompt_sent
       config
-      ~prompt:"Return the fixture marker"
+      ~prompt
       ~images)
 ;;
 
@@ -565,6 +570,54 @@ let test_chatgpt_subscription_turn () =
         check string "model" "gpt-fixture" result.model;
         check string "plan" "pro" result.subscription.plan_type;
         check bool "new thread" false result.resumed)
+;;
+
+let test_prompt_transmission_boundary () =
+  let sent = ref 0 in
+  let report () = incr sent in
+  let missing = Filename.temp_file "missing-codex-" ".sh" in
+  Sys.remove missing;
+  check bool "missing client fails" true
+    (Result.is_error (run_fixture ~on_prompt_sent:report missing));
+  check int "spawn failure emits no input" 0 !sent;
+  let lines = [ init_result; account_chatgpt; thread_result; turn_result;
+                item_completed; turn_completed ] in
+  with_fixture ~close_before_turn:true lines (fun path ->
+    (match run_fixture ~prompt:(String.make 1_100_000 'x') ~on_prompt_sent:report path with
+     | Error (Runtime_codex_app_server.Turn_input_write_failed _ as error) ->
+       check bool "write interruption retains transport recovery phase" true
+         (Keeper_codex_runtime.For_testing.recovery_failure_of_client_error error
+          = Keeper_official_client_session_store.Transport_interrupted)
+     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+     | Ok _ -> fail "incomplete turn input completed");
+    check int "incomplete write emits no input" 0 !sent);
+  let captured = Filename.temp_file "codex-transmitted-input-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
+    with_fixture ~capture_path:captured lines (fun path ->
+      let result = run_fixture ~prompt:"transmission-marker" ~on_prompt_sent:report path in
+      check bool "complete turn succeeds" true (Result.is_ok result);
+      check int "complete write emits once" 1 !sent;
+      let open Yojson.Safe.Util in
+      let request = In_channel.with_open_bin captured In_channel.input_all
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> line <> "")
+        |> List.map Yojson.Safe.from_string
+        |> List.find (fun json -> json |> member "method" = `String "turn/start") in
+      let text = request |> member "params" |> member "input" |> to_list
+        |> List.hd |> member "text" |> to_string in
+      check string "client received exact turn input" "transmission-marker" text));
+  with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
+    (fun path ->
+      (match run_fixture ~on_prompt_sent:report path with
+       | Error (Runtime_codex_app_server.Turn_failed "fixture provider rejection") -> ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "provider rejection became success");
+      check int "provider rejection keeps transmitted evidence" 2 !sent);
+  with_fixture lines (fun path ->
+    match run_fixture ~on_prompt_sent:(fun () -> failwith "fixture observer failure") path with
+    | Error (Runtime_codex_app_server.Protocol_error { stage = "prompt sent callback"; _ }) -> ()
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ -> fail "observation failure silently continued")
 ;;
 
 let test_subscription_probe_stops_before_thread () =
@@ -1790,7 +1843,7 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
    official clients name a fixture prompt the same way. *)
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
-    ?on_event ?(keeper_name = "codex-fixture")
+    ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
@@ -1850,6 +1903,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context
                       ?raw_trace
                       ?on_event
+                      ?on_request_attribution
                       ~sw
                       ~net:(Eio.Stdenv.net env)
                       ()
@@ -2134,6 +2188,58 @@ let test_keeper_dispatches_codex_turn_runtime () =
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
+;;
+
+let test_keeper_spawn_failure_has_no_transmitted_input () =
+  let missing = Filename.temp_file "missing-keeper-codex-" ".sh" in
+  Sys.remove missing;
+  let reports = ref 0 in
+  let result = run_keeper_turn ~cli_path:missing ~model:"gpt-fixture"
+      ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () in
+  check bool "missing client fails Keeper turn" true (Result.is_error result);
+  check int "Keeper preparation does not claim transmission" 0 !reports
+;;
+
+let test_keeper_partial_write_retains_transport_evidence () =
+  let base_path = temp_workspace "codex-input-write-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture ~close_before_turn:true
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun cli_path ->
+        let result = run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
+            ~goal:(String.make 1_100_000 'x') () in
+        (match result with
+         | Error error ->
+           (match Keeper_internal_error.classify_masc_internal_error error with
+            | Some (Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+              check bool "partial dispatch cannot be replayed automatically" false
+                (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+            | _ -> fail (Agent_core.Error.to_string error))
+         | Ok _ -> fail "partial input dispatch completed a Keeper turn");
+        match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
+        | Ok (Some { phase = Recovery_required
+            { failure = Transport_interrupted; _ }; _ }) -> ()
+        | Ok _ -> fail "partial write lost durable transport recovery evidence"
+        | Error detail -> fail detail))
+;;
+
+let test_keeper_post_write_observer_failure_cannot_retry () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun cli_path ->
+      let calls = ref 0 in
+      let result = run_keeper_turn ~cli_path ~model:"gpt-fixture"
+        ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ ->
+          incr calls; failwith "fixture attribution failed after dispatch") () in
+      check int "one completed write reached the observer" 1 !calls;
+      match result with
+      | Error error ->
+        (match Keeper_internal_error.classify_masc_internal_error error with
+         | Some (Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+           check bool "observer failure cannot replay the dispatched input" false
+             (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+         | _ -> fail (Agent_core.Error.to_string error))
+      | Ok _ -> fail "failed attribution completed a Keeper turn")
 ;;
 
 let test_keeper_projects_codex_live_stream () =
@@ -3932,6 +4038,7 @@ let () =
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
         ; test_case
             "probe stops before thread"
             `Quick
@@ -4073,6 +4180,12 @@ let () =
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
+        ; test_case "Keeper spawn failure has no transmitted input" `Quick
+            test_keeper_spawn_failure_has_no_transmitted_input
+        ; test_case "Keeper partial write retains transport evidence" `Quick
+            test_keeper_partial_write_retains_transport_evidence
+        ; test_case "post-write observer failure cannot retry" `Quick
+            test_keeper_post_write_observer_failure_cannot_retry
         ; test_case
             "Keeper maps official context error to typed core error"
             `Quick

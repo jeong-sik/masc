@@ -2156,6 +2156,8 @@
 
 (include stanzas/test_slack_read_tool.inc)
 
+(include stanzas/test_msx_tools.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -3852,6 +3854,17 @@
  (deps (alias runtest-test_tui_keyboard_input-project-changes)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-browser-screenshot)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} browser-screenshot)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-browser-screenshot)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-config)
  (deps
   test_tui_keyboard_input.py
@@ -4763,6 +4776,11 @@
  (libraries masc_test_deps ptime masc.time_codec))
 
 (include stanzas/test_keeper_repetition_scope.inc)
+
+(test
+ (name test_tui_msx_load)
+ (modules test_tui_msx_load)
+ (libraries alcotest unix masc_tui_types masc_tui_msx))
 
 (test
  (name test_tui_runtime_config_view)

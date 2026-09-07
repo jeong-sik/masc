@@ -919,13 +919,13 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
            by hand every time. Silent when either side cannot testify. *)
-        (let self = Masc.Build_identity.current () in
-         match
+        (match
            Masc_tui_footer.build_mismatch_item
-             ~tui_commit:self.Masc.Build_identity.binary_commit
+             ~tui_commit:Masc.Build_identity.embedded_commit
              ~tui_age_s:
                (Option.map float_of_int
-                  self.Masc.Build_identity.binary_commit_age_seconds)
+                  (Masc.Build_identity.embedded_commit_age_seconds
+                     ~now:(Unix.gettimeofday ())))
              ~server_commit:identity.Tui_decode.sid_binary_commit
              ~server_age_s:identity.Tui_decode.sid_binary_commit_age_s
          with
@@ -8659,13 +8659,15 @@ let chat_rows_with_timeline_ats messages =
    live turn and once through [keeper_message_layout_entries]. The filter
    walks every committed row on every key, and its answer depends only on the
    row list -- replaced, not mutated, when the conversation changes -- and the
-   two visibility readings, so those three are the key. Same scoping as
+   memory, reasoning, and tool visibility readings. Full tool detail restores
+   the raw Gate lifecycle, so its toggle also invalidates this reading. Same scoping as
    [chat_timeline_ats_memo] above: a frame with different rows or a toggled
    visibility replaces the slot, and nothing is kept stale. *)
 type visible_timeline_memo = {
   vtm_messages : msg_entry list;
   vtm_memory : memory_visibility;
   vtm_reasoning : reasoning_visibility;
+  vtm_tools : tool_visibility;
   vtm_timeline : (msg_entry * float option) list;
 }
 
@@ -8681,7 +8683,8 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
   | Some memo
     when memo.vtm_messages == messages
          && memo.vtm_memory = state.msg_memory_visibility
-         && memo.vtm_reasoning = state.msg_reasoning_visibility ->
+         && memo.vtm_reasoning = state.msg_reasoning_visibility
+         && memo.vtm_tools = state.msg_tool_visibility ->
       memo.vtm_timeline
   | Some _ | None ->
       let timeline =
@@ -8694,15 +8697,14 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
           || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
         |> Masc_tui_types.fold_memory_summary_runs
              ~visibility:state.msg_memory_visibility
-        (* After the filters, so a hidden lane between two Gate rows does not
-           split their run and draw the same approval twice. *)
-        |> Masc_tui_types.fold_gate_runs
+        |> Masc_tui_types.project_gate_history ~visibility:state.msg_tool_visibility
       in
       visible_timeline_memo :=
         Some
           { vtm_messages = messages;
             vtm_memory = state.msg_memory_visibility;
             vtm_reasoning = state.msg_reasoning_visibility;
+            vtm_tools = state.msg_tool_visibility;
             vtm_timeline = timeline;
           };
       timeline
@@ -13576,7 +13578,6 @@ let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
-  let label = match view.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
   let read_status = Browser_lane_view.read_status view in
   let read_style = match read_status with
     | Read_ok -> Theme.ok ()
@@ -13585,11 +13586,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Unread -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
-      (screen_title (" MASC Runtime / " ^ label)) (source_name view.source)
+      (screen_title " MASC Browser Lane") (source_name view.source)
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.url_draft with
-      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
+      | Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
+      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None -> Masc_tui_keys.footer_hints_browser_lane)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -13597,6 +13599,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation Firefox…", Theme.info ()
+        | Loading (_, Screenshot _) -> "Capturing selected Firefox tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
@@ -13610,7 +13613,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
          | None -> match view.source with
-             | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
+             | Live -> "  Live Firefox • a:automation"
              | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
@@ -13626,7 +13629,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let selected = List.nth_opt tabs index in
       c.push_styled ~style:(Theme.info ())
         (match selected with
-         | None -> "  No matching tabs • Open a page in the selected Firefox session"
+         | None -> "  No open tabs • Open a page in the selected Firefox session"
          | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
@@ -13677,7 +13680,7 @@ let render_connectors (state : state) =
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"B:Browser Lane  S:Slack Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
+    ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"
@@ -13784,11 +13787,7 @@ let runtime_probe_badge = function
         | Runtime_provider_invalid_endpoint
         | Runtime_provider_invalid_execution_transport -> (Theme.bad ())
       in
-      let label =
-        match probe.rpp_status with
-        | Runtime_provider_skipped_cli -> "CLI not probed"
-        | status -> runtime_provider_status_to_string status
-      in
+      let label = runtime_probe_status_label probe.rpp_status in
       style ^ label ^ Ansi.reset
 
 let runtime_route_probe_badge runtime probe =
@@ -13947,7 +13946,7 @@ let runtime_detail_lines state target ~width =
               | Runtime_probe_cli -> "cli"
             in
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
-              (runtime_provider_status_to_string row.rpp_status)
+              (runtime_probe_status_label row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
             @ runtime_detail_field ~width ~style:Ansi.reset "Checked at" row.rpp_checked_at
             @ (match row.rpp_reachable with
@@ -13965,9 +13964,11 @@ let runtime_detail_lines state target ~width =
                | Some value ->
                    runtime_detail_field ~width ~style:Ansi.reset "Latency"
                      (Printf.sprintf "%.0fms" value))
-            @ (match row.rpp_error with
+            @ (match runtime_probe_annotation ~status:row.rpp_status row.rpp_error with
                | None -> []
-               | Some error ->
+               | Some (Runtime_probe_note note) ->
+                   runtime_detail_field ~width ~style:Ansi.dim "Probe note" note
+               | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
       fields @ candidate @ blocker @ sticky @ probe_lines

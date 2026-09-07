@@ -62,6 +62,7 @@ val run :
     from here. *)
 
 module For_testing : sig
+  val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
   val observe_stream_native_action :
     turn_count:int ->
     observe:(official_turn:int -> identity:Runtime_native_tools.action_identity ->

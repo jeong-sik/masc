@@ -1,39 +1,29 @@
 (** Repetition evidence partitioned by durable invocation identity.
     This module does not infer an invocation from prompt text, checkpoint
     presence, task IDs, or provider attempts. Producers supply identity. *)
-
-module Id : sig
-  type t
-  val direct_operation : Keeper_chat_operation.Operation_id.t -> t
-  val autonomous_admission : Uuidm.t -> t
-  val equal : t -> t -> bool
-  val to_json : t -> Yojson.Safe.t
-  val of_json : Yojson.Safe.t -> (t, string) result
-end
-
-type admission = Fresh of Id.t | Resume of Id.t
+type admission = Fresh of Keeper_execution_scope_id.t | Resume of Keeper_execution_scope_id.t
 type observation
 type t
 type error =
   | Invalid_snapshot of string
   | Invalid_observation of string
-  | Unknown_scope of Id.t
+  | Unknown_scope of Keeper_execution_scope_id.t
   | Restore_target_conflict
 
 val error_to_string : error -> string
 val observation_of_call : Keeper_agent_result.tool_call_detail -> (observation, error) result
 (** Validates and canonicalizes hashes before creating a recordable value. *)
 val empty : t
-val active : t -> Id.t option
+val active : t -> Keeper_execution_scope_id.t option
 val admit : t -> admission -> (t, error) result
 (** Fresh is idempotent for an existing identity: it never clears evidence.
     Resume requires that exact scope to have been admitted. Admitting B keeps
     A, including when the process later restores this checkpoint. *)
-val record : t -> scope:Id.t -> observation -> (t, error) result
+val record : t -> scope:Keeper_execution_scope_id.t -> observation -> (t, error) result
 (** One newly observed execution, not replay-safe ingestion. The caller owns
     callback delivery identity and serializes load/admit/record/save; individual
     Context get/set locks do not make that sequence a transaction. *)
-val tool_calls : t -> scope:Id.t -> (Keeper_agent_result.tool_call_detail list, error) result
+val tool_calls : t -> scope:Keeper_execution_scope_id.t -> (Keeper_agent_result.tool_call_detail list, error) result
 (** Only repetition fields are restored, newest first. They are observations
     for the detector, not current-turn receipt or execution-outcome evidence. *)
 val to_json : t -> Yojson.Safe.t

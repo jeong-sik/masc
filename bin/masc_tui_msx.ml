@@ -16,12 +16,12 @@
 let rom_dir () = try Sys.getenv "MSX_ROMS" with Not_found -> ""
 let cart_path () = try Sys.getenv "MSX_CART" with Not_found -> ""
 
+type load_error = { path : string; detail : string }
+exception Image_read_failed of load_error
+
 let read_file path =
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
+  try In_channel.with_open_bin path In_channel.input_all with
+  | Sys_error detail -> raise (Image_read_failed { path; detail })
 
 let load_roms dir =
   if dir = "" then []
@@ -42,17 +42,18 @@ let machine_of (state : Masc_tui_types.state) =
   | Some m -> m
   | None ->
       let roms = load_roms (rom_dir ()) in
-      booted_with_roms := roms <> [];
       let m = Msx.create ~machine:{ ram_kb = 512; vram_kb = 128; roms } in
-      (match cart_path () with
+      let cartridge = cart_path () in
+      (match cartridge with
       | "" -> ()
       | path ->
-          Msx.load_cartridge m (read_file path);
-          cart_name := Filename.basename path);
+          Msx.load_cartridge m (read_file path));
       (* Run ahead to the boot logo (~30 frames in, full at 45) so the first
          paint shows something; afterwards one key is one frame -- the
          spectator contract. *)
       Msx.step m ~frames:45;
+      booted_with_roms := roms <> [];
+      cart_name := if cartridge = "" then "" else Filename.basename cartridge;
       state.msx <- Some m;
       m
 
@@ -105,10 +106,17 @@ let draw ~write (state : Masc_tui_types.state) =
   write (Buffer.contents buf)
 
 let open_screen ~write (state : Masc_tui_types.state) =
-  state.msx_open <- true;
-  (* [draw] creates the machine through [machine_of] on first use, so there
-     is nothing to force here -- opening is setting the flag and painting. *)
-  draw ~write state
+  (* Expected file failures are handled before giving this screen the keyboard
+     and renderer. Terminal writes and emulator faults remain distinct. *)
+  let loaded =
+    try Ok (machine_of state) with Image_read_failed error -> Error error
+  in
+  match loaded with
+  | Error error -> Error error
+  | Ok _ ->
+      state.msx_open <- true;
+      draw ~write state;
+      Ok ()
 
 let key_of = function
   | "up" -> Some Msx.Up

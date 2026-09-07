@@ -37,7 +37,23 @@ let test_empty_picker_keeps_its_explanation () =
   state.runtime_lane_pick <- Some "primary";
   check_layout state 12
 
+let test_cli_probe_is_a_note () =
+  let detail = "CLI runtimes do not expose an HTTP reachability endpoint" in
+  Alcotest.(check bool) "typed CLI exclusion remains informational" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli (Some detail)
+     = Some (Runtime_probe_note detail));
+  Alcotest.(check string) "human-readable excluded probe status" "CLI not probed"
+    (runtime_probe_status_label Runtime_provider_skipped_cli);
+  List.iter (fun status ->
+    Alcotest.(check bool) "the same words cannot disguise a real failure" true
+      (runtime_probe_annotation ~status (Some detail) = Some (Runtime_probe_failure detail)))
+    [Runtime_provider_network_error; Runtime_provider_endpoint_not_found;
+     Runtime_provider_auth_failed; Runtime_provider_invalid_execution_transport];
+  Alcotest.(check bool) "no diagnostic is invented" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli None = None)
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
-      Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation]]
+      Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
+      Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note]]

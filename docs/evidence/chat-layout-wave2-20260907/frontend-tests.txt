@@ -1,0 +1,17 @@
+
+ RUN  v4.1.5 /private/tmp/masc-chat-scroll-wave2/dashboard
+
+(node:40155) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41941) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:43578) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45099) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  4 passed (4)
+      Tests  191 passed (191)
+   Start at  18:32:35
+   Duration  59.67s (transform 4.38s, setup 8.64s, import 21.65s, tests 10.80s, environment 12.47s)
+

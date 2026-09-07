@@ -237,7 +237,7 @@ let test_poison_durable_source_is_retired_during_intake () =
       ~pending_board_events:[]
   in
   check int "no empty source is offered to a provider turn" 0
-    intake.consumed_stimulus_count;
+    (Keeper_heartbeat_source_batch.count intake.source_batch);
   check int "no fabricated Board observation is returned" 0
     (List.length intake.pending_board_events);
   check bool "permanent retirement is not an intake error" true
@@ -334,11 +334,22 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
       ~meta_after_triage:meta
       ~pending_board_events:[]
   in
-  check int "transient source is not counted consumed" 0 intake.consumed_stimulus_count;
+  check int "transient source is not counted consumed" 0 (Keeper_heartbeat_source_batch.count intake.source_batch);
   check int "transient source is not exposed as consumed" 0
-    (List.length intake.consumed_stimuli);
+    (List.length (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
   check bool "exact pending selection remains attached" true
-    (Option.is_some intake.pending_selection);
+    (Option.is_some intake.diagnostic_selection);
+  let diagnostic_input = Keeper_heartbeat_source_batch.for_turn ~reactive:true intake.source_batch in
+  check bool "diagnostic is not transported as admitted work" true
+    (Keeper_heartbeat_source_batch.selections
+       (Keeper_heartbeat_source_batch.sources diagnostic_input) = []);
+  (match Keeper_heartbeat_source_batch.wake diagnostic_input with
+   | Keeper_registry.Woken [] -> ()
+   | _ -> fail "withdrawn diagnostic became an admitted wake payload");
+  (match Keeper_heartbeat_source_batch.wake
+           (Keeper_heartbeat_source_batch.for_turn ~reactive:false intake.source_batch) with
+   | Keeper_registry.Proactive_tick -> ()
+   | _ -> fail "empty cadence input became reactive");
   (match intake.event_queue_intake_error with
    | Some
        (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable) ->
@@ -360,7 +371,7 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
     false
     (Keeper_heartbeat_loop.should_run_turn_after_event_intake
        ~scheduled:true
-       ~consumed_stimulus_count:intake.consumed_stimulus_count
+       ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count intake.source_batch)
        ~event_queue_intake_error:intake.event_queue_intake_error);
   let queued =
     match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
@@ -376,12 +387,12 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
       ~pending_board_events:[]
   in
   check int "later successful read consumes the retained source" 1
-    retry_intake.consumed_stimulus_count;
+    (Keeper_heartbeat_source_batch.count retry_intake.source_batch);
   check int "later successful read renders the exact Board event" 1
     (List.length retry_intake.pending_board_events);
   check bool "retry clears the typed intake error" true
     (Option.is_none retry_intake.event_queue_intake_error);
-  (match retry_intake.pending_selection with
+  (match Keeper_heartbeat_source_batch.first retry_intake.source_batch with
    | None -> fail "successful retry lost its exact pending selection"
    | Some selection ->
      (match
@@ -478,8 +489,8 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
       ~pending_board_events:[]
   in
   check int "the entry behind the transient head is consumed" 1
-    intake.consumed_stimulus_count;
-  (match intake.consumed_stimuli with
+    (Keeper_heartbeat_source_batch.count intake.source_batch);
+  (match (Keeper_heartbeat_source_batch.stimuli intake.source_batch) with
    | [ consumed ] ->
      check string "the consumed entry is the trailing one, not the head"
        trailing_post_id consumed.Keeper_event_queue.post_id
@@ -499,7 +510,7 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
     true
     (Keeper_heartbeat_loop.should_run_turn_after_event_intake
        ~scheduled:true
-       ~consumed_stimulus_count:intake.consumed_stimulus_count
+       ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count intake.source_batch)
        ~event_queue_intake_error:intake.event_queue_intake_error);
   let queued =
     match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with

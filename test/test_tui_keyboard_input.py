@@ -1462,7 +1462,7 @@ def board_detail_isolation_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
     return fixtures, b_failure
 
 
-def board_missing_target_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+def board_paginated_detail_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     posts = [
         board_selection_post("a", "Alpha", "list-body-a"),
         board_selection_post("b", "Bravo", "list-body-b"),
@@ -4210,7 +4210,7 @@ def board_detail_authority_interaction(
     return interact
 
 
-def board_missing_target_interaction(
+def board_paginated_detail_interaction(
     fixtures: HttpFixtures,
     late_b: GatedHttpResponse,
 ) -> Interaction:
@@ -4233,34 +4233,38 @@ def board_missing_target_interaction(
             )
             send_and_wait(process, master_fd, output, b"\r", b"b-initial-comment")
 
-            fixtures["/api/v1/board?sort_by=hot"] = (
-                200,
-                {"posts": [board_selection_post("a", "Alpha", "list-body-a")]},
-            )
+            # An empty recent page is not an exact-ID deletion response.
+            fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": []})
             fixtures["/api/v1/board/post-b?format=flat"] = late_b
-            board_update = send_and_wait(
-                process, master_fd, output, b"r", screen_header(b"MASC Board", b" (1)")
-            )
-            board = frame_containing(board_update, screen_header(b"MASC Board", b" (1)"))
+            os.write(master_fd, b"R")
             if not wait_for_fixture_event(
                 process, master_fd, output, late_b.requested, timeout=10.0
             ):
                 raise AssertionError("late Board B request did not reach its fixture")
-            for expected in (
-                selected_row(b"post-a"),
-                b"Enter:read",
-            ):
-                if find_needle(board, expected) < 0:
-                    raise AssertionError(
-                        f"missing Board target did not restore list mode: {board!r}"
-                    )
-            for stale in (b"b-initial-comment", b"Esc:back"):
-                if stale in board:
-                    raise AssertionError(
-                        f"missing Board target retained detail state: {board!r}"
-                    )
+            refreshing = resize_and_wait(
+                process, master_fd, output, rows=30, columns=179,
+                needle=b"b-initial-comment", controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            if b"b-initial-comment" not in refreshing:
+                raise AssertionError("page omission cleared the refreshing exact detail")
 
-            send_and_wait(process, master_fd, output, b"\r", b"a-recovered-detail")
+            release_and_wait_for_frame(
+                process, master_fd, output, late_b, b"b-late-comment"
+            )
+            # Prove the page is still empty after the exact detail becomes ready.
+            # It must not insert the historical detail into the ranked feed.
+            fixtures["/api/v1/board/post-b?format=flat"] = (
+                404, {"error": "fixture-exact-post-not-found"}
+            )
+            failed = send_and_wait(
+                process, master_fd, output, b"R", b"fixture-exact-post-not-found"
+            )
+            if b"Board post load failed" not in CSI_RE.sub(b"", failed):
+                raise AssertionError("the exact lookup failure was not shown")
+            send_and_wait(
+                process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (0)")
+            )
             os.write(master_fd, b"q")
             completed = True
         finally:
@@ -10330,10 +10334,15 @@ def config_navigation_interaction() -> Interaction:
         for needle in (b"fixture-read-revision", b"Validation: valid", b"Keeper restart: required"):
             if needle not in status_plain:
                 raise AssertionError(f"Config status omitted {needle!r}: {status_plain!r}")
+        send_and_wait(
+            process, master_fd, output, b"r", b"fixture-reloaded-revision"
+        )
         # Source-only input must not open an editor or a hidden-source search.
         # If / stole focus, v would become search text instead of returning.
         send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
-        send_and_wait(process, master_fd, output, b"v", b"first-value = ")
+        reloaded_source = send_and_wait(process, master_fd, output, b"v", b"first-value = ")
+        if b"first-value = 9" not in CSI_RE.sub(b"", reloaded_source):
+            raise AssertionError("Config reload changed revision without its new source")
 
         next_field = send_and_wait(
             process, master_fd, output, b"j", b"second-value = "
@@ -11887,7 +11896,7 @@ def run_keyboard_regression(executable: str) -> None:
     board_selection_fixtures = board_selection_http_fixtures()
     board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
-    missing_target_fixtures, late_b = board_missing_target_http_fixtures()
+    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
     chat_visibility_fixtures = chat_clarity_http_fixtures()
     lanes_fixtures = keeper_runtime_http_fixtures()
@@ -12431,8 +12440,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Board missing target recovery",
-        interact=board_missing_target_interaction(missing_target_fixtures, late_b),
+        description="Board exact detail survives page omission",
+        interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
         http_fixtures=missing_target_fixtures,
     )
     run_terminal_scenario(
@@ -12641,16 +12650,117 @@ def run_project_changes_regression(executable: str) -> None:
     )
 
 
+def run_browser_screenshot_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    requests: list[dict[str, object]] = []
+    png = [""]
+    requested, release = threading.Event(), threading.Event()
+
+    def prepare(base: str) -> None:
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        tab_id = request.get("tabId", 2)
+        title = "first" if tab_id == 1 else "second"
+        return 200, {"ok": True, "data": {
+            "source": request["lane"], "elapsed_ms": 12.5,
+            "tabs": [{"id": n, "title": name, "url": "https://example.org/", "active": n == 2}
+                     for n, name in [(1, "first"), (2, "second")]],
+            "page": {"tabId": tab_id, "title": title, "url": "https://example.org/",
+                     "text": title + " page body", "chars": 16, "truncated": False}}}
+
+    def screenshot(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        requests.append(request)
+        if len(requests) == 2:
+            requested.set()
+            if not release.wait(timeout=10):
+                return 504, {"ok": False, "error": "fixture timeout"}
+        if len(requests) == 4:
+            return 404, {"ok": False, "error": "selected Firefox tab closed"}
+        return 200, {"ok": True, "data": {
+            "source": request["lane"], "tabId": request["tabId"], "title": "selected Firefox tab",
+            "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        palette_go(process, master_fd, output, b"go Browser Lane", b"second page body")
+
+        def capture() -> None:
+            read_available(master_fd, output)
+            start = len(output)
+            os.write(master_fd, b"\x0f")
+            wait_for_output(process, master_fd, output, b"a=T", start=start, timeout=3.0)
+            if b"f=100" not in bytes(output[start:]):
+                raise AssertionError("screenshot did not use the PNG image viewer")
+
+        capture()
+        if requests != [{"lane": "live", "tabId": 2}]:
+            raise AssertionError(f"screenshot did not bind the selected live tab: {requests!r}")
+        send_and_wait(process, master_fd, output, b"j", b"second page body")
+        send_and_wait(process, master_fd, output, b"a", b"second page body")
+        send_and_wait(process, master_fd, output, b"g", b"Ctrl-U:clear")
+        draft = b"https://example.org/?q=draft"
+        send_and_wait(process, master_fd, output, b"\x1b[200~" + draft + b"\x1b[201~", draft)
+        os.write(master_fd, b"\x0f")
+        if not wait_for_fixture_event(process, master_fd, output, requested, timeout=3.0):
+            raise AssertionError("screenshot request never reached the fixture")
+        send_and_wait(process, master_fd, output, b"x", draft + b"x")
+        # Enter intentionally does not change this busy frame. Observe its
+        # state after a real resize, rather than requiring unchanged rows to
+        # be emitted again by the differential frame presenter.
+        os.write(master_fd, b"\r")
+        wait_for_terminal_input_consumed(_slave_fd)
+        drain_until_quiet(process, master_fd, output)
+        retained = resize_and_wait(process, master_fd, output,
+            rows=31, columns=101, needle=draft + b"x", controls=(FULL_REDRAW,))
+        if b"Enter after completion" not in CSI_RE.sub(b"", retained):
+            raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
+        read_available(master_fd, output)
+        cancelled_from = len(output)
+        release.set()
+        wait_for_output(process, master_fd, output, b"Read 12.5 ms", start=cancelled_from, timeout=3.0)
+        if b"a=T" in bytes(output[cancelled_from:]):
+            raise AssertionError("cancelled screenshot interrupted the URL draft")
+        # A cancelled preview still settles its operation, so another capture works.
+        capture()
+        restored = send_and_wait(process, master_fd, output, b" ", draft + b"x")
+        if draft + b"x " in CSI_RE.sub(b"", restored).split(b"\xe2\x96\x8f")[0]:
+            raise AssertionError("image dismissal typed into the retained URL draft")
+        send_and_wait(process, master_fd, output, b"\x1b", b"second page body")
+        send_and_wait(process, master_fd, output, b"]", b"first page body")
+        send_and_wait(process, master_fd, output, b"\x0f", b"selected Firefox tab closed")
+        if requests[-1] != {"lane": "automation", "tabId": 1}:
+            raise AssertionError("closed-tab screenshot silently changed target")
+        send_and_wait(process, master_fd, output, b"r", b"second page body")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        os.write(master_fd, b"q")
+
+    try:
+        run_terminal_scenario(executable, description="Browser screenshot ownership and URL preservation",
+            interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
+            preload_input=GRAPHICS_SUPPORTED_REPLY)
+    finally:
+        release.set()
+
+
 def run_config_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
-    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
-        200,
-        {
-            **runtime_config_read_metadata(),
-            "path": "/workspace/config/runtime.toml",
-            "source_text": config_navigation_source(),
-        },
-    )
+    initial = {
+        **runtime_config_read_metadata(),
+        "path": "/workspace/config/runtime.toml",
+        "source_text": config_navigation_source(),
+    }
+    reloaded = {
+        **initial,
+        "source_revision": "fixture-reloaded-revision",
+        "source_text": config_navigation_source().replace("first-value = 1", "first-value = 9"),
+    }
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = SequencedHttpResponse([(200, initial), (200, reloaded)])
     run_terminal_scenario(
         executable,
         description="Config value navigation, paging, and model temperature",
@@ -13191,6 +13301,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "project-changes":
         run_project_changes_regression(os.path.abspath(sys.argv[1]))
         print("tui project Git changes regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
+        run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
+        print("tui Browser screenshot regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))

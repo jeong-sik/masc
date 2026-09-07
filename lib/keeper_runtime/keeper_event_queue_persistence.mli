@@ -151,6 +151,19 @@ val ack_pending_result :
   unit ->
   (unit, string) result
 
+val bind_pending_repetition_scope_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  selections:Keeper_event_queue_state.pending_selection list ->
+  scope:Keeper_execution_scope_id.t ->
+  unit ->
+  (Keeper_event_queue_state.pending_selection list, string) result
+(** Bind under the owner lock with strict snapshot durability. The producer
+    supplies identity once; this function never invents identity or infers a
+    parent from event payloads. Success returns fresh selection authority only
+    after the durable commit. This is not a complete continuation contract. *)
+
 val note_checkpoint_retention_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
@@ -217,6 +230,13 @@ val observe_snapshot_with_errors :
     rather than a healthy empty projection. *)
 
 module For_testing : sig
+  val bind_pending_repetition_scope_with_confirmation :
+    confirm_snapshot:(string -> Yojson.Safe.t -> (unit, string) result) ->
+    base_path:string -> keeper_name:string ->
+    selections:Keeper_event_queue_state.pending_selection list ->
+    scope:Keeper_execution_scope_id.t -> unit ->
+    (Keeper_event_queue_state.pending_selection list, string) result
+
   val load_state_with_read_interleave
     : after_read:(unit -> unit)
     -> base_path:string

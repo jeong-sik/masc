@@ -535,16 +535,19 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                 })
               images )
     in
-    (* Reported from [prepared.messages], the post-window list, and gated on
+    (* Prepared from [prepared.messages], the post-window list, and gated on
        the same [session_mode] the prompt below is built from -- one match,
        so the record cannot claim bytes the prompt did not carry. A [Start]
        renders the whole list; a [Resume] sends the goal alone and leaves the
        accumulated conversation in the session the CLI owns, which is the fact
-       the composition line at the foot of this function already states. *)
-    on_transmitted_model_input
-      (match session_mode with
-       | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
-       | Runtime_claude_code.Resume _ -> Host.Held_by_client_session);
+       the composition line at the foot of this function already states.
+       Report it only after the runtime writes the complete user message. *)
+    let report_transmitted_input () =
+      on_transmitted_model_input
+        (match session_mode with
+         | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
+         | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
+    in
     let prompt =
       match session_mode with
       | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
@@ -916,6 +919,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                    ~expected
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
+             ~on_prompt_sent:report_transmitted_input
              ~on_turn_starting:(fun ~session_id ->
                update_session "turn-starting transition" (fun expected ->
                  Session_store.mark_turn_starting

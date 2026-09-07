@@ -463,6 +463,7 @@ let test_reinserted_source_rejects_old_terminal_incarnation () =
       { source = request.source
       ; admitted_revision = request.source_incarnation
       ; checkpoint_retentions = 0
+      ; repetition_scope = None
       }
     in
     Persistence.ack_pending_result

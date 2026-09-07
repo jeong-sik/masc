@@ -2,7 +2,7 @@
 // SSE events and API responses update these signals;
 // subscribing components re-render automatically.
 
-import { signal, computed, type ReadonlySignal } from '@preact/signals'
+import { signal, computed, batch, type ReadonlySignal } from '@preact/signals'
 import type {
   Agent,
   Task,
@@ -336,7 +336,7 @@ export const goalsLoading = signal(false)
 
 // --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
 
-import type { FusionRunRecord } from './api/dashboard-fusion'
+import type { FusionRunRecord, DashboardFusionRunsResponse } from './api/dashboard-fusion'
 
 // In-progress + recently completed fusion deliberations from the in-memory
 // registry endpoint. Distinct from `boardPosts` (the board-derived detail the
@@ -346,6 +346,7 @@ export const fusionBoardPosts = signal<BoardPost[]>([])
 export const fusionBoardLoading = signal(false)
 export const fusionBoardError = signal<string | null>(null)
 export const fusionRuns = signal<FusionRunRecord[]>([])
+export const fusionRunObservation = signal<Pick<DashboardFusionRunsResponse, 'replay' | 'historicalEvidence'> | null>(null)
 export const fusionRunsLoading = signal(false)
 export const fusionRunsError = signal<string | null>(null)
 
@@ -1497,12 +1498,60 @@ export async function refreshFusionBoard(): Promise<void> {
       offset: 0,
     }))
     fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, data.posts ?? [])
+    // A run the window did not carry can be asked for again: it may have
+    // written its post since, and a run that has one now is not the run that
+    // had none when it was last asked.
+    forgetFusionEvidenceRequests()
   } catch (err) {
     console.warn('[Fusion] board fetch error:', err)
     fusionBoardError.value = errorMessageOr(err, 'Fusion board-sink load failed')
   } finally {
     fusionBoardLoading.value = false
   }
+}
+
+// One run's board-sink evidence, fetched by the run's own id.
+//
+// refreshFusionBoard reads the last 500 board posts, so how long a run's panel
+// and judge detail stays readable is decided by how busy the board is. On a
+// 2,055-row board two runs from two days earlier sat 553rd and 1,231st from the
+// end and their detail could not be opened at all (#33562).
+//
+// The server answers this from an exact run-id index, so it costs the same
+// whatever the board has done since. Merged into the same signal the list fills:
+// a run found either way is one run, and reconcileBoardPosts keeps the identity.
+//
+// Silent on failure. This runs for a run the list did not carry, so the pane it
+// feeds already draws the honest sparse detail; replacing that with an error
+// would report the fetch instead of the run.
+export const fusionEvidenceRequests = signal<ReadonlyMap<string, symbol>>(new Map())
+
+export async function loadFusionRunEvidence(runId: string): Promise<void> {
+  const requests = fusionEvidenceRequests.peek()
+  if (runId === '' || requests.has(runId)) return
+  const request = Symbol(runId)
+  fusionEvidenceRequests.value = new Map(requests).set(runId, request)
+  try {
+    const { fetchFusionRunEvidencePost } = await import('./api/board')
+    const post = await fetchFusionRunEvidencePost(runId)
+    // A list refresh retires previous requests. A late answer from that
+    // earlier read must not replace evidence fetched after the refresh.
+    if (fusionEvidenceRequests.peek().get(runId) !== request || post === null) return
+    fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, [
+      post,
+      ...fusionBoardPosts.value.filter(existing => existing.id !== post.id),
+    ])
+  } catch (err) {
+    console.warn('[Fusion] run evidence fetch error:', err)
+  }
+}
+
+// A run whose evidence was asked for once is not asked again, which is what
+// keeps a render loop from making a request per frame. Cleared when the list
+// itself is refetched, so a run that had no post yet can be asked again after
+// its deliberation lands.
+export function forgetFusionEvidenceRequests(): void {
+  fusionEvidenceRequests.value = new Map()
 }
 
 // Re-fetched on route visit (tab-refresh) and on each `fusion_run_status` SSE
@@ -1515,7 +1564,10 @@ export async function refreshFusionRuns(): Promise<void> {
   try {
     const { fetchFusionRuns } = await import('./api/dashboard-fusion')
     const data = await fetchFusionRuns()
-    fusionRuns.value = data.runs
+    batch(() => {
+      fusionRuns.value = data.runs
+      fusionRunObservation.value = { replay: data.replay, historicalEvidence: data.historicalEvidence }
+    })
   } catch (err) {
     console.warn('[Fusion] runs fetch error:', err)
     fusionRunsError.value = errorMessageOr(err, 'Fusion run registry load failed')

@@ -203,7 +203,7 @@ val run_keeper_cycle
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation
-  -> wake:Keeper_registry.wake_reason
+  -> turn_input:Keeper_heartbeat_source_batch.turn_input
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?previous_turn_stop:Keeper_turn_checkpoint_reason.t
   -> ?shared_context:Agent_core.Context.t

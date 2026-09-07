@@ -1818,6 +1818,10 @@ type async_msg =
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
+  | Browser_lane_screenshot_ready of {
+      generation : int; image_generation : int;
+      result : (Browser_lane_view.screenshot * string, string) result;
+    }
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -4032,6 +4036,7 @@ let launch_browser_lane state ~mailbox operation =
   | Some view ->
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
+      let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4045,6 +4050,11 @@ let launch_browser_lane state ~mailbox operation =
         match operation with
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
+        | Screenshot tab_id -> Browser_lane_screenshot_ready {
+            generation; image_generation;
+            result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
+              ~host ~port ~source:view.source ~tab_id);
+          }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
       in
@@ -4054,8 +4064,8 @@ let launch_browser_lane state ~mailbox operation =
        | None ->
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
-let open_browser_lane state ~mailbox app =
-  show_browser_lane state app;
+let open_browser_lane state ~mailbox =
+  show_browser_lane state;
   release_composer_for_browser_reader state;
   launch_browser_lane state ~mailbox Browser_lane_view.Read
 
@@ -7721,13 +7731,6 @@ let leave_board_detail state =
   state.board_scroll <- 0;
   state.board_detail <- Board_detail.clear state.board_detail
 
-let leave_missing_board_detail state =
-  match state.board_mode with
-  | Board_read post_id
-    when not (List.exists (fun post -> String.equal post.bp_id post_id) state.board_posts) ->
-      leave_board_detail state
-  | Board_list | Board_read _ | Board_compose -> ()
-
 let apply_board_hearths_load state = function
   | Ok census -> state.board_hearths <- census
   | Error _ ->
@@ -7739,8 +7742,10 @@ let apply_board_hearths_load state = function
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
-      state.board_list_error <- None;
-      leave_missing_board_detail state
+      (* A sorted/filtered page cannot establish that an exact-ID target
+         disappeared. Its own detail request owns loading and failure, even
+         when the recent page is empty or excludes this historical post. *)
+      state.board_list_error <- None
   | Error err ->
       remember_surface_error state ~surface:"board list"
         ~current_error:state.board_list_error
@@ -11759,6 +11764,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
+  | Browser_lane_screenshot_ready { generation; image_generation; result } ->
+      (match state.browser_lane with
+       | None -> ()
+       | Some view ->
+           let settled, screenshot = Browser_lane_view.accept_screenshot ~generation
+               (Result.map fst result) view in
+           state.browser_lane <- Some settled;
+           (* Any deliberate input cancels the overlay, including a URL edit.
+              It must not leave the matching browser operation busy forever. *)
+           if image_generation = state.image_request_generation
+              && Option.is_some (browser_lane_on_screen state) then
+             match screenshot, result with
+             | Some shot, Ok (_, bytes) ->
+                 let refuse detail =
+                   state.browser_lane <- Some { settled with load = Failed detail }
+                 in
+                 (match !terminal_draws_images with
+                  | Some false -> refuse terminal_draws_no_images
+                  | Some true | None ->
+                      draw_image state ~refuse ~title:("Browser screenshot · " ^ shot.title)
+                        ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
+                            (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms;
+                          shot.url] bytes)
+             | _ -> ())
   | Browser_lane_action_done (generation, result) ->
       (match state.browser_lane with
        | Some view ->
@@ -12436,13 +12465,14 @@ let main () =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
-  (match Masc_tui_config.board_sort ~base_path with
+  let tui_settings = Masc_tui_config.load ~base_path in
+  (match tui_settings.board_sort with
    | None -> ()
    | Some value ->
        (match board_sort_of_string value with
         | Some sort -> state.board_sort <- sort
         | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
-  (match Masc_tui_config.theme ~base_path with
+  (match tui_settings.theme with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
    | Some _ | None -> ());
@@ -12450,26 +12480,26 @@ let main () =
   (* Same file, same moment. Absent reads as on, which is what masc drew
      before the key existed -- a reader who never set it sees no change. *)
   Masc_tui_theme.set_lift_enabled
-    (Option.value (Masc_tui_config.lift_colours ~base_path) ~default:true);
+    (Option.value (tui_settings.lift_colours) ~default:true);
 
   (* Same file, same moment: the box a table draws is a look, and a look that
      survives a restart is the point of storing it. *)
   set_table_frame
-    (Option.value (Masc_tui_config.table_frame ~base_path) ~default:false);
+    (Option.value (tui_settings.table_frame) ~default:false);
 
   (* Same file, same moment. Absent reads as on -- the hints predate the
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
-    Option.value (Masc_tui_config.hints_visible ~base_path) ~default:true;
+    Option.value (tui_settings.hints_visible) ~default:true;
   state.coalesce_queued_input <-
     Option.value
-      (Masc_tui_config.coalesce_queued_input ~base_path)
+      (tui_settings.coalesce_queued_input)
       ~default:true;
   (* Default false, unlike its neighbours: this one sends without the operator
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <-
     Option.value
-      (Masc_tui_config.voice_send_on_stop ~base_path)
+      (tui_settings.voice_send_on_stop)
       ~default:false;
 
   (* Setup terminal *)
@@ -14457,10 +14487,7 @@ and is loaded on demand through keeper_skill.
            (match browser_lane_on_screen state with
             | Some _ -> hide_browser_lane state
             | None ->
-                let app = match state.browser_lane with
-                  | Some view -> view.Browser_lane_view.app
-                  | None -> Browser_lane_view.Browser in
-                open_browser_lane state ~mailbox:async_messages app);
+                open_browser_lane state ~mailbox:async_messages);
            Render_schedule.request render_schedule Render_schedule.Force
        (* Writing an answer takes every printable key, the way the row search
           and the app form do, and it sits above the answering arm because
@@ -15109,8 +15136,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
-                 | Some (_, Masc_tui_types.Palette_browser_lane app) ->
-                     open_browser_lane state ~mailbox:async_messages app
+                 | Some (_, Masc_tui_types.Palette_browser_lane) ->
+                     open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
                  | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->
@@ -15441,6 +15468,21 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key when String.length key = 1 && Char.code key.[0] = 15
+                       && Option.is_some (browser_lane_on_screen state) ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view when Browser_lane_view.busy view -> ()
+            | Some view ->
+                let refuse detail =
+                  state.browser_lane <- Some { view with load = Failed detail }
+                in
+                match !terminal_draws_images, view.selected_tab with
+                | Some false, _ -> refuse terminal_draws_no_images
+                | _, None -> refuse "Read and select a Firefox tab before taking a screenshot"
+                | (Some true | None), Some tab_id ->
+                    launch_browser_lane state ~mailbox:async_messages
+                      (Browser_lane_view.Screenshot tab_id))
        | Some key
          when text_input_target state ~compact_viewport = Some Text_browser_url ->
            (match state.browser_lane with
@@ -15450,6 +15492,10 @@ and is loaded on demand through keeper_skill.
                 let edit url_draft = state.browser_lane <- Some { view with url_draft } in
                 (match key with
                  | "esc" -> edit None
+                 | "\r" | "\n" | "enter" when Browser_lane_view.busy view ->
+                     (* A screenshot owns the pending operation. Retain the
+                        URL until Enter can actually launch its navigation. *)
+                     ()
                  | "\r" | "\n" | "enter" ->
                      let url = String.trim draft in
                      if url = "" then
@@ -15466,9 +15512,8 @@ and is loaded on demand through keeper_skill.
                              && (String.length text = 1 || Char.code text.[0] >= 128) ->
                      edit (Some (draft ^ text))
                  | _ -> ()))
-       | Some (("B" | "S") as key) when state.view = Connectors ->
+       | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-             (if key = "B" then Browser_lane_view.Browser else Slack)
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g") as key)
@@ -16242,21 +16287,28 @@ and is loaded on demand through keeper_skill.
       | Some "&" ->
            (* The MSX screen takes the whole terminal, like the image
               overlay: it draws itself and the loop yields until [esc]. *)
-           Masc_tui_msx.open_screen ~write:write_to_terminal state
+           (match Masc_tui_msx.open_screen ~write:write_to_terminal state with
+            | Ok () -> ()
+            | Error { path; detail } ->
+                report_action state "error"
+                  (Printf.sprintf "MSX load failed (%s): %s. Repair the file and press & to retry."
+                     path detail))
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
        | Some "r"
          when (not message_mode)
               && state.view <> Runtime
+              && state.view <> Config
               && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
               && state.context_inspector_open = false ->
            (* The listing footers have promised [r:refresh] since the footer
               tables existed; no handler ever answered it. This arm makes the
               sheet true everywhere a listing draws it. The guards stay out
               of the identity pane and context inspector, and out of the
-              composer, where r must type. Runtime also owns its refresh:
-              its r/R handler below forces a provider probe. *)
+              composer, where r must type. Runtime and Config own their
+              refresh: the r/R dispatcher below forces a provider probe or
+              reloads the selected Config pane's source. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -19618,11 +19670,6 @@ and is loaded on demand through keeper_skill.
          | Connectors ->
              (match browser_lane_on_screen state with
               | None -> launch_connectors_load state ~mailbox:async_messages
-              | Some view when Browser_lane_view.should_refresh_on_tick view ->
-                  (* Live extension reads do not focus Firefox tabs. Reuse
-                     this surface's configured cadence for the Slack stream;
-                     automation still reads only on an operator action. *)
-                  launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read
               | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps

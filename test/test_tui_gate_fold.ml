@@ -53,11 +53,11 @@ let step ?(approval = "appr_1") ?(tool = "Execute") ?(summary = None) phase =
 let said text = entry Types.Message_keeper text
 let rows entries = List.map (fun e -> (e, ())) entries
 let describe folded = List.map (fun (e, _) -> e.Types.me_text) folded
-let fold entries = describe (Types.fold_gate_runs (rows entries))
+let fold entries = describe (Types.project_gate_history ~visibility:Types.Tools_compact (rows entries))
 
 let test_one_approval_is_one_row () =
   check (list string) "the whole run says where the effect ended up"
-    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute" ]
+    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute · 4 steps · Ctrl-D" ]
     (fold
        [ step Approval_requested
        ; step Approval_resolved_approved
@@ -70,62 +70,71 @@ let test_the_summary_names_the_deferred_call () =
      line says what was gated even though the request row itself is gone. *)
   let summary = Some "git reflog --date=iso | head -30" in
   check (list string) "the folded line keeps the call's own words"
-    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30" ]
+    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30 · 3 steps · Ctrl-D" ]
     (fold
        [ step ~tool:"tool_execute" ~summary Approval_requested
        ; step ~tool:"tool_execute" ~summary Approval_resolved_approved
        ; step ~tool:"tool_execute" ~summary Approval_replay_applied
        ])
 
-let test_a_correction_supersedes_the_row_it_corrects () =
-  (* A replay correction is a second row for the same approval carrying the
-     canonical phase. Ranking by severity kept showing the phase the
-     correction exists to overturn. *)
-  check (list string) "the canonical phase is the one drawn"
-    [ "미뤘던 호출 적용됨 · Execute" ]
-    (fold
-       [ step Approval_resolved_approved
-       ; step Approval_replay_failed
-       ; step Approval_replay_applied
-       ])
+let test_problems_remain_complete () =
+  List.iter (fun phase ->
+    let entries = [step Approval_requested; step Approval_resolved_approved;
+      step phase; step Approval_continuation_recorded] in
+    check (list string) "every problem phase remains visible"
+      (describe (rows entries)) (fold entries))
+    [Approval_replay_failed; Approval_replay_indeterminate;
+     Approval_replay_applied_with_warning; Approval_resolved_rejected]
 
-let test_a_replay_outranks_the_resolution_before_it () =
-  check (list string) "the outcome, not how the Gate answered"
-    [ "적용 여부 불명 · 대상을 직접 확인하세요 · Execute" ]
-    (fold
-       [ step Approval_requested
-       ; step Approval_resolved_approved
-       ; step Approval_replay_indeterminate
-       ])
+let test_corrections_keep_the_failure_history () =
+  let entries = [step Approval_replay_failed; step Approval_replay_applied] in
+  check (list string) "success cannot erase a preceding failure"
+    (describe (rows entries)) (fold entries)
 
-let test_a_problem_outranks_a_later_step () =
-  (* continuation_recorded is the newest row, but an operator scanning the pane
-     has to see that the effect never landed. The turn did carry on, so that
-     stays on the line -- it just does not get to be the whole line. *)
-  check (list string) "the failure is the outcome, not the newest step"
-    [ "적용 실패 · 턴 이어서 진행 · Execute" ]
-    (fold
-       [ step Approval_resolved_approved
-       ; step Approval_replay_failed
-       ; step Approval_continuation_recorded
-       ])
+let test_unresolved_approval_remains_complete () =
+  let entries = [step Approval_requested; said "verbatim answer";
+    step Approval_resolved_approved; step Approval_continuation_recorded] in
+  check (list string) "approval alone is not a successful effect"
+    (describe (rows entries)) (fold entries)
 
-let test_a_waiting_request_keeps_its_own_row () =
-  check (list string) "a request still waiting is not folded away"
-    [ "판정 중 · 이 호출은 미뤄짐 · Execute"
-    ; "말"
-    ; "미뤘던 호출 적용됨 · Execute"
-    ]
-    (fold
-       [ step Approval_requested
-       ; said "말"
-       ; step Approval_resolved_approved
-       ; step Approval_replay_applied
-       ])
+let test_settled_steps_fold_across_prose () =
+  let prose = said "Liveness: 그대로 보존\n\nnot a status, no substring rewrite" in
+  let entries = rows [step Approval_requested; prose;
+    step Approval_resolved_approved; step Approval_replay_applied] in
+  let projected = Types.project_gate_history ~visibility:Types.Tools_compact entries in
+  check (list string) "prose keeps its position before the settled outcome"
+    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D"]
+    (describe projected);
+  check bool "original prose record is untouched" true (fst (List.hd projected) == prose)
+
+let test_full_restores_every_original_row () =
+  let entries = rows [step Approval_requested; said "verbatim";
+    step Approval_resolved_approved; step Approval_replay_applied] in
+  let projected = Types.project_gate_history ~visibility:Types.Tools_full entries in
+  check bool "Full returns raw timeline, including identity and clocks" true (projected == entries)
+
+let test_identity_is_not_a_tool_name () =
+  let entries = [step ~approval:"a" Approval_requested;
+    step ~approval:"b" Approval_replay_applied] in
+  check (list string) "matching tools cannot correlate different approvals"
+    (describe (rows entries)) (fold entries);
+  let entries = [step Approval_requested;
+    { (step Approval_replay_applied) with me_keeper_name = "other" }] in
+  check (list string) "keeper identity scopes approvals"
+    (describe (rows entries)) (fold entries);
+  let entries = [step ~approval:"" Approval_requested;
+    step ~approval:"" Approval_replay_applied] in
+  check (list string) "missing approval identity never folds"
+    (describe (rows entries)) (fold entries)
+
+let test_wait_after_success_is_not_settled () =
+  let entries = [step Approval_replay_applied; step Approval_requested] in
+  check (list string) "later unresolved phase remains visible"
+    (describe (rows entries)) (fold entries)
 
 let test_two_approvals_stay_two_rows () =
   check (list string) "back to back approvals do not merge"
-    [ "미뤘던 호출 적용됨 · Execute"; "승인 거절 · Write" ]
+    [ "미뤘던 호출 적용됨 · Execute · 2 steps · Ctrl-D"; "승인 거절 · Write" ]
     (fold
        [ step ~approval:"appr_1" Approval_resolved_approved
        ; step ~approval:"appr_1" Approval_replay_applied
@@ -207,14 +216,13 @@ let () =
       , [ test_case "one approval is one row" `Quick test_one_approval_is_one_row
         ; test_case "the summary names the deferred call" `Quick
             test_the_summary_names_the_deferred_call
-        ; test_case "a problem outranks a later step" `Quick
-            test_a_problem_outranks_a_later_step
-        ; test_case "a correction supersedes the row it corrects" `Quick
-            test_a_correction_supersedes_the_row_it_corrects
-        ; test_case "a replay outranks the resolution before it" `Quick
-            test_a_replay_outranks_the_resolution_before_it
-        ; test_case "a waiting request keeps its own row" `Quick
-            test_a_waiting_request_keeps_its_own_row
+        ; test_case "problems remain complete" `Quick test_problems_remain_complete
+        ; test_case "corrections keep failure history" `Quick test_corrections_keep_the_failure_history
+        ; test_case "unresolved approvals remain complete" `Quick test_unresolved_approval_remains_complete
+        ; test_case "settled steps fold across prose" `Quick test_settled_steps_fold_across_prose
+        ; test_case "Full restores every original row" `Quick test_full_restores_every_original_row
+        ; test_case "identity is not a tool name" `Quick test_identity_is_not_a_tool_name
+        ; test_case "wait after success is unresolved" `Quick test_wait_after_success_is_not_settled
         ; test_case "two approvals stay two rows" `Quick
             test_two_approvals_stay_two_rows
         ; test_case "rows that are not gate rows are untouched" `Quick

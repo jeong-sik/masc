@@ -95,10 +95,8 @@ val record_event_queue_stimulus_turn_finished
     after dedup and the number of stimuli consumed from the queue. *)
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
-  consumed_stimulus_count : int;
-  consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue_state.pending_selection option;
-  consumed_selections : Keeper_event_queue_state.pending_selection list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -173,9 +171,10 @@ val reconcile_spent_selection
     ready non-connector source is included except that at most one
     [Hitl_resolved] is admitted because a turn carries one exact cycle grant.
     Later ready HITL resolutions remain queued for their own replay turns.
-    [consumed_stimuli] and [consumed_selections] carry the full batch, while
-    [pending_selection] is the first admitted selection for legacy
-    primary-source diagnostics.
+    [source_batch] carries all exact admitted selections. Payloads and counts
+    are derived from that batch. [diagnostic_selection] retains a withdrawn
+    or failed source separately; it is never an admitted batch member merely
+    because it is attached to an intake error.
 
     The selected observations are merged with the [pending_board_events]
     already accumulated by the caller, deduplicating by [post_id] (the durable

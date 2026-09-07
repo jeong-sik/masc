@@ -674,6 +674,7 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
       { source = request.source
       ; admitted_revision = request.source_incarnation
       ; checkpoint_retentions = 0
+      ; repetition_scope = None
       }
     in
     Persistence.ack_pending_result

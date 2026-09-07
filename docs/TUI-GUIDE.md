@@ -45,6 +45,16 @@ live / automation Firefox. `[` / `]` choose among open tabs and `r` refreshes.
 Live reads use the operator's browser login; automation owns an isolated session.
 See the [Browser guide](guides/tui-browser-lanes.md) for setup and controls.
 
+## MSX
+
+`&` (also `:` then `go MSX`) takes the terminal over with the workspace MSX
+machine (RFC-0439): a load menu first, listing the cartridge images in
+`<base-path>/.masc/msx/carts/`, then the screen of the game a Keeper or you
+loaded. `Esc` returns. The directory starts empty;
+`scripts/msx-fetch-homebrew-carts.sh` fills it with open-source games, and
+the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
+machine accepts and where the images come from.
+
 ## Options
 
 | Option | Default | Effect |

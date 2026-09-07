@@ -16,6 +16,7 @@ base = "openai_chat"
 provider_name = "openai"
 chat_output_budget_field = "max_completion_tokens"
 thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high"]
 max_context_tokens = 272000
 max_output_tokens = 128000
 supports_tools = true

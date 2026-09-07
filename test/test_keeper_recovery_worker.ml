@@ -596,6 +596,56 @@ let test_source_io_failure_settles_claim () =
       (Fs_compat.load_file path))
 ;;
 
+let test_published_proposal_survives_observer_failure () =
+  with_fixture (fun env sw config work _ current path _ configure ->
+    let before = Fs_compat.load_file path in
+    let endpoint, requests =
+      start_server ~sw ~net:env#net (fun _ ->
+        tool_call
+          "published-exact"
+          "keeper_recovery_propose"
+          (proposal (Work.source_artifact_sha256 work) true))
+    in
+    configure endpoint;
+    let outcome =
+      run
+        env
+        sw
+        config
+        work
+        current
+        ~on_observation:(function
+          | Worker.Proposal_persisted _ -> failwith "fixture receipt delivery failed"
+          | Worker.Page_produced _ -> ())
+        ()
+    in
+    (match outcome with
+     | Worker.Proposal_recorded { execution = Error _; receipt; _ } ->
+       check
+         string
+         "publication receipt survives late delivery failure"
+         "published-exact"
+         receipt.tool_use_id
+     | Worker.Proposal_recorded { execution = Ok _; _ } ->
+       fail "late Tool result failure was hidden"
+     | Worker.Stopped _ -> fail "durable proposal was discarded after observer failure");
+    check
+      int
+      "failed receipt delivery does not redispatch proposal"
+      1
+      (List.length !requests);
+    let stored = reload config work in
+    (match Work.status stored with
+     | Work.Proposal_recorded _ -> ()
+     | _ -> fail "late observer failure overwrote durable publication");
+    Work.verify_artifacts config stored |> ok;
+    check
+      string
+      "late failure leaves canonical source untouched"
+      before
+      (Fs_compat.load_file path))
+;;
+
 let () =
   Alcotest.run
     "keeper_recovery_worker"
@@ -616,6 +666,10 @@ let () =
             "source I/O failure settles the owned work"
             `Quick
             test_source_io_failure_settles_claim
+        ; test_case
+            "durable proposal survives late observer failure"
+            `Quick
+            test_published_proposal_survives_observer_failure
         ] )
     ]
 ;;

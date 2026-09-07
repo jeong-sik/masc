@@ -15037,7 +15037,7 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages destination
                  | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->
                      launch_gate_mode_set state ~mailbox:async_messages ~lane
-                       ~mode:(Keeper_gate_mode.to_string mode)
+                       ~mode:(Masc.Keeper_gate_mode.to_string mode)
                  | Some (_, Masc_tui_types.Palette_config pane) ->
                      state.config_pane <- pane;
                      state.config_scroll <- 0;

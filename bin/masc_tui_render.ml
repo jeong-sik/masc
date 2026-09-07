@@ -2545,6 +2545,20 @@ let ask_section_rows buf =
   String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
   !n
 
+let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
+  box_wrapped_field buf cols
+    ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
+    ~style:Ansi.bold
+    (Terminal_text.single_line entry.ate_text ^ "\xe2\x96\x8c");
+  match Ask_projection.response_for draft ~question with
+  | Some (Ask_projection.Draft_chose _) ->
+      box_line buf cols
+        (Printf.sprintf "      %ssaving replaces what you picked%s"
+           Ansi.dim Ansi.reset)
+  | Some (Ask_projection.Draft_wrote _)
+  | Some Ask_projection.Draft_skipped
+  | None -> ()
+
 (* One question with everything the operator answers it by: the prompt, the
    choices and their marks, whatever the draft holds, and the free-text line.
    Lifted out of the panel so the panel can draw a question into a buffer of
@@ -2646,22 +2660,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
          search uses. Without it the keys went into a buffer nothing on screen
          showed, which reads as a terminal that has stopped listening. *)
       | Some entry ->
-          box_wrapped_field buf cols
-            ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
-            ~style:Ansi.bold
-            (Terminal_text.single_line entry.ate_text ^ "\xe2\x96\x8c");
-          (* The domain's response is one of three -- chosen, written, or
-             skipped -- so saving text drops the picks. Said while the marks
-             are still on screen: a choice that vanishes on Enter reads as the
-             surface having lost it. *)
-          (match Ask_projection.response_for draft ~question with
-           | Some (Ask_projection.Draft_chose _) ->
-               box_line buf cols
-                 (Printf.sprintf "      %ssaving replaces what you picked%s"
-                    Ansi.dim Ansi.reset)
-           | Some (Ask_projection.Draft_wrote _)
-           | Some Ask_projection.Draft_skipped
-           | None -> ())
+          draw_ask_text_entry buf cols ~draft ~question entry
       | None -> (
           (* The key that opens the editor is named by the footer, which knows
              whether the question under the cursor takes text; naming it on
@@ -3082,9 +3081,9 @@ let render_approvals (state : state) =
          Printf.sprintf
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
-           (match Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
+           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
             | Some mode -> gate_mode_label mode | None -> "Unknown mode")
-           (match Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
+           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
             | Some mode -> gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
@@ -3368,9 +3367,18 @@ let ask_question_viewport (state : state) =
          | None -> ["  No question selected"]
          | Some question ->
              let text, _ = ask_block (fun b ->
-               draw_ask_question b cols state ~row ~draft ~question
-                 ~answering:true ~selected_question:true;
-               draw_ask_context b cols ~row) in
+               match state.ask_text_entry with
+               | Some entry when String.equal
+                   (Ask_projection.free_text_question_id entry.ate_slot) question.aq_id ->
+                   (* Typing owns the keys. Keep the editor separate from
+                      choices and context that can fill the reader. *)
+                   box_wrapped_field b cols ~head:"  " ~style:Ansi.bold
+                     question.aq_prompt;
+                   draw_ask_text_entry b cols ~draft ~question entry
+               | Some _ | None ->
+                   draw_ask_question b cols state ~row ~draft ~question
+                     ~answering:true ~selected_question:true;
+                   draw_ask_context b cols ~row) in
              String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))
   in
   (* title, progress, help, two dividers, outer edges and footer *)
@@ -3401,18 +3409,26 @@ let render_question_reader (state : state) =
            (Theme.warn ()) (Terminal_text.single_line row.ar_keeper)
            (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) answered Ansi.reset);
-  box_line buf cols "  Left/Right: previous/next question · [/]: previous/next ask · Esc: approvals";
+  box_line buf cols
+    (if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
+     else "  Left/Right: previous/next question · [/]: previous/next ask · Esc: approvals");
   box_divider buf cols;
   let lines, room = ask_question_viewport state in
-  let scroll = max 0 (min state.ask_question_scroll (max 0 (List.length lines - room))) in
+  let limit = max 0 (List.length lines - room) in
+  let scroll =
+    if Option.is_some state.ask_text_entry then limit
+    else max 0 (min state.ask_question_scroll limit)
+  in
   for i = 0 to room - 1 do
     match List.nth_opt lines (scroll + i) with
     | Some line -> Buffer.add_string buf (line ^ "\n")
     | None -> box_empty buf cols
   done;
   box_divider buf cols;
-  box_line buf cols (Printf.sprintf "  Lines %d-%d/%d · PgUp/PgDn or wheel to read"
-      (if lines = [] then 0 else scroll + 1) (min (List.length lines) (scroll + room)) (List.length lines));
+  box_line buf cols
+    (if Option.is_some state.ask_text_entry then "  Writing answer · Enter saves locally before you send"
+     else Printf.sprintf "  Lines %d-%d/%d · PgUp/PgDn or wheel to read"
+       (if lines = [] then 0 else scroll + 1) (min (List.length lines) (scroll + room)) (List.length lines));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
   finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf

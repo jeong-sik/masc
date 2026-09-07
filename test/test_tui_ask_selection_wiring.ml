@@ -38,11 +38,11 @@ let test_the_two_modes_give_the_walk_one_name () =
   Alcotest.(check int) "the browsing footer and the answering one share a name"
     1
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals" ~needle:"[/]:ask");
+       ~binding_name:"question_hints" ~needle:"[/]:ask");
   Alcotest.(check int)
     "and no second spelling survives beside it" 0
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals" ~needle:"[/]:question")
+       ~binding_name:"question_hints" ~needle:"[/]:question")
 ;;
 
 (* The vocabulary is the repository's, not this surface's. [ and ] walk the
@@ -56,10 +56,10 @@ let test_the_bracket_keys_keep_one_vocabulary () =
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
          (Ast_grep.count_string_literals ~module_path:render ~needle:name))
     names;
-  (* Every bracket-key label in the file is one of those three. A fourth is a
-     surface that has started calling the walk something of its own, which is
-     how this surface came to say both "ask" and "question". *)
-  Alcotest.(check int) "and no surface spells the walk a fourth way" 3
+  Alcotest.(check int) "the question reader explains the same ask walk" 1
+    (Ast_grep.count_string_literals ~module_path:render
+       ~needle:"[/]: previous/next ask");
+  Alcotest.(check int) "three footer labels and one reader explanation" 4
     (Ast_grep.count_string_literals ~module_path:render ~needle:"[/]:")
 ;;
 
@@ -154,10 +154,10 @@ let test_typing_outranks_the_choice_digits () =
 let test_the_footer_names_the_editor_key () =
   Alcotest.(check int) "the write key is named once" 1
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals" ~needle:"t:write  ");
+       ~binding_name:"question_hints" ~needle:"t:write  ");
   Alcotest.(check int) "and the digits keep their own label" 1
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"render_approvals" ~needle:"1-9:pick  ")
+       ~binding_name:"question_hints" ~needle:"1-9:pick  ")
 ;;
 
 (* The panel is the last block the Approvals surface writes, and

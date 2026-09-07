@@ -6013,15 +6013,15 @@ let gate_lane_label = function
   | External_gate -> "Outside services"
 
 let gate_mode_label = function
-  | Keeper_gate_mode.Manual -> "Ask me for each decision"
-  | Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
-  | Keeper_gate_mode.Always_allow -> "Allow every call without review"
+  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
 
 type palette_action =
   | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
-  | Palette_gate_mode of gate_lane * Keeper_gate_mode.t
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_post of string
@@ -6109,7 +6109,7 @@ let palette_entries (state : state) =
       List.map (fun mode ->
         ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
          Palette_gate_mode (lane, mode)))
-        [Keeper_gate_mode.Manual; Keeper_gate_mode.Auto_judge; Keeper_gate_mode.Always_allow])
+        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
       [Workspace_gate; External_gate]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]

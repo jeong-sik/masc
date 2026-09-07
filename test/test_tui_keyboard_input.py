@@ -3140,7 +3140,7 @@ KEEPER_ASKS_PATH = "/api/v1/keepers/asks"
 KEEPER_ASK_ANSWER_PATH = "/api/v1/keepers/ask-answer"
 
 
-def keeper_asks_response() -> HttpFixture:
+def keeper_asks_response(*, long_question: bool = False) -> HttpFixture:
     return (
         200,
         {
@@ -3164,7 +3164,20 @@ def keeper_asks_response() -> HttpFixture:
                                 {"choice_id": "c-yes", "label": "ship it"},
                                 {"choice_id": "c-no", "label": "hold"},
                             ],
-                        }
+                        },
+                        *([
+                            {
+                                "question_id": "q-2",
+                                "header": "Explanation",
+                                "prompt": "Explain the rollout decision",
+                                "mode": "single",
+                                "free_text": {"allowed": True},
+                                "choices": [{
+                                    "choice_id": "c-long",
+                                    "label": "Consider the deployment consequences. " * 80,
+                                }],
+                            }
+                        ] if long_question else []),
                     ],
                 }
             ],
@@ -3249,6 +3262,105 @@ def keeper_ask_answer_interaction(
                 f"the answer never reached the server: {ask_requests!r}"
             )
 
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def question_reader_interaction(requests: HttpRequests) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"Questions waiting on you")
+        send_and_wait(process, master_fd, output, b"a", b"Question 1/2")
+        send_and_wait(process, master_fd, output, b"\x1b[C", b"Question 2/2")
+        resized = resize_and_wait(
+            process, master_fd, output, rows=24, columns=100,
+            needle=b"Question 2/2", final_cursor=b"\x1b[?25l",
+        )
+        progress = re.search(rb"Lines (\d+)-(\d+)/(\d+)", CSI_RE.sub(b"", resized))
+        if progress is None or int(progress[2]) >= int(progress[3]):
+            raise AssertionError(f"long question did not overflow: {resized!r}")
+        paged = send_and_wait(process, master_fd, output, b"\x1b[6~", b"Lines ")
+        progress = re.search(rb"Lines (\d+)-(\d+)/(\d+)", CSI_RE.sub(b"", paged))
+        if progress is None or int(progress[1]) <= 1:
+            raise AssertionError(f"PageDown did not scroll the question: {paged!r}")
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"Question 1/2")
+        reset = send_and_wait(process, master_fd, output, b"\x1b[C", b"Question 2/2")
+        if b"Lines 1-" not in CSI_RE.sub(b"", reset):
+            raise AssertionError(f"question navigation kept the previous scroll: {reset!r}")
+
+        # The choices fill the reader, but opening text entry must reveal the
+        # editor immediately and keep its caret visible as the text grows.
+        send_and_wait(process, master_fd, output, b"t", b"write: ")
+        typed = send_and_wait(
+            process, master_fd, output,
+            b"operator response " * 100 + b"VISIBLE_EDITOR_TAIL",
+            b"VISIBLE_EDITOR_TAIL",
+        )
+        if "▌".encode() not in CSI_RE.sub(b"", frame_containing(typed, b"VISIBLE_EDITOR_TAIL")):
+            raise AssertionError(f"the text caret left the visible reader: {typed!r}")
+        resize_and_wait(
+            process, master_fd, output, rows=22, columns=90,
+            needle=b"VISIBLE_EDITOR_TAIL", final_cursor=b"\x1b[?25l",
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"PgUp/PgDn")
+        drain_until_quiet(process, master_fd, output)
+        if any(path == KEEPER_ASK_ANSWER_PATH for path, _ in requests):
+            raise AssertionError(f"browsing or cancelling text sent an answer: {requests!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"[w] Workspace:")
+        mode_paths = {
+            "/api/v1/dashboard/gate/mode",
+            "/api/v1/dashboard/gate/external-mode",
+        }
+
+        def mode_requests() -> list[tuple[str, object]]:
+            return [(path, json.loads(body)) for path, body in requests if path in mode_paths]
+
+        send_and_wait(process, master_fd, output, b"w", b"Ask me for each decision")
+        send_and_wait(process, master_fd, output, b"\x1b[B", b"Let Auto Judge decide")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Approvals")
+        drain_until_quiet(process, master_fd, output)
+        if mode_requests():
+            raise AssertionError(f"opening, moving or cancelling changed Gate mode: {requests!r}")
+
+        send_and_wait(process, master_fd, output, b"w", b"Ask me for each decision")
+        send_and_wait(process, master_fd, output, b"\x1b[B", b"Let Auto Judge decide")
+        drain_until_quiet(process, master_fd, output)
+        if mode_requests():
+            raise AssertionError(f"Gate mode changed before Enter: {requests!r}")
+        send_and_wait(process, master_fd, output, b"\r", b"MASC Approvals")
+        drain_until_quiet(process, master_fd, output)
+        expected = [("/api/v1/dashboard/gate/mode", {"mode": "auto_judge"})]
+        if mode_requests() != expected:
+            raise AssertionError(f"Enter did not apply only the selected Workspace mode: {requests!r}")
+
+        send_and_wait(process, master_fd, output, b"e", b"Ask me for each decision")
+        drain_until_quiet(process, master_fd, output)
+        if mode_requests() != expected:
+            raise AssertionError(f"opening Outside services changed a mode: {requests!r}")
+        send_and_wait(process, master_fd, output, b"\r", b"MASC Approvals")
+        drain_until_quiet(process, master_fd, output)
+        expected.append(("/api/v1/dashboard/gate/external-mode", {"mode": "manual"}))
+        if mode_requests() != expected:
+            raise AssertionError(f"Outside services choice used the wrong lane or mode: {requests!r}")
         os.write(master_fd, b"q")
 
     return interact
@@ -12130,6 +12242,28 @@ def run_keyboard_regression(executable: str) -> None:
         interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
         http_fixtures=keeper_ask_fixtures,
         http_requests=ask_requests,
+    )
+    reader_fixtures, _, _ = approval_selection_http_fixtures()
+    reader_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response(long_question=True)
+    reader_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+    reader_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Question arrows, overflow and visible free-text editing",
+        interact=question_reader_interaction(reader_requests),
+        http_fixtures=reader_fixtures,
+        http_requests=reader_requests,
+    )
+    mode_fixtures = blocked_gate_detail_http_fixtures()
+    mode_fixtures["/api/v1/dashboard/gate/mode"] = (200, {"ok": True})
+    mode_fixtures["/api/v1/dashboard/gate/external-mode"] = (200, {"ok": True})
+    mode_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Gate mode chooser applies only after Enter",
+        interact=gate_mode_picker_interaction(mode_requests),
+        http_fixtures=mode_fixtures,
+        http_requests=mode_requests,
     )
     run_terminal_scenario(
         executable,

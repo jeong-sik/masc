@@ -333,14 +333,11 @@ let resource_templates = surface.resource_templates
 let mcp_asset_prefix = "mcp/"
 let resources_relative_path = mcp_asset_prefix ^ "resources.toml"
 let prompts_relative_path = mcp_asset_prefix ^ "prompts.toml"
-let manifest_relative_path = mcp_asset_prefix ^ "managed-assets.json"
 
 let validate_embedded ~read ~files =
   let validate_one acc rel =
     let* () = acc in
     if not (String.starts_with ~prefix:mcp_asset_prefix rel)
-    then Ok ()
-    else if String.equal rel manifest_relative_path
     then Ok ()
     else if not (String.equal (Filename.dirname rel) "mcp")
     then Error (sprintf "mcp surface files must sit directly under mcp/: %s" rel)

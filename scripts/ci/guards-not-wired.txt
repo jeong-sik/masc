@@ -13,7 +13,8 @@
 #   green  -- run on untouched main and passed, so wiring it costs nothing now
 #   report -- prints findings and exits 0 either way; wiring it enforces
 #             nothing, so the work is to give it a verdict first
-#   tool   -- takes arguments or a mode; not a standalone check
+#   tool   -- takes arguments or a mode, or reads the operator's live .masc
+#             store rather than this repository; not a standalone check
 #   (unmarked) -- not run
 #
 # 2026-09-07: the name pattern above used to read (lint|check|guard|ratchet),
@@ -21,7 +22,7 @@
 # audit-*. They were not passing this check, they were not in it. Counts went
 # 76/23 to 103/45.
 #
-scripts/audit-agent-core-payload.py  # red
+scripts/audit-agent-core-payload.py  # tool: reads the live .masc trace store
 scripts/audit-catchall.sh  # report
 scripts/audit-code-smell.sh  # report
 scripts/audit-cross-module-exhaustive-match.sh  # report
@@ -29,12 +30,12 @@ scripts/audit-dashboard-prompt-keys.sh  # green
 scripts/audit-dead-surface.py  # tool: needs --modules/--exports/--stanzas
 scripts/audit-hardcoding-truth.sh  # report: prints "Status: findings", exits 0
 scripts/audit-keeper-credential-drift.sh  # report
-scripts/audit-keeper-credential-uuid-integrity.sh  # red
+scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc credential store
 scripts/audit-keeper-tool-boundary-matrix.sh  # tool
 scripts/audit-ocaml-phase-count.sh  # green
 scripts/audit-ocaml-spec-nav-line-refs.sh  # green, but 0 citations exist to check
-scripts/audit-odoc-refs.py  # red
-scripts/audit-path-ssot.sh  # red
+scripts/audit-odoc-refs.py  # red; #34081 makes it green
+scripts/audit-path-ssot.sh  # red; #34080 makes it green
 scripts/audit-rfc-closeout-lag.sh  # report
 scripts/audit-route-tool-catalog.sh  # green
 scripts/audit-shell-ir-consumption.sh  # green

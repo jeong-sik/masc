@@ -460,9 +460,9 @@ let test_fleet_summary_follows_a_degraded_keeper () =
       ~limit_per_keeper:10
   in
   check int
-    "no stale durable queue, so that path cannot be what degrades the fleet"
+    "no durable queue, so that path cannot be what degrades the fleet"
     0
-    (fleet |> member "durable_event_queue_stale_count" |> to_int);
+    (fleet |> member "durable_event_queue_count" |> to_int);
   check_member_string
     "a degraded keeper degrades the fleet"
     "degraded"
@@ -491,12 +491,10 @@ let test_fleet_summary_follows_a_degraded_keeper () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check_member_string "durable queue backlog degrades fleet summary" "degraded" "status" fleet;
-  check_list_has_string
-    "durable queue stale reason is explicit"
-    "durable_event_queue_stale"
-    (fleet |> member "status_reasons");
-  check bool "durable queue backlog requires operator action" true
+  check_member_string "source age does not degrade ledger integrity" "ok" "status" fleet;
+  check int "no unsupported age reason" 0
+    (fleet |> member "status_reasons" |> to_list |> List.length);
+  check bool "source age alone does not require operator action" false
     (fleet |> member "operator_action_required" |> to_bool);
   check int "ledger pending rows stay independent" 0
     (fleet |> member "pending_stimulus_count" |> to_int);
@@ -504,13 +502,6 @@ let test_fleet_summary_follows_a_degraded_keeper () =
     (fleet |> member "durable_event_queue_count" |> to_int);
   check int "durable queue pending backlog counted" 3
     (fleet |> member "durable_event_queue_pending_count" |> to_int);
-  check (float 0.001) "default durable queue stale threshold preserves prior behavior"
-    0.0
-    (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
-  check int "durable queue stale backlog counted" 3
-    (fleet |> member "durable_event_queue_stale_count" |> to_int);
-  check int "durable queue stale keeper counted" 1
-    (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
   let keeper_queue =
     fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
   in
@@ -525,10 +516,12 @@ let test_fleet_summary_follows_a_degraded_keeper () =
     (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
   check int "keeper immediate durable queue backlog counted" 2
     (keeper_queue |> member "immediate_count" |> to_int);
-  check bool "keeper durable queue is stale by default" true
-    (keeper_queue |> member "stale" |> to_bool);
-  check int "stale keeper list mirrors stale backlog" 1
-    (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length);
+  let residence = keeper_queue |> member "queue_residence" in
+  check_member_string "durable queue residence is unknown" "unknown" "status" residence;
+  check bool "residence does not inherit source age" true
+    (residence |> member "oldest_age_seconds" = `Null);
+  check bool "original source age remains visible" true
+    (keeper_queue |> member "oldest_source_age_seconds" |> to_int > 0);
   let payload_counts =
     fleet |> member "durable_event_queue_payload_counts" |> to_list
   in
@@ -560,8 +553,8 @@ let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name (
       ~limit_per_keeper:10
   in
   check_member_string
-    "durable-only queue degrades fleet summary"
-    "degraded"
+    "durable-only queue does not imply a reaction ledger failure"
+    "ok"
     "status"
     fleet;
   check int "durable-only keeper is included in fleet count" 1
@@ -633,50 +626,31 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
     (fleet |> member "keeper_count" |> to_int)
 ;;
 
-let test_fleet_summary_allows_nonstale_durable_event_queue_backlog () =
-  if Sys.getenv_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" <> None then
-    skip ()
-  else
-  Fun.protect
-    ~finally:(fun () -> Config_boot_overrides.reset_for_tests ())
-    (fun () ->
-       Config_boot_overrides.reset_for_tests ();
-       Config_boot_overrides.set "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" "1000000000000.0";
-       with_temp_base @@ fun base_path ->
-       let keeper_name = "fresh-durable-backlog-keeper" in
-       Keeper_registry_event_queue.enqueue
-         ~base_path
-         keeper_name
-         (board_stimulus ~post_id:"post-fresh-backlog" ());
-       let fleet =
-         Keeper_reaction_ledger.fleet_summary_json
-           ~base_path
-           ~keeper_names:[ keeper_name ]
-           ~limit_per_keeper:10
-       in
-       check_member_string
-         "fresh durable backlog remains visible but not degraded"
-         "ok"
-         "status"
-         fleet;
-       check bool "fresh durable backlog does not require operator action" false
-         (fleet |> member "operator_action_required" |> to_bool);
-       check int "fresh durable queue backlog counted" 1
-         (fleet |> member "durable_event_queue_count" |> to_int);
-       check int "fresh durable queue stale count stays zero" 0
-         (fleet |> member "durable_event_queue_stale_count" |> to_int);
-       check int "fresh durable queue stale keeper count stays zero" 0
-         (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
-       check (float 0.001) "durable stale threshold comes from boot override"
-         1000000000000.0
-         (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
-       let keeper_queue =
-         fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
-       in
-       check bool "fresh durable queue is not stale" false
-         (keeper_queue |> member "stale" |> to_bool);
-       check int "fresh durable stale keeper list is empty" 0
-         (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length))
+let test_fleet_summary_source_age_never_supplies_residence () =
+  List.iter (fun source_at ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "source-age-keeper" in
+    let source = { (board_stimulus ~post_id:"source-age" ()) with
+      Keeper_event_queue.arrived_at = source_at } in
+    Keeper_registry_event_queue.enqueue ~base_path keeper_name source;
+    let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
+    let before = Yojson.Safe.from_file snapshot_path in
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name] ~limit_per_keeper:10 in
+    check bool "reaction health leaves durable state semantics unchanged" true
+      (Yojson.Safe.from_file snapshot_path = before);
+    check_member_string "no source-age-only ledger degradation" "ok" "status" fleet;
+    check bool "no source-age-only composite action reason" false
+      (fleet |> member "operator_action_required" |> to_bool);
+    check int "pending source remains counted" 1
+      (fleet |> member "durable_event_queue_pending_count" |> to_int);
+    let observation = fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd in
+    check (float 0.001) "source timestamp is retained verbatim" source_at
+      (observation |> member "oldest_source_arrived_at_unix" |> to_float);
+    check_member_string "unknown residence explains missing first admission"
+      "first_admission_not_recorded" "reason"
+      (observation |> member "queue_residence"))
+    [1.0; Unix.gettimeofday ()]
 ;;
 
 let test_fleet_summary_surfaces_durable_event_queue_read_error () =
@@ -1444,9 +1418,9 @@ let () =
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_discovery_error
         ; test_case
-            "fleet summary separates fresh durable event queue backlog from stale"
+            "fleet summary separates source age from unknown residence"
             `Quick
-            test_fleet_summary_allows_nonstale_durable_event_queue_backlog
+            test_fleet_summary_source_age_never_supplies_residence
         ; test_case
             "fleet summary surfaces durable event queue read errors"
             `Quick

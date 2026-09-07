@@ -224,7 +224,7 @@ export interface OverviewKeeperQueueDigest {
   workStatus: string
   workState: string
   runnableBacklogCount: number
-  runnableOldestAgeSeconds: number | null
+  runnableOldestSourceAgeSeconds: number | null
   backlogClean: boolean
 }
 
@@ -467,7 +467,7 @@ function summarizeKeeperQueueHealth(
       workStatus: 'unknown',
       workState: 'unknown',
       runnableBacklogCount: 0,
-      runnableOldestAgeSeconds: null,
+      runnableOldestSourceAgeSeconds: null,
       backlogClean: false,
     }
   }
@@ -477,7 +477,7 @@ function summarizeKeeperQueueHealth(
     workStatus: queue.work_liveness?.status ?? 'unknown',
     workState: queue.work_liveness?.state ?? 'unknown',
     runnableBacklogCount: queue.work_liveness?.runnable_backlog_count ?? 0,
-    runnableOldestAgeSeconds: queue.work_liveness?.runnable_oldest_age_seconds ?? null,
+    runnableOldestSourceAgeSeconds: queue.work_liveness?.runnable_oldest_source_age_seconds ?? null,
     backlogClean: queue.backlog_clean,
   }
 }
@@ -1597,9 +1597,10 @@ function OverviewDomainSection({
                 <span class="k">work liveness</span>
                 <span class=${`v mono ${keeperQueueSummary.backlogClean ? 'ok' : 'warn'}`}>
                   ${keeperQueueSummary.workState} · ${keeperQueueSummary.runnableBacklogCount}
-                  ${keeperQueueSummary.runnableOldestAgeSeconds == null
+                  · queue residence unknown
+                  ${keeperQueueSummary.runnableOldestSourceAgeSeconds == null
                     ? ''
-                    : ` · oldest ${Math.round(keeperQueueSummary.runnableOldestAgeSeconds)}s`}
+                    : ` · oldest source ${Math.round(keeperQueueSummary.runnableOldestSourceAgeSeconds)}s`}
                 </span>
               </div>
             `

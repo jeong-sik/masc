@@ -1379,7 +1379,7 @@ let nested_float_field outer inner json =
 ;;
 
 let summary_schema = "keeper.reaction_ledger.summary.v2"
-let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v2"
+let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v3"
 
 let cap_list limit values =
   let rec loop remaining acc = function
@@ -1414,19 +1414,11 @@ type durable_event_queue_health =
   ; durable_event_queue_count : int
   ; durable_event_queue_pending_count : int
   ; immediate_count : int
-  ; oldest_arrived_at : float option
-  ; newest_arrived_at : float option
+  ; oldest_source_arrived_at : float option
+  ; newest_source_arrived_at : float option
   ; payload_kind_counts : (string * int) list
   ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
   }
-
-let durable_event_queue_is_stale ~now ~stale_after_sec health =
-  health.durable_event_queue_count > 0
-  &&
-  match health.oldest_arrived_at with
-  | None -> false
-  | Some arrived_at -> now -. arrived_at >= stale_after_sec
-;;
 
 let payload_kind_count_pairs stimuli =
   let tbl = Hashtbl.create 8 in
@@ -1446,7 +1438,7 @@ let durable_event_queue_health ~base_path ~keeper_name =
   in
   let queue = snapshot.pending in
   let stimuli = Keeper_event_queue.to_list queue in
-  let oldest_arrived_at, newest_arrived_at =
+  let oldest_source_arrived_at, newest_source_arrived_at =
     List.fold_left
       (fun (oldest, newest) (stimulus : Keeper_event_queue.stimulus) ->
         let arrived_at = stimulus.arrived_at in
@@ -1472,14 +1464,14 @@ let durable_event_queue_health ~base_path ~keeper_name =
   ; durable_event_queue_count = Keeper_event_queue.length queue
   ; durable_event_queue_pending_count = Keeper_event_queue.length snapshot.pending
   ; immediate_count
-  ; oldest_arrived_at
-  ; newest_arrived_at
+  ; oldest_source_arrived_at
+  ; newest_source_arrived_at
   ; payload_kind_counts = payload_kind_count_pairs stimuli
   ; read_errors = snapshot.read_errors
   }
 ;;
 
-let durable_event_queue_health_json ~now ~stale_after_sec health =
+let durable_event_queue_health_json ~now health =
   let float_opt_to_json = function
     | None -> `Null
     | Some value -> `Float value
@@ -1488,7 +1480,6 @@ let durable_event_queue_health_json ~now ~stale_after_sec health =
     | None -> `Null
     | Some value -> `Int (int_of_float (max 0.0 (now -. value)))
   in
-  let stale = durable_event_queue_is_stale ~now ~stale_after_sec health in
   let read_errors_json =
     List.map
       (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
@@ -1511,12 +1502,13 @@ let durable_event_queue_health_json ~now ~stale_after_sec health =
     ; ( "durable_event_queue_pending_count"
       , `Int health.durable_event_queue_pending_count )
     ; "immediate_count", `Int health.immediate_count
-    ; "oldest_arrived_at_unix", float_opt_to_json health.oldest_arrived_at
-    ; "oldest_age_sec", age_opt_to_json health.oldest_arrived_at
-    ; "newest_arrived_at_unix", float_opt_to_json health.newest_arrived_at
-    ; "newest_age_sec", age_opt_to_json health.newest_arrived_at
-    ; "stale_after_sec", `Float stale_after_sec
-    ; "stale", `Bool stale
+    ; "oldest_source_arrived_at_unix", float_opt_to_json health.oldest_source_arrived_at
+    ; "oldest_source_age_seconds", age_opt_to_json health.oldest_source_arrived_at
+    ; "newest_source_arrived_at_unix", float_opt_to_json health.newest_source_arrived_at
+    ; "newest_source_age_seconds", age_opt_to_json health.newest_source_arrived_at
+    ; "queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
+        (Unknown (if health.read_errors = [] then First_admission_not_recorded
+                  else Queue_observation_incomplete)))
     ; "read_error_count", `Int (List.length health.read_errors)
     ; "read_errors", `List read_errors_json
     ; ( "payload_kind_counts"
@@ -1805,14 +1797,11 @@ let unavailable_fleet_summary_json () =
     ; "durable_event_queue_discovered_keeper_names", `List []
     ; "durable_event_queue_discovery_error", `Null
     ; "durable_event_queue_discovery_error_count", `Int 0
-    ; ( "durable_event_queue_stale_after_sec"
-      , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
-    ; "durable_event_queue_stale_count", `Int 0
-    ; "durable_event_queue_stale_keeper_count", `Int 0
+    ; "durable_event_queue_residence", Keeper_event_queue_persistence.(
+        queue_residence_to_yojson (Unknown Queue_observation_incomplete))
     ; "durable_event_queue_read_error_count", `Int 0
     ; "durable_event_queue_read_errors_by_keeper", `List []
     ; "durable_event_queue_by_keeper", `List []
-    ; "durable_event_queue_stale_by_keeper", `List []
     ; "durable_event_queue_payload_counts", `List []
     ; "pending_by_keeper", `List []
     ; "read_error_count", `Int 0
@@ -1830,7 +1819,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       String.compare
       (keeper_names @ durable_event_queue_discovery.keeper_names)
   in
-  (* NDT-OK: fleet summary health renders stale-age telemetry at the read
+  (* NDT-OK: fleet summary health renders source-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
   let summaries_with_status =
@@ -1842,9 +1831,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
-  in
-  let durable_event_queue_stale_after_sec =
-    Env_config.KeeperHealth.durable_queue_stale_sec ()
   in
   let total_int name =
     List.fold_left (fun acc summary -> acc + int_field name summary) 0 summaries
@@ -1865,25 +1851,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     durable_event_queue_summaries
     |> List.filter (fun summary -> summary.durable_event_queue_count > 0)
     |> List.map
-         (durable_event_queue_health_json
-            ~now
-            ~stale_after_sec:durable_event_queue_stale_after_sec)
-  in
-  let durable_event_queue_stale_summaries =
-    List.filter
-      (durable_event_queue_is_stale
-         ~now
-         ~stale_after_sec:durable_event_queue_stale_after_sec)
-      durable_event_queue_summaries
-  in
-  let durable_event_queue_stale_count =
-    List.fold_left
-      (fun acc summary -> acc + summary.durable_event_queue_count)
-      0
-      durable_event_queue_stale_summaries
-  in
-  let durable_event_queue_stale_keeper_count =
-    List.length durable_event_queue_stale_summaries
+         (durable_event_queue_health_json ~now)
   in
   let durable_event_queue_read_error_count =
     List.fold_left
@@ -1895,16 +1863,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     durable_event_queue_summaries
     |> List.filter (fun summary -> summary.read_errors <> [])
     |> List.map
-         (durable_event_queue_health_json
-            ~now
-            ~stale_after_sec:durable_event_queue_stale_after_sec)
-  in
-  let durable_event_queue_stale_by_keeper =
-    durable_event_queue_stale_summaries
-    |> List.map
-         (durable_event_queue_health_json
-            ~now
-            ~stale_after_sec:durable_event_queue_stale_after_sec)
+         (durable_event_queue_health_json ~now)
   in
   let durable_event_queue_payload_counts =
     let tbl = Hashtbl.create 8 in
@@ -2010,10 +1969,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       if quarantined_row_count > 0
       then "reaction_ledger_quarantined_row" :: reasons
       else reasons)
-    |> (fun reasons ->
-      if durable_event_queue_stale_count > 0
-      then "durable_event_queue_stale" :: reasons
-      else reasons)
     |> List.rev
   in
   let status =
@@ -2026,7 +1981,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       List.exists
         (fun (status, _) -> status = Summary_degraded)
         summaries_with_status
-      || durable_event_queue_stale_count > 0
     then Summary_degraded
     else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
     else Summary_ok
@@ -2069,15 +2023,14 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
         | None -> `Null )
     ; ( "durable_event_queue_discovery_error_count"
       , `Int durable_event_queue_discovery_error_count )
-    ; "durable_event_queue_stale_after_sec", `Float durable_event_queue_stale_after_sec
-    ; "durable_event_queue_stale_count", `Int durable_event_queue_stale_count
-    ; ( "durable_event_queue_stale_keeper_count"
-      , `Int durable_event_queue_stale_keeper_count )
+    ; "durable_event_queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
+        (Unknown (if durable_event_queue_discovery_error_count > 0
+                     || durable_event_queue_read_error_count > 0
+                  then Queue_observation_incomplete else First_admission_not_recorded)))
     ; "durable_event_queue_read_error_count", `Int durable_event_queue_read_error_count
     ; ( "durable_event_queue_read_errors_by_keeper"
       , `List durable_event_queue_read_errors_by_keeper )
     ; "durable_event_queue_by_keeper", `List durable_event_queue_by_keeper
-    ; "durable_event_queue_stale_by_keeper", `List durable_event_queue_stale_by_keeper
     ; "durable_event_queue_payload_counts", durable_event_queue_payload_counts
     ; "pending_by_keeper", `List pending_by_keeper
     ; "read_error_count", `Int read_error_count

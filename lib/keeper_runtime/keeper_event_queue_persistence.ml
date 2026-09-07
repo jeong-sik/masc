@@ -1468,7 +1468,7 @@ let drop_by_post_id
        Ok (state, removed))
 ;;
 
-let queue_oldest_arrived_at queue =
+let queue_oldest_source_arrived_at queue =
   queue
   |> Keeper_event_queue.to_list
   |> List.fold_left
@@ -1492,6 +1492,24 @@ let age_seconds_json ~now = function
   | Some timestamp -> `Float (Float.max 0.0 (now -. timestamp))
 ;;
 
+type queue_residence_unknown_reason =
+  | First_admission_not_recorded
+  | Queue_observation_incomplete
+
+type queue_residence = Unknown of queue_residence_unknown_reason
+
+let queue_residence_to_yojson (Unknown reason) =
+  let reason = match reason with
+    | First_admission_not_recorded -> "first_admission_not_recorded"
+    | Queue_observation_incomplete -> "queue_observation_incomplete"
+  in
+  `Assoc
+    [ "status", `String "unknown"
+    ; "oldest_age_seconds", `Null
+    ; "reason", `String reason
+    ]
+;;
+
 type owner_lifecycle =
   | Runnable
   | Recoverable
@@ -1504,7 +1522,7 @@ type keeper_summary =
   { keeper_name : string
   ; owner_lifecycle : owner_lifecycle
   ; pending_count : int
-  ; pending_oldest : float option
+  ; pending_oldest_source : float option
   ; outbox_count : int
   ; counts_complete : bool
   ; read_errors : string list
@@ -1525,7 +1543,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   match load_state_result_with_primary_detail ~base_path ~keeper_name with
   | Ok (state, primary_detail) ->
     let pending = State.pending state in
-    let pending_oldest = queue_oldest_arrived_at pending in
+    let pending_oldest_source = queue_oldest_source_arrived_at pending in
     let outbox = State.transition_outbox state in
     let primary_read_errors =
       match primary_detail with
@@ -1545,7 +1563,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     { keeper_name
     ; owner_lifecycle
     ; pending_count = Keeper_event_queue.length pending
-    ; pending_oldest
+    ; pending_oldest_source
     ; outbox_count = List.length outbox
     ; counts_complete = lifecycle_read_errors = [] && primary_read_errors = []
     ; read_errors = lifecycle_read_errors @ primary_read_errors
@@ -1559,7 +1577,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     { keeper_name
     ; owner_lifecycle
     ; pending_count = 0
-    ; pending_oldest = None
+    ; pending_oldest_source = None
     ; outbox_count = 0
     ; counts_complete = false
     ; read_errors = lifecycle_read_errors @ read_errors
@@ -1581,10 +1599,13 @@ let keeper_summary_json ~now (summary : keeper_summary) =
     ; "owner_lifecycle", `String (owner_lifecycle_wire summary.owner_lifecycle)
     ; "pending_count", `Int summary.pending_count
     ; "total_count", `Int summary.pending_count
-    ; "oldest_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest
-    ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
-    ; "pending_oldest_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest
-    ; "pending_oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
+    ; "oldest_source_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest_source
+    ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
+    ; "queue_residence", queue_residence_to_yojson
+        (Unknown (if summary.counts_complete then First_admission_not_recorded
+                  else Queue_observation_incomplete))
+    ; "pending_oldest_source_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest_source
+    ; "pending_oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
     ; "transition_outbox_count", `Int summary.outbox_count
     ; "counts_complete", `Bool summary.counts_complete
     ; "read_errors", `List (List.map (fun message -> `String message) summary.read_errors)
@@ -1595,7 +1616,10 @@ let compact_pending_count_json ~now (summary : keeper_summary) =
   `Assoc
     [ "keeper_name", `String summary.keeper_name
     ; "pending_count", `Int summary.pending_count
-    ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
+    ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
+    ; "queue_residence", queue_residence_to_yojson
+        (Unknown (if summary.counts_complete then First_admission_not_recorded
+                  else Queue_observation_incomplete))
     ]
 ;;
 
@@ -1604,7 +1628,10 @@ let compact_backlog_count_json ~now (summary : keeper_summary) =
     [ "keeper_name", `String summary.keeper_name
     ; "pending_count", `Int summary.pending_count
     ; "total_count", `Int summary.pending_count
-    ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
+    ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
+    ; "queue_residence", queue_residence_to_yojson
+        (Unknown (if summary.counts_complete then First_admission_not_recorded
+                  else Queue_observation_incomplete))
     ]
 ;;
 
@@ -1625,7 +1652,7 @@ let backlog_summary ~matches summaries =
   let oldest =
     List.fold_left
       (fun oldest (summary : keeper_summary) ->
-         min_float_opt oldest summary.pending_oldest)
+         min_float_opt oldest summary.pending_oldest_source)
       None
       keepers
   in
@@ -1652,7 +1679,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   let oldest =
     List.fold_left
       (fun oldest (summary : keeper_summary) ->
-         min_float_opt oldest summary.pending_oldest)
+         min_float_opt oldest summary.pending_oldest_source)
       None
       summaries
   in
@@ -1747,7 +1774,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     || shutdown_fenced.pending_count > 0
   in
   `Assoc
-    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v3"
+    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
     ; "status", `String (if operator_action_required then "degraded" else "ok")
     ; "operator_action_required", `Bool operator_action_required
     ; "base_path", `String projection_base_path
@@ -1759,28 +1786,31 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; "total_count", `Int pending_count
     ; "transition_outbox_count", `Int outbox_count
     ; "counts_complete", `Bool counts_complete
-    ; "oldest_arrived_at_unix", Json_util.float_opt_to_json oldest
-    ; "oldest_age_seconds", age_seconds_json ~now oldest
+    ; "oldest_source_arrived_at_unix", Json_util.float_opt_to_json oldest
+    ; "oldest_source_age_seconds", age_seconds_json ~now oldest
+    ; "queue_residence", queue_residence_to_yojson
+        (Unknown (if counts_complete then First_admission_not_recorded
+                  else Queue_observation_incomplete))
     ; "runnable_backlog_count", `Int runnable.pending_count
-    ; "runnable_oldest_arrived_at_unix", Json_util.float_opt_to_json runnable.oldest
-    ; "runnable_oldest_age_seconds", age_seconds_json ~now runnable.oldest
+    ; "runnable_oldest_source_arrived_at_unix", Json_util.float_opt_to_json runnable.oldest
+    ; "runnable_oldest_source_age_seconds", age_seconds_json ~now runnable.oldest
     ; ( "runnable_by_keeper"
       , `List
           (runnable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "recoverable_backlog_count", `Int recoverable.pending_count
-    ; "recoverable_oldest_arrived_at_unix", Json_util.float_opt_to_json recoverable.oldest
-    ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
+    ; "recoverable_oldest_source_arrived_at_unix", Json_util.float_opt_to_json recoverable.oldest
+    ; "recoverable_oldest_source_age_seconds", age_seconds_json ~now recoverable.oldest
     ; ( "recoverable_by_keeper"
       , `List
           (recoverable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "retained_disabled_backlog_count", `Int retained_disabled.pending_count
-    ; ( "retained_disabled_oldest_arrived_at_unix"
+    ; ( "retained_disabled_oldest_source_arrived_at_unix"
       , Json_util.float_opt_to_json retained_disabled.oldest )
-    ; ( "retained_disabled_oldest_age_seconds"
+    ; ( "retained_disabled_oldest_source_age_seconds"
       , age_seconds_json ~now retained_disabled.oldest )
     ; ( "retained_disabled_by_keeper"
       , `List
@@ -1788,17 +1818,17 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "paused_dead_backlog_count", `Int paused_dead.pending_count
-    ; "paused_dead_oldest_arrived_at_unix", Json_util.float_opt_to_json paused_dead.oldest
-    ; "paused_dead_oldest_age_seconds", age_seconds_json ~now paused_dead.oldest
+    ; "paused_dead_oldest_source_arrived_at_unix", Json_util.float_opt_to_json paused_dead.oldest
+    ; "paused_dead_oldest_source_age_seconds", age_seconds_json ~now paused_dead.oldest
     ; ( "paused_dead_by_keeper"
       , `List
           (paused_dead.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "shutdown_fenced_backlog_count", `Int shutdown_fenced.pending_count
-    ; ( "shutdown_fenced_oldest_arrived_at_unix"
+    ; ( "shutdown_fenced_oldest_source_arrived_at_unix"
       , Json_util.float_opt_to_json shutdown_fenced.oldest )
-    ; ( "shutdown_fenced_oldest_age_seconds"
+    ; ( "shutdown_fenced_oldest_source_age_seconds"
       , age_seconds_json ~now shutdown_fenced.oldest )
     ; ( "shutdown_fenced_by_keeper"
       , `List
@@ -1806,8 +1836,8 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
     ; "unclassified_count", `Int unclassified.pending_count
-    ; "unclassified_oldest_arrived_at_unix", Json_util.float_opt_to_json unclassified.oldest
-    ; "unclassified_oldest_age_seconds", age_seconds_json ~now unclassified.oldest
+    ; "unclassified_oldest_source_arrived_at_unix", Json_util.float_opt_to_json unclassified.oldest
+    ; "unclassified_oldest_source_age_seconds", age_seconds_json ~now unclassified.oldest
     ; ( "unclassified_by_keeper"
       , `List
           (unclassified.keepers

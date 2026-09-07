@@ -523,24 +523,6 @@ module WorkAsHeartbeat = struct
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 end
 
-(** {1 Keeper health policy} *)
-
-module KeeperHealth = struct
-  (** Durable event-queue backlog age threshold for fleet health degradation.
-      The durable queue remains fully reported regardless of this value; this
-      policy only decides when backlog should flip [/health?full=1] from
-      informational to operator-actionable. Default [0.0] preserves the
-      existing behavior where any durable backlog is immediately visible as
-      degraded. Operators may raise it to avoid treating fresh, expected queue
-      handoff as degraded.
-
-      Env: [MASC_KEEPER_DURABLE_QUEUE_STALE_SEC].
-      @category Telemetry @ops_class operator *)
-  let durable_queue_stale_sec () =
-    get_float_nonneg ~default:0.0 "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
-  ;;
-end
-
 (** {1 Keeper Keepalive Loop Constants} *)
 
 module KeeperKeepalive = struct

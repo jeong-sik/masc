@@ -293,9 +293,9 @@ let render_section_resources ~cols (state : state) =
       @ List.map
           (fun (name, lane, started_at_unix) ->
               let lane = match lane with
-                | Turn_lane_autonomous -> "autonomous"
-                | Turn_lane_chat_operation -> "chat"
-                | Turn_lane_maintenance -> "maintenance" in
+                | Decode.Turn_lane_autonomous -> "autonomous"
+                | Decode.Turn_lane_chat_operation -> "chat"
+                | Decode.Turn_lane_maintenance -> "maintenance" in
               Printf.sprintf "    %-18s  turn %8s  lane %s"
                 (Layout.fit_width name 18)
                 (age_text (now -. started_at_unix)) lane)

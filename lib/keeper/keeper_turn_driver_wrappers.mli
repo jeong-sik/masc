@@ -16,7 +16,7 @@ val run_named_with_masc_tools :
   ?keeper_name:string ->
   goal:string ->
   base_path:string ->
-  ?system_prompt:string ->
+  system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->

@@ -755,7 +755,16 @@ let run_named
     ~goal
     ?goal_blocks
     ?session_id
-    ?(system_prompt = "")
+    (* Required, not defaulted to "". Three of the runtimes this dispatches to
+       -- Codex, Claude Code, Antigravity -- refuse a blank composition in
+       [Keeper_official_client_host.prepare_turn], because a blank one runs the
+       turn under the vendor's built-in instructions with masc's tool surface
+       still attached (#33165). A default that part of the domain rejects is not
+       a default: it left 34 cases red across the three official-client suites
+       and #33165 fixed one of the five call sites, because an optional
+       argument asks nobody. Callers that mean "no system prompt" now say so
+       (#33862). *)
+    ~system_prompt
     ?(tools = [])
     ~agent_core_tools
     ?(initial_messages = [])

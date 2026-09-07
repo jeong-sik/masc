@@ -1006,9 +1006,23 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/execution" ->
           with_h2_public_read h2_reqd (fun state ->
-            match dashboard_execution_cached_http_body ~state httpun_request with
-            | Some body ->
-              h2_respond_json h2_reqd body ~compress:false ~extra_headers:cors
+            match dashboard_execution_cached_http_representation ~state httpun_request with
+            | Some (body, etag, headers) ->
+              let extra_headers =
+                cors @ headers
+                @ [ "etag", etag
+                  ; "cache-control", Http_server_eio.Response.json_revalidate_cache_control ]
+              in
+              let unchanged =
+                match Httpun.Headers.get httpun_request.headers "if-none-match" with
+                | Some client_tag ->
+                  Http_server_eio.Response.client_tag_matches ~etag ~client_tag
+                | None -> false
+              in
+              if unchanged then
+                h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
+              else
+                h2_respond_json h2_reqd body ~compress:false ~extra_headers
             | None ->
               let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
               h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors)

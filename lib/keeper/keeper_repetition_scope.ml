@@ -191,3 +191,54 @@ let restore ~source ~target =
       let* existing = load target in
       if to_json state = to_json existing then Ok existing
       else Error Restore_target_conflict
+
+module Execution = struct
+  type snapshot = t
+  type t =
+    { scope : Id.t
+    ; mutable current : (snapshot, error) result option
+    }
+
+  let direct_operation operation_id =
+    { scope = Id.direct_operation operation_id; current = None }
+
+  let install ~target state =
+    match Agent_core.Context.get_scoped target Agent_core.Context.Session context_key with
+    | None -> save target state; Ok ()
+    | Some _ ->
+      let* existing = load target in
+      if to_json existing = to_json state then Ok ()
+      else Error Restore_target_conflict
+
+  let prepare execution ~source ~target =
+    let result =
+      let* state = match execution.current with
+        | Some state -> state
+        | None ->
+          let* state = load source in
+          admit state (Fresh execution.scope)
+      in
+      let* () = install ~target state in
+      Ok state
+    in
+    execution.current <- Some result;
+    let* state = result in
+    tool_calls state ~scope:execution.scope
+
+  let observe execution ~target call =
+    let result =
+      let* state = match execution.current with
+        | Some state -> state
+        | None -> Error (Invalid_snapshot "repetition execution was not prepared")
+      in
+      let* observation = observation_of_call call in
+      let* state = record state ~scope:execution.scope observation in
+      save target state;
+      Ok state
+    in
+    execution.current <- Some result
+
+  let failure execution = match execution.current with
+    | Some (Error error) -> Some error
+    | None | Some (Ok _) -> None
+end

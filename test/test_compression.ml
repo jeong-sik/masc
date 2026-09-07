@@ -236,12 +236,48 @@ let test_negotiation_always_varies () =
   Alcotest.(check bool) "identity responses still advertise Vary" true
     (List.mem_assoc "vary" headers)
 
+let test_prepared_snapshot_roundtrips () =
+  let prepared = Http_response_payload.prepare sample_json in
+  List.iter (fun (accept_encoding, expected_encoding) ->
+    let body, headers =
+      Http_response_payload.select_prepared ~accept_encoding prepared
+    in
+    Alcotest.(check (option string)) "negotiated content encoding"
+      expected_encoding (List.assoc_opt "content-encoding" headers);
+    Alcotest.(check (option string)) "all representations vary"
+      (Some "Accept-Encoding") (List.assoc_opt "vary" headers);
+    let decoded =
+      match expected_encoding with
+      | Some "gzip" -> gunzip body
+      | Some "zstd" ->
+        Compression_codec.decompress ~orig_size:(String.length sample_json) body
+      | None -> Ok body
+      | Some _ -> Alcotest.fail "unexpected test encoding"
+    in
+    (match decoded with
+     | Ok decoded -> Alcotest.(check string) "complete snapshot" sample_json decoded
+     | Error message -> Alcotest.fail message);
+    let again, _ = Http_response_payload.select_prepared ~accept_encoding prepared in
+    Alcotest.(check bool) "poll reuses the prepared bytes" true (body == again))
+    [ Some "gzip", Some "gzip";
+      Some "zstd, gzip", Some "zstd";
+      Some "gzip;q=0, zstd;q=0", None;
+      None, None ];
+  let tiny = Http_response_payload.prepare "{}" in
+  let body, headers =
+    Http_response_payload.select_prepared ~accept_encoding:(Some "gzip") tiny
+  in
+  Alcotest.(check string) "small snapshot remains identity" "{}" body;
+  Alcotest.(check (option string)) "no false gzip header" None
+    (List.assoc_opt "content-encoding" headers)
+
 let gzip_tests = [
   "round trips through a real gunzip", `Quick, test_gzip_round_trips;
   "is deterministic", `Quick, test_gzip_is_deterministic;
   "skips payloads below min_size", `Quick, test_gzip_skips_small_payloads;
   "negotiation table", `Quick, test_negotiation_table;
   "identity still varies", `Quick, test_negotiation_always_varies;
+  "prepared snapshots roundtrip and reuse bytes", `Quick, test_prepared_snapshot_roundtrips;
 ]
 
 (* ===== Test Entry Point ===== *)

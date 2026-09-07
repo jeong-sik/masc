@@ -7573,8 +7573,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    add_row "Turn Ref:"
                      (Terminal_text.single_line observation.turn_ref)
                | Observation_layout.Context_partial observation ->
+                   (* The one reading in this row that printed a bare number.
+                      The row also carries a cumulative figure, which says
+                      "cumulative usage" in its own sentence, and a measured
+                      one, which carries a percentage and a window -- so a
+                      number alone was the only thing here a reader had to
+                      guess the scope of, and the two differ by an order of
+                      magnitude (#33791). This one is occupancy: the
+                      projection emits an observation only once it has
+                      confirmed the turn's own usage. *)
                    add_row "Context:"
-                     (Printf.sprintf "%d tokens; context window not observed"
+                     (Printf.sprintf
+                        "%d tokens in context; window not observed"
                         observation.tokens);
                    add_row "Observed:"
                      (Terminal_text.short_timestamp observation.observed_at);
@@ -15801,7 +15811,8 @@ let config_pane_strip (state : state) =
       Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
     else Ansi.dim ^ " " ^ label ^ Ansi.reset
   in
-  String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
+  Ansi.dim ^ "9:Runtime  p:next  " ^ Ansi.reset
+  ^ String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
     [ name Config_runtime "runtime.toml"
     ; name Config_models "models"
     ; name Config_params "params"
@@ -15810,7 +15821,6 @@ let config_pane_strip (state : state) =
     ; name Config_themes "themes"
     ; name Config_voice "voice"
     ]
-  ^ Ansi.dim ^ "  p:next  9:Runtime" ^ Ansi.reset
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this
@@ -16544,7 +16554,7 @@ let render_config_models (state : state) =
   box_top buf cols;
   let path_note =
     match state.runtime_config_view with
-    | Some (path, _) -> Ansi.dim ^ path ^ Ansi.reset
+    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
     | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
   in
   box_line buf cols
@@ -16634,9 +16644,55 @@ let render_config_models (state : state) =
        ~hints:"j/k:row  e:open [models.NAME]  p:next pane  r:reload  Tab:next");
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
+let config_metadata_summary (state : state) =
+  match state.runtime_config_view with
+  | None -> []
+  | Some reading ->
+      let lines = Masc_tui_runtime_config_view.summary_lines reading.rcv_metadata in
+      (match lines, state.runtime_config_view_error with
+       | (tone, text) :: rest, Some _ -> (tone, "Previous read · " ^ text) :: rest
+       | _ -> lines)
+
+let config_metadata_style = function
+  | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
+  | Good -> Theme.ok () | Warning -> Theme.warn () | Bad -> Theme.bad ()
+
 let config_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
-  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 7)
+  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows
+         - 7 - List.length (config_metadata_summary state))
+
+let runtime_config_status_lines state ~cols =
+  let lines =
+    (match state.runtime_config_view_error with
+     | None -> []
+     | Some detail -> [Masc_tui_runtime_config_view.Bad, "Read failed: " ^ detail])
+    @ match state.runtime_config_view with
+      | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
+      | Some reading ->
+          [Masc_tui_runtime_config_view.Neutral,
+           (if Option.is_some state.runtime_config_view_error then "Previous source: " else "Source: ") ^ reading.rcv_path]
+          @ Masc_tui_runtime_config_view.detail_lines reading.rcv_metadata
+  in
+  List.concat_map (fun (tone, text) ->
+    Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+      (Terminal_text.single_line text)
+    |> List.map (fun text -> tone, text)) lines
+
+let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
+  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
+  max 0 (List.length (runtime_config_status_lines state ~cols) - room)
+
+let render_runtime_config_status state =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"config-status"
+    ~title:(screen_title " MASC Config / runtime.toml status")
+    ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
+    ~body:(fun ~budget c ->
+      let lines = runtime_config_status_lines state ~cols in
+      let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in
+      lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
+      |> List.iter (fun (tone, text) -> c.push_styled ~style:(config_metadata_style tone) ("  " ^ text)))
 
 (* What voice resolved to, and on which microphone.
 
@@ -16718,12 +16774,13 @@ let render_voice (state : state) =
 ;;
 
 let render_config (state : state) =
+  if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   let path_note =
     match state.runtime_config_view with
-    | Some (path, _) -> Ansi.dim ^ path ^ Ansi.reset
+    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
     | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
   in
   box_line buf cols
@@ -16747,6 +16804,9 @@ let render_config (state : state) =
             (fit_width identity.Tui_decode.sid_masc_root 32)
             (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
             Ansi.reset));
+  List.iter (fun (tone, text) ->
+    box_line_styled buf cols ~style:(config_metadata_style tone)
+      ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
   box_divider buf cols;
   let content_height = config_content_height state in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -16760,7 +16820,7 @@ let render_config (state : state) =
        for _ = 2 to content_height do
          box_empty buf cols
        done
-   | None, Some (_, rows) ->
+   | None, Some { rcv_rows = rows; _ } ->
        let total = List.length rows in
        let max_scroll = max 0 (total - content_height) in
        let scroll = max 0 (min state.config_scroll max_scroll) in
@@ -16784,7 +16844,7 @@ let render_config (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:value field  PgUp/PgDn:page  e:edit (preview-checked)  r:reload  Tab:next");
+         "j/k:value field  v:read status  PgUp/PgDn:page  e:edit (preview-checked)  r:reload");
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =

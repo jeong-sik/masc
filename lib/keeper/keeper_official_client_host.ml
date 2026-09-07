@@ -797,7 +797,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
     ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
-    ~next_dynamic_invocation_index ~repeated_call_state ~on_result_handoff
+    ~next_dynamic_invocation_index ~repeated_call_state ~on_tool_boundary ~on_result_handoff
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -1005,27 +1005,21 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
             | Some abort_turn -> { result with abort_turn = Some abort_turn }
             | None -> result
           in
-          let fingerprint =
-            dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
-          in
-          let repeated_count = observe_repeated_call repeated_call_state fingerprint in
           let final_result =
-            if repeated_count < repeated_call_abort_threshold
-            then result
-            else
-            let detail =
-              Printf.sprintf
-                "repeated exact dynamic tool call detected: tool=%s count=%d"
-                tool.schema.name
-                repeated_count
-            in
-            Log.Keeper.warn ~keeper_name "%s" detail;
-              { result with
-                abort_turn =
-                  Some
-                    (Repeated_tool_call
-                       { tool_name = tool.schema.name; repeated_count })
-              }
+            match on_tool_boundary, result.abort_turn with
+            | Some _, _ | None, Some _ -> result
+            | None, None ->
+              let fingerprint =
+                dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
+              in
+              let repeated_count = observe_repeated_call repeated_call_state fingerprint in
+              if repeated_count < repeated_call_abort_threshold then result
+              else (
+                Log.Keeper.warn ~keeper_name
+                  "repeated exact dynamic tool call detected: tool=%s count=%d"
+                  tool.schema.name repeated_count;
+                { result with abort_turn = Some
+                    (Repeated_tool_call { tool_name = tool.schema.name; repeated_count }) })
           in
           (try on_result_handoff ~invocation ~content:final_result.content with
            | exn ->
@@ -1036,7 +1030,39 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                tool.schema.name
                (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
                (Printexc.to_string exn));
-          final_result
+          (* The caller observes the settled call, including result handoff.
+             Its scope spans provider attempts; a new client-local counter must
+             not replace it. Existing exact terminal evidence has priority. *)
+          (match on_tool_boundary with
+           | None -> final_result
+           | Some observe ->
+             let boundary =
+               try observe () with
+               | exn ->
+                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                 Error (Agent_core.Error.Internal (Printexc.to_string exn))
+             in
+             let boundary =
+               match boundary with
+               | Ok stop -> stop
+               | Error error ->
+                 let detail = Agent_core.Error.to_string error in
+                 record_terminal_error terminal_error detail;
+                 Some (Terminal_tool_boundary
+                   { tool_name = tool.schema.name
+                   ; outcome = Terminal_failed
+                       { failure_class = Tool_result.Runtime_failure
+                       ; effect_disposition = Tool_result.Effect_outcome_unknown
+                       ; diagnostic = detail
+                       }
+                   })
+             in
+             match final_result.abort_turn, boundary with
+             | Some _, _ | None, None -> final_result
+             | None, Some (Terminal_tool_boundary
+                 { outcome = Terminal_failed _; _ } as stop) ->
+               { final_result with success = false; abort_turn = Some stop }
+             | None, Some stop -> { final_result with abort_turn = Some stop })
         | exception exn ->
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -1053,6 +1079,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
 let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
+    ?on_tool_boundary
     ?(on_result_handoff = fun ~invocation:_ ~content:_ -> ()) ~raw_trace_run () =
   match tools, context with
   | [], _ -> Ok []
@@ -1082,6 +1109,7 @@ let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
             ~raw_trace_run
             ~next_dynamic_invocation_index
             ~repeated_call_state
+            ~on_tool_boundary
             ~on_result_handoff)
          tools)
 ;;

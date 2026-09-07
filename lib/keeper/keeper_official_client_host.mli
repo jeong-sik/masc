@@ -233,12 +233,19 @@ val dynamic_tools :
   terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   terminal_error:string option ref ->
   pre_tool_rejects:rejected_tool_call list ref ->
+  ?on_tool_boundary:(unit -> (host_stop option, Agent_core.Error.t) result) ->
   ?on_result_handoff:
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   unit ->
   (dynamic_tool list, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
+
+    [on_tool_boundary], when supplied, replaces the provider-local repetition
+    detector. It runs after tool settlement and result observers, including when
+    exact terminal evidence already stops the turn. Its errors are recorded in
+    [terminal_error] and close the host loop without inventing a checkpoint.
+    An existing terminal result takes priority over a callback stop.
 
     [tool_approval] settles a [pre_tool_use] hook that answers
     [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --

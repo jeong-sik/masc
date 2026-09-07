@@ -415,6 +415,7 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
 ;;
 
 let dispatch_keeper_msg_stream_admitted
+      ~operation_id
       ~admission_token
       ?on_text_delta
       ?on_event
@@ -431,6 +432,7 @@ let dispatch_keeper_msg_stream_admitted
     (tool_result_with_tool_name
        ~tool_name:name
        (handle_keeper_msg_stream_admitted
+          ~operation_id
           ~admission_token
           ?on_text_delta
           ?on_event

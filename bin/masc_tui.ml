@@ -182,8 +182,8 @@ let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 let runtime_config_assignment_rows (state : state) =
   match state.runtime_config_view with
   | None -> []
-  | Some (_, rows) ->
-      rows
+  | Some reading ->
+      reading.rcv_rows
       |> List.filter_mapi (fun index row ->
              if Masc_tui_code_lexer.row_has_assignment row then Some index
              else None)
@@ -230,9 +230,10 @@ let runtime_config_section_line ~section rows =
    heading visible as context. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some section, Some (_, rows) ->
+  | Some section, Some { rcv_rows = rows; _ } ->
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
+    state.runtime_config_status_open <- false;
     let found = runtime_config_section_line ~section rows in
     (match found with
      | Some index ->
@@ -1940,7 +1941,8 @@ type async_msg =
       string * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
-  | Runtime_config_view_loaded of (string * string list, string) result
+  | Runtime_config_view_loaded of
+      (string * string list * Masc_tui_runtime_config_view.metadata, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of
@@ -10643,7 +10645,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_params_error <- Some detail)
   | Runtime_config_view_loaded result -> (
       match result with
-      | Ok (path, lines) ->
+      | Ok (path, lines, metadata) ->
           (* Lexed once here rather than per frame or per row. TOML opens a
              string with a triple quote that closes several rows later, and
              masc's own tool declarations are written that way, so a row cannot
@@ -10657,7 +10659,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
-          state.runtime_config_view <- Some (path, rows);
+          state.runtime_config_view <- Some
+             { rcv_path = path; rcv_rows = rows; rcv_metadata = metadata };
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
@@ -13255,8 +13258,9 @@ let main () =
     | Some row -> (
       match state.runtime_config_view with
       | None -> add_event state "error" "config not loaded yet; r to reload"
-      | Some (_, source_rows) ->
+      | Some { rcv_rows = source_rows; _ } ->
         state.config_pane <- Config_runtime;
+        state.runtime_config_status_open <- false;
         (* Land a few rows above the header so the section reads as a block
            rather than starting at the top edge. *)
         (match config_models_source_line ~row source_rows with
@@ -13271,7 +13275,7 @@ let main () =
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some (_, rows) -> (
+    | Some { rcv_rows = rows; _ } -> (
       match Masc_tui_editor.editor_command () with
       | None ->
         report_action state "error"
@@ -15614,6 +15618,35 @@ and is loaded on demand through keeper_skill.
             | None, _ | _, None -> ())
        | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
+       | Some ("v" | "V")
+         when state.view = Config && state.config_pane = Config_runtime ->
+           state.runtime_config_status_open <- not state.runtime_config_status_open;
+           state.runtime_config_status_scroll <- 0
+       | Some ("e" | "E" | "enter" | "\r" | "\n" | "/" | "n" | "N")
+         when state.view = Config && state.config_pane = Config_runtime
+              && state.runtime_config_status_open ->
+           (* This pane reads metadata. A source cursor retained behind it
+              cannot authorize an edit or a search of that hidden source. *)
+           ()
+       | Some (("esc" | "left" | "j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home") as key)
+         when state.view = Config && state.config_pane = Config_runtime
+              && state.runtime_config_status_open ->
+           (match key with
+            | "esc" | "left" -> state.runtime_config_status_open <- false
+            | "home" -> state.runtime_config_status_scroll <- 0
+            | _ ->
+                let terminal_rows, cols = get_terminal_size () in
+                let step = match key with
+                  | "pageup" | "pagedown" ->
+                      (* Match the status surface's five chrome rows after
+                         composer/agenda space has been reserved. *)
+                      max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
+                  | _ -> 1
+                in
+                let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
+                let limit = Masc_tui_render.runtime_config_status_scroll_limit state ~terminal_rows ~cols in
+                state.runtime_config_status_scroll <-
+                  max 0 (min limit (min limit state.runtime_config_status_scroll + delta)))
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
@@ -16215,14 +16248,15 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0
        | Some "r"
          when (not message_mode)
+              && state.view <> Runtime
               && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
               && state.context_inspector_open = false ->
            (* The listing footers have promised [r:refresh] since the footer
               tables existed; no handler ever answered it. This arm makes the
               sheet true everywhere a listing draws it. The guards stay out
-              of the two surfaces that own their own r — the identity pane
-              and the context inspector — and out of the composer, where r
-              must type. *)
+              of the identity pane and context inspector, and out of the
+              composer, where r must type. Runtime also owns its refresh:
+              its r/R handler below forces a provider probe. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight

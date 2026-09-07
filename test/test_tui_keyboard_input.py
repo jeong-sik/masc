@@ -10263,6 +10263,26 @@ RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
 RUNTIME_CONFIG_RAW_PATH = "/api/v1/runtime/config/raw"
 
 
+def runtime_config_read_metadata() -> dict[str, object]:
+    return {
+        "ok": True,
+        "source_revision": "fixture-read-revision",
+        "validation": {
+            "valid": True, "schema_version": 1, "current_schema_version": 1,
+            "forward_schema": False, "issues": [],
+        },
+        "application": {
+            "operation": "read",
+            "routing": {"status": "active", "requires_restart": False},
+            "keeper_overlay": {
+                "status": "pending_restart", "configured_count": 1,
+                "requires_restart": True, "pending_keys": ["keeper.pending"],
+                "applied_keys": [], "preempted_keys": [],
+            },
+        },
+    }
+
+
 def config_navigation_source() -> str:
     lines = [
         "# operator notes stay visible",
@@ -10302,6 +10322,18 @@ def config_navigation_interaction() -> Interaction:
             start=0,
             timeout=3.0,
         )
+
+        status = send_and_wait(
+            process, master_fd, output, b"v", b"Pending restart: keeper.pending"
+        )
+        status_plain = CSI_RE.sub(b"", status)
+        for needle in (b"fixture-read-revision", b"Validation: valid", b"Keeper restart: required"):
+            if needle not in status_plain:
+                raise AssertionError(f"Config status omitted {needle!r}: {status_plain!r}")
+        # Source-only input must not open an editor or a hidden-source search.
+        # If / stole focus, v would become search text instead of returning.
+        send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
+        send_and_wait(process, master_fd, output, b"v", b"first-value = ")
 
         next_field = send_and_wait(
             process, master_fd, output, b"j", b"second-value = "
@@ -10725,12 +10757,25 @@ def runtime_surface_interaction(
             )
 
             fixtures[RUNTIME_PROBE_PATH] = (503, {"error": "probe refresh failed"})
-            send_and_wait(
+            read_available(master_fd, output)
+            refresh_start = len(output)
+            os.write(master_fd, b"r")
+            # Prove the key reached Runtime's forced-probe endpoint. A
+            # generic listing refresh used to intercept lowercase r, leaving
+            # only ordinary polls and never reaching this request.
+            wait_for_fixture_served(
                 process,
                 master_fd,
                 output,
-                b"r",
-                b"forced probe refresh failed",
+                force_probe,
+                after=0,
+                description="Runtime r forced provider probe",
+            )
+            # The next ordinary poll can replace the force failure's wording;
+            # both must leave the failed reading visible with the prior rows.
+            wait_for_output(
+                process, master_fd, output, b"runtime probe load failed",
+                start=refresh_start, timeout=3.0,
             )
             if force_probe.served != 1:
                 raise AssertionError(
@@ -10753,7 +10798,14 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\x1b", b"9:Runtime")
+            # Verify the selected parent pane and its Runtime entry remain
+            # visible at 99 columns, even when later pane names are clipped.
+            config_start = len(output)
+            send_and_wait(
+                process, master_fd, output, b"\x1b", "▸runtime.toml".encode()
+            )
+            if b"9:Runtime" not in CSI_RE.sub(b"", bytes(output[config_start:])):
+                raise AssertionError("Config hides its Runtime entry at 99 columns")
             os.write(master_fd, b"q")
             completed = True
         finally:
@@ -12594,6 +12646,7 @@ def run_config_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
+            **runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": config_navigation_source(),
         },
@@ -12897,6 +12950,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
+            **runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": "\n".join(
                 [

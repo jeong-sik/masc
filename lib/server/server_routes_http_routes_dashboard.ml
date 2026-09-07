@@ -2340,17 +2340,20 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         (* The default execution surface is a large proactive cached snapshot.
-            Re-compressing it on every dashboard poll burns the same serving
-            domain that accepts health/chat/keeper requests; serve identity JSON
-            here and keep the compute/cache policy in
-            [dashboard_execution_http_json]. *)
-         match dashboard_execution_cached_http_body_and_etag ~state request with
-         | Some (body, etag) ->
-           Http.Response.json_lazy ~compress:false ~request:req ~etag (fun () -> body) reqd
+         (* The producer prepares all encodings once per snapshot. Requests
+            select bytes and validate the identity ETag without recompression. *)
+         let timing = Server_timing.create () in
+         match Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
+           dashboard_execution_cached_http_representation ~state request) with
+         | Some (body, etag, extra_headers) ->
+           Http.Response.json_lazy ~compress:false ~request:req ~etag
+             ~extra_headers:(extra_headers @ Server_timing.extra_header timing)
+             (fun () -> body) reqd
          | None ->
-           let json = dashboard_execution_http_json ~state ~sw ~clock request in
-           Http.Response.json_value ~compress:false ~request:req json reqd
+           let json = Server_timing.measure timing Server_timing.Cache_compute
+             (fun () -> dashboard_execution_http_json ~state ~sw ~clock request) in
+           Http.Response.json_value ~compress:false ~request:req
+             ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->

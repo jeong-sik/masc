@@ -1177,6 +1177,7 @@ let test_declared_thinking_capabilities_override_catalog () =
 id_prefix = "qwen"
 provider_name = "runpod_mtp"
 supports_system_prompt = true
+max_output_tokens = 32768
 supports_reasoning = true
 supports_reasoning_budget = true
 thinking_control_format = "ollama_think"
@@ -1221,7 +1222,99 @@ thinking_control_format = "ollama_think"
          check bool "sparse system prompt preserves catalog" true caps.supports_system_prompt;
          check bool "declared transport stream parser wins" true
            (caps.reasoning_streaming_format
-            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content"))
+            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content");
+         let body =
+           Llm_provider.Backend_openai.build_request_assoc
+             ~config:{ provider_cfg with max_tokens = Some 65536 }
+             ~messages:[] ()
+         in
+         check int "sparse thinking override preserves catalog output ceiling on wire"
+           32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
+
+let glm_vision_binding_config ~runtime_caps =
+  let provider = { runpod_provider with id = "glm-coding" } in
+  let model =
+    { qwen_model with id = "glm-4.6v"; api_name = "glm-4.6v"
+    ; capabilities = Some runtime_caps }
+  in
+  let binding =
+    { runpod_binding with provider_id = provider.id; model_id = model.id }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]; models = [ model ]
+    ; bindings = [ binding ]; default_runtime_id = Some "glm-coding.glm-4.6v"
+    ; keeper_assignments = []; media_failover = []; lane_decls = []
+    ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+    ; egress_allowlists = []; lsp_servers = [] }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg binding with
+  | Ok config -> config
+  | Error detail -> failf "vision binding failed: %s" detail
+
+let check_vision_output_wire config =
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "65536" (fun () ->
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc ~config
+        ~messages:[] ()
+    in
+    check bool "absent request budget remains absent despite known ceiling" true
+      (Yojson.Safe.Util.member "max_tokens" body = `Null);
+    let vision = Keeper_vision_tool.provider_for_vision config in
+    check (option int) "vision requests its configured default" (Some 65536)
+      vision.max_tokens;
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc ~config:vision
+        ~messages:[] ()
+    in
+    check int "vision request reaches wire within GLM image-model ceiling"
+      32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
+
+let test_runtime_max_only_capability_overrides_provider_base_on_wire () =
+  with_model_catalog
+    {|
+[[providers]]
+id = "glm-coding"
+kind = "glm"
+base_url = "https://example.invalid/v4"
+request_path = "/chat/completions"
+api_key_env = "TEST_UNUSED_GLM_KEY"
+capabilities_base = "glm"
+|}
+    (fun () ->
+       let baseline =
+         glm_vision_binding_config
+           ~runtime_caps:Runtime_schema.model_capabilities_default
+       in
+       let baseline_caps =
+         match Llm_provider.Provider_config.capabilities_for_config_model baseline with
+         | Some caps -> caps | None -> fail "provider base must resolve"
+       in
+       check (option int) "fixture reaches broader provider ceiling"
+         (Some 40960) baseline_caps.max_output_tokens;
+       let config =
+         glm_vision_binding_config
+           ~runtime_caps:{ Runtime_schema.model_capabilities_default with
+             max_output_tokens = Some 32768 }
+       in
+       (match Llm_provider.Provider_config.capabilities_for_config_model config with
+        | None -> fail "explicit model ceiling lost provider capabilities"
+        | Some caps ->
+          check bool "max-only declaration preserves provider reasoning contract"
+            baseline_caps.supports_reasoning caps.supports_reasoning);
+       check_vision_output_wire config)
+
+let test_embedded_glm_vision_catalog_ceiling_reaches_wire () =
+  let previous = Llm_provider.Model_catalog.global () in
+  Llm_provider.Model_catalog.clear_global ();
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+      | None -> Llm_provider.Model_catalog.clear_global ())
+    (fun () ->
+       glm_vision_binding_config
+         ~runtime_caps:Runtime_schema.model_capabilities_default
+       |> check_vision_output_wire)
 
 (* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
    Provider_config. Before the fix the adapter dropped both binding
@@ -2500,6 +2593,14 @@ let () =
             "declared thinking capabilities override catalog"
             `Quick
             test_declared_thinking_capabilities_override_catalog
+        ; test_case
+            "max-only runtime capability overrides provider base on wire"
+            `Quick
+            test_runtime_max_only_capability_overrides_provider_base_on_wire
+        ; test_case
+            "embedded GLM vision catalog ceiling reaches wire"
+            `Quick
+            test_embedded_glm_vision_catalog_ceiling_reaches_wire
         ; test_case
             "runtime adapter carries auth in api_key only"
             `Quick

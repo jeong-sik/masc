@@ -3326,6 +3326,25 @@ supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
 
+# Z.AI Coding resolves by provider identity; a bare model row does not apply.
+# Source: https://docs.z.ai/guides/overview/concept-param (maximum 32768).
+# The coding endpoint independently rejects 40960 with HTTP 400/code 1210.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+
 [[models]]
 id_prefix = "glm-4.5v"
 base = "glm"

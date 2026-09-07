@@ -1051,7 +1051,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                | Execution_json json ->
                  h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors
                | Execution_payload payload ->
-                 respond_cached ~body:payload.raw_json ~etag:payload.etag ~headers:[]))
+                 let body, headers = Dashboard_cache.select_http_representation
+                   ~accept_encoding:(Httpun.Headers.get httpun_request.headers "accept-encoding") payload in
+                 respond_cached ~body ~etag:payload.etag ~headers))
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
           with_h2_public_read h2_reqd (fun state ->

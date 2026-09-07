@@ -306,10 +306,49 @@ let test_an_interrupted_turn_still_opens_once () =
     ]
 ;;
 
-(* Two turns interleaved -- parallel lanes do this -- each keep one boundary. *)
-let test_interleaved_turns_each_open_once () =
+(* One turn's rows split by another turn's row. The pair is no longer a run,
+   so it draws as two lone rows -- not as a bracket reaching over r2. *)
+let test_a_turn_split_by_another_does_not_reach_over_it () =
+  check_edges "r1 r1 r2 r1"
+    [ "opens"; "closes"; "alone"; "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"a" 1.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
+        ~text:"b" 2.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"c" 3.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"d" 4.
+    ]
+;;
+
+(* The same turn arriving twice with an outside row between is still one run:
+   sidings are transparent, so the bracket does not break on a journal commit
+   the way it breaks on another turn. Read together with the case above, this
+   is the whole rule -- what breaks a run is another turn, nothing else. *)
+let test_only_another_turn_breaks_a_run () =
+  check_edges "r1, journal, r1"
+    [ "opens"; "outside"; "closes" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"a" 1.
+    ; row ~role:Tui_types.Message_memory ~phase:Tui_types.Turn_progress
+        ~text:"r4400 committed" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"b" 3.
+    ]
+;;
+
+(* Two turns interleaved -- parallel lanes do this. They used to keep one
+   boundary each, which put two brackets in one column: on a live pane that
+   drew three openings before any close, and one turn's bracket ran past a
+   date divider with three other turns inside it. A bracket claims what is
+   between its corners, and a row between r1's corners here is r2's.
+
+   So each row stands alone. Less is said, and what is said is true: these
+   rows are not adjacent, and nothing in one column can group them. *)
+let test_interleaved_turns_do_not_bracket_each_other () =
   check_edges "r1 and r2 alternating"
-    [ "opens"; "opens"; "closes"; "closes" ]
+    [ "alone"; "alone"; "alone"; "alone" ]
     [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
         ~text:"a" 1.
     ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
@@ -398,8 +437,12 @@ let () =
             test_a_journal_commit_belongs_to_no_turn;
           Alcotest.test_case "an interrupted turn still opens once" `Quick
             test_an_interrupted_turn_still_opens_once;
-          Alcotest.test_case "interleaved turns each open once" `Quick
-            test_interleaved_turns_each_open_once;
+          Alcotest.test_case "interleaved turns do not bracket each other" `Quick
+            test_interleaved_turns_do_not_bracket_each_other;
+          Alcotest.test_case "a turn split by another does not reach over it" `Quick
+            test_a_turn_split_by_another_does_not_reach_over_it;
+          Alcotest.test_case "only another turn breaks a run" `Quick
+            test_only_another_turn_breaks_a_run;
           Alcotest.test_case "a held turn keeps only the rows the log does not draw" `Quick
             test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw;
           Alcotest.test_case "an empty conversation has no edges" `Quick

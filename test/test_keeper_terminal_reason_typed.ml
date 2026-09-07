@@ -957,6 +957,7 @@ let () =
     ; prompt_metrics
     ; ctx_composition
     ; runtime_observation = None
+    ; cooperative_boundary = None
     ; turn_count = 1
     ; final_agent_core_turn_ordinal = 0
     ; usage

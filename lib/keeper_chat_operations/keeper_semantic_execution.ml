@@ -49,6 +49,8 @@ type phase =
 type t =
   { id : Keeper_execution_scope_id.t
   ; revision : int64
+  ; input : Yojson.Safe.t option
+  ; input_sha256 : string
   ; sources : source_member list
   ; current_sources : source_member list
   ; frame : Snapshot.t
@@ -91,16 +93,26 @@ let validate_sources sources =
       else loop (identity :: seen) rest
   in loop [] sources
 
-let create ~id ~sources ~now =
+let canonical_input input =
+  let* payload = Keeper_chat_operation.canonical_json input
+    |> Result.map_error (function
+         | Keeper_chat_operation.Duplicate_object_key key -> "duplicate input key: " ^ key
+         | Keeper_chat_operation.Non_finite_float -> "input contains a non-finite number") in
+  let* digest = Keeper_chat_operation.execution_digest payload in
+  Ok (payload, digest)
+
+let create ~id ~input ~sources ~now =
   if not (valid_time now) then Error (Invalid_record "invalid admission time")
   else
     let* () = validate_sources sources in
+    let* input, input_sha256 = canonical_input input |> Result.map_error (fun detail -> Invalid_record detail) in
     let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
-    Ok { id; revision = 0L; sources; current_sources = sources; frame; phase = Preparing; created_at = now; updated_at = now }
+    Ok { id; revision = 0L; input = Some input; input_sha256; sources; current_sources = sources; frame; phase = Preparing; created_at = now; updated_at = now }
 
 let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
+  && String.equal left.input_sha256 right.input_sha256
 
 let projected_sources current projections =
   let rec loop originals previous projections =
@@ -195,7 +207,11 @@ let apply ~now action current =
     if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
     then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
-    else Ok { current with revision = Int64.succ current.revision; phase; frame; current_sources; updated_at = now }
+    else
+      let input = match phase with
+        | Settled _ -> None
+        | Preparing | Ready | Running | Suspended _ | Recovering _ -> current.input in
+      Ok { current with revision = Int64.succ current.revision; phase; frame; current_sources; input; updated_at = now }
 
 let source_to_json source =
   `Assoc [ "post_id", `String source.post_id
@@ -231,6 +247,8 @@ let to_json execution =
   `Assoc [ "schema", `String "masc.keeper_semantic_execution.v1"
          ; "id", Scope_id.to_json execution.id
          ; "revision", `Intlit (Int64.to_string execution.revision)
+         ; "input", (match execution.input with None -> `Null | Some payload -> `Assoc ["payload", payload])
+         ; "input_sha256", `String execution.input_sha256
          ; "sources", `List (List.map source_to_json execution.sources)
          ; "current_sources", `List (List.map source_to_json execution.current_sources)
          ; "frame", Snapshot.to_json execution.frame
@@ -324,7 +342,7 @@ let phase_of_json json =
 
 let of_json json =
   let decode () =
-    let* fields = exact ["schema";"id";"revision";"sources";"current_sources";"frame";"phase";"created_at";"updated_at"] json in
+    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"sources";"current_sources";"frame";"phase";"created_at";"updated_at"] json in
     let* schema = string "schema" fields in
     let* () = if schema = "masc.keeper_semantic_execution.v1" then Ok () else Error "unsupported execution schema" in
     let* id = Scope_id.of_json (field "id" fields) in
@@ -347,6 +365,21 @@ let of_json json =
       | Some active, [only] when Scope_id.equal active expected && Scope_id.equal only expected -> Ok ()
       | _ -> Error "execution frame must contain only its admitted scope" in
     let* phase = phase_of_json (field "phase" fields) in
+    let* input_sha256 = string "input_sha256" fields in
+    let* () = if canonical_sha input_sha256 then Ok () else Error "invalid admitted input digest" in
+    let* input = match field "input" fields with
+      | `Null -> Ok None
+      | value ->
+          let* wrapper = exact ["payload"] value in
+          let* payload, digest = canonical_input (field "payload" wrapper) in
+          if String.equal digest input_sha256 then Ok (Some payload)
+          else Error "admitted input digest does not match payload" in
+    let* () = match phase, input with
+      | Settled _, None -> Ok ()
+      | (Preparing | Ready | Running | Suspended _ | Recovering _), Some _ -> Ok ()
+      | Settled _, Some _ -> Error "settled execution retains an input body"
+      | (Preparing | Ready | Running | Suspended _ | Recovering _), None ->
+          Error "outstanding execution has no admitted input" in
     let* observations = Snapshot.observations frame ~scope:expected
       |> Result.map_error Snapshot.error_to_string in
     let coherent = match phase with
@@ -363,5 +396,5 @@ let of_json json =
       else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
-    Ok { id; revision; sources; current_sources; frame; phase; created_at; updated_at }
+    Ok { id; revision; input; input_sha256; sources; current_sources; frame; phase; created_at; updated_at }
   in decode () |> Result.map_error (fun detail -> Invalid_record detail)

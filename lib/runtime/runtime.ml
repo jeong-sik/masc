@@ -21,6 +21,8 @@ type t =
     (** Turn owner materialized at load time. HTTP bindings become
         [Agent_core]; official client runtimes remain distinct and can never
         be dispatched as a fake LLM provider config. *)
+  ; candidate_preference : Runtime_lane_preference.candidate
+    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
         credential-alias selection that resolved the dispatched API key
@@ -313,6 +315,18 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
            ; model
            ; binding = b
            ; execution
+           ; candidate_preference = (
+               let binding = match execution with
+                 | Runtime_execution.Agent_core config ->
+                     (match Agent_core.Binding_identity.of_provider_config
+                       ~transport:Agent_core.Binding_identity.Http config with
+                      | Ok binding -> Runtime_lane_preference.Resolved_http_binding binding
+                      | Error reason -> Runtime_lane_preference.Http_binding_unavailable reason)
+                 | Runtime_execution.Codex_app_server _
+                 | Runtime_execution.Claude_code _
+                 | Runtime_execution.Antigravity_cli _ -> Runtime_lane_preference.Official_client_binding
+               in
+               Runtime_lane_preference.create_candidate ~binding)
            ; quota_scope = quota_scope_of_materialized ~provider ~execution
            }
        | Error reason -> Error (Execution_unbuildable reason))
@@ -1468,6 +1482,24 @@ let set_loaded
     , media_failover
     , lanes
     , lsp_servers ) =
+  (* Reuse observations only when the actual resolved binding is unchanged.
+     Compare the identities frozen at materialization, never re-resolve old
+     credentials/catalog facts after a reload. Removed/rebound rows retain no
+     global registry entry; in-flight snapshots alone keep their old cells. *)
+  let previous = (Atomic.get loaded_state_ref).runtimes in
+  let preserve_candidate (runtime : t) =
+    match List.find_opt (fun (old : t) ->
+      String.equal old.id runtime.id
+      && Runtime_schema.equal_provider old.provider runtime.provider
+      && Runtime_schema.equal_model_spec old.model runtime.model
+      && Runtime_schema.equal_binding old.binding runtime.binding
+      && Runtime_lane_preference.same_candidate_binding
+           old.candidate_preference runtime.candidate_preference) previous with
+    | Some old -> { runtime with candidate_preference = old.candidate_preference }
+    | None -> runtime
+  in
+  let runtimes = List.map preserve_candidate runtimes in
+  let rt = preserve_candidate rt in
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes

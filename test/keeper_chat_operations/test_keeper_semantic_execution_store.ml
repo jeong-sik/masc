@@ -29,8 +29,9 @@ let apply store execution action = Store.semantic_apply store ~expected:executio
 let created = function
   | Store.Semantic_created execution -> execution
   | Semantic_existing _ -> fail "new identity unexpectedly replayed"
+let fixture_input = `Assoc ["kind", `String "test_turn"; "message", `String "continue the admitted task"]
 let prepare store n sources =
-  Store.semantic_prepare store ~id:(scope_id n) ~sources ~now:10. |> execution_ok |> created
+  Store.semantic_prepare ~input:fixture_input store ~id:(scope_id n) ~sources ~now:10. |> execution_ok |> created
 let get store id = match Store.semantic_get store id |> execution_ok with
   | Some execution -> execution | None -> fail "durable execution disappeared"
 let running store n sources =
@@ -86,7 +87,7 @@ let test_identity_frame_and_membership_commit_together () =
       let restored = get reopened first.id in
       check bool "identity and membership survive reopen" true
         (Execution.to_json first = Execution.to_json restored);
-      match Store.semantic_prepare reopened ~id:first.id ~sources:first.sources ~now:99. |> execution_ok with
+      match Store.semantic_prepare ~input:fixture_input reopened ~id:first.id ~sources:first.sources ~now:99. |> execution_ok with
       | Semantic_existing replay ->
         check bool "re-admission does not create a new lifetime" true (Execution.to_json restored = Execution.to_json replay)
       | Semantic_created _ -> fail "reopen created a replacement execution"))
@@ -94,7 +95,7 @@ let test_identity_frame_and_membership_commit_together () =
 let test_admission_commit_faults () =
   List.iter (fun fault -> with_store (fun path store ->
     Store.For_testing.fail_next_commit fault;
-    assert_execution_error (Store.semantic_prepare store ~id:(scope_id 1) ~sources:[source 1] ~now:10.);
+    assert_execution_error (Store.semantic_prepare ~input:fixture_input store ~id:(scope_id 1) ~sources:[source 1] ~now:10.);
     Store.close store |> store_ok;
     with_open path (fun reopened ->
       match fault, Store.semantic_get reopened (scope_id 1) |> execution_ok with
@@ -103,7 +104,7 @@ let test_admission_commit_faults () =
         assert_count "rolled-back admission starts empty exactly once" 0 fresh
       | Fail_after_commit, Some committed ->
         assert_count "uncertain commit kept initialized frame" 0 committed;
-        (match Store.semantic_prepare reopened ~id:(scope_id 1) ~sources:[source 1] ~now:99. |> execution_ok with
+        (match Store.semantic_prepare ~input:fixture_input reopened ~id:(scope_id 1) ~sources:[source 1] ~now:99. |> execution_ok with
          | Semantic_existing replay -> check bool "uncertain admission uses same ID" true (Scope.equal replay.id committed.id)
          | Semantic_created _ -> fail "uncertain admission was duplicated")
       | _ -> fail "commit fault produced a partial or missing admission")))
@@ -130,7 +131,7 @@ let test_observation_fault_reload_and_stale_cas () =
           | Ok _ -> fail "stale retry duplicated an observation"));
       let current = get reopened before.id in
       assert_count "one durable observation after recovery" 1 current;
-      match Store.semantic_prepare reopened ~id:before.id ~sources:before.sources ~now:25. |> execution_ok with
+      match Store.semantic_prepare ~input:fixture_input reopened ~id:before.id ~sources:before.sources ~now:25. |> execution_ok with
       | Semantic_existing replay -> assert_count "same admission does not clear evidence" 1 replay
       | Semantic_created _ -> fail "observation recovery invented Fresh")))
     Store.For_testing.[Fail_before_commit; Fail_after_commit]
@@ -144,7 +145,7 @@ let test_suspended_or_recovering_owner_does_not_block_unrelated_work () =
     check string "unrelated B may run while A waits" "running" (Execution.phase_name b.phase);
     assert_count "B does not inherit A repetition" 0 b;
     assert_count "waiting A retains evidence" 1 (get store a.id);
-    (match Store.semantic_prepare store ~id:(scope_id 3) ~sources:[source ~retentions:7 1] ~now:22. with
+    (match Store.semantic_prepare ~input:fixture_input store ~id:(scope_id 3) ~sources:[source ~retentions:7 1] ~now:22. with
      | Error (Store.Sources_owned [owner]) -> check bool "same source remains owned by A" true (Scope.equal a.id owner)
      | Error error -> fail (Store.semantic_error_to_string error)
      | Ok _ -> fail "waiting A lost source ownership"))) [true; false]
@@ -183,7 +184,7 @@ let test_restart_recovery_preserves_scope_and_allows_other_work () =
       check bool "restart preserved execution identity" true (Scope.equal (Execution.scope a) (Execution.scope recovered));
       let b = running reopened 2 [source 2] in
       check string "unrelated work runs after restart" "running" (Execution.phase_name b.phase);
-      (match Store.semantic_prepare reopened ~id:(scope_id 3) ~sources:[source 1] ~now:31. with
+      (match Store.semantic_prepare ~input:fixture_input reopened ~id:(scope_id 3) ~sources:[source 1] ~now:31. with
        | Error (Store.Sources_owned _) -> () | _ -> fail "restart freed A's unresolved source")))
 
 let test_terminal_evidence_immutable_and_new_lifetime_is_fresh () =
@@ -349,7 +350,7 @@ let test_corrupt_terminal_index_cannot_hide_outstanding_execution () =
     (match Store.semantic_outstanding store with
      | Error (Store.Semantic_store_error (Store.Integrity_error _)) -> ()
      | _ -> fail "terminal index hid a pending execution from ownership checks");
-    assert_execution_error (Store.semantic_prepare store ~id:(scope_id 92) ~sources:[source 91] ~now:30.);
+    assert_execution_error (Store.semantic_prepare ~input:fixture_input store ~id:(scope_id 92) ~sources:[source 91] ~now:30.);
     check string "incoherent record is retained without a replacement" before (raw_file path))
 
 let project execution observed =
@@ -378,7 +379,7 @@ let test_undispatched_recheck_survives_reopen_and_queue_generation () =
     check bool "current membership follows verified queue generation" true (repaired.current_sources = updated);
     check bool "recovery advanced beyond initial revision" true (repaired.revision > original.revision);
     List.iter (fun reserved ->
-      (match Store.semantic_prepare store ~id:(scope_id 52) ~sources:reserved ~now:22. with
+      (match Store.semantic_prepare ~input:fixture_input store ~id:(scope_id 52) ~sources:reserved ~now:22. with
        | Error (Store.Sources_owned [owner]) -> check bool "both source incarnations remain reserved" true (Scope.equal owner original.id)
        | _ -> fail "rechecked source was admitted under another execution")) [original.sources; updated];
     Store.close store |> store_ok;
@@ -463,7 +464,7 @@ let test_direct_and_auto_same_text_are_distinct_durable_scopes () =
   with_store (fun path store ->
     let text = Uuidm.to_string (uuid 91) in
     let direct = direct_id text and autonomous = scope_id 91 in
-    let admit id = Store.semantic_prepare store ~id ~sources:[] ~now:10. |> execution_ok |> created in
+    let admit id = Store.semantic_prepare ~input:fixture_input store ~id ~sources:[] ~now:10. |> execution_ok |> created in
     let a = admit direct and b = admit autonomous in
     check bool "producer origins distinguish identical text" false (Scope.equal a.id b.id);
     check bool "each empty frame has only its typed identity" true
@@ -488,7 +489,7 @@ let test_direct_and_auto_same_text_are_distinct_durable_scopes () =
 let test_direct_wait_auto_completes_then_direct_resumes () =
   with_store (fun path store ->
     let original_id = direct_id "direct-parent-awaiting-child" in
-    let a = Store.semantic_prepare store ~id:original_id ~sources:[] ~now:10. |> execution_ok |> created in
+    let a = Store.semantic_prepare ~input:fixture_input store ~id:original_id ~sources:[] ~now:10. |> execution_ok |> created in
     let a = apply store a Execution.Confirm_sources |> fun a -> apply store a Execution.Begin_execution in
     let a = apply store a (Execution.Record_observation observation) in
     let checkpoint = checkpoint () in
@@ -508,7 +509,7 @@ let test_direct_wait_auto_completes_then_direct_resumes () =
       let observed = apply reopened resumed (Execution.Record_observation observation) in
       assert_count "Direct extends the same frame after resume" 2 observed;
       assert_count "Auto frame was not merged into Direct" 0 (get reopened b.id);
-      let next = Store.semantic_prepare reopened ~id:(direct_id "next-direct-request") ~sources:[] ~now:30.
+      let next = Store.semantic_prepare ~input:fixture_input reopened ~id:(direct_id "next-direct-request") ~sources:[] ~now:30.
         |> execution_ok |> created in
       assert_count "another Direct request has independent evidence" 0 next))
 
@@ -536,9 +537,124 @@ let test_recheck_cannot_take_another_execution_source_incarnation () =
     check bool "disjoint update leaves B's record unchanged" true
       (b_before = Execution.to_json (get store b.id)))
 
+let test_input_survives_request_delivery_and_independent_work () =
+  with_store (fun path store ->
+    let operation_id = Chat.Operation_id.of_string "direct-input-lifetime" |> string_ok in
+    let _submitted = Store.submit store ~now:1. ~operation_id
+      ~source:(`Assoc ["kind", `String "direct"])
+      ~input:(`Assoc ["message", `String "before queued edit"]) |> store_ok in
+    let wanted = `Assoc ["message", `String "the actual edited request"; "continuation", `String "resume after approval"] in
+    let _edited = Store.edit_queued store ~operation_id ~input:wanted |> store_ok in
+    let claimed = match Store.claim_next store ~now:2. |> store_ok with
+      | Some operation -> operation | None -> fail "edited request was not claimed" in
+    let input = match claimed.input with Some input -> input | None -> fail "claimed input missing" in
+    let id = Scope.direct_operation operation_id in
+    let a = Store.semantic_prepare store ~id ~input ~sources:[] ~now:3. |> execution_ok |> created in
+    check string "admission digest binds actual claimed input" claimed.execution_digest a.input_sha256;
+    let a = apply store a Execution.Confirm_sources |> fun a -> apply store a Execution.Begin_execution in
+    let a = apply store a (Execution.Record_observation observation) in
+    let cp = checkpoint () in
+    let waiting = apply store a (Execution.Suspend cp) in
+    let delivered = Store.succeed_running store ~now:21. ~operation_id ~outcome_ref:"delivered-response" |> store_ok in
+    check bool "request ledger released its terminal input" true (Option.is_none delivered.input);
+    let b = running store 200 [] |> fun b -> apply store b (Execution.Settle Execution.Completed) in
+    check bool "B completed and released its own input" true (Option.is_none b.input);
+    Store.close store |> store_ok;
+    with_open path (fun reopened ->
+      let saved = get reopened id in
+      check bool "A retains its own edited input after request delivery and B" true (saved.input = Some input);
+      check string "A input identity survived reopen" waiting.input_sha256 saved.input_sha256;
+      let resumed = apply reopened saved (Execution.Resume_checkpoint cp) in
+      assert_count "A keeps its own repetition evidence" 1 resumed;
+      let done_ = apply reopened resumed (Execution.Settle Execution.Completed) in
+      check bool "actual semantic completion releases payload" true (Option.is_none done_.input);
+      check string "terminal admission retains digest" saved.input_sha256 done_.input_sha256;
+      (match Store.semantic_prepare reopened ~id ~input ~sources:[] ~now:30. |> execution_ok with
+       | Semantic_existing same ->
+         check bool "terminal retry does not restore released input" true (Option.is_none same.input)
+       | Semantic_created _ -> fail "terminal retry created another invocation");
+      (match Store.semantic_prepare reopened ~id ~input:(`String "different request") ~sources:[] ~now:31. with
+       | Error (Store.Admission_conflict actual) -> check bool "conflict names A" true (Scope.equal actual id)
+       | _ -> fail "same ID accepted changed input after completion")))
+
+let test_input_canonical_idempotency_and_conflict () =
+  with_store (fun _path store ->
+    let id = scope_id 201 in
+    let first = `Assoc ["z", `Int 1; "a", `Assoc ["b", `String "B"; "a", `String "A"]] in
+    let reordered = `Assoc ["a", `Assoc ["a", `String "A"; "b", `String "B"]; "z", `Int 1] in
+    let a = Store.semantic_prepare store ~id ~input:first ~sources:[] ~now:1. |> execution_ok |> created in
+    (match Store.semantic_prepare store ~id ~input:reordered ~sources:[] ~now:2. |> execution_ok with
+     | Semantic_existing existing -> check string "canonical input is one admission" a.input_sha256 existing.input_sha256
+     | Semantic_created _ -> fail "object order created another admission");
+    (match Store.semantic_prepare store ~id ~input:(`Assoc ["z", `Int 2]) ~sources:[] ~now:3. with
+     | Error (Store.Admission_conflict _) -> () | _ -> fail "changed input reused admitted identity");
+    check bool "conflict leaves full admission unchanged" true (Execution.to_json a = Execution.to_json (get store id)))
+
+let test_recovery_preserves_input_until_explicit_settlement () =
+  List.iter (fun terminal -> with_store (fun path store ->
+    let running = running store 202 [] in
+    let _recovered = Store.settle_running_after_restart store ~now:30. |> store_ok in
+    Store.close store |> store_ok;
+    with_open path (fun reopened ->
+      let recovering = get reopened running.id in
+      check bool "interrupted admission retains original input" true (recovering.input = running.input);
+      let terminal = apply reopened recovering (Execution.Settle terminal) in
+      check bool "terminal decision releases input" true (Option.is_none terminal.input);
+      check string "terminal decision preserves input identity" running.input_sha256 terminal.input_sha256)))
+    [Execution.Cancelled; Execution.Failed "operator reconciled the failure"]
+
+let test_invalid_admitted_input_is_not_committed () =
+  List.iter (fun input -> with_store (fun _path store ->
+    let id = scope_id 203 in
+    (match Store.semantic_prepare store ~id ~input ~sources:[] ~now:1. with
+     | Error (Store.Invalid_execution (Execution.Invalid_record _)) -> ()
+     | _ -> fail "invalid input was admitted");
+    check bool "invalid input leaves no journal row" true
+      ((Store.semantic_get store id |> execution_ok) = None)))
+    [`Assoc ["duplicate", `Int 1; "duplicate", `Int 2]; `Float Float.nan; `Float Float.infinity]
+
+let test_null_payload_is_distinct_from_released_input () =
+  with_store (fun path store ->
+    let id = scope_id 204 in
+    let _a = Store.semantic_prepare store ~id ~input:`Null ~sources:[] ~now:1. |> execution_ok |> created in
+    Store.close store |> store_ok;
+    with_open path (fun reopened ->
+      let a = get reopened id in
+      check bool "opaque null input remains present" true (a.input = Some `Null);
+      let cancelled = apply reopened a (Execution.Settle Execution.Cancelled) in
+      check bool "released input is absent" true (Option.is_none cancelled.input)))
+
+let test_corrupt_input_cannot_become_fresh_or_repaired () =
+  List.iter (fun replacement -> with_store (fun path store ->
+    let a = prepare store 205 [] in
+    let json = match Execution.to_json a with
+      | `Assoc fields -> `Assoc (("input", replacement) :: List.remove_assoc "input" fields)
+      | _ -> fail "expected object" in
+    Store.close store |> store_ok;
+    with_db path (fun db ->
+      let stmt = Sqlite3.prepare db "UPDATE semantic_executions SET record_json=? WHERE phase='preparing'" in
+      Fun.protect ~finally:(fun () -> check bool "statement finalized" true (Sqlite3.finalize stmt = Sqlite3.Rc.OK))
+        (fun () ->
+          check bool "replacement bound" true (Sqlite3.bind_text stmt 1 (Yojson.Safe.to_string json) = Sqlite3.Rc.OK);
+          check bool "replacement stored" true (Sqlite3.step stmt = Sqlite3.Rc.DONE)));
+    let before = raw_file path in
+    (match Store.inspect_outstanding ~path with
+     | Error (Store.Integrity_error _) -> ()
+     | Error error -> fail (Store.error_to_string error)
+     | Ok _ -> fail "corrupt admitted input was accepted as an empty/fresh operation");
+    check string "corrupt payload evidence is retained" before (raw_file path)))
+    [`Null; `Assoc ["payload", `String "different input with stale digest"]]
+
 let () =
   run "keeper semantic execution store"
-    [ "typed identity", [
+    [ "admitted input", [
+        test_case "Direct input outlives delivery and independent Auto work" `Quick test_input_survives_request_delivery_and_independent_work;
+        test_case "canonical input identity rejects changed requests" `Quick test_input_canonical_idempotency_and_conflict;
+        test_case "restart retains input until actual settlement" `Quick test_recovery_preserves_input_until_explicit_settlement;
+        test_case "invalid input creates no partial admission" `Quick test_invalid_admitted_input_is_not_committed;
+        test_case "null payload is not released input" `Quick test_null_payload_is_distinct_from_released_input;
+        test_case "corrupt input never becomes fresh" `Quick test_corrupt_input_cannot_become_fresh_or_repaired ];
+      "typed identity", [
         test_case "Direct and Auto identical text retain separate durable identities" `Quick test_direct_and_auto_same_text_are_distinct_durable_scopes;
         test_case "Direct waits Auto completes Direct resumes original frame" `Quick test_direct_wait_auto_completes_then_direct_resumes ];
       "durability", [

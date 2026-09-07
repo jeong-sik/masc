@@ -1,0 +1,225 @@
+{
+  "result": "passed",
+  "source_commit": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
+  "source_identity_kind": "caller supplied CI source; binary hash independently measured",
+  "server_build": {
+    "commit": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
+    "commit_source": "embedded",
+    "executable_sha256": "3fe98ff8b1a742ebfc6dc19ed4c66e58d0b6c7d9f977d69e6dd71bf3958e5a5b"
+  },
+  "native_host_sha256": "4a0ffdfc03e1bc2ad6f73dc4f4bea84ecb051d1255588093e47cb33b05d453f5",
+  "script_sha256": "9b492787c831605e6bc66c823efa3a9da512f1713973e0dd355fddb7421fe9c3",
+  "extension_original_sha256": "18cfb6ff109dc66b6f9514f8a93861589d65d584267b79682f15bed0577a1d9d",
+  "runtime": "isolated temporary MASC runtime; exact base verified before test",
+  "server_port": 61027,
+  "browsers": {
+    "firefox": {
+      "tabId": 1,
+      "browserInfo": {
+        "name": "Firefox",
+        "vendor": "Mozilla",
+        "version": "155.0.1",
+        "buildID": "20260903215306"
+      },
+      "instrumented_extension_sha256": "701956dd20e1b8a508d975c6b44a13c69e67490740ab609ffd82f2446fb66f61",
+      "client": {
+        "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+        "browser": "firefox",
+        "version": "155.0.1",
+        "engineVersion": "155.0.1"
+      },
+      "screenshot": {
+        "path": "firefox-selected-client.png",
+        "bytes": 28487,
+        "sha256": "2c43e84b39500f6db15b50e3a3d00b04c7ef03b1649087f4300b640c2a43bd50"
+      }
+    },
+    "zen": {
+      "tabId": 1,
+      "browserInfo": {
+        "name": "Firefox",
+        "vendor": "Mozilla",
+        "version": "155.0.1",
+        "buildID": "20260904060728",
+        "zen": {
+          "version": "1.22b"
+        }
+      },
+      "instrumented_extension_sha256": "600c50d0c4130b9bb8fc30c7ce86c85eda5701d3e638e6f798d3173e95454bb4",
+      "client": {
+        "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+        "browser": "zen",
+        "version": "1.22b",
+        "engineVersion": "155.0.1"
+      },
+      "screenshot": {
+        "path": "zen-selected-client.png",
+        "bytes": 24209,
+        "sha256": "48264310805172e4e6accfeadc84bc426857bf797144a0f43ce6507199eace28"
+      }
+    }
+  },
+  "operations": [
+    {
+      "kind": "read",
+      "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+      "elapsed_ms": 20.5
+    },
+    {
+      "kind": "read",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "elapsed_ms": 19.1
+    },
+    {
+      "kind": "fill",
+      "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+      "native_dispatch_browser": "firefox",
+      "elapsed_ms": 17.9
+    },
+    {
+      "kind": "click",
+      "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+      "native_dispatch_browser": "firefox",
+      "elapsed_ms": 20.3
+    },
+    {
+      "kind": "scroll",
+      "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+      "native_dispatch_browser": "firefox",
+      "elapsed_ms": 9.1
+    },
+    {
+      "kind": "read",
+      "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+      "elapsed_ms": 12.5
+    },
+    {
+      "kind": "read",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "elapsed_ms": 37.9
+    },
+    {
+      "kind": "fill",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "native_dispatch_browser": "zen",
+      "elapsed_ms": 8.7
+    },
+    {
+      "kind": "click",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "native_dispatch_browser": "zen",
+      "elapsed_ms": 8.0
+    },
+    {
+      "kind": "scroll",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "native_dispatch_browser": "zen",
+      "elapsed_ms": 12.0
+    },
+    {
+      "kind": "read",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "elapsed_ms": 19.6
+    },
+    {
+      "kind": "read",
+      "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+      "elapsed_ms": 10.1
+    },
+    {
+      "kind": "read",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "elapsed_ms": 7.3
+    },
+    {
+      "kind": "read",
+      "clientId": "7b5cd449-64df-49bb-898b-f6eaae1bb306",
+      "elapsed_ms": 18.4
+    },
+    {
+      "kind": "read",
+      "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+      "elapsed_ms": 10.1
+    }
+  ],
+  "profile": "separate disposable WebDriver profiles",
+  "keeper_model_turn_measured": false,
+  "foreign_result_spoof_runtime_measured": false,
+  "instrumentation": "unique native manifest name plus awaited command metadata observer; no page payload logging",
+  "colliding_tab_ids_observed": true,
+  "ambiguous_tabs": {
+    "isError": true,
+    "clients": [
+      {
+        "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+        "browser": "zen",
+        "version": "1.22b",
+        "engineVersion": "155.0.1"
+      },
+      {
+        "clientId": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+        "browser": "firefox",
+        "version": "155.0.1",
+        "engineVersion": "155.0.1"
+      }
+    ],
+    "dispatch_count": 0,
+    "completed_read_barriers": 2,
+    "barrier_command_count": 4
+  },
+  "tui": {
+    "result": "passed",
+    "clientId": "075e349f-a8db-402e-b55f-4b7b57782549",
+    "script_sha256": "8c06d1da7e20271cbd2900c61a0ad8cbf07bd93bd5a345a50f20f21597f286be",
+    "tui_sha256": "13558430a836a90344bcd00d668a0a7e6a082e025edda71772e6b160a16a8e98",
+    "transport": "real scratch MASC HTTP; no fixture responses",
+    "terminal": "PTY with Kitty capability response and 140x42 cells",
+    "tty_override_applied": false,
+    "text_verified": [
+      "Owned zen",
+      "Clicked zen",
+      "Scroll 640"
+    ],
+    "image": {
+      "path": "zen-through-tui.png",
+      "bytes": 24069,
+      "sha256": "23020ca4042876312349c93400aed77413d16aff6cd77a801038e2e75550ee53"
+    },
+    "normal_exit_code": 0,
+    "termios_restoration_measured_here": false
+  },
+  "disconnect": {
+    "remaining_browser": "zen",
+    "stale_id_refused": true,
+    "stale_dispatch_count": 0,
+    "completed_read_barriers": 1,
+    "barrier_command_count": 2
+  },
+  "reconnect": {
+    "browser": "firefox",
+    "old_client_id": "d8881d62-33ff-4369-9ce6-3e8fa6878527",
+    "new_client_id": "7b5cd449-64df-49bb-898b-f6eaae1bb306",
+    "old_tab_id": 1,
+    "new_tab_id": 1,
+    "tab_id_reused": true,
+    "tab_id_collides_with_zen": true,
+    "new_browser_info": {
+      "name": "Firefox",
+      "vendor": "Mozilla",
+      "version": "155.0.1",
+      "buildID": "20260903215306"
+    },
+    "old_id_refused": true,
+    "old_id_dispatch_count": 0,
+    "completed_read_barriers": 2,
+    "barrier_command_count": 4,
+    "new_fixture_starts_unmodified": true,
+    "existing_zen_state_retained": true
+  },
+  "cleanup": {
+    "owned_manifests_removed": true,
+    "drivers_stopped": true
+  },
+  "ci_run": "https://github.com/jeong-sik/masc/actions/runs/34126133709",
+  "ci_artifact_id": 10021176681
+}

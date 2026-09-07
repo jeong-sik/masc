@@ -472,13 +472,14 @@ let fork_egress_proxy
          (fun config_path ->
             Keeper_egress_lane.read_allowlist ~config_path ~keeper_name
             |> Result.map (fun rules -> config_path, rules))
+     , ctx.net
      with
-     | Error detail ->
+     | Error detail, _ ->
        Log.Keeper.error
          "egress proxy not started keeper=%s: %s (the lane stays closed)"
          keeper_name
          detail
-     | Ok _ when Option.is_none ctx.net ->
+     | Ok _, None ->
        (* No network capability in this context means no listener can be
           bound, and a policy guest with no proxy reaches nothing. Said
           rather than passed over: the lane being closed is the safe
@@ -487,8 +488,7 @@ let fork_egress_proxy
          "egress proxy not started keeper=%s: this lane has no network \
           capability (the lane stays closed)"
          keeper_name
-     | Ok (config_path, initial_rules) ->
-       let net = Option.get ctx.net in
+     | Ok (config_path, initial_rules), Some net ->
        (* Re-read per request, so an operator's edit reaches the next
           connection instead of waiting for a lane restart -- the sibling SSH
           lane already re-reads its registry on every dispatch, and one file

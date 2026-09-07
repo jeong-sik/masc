@@ -1230,4 +1230,12 @@ let begin_stopping t = request t Begin_stopping
 
 module For_testing = struct
   let mailbox_depth t = Eio.Stream.length t.mailbox
+
+  let observe_state_changes ~sw observer =
+    let previous = Atomic.get state_change_observer in
+    (* Keep the installed observer and restore it with this test switch. The
+       additional callback only resolves a test promise; it must not yield. *)
+    install_state_change_observer (fun () ->
+      Fun.protect ~finally:observer previous);
+    Eio.Switch.on_release sw (fun () -> install_state_change_observer previous)
 end

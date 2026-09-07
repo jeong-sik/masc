@@ -39,8 +39,6 @@ checkpoint_surface_files=(
   lib/keeper/keeper_context_runtime.mli
   lib/keeper/keeper_post_turn.ml
   lib/keeper/keeper_post_turn.mli
-  lib/keeper/keeper_manual_compaction.ml
-  lib/keeper/keeper_manual_compaction.mli
   lib/keeper/keeper_heartbeat_loop.ml
   lib/keeper/keeper_heartbeat_loop_cycle.ml
   lib/keeper/keeper_heartbeat_loop_cycle.mli
@@ -58,14 +56,14 @@ if matches="$(
   fi
 fi
 
-manual_compaction_surface_files=(
-  lib/keeper/keeper_manual_compaction.ml
-  lib/keeper/keeper_manual_compaction.mli
-)
+# This block named lib/keeper/keeper_manual_compaction.{ml,mli}, which #31623
+# deleted along with the compaction concept, so it scanned nothing and passed.
+# The symbol is what the purge is about, and it now has no home module to come
+# back to, so ask the tree instead of a file list.
 if matches="$(
   rg -n \
     'on_checkpoint_installed' \
-    "${manual_compaction_surface_files[@]}" || true
+    lib bin test proto || true
 )"; then
   if [[ -n "${matches}" ]]; then
     echo "[checkpoint-installation-legacy-purge] forbidden manual-compaction callback residue:" >&2

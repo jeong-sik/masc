@@ -5,34 +5,6 @@
 # Claude Platform model overview / adaptive-thinking docs (checked 2026-07-10).
 # Static pricing rows use standard rates; time-limited promotional pricing is
 # intentionally not encoded as a model capability or runtime control.
-# 2026-09-07: OpenAI direct reserve row. Vision + tools verified by live probe
-# (8x8 red PNG -> "빨강", tool definition accepted). Reasoning happens
-# server-side and bills inside the completion budget — budget fields must use
-# max_completion_tokens (chat_output_budget_field below). tool_choice
-# forcing left off (unverified on this key).
-[[models]]
-id_prefix = "gpt-5.5"
-base = "openai_chat"
-provider_name = "openai"
-chat_output_budget_field = "max_completion_tokens"
-thinking_control_format = "reasoning_effort"
-accepted_reasoning_efforts = ["low", "medium", "high"]
-tool_schema_conformance = "conformant"
-max_context_tokens = 272000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_parallel_tool_calls = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-supports_image_input = true
-supports_native_streaming = true
-input_per_million = 5.0
-output_per_million = 30.0
-cache_read_multiplier = 0.1
 
 [[models]]
 id_prefix = "claude-fable-5"
@@ -309,18 +281,6 @@ max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_computer_use = true
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-
-[[models]]
-id_prefix = "gpt-5.5"
-base = "openai_chat_extended"
-max_context_tokens = 1050000
-max_output_tokens = 128000
-supports_computer_use = true
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-input_per_million = 5.0
-output_per_million = 30.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.1
 
 [[models]]
 id_prefix = "gpt-5.4-mini"
@@ -2539,19 +2499,64 @@ request_path = "/responses"
 api_key_env = "DEEPSEEK_API_KEY"
 capabilities_base = "openai_chat"
 
-# 2026-09-07: OpenAI direct — reserve-only. The operator's key carries prepaid
-# balance and gpt-5.5/gpt-5.5-pro only (live /v1/models probe 2026-09-07;
-# gpt-5.6 is project-gated "does not have access"). gpt-5.5 rejects the classic
-# max_tokens field, hence chat_output_budget_field on the model row (live 400:
-# "Use 'max_completion_tokens' instead"). Pricing per developers.openai.com
-# 2026-09-07: $5/$30 short-context, $10/$45 long-context (272K window).
 [[providers]]
-id = "openai"
+id = "openai-responses"
 kind = "openai_compat"
 base_url = "https://api.openai.com"
-request_path = "/v1/chat/completions"
+request_path = "/v1/responses"
 api_key_env = "OPENAI_API_KEY"
 capabilities_base = "openai_chat"
+
+
+# 2026-09-07 라이브 실측: 이 키의 호출 가능 모델은 gpt-5.6-luna($0.20/$1.20,
+# deepseek-flash 출력가보다 싸다), gpt-6-astra($10/$50), gpt-5.4. sol/terra 는
+# /v1/models 에 나오지만 프로젝트 게이트로 호출 거부. gpt-5.5 는 이 날 접근이
+# 사라졌다. 모델들이 chat/completions 에서 function tools+reasoning_effort 를
+# 함께 거부하므로(라이브 400) 두 행 모두 responses 표면으로.
+[[models]]
+id_prefix = "gpt-5.6-luna"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 272000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 0.2
+output_per_million = 1.2
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-6-astra"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 272000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 
 [[providers]]
 id = "gemini"

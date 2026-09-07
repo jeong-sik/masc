@@ -118,17 +118,33 @@ let deferred_runtime_ids hint =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
+let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of candidates =
+  let available, backpressured = List.partition (fun candidate ->
+    let quota_exhausted =
+      Option.fold ~none:false
+        ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
+        (quota_scope_of candidate)
+    in
+    let rate_limited =
+      Option.fold ~none:false
+        ~some:(fun candidate -> Option.is_some
+          (Runtime_lane_preference.candidate_backpressure ~now ~candidate))
+        (candidate_preference_of candidate)
+    in
+    not (quota_exhausted || rate_limited)) candidates in
+  available @ backpressured
+;;
+
 let quota_ordered_runtime_ids ~now runtime_ids =
-  let resolvable, unresolvable =
-    List.partition
-      (fun id -> Option.is_some (Runtime.get_runtime_by_id id))
-      runtime_ids
-  in
-  Runtime_quota_window.demote_order
-    ~now
-    ~quota_scope_of:Runtime.quota_scope_of_runtime_id
-    resolvable
-  @ unresolvable
+  (* Resolve once so both kinds of ordering evidence use the same catalog row. *)
+  let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
+  let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
+  let ordered = demote_unavailable_candidates ~now
+    ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
+    ~candidate_preference_of:(fun (_, rt) ->
+      Option.map (fun (rt : Runtime.t) -> rt.candidate_preference) rt)
+    resolvable in
+  List.map fst (ordered @ unresolvable)
 ;;
 
 let quota_ordered_deferred_runtime_lane ~now hint =
@@ -236,6 +252,7 @@ let attempt_runtime_candidates
     ?(on_retry_deferred = fun _ -> ())
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ _error -> ())
     ?quota_scope_of
+    ?candidate_preference_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -261,6 +278,13 @@ let attempt_runtime_candidates
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
+  let candidate_preference_of =
+    match candidate_preference_of with
+    | Some candidate_preference_of -> candidate_preference_of
+    | None -> fun candidate ->
+        Runtime.get_runtime_by_id (runtime_id_of candidate)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_preference)
+  in
   (* Mid-walk demotion shares the pre-walk rule: never move an
      exhausted-but-dispatchable candidate behind one that cannot dispatch, or
      the walk fails on the dead head with a non-rotating error before real
@@ -283,9 +307,9 @@ let attempt_runtime_candidates
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
-    Runtime_quota_window.demote_order
+    demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
-      ~quota_scope_of
+      ~quota_scope_of ~candidate_preference_of
       dispatchable
     @ undispatchable
   in
@@ -307,6 +331,7 @@ let attempt_runtime_candidates
          the provider returns could then attribute the old credential's
          response to the replacement catalog row. *)
       let attempt_quota_scope = quota_scope_of candidate in
+      let attempt_candidate_preference = candidate_preference_of candidate in
       emit_runtime_manifest
         ~status:"attempt"
         ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -326,6 +351,9 @@ let attempt_runtime_candidates
             Runtime_lane_preference.note_success ~lane_id
               ~candidate:attempt_runtime_id
           | None -> ());
+         Option.iter
+           (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
+           attempt_candidate_preference;
          (* A call getting through is the only evidence a quota came back that
             a provider stating no reset time leaves available, so it is what
             clears the observation. A stated window is left alone: it names a
@@ -343,58 +371,36 @@ let attempt_runtime_candidates
            ~runtime_id:attempt_runtime_id
            ~attempt:idx
            error;
-         (* A hard-quota rejection with a provider-stated reset time is an
-            account-scoped fact; remember it so later lane ordering stops
-            re-dispatching into the exhausted window (RFC-0370 §3.3). The
-            provider identity comes from the attempted candidate's catalog
-            row, not the error payload, so both sides of the window share
-            one namespace. Quota errors without [retry_after] record
-            nothing — a cooldown the provider never stated would be a
-            synthesized default. *)
-         (* Both refusals that say an account cannot serve right now.
-            [HardQuota] is HTTP 402 by status alone; [RateLimit] is 429, which
-            is what a spent quota actually arrives as -- traced 2026-09-06:
-            [Retry.classify_error] maps 429 to [RateLimited] and
-            [of_retry_api_error] maps that to [RateLimit], while [HardQuota] is
-            reached only from [PaymentRequired]. Matching [HardQuota] alone,
-            as this did, meant no 429 ever recorded a window and the walk
-            re-dispatched into a spent account every turn: 41 of 41 librarian
-            failures on one slot that day, 224 of 1,185 turns rate-limited in
-            two hours.
-
-            Quota is credential-account-owned, so the window is keyed by the
-            row's quota scope: siblings sharing the credential are demoted
-            together (PR #28202 review P2). *)
+         (* HTTP 429 and coarse Provider.RateLimit do not identify the
+            exhausted resource. Keep that unknown scope and the optional
+            provider hint as candidate-only ordering evidence. A shared
+            credential quota requires the distinct HardQuota/402 contract. *)
          let note_quota retry_after =
            match attempt_quota_scope, retry_after with
            | None, _ -> ()
            | Some scope, Some retry_after_s ->
              Runtime_quota_window.note_exhausted
                ~scope
-               (* NDT-OK: [retry_after] is relative to the provider response;
-                  convert it to the wall-clock expiry at this ingress. *)
+               (* NDT-OK: convert the provider's relative reset at ingress. *)
                ~resets_at:(Unix.gettimeofday () +. retry_after_s)
            | Some scope, None ->
-             (* The provider said it cannot serve and did not say when it can.
-                Recording the observation is not inventing a cooldown: it names
-                no time and the next success on this scope drops it. Neither
-                metered provider this fleet reaches states one -- ollama.com
-                and api.z.ai both 429 with no Retry-After header and no
-                [error.retry_after] in the body (probed 2026-09-06), and those
-                are the only two places [resolve_retry_after] looks. RFC-0433. *)
              Runtime_quota_window.note_observed_exhausted ~scope
          in
+         let note_rate_limit retry_after =
+           Option.iter
+             (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
+             attempt_candidate_preference
+         in
          (match error with
-          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ })
-          | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ })
-            -> note_quota retry_after
+          | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
+          | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+              note_rate_limit retry_after
+          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ }) ->
+              note_quota retry_after
+          | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> note_quota None
           | _ -> ());
-         (* The window just learned above must affect this same lane walk.
-            Otherwise a sibling on the same credential is retried before an
-            unrelated candidate even though the provider has already stated
-            that the shared account is exhausted.  This remains ordering,
-            not admission: if every remaining candidate is demoted they are
-            all still attempted in their prior relative order. *)
+         (* Stable demotion retains every declared candidate, including when
+            all are observed unavailable. Neither hint causes a wait or gate. *)
          let rest = demote_rest rest in
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
@@ -921,7 +927,7 @@ let run_named
      operators can route through explicit failover groups.  Lane candidate
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
-  (* Quota-window demotion is ordering only — a demoted candidate is still
+  (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
      selecting a fresh lane walk. A deferred suffix was already frozen before
      pre-dispatch shaping, so re-reading wall-clock quota state here could make
@@ -934,7 +940,7 @@ let run_named
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
-         wall clock; [demote_order] stays pure via injected [now]. *)
+         wall clock; the ordering read receives one explicit [now]. *)
       ~now:(Unix.gettimeofday ())
       candidates
   in
@@ -948,9 +954,8 @@ let run_named
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
          ( Some lane_id
-         , (* Demotion runs after sticky preference: a provider that stated
-              "exhausted until T" outranks a remembered last-good candidate
-              on that same account. *)
+         , (* Current candidate backpressure or credential quota evidence
+              takes precedence over the lane's remembered last success. *)
            Runtime_lane_preference.prefer_order ~lane_id
              (Runtime_lane.ordered_candidates lane)
            |> demote_quota_exhausted ))
@@ -1083,6 +1088,9 @@ let run_named
       | Missing_runtime runtime_id -> runtime_id)
     ~quota_scope_of:(function
       | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
+      | Missing_runtime _ -> None)
+    ~candidate_preference_of:(function
+      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_preference
       | Missing_runtime _ -> None)
     ~candidate_dispatchable:(function
       (* A materialized snapshot stays dispatchable even if a runtime.toml

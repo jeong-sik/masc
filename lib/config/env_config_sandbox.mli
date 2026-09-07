@@ -57,6 +57,12 @@ end
 module Runtime : sig
   val docker_image : unit -> string
 
+  val image_declared_or_default : string option -> string
+  (** The image a Keeper runs in: its own [sandbox_image] where it declared
+      one, {!docker_image} where it did not. Whitespace is not part of a tag,
+      so the declaration is trimmed and one that trims to nothing counts as
+      undeclared. *)
+
   val microvm_remove_timeout_sec : unit -> float
   (** How long to wait for a microvm guest to be removed. Removing one is a
       VM shutdown: measured at 63-67s, against a Cleanup_rm bucket of 10s and

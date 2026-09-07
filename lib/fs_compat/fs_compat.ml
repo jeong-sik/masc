@@ -1267,28 +1267,52 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
     a malformed log from either path uses the same orchestrate system. *)
+(* One row, with the row number the warning prints. A caller that walks rows
+   itself - to stop before the end of a window - parses through this so the
+   warning it prints is the same one, in the same shape, as the whole-list
+   parse below. *)
+let parse_jsonl_line ~(source : string) ~(line_no : int) (line : string)
+  : Yojson.Safe.t option
+  =
+  match Yojson.Safe.from_string line with
+  | json -> Some json
+  | exception Yojson.Json_error msg ->
+    Stdlib.Printf.eprintf
+      "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+      source
+      line_no
+      msg;
+    None
+;;
+
+(* Blank lines do not take a number, matching what [cat -n] shows for the
+   printed JSONL rows. A caller that needs those numbers without parsing
+   uses this. *)
+let number_jsonl_lines (lines : string list) : (int * string) list =
+  let line_no = ref 0 in
+  List.filter_map
+    (fun line ->
+       let trimmed = String.trim line in
+       if String.equal trimmed ""
+       then None
+       else begin
+         incr line_no;
+         Some (!line_no, trimmed)
+       end)
+    lines
+;;
+
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
-  let line_no = ref 0 in
   let parsed =
     List.filter_map
-      (fun line ->
-         let trimmed = String.trim line in
-         if String.equal trimmed ""
-         then None
-         else (
-           incr line_no;
-           match Yojson.Safe.from_string trimmed with
-           | json -> Some json
-           | exception Yojson.Json_error msg ->
-             incr malformed;
-             Stdlib.Printf.eprintf
-               "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-               source
-               !line_no
-               msg;
-             None))
-      lines
+      (fun (line_no, trimmed) ->
+         match parse_jsonl_line ~source ~line_no trimmed with
+         | Some json -> Some json
+         | None ->
+           incr malformed;
+           None)
+      (number_jsonl_lines lines)
   in
   parsed, !malformed
 ;;

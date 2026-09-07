@@ -37,7 +37,6 @@ scripts/ml_line_cap_audit.sh  # report: no failing exit anywhere in it
 scripts/check-memory-leak.sh  # tool: builds and runs a server
 scripts/check_silent_failure.sh  # report by default; --strict, the only mode that
 #   enforces, is red on main
-scripts/dashboard-drift-check.sh  # green, not proven to fail yet
 scripts/viewer-local-e2e-check.sh  # tool: needs a running viewer
 scripts/audit-agent-core-payload.py  # tool: reads the live .masc trace store
 scripts/audit-catchall.sh  # report
@@ -51,9 +50,6 @@ scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc 
 scripts/audit-keeper-tool-boundary-matrix.sh  # tool
 scripts/audit-rfc-closeout-lag.sh  # report
 scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
-scripts/check-boundary-guard-mli-pairs.sh  # green; diff-driven on BASE_REF, and no
-#   planted violation has been shown to fail it yet
 scripts/check-ollama-model-context.py  # tool: needs OLLAMA_CLOUD_API_KEY and network
-scripts/check-pr-sync.sh
 scripts/lib/worktree-cleanup-guards.sh  # not a check: a function library the name
 #   pattern picks up

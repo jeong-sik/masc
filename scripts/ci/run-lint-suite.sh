@@ -233,6 +233,13 @@ blocking_pr_lints() {
   run_lint "Release train guard" \
     bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
   run_lint "PR hygiene" bash scripts/check-pr-hygiene.sh --base "${base}"
+  # The companion to the boundary guard wired above: a new .mli whose paired
+  # .ml is already in that guard's allow-list has to be added alongside it,
+  # or every later PR fails on docstrings this one exposed. That is PR #11248
+  # -> blocked #11272 -> fix-forward #11280/#11283. Adding a keeper .mli whose
+  # .ml is allow-listed, without the .mli, reports PAIR-GATE FAIL.
+  run_lint "Boundary-guard .mli pairing" \
+    env BASE_REF="${base}" bash scripts/check-boundary-guard-mli-pairs.sh
   # A wildcard catch that swallows Eio.Cancel.Cancelled is the bug this repo
   # modelled in TLA+ (CancelledAbsorbed / CancelledNeverAbsorbed) and hit at
   # runtime as an Assert_failure. The lint existed but no workflow ran it, so
@@ -356,6 +363,12 @@ blocking_pr_lints() {
   # concept walking back in unnoticed, but it is the first place to look if
   # the lint job gets slow.
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
+  # A per-pattern ratchet over dashboard/src for Tailwind spellings whose
+  # replacement already exists. It was reporting one unit of slack --
+  # text-px-literal measured 50 against a baseline of 51 -- which is one free
+  # regression, so the baseline moves to 50 in this commit. Planting
+  # `text-[13px] bg-zinc-800` reports two patterns over baseline.
+  run_lint "Dashboard styling drift" bash scripts/dashboard-drift-check.sh
   # Two line-reference validators with nothing to validate: no spec preamble
   # and no keeper docstring currently cites a line number. They were written
   # after four citations in a retired queue model drifted 245 to 413 lines

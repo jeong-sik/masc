@@ -377,7 +377,7 @@ let test_scoped_boundary_error_stops_immediately () =
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~usage:None stop with
           | Error error ->
-            (match Masc.Keeper_internal_error.classify_masc_internal_error error with
+            (match Keeper_internal_error.classify_masc_internal_error error with
              | Some (Terminal_effect_failed
                  { failure_class = Tool_result.Runtime_failure;
                    effect_disposition = Tool_result.Effect_outcome_unknown;

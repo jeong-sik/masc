@@ -44,8 +44,8 @@ let add_routes router =
          read_body request reqd (fun json ->
            Result.bind (Browser_surface.parse_request json) Browser_surface.read)))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/session"
-      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun _state request reqd ->
+      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun _state _agent_name request reqd ->
          read_body request reqd session))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/goto"
-      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun _state request reqd ->
+      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun _state _agent_name request reqd ->
          read_body request reqd goto))

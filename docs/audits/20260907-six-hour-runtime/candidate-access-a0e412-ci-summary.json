@@ -25,10 +25,16 @@
   "independent_source_review": "pass",
   "required_checks": {
     "run_id": 34132761749,
-    "status": "@check pending at this observation"
+    "conclusion": "success"
   },
   "limits": [
     "Actual HTTP error attribution and production candidate walk fixtures; no provider HTTP server in these scenarios.",
     "No account permission repair, deployment or live successful fallback proof."
-  ]
+  ],
+  "merge": {
+    "merged": true,
+    "merged_at": "2026-09-07T14:38:29Z",
+    "merge_commit_sha": "656d1493d5974a82e7296cf416f6bd47209b0962"
+  },
+  "merge_verified_at": "2026-09-07T14:39:40.619602+00:00"
 }

@@ -508,3 +508,11 @@ Responses는다른세션의#34055가이미catalog행으로표현하므로새prot
 
 
 권한 failover의 a0e412 원격 실행은 [93/93 PASS](candidate-access-a0e412-ci-summary.json)(driver62/lane18/quota13)로 완료됐다. 신규3개 시나리오도 실제 실행했다. 필수 @check는 이 관측에서 진행 중이다. 기존 Responses PR9c98의 올바른 대상 실행은 [71/71 PASS](openai-responses-9c98-ci-summary.json)(catalog14/header57)이며, 별도 CI workflow도 SUCCESS다. 이 결과는 아직 추가 중인 전체 runtime HTTP 시나리오를 포함하지 않는다.
+
+
+[#34093](https://github.com/jeong-sik/masc/pull/34093)은 기존#34055에 의존하는 작은 수정이다. [stack 정보](openai-responses-effort-stack.json)의0d7dcbd555는 GPT-5.5 세 행의 effort 목록만 공식5값으로 맞추고, 실제 TOML→binding→완료 API→로컬 HTTP를 통과하는 시나리오를 추가했다. Responses6조합, Chat none2조합, minimal의 실제 완료 호출 거절과 HTTP0을 정의했다. source review와 parser PASS이며 remote34133788720은 진행 중이다. 운영 권한이나 OpenAI 서버 수락을 로컬 응답으로 대신 증명하지 않는다.
+
+
+14:38:29Z #34087은 모든 필수 검사와93/93 동작 테스트를 통과한 a0e412에서656d1493d5로 병합됐다. [후속 운영 확인](runtime-health-followup-connection.json)에서는 잠시8935 연결이 거절됐다가14:39:08Z 새 바이너리3a3968edce의 health가warming으로 응답했다. 로그에는14:36:33Z SIGTERM/정상 종료, 새 프로세스 시작은14:39:00Z다. 이 세션은 배포·재시작하지 않았으며 신호 발신자는 확인하지 않았다. 최신 상태를 앞선14:05Z warning 관측과 구분한다.
+
+사용자가 요청한 비정체 복구 조건은 [복구 시나리오 표](recovery-scenarios.md)에 테스트 범위와 남은 native 연결을 나누어 정리했다.

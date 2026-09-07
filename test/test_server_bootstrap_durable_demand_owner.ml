@@ -119,6 +119,50 @@ let test_a_name_with_no_durable_work_carries_no_demand () =
       fail "the classification could not run")
 ;;
 
+let test_unsupported_primary_retains_unknown_demand () =
+  with_base_path (fun base_path ->
+    let keeper_name = "keeper-unsupported-queue" in
+    seed_durable_demand ~base_path ~keeper_name;
+    let path =
+      Filename.concat
+        (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+        "event-queue-v19.json"
+    in
+    let unsupported =
+      match Yojson.Safe.from_file path with
+      | `Assoc fields ->
+        `Assoc
+          (("schema", `String "keeper.event_queue.state.unsupported")
+           :: List.remove_assoc "schema" fields)
+        |> Yojson.Safe.pretty_to_string
+        |> fun body -> body ^ "\n"
+      | _ -> fail "seeded queue snapshot is not an object"
+    in
+    let output = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out output)
+      (fun () -> output_string output unsupported);
+    (match classify ~base_path ~keeper_name with
+     | Error (Maintenance.Demand_unknown detail) ->
+       check bool "decode failure retains an actionable diagnostic" true
+         (String_util.contains_substring detail
+            "keeper.event_queue.state.unsupported")
+     | Error Maintenance.Owner_absent ->
+       fail "undecodable demand must not authorize owner-absent cancellation"
+     | Error (Maintenance.Owner_unknown _)
+     | Error (Maintenance.Executor_unavailable _)
+     | Error (Maintenance.Demand_execution_failed _) ->
+       fail "unsupported primary did not reach the durable demand read boundary"
+     | Ok None -> fail "unsupported primary was silently treated as no demand"
+     | Ok (Some _) -> fail "unsupported primary was accepted as durable demand");
+    let input = open_in_bin path in
+    let after =
+      Fun.protect ~finally:(fun () -> close_in input)
+        (fun () -> really_input_string input (in_channel_length input))
+    in
+    check string "classification preserves every unsupported snapshot byte"
+      unsupported after)
+;;
+
 let test_an_executable_owner_is_woken_for_durable_demand () =
   match
     Maintenance.Recovery_for_testing.durable_demand_recovery_action
@@ -156,6 +200,8 @@ let () =
             test_durable_work_under_an_unknown_name_is_absent_not_unknown
         ; test_case "a name with no durable work carries no demand" `Quick
             test_a_name_with_no_durable_work_carries_no_demand
+        ; test_case "unsupported primary retains unknown demand and original bytes" `Quick
+            test_unsupported_primary_retains_unknown_demand
         ] )
     ; ( "recovery_action"
       , [ test_case "executable owner receives a fresh wake hint" `Quick

@@ -202,8 +202,9 @@ let same_snapshot_file (left : Unix.stats) (right : Unix.stats) =
 ;;
 
 let cached_snapshot path =
-  match Unix.stat path with
+  match Unix.lstat path with
   | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | stat when stat.Unix.st_kind <> Unix.S_REG -> None
   | stat ->
     Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
       match Hashtbl.find_opt snapshot_cache path with
@@ -211,14 +212,11 @@ let cached_snapshot path =
       | None | Some _ -> None)
 ;;
 
-let remember_snapshot path state =
-  (* Re-stat after the read: a write between the two would leave the cache
-     describing bytes this decode never saw. *)
-  match Unix.stat path with
-  | exception (Unix.Unix_error _ | Sys_error _) -> ()
-  | stat ->
-    Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
-      Hashtbl.replace snapshot_cache path { sce_stat = stat; sce_state = state })
+let remember_snapshot ~stat path state =
+  (* Bind only the identity sampled around the bytes that were decoded.
+     Re-statting here could attach the old state to a concurrent replacement. *)
+  Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
+    Hashtbl.replace snapshot_cache path { sce_stat = stat; sce_state = state })
 ;;
 
 let forget_snapshot path =
@@ -231,11 +229,9 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
   let save = if strict_parent_sync then save_json_atomic_strict else save_json_atomic in
   match save path (State.to_yojson state) with
   | Ok () ->
-    (* The writer already holds the state it just wrote, so the next read is
-       a hit rather than a re-parse of bytes this process produced. An atomic
-       save renames a new file into place, so the stat recorded here is the
-       one a reader will compare against. *)
-    remember_snapshot path state;
+    (* The atomic writer does not return the written descriptor identity.
+       Re-read once before caching; a post-write stat could name a replacement. *)
+    forget_snapshot path;
     notify_state_change_observer ~keeper_name;
     Ok ()
   | Error message ->
@@ -272,26 +268,33 @@ let snapshot_read_error_kind_to_string = function
   | Incoherent_read -> "incoherent_read"
 ;;
 
-let reset_required_message ~path ~surface detail =
-  Printf.sprintf "%s at %s is incompatible (reset required): %s" surface path detail
+let undecodable_message ~path ~surface detail =
+  Printf.sprintf "%s at %s cannot be decoded: %s" surface path detail
 ;;
 
-let read_json_if_present path =
+let read_json_if_present ~after_read path =
   try
-    if Sys.file_exists path
-    then
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | stat when stat.Unix.st_kind <> Unix.S_REG ->
+        Error (Printf.sprintf "event queue snapshot at %s is not a regular file" path)
+    | before ->
       (match Safe_ops.read_file_safe path with
        | Error message ->
          Error (Printf.sprintf "failed to read %s: %s" path message)
        | Ok bytes ->
-         (try Ok (Some (Yojson.Safe.from_string bytes)) with
+         (try
+            let json = Yojson.Safe.from_string bytes in
+            after_read ();
+            let after = Unix.lstat path in
+            if after.Unix.st_kind = Unix.S_REG && same_snapshot_file before after
+            then Ok (Some (json, before))
+            else Error (Printf.sprintf "event queue snapshot changed while reading %s" path)
+          with
           | Yojson.Json_error detail ->
             Error
-              (reset_required_message
-                 ~path
-                 ~surface:"event queue snapshot"
-                 ("invalid JSON: " ^ detail))))
-    else Ok None
+              (Printf.sprintf "event queue snapshot at %s contains invalid JSON: %s"
+                 path detail)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -309,15 +312,9 @@ let schema_field = function
 
 type primary_snapshot =
   | Primary_absent
-  | Primary_unreadable of string
-      (** The file is there and this binary cannot decode it. Boot treats this
-          exactly like [Primary_absent] — see [fail_open] below — but the health
-          probe has to tell the two apart, because an unreadable queue and an
-          empty queue look identical from the outside and only one of them
-          means stimuli were lost. *)
   | Primary_current of State.t
 
-let read_primary_current_unlocked owner =
+let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
   let path = snapshot_path_of_owner owner in
   Atomic.incr snapshot_cache_read_counter;
   match cached_snapshot path with
@@ -325,36 +322,26 @@ let read_primary_current_unlocked owner =
     Atomic.incr snapshot_cache_hit_counter;
     Ok (Primary_current state)
   | None ->
-  match read_json_if_present path with
+  match read_json_if_present ~after_read path with
   | Error _ as error -> error
   | Ok None -> Ok Primary_absent
-  | Ok (Some json) ->
-    (* Fail open. A snapshot this binary cannot decode is an absent snapshot:
-       the queue starts empty and the WAL replays on top, which is the same
-       path a first boot takes. Refusing instead stopped the whole fleet three
-       times on 2026-08-23, every time on a field or variant this binary had
-       itself stopped writing, and every time with nothing pending. What is
-       lost is the pending stimuli and the idempotence ledger in the
-       unreadable file; the WARN below is the record of that loss. *)
-    let fail_open detail =
-      Log.Keeper.warn
-        "event queue snapshot unreadable at %s, starting from an empty queue \
-         (pending stimuli and the disposition ledger in it are lost): %s"
-        path
-        detail;
-      Ok (Primary_unreadable detail)
+  | Ok (Some (json, stat)) ->
+    (* A present snapshot remains authoritative even when this binary cannot
+       decode it. Only physical absence permits WAL-only reconstruction.
+       Returning an error prevents any later transform from overwriting its
+       pending sources and disposition evidence with an empty state. *)
+    let decode_error detail =
+      Error (Printf.sprintf "event queue snapshot at %s cannot be decoded; \
+                            snapshot and transition WAL retained: %s" path detail)
     in
     (match schema_field json with
-     | Error message -> fail_open message
+     | Error message -> decode_error message
      | Ok _ ->
        (match State.of_yojson json with
         | Ok state ->
-          remember_snapshot path state;
+          remember_snapshot ~stat path state;
           Ok (Primary_current state)
-        (* An undecodable snapshot is not cached: it is answered by
-           [fail_open] every time, which is where the WARN that records the
-           loss is written. *)
-        | Error message -> fail_open message))
+        | Error message -> decode_error message))
 ;;
 
 let read_primary_unlocked = read_primary_current_unlocked
@@ -475,7 +462,7 @@ let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
        (match replay_transition_wal_bytes ~wal_only owner state bytes with
         | Error detail ->
           Error
-            (reset_required_message
+            (undecodable_message
                ~path
                ~surface
                detail)
@@ -550,40 +537,12 @@ let replay_transition_wal_read_only_unlocked ?(wal_only = false) owner state =
     state
 ;;
 
-let load_state_unlocked_with_primary_detail owner =
-  let from_empty detail =
-    Result.map
-      (fun state -> state, detail)
-      (replay_transition_wal_unlocked ~wal_only:true owner State.empty)
-  in
-  match read_primary_unlocked owner with
+let load_state_unlocked ?after_read owner =
+  match read_primary_unlocked ?after_read owner with
   | Error _ as error -> error
-  | Ok (Primary_current state) ->
-    Result.map (fun state -> state, None) (replay_transition_wal_unlocked owner state)
-  | Ok Primary_absent -> from_empty None
-  | Ok (Primary_unreadable detail) -> from_empty (Some detail)
-;;
-
-let load_state_unlocked owner =
-  Result.map fst (load_state_unlocked_with_primary_detail owner)
-;;
-
-let load_state_result_with_primary_detail ~base_path ~keeper_name =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         load_state_unlocked_with_primary_detail owner)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue state load raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
+  | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
+  | Ok Primary_absent ->
+      replay_transition_wal_unlocked ~wal_only:true owner State.empty
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -607,7 +566,7 @@ let read_state_read_only_unlocked ~require_existing owner =
   | Error _ as error -> error
   | Ok (Primary_current state) ->
     replay_transition_wal_read_only_unlocked owner state
-  | Ok (Primary_absent | Primary_unreadable _)
+  | Ok Primary_absent
     when require_existing && not (durable_state_exists_unlocked owner) ->
     Error
       (Printf.sprintf
@@ -615,7 +574,7 @@ let read_state_read_only_unlocked ~require_existing owner =
          (keeper_name_of_owner owner)
          (snapshot_path_of_owner owner)
          (transition_wal_path_of_owner owner))
-  | Ok (Primary_absent | Primary_unreadable _) ->
+  | Ok Primary_absent ->
     replay_transition_wal_read_only_unlocked
       ~wal_only:true
       owner
@@ -760,14 +719,8 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
 ;;
 
 let load_with_read_errors ~projection ~base_path ~keeper_name =
-  match load_state_result_with_primary_detail ~base_path ~keeper_name with
-  | Ok (state, None) -> { pending = projection state; read_errors = [] }
-  | Ok (state, Some detail) ->
-    (* The keeper booted on an empty queue and kept running; what it lost is
-       still a read error, and the fleet summary is where an operator sees it. *)
-    { pending = projection state
-    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name detail
-    }
+  match load_state_result ~base_path ~keeper_name with
+  | Ok state -> { pending = projection state; read_errors = [] }
   | Error message ->
     { pending = projection State.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
@@ -813,6 +766,13 @@ let observe_snapshot_with_errors ~base_path ~keeper_name =
 ;;
 
 module For_testing = struct
+  let load_state_with_read_interleave ~after_read ~base_path ~keeper_name =
+    match resolve_owner ~base_path ~keeper_name with
+    | Error _ as error -> error
+    | Ok owner -> Owner_lock.with_durable_lock owner (fun () ->
+        load_state_unlocked ~after_read owner)
+  ;;
+
   let observe_snapshot_with_errors_with_interleave =
     observe_snapshot_with_errors_with
   ;;
@@ -1540,23 +1500,15 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     | Lifecycle_unknown detail ->
       [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
   in
-  match load_state_result_with_primary_detail ~base_path ~keeper_name with
-  | Ok (state, primary_detail) ->
+  match load_state_result ~base_path ~keeper_name with
+  | Ok state ->
     let pending = State.pending state in
     let pending_oldest_source = queue_oldest_source_arrived_at pending in
     let outbox = State.transition_outbox state in
-    let primary_read_errors =
-      match primary_detail with
-      | None -> []
-      | Some detail ->
-        diagnose_snapshot_read_error ~base_path ~keeper_name detail
-        |> List.map (fun error -> error.message)
-    in
     let lifecycle_read_errors =
       if
         Keeper_event_queue.is_empty pending
         && outbox = []
-        && primary_read_errors = []
       then []
       else lifecycle_read_errors ()
     in
@@ -1565,8 +1517,8 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     ; pending_count = Keeper_event_queue.length pending
     ; pending_oldest_source
     ; outbox_count = List.length outbox
-    ; counts_complete = lifecycle_read_errors = [] && primary_read_errors = []
-    ; read_errors = lifecycle_read_errors @ primary_read_errors
+    ; counts_complete = lifecycle_read_errors = []
+    ; read_errors = lifecycle_read_errors
     }
   | Error message ->
     let lifecycle_read_errors = lifecycle_read_errors () in

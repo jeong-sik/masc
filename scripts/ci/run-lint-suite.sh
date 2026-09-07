@@ -282,6 +282,12 @@ blocking_pr_lints() {
     bash scripts/audit-shell-ir-consumption.sh \
     --baseline scripts/shell-ir-consumption-baseline.json
   run_lint "Base policy" bash scripts/base-policy-audit.sh --fail-on-regression
+  # The gate itself needs `dune describe` and runs in the build job. This is
+  # its self-test, which feeds synthetic graphs and asserts both directions --
+  # a clean graph passes, a cycle and a dangling UID are refused -- and needs
+  # no switch. Same split as the env-read floor check above.
+  run_lint "Sublib leaf boundary self-test" \
+    python3 scripts/audit-sublib-cycle.py --self-test
 }
 
 advisory_lints() {

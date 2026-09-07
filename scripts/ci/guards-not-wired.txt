@@ -18,7 +18,7 @@
 # failing exit in them at all -- so passing was not evidence of anything, and
 # they are marked report. Two more need the OCaml toolchain, which the lint
 # job does not have; wiring them there fails on a missing binary rather than
-# on the thing they check.
+# on the thing they check. Both are in the build job now, where the switch is.
 #   report -- prints findings and exits 0 either way; wiring it enforces
 #             nothing, so the work is to give it a verdict first
 #   tool   -- takes arguments or a mode, or reads the operator's live .masc
@@ -33,9 +33,6 @@
 scripts/anti-fake-audit.sh  # report: the default scan scores each test file with bc
 #   arithmetic over pattern counts and fails under a threshold, so wiring it makes a
 #   PR's verdict a heuristic. --production-scan has a real rule and is red on main.
-scripts/audit-sublib-cycle.py  # green, but needs dune: belongs in the build job
-scripts/check-keeper-event-queue-projection-boundary.sh  # green, but compiles a
-#   checker with ocamlc -I +compiler-libs: belongs in the build job
 scripts/check-ssot.sh  # red: R4-config-filename 1 > 0 and R6-home-masc-root 70 > 0.
 #   R2 and R10 were the other two and are fixed (#34199, #34198). R6's 70 are mostly
 #   evidence documents quoting a ~/.masc path, which is a scope question about the

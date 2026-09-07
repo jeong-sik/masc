@@ -105,12 +105,23 @@ let load_poll_config ~path =
 let cursor_path ~base_dir =
   Filename.concat base_dir ".gate/runtime/slack/poll-cursor.json"
 
+(* An unreadable or corrupt cursor resets every channel to now, skipping
+   whatever the old cursor still owed — that loss is real, so it is loud.
+   The sibling iMessage cursor holds the same stance. *)
 let read_cursors ~path : (string * string) list =
   match Safe_ops.read_file_safe path with
-  | Error _ -> []
+  | Error detail ->
+    Log.Server.warn
+      "slack-lane: cursor unreadable (%s): %s — every channel restarts from        now and the uncollected window is lost"
+      path detail;
+    []
   | Ok content ->
     (match Yojson.Safe.from_string content with
-     | exception Yojson.Json_error _ -> []
+     | exception Yojson.Json_error detail ->
+       Log.Server.warn
+         "slack-lane: cursor corrupt (%s): %s — every channel restarts from           now and the uncollected window is lost"
+         path detail;
+       []
      | `Assoc fields ->
        List.filter_map
          (fun (channel_id, value) ->
@@ -118,35 +129,23 @@ let read_cursors ~path : (string * string) list =
            | `String ts when String.trim ts <> "" -> Some (channel_id, ts)
            | _ -> None)
          fields
-     | _ -> [])
+     | other ->
+       Log.Server.warn
+         "slack-lane: cursor has an unexpected shape (%s): %s — treating as         empty"
+         path (Yojson.Safe.to_string other);
+       [])
 ;;
 
 let write_cursors ~path (cursors : (string * string) list) =
   let dir = Filename.dirname path in
-  (* The server restarts often enough that a torn cursor would be routine,
-     not rare; temp + rename keeps readers atomic. *)
-  let () =
-    match Unix.lstat dir with
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-      (try Unix.mkdir dir 0o755 with
-       | Unix.Unix_error _ ->
-         (* lost a create race; the write below fails loudly if the dir is
-            genuinely unusable *)
-         ())
-    | _ -> ()
-  in
+  Fs_compat.mkdir_p dir;
   let json =
     `Assoc (List.map (fun (channel_id, ts) -> (channel_id, `String ts)) cursors)
   in
-  let temp = path ^ ".tmp" in
-  (try
-     Out_channel.with_open_bin temp (fun oc ->
-         output_string oc (Yojson.Safe.to_string json));
-     Sys.rename temp path
-   with
-  | Sys_error detail
-  | Failure detail ->
-    Log.Server.warn "slack-lane: cursor write failed (%s): %s" path detail)
+  (match Fs_compat.save_file_atomic path (Yojson.Safe.to_string json) with
+   | Error detail ->
+     Log.Server.warn "slack-lane: cursor write failed (%s): %s" path detail
+   | Ok () -> ())
 ;;
 
 (* ── filtering ─────────────────────────────────────────────────── *)
@@ -172,7 +171,10 @@ let pollable ~bot_user_id (m : Rest.history_message) : bool =
   && (match m.Rest.user_id with Some _ -> true | None -> false)
   &&
   (match bot_user_id with
-   | Some bot -> not (text_contains ("<@" ^ bot ^ ">") m.Rest.text)
+   | Some bot ->
+     (* No trailing ">": the legacy rendered form [<@id|label>] shares the
+        [<@id] prefix and must be excluded the same as [<@id>]. *)
+     not (text_contains ("<@" ^ bot) m.Rest.text)
    | None -> true)
 ;;
 
@@ -185,13 +187,17 @@ let six_digit_ts now = Printf.sprintf "%.6f" now
 
 type channel_cycle =
   | Initialized (* first sight: cursor starts now, nothing collected *)
-  | Collected of { new_messages : int; latest_ts : string }
+  | Collected of { new_messages : int; advance_ts : string }
   | Nothing_new
   | Fetch_failed of string
 
-let fetch_pages ~clock ~token ~channel_id ~oldest =
+(* [truncated] is true when pagination stopped at the page cap (or Slack
+   promised more without a cursor) — the window below what was fetched is
+   still unseen. The caller must not advance past it blindly. *)
+let fetch_pages ~clock ~token ~channel_id ~oldest :
+    ((Rest.history_message list * bool), Rest.error) result =
   let rec go ~pages_left ~cursor ~acc =
-    if pages_left = 0 then Ok (List.rev acc)
+    if pages_left = 0 then Ok (List.rev acc, true)
     else
       match
         Rest.conversations_history ~clock ~token ~channel_id ~oldest ?cursor ()
@@ -201,15 +207,22 @@ let fetch_pages ~clock ~token ~channel_id ~oldest =
         let acc = page.Rest.messages @ acc in
         if page.Rest.has_more && page.Rest.next_cursor <> None then
           go ~pages_left:(pages_left - 1) ~cursor:page.Rest.next_cursor ~acc
-        else Ok (List.rev acc)
+        else if page.Rest.has_more then Ok (List.rev acc, true)
+        else Ok (List.rev acc, false)
   in
   go ~pages_left:max_pages_per_cycle ~cursor:None ~acc:[]
 ;;
 
-(* Slack returns newest first, so the head of the first page is the cycle's
-   high-water mark — and it exists whenever the page is non-empty. *)
-let max_ts_of (messages : Rest.history_message list) : string option =
-  match messages with [] -> None | newest :: _ -> Some newest.Rest.ts
+(* The cursor advances to the OLDEST ts actually fetched: everything above
+   it was fetched contiguously, and anything below (a truncated backlog)
+   stays reachable for the next cycle. Advancing to the newest would
+   permanently skip pages the cap never reached. Messages arrive
+   newest-first. *)
+let cursor_advance_of (messages : Rest.history_message list) : string option
+  =
+  match List.rev messages with
+  | [] -> None
+  | oldest :: _ -> Some oldest.Rest.ts
 ;;
 
 let poll_channel ~clock ~token ~bot_user_id ~now ~capacity ~channel_id
@@ -219,7 +232,13 @@ let poll_channel ~clock ~token ~bot_user_id ~now ~capacity ~channel_id
   | Some oldest -> (
     match fetch_pages ~clock ~token ~channel_id ~oldest with
     | Error e -> (Fetch_failed (error_to_string e), None)
-    | Ok messages ->
+    | Ok (messages, truncated) ->
+      let () =
+        if truncated then
+          Log.Server.warn
+            "slack-lane: channel %s window exceeded %d pages; collecting              the newest part, the rest follows next cycle"
+            channel_id max_pages_per_cycle
+      in
       let kept =
         List.filter (fun m -> pollable ~bot_user_id m) messages
       in
@@ -237,9 +256,11 @@ let poll_channel ~clock ~token ~bot_user_id ~now ~capacity ~channel_id
           ~capacity
       in
       List.iter push_one kept;
-      match max_ts_of messages with
-      | Some latest -> (Collected { new_messages = List.length kept; latest_ts = latest }, Some latest)
-      | None -> (Nothing_new, None))
+      (match cursor_advance_of messages with
+       | Some advance ->
+         ( Collected { new_messages = List.length kept; advance_ts = advance }
+         , Some advance )
+       | None -> (Nothing_new, None)))
 ;;
 
 (* ── the cycle over all bound channels ──────────────────────────── *)
@@ -269,10 +290,10 @@ let poll_cycle ~clock ~token ~bot_user_id ~base_dir ~capacity () =
              Log.Server.info
                "slack-lane: channel %s first sight, collecting from now"
                channel_id
-           | Collected { new_messages; latest_ts } ->
+           | Collected { new_messages; advance_ts } ->
              Log.Server.info
-               "slack-lane: channel %s +%d message(s) through ts %s" channel_id
-               new_messages latest_ts
+               "slack-lane: channel %s +%d message(s), cursor at ts %s"
+               channel_id new_messages advance_ts
            | Nothing_new -> ()
            | Fetch_failed detail ->
              Log.Server.warn
@@ -289,6 +310,8 @@ let poll_cycle ~clock ~token ~bot_user_id ~base_dir ~capacity () =
 
 module For_testing = struct
   let pollable = pollable
+
+  let cursor_advance_of = cursor_advance_of
 end
 
 (* ── start ─────────────────────────────────────────────────────── *)
@@ -315,36 +338,37 @@ let start ~sw ~env ~state =
     | Ok (Poll_enabled config) ->
       let clock = Eio.Stdenv.clock env in
       let base_dir = (Mcp_server.workspace_config state).base_path in
-      let bot_user_id =
-        match Rest.auth_test ~clock ~token () with
-        | Error e ->
-          Log.Server.warn
-            "slack-lane: auth.test failed, mention filtering degraded (%s)"
-            (error_to_string e);
-          None
-        | Ok { Rest.user_id; _ } -> Some user_id
-      in
-      Log.Server.info
-        "slack-lane: starting poll fiber (interval %.0fs, capacity %d/channel)"
-        config.interval_sec Lane.default_capacity_per_channel;
-      Eio.Fiber.fork ~sw (fun () ->
-          try
-            let rec loop () =
-              (try
-                 poll_cycle ~clock ~token ~bot_user_id ~base_dir
-                   ~capacity:Lane.default_capacity_per_channel ()
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                 Log.Server.error "slack-lane: poll cycle crashed: %s"
-                   (Printexc.to_string exn));
-              Eio.Time.sleep clock config.interval_sec;
+      (* Without the bot identity the mention filter is unenforceable, and
+         collecting mentions here doubles them against the socket path.
+         Fail closed: the lane does not start. *)
+      (match Rest.auth_test ~clock ~token () with
+       | Error e ->
+         Log.Server.error
+           "slack-lane: auth.test failed, poll lane not started (%s)"
+           (error_to_string e)
+       | Ok { Rest.user_id; _ } ->
+        let bot_user_id = Some user_id in
+        Log.Server.info
+          "slack-lane: starting poll fiber (interval %.0fs, capacity %d/channel)"
+          config.interval_sec Lane.default_capacity_per_channel;
+        Eio.Fiber.fork ~sw (fun () ->
+            try
+              let rec loop () =
+                (try
+                   poll_cycle ~clock ~token ~bot_user_id ~base_dir
+                     ~capacity:Lane.default_capacity_per_channel ()
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Server.error "slack-lane: poll cycle crashed: %s"
+                     (Printexc.to_string exn));
+                Eio.Time.sleep clock config.interval_sec;
+                loop ()
+              in
               loop ()
-            in
-            loop ()
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Server.error "slack-lane: poll fiber crashed: %s"
-              (Printexc.to_string exn)))
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.error "slack-lane: poll fiber crashed: %s"
+                (Printexc.to_string exn))))
 ;;

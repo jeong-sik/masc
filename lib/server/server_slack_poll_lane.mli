@@ -10,8 +10,16 @@
     and bot/subtype rows are not conversation.
 
     The cursor (.gate/runtime/slack/poll-cursor.json, channel_id → last
-    ts seen) is durable across restarts and advances only over messages
-    the fiber actually saw, so a failed cycle retries rather than skips.
+    ts seen) is durable across restarts and advances only to the OLDEST
+    message actually fetched: a cycle whose window exceeds the page cap
+    collects the newest part and leaves the rest reachable for the next
+    cycle, so a failed or truncated cycle retries rather than skips. A
+    failed cycle holds the cursor; an unreadable or corrupt cursor file
+    logs loudly and restarts every channel from now (that window is lost,
+    not silently bridged). The lane refuses to start when auth.test
+    cannot resolve the bot identity: without it the mention filter is
+    unenforceable and collected mentions would double against the socket
+    path.
 
     Board posting is deliberately absent here: the external bridge poller
     (jeong-sik/me#1291) owns the digest circuit until the cutover
@@ -47,7 +55,14 @@ module For_testing : sig
     bot_user_id:string option -> Slack_rest_client.history_message -> bool
   (** The collection filter, exposed so tests can pin the contract without
      a live token: plain human top-level messages, mentions excluded (the
-     socket path owns them). *)
+     socket path owns them), legacy [<@id|label>] mention rendering
+     included. *)
+
+  val cursor_advance_of :
+    Slack_rest_client.history_message list -> string option
+  (** The cursor decision: the OLDEST ts of the fetched (newest-first)
+     page set, or [None] when nothing was fetched. Advancing to the oldest
+     — not the newest — is what keeps a truncated backlog reachable. *)
 end
 
 val start :

@@ -144,6 +144,28 @@ let test_pollable_filter () =
 (* ---------------------------------------------------------------- *)
 (* ring buffer: order, dedupe, capacity                             *)
 (* ---------------------------------------------------------------- *)
+(* cursor advance: the OLDEST fetched ts, never the newest           *)
+(* ---------------------------------------------------------------- *)
+
+let test_cursor_advance () =
+  (* newest-first, as conversations.history returns them. *)
+  let page =
+    [ history_message ~ts:"1788708950.000000" ~text:"newest" ()
+    ; history_message ~ts:"1788708947.825569" ~text:"middle" ()
+    ; history_message ~ts:"1788708940.000100" ~text:"oldest" ()
+    ]
+  in
+  (match Poll.For_testing.cursor_advance_of page with
+   | Some advance ->
+     (* The newest would be ...950; advancing there would permanently skip
+        anything the page cap never fetched below. *)
+     check string "advance is the oldest fetched ts" "1788708940.000100" advance
+   | None -> failwith "expected an advance");
+  check bool "empty page advances nothing"
+    (Poll.For_testing.cursor_advance_of [] = None) true
+;;
+
+(* ---------------------------------------------------------------- *)
 
 let lane_msg ~ts ~text : Lane.lane_message =
   { Lane.channel_id = "C1"; ts; user_id = "U1"; text; received_unix = 0.0 }
@@ -276,6 +298,8 @@ let () =
         ] )
     ; ( "filter"
       , [ test_case "pollable" `Quick test_pollable_filter ] )
+    ; ( "cursor"
+      , [ test_case "advance is oldest fetched" `Quick test_cursor_advance ] )
     ; ( "lane"
       , [ test_case "order and dedupe" `Quick test_lane_order_and_dedupe
         ; test_case "capacity trim" `Quick test_lane_capacity_trim

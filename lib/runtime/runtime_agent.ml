@@ -693,6 +693,29 @@ let apply_runtime_model_input_capabilities
     supports_video_input = model_caps.supports_video_input;
   }
 
+(* A model declaration cannot make its host transport carry a media block.
+   The official-client adapters accept text plus inline images for Codex and
+   Claude, and text only for Antigravity (Keeper_official_client_host). *)
+let apply_execution_input_capabilities execution
+    (caps : Llm_provider.Capabilities.capabilities) =
+  match execution with
+  | Runtime_execution.Agent_core _ -> caps
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _ ->
+    { caps with
+      supports_multimodal_inputs = false
+    ; supports_audio_input = false
+    ; supports_video_input = false
+    ; supports_document_input = false
+    }
+  | Runtime_execution.Antigravity_cli _ ->
+    { caps with
+      supports_multimodal_inputs = false
+    ; supports_image_input = false
+    ; supports_audio_input = false
+    ; supports_video_input = false
+    ; supports_document_input = false
+    }
+
 let input_capabilities_for_config (config : config) =
   let caps = provider_caps_of_config config.provider_cfg in
   match Runtime.get_runtime_by_id (runtime_id_of_config config) with
@@ -704,11 +727,12 @@ let input_capabilities_for_config (config : config) =
           ~default:Runtime_schema.model_capabilities_default
       in
       apply_runtime_model_input_capabilities caps model_caps
+      |> apply_execution_input_capabilities runtime.execution
 
 (* Effective input capabilities of a materialized runtime (RFC-0265 reroute
    candidate scoring). Same composition as [input_capabilities_for_config]:
-   provider caps overlaid with the model's declared media capabilities (the MASC
-   SSOT, [apply_runtime_model_input_capabilities]). *)
+   provider caps overlaid with the model's declared media capabilities, then
+   constrained by the concrete execution transport. *)
 let input_capabilities_of_runtime (rt : Runtime.t) =
   let provider_caps =
     match rt.Runtime.execution with
@@ -723,6 +747,7 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
     provider_caps
     (Option.value rt.Runtime.model.capabilities
        ~default:Runtime_schema.model_capabilities_default)
+  |> apply_execution_input_capabilities rt.execution
 
 let validate_content_blocks_for_config
     ?agent_core_checkpoint

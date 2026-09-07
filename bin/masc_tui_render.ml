@@ -12074,6 +12074,213 @@ let fusion_pipeline_diagram (run : Tui_decode.fusion_run) =
     ~glyph_done ~glyph_active ~glyph_waiting ~glyph_failed ~arrow
     ~status ~stage ~panel_answered ~panel_expected ()
 
+let fusion_evidence_lines ~width (evidence : fusion_evidence) =
+  let answered, failed, input_tokens, output_tokens =
+    List.fold_left
+      (fun (answered, failed, input_tokens, output_tokens) result ->
+        match result with
+        | Fusion_panel_answered answer ->
+            ( answered + 1
+            , failed
+            , input_tokens + answer.fpa_input_tokens
+            , output_tokens + answer.fpa_output_tokens )
+        | Fusion_panel_failed _ ->
+            answered, failed + 1, input_tokens, output_tokens)
+      (0, 0, 0, 0) evidence.fe_panel
+  in
+  let panel_lines =
+    evidence.fe_panel
+    |> List.mapi (fun index result ->
+           match result with
+           | Fusion_panel_answered answer ->
+               [ ( (Theme.ok ())
+                 , Printf.sprintf
+                     "  Panel %d [answered] %s  (%d in / %d out)"
+                     (index + 1)
+                     (Terminal_text.single_line answer.fpa_model)
+                     answer.fpa_input_tokens answer.fpa_output_tokens )
+               ]
+               @ fusion_markdown_block ~width ~indent:"    "
+                   answer.fpa_answer
+           | Fusion_panel_failed failure ->
+               [ ( (Theme.bad ())
+                 , Printf.sprintf "  Panel %d [failed] %s  [%s]"
+                     (index + 1)
+                     (Terminal_text.single_line failure.fpf_model)
+                     (Terminal_text.single_line failure.fpf_reason_code) )
+               ]
+               @ fusion_wrapped_block ~width ~indent:"    "
+                   failure.fpf_reason_detail)
+    |> List.concat
+  in
+  let panel_token_items =
+    List.filter_map
+      (function
+        | Fusion_panel_answered answer ->
+            Some
+              { Chart.name = Terminal_text.single_line answer.fpa_model
+              ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
+              ; style = Some (Chart.Status Masc_tui_theme.Ok)
+              }
+        | Fusion_panel_failed failure ->
+            Some
+              { Chart.name = Terminal_text.single_line failure.fpf_model
+              ; count = 0
+              ; style = Some (Chart.Status Masc_tui_theme.Bad)
+              })
+      evidence.fe_panel
+  in
+  let panel_chart_lines =
+    if List.length panel_token_items >= 2 then
+      (Ansi.dim, "  Model token distribution:")
+      :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
+      @ [ Ansi.dim, "" ]
+    else []
+  in
+  let judge_lines =
+    match evidence.fe_judge with
+    | Fusion_judge_synthesized judge ->
+        [ ( (Theme.info ())
+          , "  Judge [synthesized] "
+            ^ Terminal_text.single_line judge.fj_decision )
+        ]
+        @ fusion_labeled_markdown ~width ~label:"Resolved"
+            judge.fj_resolved_answer
+        @ fusion_labeled_markdown ~width ~label:"Reason" judge.fj_reason
+    | Fusion_judge_failed failure ->
+        [ ( (Theme.bad ())
+          , "  Judge [failed] ["
+            ^ Terminal_text.single_line failure.fj_failure_code
+            ^ "]" )
+        ]
+        @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
+  in
+  (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
+     synthesis; this block is the topology it came through -- first the
+     observed shape as one line, then one card per first-pass lens.
+     Meta/stage/final nodes stay in the shape line only: their output
+     is intermediate synthesis, and printing it next to the final one
+     would render the same deliberation twice. Pre-RFC posts decode
+     with no nodes and draw none of this. *)
+  let judges_lines =
+    match evidence.fe_judges with
+    | [] -> []
+    | nodes ->
+        let count_role wanted =
+          List.fold_left
+            (fun n node ->
+              if node.fjn_role = wanted then n + 1 else n)
+            0 nodes
+        in
+        let firsts = count_role Judge_first in
+        let metas = count_role Judge_meta in
+        let stage_metas = count_role Judge_stage_meta in
+        let final_metas = count_role Judge_final_meta in
+        let refines = count_role Judge_refine in
+        let singles = count_role Judge_single in
+        let shape =
+          (* Same reading the dashboard's shape classifier makes: a
+             first-pass judge only exists in a judge-of-judges run,
+             and stage/final metas only in the staged one. *)
+          if stage_metas > 0 || final_metas > 0 then "staged judge-of-judges"
+          else if firsts > 0 then "judge-of-judges"
+          else if refines > 0 then "refine"
+          else "single"
+        in
+        let counts =
+          List.filter_map
+            (fun (label, n) ->
+              if n > 0 then Some (Printf.sprintf "%s \xc3\x97%d" label n) else None)
+            [ ("first", firsts); ("meta", metas); ("stage-meta", stage_metas)
+            ; ("final-meta", final_metas); ("refine", refines)
+            ; ("single", singles) ]
+        in
+        let first_cards =
+          nodes
+          |> List.filter (fun node -> node.fjn_role = Judge_first)
+          |> List.mapi (fun index node ->
+                 match node.fjn_outcome with
+                 | Judge_node_synthesized synthesized ->
+                     [ ( (Theme.info ())
+                       , Printf.sprintf
+                           "  First %d [synthesized] %s  (%d in / %d out)"
+                           (index + 1)
+                           (Terminal_text.single_line node.fjn_identity)
+                           synthesized.fjno_input_tokens
+                           synthesized.fjno_output_tokens )
+                     ]
+                     @ fusion_labeled_markdown ~width
+                         ~label:
+                           (Printf.sprintf "First %d %s" (index + 1)
+                              (Terminal_text.single_line node.fjn_identity))
+                         synthesized.fjno_resolved_answer
+                 | Judge_node_failed failed ->
+                     let clock =
+                       match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
+                       | true, _ -> "  (timed out)"
+                       | false, Some seconds ->
+                           Printf.sprintf "  (%.0fs)" seconds
+                       | false, None -> ""
+                     in
+                     [ ( (Theme.bad ())
+                       , Printf.sprintf
+                           "  First %d [failed] %s  [%s]%s"
+                           (index + 1)
+                           (Terminal_text.single_line node.fjn_identity)
+                           (Terminal_text.single_line failed.fjno_failure_code)
+                           clock )
+                     ]
+                     @ fusion_wrapped_block ~width ~indent:"    "
+                         failed.fjno_error)
+          |> List.concat
+        in
+        [ Ansi.dim, "" ]
+        (* The counts are already in pipeline order, so joining them
+           with the same arrow the Goal stage rail uses draws the run
+           rather than describing it. The shape name stays, at the end,
+           because it is what the preset is called. *)
+        @ ( Ansi.dim
+          , Printf.sprintf "  %s  \xe2\x94\x80\xe2\x96\xb6  %s  \xc2\xb7  %s"
+              (fusion_panel_dots ~answered ~failed)
+              (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " counts)
+              shape )
+        :: first_cards
+  in
+  let tool_lines =
+    fusion_tool_trace_lines ~width evidence.fe_tool_trace
+  in
+  [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
+  ; Ansi.dim, ""
+  ; Ansi.bold, "  1  QUESTION"
+  ]
+  @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  2  PANEL RESPONSES"
+    ; ( Ansi.dim
+      , Printf.sprintf
+          "  %d answered / %d failed  \xc2\xb7  %d input / %d output tokens"
+          answered failed input_tokens output_tokens )
+  ]
+  @ [ Ansi.dim, "" ]
+  @ panel_chart_lines
+  @ panel_lines
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  3  JUDGE"
+    ]
+  @ judge_lines
+  @ judges_lines
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  4  TOOL EXECUTIONS"
+    ]
+  @ tool_lines
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  5  EVIDENCE RECORDED"
+    ; ( Ansi.dim
+      , "  Board link: "
+        ^ Link.reference Board_post
+            (Terminal_text.single_line evidence.fe_post_id) )
+    ]
+
 let fusion_detail_lines ~width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
@@ -12146,212 +12353,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
-    | Fusion_evidence_recorded, Some evidence ->
-        let answered, failed, input_tokens, output_tokens =
-          List.fold_left
-            (fun (answered, failed, input_tokens, output_tokens) result ->
-              match result with
-              | Fusion_panel_answered answer ->
-                  ( answered + 1
-                  , failed
-                  , input_tokens + answer.fpa_input_tokens
-                  , output_tokens + answer.fpa_output_tokens )
-              | Fusion_panel_failed _ ->
-                  answered, failed + 1, input_tokens, output_tokens)
-            (0, 0, 0, 0) evidence.fe_panel
-        in
-        let panel_lines =
-          evidence.fe_panel
-          |> List.mapi (fun index result ->
-                 match result with
-                 | Fusion_panel_answered answer ->
-                     [ ( (Theme.ok ())
-                       , Printf.sprintf
-                           "  Panel %d [answered] %s  (%d in / %d out)"
-                           (index + 1)
-                           (Terminal_text.single_line answer.fpa_model)
-                           answer.fpa_input_tokens answer.fpa_output_tokens )
-                     ]
-                     @ fusion_markdown_block ~width ~indent:"    "
-                         answer.fpa_answer
-                 | Fusion_panel_failed failure ->
-                     [ ( (Theme.bad ())
-                       , Printf.sprintf "  Panel %d [failed] %s  [%s]"
-                           (index + 1)
-                           (Terminal_text.single_line failure.fpf_model)
-                           (Terminal_text.single_line failure.fpf_reason_code) )
-                     ]
-                     @ fusion_wrapped_block ~width ~indent:"    "
-                         failure.fpf_reason_detail)
-          |> List.concat
-        in
-        let panel_token_items =
-          List.filter_map
-            (function
-              | Fusion_panel_answered answer ->
-                  Some
-                    { Chart.name = Terminal_text.single_line answer.fpa_model
-                    ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
-                    ; style = Some (Chart.Status Masc_tui_theme.Ok)
-                    }
-              | Fusion_panel_failed failure ->
-                  Some
-                    { Chart.name = Terminal_text.single_line failure.fpf_model
-                    ; count = 0
-                    ; style = Some (Chart.Status Masc_tui_theme.Bad)
-                    })
-            evidence.fe_panel
-        in
-        let panel_chart_lines =
-          if List.length panel_token_items >= 2 then
-            (Ansi.dim, "  Model token distribution:")
-            :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
-            @ [ Ansi.dim, "" ]
-          else []
-        in
-        let judge_lines =
-          match evidence.fe_judge with
-          | Fusion_judge_synthesized judge ->
-              [ ( (Theme.info ())
-                , "  Judge [synthesized] "
-                  ^ Terminal_text.single_line judge.fj_decision )
-              ]
-              @ fusion_labeled_markdown ~width ~label:"Resolved"
-                  judge.fj_resolved_answer
-              @ fusion_labeled_markdown ~width ~label:"Reason" judge.fj_reason
-          | Fusion_judge_failed failure ->
-              [ ( (Theme.bad ())
-                , "  Judge [failed] ["
-                  ^ Terminal_text.single_line failure.fj_failure_code
-                  ^ "]" )
-              ]
-              @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
-        in
-        (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
-           synthesis; this block is the topology it came through -- first the
-           observed shape as one line, then one card per first-pass lens.
-           Meta/stage/final nodes stay in the shape line only: their output
-           is intermediate synthesis, and printing it next to the final one
-           would render the same deliberation twice. Pre-RFC posts decode
-           with no nodes and draw none of this. *)
-        let judges_lines =
-          match evidence.fe_judges with
-          | [] -> []
-          | nodes ->
-              let count_role wanted =
-                List.fold_left
-                  (fun n node ->
-                    if node.fjn_role = wanted then n + 1 else n)
-                  0 nodes
-              in
-              let firsts = count_role Judge_first in
-              let metas = count_role Judge_meta in
-              let stage_metas = count_role Judge_stage_meta in
-              let final_metas = count_role Judge_final_meta in
-              let refines = count_role Judge_refine in
-              let singles = count_role Judge_single in
-              let shape =
-                (* Same reading the dashboard's shape classifier makes: a
-                   first-pass judge only exists in a judge-of-judges run,
-                   and stage/final metas only in the staged one. *)
-                if stage_metas > 0 || final_metas > 0 then "staged judge-of-judges"
-                else if firsts > 0 then "judge-of-judges"
-                else if refines > 0 then "refine"
-                else "single"
-              in
-              let counts =
-                List.filter_map
-                  (fun (label, n) ->
-                    if n > 0 then Some (Printf.sprintf "%s \xc3\x97%d" label n) else None)
-                  [ ("first", firsts); ("meta", metas); ("stage-meta", stage_metas)
-                  ; ("final-meta", final_metas); ("refine", refines)
-                  ; ("single", singles) ]
-              in
-              let first_cards =
-                nodes
-                |> List.filter (fun node -> node.fjn_role = Judge_first)
-                |> List.mapi (fun index node ->
-                       match node.fjn_outcome with
-                       | Judge_node_synthesized synthesized ->
-                           [ ( (Theme.info ())
-                             , Printf.sprintf
-                                 "  First %d [synthesized] %s  (%d in / %d out)"
-                                 (index + 1)
-                                 (Terminal_text.single_line node.fjn_identity)
-                                 synthesized.fjno_input_tokens
-                                 synthesized.fjno_output_tokens )
-                           ]
-                           @ fusion_labeled_markdown ~width
-                               ~label:
-                                 (Printf.sprintf "First %d %s" (index + 1)
-                                    (Terminal_text.single_line node.fjn_identity))
-                               synthesized.fjno_resolved_answer
-                       | Judge_node_failed failed ->
-                           let clock =
-                             match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
-                             | true, _ -> "  (timed out)"
-                             | false, Some seconds ->
-                                 Printf.sprintf "  (%.0fs)" seconds
-                             | false, None -> ""
-                           in
-                           [ ( (Theme.bad ())
-                             , Printf.sprintf
-                                 "  First %d [failed] %s  [%s]%s"
-                                 (index + 1)
-                                 (Terminal_text.single_line node.fjn_identity)
-                                 (Terminal_text.single_line failed.fjno_failure_code)
-                                 clock )
-                           ]
-                           @ fusion_wrapped_block ~width ~indent:"    "
-                               failed.fjno_error)
-                |> List.concat
-              in
-              [ Ansi.dim, "" ]
-              (* The counts are already in pipeline order, so joining them
-                 with the same arrow the Goal stage rail uses draws the run
-                 rather than describing it. The shape name stays, at the end,
-                 because it is what the preset is called. *)
-              @ ( Ansi.dim
-                , Printf.sprintf "  %s  \xe2\x94\x80\xe2\x96\xb6  %s  \xc2\xb7  %s"
-                    (fusion_panel_dots ~answered ~failed)
-                    (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " counts)
-                    shape )
-              :: first_cards
-        in
-        let tool_lines =
-          fusion_tool_trace_lines ~width evidence.fe_tool_trace
-        in
-        [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
-        ; Ansi.dim, ""
-        ; Ansi.bold, "  1  QUESTION"
-        ]
-        @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
-        @ [ Ansi.dim, ""
-          ; Ansi.bold, "  2  PANEL RESPONSES"
-          ; ( Ansi.dim
-            , Printf.sprintf
-                "  %d answered / %d failed  \xc2\xb7  %d input / %d output tokens"
-                answered failed input_tokens output_tokens )
-        ]
-        @ [ Ansi.dim, "" ]
-        @ panel_chart_lines
-        @ panel_lines
-        @ [ Ansi.dim, ""
-          ; Ansi.bold, "  3  JUDGE"
-          ]
-        @ judge_lines
-        @ judges_lines
-        @ [ Ansi.dim, ""
-          ; Ansi.bold, "  4  TOOL EXECUTIONS"
-          ]
-        @ tool_lines
-        @ [ Ansi.dim, ""
-          ; Ansi.bold, "  5  EVIDENCE RECORDED"
-          ; ( Ansi.dim
-            , "  Board link: "
-              ^ Link.reference Board_post
-                  (Terminal_text.single_line evidence.fe_post_id) )
-          ]
+    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width evidence
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->
@@ -12361,6 +12363,27 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         [ (Theme.bad ()), "  Fusion evidence invariant violated" ]
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
+
+let fusion_historical_lines ~width (detail : fusion_historical_detail) =
+  [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
+  ; Theme.warn (), "  Execution status and finish time: not retained"
+  ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
+  ; Ansi.reset, "  Board author: " ^ Terminal_text.single_line detail.fhd_author
+  ; Theme.info (), "  Board: " ^ Link.reference Board_post detail.fhd_reference.fhe_post_id
+  ; Ansi.reset, "  Title: " ^ Terminal_text.single_line detail.fhd_title
+  ; Ansi.reset, (match detail.fhd_usage with
+      | None -> "  Observed tokens: not recorded"
+      | Some (input, output) -> Printf.sprintf "  Observed tokens: %d input / %d output" input output)
+  ; Ansi.reset, (match detail.fhd_cost_usd with
+      | None -> "  Observed cost: not recorded"
+      | Some cost -> Printf.sprintf "  Observed cost: $%.4f" cost)
+  ; Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
+  ; Ansi.dim, "" ]
+  @ (match detail.fhd_evidence with
+     | Ok evidence -> fusion_evidence_lines ~width evidence
+     | Error error -> [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
+  @ [ Ansi.dim, ""; Ansi.bold, "  BOARD ORIGINAL" ]
+  @ fusion_markdown_block ~width ~indent:"    " detail.fhd_body
 
 let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   let detail =
@@ -12388,12 +12411,19 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   in
   let content_height = max 1 (rows - chrome_rows) in
   let lines =
-    match detail, state.fusion_detail_error with
-    | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-    | None, Some _ ->
-        [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
-    | Some detail, (Some _ | None) ->
-        fusion_detail_lines ~width:(max 1 (cols - 8)) detail
+    match state.fusion_mode with
+    | Fusion_historical_detail reference ->
+        (match state.fusion_historical_detail with
+         | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
+                              && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
+             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading (refresh failed)" ] else [])
+             @ fusion_historical_lines ~width:(max 1 (cols - 8)) original
+         | Some _ | None -> [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
+    | Fusion_list | Fusion_detail _ ->
+        (match detail, state.fusion_detail_error with
+         | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
+         | None, Some _ -> [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+         | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (cols - 8)) detail)
   in
   let total = List.length lines in
   let max_scroll = max 0 (total - content_height) in
@@ -12432,10 +12462,11 @@ let render_fusion_detail (state : state) run_id =
         Render_schedule.fusion_sidebar_label ~status ~time ~keeper ~run_id
       in
       let labels =
-        match state.fusion_runs with
-        | None -> []
-        | Some snapshot ->
-          List.map format_sidebar_fusion snapshot.Tui_decode.fus_runs
+        fusion_list_entries state
+        |> List.map (function
+            | Fusion_retained_run run -> format_sidebar_fusion run
+            | Fusion_historical_evidence reference ->
+                "history " ^ Terminal_text.single_line reference.fhe_title)
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
@@ -16928,7 +16959,8 @@ let render_surface (state : state) =
   | Fusion ->
       (match state.fusion_mode with
        | Fusion_list -> render_fusion_list state
-       | Fusion_detail run_id -> render_fusion_detail state run_id)
+       | Fusion_detail run_id -> render_fusion_detail state run_id
+       | Fusion_historical_detail reference -> render_fusion_detail state reference.fhe_run_id)
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
         render_memory_facts state

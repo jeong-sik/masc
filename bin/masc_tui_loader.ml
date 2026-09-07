@@ -1345,6 +1345,11 @@ let load_fusion_runs ~(host : string) ~(port : int) :
   | Ok json -> Tui_decode.decode_fusion_snapshot json
 
 (** Load one exact Fusion run/evidence projection. *)
+let load_fusion_historical_detail ~(host : string) ~(port : int) ~reference =
+  match fetch_board_post ~host ~port ~post_id:reference.Tui_decode.fhe_post_id with
+  | Error err -> Error ("Fusion Board original load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_historical_detail ~reference json
+
 let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Tui_decode.fusion_detail, string) result =
   match fetch_fusion_detail ~host ~port ~run_id with

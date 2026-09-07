@@ -1472,6 +1472,23 @@ type fusion_detail = {
   fud_evidence : fusion_evidence option;
 }
 
+type fusion_historical_detail = {
+  fhd_reference : fusion_historical_evidence;
+  fhd_author : string;
+  fhd_title : string;
+  fhd_body : string;
+  fhd_usage : (int * int) option;
+  fhd_cost_usd : float option;
+  fhd_evidence : (fusion_evidence, string) result;
+}
+
+val decode_fusion_historical_detail :
+  reference:fusion_historical_evidence -> Yojson.Safe.t ->
+  (fusion_historical_detail, string) result
+(** Read an exact Board original independently of registry lifecycle. Source
+    identity is required; a malformed evidence payload remains an explicit
+    error beside the preserved original. *)
+
 val decode_fusion_snapshot : Yojson.Safe.t -> (fusion_snapshot, string) result
 (** Decode the retained registry list from
     [GET /api/v1/dashboard/fusion-runs]. The published count must equal the

@@ -4126,6 +4126,88 @@ let fusion_recorded_detail_json ?(source = "fusion")
           ] )
     ]
 
+let historical_fusion_reference : Tui_decode.fusion_historical_evidence =
+  { fhe_run_id = "fusion-recorded-501"
+  ; fhe_post_id = "p-fusion-501"
+  ; fhe_title = "Fusion title 501"
+  ; fhe_created_at = 1787557684.
+  }
+
+let historical_fusion_post_json ?(usage = []) ?(cost = []) () =
+  let open Yojson.Safe.Util in
+  let post = fusion_recorded_detail_json () |> member "evidence" |> member "post" in
+  match post with
+  | `Assoc fields ->
+      `Assoc
+        (("author", `String "board-sink-author")
+         :: ("body", `String "# Original Fusion answer\nThe retained original.")
+         :: List.map (function
+             | "meta", `Assoc fields -> "meta", `Assoc (fields @ usage @ cost)
+             | field -> field) fields)
+  | _ -> Alcotest.fail "invalid Fusion fixture"
+
+let test_historical_fusion_original_and_observations () =
+  let post = historical_fusion_post_json
+      ~usage:["observed_usage", `Assoc ["input_tokens", `Int 9321; "output_tokens", `Int 17721]] () in
+  (match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+           (`Assoc ["post", post]) with
+   | Error error -> Alcotest.fail error
+   | Ok original ->
+       Alcotest.(check string) "Board author is retained without claiming caller"
+         "board-sink-author" original.fhd_author;
+       Alcotest.(check string) "original body is intact"
+         "# Original Fusion answer\nThe retained original." original.fhd_body;
+       Alcotest.(check (option (pair int int))) "observed tokens"
+         (Some (9321, 17721)) original.fhd_usage;
+       Alcotest.(check bool) "unknown price is not zero" true (original.fhd_cost_usd = None);
+       (match original.fhd_evidence with
+        | Error error -> Alcotest.fail error
+        | Ok evidence ->
+            Alcotest.(check int) "existing panel interpretation retained" 2 (List.length evidence.fe_panel);
+            Alcotest.(check bool) "existing Tool trace interpretation retained" true evidence.fe_tool_trace.ftt_complete));
+  let read ?(usage = []) ?(cost = []) () =
+    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+            (historical_fusion_post_json ~usage ~cost ()) with
+    | Ok original -> original
+    | Error error -> Alcotest.fail error in
+  Alcotest.(check bool) "absent usage is unknown" true ((read ()).fhd_usage = None);
+  let zero = read
+      ~usage:["observed_usage", `Assoc ["input_tokens", `Int 0; "output_tokens", `Int 0]]
+      ~cost:["cost_usd", `Int 0] () in
+  Alcotest.(check (option (pair int int))) "measured zero tokens survive" (Some (0, 0)) zero.fhd_usage;
+  Alcotest.(check bool) "measured zero cost survives" true (zero.fhd_cost_usd = Some 0.)
+
+let test_historical_fusion_exact_identity_and_strict_metadata () =
+  let expect_error label reference post =
+    match Tui_decode.decode_fusion_historical_detail ~reference post with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail label in
+  let post = historical_fusion_post_json () in
+  expect_error "another post cannot supply this original"
+    { historical_fusion_reference with fhe_post_id = "other-post" } post;
+  expect_error "another run cannot supply this original"
+    { historical_fusion_reference with fhe_run_id = "other-run" } post;
+  expect_error "an omitted exact post is not an empty original"
+    historical_fusion_reference (`Assoc ["post", `Null]);
+  expect_error "text tokens are not measurements" historical_fusion_reference
+    (historical_fusion_post_json
+       ~usage:["observed_usage", `Assoc ["input_tokens", `String ""; "output_tokens", `Int 0]] ());
+  expect_error "negative cost is not a measurement" historical_fusion_reference
+    (historical_fusion_post_json ~cost:["cost_usd", `Int (-1)] ());
+  let malformed = match post with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "meta", `Assoc fields -> "meta", `Assoc (List.remove_assoc "tool_trace" fields)
+        | field -> field) fields)
+    | _ -> Alcotest.fail "invalid Fusion fixture" in
+  match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference malformed with
+  | Error error -> Alcotest.fail error
+  | Ok original ->
+      Alcotest.(check string) "original survives structured evidence failure"
+        "# Original Fusion answer\nThe retained original." original.fhd_body;
+      (match original.fhd_evidence with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "missing Tool trace cannot masquerade as empty trace")
+
 let test_decode_fusion_list_and_exact_detail () =
   let failed_fields =
     [ "error", `String "panel unavailable"
@@ -8139,6 +8221,10 @@ let () =
       ] );
     ( "decode_fusion",
       [
+        Alcotest.test_case "historical original carries exact evidence and measured usage" `Quick
+          test_historical_fusion_original_and_observations;
+        Alcotest.test_case "historical identity and evidence remain strict" `Quick
+          test_historical_fusion_exact_identity_and_strict_metadata;
         Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
           test_decode_fusion_list_and_exact_detail;
         Alcotest.test_case "decodes RFC-0284 judge nodes" `Quick

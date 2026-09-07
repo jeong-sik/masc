@@ -46,6 +46,7 @@ vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { resetRuntimeResolved } from '../lib/runtime-resolved-resource'
 import type { RuntimeResolvedResponse } from '../api/dashboard'
+import { parseRuntimeResolvedResponse } from '../api/schemas/runtime-resolved'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 
 async function flush() {
@@ -486,6 +487,31 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     expect(badge?.textContent?.trim()).toBe('explicit → a.one')
     expect(badge?.getAttribute('data-assignment-source')).toBe('explicit')
     expect(badge?.getAttribute('data-assignment-target-kind')).toBe('single_runtime')
+  })
+
+  it('keeps an unavailable explicit target visible without replacing it with the default', async () => {
+    const response = makeRuntimeResolved({ assignments: [{
+      keeper: 'affected', assignment_source: 'explicit',
+      resolved: { kind: 'unavailable', id: 'fixture.missing', reason: {
+        kind: 'missing_catalog_model', message: 'Capability catalog entry unavailable: fixture.missing',
+        provider_id: 'fixture', provider_label: 'fixture', model_id: 'missing',
+      } },
+    }] })
+    refs.config = makeConfig({ selected_runtime_id: 'fixture.missing' })
+    refs.resolved.mockResolvedValue(parseRuntimeResolvedResponse(response))
+    render(html`<${KeeperRuntimeModelEditor} keeperName="affected" />`, container)
+    await flush()
+    await flush()
+    const badge = container.querySelector('[data-testid="keeper-runtime-assignment-source"]')
+    expect(badge?.getAttribute('data-assignment-target-kind')).toBe('unavailable')
+    expect(badge?.textContent).toContain('fixture.missing')
+    expect(badge?.textContent).toContain('사용 불가')
+    expect(badge?.textContent).toContain('Capability catalog entry unavailable')
+    expect(badge?.textContent).not.toContain('a.one')
+    expect(() => parseRuntimeResolvedResponse({ ...response, assignments: [{
+      keeper: 'affected', assignment_source: 'explicit',
+      resolved: { kind: 'unavailable', id: 'fixture.missing' },
+    }] })).toThrow()
   })
 
   it('shows a default assignment_source badge for a keeper riding [runtime].default with no explicit entry', async () => {

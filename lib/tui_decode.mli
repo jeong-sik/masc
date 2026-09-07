@@ -1691,6 +1691,7 @@ type runtime_assignment = {
   ra_keeper : string;
   ra_source : string;
   ra_target_id : string option;
+  ra_unavailable_reason : string option;
       (** Resolved lane id, or [None] when the assignment is missing. *)
 }
 

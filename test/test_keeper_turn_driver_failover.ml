@@ -474,7 +474,7 @@ let test_lanes_accessor_returns_declared_lanes () =
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
-    | `Missing -> Alcotest.fail "expected assignment to resolve"
+    | `Missing | `Unavailable _ -> Alcotest.fail "expected assignment to resolve"
     | `Lane lane ->
       Alcotest.(check string)
         "lane id shadows runtime id"
@@ -491,7 +491,7 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
 let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "fallback.test_model" with
-    | `Missing -> Alcotest.fail "expected runtime to resolve"
+    | `Missing | `Unavailable _ -> Alcotest.fail "expected runtime to resolve"
     | `Lane lane ->
       Alcotest.(check string)
         "lane is named after the runtime it was assigned"
@@ -506,7 +506,7 @@ let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
 let test_lane_already_naming_the_default_is_unchanged () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing -> Alcotest.fail "expected lane to resolve"
+    | `Missing | `Unavailable _ -> Alcotest.fail "expected lane to resolve"
     | `Lane lane ->
       Alcotest.(check (list string))
         "declared candidates already terminate at the default"
@@ -564,7 +564,7 @@ let test_resolve_assignment_missing () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "not.configured" with
     | `Missing -> ()
-    | `Lane _ -> Alcotest.fail "expected missing assignment")
+    | `Lane _ | `Unavailable _ -> Alcotest.fail "expected missing assignment")
 
 let runtime_toml_assignment_to_lane =
   {|
@@ -780,7 +780,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing ->
+    | `Missing | `Unavailable _ ->
       Alcotest.fail "expected resilient assignment to resolve to a lane"
     | `Lane lane ->
       let first_candidate_id =
@@ -1504,7 +1504,7 @@ let test_text_official_client_history_stays_admissible () =
 let test_lane_media_reroute_stays_within_lane () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing ->
+    | `Missing | `Unavailable _ ->
       Alcotest.fail "expected resilient assignment to resolve to a lane"
     | `Lane lane ->
       let first_candidate_id, remaining_candidate_ids =

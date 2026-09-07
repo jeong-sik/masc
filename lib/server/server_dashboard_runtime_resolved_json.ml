@@ -66,11 +66,24 @@ let lane_json (lane : Runtime_lane.t) : Yojson.Safe.t =
     ]
 ;;
 
-let resolved_assignment_json (resolution : [ `Lane of Runtime_lane.t | `Missing ])
+let resolved_assignment_json
+    (resolution : [ `Lane of Runtime_lane.t | `Unavailable of Runtime.missing_catalog_model | `Missing ])
   : Yojson.Safe.t
   =
   match resolution with
   | `Lane lane -> `Assoc [ "kind", `String "lane"; "id", `String (Runtime_lane.id lane) ]
+  | `Unavailable missing ->
+      `Assoc
+        [ "kind", `String "unavailable"
+        ; "id", `String missing.runtime_id
+        ; "reason", `Assoc
+            [ "kind", `String "missing_catalog_model"
+            ; "message", `String ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
+            ; "provider_id", `String missing.provider_id
+            ; "provider_label", `String missing.provider_label
+            ; "model_id", `String missing.model_id
+            ]
+        ]
   | `Missing -> `Assoc [ "kind", `String "missing"; "id", `Null ]
 ;;
 
@@ -127,7 +140,7 @@ let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
     |> List.filter_map (fun id ->
       match Runtime.resolve_assignment id with
       | `Lane lane when not (List.mem (Runtime_lane.id lane) seen) -> Some lane
-      | `Lane _ | `Missing -> None)
+      | `Lane _ | `Missing | `Unavailable _ -> None)
     |> List.sort_uniq (fun a b ->
       String.compare (Runtime_lane.id a) (Runtime_lane.id b))
   in

@@ -6883,6 +6883,7 @@ type runtime_assignment = {
   ra_keeper : string;
   ra_source : string;  (* "default" | "explicit" *)
   ra_target_id : string option;
+  ra_unavailable_reason : string option;
 }
 
 let decode_runtime_assignment json =
@@ -6896,15 +6897,28 @@ let decode_runtime_assignment json =
   let* resolved = required_object_field json "resolved" in
   let* kind = required_string_field resolved "kind" in
   let* id = required_nullable_string_field resolved "id" in
-  let* ra_target_id =
+  let* ra_target_id, ra_unavailable_reason =
     match kind, id with
-    | "lane", Some lane_id -> Ok (Some lane_id)
-    | "missing", None -> Ok None
+    | "lane", Some lane_id -> Ok (Some lane_id, None)
+    | "missing", None -> Ok (None, None)
+    | "unavailable", Some runtime_id ->
+        let* reason = required_object_field resolved "reason" in
+        let* kind = required_string_field reason "kind" in
+        let* () = match kind with
+          | "missing_catalog_model" -> Ok ()
+          | value -> Error (Printf.sprintf "unknown runtime unavailability reason %S" value)
+        in
+        let* message = required_string_field reason "message" in
+        let* _provider_id = required_string_field reason "provider_id" in
+        let* _provider_label = required_string_field reason "provider_label" in
+        let* _model_id = required_string_field reason "model_id" in
+        Ok (Some runtime_id, Some message)
+    | "unavailable", None -> Error "unavailable runtime assignment is missing its configured id"
     | "lane", None -> Error "runtime lane assignment is missing its id"
     | "missing", Some _ -> Error "missing runtime assignment carries an id"
     | value, _ -> Error (Printf.sprintf "unknown resolved runtime kind %S" value)
   in
-  Ok { ra_keeper; ra_source; ra_target_id }
+  Ok { ra_keeper; ra_source; ra_target_id; ra_unavailable_reason }
 
 let decode_runtime_resolved json =
   let* snapshot = decode_runtime_resolved_snapshot json in
@@ -6916,9 +6930,9 @@ let decode_runtime_resolved json =
     match
       List.find_opt
         (fun assignment ->
-           match assignment.ra_target_id with
-           | None -> false
-           | Some lane_id ->
+           match assignment.ra_target_id, assignment.ra_unavailable_reason with
+           | None, _ | Some _, Some _ -> false
+           | Some lane_id, None ->
                not
                  (List.exists
                     (fun lane -> String.equal lane.rrl_id lane_id)

@@ -288,7 +288,7 @@ export interface DashboardRuntimeStartupMissingCatalogModel {
   model_id?: string | null
 }
 
-export interface DashboardRuntimeStartupDroppedAssignment {
+export interface DashboardRuntimeStartupUnavailableAssignment {
   keeper_name: string
   runtime_id: string
 }
@@ -316,7 +316,7 @@ export interface DashboardRuntimeStartupDegradation {
   missing_catalog_model_count: number
   missing_catalog_models: DashboardRuntimeStartupMissingCatalogModel[]
   disabled_runtime_ids: string[]
-  dropped_assignments: DashboardRuntimeStartupDroppedAssignment[]
+  unavailable_assignments: DashboardRuntimeStartupUnavailableAssignment[]
   dropped_routes: DashboardRuntimeStartupDroppedRoute[]
   dropped_media_failover: string[]
   dropped_lane_candidates: DashboardRuntimeStartupDroppedLane[]
@@ -791,7 +791,7 @@ function decodeRuntimeStartupMissingCatalogModel(raw: unknown): DashboardRuntime
   }
 }
 
-function decodeRuntimeStartupDroppedAssignment(raw: unknown): DashboardRuntimeStartupDroppedAssignment | null {
+function decodeRuntimeStartupUnavailableAssignment(raw: unknown): DashboardRuntimeStartupUnavailableAssignment | null {
   if (!isRecord(raw)) return null
   const keeperName = asString(raw.keeper_name)
   const runtimeId = asString(raw.runtime_id)
@@ -840,9 +840,9 @@ function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupD
       .map(decodeRuntimeStartupMissingCatalogModel)
       .filter((item): item is DashboardRuntimeStartupMissingCatalogModel => item !== null),
     disabled_runtime_ids: asStringArray(raw.disabled_runtime_ids),
-    dropped_assignments: asRecordArray(raw.dropped_assignments)
-      .map(decodeRuntimeStartupDroppedAssignment)
-      .filter((item): item is DashboardRuntimeStartupDroppedAssignment => item !== null),
+    unavailable_assignments: asRecordArray(raw.unavailable_assignments)
+      .map(decodeRuntimeStartupUnavailableAssignment)
+      .filter((item): item is DashboardRuntimeStartupUnavailableAssignment => item !== null),
     dropped_routes: asRecordArray(raw.dropped_routes)
       .map(decodeRuntimeStartupDroppedRoute)
       .filter((item): item is DashboardRuntimeStartupDroppedRoute => item !== null),

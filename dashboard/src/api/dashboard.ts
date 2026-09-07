@@ -183,7 +183,7 @@ export type {
   DashboardRuntimeAssignment,
   DashboardRuntimeAssignmentStatus,
   DashboardRuntimeStartupDegradation,
-  DashboardRuntimeStartupDroppedAssignment,
+  DashboardRuntimeStartupUnavailableAssignment,
   DashboardRuntimeStartupDroppedLane,
   DashboardRuntimeStartupDroppedRoute,
   DashboardRuntimeStartupMissingCatalogModel,

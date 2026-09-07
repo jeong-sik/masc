@@ -166,6 +166,9 @@ function fleetRotationLane(
   if (assignment.resolved.kind === 'single_runtime') {
     return { lane: null, note: '단일 런타임에 고정 — 후보 체인 없음' }
   }
+  if (assignment.resolved.kind === 'unavailable') {
+    return { lane: null, note: `${assignment.resolved.id} · 사용 불가: ${assignment.resolved.reason.message}` }
+  }
   if (assignment.resolved.kind === 'missing') {
     return { lane: null, note: '할당 대상 런타임을 해석하지 못했습니다.' }
   }

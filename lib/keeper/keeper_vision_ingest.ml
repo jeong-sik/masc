@@ -248,6 +248,7 @@ let runtime_takes_images_itself id =
    does not. *)
 let delegates_media ~runtime_id =
   match Runtime.resolve_assignment runtime_id with
+  | `Unavailable _ -> false
   | `Missing -> true
   | `Lane lane ->
     not

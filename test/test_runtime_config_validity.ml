@@ -2402,7 +2402,33 @@ let test_edit_config_text_reads_the_file_and_commits_the_edit () =
               "theme = \"gruvbox-dark\""))
 ;;
 
+let with_model_catalog_content content f =
+  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+       Llm_provider.Model_catalog.clear_global ();
+       (try Sys.remove path with
+        | _ -> ())
+       )
+    (fun () ->
+       match Llm_provider.Model_catalog.load_file path with
+       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
+       | Ok catalog ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+
+(* Config edits now publish the same catalog-validated state as bootstrap.
+   These cap/official-client cases declare their synthetic HTTP models too. *)
+let with_config_save_model_catalog f =
+  let row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
+  with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
+
 let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
+  with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2461,6 +2487,7 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
    load undeclared, and the Agent_core side must still reject. Without the
    second half, deleting the whole check would also pass. *)
 let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+  with_config_save_model_catalog @@ fun () ->
   let content ~bound ~agent_core_cap =
     Printf.sprintf
       "[providers.local]\n\
@@ -2546,6 +2573,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
+  with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2754,24 +2782,6 @@ let with_fake_runtime_model_catalog f =
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
-       | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
-         f ())
-
-let with_model_catalog_content content f =
-  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
-       (try Sys.remove path with
-        | _ -> ())
-       )
-    (fun () ->
-       match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
@@ -3499,7 +3509,149 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
                  (Runtime.Missing_catalog_models report))
               "provider_label=custom"))
 
-let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
+let test_degraded_assignment_isolation_preserves_routing_and_recovers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let server = Exact_output_fixture.start_server
+      ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply
+         (Exact_output_fixture.openai_response (`Assoc ["answer", `String "route reached"]))) in
+  let catalog_row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n" id in
+  let catalog = catalog_row "good" in
+  let runtime_toml = Printf.sprintf {|[runtime]
+default = "fixture.good"
+[runtime.assignments]
+affected = "fixture.missing"
+healthy = "fixture.good"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.good]
+api-name = "good"
+max-context = 8192
+temperature = 0.25
+streaming = false
+[models.missing]
+api-name = "missing"
+max-context = 8192
+streaming = false
+[fixture.good]
+max-request-body-bytes = 65536
+[fixture.missing]
+max-request-body-bytes = 65536
+|} server.base_url in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml runtime_toml @@ fun path ->
+      let init () = match Runtime.init_default_degraded_report ~config_path:path with
+        | Ok outcome -> outcome
+        | Error error -> fail (Runtime.strict_init_error_to_string error) in
+      (match init () with
+       | Runtime.Initialized -> fail "missing catalog row must remain observable"
+       | Runtime.Initialized_degraded report ->
+           check (list string) "only affected assignment unavailable" ["affected"]
+             (List.map (fun (a : Runtime.unavailable_runtime_assignment) -> a.keeper_name) report.unavailable_assignments));
+      check (option string) "configured assignment is retained" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      check string "default identity is unchanged" "fixture.good" (Runtime.get_default_runtime_id ());
+      let meta keeper = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String keeper; "trace_id", `String ("trace-" ^ keeper)]) with
+        | Ok meta -> meta | Error detail -> fail detail in
+      let assert_unavailable = function
+        | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+            check string "runtime configuration error" "runtime_id" field;
+            check bool "exact configured identity in reason" true
+              (String_util.contains_substring detail "fixture.missing")
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ -> fail "unavailable assignment dispatched" in
+      let run keeper =
+        let meta = meta keeper in
+        Keeper_turn_driver.run_named ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+          ~keeper_name:keeper ~base_path ~system_prompt:"Answer the fixture task."
+          ~goal:"Return the fixture answer." ~agent_core_tools:[] ~sw ~net:env#net () in
+      let assignment_projection keeper =
+        let projection = Server_dashboard_runtime_resolved_json.build
+            ~generated_at_iso:"2026-09-07T00:00:00Z"
+            ~config:(Workspace.default_config base_path) in
+        Yojson.Safe.Util.(projection |> member "assignments" |> to_list)
+        |> List.find (fun row ->
+          Yojson.Safe.Util.(row |> member "keeper" |> to_string) = keeper) in
+      (match Runtime.resolve_assignment "fixture.missing" with
+       | `Unavailable missing -> check string "catalog identity is typed" "missing" missing.model_id
+       | `Missing | `Lane _ -> fail "configured unavailable runtime became unknown or active");
+      let projection = assignment_projection "affected" in
+      check string "Dashboard exposes the unavailable state" "unavailable"
+        Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
+      check string "Dashboard preserves the requested ID" "fixture.missing"
+        Yojson.Safe.Util.(projection |> member "resolved" |> member "id" |> to_string);
+      let affected_meta = meta "affected" in
+      assert_unavailable (Keeper_unified_turn_pre_dispatch.build_runtime_execution
+          ~meta:affected_meta ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta affected_meta));
+      assert_unavailable (run "affected");
+      check int "no provider request for unavailable assignment" 0 (Exact_output_fixture.post_count server);
+      (match Runtime.edit_config_text ~runtime_config_path:path
+          (fun source -> source ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n") with
+       | Ok _ -> () | Error detail -> fail detail);
+      check (option string) "unrelated config save retains exact assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match Runtime.resolve_assignment "fixture.missing" with
+       | `Unavailable _ -> () | `Missing | `Lane _ -> fail "config save reactivated unavailable assignment");
+      assert_unavailable (run "affected");
+      check int "unrelated save cannot permit a provider request" 0 (Exact_output_fixture.post_count server);
+      List.iter (fun keeper -> match run keeper with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error)) ["healthy"; "default-rider"];
+      check int "healthy and default Keeper both reach the real HTTP provider" 2
+        (Exact_output_fixture.post_count server);
+      (with_model_catalog_content (catalog ^ catalog_row "missing") @@ fun () ->
+      (match init () with Runtime.Initialized -> () | Runtime.Initialized_degraded _ -> fail "restored row stayed unavailable");
+      check (option string) "recovery did not rewrite the assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      check int "same assigned Keeper now reaches provider" 3 (Exact_output_fixture.post_count server);
+      let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+      check string "restored route used its own model, not default" "missing"
+        Yojson.Safe.Util.(body |> member "model" |> to_string));
+      (* Prove restoration before changing this assignment into a declared lane.
+         A successful lane candidate is sticky for the same assignment ID, so
+         running the shadow scenario first would exercise a different contract:
+         retaining that candidate when the lane becomes an implicit fallback. *)
+      with_model_catalog_content catalog @@ fun () ->
+      let shadowed_lane_toml = runtime_toml ^
+        "\n[runtime.lanes.\"fixture.missing\"]\ncandidates = [\"fixture.good\"]\n" in
+      (with_temp_runtime_toml shadowed_lane_toml @@ fun shadow_path ->
+        (match Runtime.init_default_degraded_report ~config_path:shadow_path with
+         | Ok (Runtime.Initialized_degraded report) ->
+             check (list string) "healthy declared lane is not an unavailable assignment" []
+               (List.map (fun (a : Runtime.unavailable_runtime_assignment) -> a.keeper_name)
+                  report.unavailable_assignments)
+         | Ok Runtime.Initialized -> fail "shadowed missing binding still needs a catalog report"
+         | Error error -> fail (Runtime.strict_init_error_to_string error));
+        (match Keeper_unified_turn_pre_dispatch.build_runtime_execution
+            ~meta:affected_meta ~runtime_id:"fixture.missing" with
+         | Ok execution ->
+             check string "pre-dispatch keeps the requested lane ID" "fixture.missing"
+               execution.runtime_id;
+             check (float 0.000001) "pre-dispatch uses the lane candidate temperature" 0.25
+               execution.temperature
+         | Error error -> fail (Agent_core.Error.to_string error));
+        let projection = assignment_projection "affected" in
+        check string "Dashboard resolves the healthy shadowing lane" "lane"
+          Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
+        (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "healthy lane reaches the actual HTTP provider" 4
+          (Exact_output_fixture.post_count server);
+        let body = List.nth (Exact_output_fixture.request_bodies server) 3 |> Yojson.Safe.from_string in
+        check string "declared lane serves its healthy candidate" "good"
+          Yojson.Safe.Util.(body |> member "model" |> to_string);
+        check (float 0.000001) "actual provider sees the candidate temperature" 0.25
+          Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
+
+let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
@@ -3619,11 +3771,11 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
-         check (list string) "no dropped assignment"
+         check (list string) "no unavailable assignment"
            []
            (List.map
-              (fun (entry : Runtime.dropped_runtime_assignment) -> entry.keeper_name)
-              degradation.dropped_assignments);
+              (fun (entry : Runtime.unavailable_runtime_assignment) -> entry.keeper_name)
+              degradation.unavailable_assignments);
          check (option string) "catalog-known assignment preserved"
            (Some "ollama.good")
            (Runtime.runtime_id_for_keeper "keeper_b");
@@ -3867,7 +4019,9 @@ let test_structured_judge_runtime_key_is_rejected () =
          errors)
 
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
-  with_fake_runtime_model_catalog @@ fun () ->
+  let catalog_row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
+  with_model_catalog_content (catalog_row "chat" ^ catalog_row "libr") @@ fun () ->
   let snapshot =
     Exact_output_fixture.resolver_snapshot
       ~source:"runtime raw-save exact replacement"
@@ -4764,9 +4918,11 @@ let () =
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
+          test_case "assignment-only catalog gap isolates requests and recovers" `Quick
+            test_degraded_assignment_isolation_preserves_routing_and_recovers;
           test_case
-            "server degraded init rejects referenced uncatalogued runtimes"
-            `Quick test_server_degraded_init_rejects_referenced_uncatalogued_runtimes;
+            "server degraded init still rejects unavailable lane and media routes"
+            `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;
           test_case
             "server degraded init disables unreferenced uncatalogued runtimes"
             `Quick test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes;

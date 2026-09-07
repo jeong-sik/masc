@@ -15047,9 +15047,12 @@ let render_runtime_pick (state : state) =
         state.runtime_assignments
     with
     | Some a ->
-        Printf.sprintf "%s (%s)"
+        Printf.sprintf "%s (%s)%s"
           (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
           (Terminal_text.single_line a.ra_source)
+          (match a.ra_unavailable_reason with
+           | None -> ""
+           | Some reason -> " — unavailable: " ^ Terminal_text.single_line reason)
     | None -> "-"
   in
   (* Only what a keeper can actually be pointed at. The catalogue also lists

@@ -882,6 +882,17 @@ val load_jsonl_diagnostics : string -> Yojson.Safe.t list * int
 (** Parse pre-read string lines as JSONL, returning parsed values and
     malformed count.  [source] is used in log messages.
     Use when lines come from tail-readers or non-file sources. *)
+val number_jsonl_lines : string list -> (int * string) list
+(** The non-blank rows, trimmed, each with the 1-based number the malformed
+    warning would print for it. Blank rows are dropped and take no number, so
+    the number is the printed JSONL row an operator sees in [cat -n]. *)
+
+val parse_jsonl_line : source:string -> line_no:int -> string -> Yojson.Safe.t option
+(** Parse one trimmed row. A malformed row warns on stderr, naming [source]
+    and [line_no], and returns [None] - the same warning {!parse_jsonl_lines}
+    prints. Use it with {!number_jsonl_lines} to walk rows without parsing the
+    ones the walk never reaches. *)
+
 val parse_jsonl_lines : source:string -> string list -> Yojson.Safe.t list * int
 
 (** Stream JSONL line-by-line via [Eio.Buf_read.lines] when the global

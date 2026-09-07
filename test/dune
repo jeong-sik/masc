@@ -4765,6 +4765,11 @@
 (include stanzas/test_keeper_repetition_scope.inc)
 
 (test
+ (name test_tui_msx_load)
+ (modules test_tui_msx_load)
+ (libraries alcotest unix masc_tui_types masc_tui_msx))
+
+(test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
  (libraries masc_tui_runtime_config_view))

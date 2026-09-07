@@ -6,14 +6,17 @@
     the screen -- closing it is closing the window, not switching the computer
     off, so reopening continues the same frame.
 
-    The core is the stub from ocaml-msx: no Z80, no VDP, a deterministic test
-    pattern. What this module proves is the attachment -- terminal takeover,
-    key injection, frame stepping -- so the core can be replaced under it
-    without this file changing. *)
+    The ocaml-msx core owns the Z80, VDP and cartridge. This screen owns
+    terminal takeover, keyboard injection and frame stepping. *)
 
-val open_screen : write:(string -> unit) -> Masc_tui_types.state -> unit
+type load_error = { path : string; detail : string }
+
+val open_screen :
+  write:(string -> unit) -> Masc_tui_types.state -> (unit, load_error) result
 (** Take the terminal over and draw the current frame. Creates the machine on
-    first use; later opens keep the machine and its frame. *)
+    first use; later opens keep the machine and its frame. A ROM or cartridge
+    read failure leaves the screen closed and the machine absent, so the caller
+    can display the error and retry after the file is repaired. *)
 
 val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 (** Read one key while the screen is open. [esc] closes the screen; arrows,

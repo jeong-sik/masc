@@ -6,6 +6,23 @@
     [slot].  Handler wiring lives in [Server_dashboard_shell_snapshot]
     (renamed to [Server_dashboard_snapshot_select] in #16761). *)
 
+type tools_projection = {
+  base_path : string;
+  workspace_path : string;
+  masc_root : string;
+  json : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+
+let prepare_tools ~(config : Workspace.config) compute =
+  let masc_root = Workspace.masc_root_dir config in
+  let json = compute () in
+  let raw = Yojson.Safe.to_string json in
+  { base_path = config.base_path; workspace_path = config.workspace_path; masc_root;
+    json; etag = Http_server_eio.Response.weak_etag_value raw;
+    encoded = Http_response_payload.prepare raw }
+
 type t = {
   generated_at : float;
   shell : Yojson.Safe.t;
@@ -15,7 +32,7 @@ type t = {
      wait-free instead of recomputing.  Light is a DIFFERENT shape from
      [shell] (skips belief/tension evaluation, uses the light agent-count /
      runtime projections), so it is stored separately rather than derived. *)
-  tools : Yojson.Safe.t;
+  tools : tools_projection;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
@@ -33,21 +50,21 @@ let slot : t option Atomic.t = Atomic.make None
 
 let current () = Atomic.get slot
 
-type projection_cache_entry =
+type 'a projection_cache_entry =
   { refreshed_at : float
-  ; value : Yojson.Safe.t
+  ; value : 'a
   }
 
-type projection_cache = projection_cache_entry option Atomic.t
+type 'a projection_cache = 'a projection_cache_entry option Atomic.t
 
-let make_projection_cache () : projection_cache = Atomic.make None
+let make_projection_cache () : 'a projection_cache = Atomic.make None
 
 let should_reuse_projection ~now ~ttl ~refreshed_at =
   let age = now -. refreshed_at in
   age >= 0.0 && age < ttl
 ;;
 
-let refresh_projection ~now ~ttl ~(cache : projection_cache) compute =
+let refresh_projection ~now ~ttl ~(cache : 'a projection_cache) compute =
   let started_at = now () in
   match Atomic.get cache with
   | Some entry
@@ -215,7 +232,10 @@ let refresh_loop
     in
     let tools =
       cached_projection ~ttl:60.0 ~cache:tools_cache "tools" (fun () ->
-        (!dashboard_tools_http_json_ref) config)
+        (* This is the final projection, including waiting inventory and the
+           default effective/skill fields. Prepare it inside the component
+           refresh so faster whole-snapshot ticks reuse all encodings. *)
+        prepare_tools ~config (fun () -> (!dashboard_tools_http_json_ref) config))
     in
     let telemetry_summary =
       cached_projection ~ttl:30.0 ~cache:telemetry_cache "telemetry_summary" (fun () ->
@@ -295,7 +315,7 @@ let refresh_loop
 
 let publish_for_test t = Atomic.set slot (Some t)
 
-let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
+let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
       ~telemetry_summary
       ?(activity_events_default = `Null)
       ?(activity_graph_default = `Null)
@@ -304,7 +324,7 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
     generated_at = Unix.gettimeofday ();
     shell;
     shell_light;
-    tools;
+    tools = prepare_tools ~config (fun () -> tools);
     namespace_truth;
     telemetry_summary;
     activity_events_default;
@@ -316,11 +336,15 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
 let reset_for_test () = Atomic.set slot None
 
 module For_testing = struct
-  type cache = projection_cache
+  type cache = Yojson.Safe.t projection_cache
+  type tools_cache = tools_projection projection_cache
   type activity_cache = activity_defaults_cache
 
   let make_cache = make_projection_cache
   let refresh_projection = refresh_projection
+  let make_tools_cache = make_projection_cache
+  let refresh_tools ~now ~ttl ~cache ~config compute =
+    refresh_projection ~now ~ttl ~cache (fun () -> prepare_tools ~config compute)
   let make_activity_cache = make_activity_defaults_cache
   let refresh_activity_defaults = refresh_activity_defaults
   let should_reuse_projection = should_reuse_projection

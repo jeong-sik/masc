@@ -1740,6 +1740,7 @@
   masc.skill_config
   masc.skill_reference
   bigstringaf
+  h2
   terminal_size
   masc.jsonl_writer
   decompress.de

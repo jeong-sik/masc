@@ -1,6 +1,6 @@
 name = "masc_browser_session"
 description = """
-Open or close the automation lane's keeper-dedicated stock Firefox browser \
+Open or close the automation lane's keeper-dedicated Gecko browser \
 through MASC's OCaml WebDriver client, with an isolated profile separate \
 from the operator's session. Configure browser.webdriver_url first; optional browser.binary selects an explicit Gecko browser such as Zen. \
 Action "open" launches it (headless by default), "close" shuts it down. \

@@ -27,7 +27,7 @@ let with_browser tabs f =
         | _ -> fail "unexpected browser command"));
       Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
       f reads))
-let request tab_id : Surface.request = { source = Automation; tab_id }
+let request tab_id : Surface.request = { source = Automation; tab_id; client_id=None }
 let read_ok request = match Surface.read request with
   | Ok data -> data | Error detail -> fail detail
 let test_any_website_selection () =
@@ -71,9 +71,74 @@ let test_capture_identity () =
       check bool "non-image payload refused" true
         (Result.is_error (Surface.capture (request (Some 7))))))
 
+let test_live_read_pins_client_between_hops () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let info raw browser : Browser_lane.client_info =
+        let client_id = match Browser_lane.client_id_of_string raw with
+          | Ok id -> id | Error error -> fail error in
+        {client_id; browser; version="fixture"; engine_version="155.0.1"} in
+      let first = info "10000000-0000-4000-8000-000000000001" Browser_lane.Firefox in
+      let second = info "10000000-0000-4000-8000-000000000002" Browser_lane.Zen in
+      List.iter (fun info -> Eio.Switch.on_release sw (fun () ->
+        ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id))) [first;second];
+      ignore (Browser_lane.take_command ~client_info:first ~window_sec:0.001);
+      let pending = Eio.Fiber.fork_promise ~sw (fun () ->
+        Surface.read {source=Live; tab_id=Some 1; client_id=None}) in
+      let take info = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
+        | Ok (Some command) -> command | _ -> fail "selected client command missing" in
+      let tabs_command = take first in
+      ignore (Browser_lane.take_command ~client_info:second ~window_sec:0.001);
+      ignore (Browser_lane.deliver_result ~client_id:first.client_id ~id:tabs_command.id
+        ~payload:(`Assoc ["ok", `Bool true; "data", `List [tab 1 "https://example.org/first" true]]));
+      check bool "new client cannot consume next hop" true
+        (Browser_lane.take_command ~client_info:second ~window_sec:0.002 = Ok None);
+      let read_command = take first in
+      ignore (Browser_lane.deliver_result ~client_id:first.client_id ~id:read_command.id
+        ~payload:(`Assoc ["ok", `Bool true; "data", `Assoc [
+          "url", `String "https://example.org/first"; "title", `String "First browser";
+          "text", `String "first-owned"; "chars", `Int 11; "truncated", `Bool false]]));
+      match Eio.Promise.await pending with
+      | Ok (Ok data) ->
+        check bool "reply identifies the original single client" true
+          (Yojson.Safe.Util.member "clientId" data = `String (Browser_lane.client_id_to_string first.client_id));
+        check bool "page belongs to the pinned browser" true
+          (Yojson.Safe.Util.(data |> member "page" |> member "text") = `String "first-owned")
+      | _ -> fail "second connection disrupted the once-resolved read"))
+
+let test_keeper_discovers_clients_without_dispatch () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let info raw browser : Browser_lane.client_info =
+        let client_id = match Browser_lane.client_id_of_string raw with
+          | Ok id -> id | Error error -> fail error in
+        {client_id; browser; version="fixture"; engine_version="155.0.1"} in
+      let clients = [
+        info "20000000-0000-4000-8000-000000000001" Browser_lane.Firefox;
+        info "20000000-0000-4000-8000-000000000002" Browser_lane.Zen] in
+      List.iter (fun info ->
+        Eio.Switch.on_release sw (fun () ->
+          ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id));
+        ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001)) clients;
+      let result = Masc.Tool_misc_browser_lane.handle_tabs
+        ~tool_name:"BrowserTabs" ~start_time:0.0 (`Assoc []) in
+      let data = Masc.Tool_result.data result in
+      check bool "ambiguous failure stays actionable" true
+        (Yojson.Safe.Util.member "error" data = `String "ambiguous_browser_clients");
+      check int "both browser identities discoverable" 2
+        (Yojson.Safe.Util.(data |> member "clients" |> to_list |> List.length));
+      check bool "model-facing error preserves the same discovery payload" true
+        (Yojson.Safe.from_string (Masc.Tool_result.message result) = data);
+      List.iter (fun info -> check bool "no dispatch before explicit selection" true
+        (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
+
 let () = run "browser surface" ["behavior",[
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;
   test_case "invalid input is refused" `Quick test_strict_input;
   test_case "backend failure is visible" `Quick test_remote_failure;
-  test_case "capture target and image identity" `Quick test_capture_identity]]
+  test_case "capture target and image identity" `Quick test_capture_identity;
+  test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
+  test_case "live read pins client across both hops" `Quick test_live_read_pins_client_between_hops]]

@@ -1,15 +1,15 @@
 (** Closed browser interactions. Caller strings are values, never script source. *)
-type request = { source : Browser_surface.source; tab_id : int;
+type request = { source : Browser_surface.source; tab_id : int; client_id : Browser_lane.client_id option;
   expected_url : string option; action : Browser_lane.interaction }
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
     let* base = Browser_surface.parse_capture_request
-      (`Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"]) fields)) in
+      (`Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"; "clientId"]) fields)) in
     let* tab_id = match base.tab_id with Some id -> Ok id | None -> Error "tabId is required" in
     let* expected_url = match List.assoc_opt "expectedUrl" fields with
       | None -> Ok None
@@ -38,7 +38,7 @@ let parse = function
         let* () = excludes ["selector"; "text"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
       | _ -> Error "action must be click, fill, or scroll" in
-    Ok { source = base.source; tab_id; expected_url; action }
+    Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
 let script = {js|function interactInPage(args) {

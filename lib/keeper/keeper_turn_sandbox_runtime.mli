@@ -154,6 +154,7 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
+  ?output_capture:Process_output_capture.t ->
   stdin_content:string ->
   string list ->
   Unix.process_status * string * string

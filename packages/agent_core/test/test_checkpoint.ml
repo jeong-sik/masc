@@ -197,11 +197,54 @@ let check_checkpoint_json_contract checkpoint =
        Alcotest.fail ("serializer emitted an undecodable checkpoint: " ^ Error.to_string error))
 ;;
 
+let test_image_carriers_remain_canonical () =
+  let open Types in
+  let images =
+    [ Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 }
+    ; Image { media_type = "image/png"; data = "https://images.invalid/old.png"
+            ; source_type = Url }
+    ; Image { media_type = "image/png"; data = "file_history_image"; source_type = File_id }
+    ]
+  in
+  let messages =
+    [ make_message ~role:User images
+    ; make_message ~role:Assistant
+        [ ToolUse { id = "image-tool"; name = "inspect"; input = `Assoc [] } ]
+    ; make_message ~role:Tool
+        [ ToolResult { tool_use_id = "image-tool"; content = ""; outcome = Tool_succeeded
+                     ; json = None; content_blocks = Some images } ]
+    ]
+  in
+  let json = Checkpoint.to_json (make_checkpoint ~messages ()) in
+  let open Yojson.Safe.Util in
+  let saved_images = json |> member "messages" |> to_list |> List.hd
+                     |> member "content" |> to_list in
+  let expected_sources =
+    [ "base64", "aW1hZ2U="
+    ; "url", "https://images.invalid/old.png"
+    ; "file_id", "file_history_image" ]
+  in
+  List.iter2 (fun image (kind, data) ->
+    Alcotest.(check bool) "checkpoint keeps canonical media source fields" true
+      (Yojson.Safe.equal (image |> member "source")
+         (`Assoc [ "type", `String kind; "media_type", `String "image/png"
+                 ; "data", `String data ])))
+    saved_images expected_sources;
+  match Checkpoint.of_json json with
+  | Error error -> Alcotest.fail (Error.to_string error)
+  | Ok restored ->
+    Alcotest.(check bool) "history and nested tool images survive replay" true
+      (restored.messages = messages)
+;;
+
 let () =
   let open Alcotest in
   run
     "Checkpoint"
-    [ ( "version"
+    [ ( "media replay"
+      , [ test_case "image carriers remain canonical" `Quick
+            test_image_carriers_remain_canonical ] )
+    ; ( "version"
       , [ test_case "checkpoint_version is 10" `Quick (fun () ->
             check int "version" 10 Checkpoint.checkpoint_version)
         ; test_case "version field in to_json" `Quick (fun () ->

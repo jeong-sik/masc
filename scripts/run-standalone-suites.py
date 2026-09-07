@@ -235,9 +235,17 @@ class Resolver:
         return plan, None
 
 
-def build_and_run(
-    plan: Plan, root: str, source_root: str, keep: str | None
-) -> tuple[bool | None, str]:
+@dataclass(frozen=True)
+class Outcome:
+    """One suite's verdict. `built` is None when it never got as far as a
+    verdict, which is a gap in this harness rather than a red test."""
+
+    built: bool | None
+    summary: str
+    detail: str = ""
+
+
+def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> Outcome:
     workdir = keep or tempfile.mkdtemp(prefix=f"{plan.suite}-")
     os.makedirs(workdir, exist_ok=True)
     sources: list[str] = []
@@ -300,7 +308,7 @@ def build_and_run(
         # nothing about the code it tests, and counting it as red would put a
         # gap in this harness on the same line as a real defect.
         detail = compile.stderr.strip().splitlines()
-        return None, detail[-1] if detail else "build failed"
+        return Outcome(None, detail[-1] if detail else "build failed")
 
     # Run inside its own directory: alcotest writes its per-case output under
     # the working directory, and a shared one has suites overwriting each other.
@@ -318,9 +326,41 @@ def build_and_run(
         for line in output.splitlines():
             if "Test Successful" in line:
                 summary = line.strip()
-        return True, summary
+        return Outcome(True, summary)
     failures = [line.strip() for line in output.splitlines() if line.startswith("FAIL")]
-    return False, "; ".join(failures) if failures else "failed"
+    summary = "; ".join(failures) if failures else "failed"
+    return Outcome(False, summary, failure_detail(output))
+
+
+# What alcotest printed under each failed assertion, bounded. The names alone
+# were not enough the first time this ran in CI: test_dune_local_script failed
+# two assertions there and passed here, and a reader had only the two names to
+# work from -- no expected, no received, and an environment they could not
+# reproduce. The Expected/Received pair is the part that travels.
+DETAIL_LINES = 40
+# Alcotest prints the pair a couple of blank lines under the FAIL line, then a
+# backtrace. Stop at the backtrace: it names alcotest's own frames, not the
+# assertion, and it is the longest part of the block.
+DETAIL_STOP = ("Raised at", "ASSERT", "FAIL", "Logs saved to", "Testing ")
+
+
+def failure_detail(output: str) -> str:
+    lines = output.splitlines()
+    keep: list[str] = []
+    for index, line in enumerate(lines):
+        if not line.startswith("FAIL"):
+            continue
+        keep.append(line.rstrip())
+        for follow in lines[index + 1 : index + 12]:
+            stripped = follow.rstrip()
+            if stripped.lstrip().startswith(DETAIL_STOP):
+                break
+            if stripped and not set(stripped) <= {"\u2500", "\u2502", " "}:
+                keep.append(stripped)
+        if len(keep) >= DETAIL_LINES:
+            keep.append("  ... (truncated)")
+            break
+    return "\n".join(keep[:DETAIL_LINES + 1])
 
 
 def main() -> int:
@@ -401,16 +441,19 @@ def main() -> int:
     unbuilt = 0
     for plan in plans:
         keep = os.path.join(args.keep, plan.suite) if args.keep else None
-        outcome, summary = build_and_run(plan, root, source_root, keep)
-        if outcome is None:
+        outcome = build_and_run(plan, root, source_root, keep)
+        if outcome.built is None:
             unbuilt += 1
             label = "build"
-        elif outcome:
+        elif outcome.built:
             label = "ok   "
         else:
             failed += 1
             label = "FAIL "
-        print(f"{label} {plan.suite}: {summary}")
+        print(f"{label} {plan.suite}: {outcome.summary}")
+        if outcome.detail:
+            for line in outcome.detail.splitlines():
+                print(f"      {line}")
     for name, why in blocked:
         print(f"skip  {name}: {why}")
     print(

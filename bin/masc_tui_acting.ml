@@ -754,6 +754,20 @@ let evidence_fields (entry : entry) =
       ; some "Skill receipt" "not carried by this observer event"
       ]
   | Observer.Keeper_tool_call call ->
+      let schedule_fields =
+        match call.kt_schedule with
+        | None -> [ field "Execution schedule" None ]
+        | Some (Error error) -> [ some "Execution schedule error" error ]
+        | Some (Ok schedule) ->
+            [ some "Execution mode"
+                (match schedule.execution_mode with
+                 | Agent_core.Tool_contract.Concurrent -> "concurrent"
+                 | Agent_core.Tool_contract.Serial -> "serial")
+            ; some "Planned index (zero-based)" (string_of_int schedule.planned_index)
+            ; some "Batch index (zero-based) / size"
+                (Printf.sprintf "%d / %d" schedule.batch_index schedule.batch_size)
+            ]
+      in
       [ some "Source" "keeper_tool_call observer event"
       ; some "Keeper" call.kt_keeper
       ; some "Tool name" call.kt_tool
@@ -761,7 +775,7 @@ let evidence_fields (entry : entry) =
       ; field "Disposition" call.kt_disposition
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
-      ]
+      ] @ schedule_fields
   | event ->
       let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"

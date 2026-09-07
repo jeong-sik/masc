@@ -2360,6 +2360,67 @@ let test_top_level_unsupported_keywords_are_dropped () =
      |> to_string)
 ;;
 
+(* Exercise the serialized request: Yojson's member lookup alone hides a
+   second description field, while the provider rejects the entire body. *)
+let test_conformant_tool_description_is_unique_on_wire () =
+  let rec check_unique path = function
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      check_int (path ^ " unique object keys")
+        (List.length names) (List.length (List.sort_uniq String.compare names));
+      List.iter (fun (name, value) -> check_unique (path ^ "." ^ name) value) fields
+    | `List values -> List.iteri (fun index value ->
+        check_unique (Printf.sprintf "%s[%d]" path index) value) values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> ()
+    | `Tuple _ | `Variant _ -> Alcotest.fail "request contains non-JSON data"
+  in
+  let shell description =
+    `Assoc ([ "type", `String "string"
+            ; "enum", `List [ `String "sh"; `String "bash" ]
+            ; "default", `String "sh" ] @ description)
+  in
+  let cases =
+    [ "existing", [ "description", `String "Which shell runs script." ],
+      "Which shell runs script.; one of: sh | bash"
+    ; "empty", [ "description", `String "" ], "one of: sh | bash"
+    ; "absent", [], "one of: sh | bash" ]
+  in
+  List.iter (fun (name, description, expected) ->
+    let config =
+      Provider_config.make
+        ~kind:OpenAI_compat ~model_id:"codec-conformant-description"
+        ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+        ~max_tokens:128
+        ~model_capabilities_override:
+          { Capabilities.default_capabilities with
+            tool_schema_conformance = Capabilities.Conformant_subset_required }
+        ()
+    in
+    let tool = `Assoc
+      [ "name", `String "Execute"; "description", `String "Run a command."
+      ; "input_schema", `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc
+              [ "shell", shell description
+              ; "shells", `Assoc
+                  [ "type", `String "array"; "items", shell description ] ] ] ]
+    in
+    let body = Backend_openai_request.build_request ~config
+        ~messages:[msg User [Text "run the command"]] ~tools:[tool] ()
+      |> Yojson.Safe.from_string in
+    check_unique name body;
+    let parameters = body |> member "tools" |> to_list |> List.hd
+      |> member "function" |> member "parameters" in
+    let properties = member "properties" parameters in
+    List.iter (fun schema ->
+      check_string "description preserves instruction and vocabulary"
+        expected (schema |> member "description" |> to_string);
+      check_string "default remains sh" "sh" (schema |> member "default" |> to_string);
+      check_bool "enum projected to vocabulary" true (member "enum" schema = `Null))
+      [member "shell" properties; properties |> member "shells" |> member "items"])
+    cases
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
@@ -2541,6 +2602,10 @@ let () =
             "tool_choice respects capability gate"
             `Quick
             test_responses_tool_choice_respects_capability_gate
+        ; Alcotest.test_case
+            "conformant request has unique descriptions at every depth"
+            `Quick
+            test_conformant_tool_description_is_unique_on_wire
         ; Alcotest.test_case
             "top-level unsupported schema keywords are dropped"
             `Quick

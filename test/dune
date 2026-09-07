@@ -2343,6 +2343,7 @@
 (include stanzas/test_keeper_checkpoint_classify.inc)
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
+(include stanzas/test_keeper_owned_checkpoint.inc)
 
 
 
@@ -3332,7 +3333,7 @@
  (modules test_tui_observer)
  ; masc for the routing table the decoder classifies by: the test quantifies
  ; over the same vocabulary rather than restating it.
- (libraries alcotest masc masc_tui_observer yojson))
+ (libraries alcotest masc agent_core masc_tui_observer yojson))
 
 (test
  (name test_tui_clipboard)
@@ -3990,6 +3991,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-acting-call-evidence)))
+
+(rule
+ (alias runtest-test_tui_build_identity)
+ (deps
+  test_tui_build_identity.py
+  ../bin/masc_tui.exe
+  ../lib/build_commit/build_commit_generated.ml)
+ (action
+  (run python3 %{dep:test_tui_build_identity.py}
+   %{dep:../bin/masc_tui.exe}
+   %{dep:../lib/build_commit/build_commit_generated.ml}
+   --expected-version %{version:masc})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_build_identity)))
 
 ; Python unit suites over the scripts/ tree. These suites were first wired
 ; into runtest after the #32245 review found several of them running with no

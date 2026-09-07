@@ -340,6 +340,7 @@ module For_testing : sig
     ?on_attempt_error:
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
+    ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->

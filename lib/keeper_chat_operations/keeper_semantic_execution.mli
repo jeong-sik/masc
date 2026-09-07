@@ -39,6 +39,8 @@ type phase =
 type t = private
   { id : Keeper_execution_scope_id.t
   ; revision : int64
+  ; input : Yojson.Safe.t option
+  ; input_sha256 : string
   ; sources : source_member list
   ; current_sources : source_member list
   ; frame : Keeper_repetition_snapshot.t
@@ -65,7 +67,10 @@ val error_to_string : error -> string
 val phase_name : phase -> string
 val is_terminal : t -> bool
 val scope : t -> Keeper_execution_scope_id.t
-val create : id:Keeper_execution_scope_id.t -> sources:source_member list -> now:float -> (t, error) result
+val create : id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t -> sources:source_member list -> now:float -> (t, error) result
+(** The producer owns the input codec. Its canonical payload remains available
+    during waiting/recovery and is released only at semantic settlement. The
+    immutable digest remains part of admission identity after release. *)
 val apply : now:float -> action -> t -> (t, error) result
 (** Recheck_sources carries a complete, caller-verified projection of the
     original batch's current queue entries and their durable scope bindings.

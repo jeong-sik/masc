@@ -32,7 +32,6 @@ scripts/ci/check-yaml-syntax.py
 scripts/ci/check_env_reads_below_config.py  # red
 scripts/ci/check_exact_field_decoder_preflight.py  # red
 scripts/lib/worktree-cleanup-guards.sh
-scripts/ocaml-boundary-ratchet.sh
 scripts/tla-bug-model-ratchet.sh
 scripts/tla-check.sh
 scripts/tla-ppx-ratchet.sh

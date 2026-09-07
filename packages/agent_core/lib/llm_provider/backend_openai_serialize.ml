@@ -1057,10 +1057,14 @@ let conformant_schema_value json =
       let fields =
         match enum_note with
         | Some note ->
-          (match List.assoc_opt "description" fields with
-           | Some (`String existing) when existing <> "" ->
-             ("description", `String (existing ^ "; " ^ note)) :: fields
-           | _ -> ("description", `String note) :: fields)
+          let description =
+            match List.assoc_opt "description" fields with
+            | Some (`String existing) when existing <> "" -> existing ^ "; " ^ note
+            | _ -> note
+          in
+          (* Replace the annotation: prepending it while retaining the old
+             field emits duplicate JSON keys and rejects the whole request. *)
+          ("description", `String description) :: List.remove_assoc "description" fields
         | None -> fields
       in
       `Assoc fields
@@ -1094,4 +1098,3 @@ let conformant_tool_json tool =
     | _ -> `Assoc outer)
   | other -> other
 ;;
-

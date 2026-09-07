@@ -704,6 +704,7 @@ type exact_checkpoint_snapshot =
 let exact_snapshot_checkpoint snapshot = snapshot.checkpoint
 let exact_snapshot_reference snapshot = snapshot.reference
 let exact_snapshot_canonical_bytes snapshot = snapshot.canonical_bytes
+let exact_snapshot_messages snapshot = snapshot.checkpoint.messages
 
 type checkpoint_cas_error =
   | Source_unavailable of checkpoint_ref_load_error

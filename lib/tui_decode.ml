@@ -7096,6 +7096,9 @@ type preset_settings_match =
 
 type preset_detail =
   { pd_name : string
+  ; pd_directory : string
+  ; pd_settings_match : preset_settings_match
+  ; pd_prompt_files : (string * string option * prompt_source) list
   ; pd_overrides : (string * int) list  (** prompt key, bytes *)
   ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
   ; pd_assignments : (string * string) list  (** keeper, runtime id *)

@@ -143,7 +143,7 @@ let test_pane_row_and_detail () =
     ; ""
     ; "Preset directory: /fixture/presets/morning"
     ; "Matches saved workspace settings (Keeper reload timing still applies)"
-    ; "Prompt keeper · effective override · Markdown /fixture/prompts/keeper.md"
+    ; "Prompt keeper · current effective override · Markdown /fixture/prompts/keeper.md"
     ; "override keeper(4431B)"
     ; "지시문 analyst.toml(812B), spruce.toml(640B)"
     ; "배정 analyst→glm-coding.glm-5.3"
@@ -191,6 +191,35 @@ let test_pane_row_and_detail () =
   check bool "the report follows the preset in the detail" true
     (List.exists (fun line -> line = "runtime: committed — runtime.toml rewritten, assignments and exact lanes live") with_report)
 
+let test_decode_saved_settings_and_effective_prompt_sources () =
+  let payload saved_settings = `Assoc
+    [ "preset", `Assoc
+        [ "name", `String "morning"; "prompt_overrides", `List []
+        ; "instructions", `List []; "assignments", `List []; "lanes", `List [] ]
+    ; "directory", `String "/fixture/presets/morning"
+    ; "saved_settings", saved_settings
+    ; "prompt_files", `List [`Assoc
+        [ "key", `String "keeper"; "path", `String "/fixture/prompts/keeper.md"
+        ; "source", `String "override" ]]
+    ]
+  in
+  List.iter (fun (status, extra, expected) ->
+    match D.decode_preset_detail (payload (`Assoc (("status", `String status) :: extra))) with
+    | Error detail -> fail detail
+    | Ok detail ->
+        check string "saved directory" "/fixture/presets/morning" detail.pd_directory;
+        check bool "comparison verdict is typed" true (detail.pd_settings_match = expected);
+        check bool "live prompt source is separate from the comparison" true
+          (detail.pd_prompt_files = ["keeper", Some "/fixture/prompts/keeper.md", D.Prompt_override]))
+    [ "matches", [], D.Preset_settings_match
+    ; "differs", [], D.Preset_settings_differ
+    ; "unavailable", ["reason", `String "broken.toml"], D.Preset_settings_unavailable "broken.toml"
+    ];
+  check bool "an unavailable comparison must explain why" true
+    (Result.is_error (D.decode_preset_detail (payload (`Assoc ["status", `String "unavailable"]))));
+  check bool "unknown comparison status is rejected" true
+    (Result.is_error (D.decode_preset_detail (payload (`Assoc ["status", `String "unknown"]))))
+
 let () =
   run "Masc_tui_preset_text"
     [ ( "preset text"
@@ -200,5 +229,7 @@ let () =
         ; test_case "restore lines show skips and the runtime outcome" `Quick
             test_restore_lines_show_skips_and_the_runtime_outcome
         ; test_case "pane row and detail lines" `Quick test_pane_row_and_detail
+        ; test_case "saved comparison and current effective source decode independently" `Quick
+            test_decode_saved_settings_and_effective_prompt_sources
         ] )
     ]

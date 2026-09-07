@@ -105,7 +105,7 @@ let contents_lines (d : D.preset_detail) =
      | D.Preset_settings_unavailable reason -> "Settings comparison unavailable: " ^ reason)
   ]
   @ List.map (fun (key, path, source) ->
-      Printf.sprintf "Prompt %s · effective %s · Markdown %s" key
+      Printf.sprintf "Prompt %s · current effective %s · Markdown %s" key
         (match source with D.Prompt_override -> "override" | D.Prompt_file -> "file" | D.Prompt_missing -> "missing")
         (Option.value path ~default:"no file registered")) d.D.pd_prompt_files
   @ sized "override" d.D.pd_overrides

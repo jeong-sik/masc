@@ -203,6 +203,54 @@ let test_capture_save_load_round_trip () =
        | _ -> false))
 ;;
 
+let test_saved_settings_ignore_snapshot_metadata () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"first") in
+    let renamed = { snapshot with Preset.name = "evening"; description = "another label";
+                                  created_at = "2026-09-07T22:00:00Z" } in
+    Alcotest.(check bool) "metadata is not a setting" true
+      (Preset.same_settings snapshot renamed);
+    Alcotest.(check bool) "unchanged durable settings match" true
+      (or_fail (Preset.matches_saved_settings ~base_path renamed)))
+;;
+
+let test_saved_settings_report_invalid_keeper_toml () =
+  with_base (fun ~base_path ~keepers ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let broken = Filename.concat keepers "broken.toml" in
+    write_file broken "[keeper\ninvalid TOML";
+    let ordinary = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    Alcotest.(check bool) "ordinary capture keeps its existing partial behavior" true
+      (Preset.same_settings snapshot ordinary);
+    match Preset.matches_saved_settings ~base_path snapshot with
+    | Ok _ -> Alcotest.fail "an unreadable Keeper cannot produce a settings verdict"
+    | Error detail -> Alcotest.(check bool) "comparison names the unreadable TOML" true
+        (contains_substring detail broken))
+;;
+
+let test_saved_settings_read_durable_overrides_without_reloading () =
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    set_override ~base_path "Live original.";
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let live = Prompt_registry.persisted_entries () in
+    let path = Filename.concat (Filename.dirname config) "prompt_overrides.json" in
+    let changed = List.map (fun (entry : Override.entry) ->
+        { entry with value = "Changed directly on disk." }) live in
+    (match Override.save ~path changed with
+     | Ok () -> () | Error error -> Alcotest.fail (Override.error_to_string error));
+    Alcotest.(check bool) "disk drift is visible even while the live registry matches" false
+      (or_fail (Preset.matches_saved_settings ~base_path snapshot));
+    Alcotest.(check bool) "comparison does not reload the live registry" true
+      (Prompt_registry.persisted_entries () = live);
+    write_file path "{invalid json";
+    (match Preset.matches_saved_settings ~base_path snapshot with
+     | Ok _ -> Alcotest.fail "corrupt durable overrides cannot produce a settings verdict"
+     | Error detail -> Alcotest.(check bool) "comparison names the corrupt override file" true
+         (contains_substring detail path));
+    Alcotest.(check bool) "corruption does not clear the live registry" true
+      (Prompt_registry.persisted_entries () = live))
+;;
+
 let test_invalid_name_is_refused () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
@@ -329,6 +377,12 @@ let () =
       , [ Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip
         ; Alcotest.test_case "an invalid name is refused" `Quick test_invalid_name_is_refused
+        ; Alcotest.test_case "saved-settings comparison ignores snapshot metadata" `Quick
+            test_saved_settings_ignore_snapshot_metadata
+        ; Alcotest.test_case "saved-settings comparison reports invalid Keeper TOML" `Quick
+            test_saved_settings_report_invalid_keeper_toml
+        ; Alcotest.test_case "saved-settings comparison reads disk without reloading" `Quick
+            test_saved_settings_read_durable_overrides_without_reloading
         ; Alcotest.test_case "restore puts the saved state back and autosaves first" `Quick
             test_restore_puts_the_saved_state_back
         ; Alcotest.test_case "the runtime.toml text transform keeps every other line" `Quick

@@ -227,6 +227,10 @@ module For_testing : sig
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     provider_attempt_outcomes
 
+  val canonical_checkpoint_sink :
+    replay_prefix_projection:Keeper_replay_prefix.projection ->
+    Agent_core.Agent.checkpoint_sink -> Agent_core.Agent.checkpoint_sink
+
   val provider_result :
     provider_attempt_outcomes ->
     (Runtime_agent.run_result, Agent_core.Error.t) result

@@ -7,6 +7,8 @@ import {
   fusionBoardError,
   fusionBoardLoading,
   fusionBoardPosts,
+  fusionEvidenceRequests,
+  loadFusionRunEvidence,
   fusionRuns,
   fusionRunsLoading,
   refreshFusionBoard,
@@ -1327,6 +1329,21 @@ export function FusionSurface() {
     ?? merged.find(run => run.kind === 'board')
     ?? merged[0]
     ?? null
+  // A registry-only selection means the board window did not carry this run's
+  // post -- either because the deliberation has not written one yet, or because
+  // the last 500 posts no longer reach back to it. The second case used to be
+  // permanent: the panel and judge detail simply could not be opened again
+  // (#33562). Asking for it by run id costs an index lookup and settles which
+  // of the two it is.
+  //
+  // Runs once per run id, and the store drops that record when the list is
+  // refetched, so a deliberation that lands its post later is asked again.
+  const unresolvedRunId = selected?.kind === 'registry' ? selected.runId : null
+  const evidenceRequested = unresolvedRunId !== null
+    && fusionEvidenceRequests.value.has(unresolvedRunId)
+  useEffect(() => {
+    if (unresolvedRunId !== null && !evidenceRequested) void loadFusionRunEvidence(unresolvedRunId)
+  }, [unresolvedRunId, evidenceRequested])
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
   // Paged master list (38-bug campaign #34): render a page of rows instead of

@@ -35,7 +35,7 @@ describe('Fusion mobile overflow contract', () => {
 // second data source the board-sink refresh cannot reach (RFC-0266 Phase 4).
 vi.mock('../../store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../store')>()
-  return { ...actual, refreshFusionBoard: vi.fn(), refreshFusionRuns: vi.fn() }
+  return { ...actual, refreshFusionBoard: vi.fn(), refreshFusionRuns: vi.fn(), loadFusionRunEvidence: vi.fn() }
 })
 
 // The Markdown renderer is lazy-loaded, which makes synchronous assertions

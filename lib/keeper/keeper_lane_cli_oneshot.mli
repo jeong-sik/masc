@@ -62,6 +62,12 @@ val run
 (** Execute [prompt] (suffixed with the lane schema instruction) once on
     [runtime_id] and parse the answer as a single JSON value. *)
 
+val order_slots : string list -> string list
+(** Stable quota ordering for the remaining declared CLI candidates. Reapply
+    before dispatch and after a failed candidate; exhausted scopes move to the
+    tail, but every declared candidate remains eligible. Shared with the HITL
+    walker, whose release/bind transitions must precede each dispatch. *)
+
 val walk
   :  ?runner:runner
   -> base_dir:string
@@ -71,7 +77,7 @@ val walk
   -> prompt:string
   -> unit
   -> (string * Yojson.Safe.t, failure list) result
-(** Walk [cli_slots] in declaration order and return the first slot whose
+(** Walk [cli_slots] with stable quota ordering and return the first slot whose
     answer parses, as [(runtime_id, value)]. [Error failures] carries every
     slot's failure in walk order when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"

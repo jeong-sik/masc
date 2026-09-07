@@ -17,6 +17,11 @@ type phase =
   | Telemetry_filter
   | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
+  | Health_build_identity
+  | Health_paths
+  | Health_internal_auth
+  | Health_dashboard_surface
+  | Health_response
   | Json_serialize
   | Mcp_http_auth
   | Mcp_identity
@@ -52,6 +57,11 @@ let phase_token = function
   | Telemetry_filter -> "telemetry_filter"
   | Telemetry_summary_per_keeper -> "telemetry_summary_per_keeper"
   | Telemetry_summary_aggregate -> "telemetry_summary_aggregate"
+  | Health_build_identity -> "health_build_identity"
+  | Health_paths -> "health_paths"
+  | Health_internal_auth -> "health_internal_auth"
+  | Health_dashboard_surface -> "health_dashboard_surface"
+  | Health_response -> "health_response"
   | Json_serialize -> "json_serialize"
   | Mcp_http_auth -> "mcp_http_auth"
   | Mcp_identity -> "mcp_identity"

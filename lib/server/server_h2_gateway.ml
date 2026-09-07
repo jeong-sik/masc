@@ -388,13 +388,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Health & Metrics
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
-          let json =
-            Server_routes_http_runtime.make_health_response_json
+          let body, timing_headers =
+            Server_routes_http_runtime.make_health_response_body
               ~listener:"h2"
               ~request_authority
               httpun_request
           in
-          h2_respond_json_value h2_reqd json ~extra_headers:cors
+          h2_respond_json h2_reqd body ~extra_headers:(cors @ timing_headers)
 
       | `GET, p when String.equal p Server_health_paths.liveness ->
           let json =

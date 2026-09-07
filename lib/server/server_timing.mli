@@ -38,6 +38,13 @@ type phase =
   | Telemetry_filter
   | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
+  | Health_build_identity (** Request-local [Build_identity.current]. *)
+  | Health_paths (** Request-local base-path diagnostics. *)
+  | Health_internal_auth (** Internal credential readiness JSON. *)
+  | Health_dashboard_surface (** Dashboard artifact health JSON. *)
+  | Health_response
+      (** Entire request health JSON builder, overlapping its child phases;
+          excludes JSON serialization and background full-health refresh. *)
   | Json_serialize
   | Mcp_http_auth (** HTTP credential admission, before reading the body. *)
   | Mcp_identity (** Canonical actor and internal Keeper verification. *)
@@ -57,7 +64,8 @@ val measure : t -> phase -> (unit -> 'a) -> 'a
 (** [measure t phase f] runs [f ()], accumulates the elapsed
     monotonic duration under [phase], and returns [f]'s result.  If
     [f] raises, the elapsed time is still recorded and the exception
-    re-raised (so failure paths are still attributed). *)
+    re-raised (so failure paths are still attributed). Durations include
+    suspension and rescheduling time; nested phases overlap their parents. *)
 
 val record_ms : t -> phase -> float -> unit
 (** Manually record [ms] under [phase].  Use when a measurement is

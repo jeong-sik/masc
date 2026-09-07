@@ -80,7 +80,7 @@ let test_plain_listing_footer_shape () =
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "1 / 2:Events / Logs  j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
@@ -676,9 +676,9 @@ let test_fleet_total_cost () =
   Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
     (fleet_total_cost_usd state)
 
-let test_config_footer_names_both_hops () =
-  check str "Config names its two off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
+let test_config_footer_names_child_hops () =
+  check str "Config names its three off-ring children"
+    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
@@ -1418,8 +1418,8 @@ let () =
             test_resources_is_a_config_child
         ; Alcotest.test_case "Tools is a Config child" `Quick
             test_tools_is_a_config_child
-        ; Alcotest.test_case "Config names both hops" `Quick
-            test_config_footer_names_both_hops
+        ; Alcotest.test_case "Config names child hops" `Quick
+            test_config_footer_names_child_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick

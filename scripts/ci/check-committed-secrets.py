@@ -14,8 +14,11 @@ five months.
 GitHub push protection would not have stopped two of the three. It matches
 known provider patterns, so it caught the `sk-ant-` key in
 docs/evidence/task-362-bundle (the redaction marker there is its own) and
-let the `postgresql://user:password@host` line in the same bundle through.
+let a postgres URL carrying inline credentials through in the same bundle.
 This scanner exists for the shapes that protection does not name.
+
+Written without any literal that its own rules match, so that scanning the
+tree it lives in stays a question about the tree.
 
 Budget is zero. The allowlist pins the exact strings the tree already
 carries -- redaction fixtures, dummy tokens, a test's own input -- by

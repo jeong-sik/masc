@@ -13342,7 +13342,88 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
+let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+  match view.reading with
+  | None -> []
+  | Some reading ->
+      match reading.page with
+      | None -> []
+      | Some page ->
+          String.split_on_char '\n' (Keeper_chat.terminal_safe_text page.text)
+          |> List.concat_map (fun line ->
+              if line = "" then [""] else
+              Message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
+
+let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let room = max 0 (max 1 (body_rows - 5) - 6) in
+  max 0 (List.length (browser_lane_page_lines ~cols view) - room)
+
+let render_browser_lane (state : state) (view : Browser_lane_view.t) =
+  let open Browser_lane_view in
+  let terminal_rows, cols = get_terminal_size () in
+  let label = match view.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
+  let title = Printf.sprintf "%s  %s  %s"
+      (screen_title (" MASC " ^ label)) (source_name view.source)
+      (connection_badge state) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+    ~hints:Masc_tui_keys.footer_hints_browser_lane
+    ~body:(fun ~budget c ->
+      let status, style = match view.load with
+        | Loading (_, Read) -> "Reading Firefox…", Theme.info ()
+        | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
+        | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
+        | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | Idle -> (match view.reading with
+            | None -> "Not read yet", Theme.recede ()
+            | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
+                reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
+      in
+      c.push_styled ~style ("  " ^ status);
+      c.push_styled ~style:(Theme.recede ())
+        (match view.source with
+         | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
+         | Automation -> "  Automation Firefox • o:open / x:close session • l:live");
+      let tabs, page = match view.reading with
+        | None -> [], None
+        | Some reading -> reading.tabs, reading.page
+      in
+      let tab_count = List.length tabs in
+      let index =
+        let rec find i = function
+          | [] -> 0
+          | (tab : tab) :: rest -> if Some tab.id = view.selected_tab then i else find (i + 1) rest
+        in find 0 tabs
+      in
+      let selected = List.nth_opt tabs index in
+      c.push_styled ~style:(Theme.info ())
+        (match selected with
+         | None -> "  No matching tabs • Open a page in the selected Firefox session"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
+             (index + 1) tab_count (Terminal_text.single_line tab.title)
+             (if tab.active then " (active)" else ""));
+      c.push_styled ~style:(Theme.recede ())
+        (match page with
+         | None -> "  No page content"
+         | Some page -> Printf.sprintf "  %s • %d chars%s%s"
+             (Terminal_text.single_line page.url) page.chars
+             (if page.truncated then " • truncated" else "")
+             (match view.load with Idle -> "" | Loading _ | Failed _ -> " • previous read"));
+      c.push_divider ();
+      let lines = browser_lane_page_lines ~cols view in
+      let room = max 0 (budget - 6) in
+      let max_scroll = max 0 (List.length lines - room) in
+      let scroll = min max_scroll view.scroll in
+      lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)
+      |> List.iter (fun line -> c.push_styled ~style:Ansi.reset ("  " ^ line));
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Esc:connectors"
+           (if lines = [] then 0 else scroll + 1) (List.length lines)))
+
 let render_connectors (state : state) =
+  match state.browser_lane with
+  | Some view -> render_browser_lane state view
+  | None ->
   let terminal_rows, cols = get_terminal_size () in
   let connectors =
     match state.connectors with
@@ -13368,7 +13449,7 @@ let render_connectors (state : state) =
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"j/k:scroll  b:bind  u:unbind  Tab:next  q:quit  r:refresh"
+    ~hints:"B:Browser Lane  S:Slack Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"

@@ -4709,3 +4709,8 @@
 (include stanzas/test_browser_webdriver.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(test
+ (name test_tui_browser_lane)
+ (modules test_tui_browser_lane)
+ (libraries masc_tui_types))

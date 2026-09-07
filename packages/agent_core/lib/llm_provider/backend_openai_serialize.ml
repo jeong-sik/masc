@@ -977,10 +977,40 @@ let tool_definition_of_json = function
   | _ -> invalid_tool_definition "tool must be a JSON object"
 ;;
 
+(* The chat-completions function schema admits none of these at the top level
+   and answers an unusable 400 for the whole request when one is present:
+   "schema must have type 'object' and not have
+   'oneOf'/'anyOf'/'allOf'/'enum'/'const'/'not' at the top level". Nested uses
+   are fine, so this drops only the top level.
+
+   masc emits one: [config/tools/tool_execute.toml] declares [[one_of]] blocks
+   for "argv or script, not both", which the TOML reader renders as a
+   top-level [oneOf]. Every other provider accepts it. Measured 2026-09-07,
+   openai lanes failed 2,525 times in six hours on this alone, two keepers at
+   204 and 207 consecutive failures.
+
+   What is lost is the model's hint, not the rule. The runtime still refuses a
+   call that names both -- keeper_tool_execute_typed_input.ml:137, "names both
+   script and argv; a call takes one form" -- and refuses one that names
+   neither. So a model that gets it wrong is answered by the tool instead of
+   being told in advance, and no call runs that would not have run before. *)
+let openai_top_level_unsupported =
+  [ "oneOf"; "anyOf"; "allOf"; "enum"; "const"; "not" ]
+;;
+
+let strip_unsupported_top_level_keywords schema =
+  match schema with
+  | `Assoc fields
+    when List.exists (fun (k, _) -> List.mem k openai_top_level_unsupported) fields ->
+    `Assoc
+      (List.filter (fun (k, _) -> not (List.mem k openai_top_level_unsupported)) fields)
+  | other -> other
+;;
+
 let tool_definition_fields definition =
   [ "name", `String definition.name
   ; "description", `String definition.description
-  ; "parameters", definition.parameters
+  ; "parameters", strip_unsupported_top_level_keywords definition.parameters
   ]
   @
   match definition.strict with

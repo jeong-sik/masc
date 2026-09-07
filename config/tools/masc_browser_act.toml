@@ -69,4 +69,4 @@ description = "Outer-to-inner iframe/frame CSS selectors from BrowserRead mode=f
 name = "paths"
 type = "array"
 items = { type = "string" }
-description = "Absolute existing file paths on the automation host for upload. Replaces the file input selection."
+description = "Keeper-readable file paths (playground-relative or visible absolute paths). Files are privately staged through your sandbox before replacing the file input selection. Maximum 16 MiB per file."

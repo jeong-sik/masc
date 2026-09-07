@@ -110,10 +110,17 @@ and an empty framePath. They cover JavaScript alert/confirm/prompt dialogs, not
 arbitrary operating-system dialogs.
 
 `BrowserAct upload` requires `tabId`, a unique file-input `selector` and a nonempty
-array of absolute `paths` on the automation host. Optional framePath targets an
+array of Keeper-readable `paths` (playground-relative or visible absolute paths).
+Optional framePath targets an
 input inside a frame. Native WebDriver clears the existing selection and sends
 these files; clicking the site's submit control remains a separate action.
-Paths refer to the host running geckodriver, not a remote Keeper's filesystem.
+The Keeper file resolver validates every path before issuing any browser command.
+The selected sandbox backend reads the bytes, including endpoint-owned trees;
+backend errors never fall back to a same-named host file. Files are privately
+staged with their basenames until the browser has accepted the selection, then
+the snapshots are removed. A 16 MiB per-file resource limit rejects oversized
+files before browser effects, without uploading truncated prefixes. Generic
+tool callers without authoritative Keeper context cannot upload.
 
 The real Firefox scenario covers nested cross-origin frame input, top-level
 recovery, missing-frame rejection before mutation, alert/confirm/prompt outcomes,

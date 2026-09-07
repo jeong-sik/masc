@@ -75,8 +75,8 @@ let parse = function
        let* paths = match List.assoc_opt "paths" fields with
          | Some value -> string_list "paths" value | None -> Error "upload requires paths" in
        let* () = if paths = [] then Error "upload requires at least one file" else Ok () in
-       let* () = if List.exists (fun p -> Filename.is_relative p || String.contains p '\n' || String.contains p '\r' || String.contains p '\000') paths
-         then Error "upload paths must be absolute file paths without line separators" else Ok () in
+       let* () = if List.exists (fun p -> String.contains p '\n' || String.contains p '\r' || String.contains p '\000') paths
+         then Error "upload paths must not contain line separators or NUL" else Ok () in
        on_tab ["selector";"paths"] (Upload {selector;paths})
      | "accept_dialog" ->
        let* text = match List.assoc_opt "text" fields with

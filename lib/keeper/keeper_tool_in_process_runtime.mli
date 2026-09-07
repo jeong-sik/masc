@@ -159,7 +159,10 @@ val handle_browser_session_with_outcome : args:Yojson.Safe.t -> Keeper_tool_exec
 
 val handle_browser_goto_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
 
-val handle_browser_act_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+val handle_browser_act_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config -> meta:keeper_meta ->
+  args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t

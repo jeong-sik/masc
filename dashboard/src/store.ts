@@ -1523,15 +1523,19 @@ export async function refreshFusionBoard(): Promise<void> {
 // Silent on failure. This runs for a run the list did not carry, so the pane it
 // feeds already draws the honest sparse detail; replacing that with an error
 // would report the fetch instead of the run.
-const fusionEvidenceRequested = new Set<string>()
+export const fusionEvidenceRequests = signal<ReadonlyMap<string, symbol>>(new Map())
 
 export async function loadFusionRunEvidence(runId: string): Promise<void> {
-  if (runId === '' || fusionEvidenceRequested.has(runId)) return
-  fusionEvidenceRequested.add(runId)
+  const requests = fusionEvidenceRequests.peek()
+  if (runId === '' || requests.has(runId)) return
+  const request = Symbol(runId)
+  fusionEvidenceRequests.value = new Map(requests).set(runId, request)
   try {
     const { fetchFusionRunEvidencePost } = await import('./api/board')
     const post = await fetchFusionRunEvidencePost(runId)
-    if (post === null) return
+    // A list refresh retires previous requests. A late answer from that
+    // earlier read must not replace evidence fetched after the refresh.
+    if (fusionEvidenceRequests.peek().get(runId) !== request || post === null) return
     fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, [
       post,
       ...fusionBoardPosts.value.filter(existing => existing.id !== post.id),
@@ -1546,7 +1550,7 @@ export async function loadFusionRunEvidence(runId: string): Promise<void> {
 // itself is refetched, so a run that had no post yet can be asked again after
 // its deliberation lands.
 export function forgetFusionEvidenceRequests(): void {
-  fusionEvidenceRequested.clear()
+  fusionEvidenceRequests.value = new Map()
 }
 
 // Re-fetched on route visit (tab-refresh) and on each `fusion_run_status` SSE

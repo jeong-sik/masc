@@ -7,6 +7,7 @@ import {
   fusionBoardError,
   fusionBoardLoading,
   fusionBoardPosts,
+  fusionEvidenceRequests,
   loadFusionRunEvidence,
   fusionRuns,
   fusionRunsLoading,
@@ -1337,13 +1338,12 @@ export function FusionSurface() {
   //
   // Runs once per run id, and the store drops that record when the list is
   // refetched, so a deliberation that lands its post later is asked again.
-  const unresolvedRunId =
-    routedSelected !== undefined && routedSelected.kind === 'registry'
-      ? routedSelected.runId
-      : ''
+  const unresolvedRunId = selected?.kind === 'registry' ? selected.runId : null
+  const evidenceRequested = unresolvedRunId !== null
+    && fusionEvidenceRequests.value.has(unresolvedRunId)
   useEffect(() => {
-    if (unresolvedRunId !== '') void loadFusionRunEvidence(unresolvedRunId)
-  }, [unresolvedRunId])
+    if (unresolvedRunId !== null && !evidenceRequested) void loadFusionRunEvidence(unresolvedRunId)
+  }, [unresolvedRunId, evidenceRequested])
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
   // Paged master list (38-bug campaign #34): render a page of rows instead of

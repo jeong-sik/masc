@@ -1711,6 +1711,30 @@ supports_reasoning_budget = true
 accepted_reasoning_efforts = []
 
 [[models]]
+# gemini-3.8-flash-{high,...}, served through the Antigravity Google
+# subscription; masc runs the -high slot. Without this row it prefix-matches
+# the generic "gemini-3" row, which declares no thinking contract at all, so
+# build_request refuses any request that carries a reasoning_effort.
+#
+# Probed against the Gemini API on 2026-09-07 rather than read off a page:
+#
+#   thinkingLevel=minimal  400  "Thinking level MINIMAL is not supported for
+#                                this model. Please retry with other thinking
+#                                level."
+#   thinkingLevel=low|medium|high  200
+#   1,048,576 in / 65,536 out     (models.list)
+#
+# thinkingBudget=1024 also answers 200, as it does on 3.6 and 3.7, which
+# declare supports_reasoning_budget = false all the same: the field picks the
+# wire masc sends on, not what the model would accept.
+id_prefix = "gemini-3.8-flash"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["low", "medium", "high"]
+
+[[models]]
 # gemini-3.7-flash-{high,medium,low}, served through the Antigravity Google
 # subscription (agy 1.1.17 `agy models` lists the three). Official page
 # ai.google.dev/gemini-api/docs/models/gemini-3.7-flash, read 2026-08-22:

@@ -3275,6 +3275,7 @@ type state = {
   mutable ask_answer_mode: ask_answer_mode;
   mutable ask_cursor: int;
   mutable ask_question_cursor: int;
+  mutable ask_question_scroll: int;
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
@@ -4602,6 +4603,7 @@ let create_state
   ask_answer_mode = Ask_browsing;
   ask_cursor = 0;
   ask_question_cursor = 0;
+  ask_question_scroll = 0;
   ask_draft = None;
   ask_text_entry = None;
   pending_ask_submit = None;
@@ -6235,10 +6237,22 @@ let keeper_message_support_status_rows state ~status_rows =
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
+type gate_lane = Workspace_gate | External_gate
+
+let gate_lane_label = function
+  | Workspace_gate -> "Workspace"
+  | External_gate -> "Outside services"
+
+let gate_mode_label = function
+  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
+
 type palette_action =
   | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_hearth of string option
@@ -6323,6 +6337,12 @@ let lsp_question_prefixes =
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
+  @ List.concat_map (fun lane ->
+      List.map (fun mode ->
+        ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
+         Palette_gate_mode (lane, mode)))
+        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
+      [Workspace_gate; External_gate]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]

@@ -929,6 +929,8 @@ let is_public_read_path path =
   || String.equal path "/favicon.ico"
   || String.equal path "/favicon.svg"
   || String.starts_with ~prefix:"/dashboard/" path
+  (* The MSX spectator frame (RFC-0439 §3.7): a game screen the TUI polls. *)
+  || String.equal path "/api/v1/msx/frame"
   || String.starts_with ~prefix:"/static/" path
   || String.starts_with ~prefix:"/graphiql/" path
   (* Tier F2 dashboard reads — multimodal artifact gallery + detail

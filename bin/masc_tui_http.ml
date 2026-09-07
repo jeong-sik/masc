@@ -59,6 +59,7 @@ let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
+let msx_frame_path = "/api/v1/msx/frame"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -256,6 +257,29 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
   match http_get ~host ~port ~path with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+
+(* The workspace MSX frame (RFC-0439 §3.7). [None] on any of: transport error,
+   non-object body, [loaded:false], or a payload that does not decode -- the
+   spectator treats all of them as "nothing to watch right now". *)
+let fetch_msx_frame ~(host : string) ~(port : int) :
+    Masc_tui_types.msx_frame option =
+  match get_json ~host ~port ~path:msx_frame_path with
+  | Error _ -> None
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "loaded" json with
+    | `Bool true -> (
+      try
+        Some
+          { Masc_tui_types.msx_number = member "number" json |> to_int
+          ; msx_width = member "width" json |> to_int
+          ; msx_height = member "height" json |> to_int
+          ; msx_mode = member "mode" json |> to_string
+          ; msx_cartridge = member "cartridge" json |> to_string_option
+          ; msx_rgb = member "rgb_base64" json |> to_string |> Base64.decode_exn
+          }
+      with _ -> None)
+    | _ -> None)
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)

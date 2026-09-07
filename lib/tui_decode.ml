@@ -394,9 +394,6 @@ type fusion_evidence = {
   fe_question : string;
   fe_panel : fusion_panel_result list;
   fe_judge : fusion_judge;
-  (* The executed judge nodes (RFC-0284). Absent on posts recorded before
-     that RFC, so the decode answers [] there; the canonical single [judge]
-     above is what both eras carry. *)
   fe_judges : fusion_judge_node list;
   fe_tool_trace : fusion_tool_trace;
 }
@@ -411,6 +408,15 @@ type fusion_detail = {
   fud_run : fusion_run;
   fud_evidence_status : fusion_evidence_status;
   fud_evidence : fusion_evidence option;
+}
+
+type fusion_historical_detail = {
+  fhd_reference : fusion_historical_evidence;
+  fhd_author : string;
+  fhd_title : string;
+  fhd_body : string;
+  fhd_observations : ((int * int) option * float option, string) result;
+  fhd_evidence : (fusion_evidence, string) result;
 }
 
 type goal_proof =
@@ -2794,12 +2800,18 @@ type skill_catalog_config =
       }
   | Skill_config_unreadable
 
+type skill_usage_coverage = {
+  suc_ledgers_loaded : int;
+  suc_unavailable : string list;
+}
+
 type skills_catalog =
   { sc_state : skills_catalog_state
   ; sc_config : skill_catalog_config option
   ; sc_sources : skill_catalog_source list
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
+  ; sc_usage_coverage : skill_usage_coverage option
   }
 
 let skills_catalog_state_to_string = function
@@ -3250,6 +3262,21 @@ let decode_skill_catalog_config json =
   | unknown ->
     Error (Printf.sprintf "skill snapshot config has unknown kind %S" unknown)
 
+let decode_skill_usage_coverage json =
+  let* coverage = required_object_field json "usage_coverage" in
+  let* suc_ledgers_loaded =
+    required_nonnegative_int_field coverage "ledgers_loaded"
+  in
+  let* unavailable = required_list_field coverage "unavailable" in
+  let* suc_unavailable =
+    decode_list "usage_coverage.unavailable"
+      (function
+        | `String detail -> Ok detail
+        | bad -> field_type_error "usage_coverage.unavailable" "a string" bad)
+      unavailable
+  in
+  Ok { suc_ledgers_loaded; suc_unavailable }
+
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
@@ -3264,6 +3291,7 @@ let decode_skills_catalog json =
           ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
           json
       in
+      let* coverage = decode_skill_usage_coverage json in
       let* snapshot = required_object_field json "snapshot" in
       let* sc_rejections = decode_skill_snapshot_rejections snapshot in
       let* config_json = required_object_field snapshot "config" in
@@ -3282,6 +3310,7 @@ let decode_skills_catalog json =
         ; sc_sources
         ; sc_surfaces
         ; sc_rejections
+        ; sc_usage_coverage = Some coverage
         }
     | "not_registered" ->
       let* () =
@@ -3296,6 +3325,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_usage_coverage = None
         }
     | "uninitialized" ->
       let* () =
@@ -3310,6 +3340,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_usage_coverage = None
         }
     | "invalid_workspace" ->
       let* () =
@@ -3335,6 +3366,7 @@ let decode_skills_catalog json =
           ; sc_sources = []
           ; sc_surfaces = []
           ; sc_rejections = []
+          ; sc_usage_coverage = None
           }
     | unknown ->
       Error (Printf.sprintf "skills catalog has unknown state %S" unknown)
@@ -6130,6 +6162,44 @@ let decode_fusion_evidence ~run_id json =
     ; fe_judges
     ; fe_tool_trace
     }
+
+let decode_fusion_historical_detail ~reference json =
+  let* post = match Json_util.assoc_member_opt "post" json with
+    | None -> Ok json
+    | Some (`Assoc _ as post) -> Ok post
+    | Some bad -> field_type_error "post" "an object" bad
+  in
+  let* post_id = required_string_field post "id" in
+  let* origin = required_object_field post "origin" in
+  let* source = required_string_field origin "source" in
+  let* run_id = required_string_field origin "fusion_run_id" in
+  let* () =
+    if String.equal post_id reference.fhe_post_id
+       && String.equal run_id reference.fhe_run_id && String.equal source "fusion"
+    then Ok () else Error "historical Fusion Board identity does not match the selected run and post"
+  in
+  let* fhd_author = required_string_field post "author" in
+  let* fhd_title = required_string_field post "title" in
+  let* fhd_body = required_string_field post "body" in
+  let fhd_observations =
+    let* meta = required_object_field post "meta" in
+    let* usage = match Json_util.assoc_member_opt "observed_usage" meta with
+    | None -> Ok None
+    | Some usage ->
+        let* input = required_nonnegative_int_field usage "input_tokens" in
+        let* output = required_nonnegative_int_field usage "output_tokens" in
+        Ok (Some (input, output))
+  in
+  let* cost_usd = match Json_util.assoc_member_opt "cost_usd" meta with
+    | None | Some `Null -> Ok None
+    | Some (`Int n) when n >= 0 -> Ok (Some (float_of_int n))
+    | Some (`Float n) when Float.is_finite n && n >= 0. -> Ok (Some n)
+    | Some bad -> field_type_error "cost_usd" "a finite nonnegative number or null" bad
+  in
+    Ok (usage, cost_usd)
+  in
+  Ok { fhd_reference = reference; fhd_author; fhd_title; fhd_body; fhd_observations;
+       fhd_evidence = decode_fusion_evidence ~run_id post }
 
 let decode_fusion_detail json =
   let* fud_generated_at = required_string_field json "generated_at" in

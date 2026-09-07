@@ -1674,6 +1674,10 @@ let skill_snapshot_json ?(rejections = []) () =
     ; "rejections", `List rejections
     ]
 
+let skill_usage_coverage_json ?(loaded = 1) ?(unavailable = []) () =
+  `Assoc ["ledgers_loaded", `Int loaded;
+          "unavailable", `List (List.map (fun detail -> `String detail) unavailable)]
+
 let skills_catalog_json ?(usage = true) ?(flow = true) () =
   let usage_json =
     if usage then
@@ -1719,6 +1723,7 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
     ; ("state", `String "ready")
+    ; ("usage_coverage", skill_usage_coverage_json ())
     ; ("snapshot", skill_snapshot_json ())
     ; ( "surfaces",
         `List
@@ -1742,6 +1747,47 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
 (* The discovery roots ride the same response the surfaces do, and the
    projection dropped them: a Skill that never loaded had nowhere on screen
    to say which root was looked at, or that the root was not there. *)
+let test_decode_skills_catalog_keeps_usage_scope () =
+  let payload ?(usage = true) coverage =
+    match skills_catalog_json ~usage () with
+    | `Assoc fields -> `Assoc (("usage_coverage", coverage) :: List.remove_assoc "usage_coverage" fields)
+    | _ -> Alcotest.fail "invalid catalog fixture" in
+  let read ?(usage = true) coverage =
+    match Tui_decode.decode_skills_catalog (payload ~usage coverage) with
+    | Ok catalog -> catalog
+    | Error error -> Alcotest.fail error in
+  let partial = read (skill_usage_coverage_json ~loaded:19
+      ~unavailable:["bravo: metadata unavailable"; "charlie: invalid_ledger"] ()) in
+  (match partial.sc_usage_coverage with
+   | Some coverage ->
+       Alcotest.(check int) "loaded ledgers are observed" 19 coverage.suc_ledgers_loaded;
+       Alcotest.(check (list string)) "unavailable reasons survive unchanged"
+         ["bravo: metadata unavailable"; "charlie: invalid_ledger"] coverage.suc_unavailable
+   | None -> Alcotest.fail "ready response lost coverage");
+  (match partial.sc_surfaces with
+   | [surface] ->
+       (match surface.scs_usage with
+        | [usage] -> Alcotest.(check int) "known invocation count survives partial coverage" 12 usage.su_invocations
+        | _ -> Alcotest.fail "known usage was dropped")
+   | _ -> Alcotest.fail "known surface was dropped");
+  let no_ledgers = read ~usage:false (skill_usage_coverage_json ~loaded:0
+      ~unavailable:["keeper catalog: unavailable"] ()) in
+  (match no_ledgers.sc_usage_coverage with
+   | Some coverage -> Alcotest.(check int) "zero loaded is explicit" 0 coverage.suc_ledgers_loaded
+   | None -> Alcotest.fail "unavailable ledger inventory disappeared");
+  List.iter (fun bad ->
+      match Tui_decode.decode_skills_catalog (payload bad) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "malformed coverage must not become an observed zero")
+    [ `Null; skill_usage_coverage_json ~loaded:(-1) ();
+      `Assoc ["ledgers_loaded", `Int 1; "unavailable", `List [`Int 1]] ];
+  match skills_catalog_json () with
+  | `Assoc fields ->
+      (match Tui_decode.decode_skills_catalog (`Assoc (List.remove_assoc "usage_coverage" fields)) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "missing coverage was accepted")
+  | _ -> Alcotest.fail "invalid catalog fixture"
+
 let test_decode_skills_catalog_reads_the_discovery_roots () =
   let snapshot =
     `Assoc
@@ -1782,6 +1828,7 @@ let test_decode_skills_catalog_reads_the_discovery_roots () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", snapshot
       ; "surfaces", `List []
       ]
@@ -1888,6 +1935,7 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
       (`Assoc
          [ ("schema", `String "masc.skill-snapshot/v1")
          ; ("state", `String "ready")
+    ; ("usage_coverage", skill_usage_coverage_json ())
          ; ("snapshot", skill_snapshot_json ())
          ; ("surfaces", `List [ bad_surface ])
          ])
@@ -1902,6 +1950,7 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "surfaces", `List []
       ; ( "snapshot"
         , skill_snapshot_json
@@ -1973,6 +2022,7 @@ let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", skill_snapshot_json ~rejections:[ rejection ] ()
       ; "surfaces", `List []
       ]
@@ -2015,6 +2065,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
        ; "snapshot", `Assoc [ "rejections", `List [] ]
        ; "surfaces", `List []
        ]);
@@ -2037,6 +2088,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
        ; ( "snapshot"
          , skill_snapshot_json ~rejections:[ missing_nullable_rejection ] () )
        ; "surfaces", `List []
@@ -4125,6 +4177,100 @@ let fusion_recorded_detail_json ?(source = "fusion")
                 ] )
           ] )
     ]
+
+let historical_fusion_reference : Tui_decode.fusion_historical_evidence =
+  { fhe_run_id = "fusion-recorded-501"
+  ; fhe_post_id = "p-fusion-501"
+  ; fhe_title = "Fusion title 501"
+  ; fhe_created_at = 1787557684.
+  }
+
+let historical_fusion_post_json ?(usage = []) ?(cost = []) () =
+  let open Yojson.Safe.Util in
+  let post = fusion_recorded_detail_json () |> member "evidence" |> member "post" in
+  match post with
+  | `Assoc fields ->
+      `Assoc
+        (("author", `String "board-sink-author")
+         :: ("body", `String "# Original Fusion answer\nThe retained original.")
+         :: List.map (function
+             | "meta", `Assoc fields -> "meta", `Assoc (fields @ usage @ cost)
+             | field -> field) fields)
+  | _ -> Alcotest.fail "invalid Fusion fixture"
+
+let test_historical_fusion_original_and_observations () =
+  let post = historical_fusion_post_json
+      ~usage:["observed_usage", `Assoc ["input_tokens", `Int 9321; "output_tokens", `Int 17721]] () in
+  (match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+           (`Assoc ["post", post]) with
+   | Error error -> Alcotest.fail error
+   | Ok original ->
+       Alcotest.(check string) "Board author is retained without claiming caller"
+         "board-sink-author" original.fhd_author;
+       Alcotest.(check string) "original body is intact"
+         "# Original Fusion answer\nThe retained original." original.fhd_body;
+       Alcotest.(check bool) "observed tokens with unknown price"
+         true (original.fhd_observations = Ok (Some (9321, 17721), None));
+       (match original.fhd_evidence with
+        | Error error -> Alcotest.fail error
+        | Ok evidence ->
+            Alcotest.(check int) "existing panel interpretation retained" 2 (List.length evidence.fe_panel);
+            Alcotest.(check bool) "existing Tool trace interpretation retained" true evidence.fe_tool_trace.ftt_complete));
+  let read ?(usage = []) ?(cost = []) () =
+    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+            (historical_fusion_post_json ~usage ~cost ()) with
+    | Ok original -> original
+    | Error error -> Alcotest.fail error in
+  Alcotest.(check bool) "absent usage is unknown" true ((read ()).fhd_observations = Ok (None, None));
+  let zero = read
+      ~usage:["observed_usage", `Assoc ["input_tokens", `Int 0; "output_tokens", `Int 0]]
+      ~cost:["cost_usd", `Int 0] () in
+  Alcotest.(check bool) "measured zero tokens and cost survive"
+    true (zero.fhd_observations = Ok (Some (0, 0), Some 0.))
+
+let test_historical_fusion_exact_identity_and_strict_metadata () =
+  let expect_error label reference post =
+    match Tui_decode.decode_fusion_historical_detail ~reference post with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail label in
+  let post = historical_fusion_post_json () in
+  expect_error "another post cannot supply this original"
+    { historical_fusion_reference with fhe_post_id = "other-post" } post;
+  expect_error "another run cannot supply this original"
+    { historical_fusion_reference with fhe_run_id = "other-run" } post;
+  expect_error "an omitted exact post is not an empty original"
+    historical_fusion_reference (`Assoc ["post", `Null]);
+  let expect_observation_error post =
+    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference post with
+    | Error error -> Alcotest.failf "usage error hid original: %s" error
+    | Ok original ->
+        Alcotest.(check string) "usage failure preserves original"
+          "# Original Fusion answer\nThe retained original." original.fhd_body;
+        (match original.fhd_observations with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "invalid usage became a measurement") in
+  expect_observation_error
+    (historical_fusion_post_json
+       ~usage:["observed_usage", `Assoc ["input_tokens", `String ""; "output_tokens", `Int 0]] ());
+  expect_observation_error
+    (historical_fusion_post_json ~cost:["cost_usd", `Int (-1)] ());
+  expect_observation_error
+    (match post with
+     | `Assoc fields -> `Assoc (List.remove_assoc "meta" fields)
+     | _ -> Alcotest.fail "invalid Fusion fixture");
+  let malformed = match post with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "meta", `Assoc fields -> "meta", `Assoc (List.remove_assoc "tool_trace" fields)
+        | field -> field) fields)
+    | _ -> Alcotest.fail "invalid Fusion fixture" in
+  match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference malformed with
+  | Error error -> Alcotest.fail error
+  | Ok original ->
+      Alcotest.(check string) "original survives structured evidence failure"
+        "# Original Fusion answer\nThe retained original." original.fhd_body;
+      (match original.fhd_evidence with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "missing Tool trace cannot masquerade as empty trace")
 
 let test_decode_fusion_list_and_exact_detail () =
   let failed_fields =
@@ -8139,6 +8285,10 @@ let () =
       ] );
     ( "decode_fusion",
       [
+        Alcotest.test_case "historical original carries exact evidence and measured usage" `Quick
+          test_historical_fusion_original_and_observations;
+        Alcotest.test_case "historical identity and evidence remain strict" `Quick
+          test_historical_fusion_exact_identity_and_strict_metadata;
         Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
           test_decode_fusion_list_and_exact_detail;
         Alcotest.test_case "decodes RFC-0284 judge nodes" `Quick
@@ -8484,7 +8634,8 @@ let () =
           test_decode_gate_row_missing_id_is_an_error;
       ] );
     ( "skills_catalog",
-      [
+      [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
+          test_decode_skills_catalog_keeps_usage_scope;
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick

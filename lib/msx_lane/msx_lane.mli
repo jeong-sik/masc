@@ -87,3 +87,16 @@ val press :
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
+
+type frame = {
+  number : int;  (** frames stepped since power-on *)
+  width : int;
+  height : int;
+  rgb : string;  (** width*height*3 bytes, row-major RGB *)
+  mode : string;
+  cartridge : string option;
+}
+
+val frame : unit -> frame option
+(** The current native-resolution frame, or [None] when no machine is loaded.
+    A spectator renders this; the pixels are the client's to downsample. *)

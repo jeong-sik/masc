@@ -1787,6 +1787,9 @@ type async_msg =
       int * (Masc.Tui_decode.fusion_snapshot, string) result
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
+  | Fusion_historical_detail_loaded of
+      int * Masc.Tui_decode.fusion_historical_evidence
+      * (Masc.Tui_decode.fusion_historical_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
@@ -4765,6 +4768,39 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
              (generation, run_id, Error "Eio switch is unavailable"))
   end
 
+let launch_fusion_historical_detail_load state ~mailbox ~reference =
+  let already_loading =
+    match state.fusion_historical_inflight with
+    | Some (generation, loading_reference) ->
+        generation = state.fusion_detail_generation
+        && loading_reference = reference
+    | None -> false
+  in
+  if not already_loading then begin
+    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
+    let generation = state.fusion_detail_generation in
+    state.fusion_historical_inflight <- Some (generation, reference);
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Fusion_historical_detail_loaded
+             (generation, reference, Error "Eio switch is unavailable"))
+  end
+
 let launch_keeper_lanes_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -5119,7 +5155,9 @@ let goto_surface state ~mailbox (destination : surface) =
        (match state.fusion_mode with
         | Fusion_list -> ()
         | Fusion_detail run_id ->
-            launch_fusion_detail_load state ~mailbox ~run_id)
+            launch_fusion_detail_load state ~mailbox ~run_id
+        | Fusion_historical_detail reference ->
+            launch_fusion_historical_detail_load state ~mailbox ~reference)
    | Memory -> launch_memory_health_load state ~mailbox
    | Repositories -> launch_repositories_load state ~mailbox
    | Changes -> (
@@ -6522,6 +6560,7 @@ let selected_surface_reference state =
                     state.harness_cursor)))
   | Fusion ->
       (match state.fusion_mode, state.fusion_runs with
+       | Fusion_historical_detail reference, _ -> Some (Link.reference Board_post reference.fhe_post_id)
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
        | Fusion_list, Some _ ->
            Option.map
@@ -7873,6 +7912,7 @@ let apply_fusion_runs_load state = function
       in
       let current_selected_id =
         match state.fusion_mode with
+        | Fusion_historical_detail reference -> Some (fusion_entry_identity (Tui_decode.Fusion_historical_evidence reference))
         | Fusion_detail run_id -> Some ("run:" ^ run_id)
         | Fusion_list -> Option.map fusion_entry_identity (selected_fusion_entry state)
       in
@@ -7909,7 +7949,7 @@ let apply_fusion_runs_load state = function
            state.fusion_detail <- None;
            state.fusion_detail_error <- None;
            state.fusion_detail_generation <- state.fusion_detail_generation + 1
-       | Fusion_list, _ -> ())
+       | Fusion_historical_detail _, _ | Fusion_list, _ -> ())
   | Error detail ->
       (* Keep the previous rows. The error marks them stale instead of
          translating a failed refresh into an empty registry. *)
@@ -7921,7 +7961,7 @@ let apply_fusion_detail_load state generation run_id result =
     &&
     match state.fusion_mode with
     | Fusion_detail current -> String.equal current run_id
-    | Fusion_list -> false
+    | Fusion_historical_detail _ | Fusion_list -> false
   then
     match result with
     | Ok detail when String.equal detail.Tui_decode.fud_run.fur_run_id run_id ->
@@ -7933,6 +7973,20 @@ let apply_fusion_detail_load state generation run_id result =
             (Printf.sprintf "fusion detail returned run %s for request %s"
                detail.Tui_decode.fud_run.fur_run_id run_id)
     | Error detail -> state.fusion_detail_error <- Some detail
+
+let apply_fusion_historical_detail_load state generation reference result =
+  if generation = state.fusion_detail_generation
+     && (match state.fusion_mode with
+         | Fusion_historical_detail current -> current = reference
+         | Fusion_list | Fusion_detail _ -> false)
+  then
+    match result with
+    | Ok detail when detail.Tui_decode.fhd_reference = reference ->
+        state.fusion_historical_detail <- Some detail;
+        state.fusion_detail_error <- None
+    | Ok _ ->
+        state.fusion_detail_error <- Some "Fusion Board original returned a different reference"
+    | Error error -> state.fusion_detail_error <- Some error
 
 let refresh_status results =
   let successes =
@@ -9402,13 +9456,11 @@ let open_fusion_detail state ~mailbox =
   match selected_fusion_entry state with
   | None -> ()
   | Some (Tui_decode.Fusion_historical_evidence evidence) ->
-      state.followed_from <- Some (state.view, None);
-      state.board_mode <- Board_read evidence.fhe_post_id;
-      state.board_scroll <- 0;
-      state.board_focus <- Right_pane;
-      goto_surface state ~mailbox Board;
-      start_board_post_refresh state ~host:server_peer_host ~port:state.port
-        ~post_id:evidence.fhe_post_id ~mailbox
+      state.fusion_mode <- Fusion_historical_detail evidence;
+      state.fusion_scroll <- 0;
+      state.fusion_historical_detail <- None;
+      state.fusion_detail_error <- None;
+      launch_fusion_historical_detail_load state ~mailbox ~reference:evidence
   | Some (Tui_decode.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
@@ -10262,7 +10314,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                match state.fusion_mode with
                | Fusion_detail open_id when String.equal run_id open_id ->
                    launch_fusion_detail_load state ~mailbox ~run_id
-               | Fusion_detail _ | Fusion_list -> ())
+               | Fusion_detail _ | Fusion_historical_detail _ | Fusion_list -> ())
            | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
            | Approvals | Planning | Schedules | Verification | Harness
            | Repositories | Code | Changes | Connectors | Runtime | Config
@@ -11305,16 +11357,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
+           let observed_at = Unix.gettimeofday () in
            (* Two consecutive polls are what "just finished" is made of:
               running in the previous, idle in this one. The glow list is
               advanced before the rows are replaced, or the transition is
               gone. *)
            state.keeper_turn_finishes <-
              Masc_tui_answering.advance_finishes
-               ~now:(Unix.gettimeofday ())
+               ~now:observed_at
                ~previous_rows:state.keeper_turns ~current_rows:rows
                state.keeper_turn_finishes;
            state.keeper_turns <- rows;
+           state.keeper_turns_observed_at <- Some observed_at;
            state.keeper_turns_error <- None
        | Error detail ->
            (* Keep the last known rows: a fetch that failed says nothing
@@ -12121,6 +12175,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.fusion_detail_inflight <- None
        | Some _ | None -> ());
       apply_fusion_detail_load state generation run_id result
+  | Fusion_historical_detail_loaded (generation, reference, result) ->
+      (match state.fusion_historical_inflight with
+       | Some (inflight_generation, inflight_reference)
+         when inflight_generation = generation && inflight_reference = reference ->
+           state.fusion_historical_inflight <- None
+       | Some _ | None -> ());
+      apply_fusion_historical_detail_load state generation reference result
   | Verification_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -12861,6 +12922,12 @@ let main () =
   (* Main loop *)
   let refresh_interval_ns =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
+  in
+  (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
+     reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
+  let msx_spectator_poll_seconds = 0.3 in
+  let msx_spectator_poll_interval_ns =
+    Int64.of_float (msx_spectator_poll_seconds *. nanoseconds_per_second)
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let roster_marquee_target = ref None in
@@ -14013,6 +14080,27 @@ and is loaded on demand through keeper_skill.
           ~now_ns:(Mtime_clock.elapsed_ns ())
           ~maximum:maximum_input_wait_seconds
       in
+      (* While the spectator is open, keep the loop waking a few times a second
+         so a machine a keeper is driving looks live, and re-fetch the server
+         frame on that cadence. The fetch is bounded work on loopback; drawing
+         from the cache is cheap, so an unchanged frame just repaints. *)
+      let input_timeout =
+        if state.msx_open then Float.min input_timeout msx_spectator_poll_seconds
+        else input_timeout
+      in
+      if state.msx_open then begin
+        let now_ns = Mtime_clock.elapsed_ns () in
+        if
+          Int64.compare (Int64.sub now_ns state.msx_last_poll_ns)
+            msx_spectator_poll_interval_ns
+          >= 0
+        then begin
+          state.msx_last_poll_ns <- now_ns;
+          state.msx_frame <-
+            Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+          Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+        end
+      end;
       let input = read_input ~timeout:input_timeout input_reader () in
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
@@ -15589,12 +15677,21 @@ and is loaded on demand through keeper_skill.
                 state.fusion_detail <- None;
                 state.fusion_detail_error <- None;
                 launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "K" when state.view = Fusion
+           && (match state.fusion_mode, selected_fusion_entry state with
+               | Fusion_historical_detail _, _
+               | Fusion_list, Some (Tui_decode.Fusion_historical_evidence _) -> true
+               | _ -> false) ->
+           add_event state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
            let run = match state.fusion_mode, state.fusion_runs with
              | Fusion_detail id, Some snapshot -> List.find_opt
                  (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
-             | Fusion_list, Some snapshot -> List.nth_opt snapshot.fus_runs state.fusion_cursor
-             | _, None -> None in
+             | Fusion_list, Some _ ->
+                 (match selected_fusion_entry state with
+                  | Some (Tui_decode.Fusion_retained_run run) -> Some run
+                  | Some (Tui_decode.Fusion_historical_evidence _) | None -> None)
+             | Fusion_historical_detail _, _ | _, None -> None in
            (match Option.bind run (fun (run : Tui_decode.fusion_run) ->
               List.find_index (fun (k : keeper) -> String.equal k.k_name run.fur_keeper) state.keepers) with
             | None -> add_event state "system" "The calling Keeper is not in the current roster"
@@ -15612,12 +15709,26 @@ and is loaded on demand through keeper_skill.
        | Some "B" when state.view = Fusion
            && state.fusion_mode = Fusion_list ->
            (match selected_fusion_entry state with
-            | Some (Tui_decode.Fusion_historical_evidence _) ->
-                open_fusion_detail state ~mailbox:async_messages
+            | Some (Tui_decode.Fusion_historical_evidence reference) ->
+                state.followed_from <- Some (state.view, None);
+                state.board_mode <- Board_read reference.fhe_post_id;
+                state.board_scroll <- 0;
+                state.board_focus <- Right_pane;
+                goto_surface state ~mailbox:async_messages Board;
+                start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                  ~post_id:reference.fhe_post_id ~mailbox:async_messages
             | Some (Tui_decode.Fusion_retained_run _) | None ->
                 add_event state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
            (match state.fusion_mode, state.fusion_detail with
+            | Fusion_historical_detail reference, _ ->
+                state.followed_from <- Some (state.view, None);
+                state.board_mode <- Board_read reference.fhe_post_id;
+                state.board_scroll <- 0;
+                state.board_focus <- Right_pane;
+                goto_surface state ~mailbox:async_messages Board;
+                start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                  ~post_id:reference.fhe_post_id ~mailbox:async_messages
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
                 (match detail.fud_evidence with
                  | None -> add_event state "system" "No Board evidence has been recorded for this run"
@@ -15812,17 +15923,21 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket)
          when state.view = Fusion
               && (match state.fusion_mode with
-                  | Fusion_detail _ -> true
+                  | Fusion_detail _ | Fusion_historical_detail _ -> true
                   | Fusion_list -> false) ->
-           step_detail_cursor
-             ~count:
-               (match state.fusion_runs with
-                | None -> 0
-                | Some snapshot -> List.length snapshot.fus_runs)
-             ~cursor:state.fusion_cursor
-             ~delta:(if bracket = "]" then 1 else -1)
-             ~set_cursor:(fun n -> state.fusion_cursor <- n)
-             ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages)
+           (match fusion_detail_entry_index state with
+            | None ->
+                state.fusion_mode <- Fusion_list;
+                state.fusion_scroll <- 0;
+                state.fusion_detail_error <- None;
+                state.fusion_detail_generation <- state.fusion_detail_generation + 1
+            | Some cursor ->
+                step_detail_cursor
+                  ~count:(List.length (fusion_list_entries state))
+                  ~cursor
+                  ~delta:(if bracket = "]" then 1 else -1)
+                  ~set_cursor:(fun n -> state.fusion_cursor <- n)
+                  ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages))
        (* Approvals holds no id -- the detail is a flag over the row under the
           cursor -- so stepping is the cursor move, and the pane follows. *)
        | Some (("[" | "]") as bracket)
@@ -16285,34 +16400,17 @@ and is loaded on demand through keeper_skill.
            state.help_open <- true;
            state.help_scroll <- 0
       | Some "&" ->
-           (* The MSX screen takes the whole terminal, like the image
-              overlay: it draws itself and the loop yields until [esc]. *)
-           (match Masc_tui_msx.open_screen ~write:write_to_terminal state with
-            | Ok () -> ()
-            | Error { path; detail } ->
-                report_action state "error"
-                  (Printf.sprintf "MSX load failed (%s): %s. Repair the file and press & to retry."
-                     path detail))
+           (* The MSX spectator takes the whole terminal, like the image
+              overlay: it draws the server's frame and the loop yields until
+              [esc], re-fetching on a timer. Fetch once now so it opens on a
+              picture. *)
+           state.msx_frame <-
+             Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+           Masc_tui_msx.open_screen ~write:write_to_terminal state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
-       | Some "r"
-         when (not message_mode)
-              && state.view <> Runtime
-              && state.view <> Config
-              && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
-              && state.context_inspector_open = false ->
-           (* The listing footers have promised [r:refresh] since the footer
-              tables existed; no handler ever answered it. This arm makes the
-              sheet true everywhere a listing draws it. The guards stay out
-              of the identity pane and context inspector, and out of the
-              composer, where r must type. Runtime and Config own their
-              refresh: the r/R dispatcher below forces a provider probe or
-              reloads the selected Config pane's source. *)
-           start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup ~mailbox:async_messages
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with
@@ -16789,7 +16887,7 @@ and is loaded on demand through keeper_skill.
                      state.fusion_cursor <-
                        max 0
                          (min (count - 1) (state.fusion_cursor + (direction * page)))
-                 | Fusion_detail _ ->
+                 | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
                        max 0 (state.fusion_scroll + (direction * page)))
             | Schedules ->
@@ -16985,8 +17083,9 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list -> ()
                  | Fusion_detail run_id ->
-                     launch_fusion_detail_load state ~mailbox:async_messages
-                       ~run_id)
+                     launch_fusion_detail_load state ~mailbox:async_messages ~run_id
+                 | Fusion_historical_detail reference ->
+                     launch_fusion_historical_detail_load state ~mailbox:async_messages ~reference)
             | Memory ->
                 launch_memory_health_load state ~mailbox:async_messages;
                 (match state.memory_facts_keeper with
@@ -17145,7 +17244,7 @@ and is loaded on demand through keeper_skill.
                  | Planning_list -> state.view <- Overview)
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_detail _ ->
+                 | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_mode <- Fusion_list;
                      state.fusion_scroll <- 0;
                      state.fusion_detail <- None;
@@ -17355,7 +17454,7 @@ and is loaded on demand through keeper_skill.
                  | Planning_list -> ())
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_detail _ ->
+                 | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_mode <- Fusion_list;
                      state.fusion_scroll <- 0;
                      state.fusion_detail <- None;
@@ -17593,7 +17692,7 @@ and is loaded on demand through keeper_skill.
                      in
                      if state.fusion_cursor < count - 1 then
                        state.fusion_cursor <- state.fusion_cursor + 1
-                 | Fusion_detail _ ->
+                 | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <- state.fusion_scroll + 1)
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then
@@ -17956,7 +18055,7 @@ and is loaded on demand through keeper_skill.
                  | Fusion_list ->
                      if state.fusion_cursor > 0 then
                        state.fusion_cursor <- state.fusion_cursor - 1
-                 | Fusion_detail _ ->
+                 | Fusion_detail _ | Fusion_historical_detail _ ->
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
@@ -18393,7 +18492,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      open_fusion_detail state ~mailbox:async_messages
-                 | Fusion_detail _ -> ())
+                 | Fusion_detail _ | Fusion_historical_detail _ -> ())
             | Changes -> (
                 (* The row under the cursor, read as the lines it removed and
                    added. Held as an index rather than a copy: a refresh
@@ -19657,8 +19756,9 @@ and is loaded on demand through keeper_skill.
              (match state.fusion_mode with
               | Fusion_list -> ()
               | Fusion_detail run_id ->
-                  launch_fusion_detail_load state ~mailbox:async_messages
-                    ~run_id)
+                  launch_fusion_detail_load state ~mailbox:async_messages ~run_id
+              | Fusion_historical_detail reference ->
+                  launch_fusion_historical_detail_load state ~mailbox:async_messages ~reference)
          | Memory ->
              (* Fleet memory health is a reading, so the tick refreshes it
                 like the listings above. *)

@@ -63,3 +63,6 @@ CMD ["bash", "-l"]
 |}
 
 let build_argv ~tag = [ "build"; "-t"; tag; "-" ]
+
+let context_directory_build_argv ~tag ~dockerfile ~context =
+  [ "build"; "-t"; tag; "-f"; dockerfile; context ]

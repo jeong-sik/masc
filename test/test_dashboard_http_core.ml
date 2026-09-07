@@ -3214,6 +3214,10 @@ let test_tools_routes_serve_prepared_http_representations () =
     let path = "/api/v1/dashboard/tools" in
     List.iter (fun (protocol, send) ->
       let check_headers headers =
+        if protocol = "H2" then
+          List.iter (fun (name, _) ->
+            check string "H2 wire field names are lowercase"
+              (String.lowercase_ascii name) name) headers;
         check (option string) (protocol ^ " CORS reflects admitted origin")
           (Some "http://localhost:8935") (List.assoc_opt "access-control-allow-origin" headers);
         let vary = List.filter_map (fun (name, value) ->

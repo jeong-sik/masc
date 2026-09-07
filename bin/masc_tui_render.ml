@@ -7022,11 +7022,11 @@ let render_clients (state : state) =
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Runtime · Clients") timestamp
+          (screen_title " MASC Config / Runtime · Clients") timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC Runtime · Clients") shown timestamp
+          (screen_title " MASC Config / Runtime · Clients") shown timestamp
           (connection_badge state)
   in
   box_top buf cols;
@@ -10632,13 +10632,13 @@ let render_system_logs (state : state) =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC System Logs") timestamp
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]") timestamp
           (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s (%d of %d, seq %d)%s  %s  %s"
-          (screen_title " MASC System Logs")
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]")
           total_entries snapshot.sys_total snapshot.sys_latest_seq filter_note
           timestamp (connection_badge state)
   in
@@ -12329,6 +12329,59 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
   @ stored_path
   @ wrap "Keepers" keepers
 
+let render_workspace_activity (state : state) repo_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = workspace_activity_rows state in
+  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"workspace-activity"
+    ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
+    ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
+    ~body:(fun ~budget c ->
+      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
+      | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
+      | Masc_tui_fetched.Ready reading ->
+          let failures, omitted = List.fold_left (fun (failures, omitted) (_, result) ->
+              match result with
+              | Error _ -> (failures + 1, omitted)
+              | Ok (snapshot : Tui_decode.file_change_snapshot) ->
+                  (failures, omitted + snapshot.fcs_over_budget + snapshot.fcs_malformed)) (0,0) reading.war_keepers in
+          c.push (Printf.sprintf "  Last %.0fh · %d recorded changes · %d successful · %d Keeper reads failed · %d unparsed calls"
+            reading.war_hours (List.length rows)
+            (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_succeeded) rows)) failures omitted);
+          let names = List.map (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper) rows |> List.sort_uniq String.compare in
+          c.push ("  Changes by Keeper: " ^ String.concat " · " (List.map (fun name ->
+              Printf.sprintf "%s %d" (Terminal_text.single_line name)
+                (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
+          c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code";
+          c.push "  DATE (local)      KEEPER             TASK             FILE";
+          c.push_divider ();
+          let room = max 1 (budget - 7) in
+          let first = max 0 (cursor - room + 1) in
+          for i = 0 to room - 1 do
+            match List.nth_opt rows (first + i) with
+            | None -> if i = 0 && rows = [] then c.push "  No recorded clone writes in this window" else c.push_empty ()
+            | Some (change, path) ->
+                let tm = Unix.localtime change.Tui_decode.fc_at in
+                let line = Printf.sprintf "  %04d-%02d-%02d %02d:%02d %-18s %-16s %s"
+                  (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+                  (fit_width (Terminal_text.single_line change.fc_keeper) 18)
+                  (fit_width (Terminal_text.single_line (Option.value change.fc_task_id ~default:"unlinked")) 16)
+                  (Terminal_text.single_line path) in
+                if first + i = cursor then c.push_selected line else c.push line
+          done;
+          c.push_divider ();
+          c.push (match List.nth_opt rows cursor with
+            | None -> "  Task and file links appear when a recorded change names them"
+            | Some (change, path) ->
+                "  " ^ Terminal_text.single_line path ^ " · " ^
+                (match change.fc_task_id with
+                 | None -> "No Task recorded"
+                 | Some id ->
+                     match List.find_opt (fun (t : Tui_decode.task) -> t.id = id) state.tasks with
+                     | None -> "Task " ^ Terminal_text.single_line id
+                     | Some task -> Terminal_text.single_line (task.id ^ " · " ^ task.title))))
+
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let repos =
@@ -13772,7 +13825,7 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Runtime detail")
+    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Config / Runtime detail")
        (Terminal_text.single_line target_label) (connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
@@ -13832,7 +13885,7 @@ let render_runtime (state : state) =
     match state.runtime_surface with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Runtime") timestamp
+          (screen_title " MASC Config / Runtime") timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -13858,7 +13911,7 @@ let render_runtime (state : state) =
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s  %s%s  %s  %s"
-          (screen_title " MASC Runtime")
+          (screen_title " MASC Config / Runtime")
           (tab ~active:lanes_active
              (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count shown))
           (tab ~active:(not lanes_active)
@@ -14537,7 +14590,7 @@ let render_acting (state : state) =
   let header =
     Printf.sprintf "%s  %s  %s"
       (screen_title
-         (Printf.sprintf " MASC Activity (%d of %d held, %s)" shown held
+         (Printf.sprintf " MASC Activity  [1 Events* | 2 Logs] (%d of %d held, %s)" shown held
             (Acting.filter_label state.acting_filter)))
       timestamp
       (connection_badge state)
@@ -15660,7 +15713,7 @@ let config_pane_strip (state : state) =
     ; name Config_themes "themes"
     ; name Config_voice "voice"
     ]
-  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+  ^ Ansi.dim ^ "  p:next  9:Runtime" ^ Ansi.reset
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this
@@ -16705,7 +16758,10 @@ let render_surface (state : state) =
       if Option.is_some state.memory_facts_keeper then
         render_memory_facts state
       else render_memory state
-  | Repositories -> render_repositories state
+  | Repositories ->
+      (match state.workspace_activity_repo with
+       | Some repo_id -> render_workspace_activity state repo_id
+       | None -> render_repositories state)
   | Changes -> render_changes state
   | Connectors -> render_connectors state
   | Runtime ->
@@ -16746,8 +16802,7 @@ let help_surface_name (surface : surface) =
   | Planning | Verification | Harness -> "Planning"
   | Fusion -> "Fusion"
   | Repositories | Code | Changes -> "Workspace"
-  | Runtime | Lanes | Clients -> "Runtime"
-  | Config | Resources | Tools -> "Config"
+  | Runtime | Lanes | Clients | Config | Resources | Tools -> "Config"
   | Connectors | Schedules -> "Keepers"
   | System_logs -> "Activity"
 

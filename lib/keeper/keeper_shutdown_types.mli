@@ -124,6 +124,17 @@ type finalization_evidence =
   ; completion : completion_receipt
   }
 
+type absent_owner_acknowledgement =
+  { finalization : finalization_evidence
+  ; prior_revision : int
+  ; prior_updated_at : string
+  ; prior_operation_sha256 : string
+  ; actor : string
+  ; reason : string
+  ; acknowledged_at : string
+  ; backlog_version : int
+  }
+
 type supersession =
   | Operator_blocked_purge_released of { actor : string }
       (** The operator released a [Blocked] dashboard purge whose worker died
@@ -171,6 +182,7 @@ type phase =
   | Cleanup_ready of cleanup_evidence
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
+  | Operator_absence_acknowledged of absent_owner_acknowledgement
   | Blocked of failure
   | Superseded of supersession
 
@@ -208,6 +220,7 @@ type invariant_error =
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
+  | Invalid_absence_acknowledgement of string
 
 val schema_version : int
 val requires_admission_fence : t -> bool

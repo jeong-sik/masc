@@ -130,9 +130,8 @@ let store_for pool keeper_name : Keeper_owner.store =
 ;;
 
 let operation_store_path pool keeper_name =
-  Filename.concat
-    (Filename.concat (Workspace.keepers_runtime_dir pool.config) keeper_name)
-    Keeper_chat_operation_store.database_file
+  Keeper_chat_operation_store.path_for_keeper
+    ~keepers_runtime_dir:(Workspace.keepers_runtime_dir pool.config) ~keeper_name
 ;;
 
 let prepare_operation_store_path pool keeper_name =

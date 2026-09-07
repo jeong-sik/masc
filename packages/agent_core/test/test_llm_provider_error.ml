@@ -565,7 +565,10 @@ let test_provider_failure_remaining_variants_mapping () =
   | _ -> fail "expected ProviderUnavailable unknown failure"
 ;;
 
-let test_provider_failure_empty_completion_maps_to_unavailable () =
+(* An empty completion is its own variant, and it carries the stop_reason the
+   old arm could only put in a string. #32497 made that split; this pins the
+   arm it lands in and that the reason survives the mapping. *)
+let test_provider_failure_empty_completion_is_its_own_variant () =
   List.iter
     (fun expected ->
        let mapped =
@@ -574,10 +577,15 @@ let test_provider_failure_empty_completion_maps_to_unavailable () =
            (Http_client.empty_completion_error ~stop_reason:expected)
        in
        match mapped with
-       | Error.ProviderUnavailable { provider; detail } ->
+       | Error.EmptyCompletion { provider; stop_reason; detail } ->
          check string "provider" "openai" provider;
-         check bool "nonempty detail" true (String.trim detail <> "")
-       | _ -> fail "expected ProviderUnavailable")
+         check bool "nonempty detail" true (String.trim detail <> "");
+         check
+           string
+           "stop_reason survives the mapping"
+           (Types.stop_reason_to_string expected)
+           (Types.stop_reason_to_string stop_reason)
+       | _ -> fail "expected EmptyCompletion")
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
@@ -754,9 +762,9 @@ let () =
             `Quick
             test_provider_failure_remaining_variants_mapping
         ; test_case
-            "Provider failure empty completion maps to unavailable"
+            "Provider failure empty completion is its own variant"
             `Quick
-            test_provider_failure_empty_completion_maps_to_unavailable
+            test_provider_failure_empty_completion_is_its_own_variant
         ; test_case
             "HTTP boundary remaining variants"
             `Quick

@@ -783,7 +783,7 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
   let stop_schema =
     check_descriptor
       "masc_keeper_sandbox_stop"
-      [ "container_kind"; "name"; "prune_stale"; "timeout_sec" ]
+      [ "container_kind"; "name"; "timeout_sec" ]
       [ "timeout_sec" ]
   in
   let runtime_stop_scopes =
@@ -800,9 +800,9 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
          Masc.Keeper_sandbox_control_contract.default_stop_scope))
     (schema_property_field stop_schema "container_kind" "default");
   check_json
-    "sandbox stop prune default"
-    (`Bool false)
-    (schema_property_field stop_schema "prune_stale" "default");
+    "sandbox stop does not declare an unused prune_stale argument"
+    `Null
+    Yojson.Safe.Util.(stop_schema |> member "properties" |> member "prune_stale");
   check_json
     "sandbox stop timeout is positive"
     (`Float 0.0)
@@ -1104,11 +1104,23 @@ let test_execute_descriptor_validates_process_forms () =
       | Some (Ok _) -> Alcotest.fail ("Execute accepted " ^ label)
       | None -> Alcotest.fail "Execute public descriptor did not resolve")
     [ "an empty vector", `Assoc [ "argv", `List [] ]
-    ; "a non-string argument", `Assoc [ "argv", `List [ `String "printf"; `Int 1 ] ]
     ; "both process forms", `Assoc [ "argv", argv; "script", `String "printf x" ]
     ; "neither process form", `Assoc [ "cwd", `String "." ]
     ; "an unknown process field", `Assoc [ "argv", argv; "background", `Bool true ]
-    ]
+    ];
+  (* The descriptor validator checks top-level types and array bounds; the
+     Execute parser owns argv item types. Walk both boundaries so the invalid
+     token must be rejected before a typed process request can exist. *)
+  let invalid_item = `Assoc [ "argv", `List [ `String "printf"; `Int 1 ] ] in
+  match Resolution.validated_descriptor_and_input_for_tool_call
+          ~tool_name:"Execute" ~input:invalid_item with
+  | Some (Error _) -> ()
+  | Some (Ok (_, prepared)) ->
+    (match Masc.Keeper_tool_execute_typed_input.of_json prepared with
+     | Error detail ->
+       check_contains "Execute identifies the invalid argv item" ~sub:"argv[1]" detail
+     | Ok _ -> Alcotest.fail "Execute accepted a non-string argument")
+  | None -> Alcotest.fail "Execute public descriptor did not resolve"
 ;;
 
 let test_grep_descriptor_documents_multiline () =
@@ -1431,7 +1443,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_board_sub_board_get"
     ; "masc_board_sub_board_list"
     ; "masc_browser_read"
-    ; "masc_browser_session"
     ; "masc_browser_tabs"
     ; "masc_config"
     ; "masc_fusion_status"
@@ -1439,6 +1450,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_goal_list"
     ; "masc_plan_get_task"
     ; "masc_run_list"
+    ; "masc_slack_read"
     ; "masc_task_history"
     ; "masc_tasks"
     ; "masc_tool_help"

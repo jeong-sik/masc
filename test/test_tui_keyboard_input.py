@@ -3535,7 +3535,7 @@ def planning_resize_budget_interaction(
     _base_path: str,
 ) -> None:
     open_loaded_planning(process, master_fd, output)
-    # The terminal margin and composer consume two rows. Exercise the old
+    # The surface strip and composer consume two rows. Exercise the old
     # zero-goal case (19 surface rows) and the minimum supported surface (14).
     for terminal_rows in (21, 16, 17, 20, 24, 16):
         frame = resize_and_wait(
@@ -3551,7 +3551,9 @@ def planning_resize_budget_interaction(
         assert_planning_goal_selected(frame, b"plan-alpha-29424")
         footer_row = frame_row_of(frame, b"j/k:move")
         goal_row = frame_row_of(frame, b"plan-alpha-29424")
-        if not goal_row < footer_row <= terminal_rows - 2:
+        # Row addresses include the prepended surface strip; the footer sits
+        # immediately above the composer on the terminal's last row.
+        if not goal_row < footer_row < terminal_rows:
             raise AssertionError(f"Planning overflowed its surface: {frame!r}")
         selected = send_and_wait(
             process, master_fd, output, b"j", b"plan-beta-29424"
@@ -9808,8 +9810,10 @@ def enter_outside_changes_interaction(
     if b"MASC Activity" not in acting:
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
-    send_and_wait(process, master_fd, output, b"l", b"MASC System Logs")
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+    send_and_wait(process, master_fd, output, b"l", b"[1 Events | 2 Logs*]")
+    send_and_wait(process, master_fd, output, b"1", b"[1 Events* | 2 Logs]")
+    send_and_wait(process, master_fd, output, b"2", b"[1 Events | 2 Logs*]")
+    send_and_wait(process, master_fd, output, b"\x1b", b"[1 Events* | 2 Logs]")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
@@ -10392,15 +10396,12 @@ def runtime_surface_interaction(
     ) -> None:
         completed = False
         try:
-            # Channels now lives under the selected Keeper, so the ring
-            # predecessor of Runtime is Workspace. Each hop is
-            # needle-verified so an async frame between presses cannot lap
-            # the walk; the last Tab stays bare because the probe fixture
-            # must observe its request after [start].
-            tab_until(process, master_fd, output, b"MASC Workspace")
+            # Runtime is a Config child. Verify the parent before opening it;
+            # keep [9] bare so the probe request is observed after [start].
+            tab_until(process, master_fd, output, b"MASC Config")
             read_available(master_fd, output)
             start = len(output)
-            os.write(master_fd, b"\t")  # Workspace -> Runtime
+            os.write(master_fd, b"9")  # Config -> Runtime
             if not wait_for_fixture_event(
                 process, master_fd, output, initial_probe.requested, timeout=10.0
             ):
@@ -10437,7 +10438,7 @@ def runtime_surface_interaction(
                 "utf-8"
             )
             for needle in (
-                "MASC Runtime",
+                "MASC Config / Runtime",
                 "LANE",
                 "CANDIDATE",
                 "PROVIDER / MODEL",
@@ -10491,7 +10492,7 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"MASC Runtime detail",
+                b"MASC Config / Runtime detail",
             )
             lane_detail_plain = CSI_RE.sub(b"", lane_detail)
             for needle in (
@@ -10521,7 +10522,7 @@ def runtime_surface_interaction(
                 b"\x1b[D",
                 b"1/2 runtime-a",
             )
-            if b"MASC Runtime detail" in CSI_RE.sub(b"", lane_list):
+            if b"MASC Config / Runtime detail" in CSI_RE.sub(b"", lane_list):
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
             all_list = send_and_wait(
@@ -10538,7 +10539,7 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"MASC Runtime detail",
+                b"MASC Config / Runtime detail",
             )
             catalog_detail_plain = CSI_RE.sub(b"", catalog_detail)
             for needle in (
@@ -10577,7 +10578,7 @@ def runtime_surface_interaction(
                 output,
                 rows=20,
                 columns=100,
-                needle=b"MASC Runtime",
+                needle=b"MASC Config / Runtime",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -10587,7 +10588,7 @@ def runtime_surface_interaction(
                 output,
                 rows=30,
                 columns=100,
-                needle=b"MASC Runtime",
+                needle=b"MASC Config / Runtime",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -10621,7 +10622,7 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Config")
+            send_and_wait(process, master_fd, output, b"\x1b", b"9:Runtime")
             os.write(master_fd, b"q")
             completed = True
         finally:

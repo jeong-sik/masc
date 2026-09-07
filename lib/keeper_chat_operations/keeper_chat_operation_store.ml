@@ -33,6 +33,14 @@ type inventory =
   }
 
 let database_file = "chat-operations.sqlite3"
+
+let path_for_keeper ~keepers_runtime_dir ~keeper_name =
+  Filename.concat (Filename.concat keepers_runtime_dir keeper_name) database_file
+;;
+
+type outstanding_snapshot =
+  | Missing_store
+  | Stored_operations of Operation.t list
 let database_schema = "masc.keeper_chat_operations.v1"
 let database_application_id = 0x4d4b4f50L
 let database_user_version = 1L
@@ -594,6 +602,56 @@ let close store =
     then Ok ()
     else Error (Store_unavailable "failed to close SQLite database")
   else Ok ()
+;;
+
+let inspect_outstanding ~path =
+  let inspect db =
+    let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
+    let* () = validate_schema db in
+    let* integrity = single_text db ~operation:"check operation store integrity" "PRAGMA quick_check" in
+    let* () = if String.equal integrity "ok" then Ok () else Error (Integrity_error integrity) in
+    let* outstanding =
+      with_statement db ~operation:"inspect durable operations"
+        ("SELECT " ^ select_columns ^ " FROM operations ORDER BY sequence")
+        (fun stmt ->
+          let rec read acc =
+            let rc = Sqlite3.step stmt in
+            if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+            else if rc = Sqlite3.Rc.ROW then
+              let* operation = decode_operation stmt in
+              read (if Operation.is_terminal operation.state then acc else operation :: acc)
+            else Error (Store_unavailable (sqlite_error db "inspect durable operations" rc))
+          in read [])
+    in
+    let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
+    Ok (Stored_operations outstanding)
+  in
+  let inspect_existing () =
+    match Sqlite3.db_open ~mode:`READONLY path with
+    | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
+    | db ->
+      let result =
+        try inspect db with
+        | Sqlite3.Error detail -> Error (Store_unavailable detail)
+      in
+      if close_db db then result
+      else Error (Store_unavailable "failed to close read-only operation store")
+  in
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } -> inspect_existing ()
+  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error (Integrity_error "operation store path is not a regular file")
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (* A journal without its database is damaged evidence, not an empty queue. *)
+    let rec absent_companions = function
+      | [] -> Ok Missing_store
+      | suffix :: rest ->
+        (match Unix.lstat (path ^ suffix) with
+         | _ -> Error (Integrity_error "operation journal exists without its database")
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> absent_companions rest
+         | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error)))
+    in absent_companions [ "-journal"; "-wal"; "-shm" ]
+  | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
 ;;
 
 let next_sequence db =

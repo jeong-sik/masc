@@ -681,6 +681,7 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
   | Cleanup_ready _
   | Reconciliation_required _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
 ;;
 
@@ -886,6 +887,7 @@ let run ~config ~entry ?successor_operation_id operation =
   | Joining_lanes
   | Reconciliation_required _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
 ;;
 

@@ -152,7 +152,8 @@ let test_release_is_recorded_as_a_purge_release () =
     | Superseded (Operator_reconciliation_accepted _) ->
       fail "a purge release was recorded as a reconciliation acceptance"
     | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
-    | Reconciliation_required _ | Finalized _ | Blocked _ ->
+    | Reconciliation_required _ | Finalized _ | Blocked _
+    | Operator_absence_acknowledged _ ->
       fail "the blocked purge was not superseded")
 ;;
 

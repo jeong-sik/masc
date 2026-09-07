@@ -34,6 +34,7 @@ val control_schema : control_operation -> Masc_domain.tool_schema
 val control_schemas : Masc_domain.tool_schema list
 (** Canonical control schemas used by registration. *)
 
+val slack_read_schema : Masc_domain.tool_schema
 val web_search_schema : Masc_domain.tool_schema
 val web_fetch_schema : Masc_domain.tool_schema
 val web_schemas : Masc_domain.tool_schema list
@@ -97,6 +98,7 @@ type misc_operation =
   | Misc_browser_read
   | Misc_browser_session
   | Misc_browser_goto
+  | Misc_slack_read
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)
 

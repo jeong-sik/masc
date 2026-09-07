@@ -179,10 +179,11 @@ blocking_lints() {
   run_lint "Spec Mirrors: references resolve" bash scripts/check-spec-truth.sh
   run_lint "docs/spec names files that exist" \
     python3 scripts/ci/check-spec-file-refs.py
+  # --self-test only, which is what the deleted step ran too: the real check
+  # shells out to `dune describe` and this job has no OCaml toolchain. It runs
+  # in the dune build @check job instead, where the switch is already built.
   run_lint "Env-read config floor self-test" \
     python3 scripts/ci/check_env_reads_below_config.py --self-test
-  run_lint "Env reads below the config floor" \
-    python3 scripts/ci/check_env_reads_below_config.py
 
   # Both were red on main until today, which is the proof they can fail:
   # audit-path-ssot for one expanduser site (#34080), audit-odoc-refs for two

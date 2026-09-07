@@ -170,6 +170,11 @@ jobs:
       # this commit no workflow called it. It runs here because it needs the
       # switch the build above already has, and it fetches its own base commit
       # because this job checks out at depth 1.
+      # Needs `dune describe`, so it cannot live in the lint job. One of the
+      # nine guards #32511 deleted with the "Meta bug-class gates" step.
+      - name: Env reads below the config floor
+        run: python3 scripts/ci/check_env_reads_below_config.py
+
       - name: OCaml boundary ratchet
         env:
           OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}

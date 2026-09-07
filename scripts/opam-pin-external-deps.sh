@@ -93,7 +93,7 @@ readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
 # core development; SHA-pinned here for CI.
-readonly OCAML_MSX_SHA="8b4d5fb17325b2237ec6dcdb08e33d4ba01038fc"
+readonly OCAML_MSX_SHA="50bcb5161aedf3578fa569d24aa063831298a4a6"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

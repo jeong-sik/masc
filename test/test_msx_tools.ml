@@ -267,6 +267,39 @@ let test_xspelunker_two_presses () =
     Printf.printf "not run: MSX_ROMS and MSX_CART are unset on this host\n%!"
 ;;
 
+(* RFC-0439 §3.1: the workspace has one shared [Msx.t], so two keepers drive it
+   together. Each press advances the same clock and appends to the same ledger
+   under its own caller name — that is the workspace's co-play. keeper-b picks
+   up the frame keeper-a left, a third caller reads that same clock, and the
+   ledger names both in the order their edges happened. No ROM is needed; the
+   point is the one machine and the two names, not any game. *)
+let test_two_keepers_share_one_machine () =
+  with_workspace @@ fun base_path ->
+  ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
+  let press who key =
+    dispatch ~base_path ~agent:who "masc_msx_press"
+      [ ("keys", `List [ `String key ]); ("hold_frames", `Int 2); ("frames", `Int 4) ]
+  in
+  let r_a = press "keeper-a" "right" in
+  check bool "keeper-a's press completes" true (is_completed r_a);
+  check int "keeper-a advances the shared clock" (Msx_lane.boot_frames + 4) (frame_of r_a);
+  let r_b = press "keeper-b" "left" in
+  check bool "keeper-b's press completes" true (is_completed r_b);
+  check int "keeper-b advances the same clock further" (Msx_lane.boot_frames + 8) (frame_of r_b);
+  let r_screen = dispatch ~base_path ~agent:"keeper-c" "masc_msx_screen" [] in
+  check int "a third caller reads the shared clock, not its own"
+    (Msx_lane.boot_frames + 8) (frame_of r_screen);
+  let entries = Msx_lane.ledger () in
+  check int "both presses land in one ledger" 4 (List.length entries);
+  check (list string) "the ledger names both keepers"
+    [ "keeper-a"; "keeper-b" ]
+    (List.sort_uniq compare (List.map (fun (e : Msx_lane.entry) -> e.who) entries));
+  let downs = List.filter (fun (e : Msx_lane.entry) -> e.down) entries in
+  check (list string) "keeper-a's edge precedes keeper-b's on the shared timeline"
+    [ "keeper-a"; "keeper-b" ]
+    (List.map (fun (e : Msx_lane.entry) -> e.who) downs)
+;;
+
 let () =
   run "msx tools"
     [ ( "lane"
@@ -279,6 +312,8 @@ let () =
         ; test_case "registration" `Quick test_registration
         ; test_case "xspelunker: two presses reach the level card" `Quick
             test_xspelunker_two_presses
+        ; test_case "two keepers share one machine" `Quick
+            test_two_keepers_share_one_machine
         ] )
     ]
 ;;

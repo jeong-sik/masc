@@ -672,6 +672,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
     let current_goal = "current goal" in
     (match
        Driver.run_named
+         ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"primary.test_model"
          ~keeper_name:"prior-checkpoint-current-goal"
          ~base_path:(Filename.get_temp_dir_name ())
@@ -737,6 +738,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
     in
     let result =
       Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-request-cap"
         ~base_path:(Filename.get_temp_dir_name ())
@@ -878,6 +880,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
     in
     ignore
       (Driver.run_named
+         ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"resilient"
          ~keeper_name:"media-degrade-keeper"
          ~base_path:(Filename.get_temp_dir_name ())
@@ -1092,6 +1095,7 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
     in
     let result =
       Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-per-candidate"
         ~base_path:(Filename.get_temp_dir_name ())
@@ -1214,6 +1218,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
     in
     match
       Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
         ~base_path:(Filename.get_temp_dir_name ())
@@ -2087,6 +2092,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
          let transformed_urls = ref [] in
          let result =
            Driver.run_named
+             ~system_prompt:"You are the runtime failover test Keeper."
              ~runtime_id:"quota_lane"
              ~keeper_name:"deferred-frozen-quota-order"
              ~base_path:(Filename.get_temp_dir_name ())

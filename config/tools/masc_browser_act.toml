@@ -6,7 +6,7 @@ additional_properties = false
 [[params]]
 name = "action"
 type = "string"
-enum = ["open_tab", "close_tab", "click", "fill", "press", "select", "scroll", "back", "forward", "reload"]
+enum = ["open_tab", "close_tab", "click", "fill", "press", "select", "scroll", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog"]
 required = true
 description = "Operation. fill replaces text; select picks an option by exact value."
 
@@ -31,7 +31,7 @@ description = "CSS selector for click/fill/press/select; must match exactly one 
 [[params]]
 name = "text"
 type = "string"
-description = "Replacement text for fill. Empty clears."
+description = "Replacement text for fill, or optional prompt text for accept_dialog. Empty clears."
 
 [[params]]
 name = "key"
@@ -58,3 +58,15 @@ description = "Horizontal pixel delta for scroll; required with y."
 name = "y"
 type = "integer"
 description = "Vertical pixel delta for scroll; required with x."
+
+[[params]]
+name = "framePath"
+type = "array"
+items = { type = "string" }
+description = "Outer-to-inner iframe/frame CSS selectors from BrowserRead mode=frames. Omit for top-level. Only element and scroll actions accept a nonempty path."
+
+[[params]]
+name = "paths"
+type = "array"
+items = { type = "string" }
+description = "Absolute existing file paths on the automation host for upload. Replaces the file input selection."

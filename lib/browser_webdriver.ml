@@ -19,7 +19,9 @@ let decode_response ~status body =
     | Some value when status >= 200 && status < 300 -> Ok value
     | Some value ->
       let* code = string_field "error" value in
-      let* message = string_field "message" value in
+      let* message = match field "message" value with
+        | Some (`String message) -> Ok message
+        | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code; message })
 let create ~request = { request; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
@@ -60,7 +62,7 @@ let select t session handle =
   call t session `POST "/window" (Some (`Assoc ["handle", `String handle]))
 let with_tab t session tab_id f =
   match tab_id with
-  | None -> f ()
+  | None -> let* _ = call t session `POST "/frame" (Some (`Assoc ["id",`Null])) in f ()
   | Some id ->
     match List.find_opt (fun (_, known) -> known = id) session.handles with
     | None -> Error (Protocol "unknown tab id; refresh the tab list")
@@ -83,6 +85,21 @@ let element_id t session selector =
   | `List [] -> Error (Protocol "selector matched no element; read elements again")
   | `List _ -> Error (Protocol "selector is ambiguous; select exactly one element")
   | _ -> Error (Protocol "malformed WebDriver elements response")
+let enter_frames t session selectors =
+  let rec enter = function
+    | [] -> Ok ()
+    | selector :: rest ->
+      let* id = element_id t session selector in
+      let* _ = call t session `POST "/frame" (Some (`Assoc ["id",
+        `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id]])) in
+      enter rest in
+  enter selectors
+let dialog_text t session =
+  match call t session `GET "/alert/text" None with
+  | Ok (`String text) -> Ok (`Assoc ["open",`Bool true;"text",`String text])
+  | Error (Remote {code="no such alert";_}) -> Ok (`Assoc ["open",`Bool false])
+  | Ok _ -> Error (Protocol "invalid dialog text response")
+  | Error error -> Error error
 let element_call perform_effect id suffix body =
   perform_effect `POST ("/element/" ^ Uri.pct_encode id ^ suffix) (Some body)
 let interact t session ~perform_effect = function
@@ -108,6 +125,22 @@ let interact t session ~perform_effect = function
   | Browser_lane.Action.Scroll {x;y} ->
     perform_effect `POST "/execute/sync" (Some (`Assoc ["script", `String "window.scrollBy({left:arguments[0],top:arguments[1],behavior:'instant'}); return {x:window.scrollX,y:window.scrollY};"
       ; "args", `List [`Int x;`Int y]]))
+  | Browser_lane.Action.Upload {selector;paths} ->
+    let* id = element_id t session selector in
+    let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
+    let* is_file = script t session "return arguments[0].localName==='input' && arguments[0].type==='file';" [element] in
+    let* () = if is_file = `Bool true then Ok () else Error (Protocol "upload requires a file input") in
+    let* _ = element_call perform_effect id "/clear" (`Assoc []) in
+    element_call perform_effect id "/value" (`Assoc ["text",`String (String.concat "\n" paths)])
+  | Browser_lane.Action.Accept_dialog text ->
+    let* _ = call t session `GET "/alert/text" None in
+    let* _ = match text with
+      | None -> Ok `Null
+      | Some text -> perform_effect `POST "/alert/text" (Some (`Assoc ["text",`String text])) in
+    perform_effect `POST "/alert/accept" (Some (`Assoc []))
+  | Browser_lane.Action.Dismiss_dialog ->
+    let* _ = call t session `GET "/alert/text" None in
+    perform_effect `POST "/alert/dismiss" (Some (`Assoc []))
   | Browser_lane.Action.Back -> perform_effect `POST "/back" (Some (`Assoc []))
   | Browser_lane.Action.Forward -> perform_effect `POST "/forward" (Some (`Assoc []))
   | Browser_lane.Action.Reload -> perform_effect `POST "/refresh" (Some (`Assoc []))
@@ -129,9 +162,10 @@ let execute_action t action =
     let* _ = call t session `POST "/url" (Some (`Assoc ["url",`String url])) in
     let* summary = page_summary t session in
     Ok (`Assoc ["tabId",`Int id;"page",summary])
-  | Browser_lane.Action.On_tab {tab_id=id;interaction} ->
+  | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
+      let* () = enter_frames t session frame_path in
       let* result = interact t session ~perform_effect:(perform_effect session) interaction in
       match interaction with
       | Browser_lane.Action.Close_tab ->
@@ -151,6 +185,7 @@ let execute_unlocked t = function
        let args = if Option.value ~default:true headless then [`String "-headless"] else [] in
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
          ["browserName", `String "firefox";
+          "unhandledPromptBehavior", `String "ignore";
           "moz:firefoxOptions", `Assoc ["args", `List args]]]] in
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
@@ -174,6 +209,21 @@ let execute_unlocked t = function
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int (tab_id t session handle)) :: fields))
       | _ -> Error (Protocol "malformed elements observation"))
+  | Browser_lane.Page_context {tab_id=id;frame_path;mode} ->
+    let* session = session t in
+    with_tab t session (Some id) (fun () ->
+      let* () = enter_frames t session frame_path in
+      let* data = match mode with
+        | `Dialog -> dialog_text t session
+        | `Elements -> script t session Browser_page_script.elements []
+        | `Frames -> script t session Browser_page_script.frames []
+        | `Text cap ->
+          if cap < 1 || cap > 100_000 then Error (Protocol "maxChars must be between 1 and 100000")
+          else script t session
+            "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};" [`Int cap] in
+      match data with
+      | `Assoc fields -> Ok (`Assoc (["tabId",`Int id;"framePath",`List (List.map (fun s -> `String s) frame_path)] @ fields))
+      | _ -> Error (Protocol "invalid contextual observation"))
   | Browser_lane.Page_screenshot {tab_id=id} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->

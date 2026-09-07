@@ -36,7 +36,7 @@ let fixture f = Eio_main.run (fun env ->
   ignore (ok (Driver.execute driver Lane.Tabs_list));
   calls := [];
   f driver current calls matches)
-let act driver tab_id interaction = Driver.execute driver (Lane.Page_act (Action.On_tab {tab_id;interaction}))
+let act driver tab_id interaction = Driver.execute driver (Lane.Page_act (Action.On_tab {tab_id;frame_path=[];interaction}))
 let test_targeted_goto () = fixture (fun driver current calls _ ->
   ignore (ok (Driver.execute driver (Lane.Page_goto {url="https://example.org/new";tab_id=Some 2})));
   check string "navigation selects observed tab" "b" !current;
@@ -101,6 +101,22 @@ let test_pre_effect_tool_outcome () = fixture (fun driver _ _ matches ->
     let absent = invoke ["action",`String "click";"selector",`String "button";"tabId",`Int 1] in
     check bool "absent element permits correction" true
       (absent.failure_effect_disposition = Tool_result.Proven_pre_effect)))
+let test_context_arguments () =
+  let valid action args = `Assoc (["action",`String action;"tabId",`Int 1] @ args) in
+  List.iter (fun input -> match Action.parse input with
+    | Ok action -> check bool "context round trip" true (Action.parse (Action.to_json action) = Ok action)
+    | Error detail -> fail detail)
+    [valid "click" ["selector",`String "#apply";"framePath",`List [`String "iframe";`String "#nested"]];
+     valid "accept_dialog" ["text",`String "한글"];
+     valid "dismiss_dialog" [];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "/fixture/file.txt"]]];
+  List.iter (fun input -> check bool "invalid context rejected" true (Result.is_error (Action.parse input)))
+    [valid "click" ["selector",`String "button";"framePath",`List [`Int 1]];
+     valid "click" ["selector",`String "button";"framePath",`List [`String ""]];
+     valid "accept_dialog" ["framePath",`List [`String "iframe"]];
+     valid "upload" ["selector",`String "input";"paths",`List []];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "relative.txt"]];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "/file\n/other"]]]
 let () = run "Firefox controls" ["behavior",[
   test_case "navigation uses requested tab" `Quick test_targeted_goto;
   test_case "selectors must match exactly once" `Quick test_selector_contract;
@@ -108,4 +124,5 @@ let () = run "Firefox controls" ["behavior",[
   test_case "parallel interactions keep their tab" `Quick test_parallel_targeting;
   test_case "stale ids cannot target a new session" `Quick test_stale_session_id;
   test_case "pre-effect failures permit correction" `Quick test_pre_effect_tool_outcome;
+  test_case "context and file arguments are explicit" `Quick test_context_arguments;
   test_case "arguments are parsed before effects" `Quick test_parser]]

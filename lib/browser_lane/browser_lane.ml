@@ -23,6 +23,7 @@ type verb =
   | Page_elements of { tab_id : int option }
   | Page_act of Browser_action.t
   | Page_screenshot of { tab_id : int }
+  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements | `Frames | `Dialog ] }
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
@@ -33,6 +34,7 @@ let verb_to_string = function
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
   | Page_screenshot _ -> "page.screenshot"
+  | Page_context _ -> "page.context"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -64,6 +66,12 @@ let verb_json = function
       (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
   | Page_screenshot {tab_id} ->
     `Assoc ["verb",`String "page.screenshot";"args",`Assoc ["tabId",`Int tab_id]]
+  | Page_context {tab_id;frame_path;mode} ->
+    let name, extra = match mode with
+      | `Text cap -> "text", ["maxChars",`Int cap]
+      | `Elements -> "elements", [] | `Frames -> "frames", [] | `Dialog -> "dialog", [] in
+    `Assoc ["verb",`String "page.context";"args",`Assoc
+      (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
 ;;
@@ -77,11 +85,12 @@ let verb_json = function
      Only the two readers — the live lane exists to be read; sessions own
      nothing there and a navigation acts with the operator's logins. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ | Page_context _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;
 
 let verb_allowed_on_live = function
+  | Page_context _ -> false
   | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;

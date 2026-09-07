@@ -9,6 +9,7 @@ let test_session_lifecycle () =
       match method_, path with
       | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned"])
       | `DELETE, "/session/owned" -> Ok `Null
+      | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/url" -> Error (Driver.Remote {code="invalid session id";message="Firefox exited"})
       | _ -> fail ("unexpected request: " ^ path)
     in
@@ -22,7 +23,7 @@ let test_session_lifecycle () =
     (match Driver.execute driver (Lane.Page_goto {url="https://example.org";tab_id=None}) with
      | Lane.Refused _ -> () | _ -> fail "browser exit must be visible");
     ignore (open_session ());
-    check int "session can recover after Firefox exits" 3 (List.length !calls);
+    check int "session can recover after Firefox exits" 4 (List.length !calls);
     List.iter (fun verb ->
       check bool "session lifecycle cannot be classified as a read" false
         (Lane.verb_is_read verb))
@@ -33,7 +34,7 @@ let test_session_lifecycle () =
       (List.hd !calls = (`DELETE, "/session/owned"));
     (match Driver.execute driver Lane.Tabs_list with
      | Lane.Refused _ -> () | _ -> fail "closed session must refuse subsequent reads");
-    check int "closed read adds no backend request" 4 (List.length !calls))
+    check int "closed read adds no backend request" 5 (List.length !calls))
 let test_backend_failure () =
   match Driver.decode_response ~status:404
     {|{"value":{"error":"no such window","message":"tab closed"}}|} with
@@ -75,6 +76,7 @@ let test_timeout_releases_session () =
     let blocked = ref true in
     let request ~method_ ~path ~body:_ = match method_, path with
       | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned"])
+      | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/execute/sync" when !blocked ->
         Eio.Switch.run (fun sw ->
           Eio.Switch.on_release sw (fun () -> cancelled := true);

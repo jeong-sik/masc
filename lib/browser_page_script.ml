@@ -39,3 +39,17 @@ function observe(el) {
 return {url:location.href,title:document.title,total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
 |}
+
+let frames = {|
+function selector(el) {
+  const parts=[];
+  for (let node=el; node && node.nodeType===1; node=node.parentElement) {
+    const tag=node.localName;
+    const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(s=>s.localName===tag) : [node];
+    parts.unshift(tag+':nth-of-type('+(siblings.indexOf(node)+1)+')');
+  }
+  return parts.join(' > ');
+}
+const frames=Array.from(document.querySelectorAll('iframe,frame'));
+return {url:location.href,title:document.title,frames:frames.map(el=>({selector:selector(el),name:el.name || '',title:el.title || '',src:el.src || ''}))};
+|}

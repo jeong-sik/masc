@@ -50,7 +50,7 @@ let () = Eio_main.run (fun _ ->
     let open_tab suffix = success (run (Browser_lane.Page_act (Browser_action.Open_tab (fixture_url ^ suffix)))) |> member "tabId" |> integer in
     let first = open_tab "/first" in
     let act id interaction =
-      let response = success (run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=id;interaction}))) in
+      let response = success (run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=id;frame_path=[];interaction}))) in
       let confirmation = match interaction with Browser_action.Close_tab -> "closed" | _ -> "performed" in
       check "native action confirms its target tab"
         (member "tabId" response = `Int id && member confirmation response = `Bool true) in
@@ -76,7 +76,7 @@ let () = Eio_main.run (fun _ ->
     let second = open_tab "/second" in
     act first (Browser_action.Click (selector "submit"));
     check "second tab remains independently readable" (member "url" (read second) = `String (fixture_url ^ "/second"));
-    let rejected = run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;interaction=Browser_action.Click "input"})) in
+    let rejected = run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Click "input"})) in
     check "ambiguous selector rejected before effect" (match rejected with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     act first (Browser_action.Scroll {x=0;y=400});
     let navigated = success (run (Browser_lane.Page_goto {url=fixture_url ^ "/next";tab_id=Some second})) in
@@ -100,11 +100,43 @@ let () = Eio_main.run (fun _ ->
     let png = member "base64" screenshot |> string in
     let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in
     output_string oc png; close_out oc;
+    let context id frame_path mode = success (run (Browser_lane.Page_context {tab_id=id;frame_path;mode})) in
+    let frames = context first [] `Frames |> member "frames" |> Yojson.Safe.Util.to_list in
+    check "iframe discovery returns a selectable frame" (List.length frames = 1);
+    let outer = member "selector" (List.hd frames) |> string in
+    let nested = context first [outer] `Frames |> member "frames" |> Yojson.Safe.Util.to_list in
+    let inner = member "selector" (List.hd nested) |> string in
+    let frame_path = [outer;inner] in
+    let frame_act interaction = success (run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path;interaction}))) in
+    check "nested cross-origin frame controls are readable"
+      (context first frame_path `Elements |> member "elements" |> Yojson.Safe.Util.to_list |> List.length = 2);
+    check "nested fill executed" (member "performed" (frame_act (Browser_action.Fill {selector="#nested-input";text="프레임 입력"})) = `Bool true);
+    check "nested click executed" (member "performed" (frame_act (Browser_action.Click "#nested-apply")) = `Bool true);
+    check "nested frame contains submitted input" (contains (context first frame_path (`Text 1000) |> member "text" |> string) "프레임 입력");
+    check "top-level read resets the frame context" (contains (member "text" (read first) |> string) "Firefox fixture");
+    (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=["#missing"];interaction=Browser_action.Click "button"})) with
+     | Browser_lane.Rejected_before_effect _ -> check "missing frame rejected before effect" true
+     | _ -> failwith "missing frame action accepted");
+    act first (Browser_action.Click "button[aria-label=alert]");
+    check "alert text remains available" (member "text" (context first [] `Dialog) = `String "Firefox alert");
+    act first (Browser_action.Accept_dialog None);
+    check "accepted alert closes" (member "open" (context first [] `Dialog) = `Bool false);
+    act first (Browser_action.Click "button[aria-label=confirm]");
+    act first Browser_action.Dismiss_dialog;
+    check "dismiss reaches the page as false" (contains (member "text" (read first) |> string) "false");
+    act first (Browser_action.Click "button[aria-label=prompt]");
+    act first (Browser_action.Accept_dialog (Some "대화상자 입력"));
+    check "prompt input reaches the page" (contains (member "text" (read first) |> string) "대화상자 입력");
+    let upload = open_tab "/upload" in
+    act upload (Browser_action.Upload {selector="#upload";paths=[Sys.getenv "MASC_PROBE_UPLOAD_PATH"]});
+    act upload (Browser_action.Click "#send-upload");
+    check "real multipart upload preserves file bytes" (contains (member "text" (read upload) |> string) "Upload verified");
+    act upload Browser_action.Close_tab;
     act first Browser_action.Close_tab;
-    check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
+    check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     let closed = success (run Browser_lane.Session_close) in
     check "session close is confirmed" (member "closed" closed = `Bool true);
     open_session ();
     let fresh = open_tab "/fresh" in
     check "reopened sessions never reuse tab IDs" (fresh > second);
-    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false)))
+    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false)))

@@ -100,6 +100,27 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
   match lane_of ~tool_name ~start_time args with
   | Error error -> error
   | Ok lane ->
+    match Browser_lane.Action.parse_frame_path args with
+    | Error detail -> make_workflow_err ~tool_name ~start_time detail
+    | Ok frame_path ->
+    let mode = get_string args "mode" "text" in
+    if frame_path <> [] || mode = "frames" || mode = "dialog" then
+      if lane <> "automation" then make_workflow_err ~tool_name ~start_time "frame and dialog reads require automation"
+      else (match get_int_opt args "tabId" with
+        | None -> make_workflow_err ~tool_name ~start_time "contextual read requires an observed tabId"
+        | Some tab_id when tab_id < 0 -> make_workflow_err ~tool_name ~start_time "tabId must be nonnegative"
+        | Some tab_id ->
+          let mode = match mode with
+            | "text" -> Ok (`Text (get_int args "maxChars" 50_000))
+            | "elements" -> Ok `Elements | "frames" -> Ok `Frames
+            | "dialog" when frame_path = [] -> Ok `Dialog
+            | _ -> Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
+          match mode with
+          | Error detail -> make_workflow_err ~tool_name ~start_time detail
+          | Ok mode -> answer_to_result ~tool_name ~start_time
+              (Browser_lane.issue ~lane_name:lane
+                ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
+    else
     let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
     match get_string args "mode" "text" with
     | "screenshot" ->

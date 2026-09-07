@@ -27,6 +27,12 @@ default = "live"
 [[params]]
 name = "mode"
 type = "string"
-enum = ["text", "elements", "screenshot"]
+enum = ["text", "elements", "screenshot", "frames", "dialog"]
 default = "text"
-description = "text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
+description = "frames lists iframe selectors; dialog reads the pending prompt (automation, explicit tabId). text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
+
+[[params]]
+name = "framePath"
+type = "array"
+items = { type = "string" }
+description = "Automation only: outer-to-inner iframe/frame selectors for text/elements/frames. Requires tabId. Omit for top-level."

@@ -5560,6 +5560,23 @@ let test_runtime_limits_reject_unknown_or_invalid_values () =
      replace "effective_max_context" (`Int 0) picker_default_runtime;
      replace "max_output_tokens" (`Int (-1)) picker_default_runtime]
 
+let test_runtime_default_limits_must_match_listed_row () =
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | _ -> Alcotest.fail "invalid runtime fixture"
+  in
+  List.iter (fun (key, value) ->
+    let different_default = replace key value picker_default_runtime in
+    let json = replace "default_runtime" different_default runtime_resolved_json in
+    match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Error detail -> Alcotest.(check string) key
+        "default_runtime disagrees with its resolved runtime row" detail
+    | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
+    ["effective_max_context", `Int 100000;
+     "max_context_source", `String "capability";
+     "max_output_tokens", `Null;
+     "is_local", `Bool true]
+
 let test_runtime_resolved_rejects_half_preference () =
   match
     Tui_decode.decode_runtime_resolved_snapshot
@@ -7947,6 +7964,8 @@ let () =
           test_runtime_catalog_probe_is_independent_of_dispatch
       ; Alcotest.test_case "limits reject invalid values" `Quick
           test_runtime_limits_reject_unknown_or_invalid_values
+      ; Alcotest.test_case "default limits match listed runtime" `Quick
+          test_runtime_default_limits_must_match_listed_row
       ; Alcotest.test_case "rejects half a sticky preference" `Quick
           test_runtime_resolved_rejects_half_preference
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick

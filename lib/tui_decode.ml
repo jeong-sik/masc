@@ -4173,6 +4173,10 @@ let decode_runtime_resolved_snapshot json =
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
                 && String.equal default.ro_model listed.ro_model
+                && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
+                && default.ro_max_context_source = listed.ro_max_context_source
+                && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
+                && Bool.equal default.ro_is_local listed.ro_is_local
                 && Bool.equal default.ro_dispatchable listed.ro_dispatchable
                 && Option.equal String.equal default.ro_blocked_reason
                      listed.ro_blocked_reason -> Ok ()

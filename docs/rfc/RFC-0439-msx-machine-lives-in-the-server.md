@@ -14,7 +14,7 @@ related: ["0414"]
 지금 MSX 머신은 TUI 프로세스 안에 산다. keeper 는 서버 도구로만 세상을 만지므로 그 머신에
 손이 닿지 않는다. 머신을 **서버로 옮기고**, TUI 는 프레임을 받아 그리는 구경꾼이 되고,
 keeper 는 `masc_msx_*` 도구로 **같은 기계에 키를 넣는다**. 누가 눌렀는지는 서버가 세고,
-모든 입력은 프레임 번호와 함께 원장에 남아 하네스로 그대로 재생된다.
+모든 입력을 프레임 번호와 함께 기록하고, §3.6의 실행 조건을 고정한 하네스 재생을 목표로 한다.
 
 ## 1. 지금 서 있는 곳
 
@@ -33,7 +33,8 @@ keeper 는 `masc_msx_*` 도구로 **같은 기계에 키를 넣는다**. 누가 
 | `screen_text` | name table 을 문자 그리드로 (글자 폰트일 때만 뜻이 있다) |
 | `dump_pc` / `cpu_halted` / `vdp_regs` | 판정용 계기 |
 
-같은 상태에 같은 입력을 넣으면 같은 프레임이 나온다. 코어에는 시간·파일·난수가 없다.
+코어는 호출자가 준 프레임 수만큼 진행한다. 이 성질을 이용한 세션 재현은 초기 상태와 입력
+순서를 함께 고정해야 하며, 서버 원장의 재생 성공은 §5에서 별도로 검증한다.
 
 masc 쪽 지금 모양(`bin/masc_tui_msx.ml`, #33818 → #33975):
 
@@ -87,14 +88,17 @@ workspace 에 머신은 **하나**다. `masc_msx_load` 가 만들고(C-BIOS + �
 
 ### 3.4 관측 — 텍스트 keeper 에게 돌려주는 것
 
-vision 은 아직 배선되지 않았다(RFC-0414). 그래서 관측은 **글자가 먼저**고 이미지는 덤이다.
+MASC에는 이미지 ingestion과 `keeper_analyze_image` 경로가 있다
+(`lib/keeper/keeper_vision_ingest.ml`, `lib/keeper/keeper_vision_tool.ml`). 아직 연결되지 않은 것은
+MSX의 `frame_rgb`를 이미지 artifact로 만들어 그 경로에 전달하는 부분이다. 이 RFC의 기본
+관측은 글자·타일이며, 이미지 전달은 기존 runtime capability와 도구 surface를 따른다.
 
 ```
 frame: 421            mode: G2       pc: 7d4a   halted: true
 screen_text:          (TEXT1/G1 에서 폰트가 글자일 때 — 40×24 또는 32×24)
 tiles:                (G1/G2) 32×24 name 그리드, 0 이 아닌 칸만 "행,열=번호"
 sprites:              SAT 순서대로 번호·x·y·패턴·색 (0xD0 앞까지)
-image:                PNG 파일 경로 (vision 이 붙은 keeper 만 열 수 있다)
+image:                MSX frame의 이미지 artifact 참조 (기존 이미지 경로와의 연결은 미구현)
 ```
 
 타일 번호가 무슨 그림인지는 게임마다 다르다. 그 뜻은 keeper 가 게임을 하며 배우는 것이고
@@ -115,11 +119,15 @@ image:                PNG 파일 경로 (vision 이 붙은 keeper 만 열 수 �
 | `masc_msx_press` | §3.3. 관측을 돌려준다 |
 | `masc_msx_realtime` | on/off. 사람 세션이 붙어 있을 때만 켜진다 |
 
-### 3.6 기록 — 원장이 곧 재현
+### 3.6 기록 — 재현에 필요한 실행 조건
 
-모든 입력은 `(frame, who, key, down|up)` 으로 append-only 원장에 남는다. 같은 카트리지에
-같은 원장을 넣으면 같은 프레임이 나온다(코어 결정론). 하네스에 `boot.exe --replay 원장` 을
-더해 keeper 세션을 터미널에서 다시 돈다. savestate 는 코어 `serialize` 가 생기면 그 위에 얹는다.
+입력은 `(frame, who, key, down|up)`과 같은 프레임 안의 적용 순서를 append-only 원장에 남긴다.
+재현 bundle은 코어 revision, 실제 BIOS·카트리지 바이트의 digest, 머신 설정, 초기화 조건,
+관측할 프레임과 마지막 프레임 번호도 함께 고정해야 한다. 키 입력 없이 진행한 시간도 마지막
+키 이벤트에서 잘리지 않아야 한다. 같은 파일 경로나 카트리지 이름만으로 동등한 실행을 보장하지 않는다.
+
+`boot.exe --replay`는 이 조건을 검증하며 재생할 후속 구현이다. 아직 서버 원장의 재생이나
+픽셀 일치가 입증된 것은 아니다. savestate는 코어 `serialize`가 구현된 뒤 별도로 다룬다.
 
 ### 3.7 TUI — 구경꾼으로
 
@@ -129,12 +137,13 @@ image:                PNG 파일 경로 (vision 이 붙은 keeper 만 열 수 �
 ## 4. 하지 않는 것
 
 - 오디오, 디스크(P3), 조이스틱 방향(커서 키만), 색 0 투명 → R#7 배경색(코어 쪽).
-- 머신 여러 개. 게임별 타일 의미 해석. vision 배선 자체(RFC-0414 몫).
+- 머신 여러 개. 게임별 타일 의미 해석. 새로운 범용 vision 경로(기존 이미지 경로를 사용).
 
 ## 5. 증명
 
-1. 서버 단위 테스트: 두 주체가 한 머신에 키를 넣은 원장을 두 번 재생하면 `frame_rgb` 해시가 같다.
-2. 하네스 재생: keeper 세션 원장을 `boot.exe --replay` 로 돌려 같은 프레임(픽셀 수·해시).
+1. 서버 단위 테스트: §3.6의 bundle을 두 번 재생해 지정한 각 프레임의 `frame_rgb` 해시를 비교한다.
+2. 하네스 재생: 같은 bundle을 `boot.exe --replay`로 재생해 마지막 프레임까지 픽셀 수·해시를 비교한다.
+   입력 없는 구간과 같은 프레임의 복수 주체 입력을 포함한다. 이 검증은 아직 실행하지 않았다.
 3. 눈: keeper 가 `masc_msx_press [Space]` 두 번으로 XSpelunker 를 LEVEL 1-1 까지 보낸다 —
    오늘 하네스 `--tap-space 340,420` 과 같은 길.
 4. domain 0 의 ≥100ms 실행 수가 실시간 틱커를 켜도 늘지 않는다 (P4 지표, `rtev/_build/default/`).
@@ -149,6 +158,6 @@ image:                PNG 파일 경로 (vision 이 붙은 keeper 만 열 수 �
 ## 7. 열린 결정 (Vincent)
 
 - 머신 하나(§3.1) vs keeper 마다 하나.
-- 이미지 전달: PNG 파일 경로로 두나, RFC-0414 vision lane 이 붙기를 기다리나.
+- 이미지 전달: MSX frame artifact를 기존 이미지 ingestion/분석 도구에 어떤 응답 형태로 연결하나.
 - 도구를 보는 keeper: 전부인가, 지정한 keeper 만인가.
 - 실시간 틱커를 어느 domain 에 두나 (P4 의 분리 원칙만 정해져 있다).

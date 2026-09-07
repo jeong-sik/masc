@@ -1321,6 +1321,16 @@ let semantic_apply store ~expected ~now action =
     if expected_bytes <> current_bytes then Error (Execution_changed current)
     else
       let* next = Semantic.apply ~now action current |> Result.map_error (fun error -> Invalid_execution error) in
+      let* () =
+        if next.current_sources = current.current_sources then Ok ()
+        else
+          let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
+          let owners = List.filter (fun (execution : Semantic.t) ->
+            not (Keeper_execution_scope_id.equal execution.id current.id)
+            && List.exists (fun selected -> List.exists (same_source selected)
+                 (execution.sources @ execution.current_sources)) next.current_sources) outstanding in
+          if owners = [] then Ok ()
+          else Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners)) in
       let* () = match next.phase with
         | Semantic.Running ->
             if current.phase = Semantic.Running then Ok () else

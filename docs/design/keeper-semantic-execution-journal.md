@@ -47,7 +47,9 @@ power-loss test. See [SQLite synchronous](https://www.sqlite.org/pragma.html#pra
 
 Several waiting operations can coexist. Only Running is unique. A waiting
 operation reserves its own exact source incarnations, including verified newer
-queue projections, rather than blocking unrelated work. A duplicate diagnostic
+queue projections, rather than blocking unrelated work. A source recheck also
+checks other nonterminal owners before changing its projection; a conflict
+preserves both exact records. A duplicate diagnostic
 is a no-op. Old CAS writers cannot overwrite newer evidence.
 
 Recovery preserves one of these origins:
@@ -73,12 +75,13 @@ hash or checkpoint-presence escape hatch authorizes replay of Interrupted execut
 
 ## Evidence and remaining integration
 
-The 22 SQLite tests cover atomic and uncertain commits, exact CAS, independent
+The 23 SQLite tests cover atomic and uncertain commits, exact CAS, independent
 work during waits, rechecks across queue generations, same-scope checkpoint
 resumption after another operation completes, immutable terminal records,
 validated migration, read-only old-schema inspection, and corrupt-evidence
-retention. Two additional scenarios distinguish Direct/Auto IDs with identical
-text and resume Direct's frame after independent Auto completion. These tests
+retention. This total includes the two cross-origin scenarios (identical
+Direct/Auto scalar text and Direct resumption after Auto completion) and the
+source-projection ownership conflict regression. These tests
 exercise the journal API, not a full provider turn or an actual child lifecycle.
 
 Direct request delivery and semantic execution have separate lifetimes. This
@@ -91,7 +94,11 @@ The runtime integration still must:
 1. Choose runnable work fairly instead of repeatedly selecting the first waiting row.
 2. Persist journal admission before queue projection and model dispatch; Direct
    claim and semantic admission must share the owner transaction.
-3. Validate current bound sources and checkpoint bytes before the corresponding recheck.
+3. Retain each owned continuation's exact checkpoint payload and load it by its
+   recorded reference. A reference alone does not retain bytes: another operation
+   can overwrite the canonical checkpoint and history pruning can remove it.
+   This retention/loader prerequisite must precede native resume. Validate current
+   bound sources and exact retained bytes before the corresponding recheck.
 4. Keep observations durable before another provider request; account for in-flight effects.
 5. Associate official sessions and child/HITL requests with explicit execution identity.
 6. Project checkpoint and terminal ACKs from journal authority with restart-safe retries.

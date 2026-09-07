@@ -512,6 +512,30 @@ let test_direct_wait_auto_completes_then_direct_resumes () =
         |> execution_ok |> created in
       assert_count "another Direct request has independent evidence" 0 next))
 
+let test_recheck_cannot_take_another_execution_source_incarnation () =
+  with_store (fun _path store ->
+    let initial = source 101 in
+    let occupied = reprioritized initial in
+    let disjoint = reprioritized occupied in
+    let a = prepare store 101 [initial] in
+    let b = prepare store 102 [occupied] in
+    let a_before = Execution.to_json a and b_before = Execution.to_json b in
+    (match Store.semantic_apply store ~expected:a ~now:22.
+      (Execution.Recheck_sources (project a [occupied])) with
+     | Error (Store.Sources_owned [owner]) ->
+       check bool "recheck names the exact conflicting owner" true (Scope.equal owner b.id)
+     | Error error -> fail (Store.semantic_error_to_string error)
+     | Ok _ -> fail "source recheck took another execution's incarnation");
+    check bool "conflict leaves A's exact record unchanged" true
+      (a_before = Execution.to_json (get store a.id));
+    check bool "conflict leaves B's exact record unchanged" true
+      (b_before = Execution.to_json (get store b.id));
+    let updated = apply store a (Execution.Recheck_sources (project a [disjoint])) in
+    check bool "disjoint verified projection still succeeds" true (updated.current_sources = [disjoint]);
+    check bool "disjoint update retains A's initial membership" true (updated.sources = [initial]);
+    check bool "disjoint update leaves B's record unchanged" true
+      (b_before = Execution.to_json (get store b.id)))
+
 let () =
   run "keeper semantic execution store"
     [ "typed identity", [
@@ -531,6 +555,7 @@ let () =
         test_case "corrupt owned frame refuses unsafe inspection" `Quick test_corrupt_semantic_frame_refuses_unsafe_inspection;
         test_case "terminal index cannot conceal pending evidence" `Quick test_corrupt_terminal_index_cannot_hide_outstanding_execution ];
       "recovery", [
+        test_case "source recheck cannot take another execution incarnation" `Quick test_recheck_cannot_take_another_execution_source_incarnation;
         test_case "undispatched recheck survives reopen and reprioritization" `Quick test_undispatched_recheck_survives_reopen_and_queue_generation;
         test_case "recheck rejects foreign scope and changed admission" `Quick test_recheck_rejects_foreign_binding_and_original_mutation;
         test_case "checkpoint A waits B completes then A resumes without queue rows" `Quick test_checkpoint_wait_b_completes_a_resumes_without_pending_sources;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -23,6 +24,55 @@ describe('keeper-v2 brand assets', () => {
     }
     // Every latin subset entry must point at a vendored file, not a CDN.
     expect(css).not.toMatch(/url\((?!'\/dashboard)/)
+  })
+
+  // A face declares a weight and points at a file. The browser trusts the
+  // declaration: asked for 600 it answers "there is a 600 face" and draws
+  // whatever outlines that file holds. So two weights pointing at the same
+  // bytes is a face that lies, and the CSS text cannot show it -- the two
+  // urls differ, only the files behind them do not.
+  //
+  // Four such runs are here today: EBGaramond 400=600 in both subsets, and
+  // JetBrainsMono 400=500=700 in both. Eight files, four distinct blobs,
+  // five declared weights. They are listed rather than failed because the
+  // repository holds no true 600 or 700 to swap in, and dropping the faces
+  // moves the text onto synthetic bold -- a look, not a bug fix. #33209
+  // carries the serif and now the mono.
+  it('gives each declared weight its own outlines', () => {
+    const known = new Set([
+      'EBGaramond-400-latin.woff2=EBGaramond-600-latin.woff2', // #33209
+      'EBGaramond-400-latinext.woff2=EBGaramond-600-latinext.woff2', // #33209
+      // #33209 counted the serif. The mono is worse: three weights, one file,
+      // in both subsets. Every weight of the code font draws the same
+      // outlines, so bold code is regular code.
+      'JetBrainsMono-400-latin.woff2=JetBrainsMono-500-latin.woff2=JetBrainsMono-700-latin.woff2',
+      'JetBrainsMono-400-latinext.woff2=JetBrainsMono-500-latinext.woff2=JetBrainsMono-700-latinext.woff2',
+    ])
+    const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)]
+      .map(m => m[1])
+      .filter((body): body is string => body !== undefined)
+    const byFile = new Map<string, { file: string; weight: string; family: string }[]>()
+    for (const face of faces) {
+      const href = /url\('([^']*\/([^'/]+))'\)/.exec(face)?.slice(1)
+      const weight = /font-weight:\s*([^;]+);/.exec(face)?.[1]
+      const family = /font-family:\s*'([^']+)'/.exec(face)?.[1]
+      const [src, file] = href ?? []
+      if (!src || !file || !weight || !family) continue
+      const path = resolve(__dirname, '../../public', src.replace('/dashboard/', ''))
+      const digest = createHash('sha256').update(readFileSync(path)).digest('hex')
+      const seen = byFile.get(digest) ?? []
+      seen.push({ file, weight: weight.trim(), family })
+      byFile.set(digest, seen)
+    }
+    const shared: string[] = []
+    for (const faces of byFile.values()) {
+      const weights = new Set(faces.map(f => `${f.family}/${f.weight}`))
+      if (faces.length > 1 && weights.size > 1) {
+        const key = faces.map(f => f.file).sort().join('=')
+        if (!known.has(key)) shared.push(key)
+      }
+    }
+    expect(shared).toEqual([])
   })
 })
 

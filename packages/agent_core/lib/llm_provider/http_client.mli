@@ -250,6 +250,12 @@ type http_error =
       invalid CLI policy, or a request that requires a capability the
       transport cannot provide. *)
 
+(** Shared transport-edge exception classification. Exact-output measurement
+    uses the same typed Unix/Eio/TLS facts as ordinary provider requests.
+    [None] means the exception is not a known transport failure; in particular
+    caller cancellation and reserved exceptions must still propagate. *)
+val classify_network_exn : exn -> http_error option
+
 (** Diagnostic rendering only. Consumers must branch on [provider_failure_kind]
     directly and never parse this string. *)
 val provider_failure_kind_to_string : provider_failure_kind -> string

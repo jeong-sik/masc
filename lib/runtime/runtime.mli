@@ -13,6 +13,8 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
+  ; candidate_preference : Runtime_lane_preference.candidate
+    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
         credential-alias selection that resolved the dispatched API key. A

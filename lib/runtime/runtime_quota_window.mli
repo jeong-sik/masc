@@ -18,10 +18,9 @@
     a provider that stated none would be a synthesized default, so
     {!note_observed_exhausted} records the observation instead and claims no
     end: it is cleared by the next success on the scope, not by a clock.
-    Both metered providers this fleet reaches answer 429 with no Retry-After
-    (2026-09-06: ollama.com and api.z.ai), so without that second form the
-    table stays empty and every lane re-dispatches into a spent account for
-    as long as it is spent.  RFC-0370 §3.3, RFC-0433. *)
+    Coarse HTTP 429 / Provider.RateLimit does not establish credential
+    ownership; it belongs to {!Runtime_lane_preference}'s candidate-only
+    observation instead. RFC-0370 §3.3, RFC-0433. *)
 
 type scope
 (** A non-secret quota ownership key.  The representation is deliberately

@@ -1630,14 +1630,19 @@ let surface_chrome (state : state) ~terminal_rows ~cols ~surface_key ~title
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key ~rows:terminal_rows ~cols buf
 
-let connection_status_badge : Masc_tui_types.connection_status -> string =
-  function
-  | Connected as status ->
-      (Theme.ok ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
-  | (Degraded | Connecting | Reconnecting | Booting) as status ->
-      (Theme.warn ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
-  | Disconnected as status ->
-      (Theme.bad ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+let connection_status_badge (status : Masc_tui_types.connection_status) =
+  (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
+     can fail while the independent Recent event feed remains live. *)
+  let style, label =
+    match status with
+    | Connected -> Theme.ok (), "connected"
+    | Degraded -> Theme.warn (), "partial"
+    | Connecting -> Theme.warn (), "loading..."
+    | Reconnecting -> Theme.warn (), "refreshing..."
+    | Booting -> Theme.warn (), "server booting..."
+    | Disconnected -> Theme.bad (), "refresh failed"
+  in
+  "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
 ;;
 
 (* Every surface header ends with this, so a workspace the server does not

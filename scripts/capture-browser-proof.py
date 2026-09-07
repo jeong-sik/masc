@@ -140,7 +140,7 @@ def main():
         report["screenshots"].append(name + ".png")
         report["display_observations"].append({
             "screenshot": name + ".png", "full_width": True,
-            "global_disconnected_badge_visible": "[disconnected]" in text,
+            "http_refresh_failed_badge_visible": "HTTP [refresh failed]" in text,
         })
 
     touched_session = False

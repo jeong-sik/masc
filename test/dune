@@ -1,6 +1,11 @@
 ; Test Environment Configuration
 
 (test
+ (name test_sse_observer_epoch)
+ (modules test_sse_observer_epoch)
+ (libraries alcotest masc masc.sse_wire masc_test_deps eio))
+
+(test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
  (libraries alcotest masc masc.runtime masc.server masc.tool_types yojson))
@@ -4850,4 +4855,3 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-fusion-history)))
-

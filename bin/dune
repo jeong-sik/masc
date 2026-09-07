@@ -1281,6 +1281,7 @@
   str
   eio_main
   eio
+  eio.unix
   mtime.clock.os
   httpun
   cohttp

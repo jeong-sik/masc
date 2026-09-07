@@ -2994,6 +2994,23 @@ let test_keeper_stream_bridge_preserves_ndjson_provider_error () =
         actual_message
   | _ -> fail "expected NDJSON provider error to remain typed and visible"
 
+let check_attachment_payload_reference ~base_dir ~raw_media data =
+  match Tool_output.decode_from_agent_core data with
+  | Tool_output.Decoded reference ->
+      check int "reference retains payload byte count"
+        (String.length raw_media) reference.bytes;
+      check string "reference preview omits raw media"
+        "attachment payload" reference.preview;
+      check (result (option string) string)
+        "persisted reference retrieves exact attachment payload"
+        (Ok (Some raw_media))
+        (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base_dir)
+           ~sha256:reference.sha256
+         |> Result.map_error Tool_blob_store.fetch_error_to_string)
+  | Tool_output.Not_marker -> fail "persisted attachment has no blob reference"
+  | Tool_output.Invalid_marker { detail } ->
+      failf "persisted attachment has invalid blob reference: %s" detail
+
 let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
   let base_dir = temp_base_path "gate-keeper-media-history" in
   Fun.protect
@@ -3028,16 +3045,12 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
       let persisted = read_file path in
       check bool "raw media omitted from jsonl" false
         (string_contains persisted raw_media);
-      check bool "attachment ref persisted" true
-        (string_contains persisted "masc://attachment/att-img/");
       match K.load ~base_dir ~keeper_name with
       | user :: _ -> (
           match user.K.attachments with
           | Some [ att ] ->
-              check bool "loaded attachment omits raw media" false
-                (String.equal raw_media att.K.data);
-              check bool "loaded attachment has ref" true
-                (string_contains att.K.data "masc://attachment/att-img/")
+              check string "loaded attachment identity" "att-img" att.K.id;
+              check_attachment_payload_reference ~base_dir ~raw_media att.K.data
           | _ -> fail "expected one persisted attachment")
       | [] -> fail "expected persisted chat messages")
 
@@ -3074,16 +3087,12 @@ let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
       let persisted = read_file path in
       check bool "raw media omitted from user-only jsonl" false
         (string_contains persisted raw_media);
-      check bool "attachment ref persisted on user-only row" true
-        (string_contains persisted "masc://attachment/att-img/");
       match K.load ~base_dir ~keeper_name with
       | [ user ] -> (
           match user.K.attachments with
           | Some [ att ] ->
-              check bool "loaded user-only attachment omits raw media" false
-                (String.equal raw_media att.K.data);
-              check bool "loaded user-only attachment has ref" true
-                (string_contains att.K.data "masc://attachment/att-img/")
+              check string "loaded user-only attachment identity" "att-img" att.K.id;
+              check_attachment_payload_reference ~base_dir ~raw_media att.K.data
           | _ -> fail "expected one persisted user-only attachment")
       | _ -> fail "expected one persisted user message")
 

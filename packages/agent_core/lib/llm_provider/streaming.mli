@@ -23,7 +23,8 @@ val emit_synthetic_events : api_response -> (sse_event -> unit) -> unit
     token delta. That means a [ContentBlockDelta] carrying a
     non-empty [TextDelta] / [TextSnapshot] / [ThinkingDelta] / [ReasoningDetailsDelta] /
     [InputJsonDelta] / [InputJsonSnapshot] payload. Prelude events
-    ([MessageStart], [ContentBlockStart], [ThinkingSignatureDelta] carriers,
+    ([MessageStart], [ContentBlockStart], [ThinkingSignatureDelta] and
+    [RedactedThinkingSnapshot] carriers,
     [Ping]), terminator events ([MessageStop], [MessageDelta] with no usage),
     and error events return [false].
 

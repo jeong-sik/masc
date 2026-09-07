@@ -181,6 +181,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_session ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_goto ->
       Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_slack_read ->
+      Some (Tool_misc_slack_lane.handle_read ~tool_name:name ~start_time:start args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -196,7 +198,8 @@ let is_read_only = function
   (* Browser readers change nothing in the browser; the verb set in
      Browser_lane is this classification's source of truth. *)
   | Tool_schemas_misc.Misc_browser_tabs
-  | Tool_schemas_misc.Misc_browser_read -> true
+  | Tool_schemas_misc.Misc_browser_read
+  | Tool_schemas_misc.Misc_slack_read -> true
   (* Starting and stopping the automation browser changes its lifecycle. *)
   | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask

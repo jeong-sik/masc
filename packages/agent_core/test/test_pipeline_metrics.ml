@@ -74,8 +74,11 @@ let make_empty_agent ~net ~stop_reason ~name =
     ()
 ;;
 
+(* An empty assistant turn is its own error variant since #32497
+   (2026-09-02); what this checks is what the agent did with it -- no turn
+   advanced, no assistant message kept -- which the split did not change. *)
 let check_agent_empty_failure agent = function
-  | Error (Error.Provider (Llm_provider.Error.ProviderUnavailable _)) ->
+  | Error (Error.Provider (Llm_provider.Error.EmptyCompletion _)) ->
     let state = Agent.state agent in
     Alcotest.(check int) "turn not advanced" 0 state.turn_count;
     Alcotest.(check int)
@@ -86,8 +89,8 @@ let check_agent_empty_failure agent = function
             (fun (message : Types.message) -> message.role = Types.Assistant)
             state.messages))
   | Error err ->
-    Alcotest.failf "expected ProviderUnavailable, got %s" (Error.to_string err)
-  | Ok _ -> Alcotest.fail "expected ProviderUnavailable, got Ok"
+    Alcotest.failf "expected EmptyCompletion, got %s" (Error.to_string err)
+  | Ok _ -> Alcotest.fail "expected EmptyCompletion, got Ok"
 ;;
 
 let test_sync_dispatches_via_complete_triggers_metrics () =

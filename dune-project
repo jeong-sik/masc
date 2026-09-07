@@ -37,7 +37,7 @@
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
  (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends
-  (ocaml (= 5.5.0))
+  (ocaml (= 5.5.1))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
   ; declaring it again here makes the generated .opam emit
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).

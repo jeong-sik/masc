@@ -12436,13 +12436,14 @@ let main () =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
-  (match Masc_tui_config.board_sort ~base_path with
+  let tui_settings = Masc_tui_config.load ~base_path in
+  (match tui_settings.board_sort with
    | None -> ()
    | Some value ->
        (match board_sort_of_string value with
         | Some sort -> state.board_sort <- sort
         | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
-  (match Masc_tui_config.theme ~base_path with
+  (match tui_settings.theme with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
    | Some _ | None -> ());
@@ -12450,26 +12451,26 @@ let main () =
   (* Same file, same moment. Absent reads as on, which is what masc drew
      before the key existed -- a reader who never set it sees no change. *)
   Masc_tui_theme.set_lift_enabled
-    (Option.value (Masc_tui_config.lift_colours ~base_path) ~default:true);
+    (Option.value (tui_settings.lift_colours) ~default:true);
 
   (* Same file, same moment: the box a table draws is a look, and a look that
      survives a restart is the point of storing it. *)
   set_table_frame
-    (Option.value (Masc_tui_config.table_frame ~base_path) ~default:false);
+    (Option.value (tui_settings.table_frame) ~default:false);
 
   (* Same file, same moment. Absent reads as on -- the hints predate the
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
-    Option.value (Masc_tui_config.hints_visible ~base_path) ~default:true;
+    Option.value (tui_settings.hints_visible) ~default:true;
   state.coalesce_queued_input <-
     Option.value
-      (Masc_tui_config.coalesce_queued_input ~base_path)
+      (tui_settings.coalesce_queued_input)
       ~default:true;
   (* Default false, unlike its neighbours: this one sends without the operator
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <-
     Option.value
-      (Masc_tui_config.voice_send_on_stop ~base_path)
+      (tui_settings.voice_send_on_stop)
       ~default:false;
 
   (* Setup terminal *)

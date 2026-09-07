@@ -82,7 +82,7 @@ let frame_cases =
   ]
 
 (* The IO path: a runtime.toml under [base]/.masc/config is the same file the
-   server reads, so [theme ~base_path] must resolve to it. A missing file reads
+   server reads, so [load ~base_path] must resolve to it. A missing file reads
    as no choice, not a crash. *)
 let with_temp_base f =
   let base = Filename.temp_file "masc_tui_config_base" "" in
@@ -106,16 +106,37 @@ let write path content =
   close_out oc
 
 let io_cases =
-  [ Alcotest.test_case "reads theme from the base's runtime.toml" `Quick
+  [ Alcotest.test_case "all startup choices come from one retained snapshot" `Quick
+      (fun () ->
+        with_temp_base (fun ~base ~config ->
+          let path = Filename.concat config "runtime.toml" in
+          write path
+            "[tui]\ntheme = \"monokai\"\nboard_sort = \"discussed\"\n\
+             lift_colours = false\ntable_frame = true\nhints_visible = false\n\
+             coalesce_queued_input = true\nvoice_send_on_stop = false\n";
+          let chosen = Config.load ~base_path:base in
+          write path "[tui]\ntheme = \"nord\"\n";
+          check_opt "retained theme" (Some "monokai") chosen.theme;
+          check_opt "retained Board order" (Some "discussed") chosen.board_sort;
+          Alcotest.(check (option bool)) "colours" (Some false) chosen.lift_colours;
+          Alcotest.(check (option bool)) "frame" (Some true) chosen.table_frame;
+          Alcotest.(check (option bool)) "hints" (Some false) chosen.hints_visible;
+          Alcotest.(check (option bool)) "coalesce" (Some true) chosen.coalesce_queued_input;
+          Alcotest.(check (option bool)) "voice consent" (Some false) chosen.voice_send_on_stop;
+          let next = Config.load ~base_path:base in
+          check_opt "new read sees new theme" (Some "nord") next.theme;
+          check_opt "new read sees removed order" None next.board_sort;
+          Alcotest.(check (option bool)) "removed voice setting is absent" None next.voice_send_on_stop))
+  ; Alcotest.test_case "reads theme from the base's runtime.toml" `Quick
       (fun () ->
         with_temp_base (fun ~base ~config ->
             write (Filename.concat config "runtime.toml")
               "[tui]\ntheme = \"monokai\"\n";
-            check_opt "monokai" (Some "monokai") (Config.theme ~base_path:base)))
+            check_opt "monokai" (Some "monokai") (Config.load ~base_path:base).theme))
   ; Alcotest.test_case "a base with no runtime.toml reads as no choice" `Quick
       (fun () ->
         with_temp_base (fun ~base ~config:_ ->
-            check_opt "none" None (Config.theme ~base_path:base)))
+            check_opt "none" None (Config.load ~base_path:base).theme))
   ]
 
 (* Whether footers spell their hints, [tui].hints_visible. Absence must read
@@ -281,13 +302,13 @@ let store_cases =
         with_storable_base (fun ~base_path ->
             store_or_fail ~base_path (Some "gruvbox-dark");
             check_opt "gruvbox-dark" (Some "gruvbox-dark")
-              (Config.theme ~base_path)))
+              (Config.load ~base_path).theme))
   ; Alcotest.test_case "withdrawing is there on the next read too" `Quick
       (fun () ->
         with_storable_base (fun ~base_path ->
             store_or_fail ~base_path (Some "gruvbox-dark");
             store_or_fail ~base_path None;
-            check_opt "none" None (Config.theme ~base_path)))
+            check_opt "none" None (Config.load ~base_path).theme))
   ]
 
 let board_sort_cases =
@@ -295,9 +316,9 @@ let board_sort_cases =
         with_storable_base (fun ~base_path ->
           (match Config.set_board_sort ~base_path "discussed" with
            | Ok () -> () | Error message -> Alcotest.fail message);
-          check_opt "stored order" (Some "discussed") (Config.board_sort ~base_path);
+          check_opt "stored order" (Some "discussed") (Config.load ~base_path).board_sort;
           store_or_fail ~base_path (Some "gruvbox-dark");
-          check_opt "theme update keeps order" (Some "discussed") (Config.board_sort ~base_path))) ]
+          check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort)) ]
 
 let () =
   Alcotest.run "tui_config"

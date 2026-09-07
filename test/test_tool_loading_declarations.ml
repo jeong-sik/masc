@@ -163,6 +163,13 @@ defer_loading = true
    would leave its own name in the listing that only it can read: the tools
    below it become unreachable, and nothing reports it, because a name in a
    listing is a live tool as far as every other check can tell. *)
+(* [keeper_skill] is here for the same reason, arrived at from the other side.
+   It reads a Skill body, so it looks like an ordinary tool to defer — and it
+   was, from #32726 until RFC-0411. But the list of Skills it can read lives in
+   its description (tool_schemas_skill.mli: "the list of instruction skills it
+   can read is whatever the catalog found"), and a deferred tool is named but
+   not described. Deferring it hides the catalogue, which is the cost the
+   comment above says bytes do not capture. *)
 let test_the_tools_that_load_deferred_tools_are_never_deferred () =
   List.iter
     (fun name ->
@@ -171,7 +178,11 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
          (name ^ " rides in every request")
          Tool_definition_toml.Always_loaded
          (Tool_loading_declarations.loading_of_tool name))
-    [ "keeper_tool_search"; "keeper_tools_list"; "keeper_capability_search" ]
+    [ "keeper_tool_search"
+    ; "keeper_tools_list"
+    ; "keeper_capability_search"
+    ; "keeper_skill"
+    ]
 ;;
 
 let () =

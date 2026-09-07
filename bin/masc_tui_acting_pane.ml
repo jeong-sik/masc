@@ -194,6 +194,22 @@ let chunk_calls_text (chunk : Acting.chunk) =
 
 type record_state = Record_open | Record_unfinished | Record_settled
 
+(* Window logical rows before formatting text or measuring display cells. These
+   descriptors live for one frame; presentation still uses that frame's input. *)
+type direction = Above | Below
+
+type logical_row =
+  | Fleet_row of keeper * Acting.chunk option
+  | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
+  | Approval_row of string
+  | Tool_row of Acting.chunk * Acting.chunk_tool * record_state
+  | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
+  | Rule
+  | More of int
+  | Indicator of direction * int
+  | File_row of int * file_row
+  | Formatted_status of line * row_target
+
 let record_state ~health (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then Record_settled
   else
@@ -323,8 +339,7 @@ let fleet_order input newest =
   in
   List.stable_sort (fun a b -> compare (rank a) (rank b)) input.keepers
 
-let fleet_row ~cols input newest keeper =
-  let chunk = Hashtbl.find_opt newest keeper.name in
+let fleet_row ~cols input keeper chunk =
   let approval = approval_for input.approvals keeper.name in
   let selected =
     match input.selected with
@@ -440,61 +455,62 @@ let turn_summary_line ~cols ~now ~health (chunk : Acting.chunk) =
          ; { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim }
          ] ))
 
-(* Every focus row, oldest call first, then the earlier turns. The caller
-   cuts to its budget. *)
-let focus_lines ~cols input chunks name =
+let focus_header_line ~cols ~now ~health name current =
+  match current with
+  | Some (current : Acting.chunk) ->
+      let state_word, state_tone = record_label (record_state ~health current) in
+      let named =
+        match turn_name current with
+        | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
+        | None -> []
+      in
+      fit_line ~cols
+        (with_border
+           ( { text = name; tone = Accent }
+           :: named
+           @ [ { text = middle_dot ^ state_word; tone = state_tone }
+             ; { text = middle_dot ^ event_age_text ~now current.Acting.ck_at; tone = Dim }
+             ] ))
+  | None ->
+      fit_line ~cols
+        (with_border
+           [ { text = name; tone = Accent }
+           ; { text = middle_dot ^ "no events on this feed yet"; tone = Dim }
+           ])
+
+let approval_line ~cols tool =
+  fit_line ~cols
+    (with_border
+       [ { text = attention_glyph ^ " "; tone = Warn }
+       ; { text = "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
+       ])
+
+(* Every logical focus row, oldest call first, then the earlier turns. No
+   text is formatted until the caller selects the visible window. *)
+let focus_rows input chunks name =
   let own =
     List.filter (fun (c : Acting.chunk) -> String.equal c.Acting.ck_keeper name) chunks
   in
-  let approval = approval_for input.approvals name in
   let health = health_of input name in
-  let header =
-    match own with
-    | (current : Acting.chunk) :: _ ->
-        let state_word, state_tone = record_label (record_state ~health current) in
-        let named =
-          match turn_name current with
-          | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
-          | None -> []
-        in
-        fit_line ~cols
-          (with_border
-             ( { text = name; tone = Accent }
-             :: named
-             @ [ { text = middle_dot ^ state_word; tone = state_tone }
-               ; { text = middle_dot ^ event_age_text ~now:input.now current.Acting.ck_at; tone = Dim }
-               ] ))
-    | [] ->
-        fit_line ~cols
-          (with_border
-             [ { text = name; tone = Accent }
-             ; { text = middle_dot ^ "no events on this feed yet"; tone = Dim }
-             ])
-  in
-  let approval_line =
-    match approval with
-    | Some tool ->
-        [ fit_line ~cols
-            (with_border
-               [ { text = attention_glyph ^ " "; tone = Warn }
-               ; { text = "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
-               ])
-        ]
+  let current = match own with current :: _ -> Some current | [] -> None in
+  let approval =
+    match approval_for input.approvals name with
+    | Some tool -> [ Approval_row tool ]
     | None -> []
   in
   let body =
     match own with
     | [] -> []
     | current :: earlier ->
-        let tools = Acting.chunk_tools current in
+        let state = record_state ~health current in
         let calls =
-          List.map (tool_line ~cols ~state:(record_state ~health current) current) tools
+          List.map (fun tool -> Tool_row (current, tool, state)) (Acting.chunk_tools current)
         in
         (* A call-less record draws no body row: the header already states
            the observation state and its receipt age. *)
-        calls @ List.map (turn_summary_line ~cols ~now:input.now ~health) earlier
+        calls @ List.map (fun chunk -> Earlier_turn (chunk, health)) earlier
   in
-  List.map (fun line -> (line, Target_none)) ((header :: approval_line) @ body)
+  Focus_header (name, current, health) :: approval @ body
 
 (* The least each block needs before the two share the rows: the fleet one
    keeper and its fold line, the focus its rule and one row. Below that the
@@ -505,7 +521,7 @@ let focus_min_rows = 2
 
 (* The overview: the fleet folded to at most half the rows, the focus block
    after a rule. What the fleet tab opens on. *)
-let overview_rows ~cols ~below fleet_rows focus focus_rows =
+let overview_rows ~below fleet_rows focus focus_rows =
   let fleet_count = List.length fleet_rows in
   let fleet_budget =
     match focus with
@@ -516,7 +532,7 @@ let overview_rows ~cols ~below fleet_rows focus focus_rows =
   let fleet =
     if fleet_count > fleet_budget && fleet_budget >= 2 then
       List.filteri (fun index _ -> index < fleet_budget - 1) fleet_rows
-      @ [ more_line ~cols (fleet_count - (fleet_budget - 1)) ]
+      @ [ More (fleet_count - (fleet_budget - 1)) ]
     else
       List.filteri (fun index _ -> index < fleet_budget) fleet_rows
   in
@@ -524,7 +540,7 @@ let overview_rows ~cols ~below fleet_rows focus focus_rows =
   let focus_block =
     match focus with
     | Some _ when after_fleet >= focus_min_rows ->
-        (rule_line ~cols, Target_none)
+        Rule
         :: List.filteri (fun index _ -> index < after_fleet - 1) focus_rows
     | Some _ | None -> []
   in
@@ -534,7 +550,7 @@ let overview_rows ~cols ~below fleet_rows focus focus_rows =
    top indicator always draws once scrolled: it is how the reader knows the
    header is not the first row. The bottom one draws only when content is
    still hidden, and the row it takes counts as hidden too. *)
-let scrolled_rows ~cols ~below ~scroll body =
+let scrolled_rows ~below ~scroll body =
   let total = List.length body in
   let room = below - 1 in
   let slice = List.filteri (fun index _ -> index >= scroll && index < scroll + room) body in
@@ -542,25 +558,25 @@ let scrolled_rows ~cols ~below ~scroll body =
   let slice =
     if hidden_below > 0 && room >= 2 then
       List.filteri (fun index _ -> index < room - 1) slice
-      @ [ indicator_line ~cols down_arrow (hidden_below + 1) ]
+      @ [ Indicator (Below, hidden_below + 1) ]
     else slice
   in
-  indicator_line ~cols up_arrow scroll :: slice
+  Indicator (Above, scroll) :: slice
 
 (* The top of a list that overflows, the last row given to the bottom
    indicator. What the changes tab opens on: its rows are all alike, so
    there is nothing to fold. *)
-let folded_rows ~cols ~below body =
+let folded_rows ~below body =
   let total = List.length body in
   let room = max 0 (below - 1) in
   List.filteri (fun index _ -> index < room) body
-  @ [ indicator_line ~cols down_arrow (total - room) ]
+  @ [ Indicator (Below, total - room) ]
 
 (* [body] windowed to [below] rows: whole when it fits, [overview] at the
    top, the scrolled slice anywhere else. At the largest scroll the last row
    is on screen under the top indicator alone; one row of the window belongs
    to that indicator. *)
-let window ~cols ~below ~scroll ~overview body =
+let window ~below ~scroll ~overview body =
   let total = List.length body in
   if below <= 0 then ([], 0)
   else if below = 1 then
@@ -575,31 +591,33 @@ let window ~cols ~below ~scroll ~overview body =
     let drawn =
       if total <= below then body
       else if scroll = 0 then overview ()
-      else scrolled_rows ~cols ~below ~scroll body
+      else scrolled_rows ~below ~scroll body
     in
     (drawn, scroll_max)
 
-let fleet_lines ~cols ~below ~scroll input =
+let fleet_lines ~below ~scroll input =
   let chunks = input.chunks in
   let newest = newest_chunk_by_keeper chunks in
   let focus = focus_keeper input newest in
   let ordered = fleet_order input newest in
   let focus_rows =
     match focus with
-    | Some name -> focus_lines ~cols input chunks name
+    | Some name -> focus_rows input chunks name
     | None -> []
   in
   (* The full list: every fleet row, then the rule and the focus block when
      there is one. Scrolling walks this; the overview folds it. *)
-  let fleet_rows = List.map (fleet_row ~cols input newest) ordered in
+  let fleet_rows =
+    List.map (fun keeper -> Fleet_row (keeper, Hashtbl.find_opt newest keeper.name)) ordered
+  in
   let body =
     fleet_rows
     @ (match focus_rows with
        | [] -> []
-       | _ :: _ -> (rule_line ~cols, Target_none) :: focus_rows)
+       | _ :: _ -> Rule :: focus_rows)
   in
-  window ~cols ~below ~scroll body ~overview:(fun () ->
-    overview_rows ~cols ~below fleet_rows focus focus_rows)
+  window ~below ~scroll body ~overview:(fun () ->
+    overview_rows ~below fleet_rows focus focus_rows)
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 
@@ -688,11 +706,31 @@ let changes_status_lines ~cols input =
 let changes_lines ~cols ~below ~scroll input =
   let files =
     match input.changes with
-    | Changes_ready r -> List.mapi (file_line ~cols ~now:input.now) r.files
+    | Changes_ready r -> List.mapi (fun index file -> File_row (index, file)) r.files
     | Changes_absent | Changes_loading | Changes_failed _ -> []
   in
-  let body = changes_status_lines ~cols input @ files in
-  window ~cols ~below ~scroll body ~overview:(fun () -> folded_rows ~cols ~below body)
+  let status =
+    List.map (fun (line, target) -> Formatted_status (line, target))
+      (changes_status_lines ~cols input)
+  in
+  let body = status @ files in
+  window ~below ~scroll body ~overview:(fun () -> folded_rows ~below body)
+
+let materialize_row ~cols input = function
+  | Fleet_row (keeper, chunk) -> fleet_row ~cols input keeper chunk
+  | Focus_header (name, current, health) ->
+      focus_header_line ~cols ~now:input.now ~health name current, Target_none
+  | Approval_row tool -> approval_line ~cols tool, Target_none
+  | Tool_row (chunk, tool, state) -> tool_line ~cols ~state chunk tool, Target_none
+  | Earlier_turn (chunk, health) ->
+      turn_summary_line ~cols ~now:input.now ~health chunk, Target_none
+  | Rule -> rule_line ~cols, Target_none
+  | More n -> more_line ~cols n
+  | Indicator (direction, n) ->
+      let arrow = match direction with Above -> up_arrow | Below -> down_arrow in
+      indicator_line ~cols arrow n
+  | File_row (index, file) -> file_line ~cols ~now:input.now index file
+  | Formatted_status (line, target) -> line, target
 
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
@@ -710,12 +748,14 @@ let lines ~rows ~cols ~scroll input =
       | Tab_fleet | Tab_changes -> [ header ]
     in
     let below = rows - List.length headers in
-    let drawn, scroll_max =
-      match input.tab with
-      | Tab_fleet -> fleet_lines ~cols ~below ~scroll input
-      | Tab_changes -> changes_lines ~cols ~below ~scroll input
+    let visible, scroll_max =
+      if below <= 0 then [], 0
+      else
+        match input.tab with
+        | Tab_fleet -> fleet_lines ~below ~scroll input
+        | Tab_changes -> changes_lines ~cols ~below ~scroll input
     in
-    let drawn = headers @ drawn in
+    let drawn = headers @ List.map (materialize_row ~cols input) visible in
     let padding =
       List.init (max 0 (rows - List.length drawn)) (fun _ -> (blank_line ~cols, Target_none))
     in

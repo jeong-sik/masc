@@ -522,7 +522,7 @@ let test_lanes_is_a_runtime_child () =
     (surface_ring_index Lanes);
   Alcotest.(check bool) "and the help sheet files it under Runtime" true
     (List.exists
-       (fun (label, _) -> String.equal label "Runtime / Lanes")
+       (fun (label, _) -> String.equal label "Config / Runtime / Lanes")
        (Masc_tui_keys.help_sections ()));
   let lanes_keys =
     List.map
@@ -595,6 +595,12 @@ let test_tools_is_a_config_child () =
    one fleet timeline, so Logs hangs off Activity (the Acting surface)
    under [l] instead of holding a Tab stop of its own. *)
 let test_logs_is_an_activity_child () =
+  Alcotest.(check bool) "Runtime is inside Config" false
+    (List.exists (fun (surface, _) -> surface = Runtime) surface_ring);
+  List.iter (fun surface ->
+      Alcotest.(check int) "runtime children highlight Config"
+        (surface_ring_index Config) (surface_ring_index surface))
+    [Runtime; Lanes; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"

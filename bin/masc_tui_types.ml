@@ -2048,7 +2048,6 @@ let surface_ring : (surface * string) list =
     (Planning, "Planning");
     (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Runtime, "Runtime");
     (Config, "Config");
   ]
 
@@ -2071,8 +2070,7 @@ let surface_ring_index (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -5520,8 +5518,7 @@ let visible_surface_ring_index (state : state) (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting

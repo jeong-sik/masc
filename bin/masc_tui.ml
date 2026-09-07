@@ -15741,10 +15741,17 @@ and is loaded on demand through keeper_skill.
           in this match owns every key before these can see one. *)
        | Some ("s" | "S") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Resources
+       | Some "9" when state.view = Config ->
+           cancel_theme_preview ();
+           goto_surface state ~mailbox:async_messages Runtime
        | Some ("t" | "T") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some "1" when state.view = Acting || state.view = System_logs ->
+           goto_surface state ~mailbox:async_messages Acting
+       | Some "2" when state.view = Acting || state.view = System_logs ->
+           goto_surface state ~mailbox:async_messages System_logs
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
         (* Metrics shortcuts: 'm' from Overview navigates to visual telemetry,
@@ -16943,7 +16950,7 @@ and is loaded on demand through keeper_skill.
                   state.runtime_detail_target <- None;
                   state.runtime_detail_scroll <- 0
                 end
-                else state.view <- Overview
+                else goto_surface state ~mailbox:async_messages Config
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then begin
                   state.system_logs_detail_seq <- None;

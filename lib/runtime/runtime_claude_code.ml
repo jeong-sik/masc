@@ -1369,7 +1369,7 @@ let terminate_spawned_process ~clock proc stdin_w =
 ;;
 
 let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
-    ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started
+    ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
     ~on_stream_event ~turn_admitted =
   let tool_call_count = ref 0 in
   let assistant_usage = new_assistant_usage () in
@@ -1412,6 +1412,8 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
            ; detail = Printexc.to_string exn
            })
   in
+  let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
+    on_prompt_sent (); Ok ()) in
   await_terminal
     io
     ~mcp_session
@@ -1438,7 +1440,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
-    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_stream_event =
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event =
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
@@ -1524,6 +1526,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_turn_starting ~session_id))
           ~on_turn_started:(fun ~session_id ~turn_id ->
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
+          ~on_prompt_sent
           ~on_stream_event
           ~turn_admitted))
   with
@@ -1650,7 +1653,7 @@ let probe_subscription ~mgr ~clock ~cwd config =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
-    ?admitted_subscription ?on_spawned ~mgr ~clock ~cwd
+    ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
@@ -1694,6 +1697,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_session_ready
         ~on_turn_starting
         ~on_turn_started
+        ~on_prompt_sent
         ~on_stream_event
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

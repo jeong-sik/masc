@@ -6,7 +6,7 @@ let require label = function
   | Error _ -> fail (label ^ " unexpectedly failed")
 
 let id value =
-  S.Id.of_json (`Assoc [ "kind", `String "direct_operation"; "id", `String value ])
+  Keeper_execution_scope_id.of_json (`Assoc [ "kind", `String "direct_operation"; "id", `String value ])
   |> require "scope ID"
 
 let hash text = Digestif.SHA256.(digest_string text |> to_hex)
@@ -76,7 +76,7 @@ let test_same_fresh_and_two_plus_two () =
 let test_unknown_resume_and_record () =
   let missing = id "missing-operation" in
   (match S.admit S.empty (S.Resume missing) with
-   | Error (S.Unknown_scope found) -> check bool "exact missing identity" true (S.Id.equal found missing)
+   | Error (S.Unknown_scope found) -> check bool "exact missing identity" true (Keeper_execution_scope_id.equal found missing)
    | _ -> fail "unknown Resume became Fresh");
   let observation = S.observation_of_call call |> require "observation" in
   match S.record S.empty ~scope:missing observation with
@@ -119,7 +119,7 @@ let test_invalid_snapshot_does_not_clear_target () =
   let invalids =
     [ `Assoc (("schema", `String "duplicate") :: fields)
     ; replace "scopes" (`List (rows @ rows))
-    ; replace "active" (S.Id.to_json (id "unknown-active"))
+    ; replace "active" (Keeper_execution_scope_id.to_json (id "unknown-active"))
     ; `Assoc (("unexpected", `Null) :: fields) ] in
   List.iter (fun json -> match S.of_json json with
     | Error (S.Invalid_snapshot _) -> ()

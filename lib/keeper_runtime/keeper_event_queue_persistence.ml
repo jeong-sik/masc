@@ -765,27 +765,6 @@ let observe_snapshot_with_errors ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
-module For_testing = struct
-  let load_state_with_read_interleave ~after_read ~base_path ~keeper_name =
-    match resolve_owner ~base_path ~keeper_name with
-    | Error _ as error -> error
-    | Ok owner -> Owner_lock.with_durable_lock owner (fun () ->
-        load_state_unlocked ~after_read owner)
-  ;;
-
-  let observe_snapshot_with_errors_with_interleave =
-    observe_snapshot_with_errors_with
-  ;;
-
-  let snapshot_cache_reads () = Atomic.get snapshot_cache_read_counter
-  let snapshot_cache_hits () = Atomic.get snapshot_cache_hit_counter
-
-  let reset_snapshot_cache_for_testing () =
-    Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
-    Atomic.set snapshot_cache_read_counter 0;
-    Atomic.set snapshot_cache_hit_counter 0
-  ;;
-end
 
 type durable_state_discovery =
   { keeper_names : string list
@@ -850,6 +829,7 @@ let discover_keeper_names_with_durable_state ~base_path =
 ;;
 
 let commit_transform_unlocked
+      ?(confirm_snapshot = save_json_atomic_strict)
       ?(strict_snapshot_durability = false)
       owner
       ~after_commit
@@ -860,7 +840,16 @@ let commit_transform_unlocked
   | Ok current ->
     (match transform current with
      | Error _ as error -> error
-     | Ok (next, value) when next == current -> Ok value
+     | Ok (next, value) when next == current ->
+       if not strict_snapshot_durability then Ok value
+       else
+         (* Visible bytes can follow a failed parent fsync. A same-binding
+            retry must cross the durability barrier again before admission.
+            Re-publish the authoritative state without a logical mutation. *)
+         let path = snapshot_path_of_owner owner in
+         let confirmed = confirm_snapshot path (State.to_yojson current) in
+         forget_snapshot path;
+         Result.map (fun () -> value) confirmed
      | Ok (next, value) ->
        (match bump_revision next with
         | Error _ as error -> error
@@ -890,6 +879,7 @@ let commit_transform_unlocked
 ;;
 
 let commit_transform
+      ?confirm_snapshot
       ?(strict_snapshot_durability = false)
       ~base_path
       ~keeper_name
@@ -902,6 +892,7 @@ let commit_transform
     (try
        Owner_lock.with_durable_lock owner (fun () ->
          commit_transform_unlocked
+           ?confirm_snapshot
            ~strict_snapshot_durability
            owner
            ~after_commit
@@ -1072,6 +1063,15 @@ let note_checkpoint_retention_result
     match State.note_checkpoint_retention ~selection state with
     | Error _ as error -> error
     | Ok (state, payload) -> Ok (state, payload))
+;;
+
+let bind_pending_repetition_scope_result
+      ?(after_commit = fun _ -> ())
+      ~base_path ~keeper_name ~selections ~scope () =
+  commit_transform ~strict_snapshot_durability:true
+    ~base_path ~keeper_name ~after_commit (fun state ->
+      State.bind_pending_repetition_scope ~selections ~scope state
+      |> Result.map_error State.scope_binding_error_to_string)
 ;;
 
 let commit_transition_unlocked_with
@@ -1805,3 +1805,33 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; "keepers", `List (List.map (keeper_summary_json ~now) summaries)
     ]
 ;;
+
+module For_testing = struct
+  let load_state_with_read_interleave ~after_read ~base_path ~keeper_name =
+    match resolve_owner ~base_path ~keeper_name with
+    | Error _ as error -> error
+    | Ok owner -> Owner_lock.with_durable_lock owner (fun () ->
+        load_state_unlocked ~after_read owner)
+  ;;
+
+  let observe_snapshot_with_errors_with_interleave =
+    observe_snapshot_with_errors_with
+  ;;
+
+  let snapshot_cache_reads () = Atomic.get snapshot_cache_read_counter
+  let snapshot_cache_hits () = Atomic.get snapshot_cache_hit_counter
+
+  let reset_snapshot_cache_for_testing () =
+    Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
+    Atomic.set snapshot_cache_read_counter 0;
+    Atomic.set snapshot_cache_hit_counter 0
+  ;;
+  let bind_pending_repetition_scope_with_confirmation
+        ~confirm_snapshot ~base_path ~keeper_name ~selections ~scope () =
+    commit_transform ~confirm_snapshot ~strict_snapshot_durability:true
+      (* See the production wrapper: this fixture observes durability, not mutation delivery. *)
+      ~base_path ~keeper_name ~after_commit:ignore (fun state ->
+        State.bind_pending_repetition_scope ~selections ~scope state
+        |> Result.map_error State.scope_binding_error_to_string)
+  ;;
+end

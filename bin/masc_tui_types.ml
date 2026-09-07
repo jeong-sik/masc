@@ -3918,6 +3918,10 @@ let browser_lane_on_screen (state : state) =
   | Connectors, Browser_lane_shown _ -> state.browser_lane
   | _, Browser_lane_hidden | _, Browser_lane_shown _ -> None
 
+let leave_browser_lane_for_surface state destination =
+  if destination <> state.view then
+    state.browser_lane_visibility <- Browser_lane_hidden
+
 let show_browser_lane state app =
   if Option.is_none (browser_lane_on_screen state) then
     state.browser_lane_visibility <- Browser_lane_shown {

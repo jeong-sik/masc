@@ -58,4 +58,12 @@ let () =
   show_browser_lane state Lane.Slack;
   hide_browser_lane state;
   assert (state.view = Connectors && browser_lane_on_screen state = None);
-  print_endline "PASS reader hide/reopen, hidden reply, app switch and draft ownership"
+  show_browser_lane state Lane.Slack;
+  leave_browser_lane_for_surface state Overview;
+  state.view <- Overview;
+  state.composer_focused <- true;
+  leave_browser_lane_for_surface state Connectors;
+  state.view <- Connectors;
+  assert (browser_lane_on_screen state = None);
+  assert state.composer_focused;
+  print_endline "PASS reader hide/reopen, hidden reply, navigation, app switch and draft ownership"

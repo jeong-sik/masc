@@ -5082,6 +5082,7 @@ let search_jump ?(backwards = false) state ~query ~after =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
+  leave_browser_lane_for_surface state destination;
   if state.repository_changes_open && destination <> state.view then
     close_repository_changes state;
   if state.view = Lanes || destination = Lanes then

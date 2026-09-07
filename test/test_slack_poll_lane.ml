@@ -30,7 +30,7 @@ let test_build_request () =
   let url, headers, body =
     Rest.build_conversations_history_request ~token:"xoxb-test"
       ~channel_id:"C123" ~oldest:"1788708937.515994" ~limit:200
-      ~cursor:"abc=" ()
+      ~latest:"1788708999.000000" ~cursor:"abc=" ()
   in
   check string "url" "https://slack.com/api/conversations.history" url;
   check bool "auth header"
@@ -43,6 +43,8 @@ let test_build_request () =
     (contains_sub ~needle:"channel=C123" ~haystack:body) true;
   check bool "oldest param"
     (contains_sub ~needle:"oldest=1788708937.515994" ~haystack:body) true;
+  check bool "latest param"
+    (contains_sub ~needle:"latest=1788708999.000000" ~haystack:body) true;
   check bool "limit param" (contains_sub ~needle:"limit=200" ~haystack:body) true;
   check bool "cursor param" (contains_sub ~needle:"cursor=abc=" ~haystack:body) true
 ;;
@@ -117,6 +119,15 @@ let test_parse_message_without_ts () =
   | _ -> failwith "expected other (missing ts)"
 ;;
 
+let test_parse_incomplete_page () =
+  List.iter (fun body ->
+    check bool "incomplete response cannot certify a completed window" true
+      (Result.is_error (Rest.parse_conversations_history_response ~status:200 ~body)))
+    [{|{"ok":true,"has_more":false}|};
+     {|{"ok":true,"messages":[]}|};
+     {|{"ok":true,"messages":[],"has_more":"false"}|}]
+;;
+
 (* ---------------------------------------------------------------- *)
 (* collection filter                                                *)
 (* ---------------------------------------------------------------- *)
@@ -144,28 +155,101 @@ let test_pollable_filter () =
 (* ---------------------------------------------------------------- *)
 (* ring buffer: order, dedupe, capacity                             *)
 (* ---------------------------------------------------------------- *)
-(* cursor advance: the OLDEST fetched ts, never the newest           *)
-(* ---------------------------------------------------------------- *)
+module Checkpoint = Poll.For_testing
+let unwrap = function Ok value -> value | Error _ -> fail "expected successful checkpoint operation"
+let ts n = Printf.sprintf "%d.000000" n
+let page messages has_more : Rest.conversations_history_ok =
+  { messages; has_more; next_cursor = None }
+let checkpoint_kind state = Yojson.Safe.Util.(Checkpoint.encode state |> member "kind" |> to_string)
+let disk_save disk state =
+  (* Model a process restart: every save must survive the real JSON codec. *)
+  disk := Some (unwrap (Checkpoint.decode (Checkpoint.encode state))); Ok ()
+let history_source values requests ~oldest ~latest =
+  requests := (oldest, latest) :: !requests;
+  let low = float_of_string oldest and high = float_of_string latest in
+  let matching = List.filter (fun n -> float n > low && float n < high) values in
+  match matching with
+  | [] -> Ok (page [] false)
+  | n :: rest -> Ok (page [history_message ~ts:(ts n) ~text:(string_of_int n) ()] (rest <> []))
 
-let test_cursor_advance () =
-  (* newest-first, as conversations.history returns them. *)
-  let page =
-    [ history_message ~ts:"1788708950.000000" ~text:"newest" ()
-    ; history_message ~ts:"1788708947.825569" ~text:"middle" ()
-    ; history_message ~ts:"1788708940.000100" ~text:"oldest" ()
-    ]
-  in
-  (match Poll.For_testing.cursor_advance_of page with
-   | Some advance ->
-     (* The newest would be ...950; advancing there would permanently skip
-        anything the page cap never fetched below. *)
-     check string "advance is the oldest fetched ts" "1788708940.000100" advance
-   | None -> failwith "expected an advance");
-  check bool "empty page advances nothing"
-    (Poll.For_testing.cursor_advance_of [] = None) true
-;;
+let test_pagination_survives_cycle_and_restart () =
+  let disk = ref (Some (Checkpoint.idle (ts 1))) and requests = ref [] and published = ref [] in
+  let source = history_source [20;9;8;7;6;5;4;3;2] requests in
+  let publish messages = published := !published @ List.map (fun (m : Rest.history_message) -> m.ts) messages in
+  let cycle now = Checkpoint.collect ~now ~cursor:!disk ~fetch:source
+      ~save:(disk_save disk) ~publish |> unwrap in
+  cycle 10.;
+  check int "cycle yields after four pages" 4 (List.length !requests);
+  check string "truncation does not advance high-water" (ts 1)
+    (Checkpoint.high_water (Option.get !disk));
+  check (list string) "partial window not published" [] !published;
+  cycle 30.;
+  check (list string) "all original pages published in chronological order"
+    (List.init 8 (fun i -> ts (i + 2))) !published;
+  check string "completed high-water is newest fetched, not wall clock" (ts 9)
+    (Checkpoint.high_water (Option.get !disk));
+  check bool "resumed latest boundary stays below original window"
+    true (List.exists (fun (oldest, latest) -> oldest = ts 1 && latest = ts 6) !requests);
+  cycle 30.;
+  check string "arrivals during backlog fetched in the next window" (ts 20)
+    (Checkpoint.high_water (Option.get !disk));
+  check int "new arrival published once" 9 (List.length !published)
 
-(* ---------------------------------------------------------------- *)
+let test_fetch_failure_resumes_saved_boundary () =
+  let disk = ref (Some (Checkpoint.idle (ts 1))) and requests = ref [] in
+  let count = ref 0 in
+  let source ~oldest ~latest =
+    incr count;
+    if !count = 3 then Error "Slack temporarily unavailable"
+    else history_source [6;5;4;3;2] requests ~oldest ~latest in
+  let cycle () = Checkpoint.collect ~now:10. ~cursor:!disk ~fetch:source
+      ~save:(disk_save disk) ~publish:(fun _ -> ()) in
+  (match cycle () with Error (Checkpoint.Fetch_failed _) -> () | _ -> fail "expected fetch failure");
+  check string "fetch failure holds committed high-water" (ts 1)
+    (Checkpoint.high_water (Option.get !disk));
+  unwrap (cycle ());
+  check bool "resume starts at last persisted page boundary" true
+    (List.exists (fun (_, latest) -> latest = ts 5) !requests);
+  check string "remaining pages complete" (ts 6) (Checkpoint.high_water (Option.get !disk))
+
+let test_checkpoint_failure_and_publish_replay () =
+  let disk = ref (Some (Checkpoint.idle (ts 1))) and requests = ref [] in
+  let fail_ready = ref true and fail_idle = ref false and publications = ref 0 in
+  let save state =
+    match checkpoint_kind state with
+    | "ready" when !fail_ready -> Error "disk full before completed-window checkpoint"
+    | "idle" when !fail_idle -> Error "disk full after publication"
+    | _ -> disk_save disk state in
+  let publish _ = incr publications in
+  let cycle () = Checkpoint.collect ~now:10. ~cursor:!disk
+      ~fetch:(history_source [2] requests) ~save ~publish in
+  (match cycle () with Error (Checkpoint.Checkpoint_failed _) -> () | _ -> fail "expected write failure");
+  check int "uncheckpointed page not published" 0 !publications;
+  check string "failed write does not advance" (ts 1) (Checkpoint.high_water (Option.get !disk));
+  fail_ready := false; fail_idle := true;
+  (match cycle () with Error (Checkpoint.Checkpoint_failed _) -> () | _ -> fail "expected high-water write failure");
+  check int "complete page published" 1 !publications;
+  check string "completed window remains durably replayable" "ready" (checkpoint_kind (Option.get !disk));
+  let fetched = List.length !requests in
+  fail_idle := false;
+  unwrap (cycle ());
+  check int "publication retried after restart" 2 !publications;
+  check int "ready replay does not fetch another page" fetched (List.length !requests);
+  check string "advance only after completed publication" (ts 2) (Checkpoint.high_water (Option.get !disk))
+
+let test_incomplete_page_and_corrupt_checkpoint () =
+  let disk = ref (Some (Checkpoint.idle (ts 1))) in
+  let result = Checkpoint.collect ~now:10. ~cursor:!disk
+      ~fetch:(fun ~oldest:_ ~latest:_ -> Ok (page [] true))
+      ~save:(disk_save disk) ~publish:(fun _ -> fail "incomplete window cannot publish") in
+  (match result with Error (Checkpoint.Page_invalid _) -> () | _ -> fail "expected missing boundary failure");
+  check string "missing continuation never skips backlog" (ts 1)
+    (Checkpoint.high_water (Option.get !disk));
+  let path = Filename.temp_file "slack-checkpoint" ".json" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun oc -> output_string oc "{broken checkpoint");
+    check bool "corruption refuses collection instead of resetting to now" true
+      (Result.is_error (Checkpoint.read_checkpoints ~path)))
 
 let lane_msg ~ts ~text : Lane.lane_message =
   { Lane.channel_id = "C1"; ts; user_id = "U1"; text; received_unix = 0.0 }
@@ -295,11 +379,15 @@ let () =
         ; test_case "slack_api error" `Quick test_parse_slack_api_error
         ; test_case "http status" `Quick test_parse_http_status
         ; test_case "message without ts" `Quick test_parse_message_without_ts
+        ; test_case "incomplete page metadata" `Quick test_parse_incomplete_page
         ] )
     ; ( "filter"
       , [ test_case "pollable" `Quick test_pollable_filter ] )
-    ; ( "cursor"
-      , [ test_case "advance is oldest fetched" `Quick test_cursor_advance ] )
+    ; ( "pagination"
+      , [ test_case "cycle cap and restart preserve unfinished window" `Quick test_pagination_survives_cycle_and_restart
+        ; test_case "fetch failure resumes saved boundary" `Quick test_fetch_failure_resumes_saved_boundary
+        ; test_case "write failure and publication replay" `Quick test_checkpoint_failure_and_publish_replay
+        ; test_case "incomplete page and corrupt checkpoint" `Quick test_incomplete_page_and_corrupt_checkpoint ] )
     ; ( "lane"
       , [ test_case "order and dedupe" `Quick test_lane_order_and_dedupe
         ; test_case "capacity trim" `Quick test_lane_capacity_trim

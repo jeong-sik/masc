@@ -3,4 +3,4 @@
 (test
  (name test_slack_poll_lane)
  (modules test_slack_poll_lane)
- (libraries alcotest masc.gate masc.slack_lane masc.server))
+ (libraries alcotest yojson masc.gate masc.slack_lane masc.server))

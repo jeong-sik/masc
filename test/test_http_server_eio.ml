@@ -752,8 +752,8 @@ let test_json_response_matching_tag_sends_no_body () =
     "HTTP/1.1 304 Not Modified"
     (response_status_line response);
   Alcotest.(check (option string))
-    "with nothing to read"
-    (Some "0")
+    "304 omits the selected representation length"
+    None
     (response_header response "content-length");
   Alcotest.(check bool)
     "and the body itself never reaches the socket"

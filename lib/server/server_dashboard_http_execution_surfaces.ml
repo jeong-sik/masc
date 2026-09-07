@@ -173,8 +173,32 @@ let execution_cache : cached_surface =
 ;;
 
 let execution_default_light_cache_key = "execution:default:light"
-let execution_default_light_http_body : string option Atomic.t = Atomic.make None
-let execution_default_light_http_payload : (string * string) option Atomic.t = Atomic.make None
+type execution_http_source =
+  { snapshot : Server_dashboard_http_cache.surface_snapshot
+  ; base_path : string
+  ; workspace_path : string
+  }
+
+type execution_http_preparation =
+  { source : execution_http_source
+  ; settled : unit Eio.Promise.t
+  ; settle : unit Eio.Promise.u
+  }
+
+type execution_http_payload =
+  { source : execution_http_source
+  ; response_json : Yojson.Safe.t
+  ; encoded : Http_response_payload.prepared
+  ; etag : string
+  }
+
+type execution_http_state =
+  | Empty
+  | Preparing of execution_http_preparation
+  | Ready of execution_http_payload
+
+(* Accessed only while holding [execution_publication_mu]. *)
+let execution_default_light_http = ref Empty
 let execution_publication_mu = Stdlib.Mutex.create ()
 let execution_publication_generation = ref 0
 let execution_publication_epoch =
@@ -191,8 +215,7 @@ let with_execution_publication_lock f =
 ;;
 
 let clear_execution_default_light_http_body () =
-  Atomic.set execution_default_light_http_body None;
-  Atomic.set execution_default_light_http_payload None
+  execution_default_light_http := Empty
 ;;
 
 let execution_surface_has_fresh_success_unlocked () =
@@ -382,14 +405,6 @@ let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot ()
     (invalidate_task_mutation_caches ~invalidate_full_health_snapshot)
 ;;
 
-module For_testing = struct
-  let execution_publication_generation () =
-    with_execution_publication_lock (fun () -> !execution_publication_generation)
-  ;;
-
-  let publish_execution_success_if_current = publish_execution_success_if_current
-end
-
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
@@ -572,22 +587,82 @@ let execution_default_light_response_json ~config =
        ~query:default_light_execution_query
 ;;
 
-let cache_execution_default_light_http_body_unlocked response_json =
-  if execution_surface_has_fresh_success_unlocked ()
-  then begin
-    let body = Yojson.Safe.to_string response_json in
-    let etag = Http_server_eio.Response.weak_etag_value body in
-    Atomic.set execution_default_light_http_body (Some body);
-    Atomic.set execution_default_light_http_payload (Some (body, etag))
-  end
-  else clear_execution_default_light_http_body ()
+let execution_http_source_matches ~(config : Workspace.config) (source : execution_http_source) =
+  source.snapshot == Server_dashboard_http_cache.snapshot execution_cache
+  && String.equal source.base_path config.base_path
+  && String.equal source.workspace_path config.workspace_path
+;;
+
+let rec refresh_execution_default_light_http_body_with
+      ~prepare ~config () =
+  let owned = ref None in
+  Eio_guard.protect
+    ~finally:(fun () ->
+      Option.iter
+        (fun preparation ->
+          with_execution_publication_lock (fun () ->
+            match !execution_default_light_http with
+            | Preparing current when current == preparation ->
+              execution_default_light_http := Empty
+            | Empty | Preparing _ | Ready _ -> ());
+          Eio.Promise.resolve preparation.settle ())
+        !owned)
+    (fun () ->
+      let action =
+        with_execution_publication_lock (fun () ->
+          if not (execution_surface_has_fresh_success_unlocked ()) then
+            `Return (execution_default_light_response_json ~config)
+          else
+            match !execution_default_light_http with
+            | Ready payload when execution_http_source_matches ~config payload.source ->
+              `Return payload.response_json
+            | Preparing preparation
+              when execution_http_source_matches ~config preparation.source ->
+              `Await preparation.settled
+            | Empty | Preparing _ | Ready _ ->
+              let settled, settle = Eio.Promise.create () in
+              let preparation =
+                { source =
+                    { snapshot = Server_dashboard_http_cache.snapshot execution_cache
+                    ; base_path = config.base_path
+                    ; workspace_path = config.workspace_path
+                    }
+                ; settled
+                ; settle
+                }
+              in
+              owned := Some preparation;
+              execution_default_light_http := Preparing preparation;
+              `Prepare (preparation, execution_default_light_response_json ~config))
+      in
+      match action with
+      | `Return json -> json
+      | `Await settled ->
+        Eio.Promise.await settled;
+        refresh_execution_default_light_http_body_with ~prepare ~config ()
+      | `Prepare (preparation, response_json) ->
+        let etag, encoded =
+          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            let body = Yojson.Safe.to_string response_json in
+            Http_server_eio.Response.weak_etag_value body, prepare body)
+        in
+        with_execution_publication_lock (fun () ->
+          (* An older completion cannot replace or clear a newer preparation. *)
+          match !execution_default_light_http with
+          | Preparing current
+            when current == preparation
+                 && execution_http_source_matches ~config preparation.source
+                 && execution_surface_has_fresh_success_unlocked () ->
+            execution_default_light_http :=
+              Ready { source = preparation.source; response_json; encoded; etag };
+            response_json
+          | Empty | Preparing _ | Ready _ ->
+            execution_default_light_response_json ~config))
 ;;
 
 let refresh_execution_default_light_http_body ~config =
-  with_execution_publication_lock (fun () ->
-    let response_json = execution_default_light_response_json ~config in
-    cache_execution_default_light_http_body_unlocked response_json;
-    response_json)
+  refresh_execution_default_light_http_body_with
+    ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
 let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
@@ -1056,8 +1131,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         !broadcast_namespace_truth_ref state))
 ;;
 
-let dashboard_execution_cached_http_body ~state request =
-  let config = Mcp_server.workspace_config state in
+let execution_cached_http_representation ~(config : Workspace.config) request =
   let fixture = query_param request "fixture" in
   let actor = execution_actor_for_request ~base_path:config.base_path request in
   let full_mode = bool_query_param request "full" ~default:false in
@@ -1065,26 +1139,34 @@ let dashboard_execution_cached_http_body ~state request =
   match fixture, actor, full_mode, force with
   | None, None, false, false ->
     with_execution_publication_lock (fun () ->
-      match Atomic.get execution_default_light_http_body with
-      | Some body when execution_surface_has_fresh_success_unlocked () -> Some body
-      | Some _ | None -> None)
+      match !execution_default_light_http with
+      | Ready payload
+        when execution_surface_has_fresh_success_unlocked ()
+             && execution_http_source_matches ~config payload.source ->
+        let body, headers =
+          Http_response_payload.select_prepared payload.encoded
+            ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
+        in
+        Some (body, payload.etag, headers)
+      | Empty | Preparing _ | Ready _ -> None)
   | _ -> None
 ;;
 
-let dashboard_execution_cached_http_body_and_etag ~state request =
-  let config = Mcp_server.workspace_config state in
-  let fixture = query_param request "fixture" in
-  let actor = execution_actor_for_request ~base_path:config.base_path request in
-  let full_mode = bool_query_param request "full" ~default:false in
-  let force = bool_query_param request "force" ~default:false in
-  match fixture, actor, full_mode, force with
-  | None, None, false, false ->
-    with_execution_publication_lock (fun () ->
-      match Atomic.get execution_default_light_http_payload with
-      | Some (body, etag) when execution_surface_has_fresh_success_unlocked () ->
-          Some (body, etag)
-      | Some _ | None -> None)
-  | _ -> None
+let dashboard_execution_cached_http_representation ~state request =
+  execution_cached_http_representation
+    ~config:(Mcp_server.workspace_config state) request
+;;
+
+module For_testing = struct
+  let cached_representation = execution_cached_http_representation
+  let execution_publication_generation = current_execution_publication_generation
+  let begin_execution_publication_attempt = begin_execution_publication_attempt
+  let publish_execution_success_if_current = publish_execution_success_if_current
+  let publish_execution_error_if_current = publish_execution_error_if_current
+  let refresh_execution_default_light_http_body
+        ?(prepare = Http_response_payload.prepare) ~config () =
+    refresh_execution_default_light_http_body_with ~prepare ~config ()
+end
 ;;
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =

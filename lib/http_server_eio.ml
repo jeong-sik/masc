@@ -278,8 +278,7 @@ module Response = struct
       let headers =
         Httpun.Headers.of_list
           (extra_headers
-          @ [ ("content-length", "0");
-              ("etag", etag_value);
+          @ [ ("etag", etag_value);
               ("cache-control", json_revalidate_cache_control);
             ])
       in
@@ -307,8 +306,7 @@ module Response = struct
         let headers =
           Httpun.Headers.of_list
             (extra_headers
-            @ [ ("content-length", "0");
-                ("etag", etag);
+            @ [ ("etag", etag);
                 ("cache-control", json_revalidate_cache_control);
               ])
         in

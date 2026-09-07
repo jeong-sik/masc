@@ -4053,10 +4053,8 @@ let launch_browser_lane state ~mailbox operation =
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
 let open_browser_lane state ~mailbox =
+  show_browser_lane state;
   release_composer_for_browser_reader state;
-  state.view <- Connectors;
-  state.browser_lane <- Some (Browser_lane_view.create ());
-  state.search <- None;
   launch_browser_lane state ~mailbox Browser_lane_view.Read
 
 let launch_runtime_surface_load state ~mailbox ~force =
@@ -5088,6 +5086,7 @@ let search_jump ?(backwards = false) state ~query ~after =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
+  leave_browser_lane_for_surface state destination;
   if state.repository_changes_open && destination <> state.view then
     close_repository_changes state;
   if state.view = Lanes || destination = Lanes then
@@ -5131,7 +5130,7 @@ let goto_surface state ~mailbox (destination : surface) =
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
        | None -> ())
    | Connectors ->
-       (match state.browser_lane with
+       (match browser_lane_on_screen state with
         | None -> launch_connectors_load state ~mailbox
         | Some _ ->
             release_composer_for_browser_reader state;
@@ -12222,6 +12221,9 @@ let toggle_roster_pane_key = "\002"
    letter is text. *)
 let toggle_acting_pane_key = "\012"
 
+(* Ctrl-^ keeps a reader one key away without consuming a typed letter. *)
+let toggle_browser_lane_key = "\030"
+
 let terminal_title_visible_keeper state =
   match state.view with
   | Code -> None
@@ -14317,6 +14319,7 @@ and is loaded on demand through keeper_skill.
         && key <> Some toggle_mouse_tracking_key
         && key <> Some toggle_roster_pane_key
         && key <> Some toggle_acting_pane_key
+        && key <> Some toggle_browser_lane_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -14438,6 +14441,20 @@ and is loaded on demand through keeper_skill.
           modal and surface branch: those states are hidden, and a question,
           search cursor, or draft must not move behind the fallback. *)
        | Some _ when compact_viewport -> ()
+       | Some k
+         when String.equal k toggle_browser_lane_key
+              && not state.palette_open && not state.help_open
+              && not state.agenda_open && not state.answering_open
+              && not state.context_inspector_open
+              && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none state.ask_text_entry
+              && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match browser_lane_on_screen state with
+            | Some _ -> hide_browser_lane state
+            | None ->
+                open_browser_lane state ~mailbox:async_messages);
+           Render_schedule.request render_schedule Render_schedule.Force
        (* Writing an answer takes every printable key, the way the row search
           and the app form do, and it sits above the answering arm because
           that arm reads digits as choices and [s]/[c] as commands. An
@@ -15083,6 +15100,8 @@ and is loaded on demand through keeper_skill.
                 in
                 close ();
                 (match chosen with
+                 | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
+                     hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
@@ -15445,7 +15464,7 @@ and is loaded on demand through keeper_skill.
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g") as key)
-         when state.view = Connectors && Option.is_some state.browser_lane ->
+         when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -15462,8 +15481,9 @@ and is loaded on demand through keeper_skill.
                 in
                 (match key with
                  | "esc" | "left" ->
-                     state.browser_lane <- None;
-                     launch_connectors_load state ~mailbox:async_messages
+                     hide_browser_lane state;
+                     if state.view = Connectors then
+                       launch_connectors_load state ~mailbox:async_messages
                  | "l" | "a" ->
                      read (switch_source (if key = "l" then Live else Automation) view)
                  | "[" | "]" when not (busy view) ->
@@ -15487,7 +15507,7 @@ and is loaded on demand through keeper_skill.
                  | "home" -> state.browser_lane <- Some { view with scroll = 0 }
                  | _ -> ()))
        | Some key
-         when state.view = Connectors && Option.is_some state.browser_lane
+         when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
               && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
            (* The child owns its keys. In particular b/u must never mutate a
               hidden connector binding while Firefox content is on screen. *)
@@ -16183,14 +16203,15 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0
        | Some "r"
          when (not message_mode)
+              && state.view <> Runtime
               && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
               && state.context_inspector_open = false ->
            (* The listing footers have promised [r:refresh] since the footer
               tables existed; no handler ever answered it. This arm makes the
               sheet true everywhere a listing draws it. The guards stay out
-              of the two surfaces that own their own r — the identity pane
-              and the context inspector — and out of the composer, where r
-              must type. *)
+              of the identity pane and context inspector, and out of the
+              composer, where r must type. Runtime also owns its refresh:
+              its r/R handler below forces a provider probe. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -16889,7 +16910,7 @@ and is loaded on demand through keeper_skill.
                       ~keeper_name
                 | None -> ())
             | Connectors ->
-                (match state.browser_lane with
+                (match browser_lane_on_screen state with
                  | None -> launch_connectors_load state ~mailbox:async_messages
                  | Some _ -> launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read)
             | Runtime ->
@@ -19554,7 +19575,7 @@ and is loaded on demand through keeper_skill.
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
          | Connectors ->
-             (match state.browser_lane with
+             (match browser_lane_on_screen state with
               | None -> launch_connectors_load state ~mailbox:async_messages
               | Some _ -> ())
          | Runtime ->

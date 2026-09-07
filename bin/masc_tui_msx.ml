@@ -11,8 +11,10 @@
 (* The ROM set comes from the environment, not from the client's knowledge
    of where the core repo lives: MSX_ROMS names a directory holding the
    C-BIOS triple (main_msx2, logo_msx2, sub). Without it the machine still
-   runs -- on 0xff bus reads, so the screen stays black; the title says so. *)
+   runs -- on 0xff bus reads, so the screen stays black; the title says so.
+   MSX_CART names one cartridge image (16/32KB) to plug into slot 2. *)
 let rom_dir () = try Sys.getenv "MSX_ROMS" with Not_found -> ""
+let cart_path () = try Sys.getenv "MSX_CART" with Not_found -> ""
 
 let read_file path =
   let ic = open_in_bin path in
@@ -33,6 +35,7 @@ let load_roms dir =
 (* Single-machine module, like state.msx itself: the title wants to know how
    the one machine booted without threading a flag through state. *)
 let booted_with_roms = ref false
+let cart_name = ref ""
 
 let machine_of (state : Masc_tui_types.state) =
   match state.msx with
@@ -41,6 +44,11 @@ let machine_of (state : Masc_tui_types.state) =
       let roms = load_roms (rom_dir ()) in
       booted_with_roms := roms <> [];
       let m = Msx.create ~machine:{ ram_kb = 512; vram_kb = 128; roms } in
+      (match cart_path () with
+      | "" -> ()
+      | path ->
+          Msx.load_cartridge m (read_file path);
+          cart_name := Filename.basename path);
       (* Run ahead to the boot logo (~30 frames in, full at 45) so the first
          paint shows something; afterwards one key is one frame -- the
          spectator contract. *)
@@ -78,8 +86,10 @@ let draw ~write (state : Masc_tui_types.state) =
   let buf = Buffer.create (pcols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
   let title =
-    if !booted_with_roms then " ocaml-msx — MSX2 C-BIOS"
-    else " ocaml-msx — no ROM (set MSX_ROMS to a C-BIOS directory)"
+    if not !booted_with_roms then
+      " ocaml-msx — no ROM (set MSX_ROMS to a C-BIOS directory)"
+    else if !cart_name = "" then " ocaml-msx — MSX2 C-BIOS"
+    else " ocaml-msx — MSX2 C-BIOS + " ^ !cart_name
   in
   Buffer.add_string buf (fit_line cols title);
   Buffer.add_string buf "\027[0K\r\n";
@@ -117,15 +127,17 @@ let consume ~write (state : Masc_tui_types.state) key =
   end else begin
     let m = machine_of state in
     (match key_of key with
-    | Some k ->
-        Msx.set_key m k ~pressed:true;
+    | Some k when Msx.set_key m k ~pressed:true ->
         Msx.step m ~frames:1;
         draw ~write state;
         (* Release only after the frame the key was down for is drawn -- the
            pattern marks held keys, and drawing after the release would always
            show none. *)
-        Msx.set_key m k ~pressed:false
-    | None ->
+        (* See Msx.set_key: it was true a frame ago and the matrix is static. *)
+        ignore (Msx.set_key m k ~pressed:false)
+    | Some _ | None ->
+        (* A key the matrix has no place for still advances one frame, so
+           the spectator's clock never stalls on a typo. *)
         Msx.step m ~frames:1;
         draw ~write state);
     true

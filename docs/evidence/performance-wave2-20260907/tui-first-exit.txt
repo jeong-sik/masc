@@ -1,0 +1,22 @@
+build frames=91 mean=3.13ms p50=1.11 p95=1.75 p99=2.91 max=189.37
+  build[approvals] frames=56 mean=1.22ms p50=1.13 p95=1.75 p99=1.80 max=2.91
+  build[memory] frames=10 mean=1.08ms p50=1.02 p95=1.50 p99=1.50 max=1.50
+  build[keeper-list] frames=10 mean=0.87ms p50=0.85 p95=0.95 p99=0.95 max=0.95
+  build[acting] frames=9 mean=0.30ms p50=0.26 p95=0.64 p99=0.64 max=0.64
+  build[overview] frames=6 mean=32.42ms p50=1.03 p95=189.37 p99=189.37 max=189.37
+  worst[0] frame=1 189.37ms tag=overview
+  worst[1] frame=56 2.91ms tag=approvals
+  worst[2] frame=60 1.80ms tag=approvals
+  worst[3] frame=46 1.78ms tag=approvals
+  worst[4] frame=59 1.75ms tag=approvals
+present frames=90 mean=0.01ms p50=0.00 p95=0.09 p99=0.12 max=0.19
+  present[approvals] frames=55 mean=0.01ms p50=0.00 p95=0.01 p99=0.02 max=0.12
+  present[memory] frames=10 mean=0.04ms p50=0.01 p95=0.19 p99=0.19 max=0.19
+  present[keeper-list] frames=10 mean=0.03ms p50=0.01 p95=0.07 p99=0.07 max=0.07
+  present[acting] frames=9 mean=0.01ms p50=0.00 p95=0.09 p99=0.09 max=0.09
+  present[overview] frames=6 mean=0.03ms p50=0.01 p95=0.12 p99=0.12 max=0.12
+  worst[0] frame=26 0.19ms tag=memory
+  worst[1] frame=1 0.12ms tag=overview
+  worst[2] frame=36 0.12ms tag=approvals
+  worst[3] frame=27 0.09ms tag=memory
+  worst[4] frame=7 0.09ms tag=acting

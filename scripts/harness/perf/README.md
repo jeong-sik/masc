@@ -1,5 +1,32 @@
 # Performance and soak harnesses
 
+## Response latency across HTTP and MCP
+
+`response_latency_probe.py` attaches to an existing server and records raw
+monotonic HTTP roundtrip samples, response sizes, Server-Timing, freshness,
+status codes, and binary identity before/after the run. It builds and boots
+nothing. The default target remains 0.1 ms; results do not certify the wider
+TUI/browser/server goal. The client speaks HTTP/1.1 and does not exercise
+conditional ETags or HTTP/2.
+
+```bash
+python3 scripts/harness/perf/response_latency_probe.py \
+  --base-url http://127.0.0.1:8935 --samples 30 --output /tmp/latency.json
+```
+
+An existing `MCP_TOKEN` enables authenticated HTTP and MCP initialize/ping;
+only the environment variable name is accepted by `--token-env`, and tokens
+are never written to evidence. Authenticated actors can take a different
+projection path from anonymous requests, so compare like scopes. Use
+`--interval` to space sample rounds if the normal token rate limit is reached.
+429s remain failures in the artifact. MCP JSON and finite SSE responses are
+decoded and their JSON-RPC IDs/results validated. A failed or unauthenticated
+initialize is recorded rather than counted as successful MCP latency.
+
+Percentiles describe valid responses; stale samples are counted separately
+and disqualify the all-samples target flag. A changed runtime identity also
+prevents treating two endpoints of the measurement window as one deployment.
+
 ## Paused-work disposition: exact 10-Keeper 8h soak
 
 `paused_work_disposition_soak.sh` is the release-evidence gate for #25191. It

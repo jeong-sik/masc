@@ -4763,3 +4763,8 @@
  (libraries masc_test_deps ptime masc.time_codec))
 
 (include stanzas/test_keeper_repetition_scope.inc)
+
+(test
+ (name test_tui_runtime_listing)
+ (modules test_tui_runtime_listing)
+ (libraries alcotest masc masc_tui_types))

@@ -855,6 +855,7 @@ let run_named
     ?on_runtime_observation
     ?on_request_wire_observation
     ?on_request_attribution
+    ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
@@ -1164,6 +1165,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
                  Option.iter
@@ -1289,6 +1291,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
                  Option.iter
@@ -1397,6 +1400,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
                  Option.iter

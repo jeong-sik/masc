@@ -31,7 +31,7 @@
       {!start_execution_trust_refresh_loop}).
     - {b snapshot access} ({!dashboard_execution_snapshot_json}).
     - {b HTTP route entries}
-      ({!dashboard_execution_cached_http_body},
+      ({!dashboard_execution_cached_http_representation},
       {!dashboard_execution_http_json},
       {!dashboard_execution_trust_http_json},
       {!dashboard_transport_health_http_json}).
@@ -123,9 +123,22 @@ val install_task_mutation_cache_invalidation :
 
 module For_testing : sig
   val execution_publication_generation : unit -> int
+  val begin_execution_publication_attempt : unit -> int
 
   val publish_execution_success_if_current :
     generation:int -> Yojson.Safe.t -> bool
+
+  val publish_execution_error_if_current : generation:int -> exn -> bool
+
+  val cached_representation :
+    config:Workspace.config -> Httpun.Request.t ->
+    (string * string * (string * string) list) option
+
+  val refresh_execution_default_light_http_body :
+    ?prepare:(string -> Http_response_payload.prepared) ->
+    config:Workspace.config -> unit -> Yojson.Safe.t
+  (** The preparation callback runs outside the publication lock on the CPU
+      worker. It can coordinate source changes and concurrent readers. *)
 end
 
 val patch_keeper_dependent_caches :
@@ -174,19 +187,13 @@ val start_execution_trust_refresh_loop :
 
 (** {1 HTTP route entries} *)
 
-val dashboard_execution_cached_http_body :
-  state:Mcp_server.server_state -> Httpun.Request.t -> string option
-(** Returns a pre-serialized response body for the default light
-    [/api/v1/dashboard/execution] request when the proactive execution
-    cache has a fresh successful snapshot.  Returns [None] for actor,
-    fixture, full, force, initializing, or stale/error requests so callers
-    fall back to {!dashboard_execution_http_json}. *)
-
-val dashboard_execution_cached_http_body_and_etag :
-  state:Mcp_server.server_state -> Httpun.Request.t -> (string * string) option
-(** Returns both the pre-serialized response body and its weak ETag for the default
-    light [/api/v1/dashboard/execution] request when the proactive execution cache has
-    a fresh successful snapshot. *)
+val dashboard_execution_cached_http_representation :
+  state:Mcp_server.server_state -> Httpun.Request.t ->
+  (string * string * (string * string) list) option
+(** Negotiated pre-compressed body, weak ETag of the identity JSON, and
+    representation headers. Returns [None] for actor, fixture, full, force,
+    initializing or stale/error requests. No serialization or compression on
+    cache hits. *)
 
 val dashboard_execution_http_json :
   state:Mcp_server.server_state ->

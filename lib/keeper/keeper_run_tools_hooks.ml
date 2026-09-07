@@ -345,6 +345,16 @@ let adopt_projection_meta
       detail;
     admitted
 
+let guard_repetition_before_turn_params repetition_execution hook event =
+  match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
+  | Some error ->
+    Agent_core.Hooks.HookFailed
+      { stage = Agent_core.Hooks.Before_turn_params
+      ; detail = Keeper_repetition_scope.error_to_string error
+      }
+  | None -> hook event
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -361,6 +371,7 @@ let assemble_hooks
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list)
+      ?repetition_execution
       ?gate_replay_evidence
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -572,6 +583,11 @@ let assemble_hooks
                        progress_io_fingerprints
                  }
                  :: acc.tool_calls;
+              (match repetition_execution, acc.tool_calls with
+               | Some execution, call :: _ ->
+                 Keeper_repetition_scope.Execution.observe execution
+                   ~target:shared_context call
+               | None, _ | Some _, [] -> ());
               (* Emit neutral agent observation events; UI adapters subscribe separately. *)
               (let typed_outcome_str =
                  match typed_outcome with
@@ -695,7 +711,7 @@ let assemble_hooks
       ;
         before_turn_params =
           Some
-            (fun event ->
+            (guard_repetition_before_turn_params repetition_execution (fun event ->
               match event with
               | Agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
@@ -1045,7 +1061,7 @@ let assemble_hooks
                     extra_system_context = ctx
                   ; tool_choice
                   }
-              | _event -> Agent_core.Hooks.Continue)
+              | _event -> Agent_core.Hooks.Continue))
       }
     in
     let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in

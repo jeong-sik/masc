@@ -372,6 +372,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    and typed-delegate entrypoints construct a valid invocation request before
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
+      ~operation_id
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -405,6 +406,11 @@ let run_keeper_invocation_turn_admitted_inner
   in
   let name = Keeper_invocation_contract.target_name request in
   let message = Keeper_invocation_contract.prompt request in
+  (* One admitted operation owns the observation state across all provider
+     attempts, including official clients that return no AGENT_CORE checkpoint. *)
+  let repetition_execution =
+    Keeper_repetition_scope.Execution.direct_operation operation_id
+  in
   let turn_instructions, direct_reply, channel_session_key, channel, user_blocks =
     match direct_message with
     | None -> None, false, None, "", None
@@ -775,6 +781,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~build_turn_prompt
 		                                ~user_message:message
 		                                ~turn_kind:Turn_record.Direct
+                                ~repetition_execution
 		                                ~skill_snapshot
 			                                ~task_skill_selection
 			                                ?user_blocks
@@ -921,6 +928,7 @@ let run_keeper_invocation_turn_admitted_inner
    mask an in-flight cancellation, so it is swallowed and logged the way the
    autonomous lane's turn cleanup does. *)
 let run_keeper_invocation_turn_admitted
+      ~operation_id
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -962,6 +970,7 @@ let run_keeper_invocation_turn_admitted
   in
   match
     run_keeper_invocation_turn_admitted_inner
+      ~operation_id
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -983,6 +992,7 @@ let run_keeper_invocation_turn_admitted
 ;;
 
 let handle_keeper_msg_admitted
+      ~operation_id
       ~admission_token:_
       ?on_text_delta
       ?on_event
@@ -998,6 +1008,7 @@ let handle_keeper_msg_admitted
     Keeper_invocation_contract.direct_message_request direct_message
   in
   run_keeper_invocation_turn_admitted
+    ~operation_id
     ?on_text_delta
     ?on_event
     ?on_tool_stream_observation

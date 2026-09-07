@@ -4,6 +4,8 @@
 
 **범위:** ~/me/.masc/logs/system_log_2026-09-06.jsonl, system_log_2026-09-07.jsonl의 timestamp 기준 102,600행. INFO 92,944 / WARN 8,764 / ERROR 892. 다른 .masc 파일 전체의 모든 문장을 전수 집계했다는 뜻은 아니다. 로그는 원본 파일/행/seq를 보존해 window.jsonl로 동결했다.
 
+**공개본 식별자:** `health-dashboard-recovered.json`과 `health-dashboard-relocated.json`의 조직 식별자는 `exampleorg`로 익명화했다. JSON 타입과 수치는 보존했다. 파일 안의 artifact 해시는 관측한 바이너리·자산의 식별자이며, 익명화한 JSON 파일 자체의 해시가 아니다.
+
 **판정:** 아래 count는 대표 로그 이벤트 수이며 서로 독립인 사고 수가 아니다. provider 실패→pipeline 실패→Keeper 실패는 중첩한다. 최종 행은 health의 별도 live acceptance 상태다.
 
 **실행 식별:** 첫 health binary b90d5f6182, 검토 source 8b804d8d5b. 다른 운영 작업이 진행 중이며 중간 재조회 binary는 8b804d8d5b. 이 초기 바이너리 교체는 본 세션이 수행하지 않았다. 이후 이 세션의 자산 적용과 ACK는 하단 시각별 증거로 구분한다.

@@ -155,7 +155,7 @@ let test_the_palette_claims_over_a_board_draft () =
 let test_browser_url_input_ownership () =
   let state = fresh_state () in
   let open Tui_types.Browser_lane_view in
-  state.Tui_types.view <- Tui_types.Connectors;
+  Tui_types.show_browser_lane state;
   state.Tui_types.browser_lane <- Some
     { (switch_source Automation (create ())) with url_draft = Some "https://example.org" };
   check target "URL owns typing and paste" (Some Tui_types.Text_browser_url) (resolved state);
@@ -171,8 +171,8 @@ let test_browser_reader_chrome_scope () =
   let state = fresh_state () in
   let module Lane = Tui_types.Browser_lane_view in
   List.iter (fun source ->
+    Tui_types.show_browser_lane state;
     state.Tui_types.browser_lane <- Some (Lane.switch_source source (Lane.create ()));
-    state.Tui_types.view <- Tui_types.Connectors;
     check bool "reader owns its context row" true
       (Option.is_some (Tui_types.browser_lane_on_screen state));
     check int "reader highlights its Runtime family"

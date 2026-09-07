@@ -6,6 +6,10 @@ have no dedicated views or filters. The reader occupies the full content width
 and shows the source in its context row. Keeper panels and the composer return
 when leaving the reader.
 
+Press `Ctrl-^` (Ctrl-Shift-6) to show or hide Browser. Hiding returns to the
+previous surface and restores its search and composer focus. The selected tab,
+scroll and unsent chat draft survive the toggle within this TUI session.
+
 Entering Browser ends continuous voice mode and discards any capture in flight,
 including a transcript awaiting delivery. An existing Keeper draft is preserved.
 
@@ -18,7 +22,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `r` | Rediscover tabs and refresh the page |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
-| Esc / Left | Return to Connectors |
+| Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
 Browser belongs to Config. Its title shows the source and latest HTTP request
 status. Coordinator connectivity and workspace warnings are labeled separately.

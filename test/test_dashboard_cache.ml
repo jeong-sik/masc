@@ -1040,19 +1040,38 @@ let test_payload_prepared_before_publication ~clock ~sw ~dm () =
         Atomic.incr preparations;
         Atomic.set observed (Some (Domain.self () :> int));
         check_payload_consistent payload;
+        let encoded = match payload.encoded with
+          | Some encoded -> encoded
+          | None -> Alcotest.fail "HTTP codecs were not prepared on the worker" in
+        Alcotest.(check bool) "identity representation shares serialized bytes" true
+          (encoded.identity == payload.raw_json);
+        List.iter (fun encoding ->
+          let body, headers = Dashboard_cache.select_http_representation
+            ~accept_encoding:(Some encoding) payload in
+          Alcotest.(check (option string)) "compressed representation ready before publication"
+            (Some encoding) (List.assoc_opt "content-encoding" headers);
+          Alcotest.(check bool) "compression reduces the published representation" true
+            (String.length body < String.length payload.raw_json)) [ "gzip"; "zstd" ];
         Alcotest.(check bool) "AST is not published ahead of bytes" true
           (Option.is_none (Dashboard_cache.peek key)))
       (fun () ->
         let first = Dashboard_cache.get_or_compute_payload_with_timeout key
-          ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "prepared") in
+          ~preparation:Dashboard_cache.Http_encodings
+          ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String (String.make 8192 'a')) in
         Alcotest.(check bool) "serialization and hash complete on worker" true
           (Option.fold ~none:false ~some:((<>) caller) (Atomic.get observed));
         Executor_pool_ref.For_testing.with_pool_option None (fun () ->
           let hit = Dashboard_cache.get_or_compute_payload key ~ttl:60.
+            ~preparation:Dashboard_cache.Http_encodings
             (fun () -> Alcotest.fail "hit recomputed") in
           let peeked = Option.get (Dashboard_cache.peek_payload key) in
           Alcotest.(check bool) "hit reuses prepared bytes without a pool" true
             (first.raw_json == hit.raw_json && hit.raw_json == peeked.raw_json);
+          List.iter (fun accept_encoding ->
+            let first_body, _ = Dashboard_cache.select_http_representation ~accept_encoding first in
+            let hit_body, _ = Dashboard_cache.select_http_representation ~accept_encoding hit in
+            Alcotest.(check bool) "cache hits reuse each codec without a worker" true
+              (first_body == hit_body)) [ None; Some "gzip"; Some "zstd" ];
           Alcotest.(check int) "one preparation across fill, hit and peek" 1
             (Atomic.get preparations))))
 
@@ -1113,6 +1132,7 @@ let test_payload_swr_publishes_prepared_bytes ~clock ~sw ~dm () =
           if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ())
         (fun () ->
           let immediate = Dashboard_cache.get_or_compute_payload_with_timeout key
+            ~preparation:Dashboard_cache.Http_encodings
             ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "new") in
           Alcotest.(check bool) "SWR returns existing bytes immediately" true
             (immediate.raw_json == old.raw_json);
@@ -1129,6 +1149,8 @@ let test_payload_swr_publishes_prepared_bytes ~clock ~sw ~dm () =
           in
           let current = Eio.Time.with_timeout_exn clock 2. await_publication in
           check_payload_consistent current;
+          Alcotest.(check bool) "SWR publishes all prepared representations atomically" true
+            (Option.is_some current.encoded && current.encoded == next.encoded);
           Alcotest.(check bool) "publication retains worker-prepared byte identity" true
             (next.raw_json == current.raw_json);
           Alcotest.(check int) "first read after SWR does not prepare again" 1
@@ -1362,17 +1384,25 @@ let test_payload_preparation_timeout_retains_stale_bytes ~clock () =
   Executor_pool_ref.For_testing.with_pool_option None (fun () ->
     let key = "prepared-stale-timeout" in
     let old = Dashboard_cache.get_or_compute_payload key ~ttl:(-1.)
+      ~preparation:Dashboard_cache.Http_encodings
       (fun () -> `String "last-good") in
+    Alcotest.(check bool) "last-good payload includes prepared HTTP representations" true
+      (Option.is_some old.encoded);
     let result = Dashboard_cache.For_testing.with_payload_prepared_hook
       (fun _ -> Eio.Time.sleep clock 1.)
       (fun () -> Dashboard_cache.get_or_compute_payload_with_timeout key
+        ~preparation:Dashboard_cache.Http_encodings
         ~ttl:60. ~clock ~timeout_sec:0.01 (fun () -> `String "too-late")) in
     Alcotest.(check bool) "preparation timeout returns last-good byte identity" true
       (old.raw_json == result.raw_json);
+    Alcotest.(check bool) "preparation timeout returns last-good encoding identity" true
+      (old.encoded == result.encoded);
     check_json "preparation timeout restores last-good AST" old.json result.json;
     let restored = Option.get (Dashboard_cache.peek_payload key) in
     Alcotest.(check bool) "restored stale entry keeps bytes and tag together" true
       (old.raw_json == restored.raw_json && old.etag == restored.etag);
+    Alcotest.(check bool) "restored stale entry retains prepared encoding identity" true
+      (old.encoded == restored.encoded);
     check_payload_consistent restored)
 
 let test_nested_dashboard_cache_compute_does_not_starve ~clock ~sw ~dm () =

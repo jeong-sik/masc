@@ -37,12 +37,14 @@ let token_counter = Atomic.make 0
 let next_token () = Atomic.fetch_and_add token_counter 1
 
 type payload_origin = Seeded | Computed | Timeout
+type payload_preparation = Identity_only | Http_encodings
 
 type cached_payload = {
   json : Yojson.Safe.t;
   raw_json : string;
   etag : string;
   origin : payload_origin;
+  encoded : Http_response_payload.prepared option;
 }
 
 let etag_hex_chars = 12
@@ -59,12 +61,22 @@ let refresh_registered_hook : (unit -> unit) option Atomic.t = Atomic.make None
 
 type refresh_registration = Queued | Registered | Abandoned
 
-let payload_of_json ~origin json =
+let payload_of_json ?(preparation = Identity_only) ~origin json =
   let raw_json = Yojson.Safe.to_string json in
   let etag = weak_etag_of_string raw_json in
-  let payload = { json; raw_json; etag; origin } in
+  let encoded =
+    match preparation with
+    | Identity_only -> None
+    | Http_encodings -> Some (Http_response_payload.prepare raw_json)
+  in
+  let payload = { json; raw_json; etag; origin; encoded } in
   Option.iter (fun hook -> hook payload) (Atomic.get payload_prepared_hook);
   payload
+
+let select_http_representation ~accept_encoding payload =
+  match payload.encoded with
+  | Some prepared -> Http_response_payload.select_prepared ~accept_encoding prepared
+  | None -> payload.raw_json, []
 
 type entry = {
   payload : cached_payload;
@@ -747,14 +759,16 @@ let peek key = Option.map (fun entry -> entry.payload.json) (peek_entry key)
    whole worker is the intent; RFC-0204 rejects *reclassifying* existing I/O
    submissions to 1.0, which is a different change. Pool size then bounds how
    many computes run at once, so no separate concurrency gate is added. *)
-let offloaded_payload compute () =
-  Executor_pool_ref.submit_or_inline (fun () -> payload_of_json ~origin:Computed (compute ()))
+let offloaded_payload ~preparation compute () =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    payload_of_json ~preparation ~origin:Computed (compute ()))
 
-let get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute =
+let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
+    key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     payload_of_json ~origin:Timeout (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
   else
-    let compute = offloaded_payload compute in
+    let compute = offloaded_payload ~preparation compute in
     let with_timeout f =
       match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (f ())) with
       | Ok value -> value
@@ -811,17 +825,17 @@ let set_default_clock clock =
    their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
-let get_or_compute_unbounded_payload key ~ttl compute =
-  let entry = get_or_compute_entry key ~ttl (offloaded_payload compute) in
+let get_or_compute_unbounded_payload ~preparation key ~ttl compute =
+  let entry = get_or_compute_entry key ~ttl (offloaded_payload ~preparation compute) in
   payload_of_entry entry
 
 
-let get_or_compute_payload key ~ttl compute =
+let get_or_compute_payload ?(preparation = Identity_only) key ~ttl compute =
   match Atomic.get default_clock with
   | Some clock ->
-    get_or_compute_payload_with_timeout key ~ttl ~clock
+    get_or_compute_payload_with_timeout ~preparation key ~ttl ~clock
       ~timeout_sec:default_compute_timeout_sec compute
-  | None -> get_or_compute_unbounded_payload key ~ttl compute
+  | None -> get_or_compute_unbounded_payload ~preparation key ~ttl compute
 
 let get_or_compute key ~ttl compute =
   (get_or_compute_payload key ~ttl compute).json

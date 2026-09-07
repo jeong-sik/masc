@@ -2357,9 +2357,11 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value ~compress:false ~request:req
                 ~extra_headers:(Server_timing.extra_header timing) json reqd
             | Execution_payload payload ->
+              let body, headers = Dashboard_cache.select_http_representation
+                ~accept_encoding:(Httpun.Headers.get req.headers "accept-encoding") payload in
               Http.Response.json_lazy ~compress:false ~request:req ~etag:payload.etag
-                ~extra_headers:(Server_timing.extra_header timing)
-                (fun () -> payload.raw_json) reqd)
+                ~extra_headers:(headers @ Server_timing.extra_header timing)
+                (fun () -> body) reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->

@@ -19,11 +19,15 @@ type payload_origin = Seeded | Computed | Timeout
 (** The producer of this exact payload, independent of its JSON contents and
     of any later replacement in the cache. *)
 
+type payload_preparation = Identity_only | Http_encodings
+(** Representations prepared by the cache-fill worker. *)
+
 type cached_payload = {
   json : Yojson.Safe.t;
   raw_json : string;
   etag : string;
   origin : payload_origin;
+  encoded : Http_response_payload.prepared option;
 }
 (** Cached dashboard payload carrying the Yojson AST, pre-serialized JSON string,
     and weak entity tag. Payload computation prepares all three together before
@@ -43,12 +47,21 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     one [f] runs; others wait for the result (stampede protection). *)
 
 val get_or_compute_payload :
+  ?preparation:payload_preparation ->
   string -> ttl:float -> (unit -> Yojson.Safe.t) -> cached_payload
 (** [get_or_compute_payload key ~ttl f] returns the {!cached_payload} for [key].
     Calls [f ()] on cache miss, and memoizes both the JSON AST and the serialized
     string + ETag. With an executor pool installed, computation, serialization,
     and hashing share one worker submission on cold fills and background refresh.
-    Cache hits with prepared bytes do not submit work. *)
+    Cache hits with prepared bytes do not submit work.
+    [Http_encodings] also prepares gzip/zstd inside that worker before publication.
+    Preparation policy must be consistent for all producers of a cache key.
+    Seeds and uncached timeout envelopes retain identity bytes only. *)
+
+val select_http_representation :
+  accept_encoding:string option -> cached_payload -> string * (string * string) list
+(** Select already prepared bytes and headers without compression or allocation
+    of response bodies. The payload ETag always identifies its identity bytes. *)
 
 val peek : string -> Yojson.Safe.t option
 (** [peek key] returns the currently cached value for [key] when a fresh or
@@ -89,6 +102,7 @@ val get_or_compute_with_timeout :
     cache entries are still served normally. *)
 
 val get_or_compute_payload_with_timeout :
+  ?preparation:payload_preparation ->
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
   (unit -> Yojson.Safe.t) -> cached_payload
 (** Same timeout and stale-value semantics as {!get_or_compute_with_timeout},

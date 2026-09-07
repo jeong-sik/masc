@@ -2390,6 +2390,11 @@ let test_execution_parameterized_payload_separates_request_queries () =
       (request_with_headers "/api/v1/dashboard/execution?full=1"
         [ "x-masc-agent", "bob" ]) in
   let payloads = [ absent; empty; explicit; light; forced; alice; bob ] in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    let encoded = match payload.encoded with Some value -> value
+      | None -> fail "parameterized execution lacks prepared encodings" in
+    check bool "each scoped encoding retains its own complete identity bytes" true
+      (encoded.identity == payload.raw_json)) payloads;
   let keys = List.map execution_payload_key payloads in
   check int "every distinct query owns its response bytes"
     (List.length payloads) (List.length (List.sort_uniq String.compare keys));
@@ -2448,6 +2453,8 @@ let test_execution_parameterized_payload_changes_after_invalidation () =
   check bool "publication generation advances" true
     (generation second > first_generation);
   check bool "invalidated bytes are not reused" true (first.raw_json != second.raw_json);
+  check bool "invalidated representations are rebuilt together" true
+    (Option.is_some second.encoded && first.encoded != second.encoded);
   check bool "new generation has a new cache key" true
     (execution_payload_key first <> execution_payload_key second);
   check bool "old key was evicted" true
@@ -3350,6 +3357,74 @@ let test_tools_routes_serve_prepared_http_representations () =
       check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
         (String_util.contains_substring body "final-decoration"))
       [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ])
+
+let test_execution_routes_serve_prepared_http_representations () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state)
+  @@ fun () ->
+  let config = Lib.Mcp_server.workspace_config state in
+  Server_auth.For_testing.restore_server_state (Some state);
+  Auth.save_auth_config config.base_path
+    { Types.default_auth_config with enabled = true; require_token = true };
+  let token = match Auth.create_token config.base_path ~agent_name:"execution-wire-reader"
+    ~role:Types.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Types.masc_error_to_string error) in
+  let clock = Eio.Stdenv.clock env in
+  let path = "/api/v1/dashboard/execution" in
+  let request_headers = [ "origin", "http://localhost:8935";
+    "authorization", "Bearer " ^ token; "x-masc-agent", "untrusted-hint" ] in
+  let first = execution_payload ~state ~sw ~clock
+    (request_with_headers path request_headers) in
+  check string "authenticated producer canonicalizes the actor" "execution-wire-reader"
+    Yojson.Safe.Util.(first.json |> member "query" |> member "actor" |> to_string);
+  let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock
+    (Lib.Http_server_eio.Router.create ()) in
+  let trust_policy = match Server_request_authority.make_trust_policy
+    ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
+    ~server_start_time:0. () in
+  List.iter (fun (protocol, send) ->
+    List.iter (fun encoding ->
+      let headers = ("accept-encoding", encoding) :: request_headers in
+      let status, reply_headers, body = send ~headers path in
+      check int (protocol ^ " success") 200 status;
+      let expected_encoding = if encoding = "identity" then None else Some encoding in
+      check (option string) (protocol ^ " encoding selection") expected_encoding
+        (List.assoc_opt "content-encoding" reply_headers);
+      check (option string) (protocol ^ " wire length")
+        (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+      let check_headers headers =
+        check (option string) (protocol ^ " identity ETag") (Some first.etag)
+          (List.assoc_opt "etag" headers);
+        let vary = List.filter_map (fun (name, value) -> if name = "vary" then Some value else None)
+          headers |> String.concat "," in
+        check bool (protocol ^ " encoding varies") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        if protocol = "H2" then
+          check bool (protocol ^ " origin still varies") true
+            (String_util.contains_substring vary "Origin")
+      in
+      check_headers reply_headers;
+      let decoded = match encoding with
+        | "gzip" -> tools_gunzip body
+        | "zstd" -> (match Compression_codec.decompress ~orig_size:(String.length first.raw_json) body with
+          | Ok json -> json | Error error -> fail error)
+        | _ -> body in
+      check string (protocol ^ " full decorated payload decodes") first.raw_json decoded;
+      let status, cached_headers, cached_body = send
+        ~headers:(("if-none-match", first.etag) :: headers) path in
+      check int (protocol ^ " conditional response") 304 status;
+      check_headers cached_headers;
+      check string (protocol ^ " 304 empty body") "" cached_body;
+      check (option string) (protocol ^ " 304 omits length") None
+        (List.assoc_opt "content-length" cached_headers)) [ "identity"; "gzip"; "zstd" ])
+    [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler ];
+  let hit = execution_payload ~state ~sw ~clock (request_with_headers path request_headers) in
+  check bool "wire reads reuse the published encodings" true (first.encoded == hit.encoded)
 
 let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -5188,6 +5263,8 @@ let () =
             test_tools_prepared_selector_scope_and_keeper_contract;
           test_case "tools routes serve prepared encodings and conditional responses" `Quick
             test_tools_routes_serve_prepared_http_representations;
+          test_case "authenticated execution routes reuse prepared encodings" `Quick
+            test_execution_routes_serve_prepared_http_representations;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick

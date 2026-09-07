@@ -1407,6 +1407,7 @@ let dashboard_execution_http_response ~state ~sw ~clock request =
     in
     let payload =
       Dashboard_cache.get_or_compute_payload_with_timeout
+        ~preparation:Dashboard_cache.Http_encodings
         cache_key
         ~ttl:deep_surface_cache_ttl_s
         ~clock

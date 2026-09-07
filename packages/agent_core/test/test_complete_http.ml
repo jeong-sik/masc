@@ -3708,6 +3708,24 @@ let test_responses_tool_images_on_http ~stream () =
   let failed =
     Tool_failed { failure_kind = Reported_tool_error; error_class = Some Transient }
   in
+  let nested_error =
+    ToolResult
+      { tool_use_id = "nested-error"; content = "capture incomplete"; outcome = failed
+      ; json = None
+      ; content_blocks = Some [ Text "nested before"; inline_image; Text "nested after" ] }
+  in
+  let nested_parent =
+    ToolResult
+      { tool_use_id = "nested-parent"; content = ""; outcome = Tool_succeeded
+      ; json = None
+      ; content_blocks = Some [ Text "parent before"; nested_error; url_image; file_image
+                              ; Text "parent after" ] }
+  in
+  let nested_text =
+    ToolResult
+      { tool_use_id = "nested-text"; content = "nested failure"; outcome = failed
+      ; json = None; content_blocks = Some [ Text "nested failure" ] }
+  in
   let cases =
     [ "mixed", Tool_succeeded, "captured images",
         Some [ Text "first"; inline_image; Text "middle"; url_image; file_image; Text "last" ]
@@ -3720,6 +3738,10 @@ let test_responses_tool_images_on_http ~stream () =
     ; "audio_and_image", Tool_succeeded, "mixed media",
         Some [ Audio { media_type = "audio/wav"; data = "YXVkaW8="; source_type = Base64 }
              ; inline_image ]
+    ; "nested_only", Tool_succeeded, "", Some [ nested_parent ]
+    ; "direct_and_nested", Tool_succeeded, "",
+        Some [ Text "outer before"; file_image; nested_error; Text "outer after"; url_image ]
+    ; "nested_without_image", failed, "nested failure", Some [ nested_text ]
     ]
   in
   let history =
@@ -3746,6 +3768,11 @@ let test_responses_tool_images_on_http ~stream () =
   let file =
     `Assoc [ "type", `String "input_image"; "file_id", `String "file_fixture_image" ]
   in
+  let nested_error_parts =
+    [ text {|Begin nested tool result {"tool_use_id":"nested-error","is_error":true}|}
+    ; text "nested before"; inline; text "nested after"
+    ; text {|End nested tool result {"tool_use_id":"nested-error","is_error":true}|} ]
+  in
   let expected_outputs =
     [ "mixed", `List [ text "first"; inline; text "middle"; url; file; text "last" ]
     ; "image_only", `List [ inline ]
@@ -3756,6 +3783,18 @@ let test_responses_tool_images_on_http ~stream () =
     ; "audio_and_image",
         `List [ text {|{"type":"audio","source":{"type":"base64","media_type":"audio/wav","data":"YXVkaW8="}}|}
               ; inline ]
+    ; "nested_only",
+        `List
+          ([ text {|Begin nested tool result {"tool_use_id":"nested-parent","is_error":false}|}
+           ; text "parent before" ]
+           @ nested_error_parts
+           @ [ url; file; text "parent after"
+             ; text {|End nested tool result {"tool_use_id":"nested-parent","is_error":false}|} ])
+    ; "direct_and_nested",
+        `List ([ text "outer before"; file ] @ nested_error_parts
+               @ [ text "outer after"; url ])
+    ; "nested_without_image",
+        `String {|[{"type":"tool_result","tool_use_id":"nested-text","content":[{"type":"text","text":"nested failure"}],"is_error":true}]|}
     ]
   in
   Eio_main.run @@ fun env ->

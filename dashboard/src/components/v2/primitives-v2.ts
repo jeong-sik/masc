@@ -116,7 +116,22 @@ export function StatusDot({ status, pulse = false }: { status: string; pulse?: b
   return html`<${Dot} state=${state} pulse=${pulse} />`
 }
 
-/** Linear meter (`.meter` + optional hot). */
-export function Meter({ pct = 0, hot = false }: { pct?: number; hot?: boolean }) {
-  return html`<div class=${'meter' + (hot ? ' hot' : '')}><span style=${{ width: Math.max(0, Math.min(100, pct)) + '%' }}></span></div>`
+/** Linear meter (`.meter` + optional hot).
+ *
+ *  [label] is required, not optional: a bar with a width and no name is a
+ *  shape a screen reader cannot read out. The one consumer already wrote
+ *  role and the three aria values by hand, which is how this primitive came
+ *  to be unused -- using it would have lost them. They live here now. */
+export function Meter(
+  { pct = 0, hot = false, label }: { pct?: number; hot?: boolean; label: string },
+) {
+  const clamped = Math.max(0, Math.min(100, pct))
+  return html`<div
+    class=${'meter' + (hot ? ' hot' : '')}
+    role="meter"
+    aria-label=${label}
+    aria-valuenow=${clamped}
+    aria-valuemin="0"
+    aria-valuemax="100"
+  ><span style=${{ width: clamped + '%' }}></span></div>`
 }

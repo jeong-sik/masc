@@ -12862,6 +12862,12 @@ let main () =
   let refresh_interval_ns =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
+  (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
+     reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
+  let msx_spectator_poll_seconds = 0.3 in
+  let msx_spectator_poll_interval_ns =
+    Int64.of_float (msx_spectator_poll_seconds *. nanoseconds_per_second)
+  in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
@@ -14013,6 +14019,27 @@ and is loaded on demand through keeper_skill.
           ~now_ns:(Mtime_clock.elapsed_ns ())
           ~maximum:maximum_input_wait_seconds
       in
+      (* While the spectator is open, keep the loop waking a few times a second
+         so a machine a keeper is driving looks live, and re-fetch the server
+         frame on that cadence. The fetch is bounded work on loopback; drawing
+         from the cache is cheap, so an unchanged frame just repaints. *)
+      let input_timeout =
+        if state.msx_open then Float.min input_timeout msx_spectator_poll_seconds
+        else input_timeout
+      in
+      if state.msx_open then begin
+        let now_ns = Mtime_clock.elapsed_ns () in
+        if
+          Int64.compare (Int64.sub now_ns state.msx_last_poll_ns)
+            msx_spectator_poll_interval_ns
+          >= 0
+        then begin
+          state.msx_last_poll_ns <- now_ns;
+          state.msx_frame <-
+            Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+          Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+        end
+      end;
       let input = read_input ~timeout:input_timeout input_reader () in
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
@@ -16285,14 +16312,14 @@ and is loaded on demand through keeper_skill.
            state.help_open <- true;
            state.help_scroll <- 0
       | Some "&" ->
-           (* The MSX screen takes the whole terminal, like the image
-              overlay: it draws itself and the loop yields until [esc]. *)
-           (match Masc_tui_msx.open_screen ~write:write_to_terminal state with
-            | Ok () -> ()
-            | Error { path; detail } ->
-                report_action state "error"
-                  (Printf.sprintf "MSX load failed (%s): %s. Repair the file and press & to retry."
-                     path detail))
+           (* The MSX spectator takes the whole terminal, like the image
+              overlay: it draws the server's frame and the loop yields until
+              [esc], re-fetching on a timer. Fetch once now so it opens on a
+              picture. *)
+           state.msx_frame <-
+             Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+           Masc_tui_msx.open_screen ~write:write_to_terminal state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0

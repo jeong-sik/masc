@@ -165,13 +165,25 @@ val event_queue_reaction_evidence_batch_result :
   ( (string * event_queue_reaction_evidence_outcome) list
   , event_queue_reaction_evidence_error )
   result
-(** Read the complete keeper-local ledger exactly once and build exact
-    evidence for every requested stimulus identity. Duplicate identities are
-    collapsed while preserving first-request order. This is the request-level
-    projection seam for bounded dashboards: rendering N rows for one Keeper
-    performs one ledger scan, not N complete scans. An empty identity rejects
-    the whole batch with {!Evidence_invalid_stimulus_id}; an empty query list
-    returns [Ok []]. *)
+(** Build exact evidence for every requested stimulus identity from the
+    keeper-local ledger. Duplicate identities are collapsed while preserving
+    first-request order. This is the request-level projection seam for bounded
+    dashboards: rendering N rows for one Keeper performs one ledger read, not
+    N. An empty identity rejects the whole batch with
+    {!Evidence_invalid_stimulus_id}; an empty query list returns [Ok []].
+
+    The read is incremental. A day file is append-only, so the accumulators
+    and the per-file cursors are kept between calls and only what the ledger
+    gained is folded in. A stimulus identity asked about for the first time
+    cannot be answered from a partial read, so it restarts every tracked
+    accumulator from a complete read - the same full scan as before, once per
+    identity rather than once per call. A file shorter than its cursor was
+    rotated or rewritten, and the whole Keeper's answer is rebuilt from a
+    complete read rather than kept.
+
+    What is kept is one accumulator per identity the caller has asked about,
+    never the ledger and never every identity in it. A read failure drops that
+    Keeper's cache and returns {!Evidence_read_error}. *)
 
 val event_queue_turn_started_seen_for_source_result :
   base_path:string ->

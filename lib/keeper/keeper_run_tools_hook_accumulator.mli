@@ -3,6 +3,7 @@
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
+  ; historical_tool_calls : Keeper_agent_result.tool_call_detail list
   ; mutable current_turn : int
   ; mutable tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -30,7 +31,21 @@ type hook_outputs =
       Keeper_contract_classifier.actionable_signal option
   }
 
+val create :
+  meta:Keeper_meta_contract.keeper_meta ->
+  tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
+  historical_tool_calls:Keeper_agent_result.tool_call_detail list ->
+  hook_accumulator
+(** Begin a new invocation, retaining checkpoint calls only for repetition. *)
+
+(** Current invocation outputs only. Checkpoint history is never execution
+    evidence for a new invocation. *)
 val freeze : hook_accumulator -> hook_outputs
+
+(** Current calls followed by checkpoint history, newest first, exclusively
+    for repeated-call detection across a resume boundary. *)
+val tool_calls_for_repetition :
+  hook_accumulator -> Keeper_agent_result.tool_call_detail list
 
 val record_requested_tool_names :
   hook_accumulator -> string list -> unit

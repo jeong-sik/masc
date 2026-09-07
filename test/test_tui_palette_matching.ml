@@ -265,10 +265,20 @@ let test_a_label_starting_with_the_query_leads () =
   state.view <- Code;
   state.code_focus_file <- Right_pane;
   state.palette_query <- "def ";
-  let labels = List.map fst (palette_matches state) in
-  check_names "the prefix hit leads, the substring hits follow in entry order"
-    [ "def Hook_common"; "post deferred wakeup evidence"; "post head 7def9c review" ]
-    labels;
+  let matches = palette_matches state in
+  (* This is the full operator palette, so independent commands may also
+     match "def" as a subsequence. They must not displace the exact prefix
+     candidate or reorder the two authored post matches. *)
+  (match matches with
+   | ("def Hook_common", Palette_lsp ("definition", "Hook_common")) :: _ -> ()
+   | _ -> Alcotest.fail "the definition prefix must lead the entire palette");
+  let posts = List.filter_map (function
+    | label, Palette_board_post id -> Some (label, id)
+    | _ -> None) matches in
+  Alcotest.(check (list (pair string string)))
+    "substring post matches preserve entry order and action identity"
+    [ "post deferred wakeup evidence", "p-1";
+      "post head 7def9c review", "p-2" ] posts;
   state.palette_query <- "hover ";
   check_names "hover pre-fill lists only the cursor line's hover entry"
     [ "hover Hook_common" ]

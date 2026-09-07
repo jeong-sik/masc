@@ -140,6 +140,44 @@ let test_press_validation () =
     (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r))
 ;;
 
+let test_inventory () =
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load without cart completes" true (is_completed r);
+  check (option (list string)) "empty inventory is an empty list" (Some [])
+    (match member "carts_available" (Tool_result.data r) with
+     | Some (`List l) -> Some (List.filter_map (function `String s -> Some s | _ -> None) l)
+     | _ -> None);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "hero") ] in
+  check bool "an unknown name is refused" true (rejected r);
+  (* Two images in the inventory: a 16KB one named with .rom, a 32KB one without. *)
+  List.iter (fun d -> if not (Sys.file_exists d) then Sys.mkdir d 0o755)
+    [ Filename.concat base_path ".masc"; Filename.dirname carts; carts ];
+  Out_channel.with_open_bin (Filename.concat carts "hero.rom") (fun oc ->
+    output_string oc (String.make 0x4000 '\000'));
+  Out_channel.with_open_bin (Filename.concat carts "big") (fun oc ->
+    output_string oc (String.make 0x8000 '\000'));
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check (option (list string)) "inventory lists both, sorted" (Some [ "big"; "hero.rom" ])
+    (match member "carts_available" (Tool_result.data r) with
+     | Some (`List l) -> Some (List.filter_map (function `String s -> Some s | _ -> None) l)
+     | _ -> None);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "hero") ] in
+  check bool "a name without .rom resolves" true (is_completed r);
+  check (option string) "the cartridge is named by its file" (Some "hero.rom")
+    (match member "cartridge" (Tool_result.data r) with Some (`String s) -> Some s | _ -> None);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "big") ] in
+  check bool "an exact inventory name resolves" true (is_completed r);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "nope") ] in
+  check bool "an unknown name is still refused" true (rejected r);
+  check bool "the refusal names the inventory" true
+    (let m = Tool_result.message r in
+     let has needle = let ln = String.length needle and lm = String.length m in
+       let rec go i = i + ln <= lm && (String.sub m i ln = needle || go (i + 1)) in go 0 in
+     has "hero.rom" && has "big")
+;;
+
 let test_key_vocabulary () =
   let named =
     [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
@@ -236,6 +274,7 @@ let () =
         ; test_case "load, step, screen, eject" `Quick test_load_and_clock
         ; test_case "press writes the ledger" `Quick test_press_ledger
         ; test_case "press validation" `Quick test_press_validation
+        ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "registration" `Quick test_registration
         ; test_case "xspelunker: two presses reach the level card" `Quick

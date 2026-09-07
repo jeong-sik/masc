@@ -2,20 +2,23 @@ name = "masc_msx_load"
 description = """
 Power on the workspace MSX machine (MSX2, C-BIOS) and plug in one \
 cartridge. Replaces any machine already loaded and starts a new input \
-ledger. Runs the boot ahead 45 frames so the first screen is the BIOS \
-logo; a cartridge game reaches its own title after roughly 300 more \
-frames (masc_msx_step). Returns the same observation as masc_msx_screen."""
+ledger. Without cart it boots the BIOS alone and lists carts_available, \
+the game images in the workspace inventory (.masc/msx/carts/); pass one \
+of those names as cart. Runs the boot ahead 45 frames so the first \
+screen is the BIOS logo; a cartridge game reaches its own title after \
+roughly 300 more frames (masc_msx_step). Returns the same observation as \
+masc_msx_screen."""
 additional_properties = false
 
 # Called once per game session; the schema would otherwise ride every request.
 defer_loading = true
 
 [[params]]
-name = "roms_dir"
-type = "string"
-description = "Directory holding the C-BIOS ROMs (cbios_main_msx2.rom, cbios_logo_msx2.rom, cbios_sub.rom). Default: the server's MSX_ROMS environment variable. Empty means no BIOS."
-
-[[params]]
 name = "cart"
 type = "string"
-description = "Path to a 16KB or 32KB cartridge ROM image. Omit for BIOS only."
+description = "A name from carts_available (with or without .rom) or a path to a 16KB/32KB cartridge image. Omit to boot the BIOS alone and see the inventory."
+
+[[params]]
+name = "roms_dir"
+type = "string"
+description = "Directory holding the C-BIOS ROMs. Default: the server's MSX_ROMS, else .masc/msx/bios/ when it holds cbios_main_msx2.rom, else no BIOS."

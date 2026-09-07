@@ -119,82 +119,48 @@ let skill_action_lines actions =
 let async_request_observation_lines (state : state) =
   match state.tools_async_observation_error, state.tools_async_observation with
   | Some detail, _ ->
-    [ Theme.bad (), " Async broker — " ^ Terminal_text.single_line detail ]
+    [ Theme.bad (), " Async broker — 읽기 실패: " ^ Terminal_text.single_line detail ]
   | None, None -> [ Theme.warn (), " Async broker — not loaded" ]
-  | None, Some json ->
-    (match json_assoc_member_opt "status" json with
-     | Some (`String "unavailable") ->
-       [ Theme.bad (), " Async broker — durable inventory unavailable" ]
-     | Some (`String "ready") ->
-       let int_field json name =
-         match json_assoc_member_opt name json with
-         | Some (`Int value) -> value
-         | Some _ | None -> 0
-       in
-       let summary_lines =
-         match json_assoc_member_opt "summary" json with
-         | Some (`Assoc _ as summary) ->
-           [ Ansi.bold,
-             Printf.sprintf
-               " Async broker — active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
-               (int_field summary "active")
-               (int_field summary "runtime_owned")
-               (int_field summary "ownership_unknown")
-               (int_field summary "record_errors")
-           ]
-         | Some _ | None -> [ Theme.bad (), " Async broker — summary is malformed" ]
-       in
-       let request_lines =
-         match json_assoc_member_opt "requests" json with
-         | Some (`List requests) ->
-           List.map
-             (fun request ->
-                let string_field name fallback =
-                  match json_assoc_member_opt name request with
-                  | Some (`String value) -> value
-                  | Some _ | None -> fallback
-                in
-                let elapsed =
-                  match json_assoc_member_opt "elapsed_sec" request with
-                  | Some (`Float value) -> Printf.sprintf "%.1fs" value
-                  | Some (`Int value) -> Printf.sprintf "%ds" value
-                  | Some _ | None -> "?s"
-                in
-                let ownership = string_field "worker_ownership" "unknown" in
-                (if String.equal ownership "runtime_owned"
-                 then Theme.ok ()
-                 else Theme.warn ()),
-                Printf.sprintf
-                  "   %s · %s · %s · %s · %s"
-                  (Terminal_text.single_line (string_field "request_id" "?"))
-                  (Terminal_text.single_line (string_field "keeper_name" "?"))
-                  (Terminal_text.single_line (string_field "status" "?"))
-                  elapsed
-                  (Terminal_text.single_line ownership))
-             requests
-         | Some _ | None -> [ Theme.bad (), "   async request rows are malformed" ]
-       in
-       let recovery_lines =
-         match json_assoc_member_opt "startup_recovery" json with
-         | Some (`Assoc _ as recovery) ->
-           [ Ansi.dim,
-             Printf.sprintf
-               "   startup recovery: lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging=%d/%d/%d"
-               (int_field recovery "lost")
-               (int_field recovery "finalized")
-               (int_field recovery "cleaned")
-               (int_field recovery "unreadable")
-               (int_field recovery "failed")
-               (int_field recovery "staging_files_inspected")
-               (int_field recovery "staging_files_deleted")
-               (int_field recovery "staging_files_preserved")
-           ]
-         | Some `Null | None ->
-           [ Ansi.dim, "   startup recovery: not observed by this process" ]
-         | Some _ -> [ Theme.bad (), "   startup recovery report is malformed" ]
-       in
-       summary_lines @ request_lines @ recovery_lines
-     | Some _ | None -> [ Theme.bad (), " Async broker response is malformed" ])
+  | None, Some (Async_unavailable { kind; reason }) ->
+    [ Theme.bad (), " Async broker — durable inventory unavailable: "
+        ^ Terminal_text.single_line kind
+        ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ Terminal_text.single_line value) reason ]
+  | None, Some (Async_ready { summary; requests; recovery }) ->
+    let summary_lines =
+      [ Ansi.bold,
+        Printf.sprintf
+          " Async broker — active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
+          summary.ars_active summary.ars_runtime_owned
+          summary.ars_ownership_unknown summary.ars_record_errors ]
+    in
+    let request_lines = List.map (fun request ->
+      let tone, ownership = match request.ar_ownership with
+        | Async_runtime_owned -> Theme.ok (), "runtime_owned"
+        | Async_ownership_unknown -> Theme.warn (), "disk_only_ownership_unknown"
+      in
+      let status = match request.ar_phase with
+        | Async_queued -> "queued"
+        | Async_running -> "running"
+        | Async_cancelling -> "cancelling"
+      in
+      let elapsed = Option.fold ~none:"?s"
+        ~some:(Printf.sprintf "%.1fs") request.ar_elapsed_sec in
+      tone, Printf.sprintf "   %s · %s · %s · %s · %s"
+        (Terminal_text.single_line request.ar_request_id)
+        (Terminal_text.single_line request.ar_keeper_name)
+        status elapsed ownership) requests
+    in
+    let recovery_lines = match recovery with
+      | None -> [ Ansi.dim, "   startup recovery: not observed by this process" ]
+      | Some report ->
+        [ Ansi.dim,
+          Printf.sprintf
+            "   startup recovery: lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging=%d/%d/%d"
+            report.arr_lost report.arr_finalized report.arr_cleaned
+            report.arr_unreadable report.arr_failed report.arr_staging_inspected
+            report.arr_staging_deleted report.arr_staging_preserved ]
+    in
+    summary_lines @ request_lines @ recovery_lines
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)

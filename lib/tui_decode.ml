@@ -9537,3 +9537,112 @@ let decode_skill_evidence json =
         }
     | _ -> Error "Skill evidence coverage must be an object"
 ;;
+
+(** Decoded durable async inventory. Malformed counters are errors, never zero.
+    The active inventory contains queued, running and cancelling requests only. *)
+type async_request_phase = Async_queued | Async_running | Async_cancelling
+
+type async_request_ownership = Async_runtime_owned | Async_ownership_unknown
+
+type async_request_row =
+  { ar_request_id : string
+  ; ar_keeper_name : string
+  ; ar_phase : async_request_phase
+  ; ar_elapsed_sec : float option
+  ; ar_ownership : async_request_ownership
+  }
+
+type async_request_summary =
+  { ars_active : int
+  ; ars_runtime_owned : int
+  ; ars_ownership_unknown : int
+  ; ars_record_errors : int
+  }
+
+type async_recovery_report =
+  { arr_lost : int
+  ; arr_finalized : int
+  ; arr_cleaned : int
+  ; arr_unreadable : int
+  ; arr_failed : int
+  ; arr_staging_inspected : int
+  ; arr_staging_deleted : int
+  ; arr_staging_preserved : int
+  }
+
+type async_request_observation =
+  | Async_ready of
+      { summary : async_request_summary
+      ; requests : async_request_row list
+      ; recovery : async_recovery_report option
+      }
+  | Async_unavailable of { kind : string; reason : string option }
+
+let decode_async_request_observation json =
+  let* schema = required_string_field json "schema" in
+  let* () = match schema with
+    | "masc.async-request-observation/v1" -> Ok ()
+    | _ -> Error (Printf.sprintf "unsupported async inventory schema %S" schema)
+  in
+  let* status = required_string_field json "status" in
+  match status with
+  | "unavailable" ->
+    let* error = required_object_field json "error" in
+    let* kind = required_string_field error "kind" in
+    let* reason = optional_string_field error "reason" in
+    Ok (Async_unavailable { kind; reason })
+  | "ready" ->
+    let* summary = required_object_field json "summary" in
+    let count scope json key =
+      Result.map_error (fun detail -> scope ^ ": " ^ detail)
+        (required_nonnegative_int_field json key)
+    in
+    let* ars_active = count "summary" summary "active" in
+    let* ars_runtime_owned = count "summary" summary "runtime_owned" in
+    let* ars_ownership_unknown = count "summary" summary "ownership_unknown" in
+    let* ars_record_errors = count "summary" summary "record_errors" in
+    let summary = { ars_active; ars_runtime_owned; ars_ownership_unknown; ars_record_errors } in
+    let decode_row json =
+      let* ar_request_id = required_nonempty_string_field json "request_id" in
+      let* ar_keeper_name = required_nonempty_string_field json "keeper_name" in
+      let* status = required_string_field json "status" in
+      let* ar_phase = match status with
+        | "queued" -> Ok Async_queued
+        | "running" -> Ok Async_running
+        | "cancelling" -> Ok Async_cancelling
+        | _ -> Error (Printf.sprintf "unknown active request status %S" status)
+      in
+      let* ownership = required_string_field json "worker_ownership" in
+      let* ar_ownership = match ownership with
+        | "runtime_owned" -> Ok Async_runtime_owned
+        | "disk_only_ownership_unknown" -> Ok Async_ownership_unknown
+        | _ -> Error (Printf.sprintf "unknown worker ownership %S" ownership)
+      in
+      let* ar_elapsed_sec = optional_float_field json "elapsed_sec" in
+      let* () = match ar_elapsed_sec with
+        | Some value when not (Float.is_finite value) -> Error "elapsed_sec must be finite"
+        | Some _ | None -> Ok ()
+      in
+      Ok { ar_request_id; ar_keeper_name; ar_phase; ar_elapsed_sec; ar_ownership }
+    in
+    let* rows = required_list_field json "requests" in
+    let* requests = decode_list "requests" decode_row rows in
+    let* recovery_json = required_member json "startup_recovery" in
+    let* recovery = match recovery_json with
+      | `Null -> Ok None
+      | `Assoc _ ->
+        let* arr_lost = count "startup_recovery" recovery_json "lost" in
+        let* arr_finalized = count "startup_recovery" recovery_json "finalized" in
+        let* arr_cleaned = count "startup_recovery" recovery_json "cleaned" in
+        let* arr_unreadable = count "startup_recovery" recovery_json "unreadable" in
+        let* arr_failed = count "startup_recovery" recovery_json "failed" in
+        let* arr_staging_inspected = count "startup_recovery" recovery_json "staging_files_inspected" in
+        let* arr_staging_deleted = count "startup_recovery" recovery_json "staging_files_deleted" in
+        let* arr_staging_preserved = count "startup_recovery" recovery_json "staging_files_preserved" in
+        Ok (Some { arr_lost; arr_finalized; arr_cleaned; arr_unreadable; arr_failed;
+                   arr_staging_inspected; arr_staging_deleted; arr_staging_preserved })
+      | bad -> field_type_error "startup_recovery" "an object or null" bad
+    in
+    Ok (Async_ready { summary; requests; recovery })
+  | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
+;;

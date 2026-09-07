@@ -7406,13 +7406,14 @@ def run_tools_purpose_regression(executable: str) -> None:
             "ledger": {"schema": "masc.skill-activations/v5", **ledger_contents, "revision": ledger_revision},
         },
     })
-    fixtures["/api/v1/async-requests"] = (200, {
+    async_payload = {
         "schema": "masc.async-request-observation/v1", "status": "ready",
         "summary": {"active": 1, "runtime_owned": 0, "ownership_unknown": 1, "record_errors": 0},
         "requests": [{"request_id": "request-unowned", "keeper_name": "alpha", "status": "queued",
                       "elapsed_sec": 2, "worker_ownership": "disk_only_ownership_unknown"}],
         "record_errors": [], "startup_recovery": None,
-    })
+    }
+    fixtures["/api/v1/async-requests"] = lambda: (200, async_payload)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Overview")
@@ -7430,6 +7431,50 @@ def run_tools_purpose_regression(executable: str) -> None:
             raise AssertionError("Catalog-only tool appeared on selected Keeper surface")
         send_and_wait(process, master_fd, output, b"p", b"request-unowned")
         require("워크스페이스의 비동기 요청·복구 상태", "소유 확인 안 됨", "ownership-unknown=1")
+        # Broken API data must not be presented as a healthy empty broker.
+        for broken in ("unknown", None, -1):
+            async_payload["summary"]["active"] = broken
+            send_and_wait(process, master_fd, output, b"r", "읽기 실패:".encode())
+            require("active")
+            if b"active=0" in screen_text(bytes(output)) or b"request-unowned" in screen_text(bytes(output)):
+                raise AssertionError("Malformed counter retained a healthy summary or stale request")
+            async_payload["summary"]["active"] = 1
+            send_and_wait(process, master_fd, output, b"r", b"request-unowned")
+        del async_payload["summary"]["runtime_owned"]
+        send_and_wait(process, master_fd, output, b"r", "읽기 실패:".encode())
+        require("runtime_owned")
+        async_payload["summary"]["runtime_owned"] = 0
+        async_payload["startup_recovery"] = {"lost": 0}
+        send_and_wait(process, master_fd, output, b"r", b"finalized")
+        require("읽기 실패:")
+        if b"finalized=0" in screen_text(bytes(output)):
+            raise AssertionError("Missing recovery counter became zero")
+        captured = bytes(output)
+        end = captured.rfind(FRAME_END) + len(FRAME_END)
+        redraw = captured.rfind(FULL_REDRAW, 0, end)
+        start = captured.rfind(FRAME_START, 0, redraw)
+        if min(start, redraw) < 0:
+            raise AssertionError("Async error evidence has no completed redraw")
+        print("ASYNC_OBSERVATION_PTY_EVIDENCE " + json.dumps({
+            "fixture": "incomplete recovery report must fail visibly", "rows": 30, "columns": 120,
+            "binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+            "encoding": "base64", "pty": base64.b64encode(captured[start:end]).decode(),
+        }), flush=True)
+        async_payload["startup_recovery"] = None
+        async_payload["requests"][0]["worker_ownership"] = "new_unknown_owner"
+        send_and_wait(process, master_fd, output, b"r", b"unknown worker ownership")
+        require("읽기 실패:")
+        async_payload["requests"][0]["worker_ownership"] = "disk_only_ownership_unknown"
+        send_and_wait(process, master_fd, output, b"r", b"request-unowned")
+        saved_requests = async_payload["requests"]
+        async_payload["requests"] = []
+        async_payload["summary"].update(active=0, ownership_unknown=0)
+        send_and_wait(process, master_fd, output, b"r", b"active=0")
+        if "읽기 실패:".encode() in screen_text(bytes(output)):
+            raise AssertionError("Valid empty broker was rejected")
+        async_payload["requests"] = saved_requests
+        async_payload["summary"].update(active=1, ownership_unknown=1)
+        send_and_wait(process, master_fd, output, b"r", b"request-unowned")
         send_and_wait(process, master_fd, output, b"p", b"Skill Use")
         require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts", "invoked=0")
         send_and_wait(process, master_fd, output, b"p", b"bravo 12/12/9")

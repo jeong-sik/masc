@@ -468,6 +468,13 @@ let prepare_agent_setup
          Agent_core.Error.Internal
            (Keeper_skill_activation_recorder.error_to_string error))
   in
+  let* load_receipts =
+    Keeper_tool_load_receipts.restore
+      ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
+      ~target:shared_context
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal (Keeper_tool_load_receipts.error_to_string error))
+  in
   let acc =
     Keeper_run_tools_hook_accumulator.create ~meta
       ~historical_tool_calls:(initial_tool_calls ~history_messages)
@@ -552,6 +559,7 @@ let prepare_agent_setup
             identity_allow.Keeper_identity_tool_allow.kept
         ; agent_cell
         ; history = history_messages
+        ; load_receipts
         }
       ?composition_plan_index
       ~skill_activation_context

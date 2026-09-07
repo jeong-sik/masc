@@ -1468,7 +1468,14 @@ let run_named
                  take [tools] whole. A caller that named no lane view is not
                  deferring anything, so this lane sends every tool too --
                  which is what every caller did before the listing existed. *)
-              tools = agent_core_tools
+              tools =
+                (match agent_ref with
+                 | None -> agent_core_tools
+                 | Some agent_cell ->
+                   (* A previous provider attempt may have loaded more tools.
+                      Carry its actual callable set into the next agent. *)
+                   Keeper_agent_tool_surface.on_the_wire
+                     ~agent_cell ~built:agent_core_tools)
             ; initial_messages
             ; model_input_projection
             ; stream_idle_timeout_s

@@ -28,6 +28,7 @@ type surface =
   { deferred : deferred list
   ; agent_cell : Agent_core.Agent.t option ref
   ; history : Agent_core.Types.message list
+  ; receipts : Keeper_tool_load_receipts.t
   ; carry_window : int
   }
 
@@ -66,7 +67,8 @@ let rec note (cell : string list Atomic.t) name =
 ;;
 
 let tool_name = "keeper_tool_search"
-(** The argument that names tools exactly. *)
+
+(* The argument that names tools exactly. *)
 let names_param = "names"
 
 (* One line per tool, shown in the answer when the tool is loaded. A line
@@ -124,7 +126,6 @@ let description_of ~placed entries =
   | names -> declared.Masc_domain.description ^ "\n" ^ String.concat ", " names
 ;;
 
-
 let refusal message =
   Error
     { Agent_core.Types.message
@@ -172,13 +173,33 @@ let describe entry = Printf.sprintf "- %s: %s" entry.name entry.summary
 (* Puts [found] into the running agent's callable set and answers with what
    each one does, so the model can pick among what it just loaded without
    waiting for the schemas of the next request. *)
-let load_found ~agent ~usage found =
-  Agent_core.Agent.extend_tools agent (List.map (fun entry -> entry.callable) found);
-  List.iter (fun entry -> note usage.loaded entry.name) found;
-  "now callable:\n" ^ String.concat "\n" (List.map describe found)
+let load_found ~agent ~usage ~receipts ~invocation found =
+  match
+    Keeper_tool_load_receipts.loaded
+      receipts
+      ~invocation
+      ~names:(List.map (fun entry -> entry.name) found)
+      ~apply:(fun () ->
+        Agent_core.Agent.extend_tools agent (List.map (fun entry -> entry.callable) found))
+  with
+  | Error (Keeper_tool_load_receipts.Work_scope_unavailable _ as error) ->
+    Error
+      { Agent_core.Types.message = Keeper_tool_load_receipts.error_to_string error
+      ; recoverable = true
+      ; error_class = Some Agent_core.Types.Transient
+      }
+  | Error (Keeper_tool_load_receipts.Invalid_snapshot _ as error) ->
+    Error
+      { Agent_core.Types.message = Keeper_tool_load_receipts.error_to_string error
+      ; recoverable = false
+      ; error_class = Some Agent_core.Types.Deterministic
+      }
+  | Ok () ->
+    List.iter (fun entry -> note usage.loaded entry.name) found;
+    Ok ("now callable:\n" ^ String.concat "\n" (List.map describe found))
 ;;
 
-let load ~keeper_name ~agent_cell ~entries ~usage requested =
+let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested =
   match !agent_cell with
   | None ->
     (* The cell is filled at agent creation, so an empty one here means the
@@ -191,46 +212,50 @@ let load ~keeper_name ~agent_cell ~entries ~usage requested =
       ~category:Log.Tool
       ~details:
         (`Assoc
-           [ "error_kind", `String "keeper_identity_tool_search_no_agent"
-           ; "requested", Json_util.json_string_list requested
-           ])
+            [ "error_kind", `String "keeper_identity_tool_search_no_agent"
+            ; "requested", Json_util.json_string_list requested
+            ])
       "Attached tool listing has no running agent to make tools callable";
     Error
       { Agent_core.Types.message =
-          "this turn has no agent to make the tool callable in; the attached \
-           surface cannot be reached"
+          "this turn has no agent to make the tool callable in; the attached surface \
+           cannot be reached"
       ; recoverable = false
       ; error_class = Some Agent_core.Types.Deterministic
       }
   | Some agent ->
-   let found, unknown =
-     List.partition_map
-       (fun name ->
-          match List.find_opt (fun entry -> String.equal entry.name name) entries with
-          | Some entry -> Either.Left entry
-          | None -> Either.Right name)
-       requested
-   in
-   (match found with
-    | [] ->
-      refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
-    | _ :: _ ->
-      let loaded = load_found ~agent ~usage found in
-      let content =
-        match unknown with
-        | [] -> loaded
-        | _ :: _ ->
-          Printf.sprintf "%s\nnot in the list: %s" loaded (String.concat ", " unknown)
-      in
-      Ok { Agent_core.Types.content; _meta = None })
+    let found, unknown =
+      List.partition_map
+        (fun name ->
+           match List.find_opt (fun entry -> String.equal entry.name name) entries with
+           | Some entry -> Either.Left entry
+           | None -> Either.Right name)
+        requested
+    in
+    (match found with
+     | [] -> refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
+     | _ :: _ ->
+       (match load_found ~agent ~usage ~receipts ~invocation found with
+        | Error _ as error -> error
+        | Ok loaded ->
+          let content =
+            match unknown with
+            | [] -> loaded
+            | _ :: _ ->
+              Printf.sprintf "%s\nnot in the list: %s" loaded (String.concat ", " unknown)
+          in
+          Ok { Agent_core.Types.content; _meta = None }))
 ;;
 
 (* Same tool, and it also says it ran. The wrapper keeps the descriptor so
    the schedule this tool is admitted under does not change. *)
-let observed usage (tool : Agent_core.Tool.t) =
+let observed usage receipts (tool : Agent_core.Tool.t) =
   { tool with
     Agent_core.Tool.handler =
       (fun env input ->
+        Keeper_tool_load_receipts.dispatched
+          receipts
+          ~name:tool.Agent_core.Tool.schema.name;
         note usage.used tool.Agent_core.Tool.schema.name;
         tool.Agent_core.Tool.handler env input)
   }
@@ -349,70 +374,18 @@ let carry_from_history ~carry_window ~entries history =
   carried_names, dropped
 ;;
 
-(* The names the conversation's last tool call asked this listing for, when
-   that call is still the last one.
-
-   A load reaches the agent of the turn that made it and no further, and the
-   carry is folded from calls, so a tool the model searched for and did not
-   get to call before the turn ended is not placed on the next request: it
-   sees the name again and searches again. Measured 2026-09-06 on sangsu,
-   asked to answer by voice: fourteen consecutive [keeper_tool_search] calls
-   for [keeper_voice_speak] and zero calls to it. Its own reasoning states
-   the rule it then breaks, so the model is not what is failing.
-
-   Most tools escape this because they get used in runs -- one turn where a
-   search and a call share a turn is enough, and the carry holds them after.
-   A tool called once, alone, by instruction never gets that turn. [make]'s
-   contract already promises the way out ("Recovering costs one round trip"),
-   which holds only if the load survives the turn that made it.
-
-   Read off the last [ToolUse] block rather than remembered: a later call of
-   any tool means the request was already answered or abandoned, so the grant
-   lapses on its own and no state has to be kept, expired, or reconciled
-   after a crash. That is the same discipline as the carry, and it is why
-   this is one request rather than a window: carrying every request grows the
-   surface back toward the full attached list, which is what
-   {!already_used} exists to avoid. *)
-let requested_by_last_call history =
-  let last = ref None in
-  List.iter
-    (fun (message : Agent_core.Types.message) ->
-       List.iter
-         (fun (block : Agent_core.Types.content_block) ->
-            match block with
-            | Agent_core.Types.ToolUse { name; input; _ } -> last := Some (name, input)
-            | Agent_core.Types.Text _
-            | Agent_core.Types.Thinking _
-            | Agent_core.Types.RedactedThinking _
-            | Agent_core.Types.ToolResult _
-            | Agent_core.Types.Image _
-            | Agent_core.Types.Document _
-            | Agent_core.Types.ReasoningDetails _
-            | Agent_core.Types.Audio _ -> ())
-         message.Agent_core.Types.content)
-    history;
-  match !last with
-  | Some (name, input) when String.equal name tool_name ->
-    (* The listing's own parser, so a request this would place is exactly a
-       request the handler would have accepted. *)
-    (match requested_names input with
-     | Ok names -> names
-     | Error _ -> [])
-  | Some _ | None -> []
-;;
-
 (* [entries] order, not carry order: the tool array is a cache prefix keyed by
    the exact bytes in the exact order sent, so a tool that leaves the window
    and comes back must come back in the slot it left. *)
-let already_used_from_history ~carry_window ~entries history =
+let already_used_from_history ~carry_window ~entries ~receipts history =
   let carried_names, dropped = carry_from_history ~carry_window ~entries history in
-  (* Placed, but not carried: the grant is spent by the next call of anything,
-     and [dropped] stays the carry's own answer so the window's diagnostics
-     keep measuring the window. *)
-  let requested = requested_by_last_call history in
+  (* Successful loads stay callable until their own dispatch or a changed
+     work/surface scope. Sibling calls say nothing about whether a loaded
+     tool is still needed. Carry diagnostics describe actual use separately. *)
+  let pending = Keeper_tool_load_receipts.pending_names receipts in
   let placed_name name =
     List.exists (String.equal name) carried_names
-    || List.exists (String.equal name) requested
+    || List.exists (String.equal name) pending
   in
   let placed =
     List.filter_map
@@ -422,7 +395,7 @@ let already_used_from_history ~carry_window ~entries history =
   placed, carried_names, dropped
 ;;
 
-let make ~keeper_name { deferred; agent_cell; history; carry_window } =
+let make ~keeper_name { deferred; agent_cell; history; carry_window; receipts } =
   match deferred with
   | [] -> None
   | _ :: _ ->
@@ -432,12 +405,12 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window } =
         (fun (d : deferred) ->
            { name = d.tool.Agent_core.Tool.schema.name
            ; summary = d.summary
-           ; callable = observed usage d.tool
+           ; callable = observed usage receipts d.tool
            })
         deferred
     in
     let already_used, carried_names, dropped =
-      already_used_from_history ~carry_window ~entries history
+      already_used_from_history ~carry_window ~entries ~receipts history
     in
     (match dropped with
      | [] -> ()
@@ -464,11 +437,11 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window } =
          ~category:Log.Tool
          ~details:
            (`Assoc
-              [ "error_kind", `String "keeper_attached_tool_carry_state"
-              ; "carry_window", `Int carry_window
-              ; "carried", `Int (List.length carried_names)
-              ; "dropped", Json_util.json_string_list dropped
-              ])
+               [ "error_kind", `String "keeper_attached_tool_carry_state"
+               ; "carry_window", `Int carry_window
+               ; "carried", `Int (List.length carried_names)
+               ; "dropped", Json_util.json_string_list dropped
+               ])
          "Tools this conversation ran are outside the carry window");
     let placed =
       List.map
@@ -491,16 +464,23 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window } =
         invalid_arg
           (Printf.sprintf "%s has a malformed argument schema: %s" tool_name reason)
     in
-    let handler input =
+    let handler env input =
       match requested_names input with
       | Error message -> refusal message
-      | Ok requested -> load ~keeper_name ~agent_cell ~entries ~usage requested
+      | Ok requested ->
+        (match Agent_core.Tool.Execution_env.invocation env with
+         | None ->
+           Error
+             { Agent_core.Types.message =
+                 "this tool load has no execution identity for its continuation receipt"
+             ; recoverable = false
+             ; error_class = Some Agent_core.Types.Deterministic
+             }
+         | Some invocation ->
+           load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested)
     in
     Some
-      { tool =
-          Agent_core.Tool.of_schema
-            schema
-            (Agent_core.Tool.ignoring_execution_env handler)
+      { tool = Agent_core.Tool.of_schema schema handler
       ; already_used
       ; observe_turn = observe_turn ~keeper_name ~usage
       }

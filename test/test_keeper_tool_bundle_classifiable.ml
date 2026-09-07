@@ -323,6 +323,13 @@ let with_bundle_tools
            ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
            ~task_skills:[]
        in
+       let receipt_context = Keeper_context_core.agent_core_context_of_context ctx_snapshot in
+       let load_receipts =
+         match Keeper_tool_load_receipts.restore
+                 ~source:receipt_context ~target:receipt_context with
+         | Ok restored -> restored
+         | Error error -> fail (Keeper_tool_load_receipts.error_to_string error)
+       in
        let bundle =
          Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config
@@ -334,6 +341,7 @@ let with_bundle_tools
              { Masc.Keeper_tools_agent_core.offered = identity_tools ()
              ; agent_cell = ref None
              ; history = []
+             ; load_receipts
              }
            ~composition_plan_index
            ?skill_activation_context:

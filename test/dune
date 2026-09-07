@@ -4045,6 +4045,16 @@
  (deps (alias runtest-test_tui_keyboard_input-skill-usage-coverage)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-tools-purpose)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} tools-purpose)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-tools-purpose)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-acting-call-evidence)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action

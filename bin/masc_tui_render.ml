@@ -14418,7 +14418,7 @@ let render_runtime (state : state) =
 
 let tools_scrolled_for_lines state display_lines =
   { sc_count = List.length display_lines
-  ; sc_chrome = if Option.is_some state.tools_error then 7 else 5
+  ; sc_chrome = if Option.is_some state.tools_error then 8 else 6
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -14438,15 +14438,13 @@ let render_tools (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    (* The strip replaces the old subtitle. "effective Keeper + registered
-       catalog" named two of the five sections and the header is where a
-       reader looks for what a surface holds. *)
-    Printf.sprintf "%s  %s  %s  %s"
-      (screen_title " MASC Tools") (Render_tools.tools_pane_strip state) timestamp
+    Printf.sprintf "%s  %s  %s"
+      (screen_title " MASC Tools") timestamp
       (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
+  box_line buf cols (" " ^ Render_tools.tools_pane_strip state);
   box_divider buf cols;
   (match state.tools_error with
    | None -> ()

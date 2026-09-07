@@ -7332,6 +7332,108 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         )
 
 
+def run_tools_purpose_regression(executable: str) -> None:
+    fixtures = skills_usage_clarity_http_fixtures()
+    # Alpha has an empty current ledger; the workspace aggregate retains
+    # another Keeper's usage. The two panes must keep those scopes distinct.
+    skills = fixtures["/api/v1/skills"]
+    assert isinstance(skills, tuple)
+    skills[1]["surfaces"][0]["usage"][0]["keeper"] = "bravo"
+    suppressed = threading.Event()
+    ledger_contents = {
+        "workspace_key": "1" * 64, "session_id": "trace-alpha",
+        "activations": [], "transition_rejections": [],
+    }
+    ledger_revision = hashlib.sha256(
+        json.dumps(ledger_contents, separators=(",", ":")).encode()
+    ).hexdigest()
+    effective = {
+        "status": "available", "keeper_name": "alpha", "runtime_id": "fixture.tools",
+        "official_client_kind": "agent_core", "tool_delivery": {"status": "delivered"},
+        "native_posture": None, "skill_snapshot_revision": "c" * 64,
+        "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
+        "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+        "count": 1, "tools": [{"name": "keeper_status", "origin": {"kind": "descriptor"}}],
+        "tool_surface_sha256": None,
+    }
+    inventory = {
+        "count": 1,
+        "tools": [{
+            "name": "masc_board_post", "description": "Registered fixture tool",
+            "registered_schema": True, "direct_call_allowed": False,
+            "doc_refs": [], "prompt_hints": [], "surfaces": [],
+        }],
+    }
+    fixtures["/api/v1/dashboard/tools?keeper=alpha"] = lambda: (200, {
+        "tool_inventory": inventory,
+        "effective_keeper_surface": ({**effective, "tools": [], "count": 0,
+            "tool_delivery": {"status": "suppressed", "reason": "runtime_tools_unsupported"}}
+            if suppressed.is_set() else effective),
+        "skill_activations": {
+            "status": "available", "keeper_name": "alpha",
+            "ledger": {"schema": "masc.skill-activations/v5", **ledger_contents, "revision": ledger_revision},
+        },
+    })
+    fixtures["/api/v1/async-requests"] = (200, {
+        "schema": "masc.async-request-observation/v1", "status": "ready",
+        "summary": {"active": 1, "runtime_owned": 0, "ownership_unknown": 1, "record_errors": 0},
+        "requests": [{"request_id": "request-unowned", "keeper_name": "alpha", "status": "queued",
+                      "elapsed_sec": 2, "worker_ownership": "disk_only_ownership_unknown"}],
+        "record_errors": [], "startup_recovery": None,
+    })
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Overview")
+        tab_until(process, master_fd, output, b"MASC Config")
+        send_and_wait(process, master_fd, output, b"t", b"keeper_status")
+
+        def require(*labels: str) -> None:
+            screen = screen_text(bytes(output))
+            for label in labels:
+                if label.encode() not in screen:
+                    raise AssertionError(f"Tools pane omitted {label!r}: {screen!r}")
+
+        require("선택 Keeper의 도구·Skill 노출 범위", "ORIGIN=도구 출처", "Runtime 도구 전달: 지원")
+        if b"masc_board_post" in screen_text(bytes(output)):
+            raise AssertionError("Catalog-only tool appeared on selected Keeper surface")
+        send_and_wait(process, master_fd, output, b"p", b"request-unowned")
+        require("워크스페이스의 비동기 요청·복구 상태", "소유 확인 안 됨", "ownership-unknown=1")
+        send_and_wait(process, master_fd, output, b"p", b"Skill Use")
+        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts", "invoked=0")
+        send_and_wait(process, master_fd, output, b"p", b"bravo 12/12/9")
+        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계", "inv/delivered/actions=호출/전달/이후 행동",
+                "1 of 2 catalog Skills observed", "Activation ledgers loaded: 19; unavailable: 0")
+        send_and_wait(process, master_fd, output, b"p", b"masc_board_post")
+        require("MASC 전체 등록 도구 목록", "DIRECT=직접 호출 허용", "surfaces=none은 노출 경로 없음")
+        send_and_wait(process, master_fd, output, b"p", b"keeper_status")
+        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools")
+        require("호출 범위", "비동기 작업", "Skill 기록", "사용 집계", "전체 도구", "p:다음 탭",
+                "사용 증거: Skill 기록", "Tool 호출별 입출력: Acting")
+        suppressed.set()
+        send_and_wait(process, master_fd, output, b"r", "Runtime 도구 전달: 미지원으로 제외".encode())
+        require("Runtime 도구 전달: 미지원으로 제외", "0 tools")
+        if b"keeper_status" in screen_text(bytes(output)):
+            raise AssertionError("Suppressed surface retained a previously callable tool")
+        captured = bytes(output)
+        end = captured.rfind(FRAME_END)
+        if end < 0:
+            raise AssertionError("Tools evidence has no completed terminal frame")
+        end += len(FRAME_END)
+        redraw = captured.rfind(FULL_REDRAW, 0, end)
+        start = captured.rfind(FRAME_START, 0, redraw) if redraw >= 0 else -1
+        if start < 0:
+            raise AssertionError("Tools evidence has no complete redraw origin")
+        print("TOOLS_PURPOSE_PTY_EVIDENCE " + json.dumps({
+            "fixture": "isolated tool purpose and scope", "rows": 30, "columns": 90,
+            "binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+            "encoding": "base64", "pty": base64.b64encode(captured[start:end]).decode(),
+        }), flush=True)
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(executable, description="Tools purposes distinguish visibility, receipts and usage",
+                          interact=interact, http_fixtures=fixtures)
+
+
 def message_origin_history_fixture() -> HttpResponse:
     return (
         200,
@@ -14075,6 +14177,10 @@ def main() -> None:
         run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
         print("tui Skill usage coverage regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "tools-purpose":
+        run_tools_purpose_regression(os.path.abspath(sys.argv[1]))
+        print("tui Tools purpose regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "observer-reconnect":
         run_observer_reconnect_regression(os.path.abspath(sys.argv[1]))
         sys.exit(0)
@@ -14087,7 +14193,7 @@ def main() -> None:
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
             "chat-clarity|mermaid-chat|changes-newline|runtime|resources|keepers-lanes|"
-            "board-json|code-memo|memory-journal|skill-usage-coverage]"
+            "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

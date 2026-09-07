@@ -159,14 +159,23 @@ def test_http_endpoint(
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self, request_body: bytes | None = None) -> None:
-            fixture = fixtures.get(
-                self.path,
-                (200, {})
-                if self.path == "/health"
-                else fleet_safety_fixture()
-                if self.path == "/health?full=1"
-                else (503, {"error": "fixture endpoint unavailable"}),
-            )
+            # Resolution order is load-bearing: exact fixture keys and the
+            # /health specials keep their legacy meaning (an exact path is
+            # still required), and only then does a query-stripped path get
+            # a second chance -- paged endpoints carry a float timestamp
+            # (e.g. /chat/history/page?before=1788678…) a scenario cannot
+            # key on. Everything else still falls to the 503 sentinel.
+            path_only = self.path.split("?", 1)[0]
+            if self.path in fixtures:
+                fixture = fixtures[self.path]
+            elif self.path == "/health":
+                fixture = (200, {})
+            elif self.path == "/health?full=1":
+                fixture = fleet_safety_fixture()
+            elif path_only in fixtures:
+                fixture = fixtures[path_only]
+            else:
+                fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
             else:
@@ -6214,8 +6223,24 @@ def memory_journal_timeline_interaction(
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        os.write(master_fd, b"\x0e\x06")
-        wait_for_terminal_input_consumed(_slave_fd)
+        # FIONREAD only observes the kernel queue: the TUI can read both
+        # toggles into its input buffer before dispatching either. Resizing
+        # at that point invalidates the old frame and correctly suppresses
+        # input until the new one is painted. Ctrl-T's emitted mouse mode
+        # acknowledges dispatch after the preceding keys, even when their
+        # changed header is hidden by this narrow notice. Restore tracking
+        # before widening; the journal assertion below still proves Ctrl-N.
+        read_available(master_fd, output)
+        tracking_ack_start = len(output)
+        os.write(master_fd, b"\x0e\x06\x14\x14")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"\x1b[?1006;1000h",
+            start=tracking_ack_start,
+            timeout=3.0,
+        )
         try:
             widened = resize_and_wait(
                 process,
@@ -6226,14 +6251,14 @@ def memory_journal_timeline_interaction(
                 needle=b"journal:full",
                 controls=(FULL_REDRAW,),
             )
-        except AssertionError as timed_out:
+        except AssertionError:
             # The raw byte dump this would otherwise carry runs to a hundred
             # kilobytes and is cut by the CI log before it says anything. The
             # screen is the part that answers what the toggles did.
             raise AssertionError(
                 "Widening back never showed journal:full. Screen:\n"
                 + screen_text(bytes(output)).decode("utf8", "replace")
-            ) from timed_out
+            ) from None
         if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
@@ -7055,6 +7080,13 @@ def viewport_gap_history_fixture() -> HttpResponse:
     )
 
 
+def viewport_gap_history_page_fixture() -> HttpResponse:
+    # The only stored message is already in the initial history. The server
+    # answers strictly before its timestamp, so this page must be empty;
+    # repeating that message fabricates an older row and moves the scroll pin.
+    return (200, {"messages": [], "has_more": False, "next_before": None})
+
+
 LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
 
 ## 정확한 5개 git 명령 (task478 worktree에서 실행):
@@ -7288,17 +7320,15 @@ def viewport_gap_interaction(
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
-    # PgUp triggers a paged history fetch; without a fixture for the paged
-    # endpoint the fetch 503s and the fallback history replaces the rows,
-    # so the post-PgDn projection draws line-20/21/22 (one row shy of the
-    # live edge) instead of line-23. The head row survives only in the
-    # pre-PgUp frame, so assert against the accumulated output, not the
-    # diff frame PgDn itself re-emits.
-    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-22")
+    # An exhausted older page leaves the transcript intact. PgDn must restore
+    # the oversized live-edge projection in this response, including its gap
+    # and newest row; previously emitted bytes cannot prove that transition.
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-23")
     newest_plain = CSI_RE.sub(b"", newest)
-    if b"line-00" not in newest_plain and b"line-00" not in bytes(output):
+    positions = [newest_plain.find(needle) for needle in (b"line-00", marker, b"line-23")]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
         raise AssertionError(
-            "PgDn did not return the exact oversized live-edge projection "
+            "PgDn did not restore the oversized live-edge projection "
             f"after one PgUp: {newest!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
@@ -11825,6 +11855,9 @@ def run_keyboard_regression(executable: str) -> None:
         interact=viewport_gap_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
         extra_env={"NO_COLOR": "1"},
     )
@@ -12378,6 +12411,9 @@ def run_chat_clarity_regression(executable: str) -> None:
         interact=viewport_gap_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
         extra_env={"NO_COLOR": "1"},
     )
@@ -12681,11 +12717,12 @@ def run_memory_journal_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
             # Reading back asks for the page behind the oldest row it holds,
-            # keyed by that row's own timestamp. Without an answer the pane
+            # matched independent of its timestamp. Without an answer the pane
             # draws the load error instead of the reading-back status row,
             # and the scroll-pin claim below has nothing to measure against.
-            "/api/v1/keepers/alpha/chat/history/page?before=%.17g"
-            % MEMORY_JOURNAL_OLDEST_TS: (200, {"messages": [], "has_more": False}),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                200, {"messages": [], "has_more": False, "next_before": None}
+            ),
             "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
         },
         refresh=0.5,

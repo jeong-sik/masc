@@ -2370,7 +2370,7 @@ let runtime_resolution_json (config : Workspace.config) =
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
 
-let light_runtime_resolution_json (config : Workspace.config) =
+let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) =
   let build = Build_identity.current () in
   let base_path_input =
     Env_config_core.base_path_source_opt ()
@@ -2388,7 +2388,7 @@ let light_runtime_resolution_json (config : Workspace.config) =
     | None -> false
   in
   let fleet_fields =
-    Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ()
+    Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ?profile_snapshot ()
   in
   let fleet_safety =
     match List.assoc_opt "keeper_fleet_safety" fleet_fields with

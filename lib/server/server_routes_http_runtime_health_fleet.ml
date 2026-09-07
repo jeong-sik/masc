@@ -468,6 +468,7 @@ let keeper_event_queue_health_json ~execution_snapshot () =
     |> keeper_event_queue_health_dimensions ~stale_after_sec
 
 let keeper_fleet_runtime_resolution_base_fields
+    ?profile_snapshot
     ?meta_scan
     ?(include_reaction_ledger = true)
     () =
@@ -476,7 +477,7 @@ let keeper_fleet_runtime_resolution_base_fields
   let execution_snapshot =
     match current_server_state_opt () with
     | Some state ->
-      keeper_execution_snapshot (Mcp_server.workspace_config state)
+      keeper_execution_snapshot ?profile_snapshot (Mcp_server.workspace_config state)
     | None -> empty_keeper_execution_snapshot
   in
   let phase_counts = phase_snapshot.counts in
@@ -493,6 +494,7 @@ let keeper_fleet_runtime_resolution_base_fields
     match meta_scan with
     | Some scan ->
       keeper_fleet_safety_health_json
+        ?profile_snapshot
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
         ~phase_snapshot
@@ -503,6 +505,7 @@ let keeper_fleet_runtime_resolution_base_fields
         ()
   | None ->
       keeper_fleet_safety_health_json
+        ?profile_snapshot
         ~phase_snapshot
         ~execution_snapshot
         ?base_path
@@ -605,17 +608,26 @@ let keeper_fleet_runtime_resolution_fields () =
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
-let keeper_fleet_runtime_resolution_light_fields () =
+let keeper_fleet_runtime_resolution_light_fields ?profile_snapshot () =
+  let profile_snapshot =
+    match profile_snapshot, current_server_state_opt () with
+    | Some _, _ -> profile_snapshot
+    | None, Some state -> Some (Keeper_types_profile.read_keeper_profile_snapshot
+        ~base_path:(Mcp_server.workspace_config state).base_path)
+    | None, None -> None
+  in
   let meta_scan =
     match current_server_state_opt () with
     | Some state ->
       Some
         (keeper_fleet_meta_scan
+           ?profile_snapshot
            ~include_paused_details:false
            (Mcp_server.workspace_config state))
     | None -> None
   in
   keeper_fleet_runtime_resolution_base_fields
+    ?profile_snapshot
     ?meta_scan
     ~include_reaction_ledger:false
     ()

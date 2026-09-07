@@ -57,7 +57,9 @@ val runtime_resolution_json : Workspace.config -> Yojson.Safe.t
     Reached unqualified through the
     [Server_dashboard_http_core] runtime consumer. *)
 
-val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
+val light_runtime_resolution_json :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  Workspace.config -> Yojson.Safe.t
 (** Renders the cheap runtime/fleet subset used by
     [/api/v1/dashboard/shell?light=true].  This keeps the shell health strip
     aligned with [/health] fleet safety without running git probes or other

@@ -21,15 +21,19 @@ The operator surface is authenticated independently of the connector:
 
 | Endpoint | Request | Permission |
 |---|---|---|
-| POST `/api/v1/dashboard/browser-lane/read` | `lane`, `app`, optional `tabId` | Read state |
+| POST `/api/v1/dashboard/browser-lane/read` | `lane`, optional `tabId` | Read state |
 | POST `/api/v1/dashboard/browser-lane/session` | `action`: open/close, optional `headless` | Operator admin token |
 | POST `/api/v1/dashboard/browser-lane/goto` | absolute HTTP(S) `url` | Operator admin token |
 
-Read replies contain `tabs`, the selected `page`, `source`, `app` and measured
+Read replies contain `tabs`, the selected `page`, `source` and measured
 `elapsed_ms`. The page contains `tabId`, `url`, `title`, `text`, `chars` and
 `truncated`. Text is capped at 50,000 Unicode code points by the operator
 surface. Each explicit read obtains a fresh page observation.
 
-[Slack Lane](slack-lane.md) uses this Browser surface and selects Slack tabs by
-parsed URL. Other WebApps can add an explicit adapter without another host
-process or a second source of browser session ownership.
+The TUI has one `go Browser Lane` entry (`B` from Connectors). It lists all
+open tabs of the selected source; `[` / `]` select a tab and `r` refreshes.
+The operator chooses pages by title and URL. Websites have no dedicated lanes
+or app filters. Keeper tools use the same general browser capabilities.
+
+See [Browser usage](browser-lane-examples.md) for reading logged-in work pages,
+checking rendered application state, and gathering evidence across tabs.

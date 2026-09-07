@@ -4054,8 +4054,8 @@ let launch_browser_lane state ~mailbox operation =
        | None ->
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
-let open_browser_lane state ~mailbox app =
-  show_browser_lane state app;
+let open_browser_lane state ~mailbox =
+  show_browser_lane state;
   release_composer_for_browser_reader state;
   launch_browser_lane state ~mailbox Browser_lane_view.Read
 
@@ -14457,10 +14457,7 @@ and is loaded on demand through keeper_skill.
            (match browser_lane_on_screen state with
             | Some _ -> hide_browser_lane state
             | None ->
-                let app = match state.browser_lane with
-                  | Some view -> view.Browser_lane_view.app
-                  | None -> Browser_lane_view.Browser in
-                open_browser_lane state ~mailbox:async_messages app);
+                open_browser_lane state ~mailbox:async_messages);
            Render_schedule.request render_schedule Render_schedule.Force
        (* Writing an answer takes every printable key, the way the row search
           and the app form do, and it sits above the answering arm because
@@ -15109,8 +15106,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
-                 | Some (_, Masc_tui_types.Palette_browser_lane app) ->
-                     open_browser_lane state ~mailbox:async_messages app
+                 | Some (_, Masc_tui_types.Palette_browser_lane) ->
+                     open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
                  | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->
@@ -15466,9 +15463,8 @@ and is loaded on demand through keeper_skill.
                              && (String.length text = 1 || Char.code text.[0] >= 128) ->
                      edit (Some (draft ^ text))
                  | _ -> ()))
-       | Some (("B" | "S") as key) when state.view = Connectors ->
+       | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-             (if key = "B" then Browser_lane_view.Browser else Slack)
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g") as key)
@@ -19623,11 +19619,6 @@ and is loaded on demand through keeper_skill.
          | Connectors ->
              (match browser_lane_on_screen state with
               | None -> launch_connectors_load state ~mailbox:async_messages
-              | Some view when Browser_lane_view.should_refresh_on_tick view ->
-                  (* Live extension reads do not focus Firefox tabs. Reuse
-                     this surface's configured cadence for the Slack stream;
-                     automation still reads only on an operator action. *)
-                  launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read
               | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps

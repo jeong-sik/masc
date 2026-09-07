@@ -13578,7 +13578,6 @@ let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
-  let label = match view.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
   let read_status = Browser_lane_view.read_status view in
   let read_style = match read_status with
     | Read_ok -> Theme.ok ()
@@ -13587,7 +13586,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Unread -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
-      (screen_title (" MASC Runtime / " ^ label)) (source_name view.source)
+      (screen_title " MASC Browser Lane") (source_name view.source)
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.url_draft with
@@ -13612,7 +13611,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
          | None -> match view.source with
-             | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
+             | Live -> "  Live Firefox • a:automation"
              | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
@@ -13628,7 +13627,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let selected = List.nth_opt tabs index in
       c.push_styled ~style:(Theme.info ())
         (match selected with
-         | None -> "  No matching tabs • Open a page in the selected Firefox session"
+         | None -> "  No open tabs • Open a page in the selected Firefox session"
          | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
@@ -13679,7 +13678,7 @@ let render_connectors (state : state) =
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"B:Browser Lane  S:Slack Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
+    ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"

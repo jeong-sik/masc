@@ -155,9 +155,9 @@ let test_the_palette_claims_over_a_board_draft () =
 let test_browser_url_input_ownership () =
   let state = fresh_state () in
   let open Tui_types.Browser_lane_view in
-  Tui_types.show_browser_lane state Browser;
+  Tui_types.show_browser_lane state;
   state.Tui_types.browser_lane <- Some
-    { (switch_source Automation (create Browser)) with url_draft = Some "https://example.org" };
+    { (switch_source Automation (create ())) with url_draft = Some "https://example.org" };
   check target "URL owns typing and paste" (Some Tui_types.Text_browser_url) (resolved state);
   state.Tui_types.palette_open <- true;
   check target "palette takes priority" (Some Tui_types.Text_palette) (resolved state);
@@ -170,8 +170,9 @@ let test_browser_url_input_ownership () =
 let test_browser_reader_chrome_scope () =
   let state = fresh_state () in
   let module Lane = Tui_types.Browser_lane_view in
-  List.iter (fun app ->
-    Tui_types.show_browser_lane state app;
+  List.iter (fun source ->
+    Tui_types.show_browser_lane state;
+    state.Tui_types.browser_lane <- Some (Lane.switch_source source (Lane.create ()));
     check bool "reader owns its context row" true
       (Option.is_some (Tui_types.browser_lane_on_screen state));
     check int "reader highlights its Runtime family"
@@ -180,7 +181,7 @@ let test_browser_reader_chrome_scope () =
     state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
     check bool "retained browser does not hide Keeper chrome" true
       (Option.is_none (Tui_types.browser_lane_on_screen state)))
-    [Lane.Browser; Lane.Slack];
+    [Lane.Live; Lane.Automation];
   state.Tui_types.view <- Tui_types.Connectors;
   state.Tui_types.browser_lane <- None;
   check bool "connector routing retains Keeper context" true

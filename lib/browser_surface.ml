@@ -1,6 +1,5 @@
-type app = Browser | Slack
 type source = Live | Automation
-type request = { source : source; app : app; tab_id : int option }
+type request = { source : source; tab_id : int option }
 type tab = { id : int; title : string; url : string; active : bool }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -10,29 +9,14 @@ let parse_request = function
       | None | Some (`String "live") -> Ok Live
       | Some (`String "automation") -> Ok Automation
       | _ -> Error "lane must be live or automation" in
-    let* app = match List.assoc_opt "app" fields with
-      | None | Some (`String "browser") -> Ok Browser
-      | Some (`String "slack") -> Ok Slack
-      | _ -> Error "app must be browser or slack" in
     let* tab_id = match List.assoc_opt "tabId" fields with
       | None -> Ok None
       | Some (`Int id) when id >= 0 -> Ok (Some id)
       | _ -> Error "tabId must be a nonnegative integer" in
-    let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"app";"tabId"]) fields
+    let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId"]) fields
       then Ok () else Error "unknown browser read argument" in
-    Ok {source; app; tab_id}
+    Ok {source; tab_id}
   | _ -> Error "body must be a JSON object"
-let is_slack_url url =
-  let uri = Uri.of_string url in
-  match Uri.scheme uri, Uri.host uri with
-  | Some "https", Some host ->
-    let host = String.lowercase_ascii host in
-    (host = "app.slack.com" ||
-     (String.ends_with ~suffix:".slack.com" host && host <> "slack.com"))
-    && (match String.split_on_char '/' (Uri.path uri) with
-        | "" :: ("client" | "archives") :: _ -> true
-        | _ -> false)
-  | _ -> false
 let decode_answer = function
   | Browser_lane.Lane_absent -> Error "browser lane is disconnected"
   | Browser_lane.Timed_out -> Error "browser lane timed out"
@@ -56,18 +40,16 @@ let rec decode_tabs = function
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
 let source_name = function Live -> "live" | Automation -> "automation"
-let app_name = function Browser -> "browser" | Slack -> "slack"
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.source in
   let issue verb = Browser_lane.issue ~lane_name ~verb ~timeout_sec:20. |> decode_answer in
   let* raw_tabs = issue Browser_lane.Tabs_list in
   let* tabs = match raw_tabs with `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list" in
-  let tabs = match request.app with Browser -> tabs | Slack -> List.filter (fun tab -> is_slack_url tab.url) tabs in
   let* selected = match request.tab_id with
     | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with
         | Some tab -> Ok (Some tab)
-        | None -> Error "selected tab is closed or is not a tab for this app")
+        | None -> Error "selected tab is closed or absent from this browser source")
     | None ->
       Ok (match List.find_opt (fun tab -> tab.active) tabs with
           | Some tab -> Some tab | None -> List.nth_opt tabs 0) in
@@ -79,12 +61,10 @@ let read request =
              field "chars" data, field "truncated" data with
        | Some (`String url), Some (`String title), Some (`String text),
          Some (`Int chars), Some (`Bool truncated) ->
-         if request.app = Slack && not (is_slack_url url) then
-           Error "Slack tab navigated away; refresh its tab list"
-         else Ok (`Assoc ["tabId",`Int tab.id;"url",`String url;"title",`String title;
+         Ok (`Assoc ["tabId",`Int tab.id;"url",`String url;"title",`String title;
            "text",`String text;"chars",`Int chars;"truncated",`Bool truncated])
        | _ -> Error "browser page lacks URL/title/text/length metadata; update the browser connector") in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"page",page;
-    "source",`String lane_name;"app",`String (app_name request.app);
+    "source",`String lane_name;
     "elapsed_ms",`Float elapsed_ms])

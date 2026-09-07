@@ -1,10 +1,6 @@
 name = "masc_browser_tabs"
 description = """
-List the tabs of the connected browser lane. The "live" lane is the \
-operator's real Firefox/Zen through the browser-lane extension; it exists \
-only while that browser runs with the host connected. Returns \
-{tabs: [{id, index, windowId, active, title, url}]}. Use masc_browser_read \
-for one page's text."""
+List open tabs in live Firefox/Zen (operator extension) or isolated automation Firefox. Returns an array of {id, active, title, url}; live also includes index/windowId. Choose relevant titles/URLs, then pass the returned id and same lane to BrowserRead."""
 additional_properties = false
 
 [[params]]

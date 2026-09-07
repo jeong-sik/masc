@@ -368,6 +368,34 @@ let test_live_structured_image_probe () =
     | M.Image_missing -> ()
     | _ -> Alcotest.fail "a definitely absent image did not produce Image_missing"
 
+(* The gate builds the image this binary carries the recipe for, and only
+   that one. A keeper naming any other image names one we have no recipe
+   for -- and an operator who pointed the default at their own tag would
+   find our recipe written over theirs. So an absent image that is not the
+   recipe's own tag has to come back as the plain refusal, with no build
+   attempted: a build that ran would say so in its own error. *)
+let test_live_absent_image_we_have_no_recipe_for_is_not_built () =
+  match Sys.getenv_opt "MASC_MICROVM_IMAGE_PROBE_LIVE" with
+  | None -> ()
+  | Some _ ->
+    with_eio_fs @@ fun () ->
+    (match
+       M.image_present_for
+         Backend.Apple_container
+         ~image:"masc-proof-definitely-missing:never"
+         ~timeout_sec:15.0
+     with
+     | Ok () ->
+       Alcotest.fail "an absent image passed the gate"
+     | Error message ->
+       Alcotest.(check bool)
+         "the refusal is the plain one, so nothing was built"
+         true
+         (String.length message > 0
+         && not
+              (Astring.String.is_infix ~affix:"microvm_image_build_failed"
+                 message)))
+
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
   let base = temp_dir "microvm_factory_" in
@@ -2111,6 +2139,8 @@ let () =
             test_the_inspect_shape_follows_the_runtime
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
+        ; Alcotest.test_case "an absent image we have no recipe for is not built"
+            `Slow test_live_absent_image_we_have_no_recipe_for_is_not_built
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "lists only this Keeper's Apple Container VM" `Quick

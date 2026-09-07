@@ -10,8 +10,13 @@ the result.
 Why it is worth having: a targeted CI dispatch answers in about eight minutes,
 and alcotest stops at the first failed assertion inside a case, so a case with
 three stale assertions costs three dispatches. The same suites answer here in
-well under a second each. Measured 2026-09-07: 54 of the 131 test_tui_* suites
-built and ran in 48 seconds.
+well under a second each. Measured 2026-09-07: 91 suites built and ran in 119
+seconds.
+
+A library's C stubs are compiled alongside its modules, and its
+(c_library_flags ...) reach the linker as -cclib. Without that the suite gets
+as far as the linker and dies on an undefined symbol -- an answer that looks
+like a verdict and is not.
 
 The suites this cannot reach are the ones that name `masc` (or a sublibrary of
 it). Building those from source is the local dune build this exists to avoid;
@@ -50,7 +55,9 @@ class Library:
     directory: str
     modules: tuple[str, ...]
     deps: tuple[str, ...]
-    stubs: bool
+    stubs: tuple[str, ...]
+    c_library_flags: tuple[str, ...]
+    wrapped: bool
 
 
 @dataclass
@@ -58,6 +65,8 @@ class Plan:
     suite: str
     modules: list[tuple[str, str]] = field(default_factory=list)
     packages: list[str] = field(default_factory=list)
+    stubs: list[tuple[str, str]] = field(default_factory=list)
+    link_flags: list[str] = field(default_factory=list)
 
 
 def sexp_forms(text: str, head: str):
@@ -103,12 +112,41 @@ def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
         name = names[0]
         modules = field_words(form, "module") or [name]
         deps = field_words(form, "librarie") or field_words(form, "libraries") or []
-        # A library with C stubs needs them compiled and linked, which is a
-        # different job from this one. Refused by name below rather than left
-        # to fail at the linker with an undefined symbol.
-        out[name] = Library(
-            name, directory, tuple(modules), tuple(deps), "(foreign_stubs" in form
+        # C stubs are compiled alongside the modules: ocamlfind takes .c
+        # files on the same command line. Without them the suite reaches the
+        # linker and dies on an undefined symbol, which looks like a verdict
+        # and is not.
+        stubs: list[str] = []
+        stub_form = next(sexp_forms(form, "(foreign_stubs"), None)
+        if stub_form is not None:
+            stubs = field_words(stub_form, "name") or []
+        # (c_library_flags (-lncurses)) -- the value is its own parenthesised
+        # list, so the words arrive wearing its brackets.
+        c_flags = [
+            word.strip("()")
+            for word in (field_words(form, "c_library_flag") or [])
+            if word.strip("()")
+        ]
+        # dune wraps a library's modules in a generated alias module unless
+        # the stanza says otherwise, and nothing here generates that module.
+        # Compiling one anyway gives every consumer an unbound module, so a
+        # wrapped library is refused by name instead.
+        wrapped = (field_words(form, "wrapped") or ["true"])[0] != "false"
+        library = Library(
+            name,
+            directory,
+            tuple(modules),
+            tuple(deps),
+            tuple(stubs),
+            tuple(c_flags),
+            wrapped,
         )
+        out[name] = library
+        # A consumer names a library by whichever of the two the author wrote,
+        # so both reach the same stanza.
+        public = field_words(form, "public_name")
+        if public:
+            out[public[0]] = library
     return out
 
 
@@ -130,14 +168,14 @@ def read_suites(root: str) -> dict[str, list[str]]:
 def collect_libraries(root: str) -> dict[str, Library]:
     libraries = read_libraries(os.path.join(root, "bin/dune"), "bin")
     libraries.update(read_libraries(os.path.join(root, "test_lib/dune"), "test_lib"))
-    # Leaf libraries under lib/: one module and nothing of their own to pull
-    # in. Anything with dependencies stays out, because following them ends at
-    # masc.
+    # Libraries under lib/ as well. Whether one can be built from source is
+    # decided per library below -- a wrapped one cannot -- rather than by
+    # keeping only the leaves here, which used to exclude fs_compat and every
+    # public name.
     for path in sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True)):
         directory = os.path.relpath(os.path.dirname(path), root)
         for name, library in read_libraries(path, directory).items():
-            if not library.deps and name not in libraries:
-                libraries[name] = library
+            libraries.setdefault(name, library)
     return libraries
 
 
@@ -164,8 +202,8 @@ class Resolver:
             if name in ordered:
                 return True
             library = self.libraries.get(name)
-            if library is not None and library.stubs:
-                blocker = blocker or f"{name} (C stubs)"
+            if library is not None and library.wrapped:
+                blocker = blocker or f"{name} (wrapped)"
                 return False
             if library is None:
                 if self.installed(name):
@@ -188,6 +226,11 @@ class Resolver:
             library = self.libraries[name]
             for module in library.modules:
                 plan.modules.append((library.directory, module))
+            for stub in library.stubs:
+                plan.stubs.append((library.directory, stub))
+            for flag in library.c_library_flags:
+                # -lncurses reaches the C linker through the OCaml driver.
+                plan.link_flags += ["-cclib", flag]
         plan.packages = packages
         return plan, None
 
@@ -213,6 +256,13 @@ def build_and_run(
         shutil.copy(origin, workdir)
         sources.append(module + ".ml")
 
+    # The C sources come first on the command line: ocamlfind compiles them
+    # and hands the objects to the linker with the modules that call them.
+    for directory, stub in plan.stubs:
+        origin = os.path.join(root, directory, stub + ".c")
+        if os.path.exists(origin):
+            shutil.copy(origin, workdir)
+            sources.append(stub + ".c")
     for directory, module in plan.modules:
         stage(directory, module)
     shutil.copy(os.path.join(root, "test", plan.suite + ".ml"), workdir)
@@ -238,6 +288,7 @@ def build_and_run(
     compile = subprocess.run(
         ["ocamlfind", "ocamlopt", "-package", packages, "-linkpkg", "-w", "-a"]
         + sources
+        + plan.link_flags
         + ["-o", plan.suite + ".exe"],
         cwd=workdir,
         capture_output=True,

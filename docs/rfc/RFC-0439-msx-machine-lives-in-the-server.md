@@ -70,12 +70,15 @@ workspace 에 머신은 **하나**다. `masc_msx_load` 가 만들고(C-BIOS + �
 
 - **턴제(기본)**: `masc_msx_step frames` 나 `masc_msx_press` 가 부를 때만 간다. keeper 혼자
   플레이할 때의 방식이다. 룬 마스터 II 같은 턴제 게임에 맞다.
-- **실시간**: 사람 TUI 가 붙어 `masc_msx_realtime on` 을 켜면 서버 틱커가 1/60초마다 1프레임을
-  민다. 틱커는 **domain 0 에 두지 않는다** — P4 지표(domain 0 의 ≥100ms 실행 수)가 늘면 안 된다.
-  TUI 가 떨어지면 틱커는 멈춘다. 이 방식이 task-1403 의 본체다.
+- **실시간(poll-cadence tick)**: 사람 TUI 가 관전하는 동안 그 poll(~3Hz)이 `POST /api/v1/msx/tick`
+  로 머신을 한 스텝(기본 18프레임)씩 민다. ~3Hz × 18 ≈ 54fps 라 60Hz 코어가 살아 움직이는 것처럼
+  보인다. **서버에 상시 틱커 domain 을 두지 않는다** — P4 지표(domain 0 의 ≥100ms 실행 수)에 영향이
+  없고, 재시작 처닝/호스트 포화 중인 서버에 부하를 더하지 않는다. TUI 가 관전을 멈추면 tick 이
+  멈춰 머신은 다시 턴제로 정지한다. 이 방식이 task-1403 의 본체다.
 
-실시간 중에 keeper 가 `press` 를 부르면, 그 입력은 **다음 틱들이 소비하는 큐**에 들어가고
-응답은 소비가 끝난 프레임의 관측이다. 턴제 중에는 `press` 가 직접 `step` 을 부른다.
+keeper 의 `press` 와 사람의 `press` 는 실시간에서도 각자 직접 `step` 을 부른다(입력 큐 없음).
+관전 tick 과 press 는 같은 프레임 시계를 앞으로 민다 — 둘이 겹치면 잠깐 60fps 보다 빠르게 흐르지만
+easter egg 범위에서 허용한다. 근거·대안(60Hz 서버 domain)은 RFC 히스토리에 남긴다.
 
 ### 3.3 입력 — 두 손이 한 키보드를 누른다
 
@@ -165,4 +168,5 @@ image:                MSX frame의 이미지 artifact 참조 (기존 이미지 �
 - 머신 하나(§3.1) vs keeper 마다 하나.
 - 이미지 전달: MSX frame artifact를 기존 이미지 ingestion/분석 도구에 어떤 응답 형태로 연결하나.
 - 도구를 보는 keeper: 전부인가, 지정한 keeper 만인가.
-- 실시간 틱커를 어느 domain 에 두나 (P4 의 분리 원칙만 정해져 있다).
+- ~~실시간 틱커를 어느 domain 에 두나~~ → 결정됨: 상시 틱커 domain 을 두지 않는다. 관전하는 TUI 의
+  poll 이 `POST /api/v1/msx/tick` 로 민다(§3.2 poll-cadence tick). 서버 부하·P4 영향 0.

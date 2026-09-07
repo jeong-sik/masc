@@ -250,8 +250,14 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str
     ~agent_name body_str
 
 let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
-  let actor = Server_auth.dashboard_actor_for_request ~base_path request in
-  Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
+  match body_jsonrpc_method body_str with
+  | Some ("tools/call", _) ->
+      let actor = Server_auth.dashboard_actor_for_request ~base_path request in
+      Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
+  | _ ->
+      (* Only tool arguments carry a caller identity. HTTP admission and
+         protocol authorization still run for every request. *)
+      body_str
 
 (* Auth-reject metric/log endpoint labels. Built on [profile_label]
    so the label vocabulary cannot drift from the session module's

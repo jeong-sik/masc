@@ -497,23 +497,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     (* [prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
-    (* Reported from [prepared.messages], which is post-carrier-append and
-       post-window: the admission contract runs inside [Host.prepare_turn], so
-       this list is the last shape masc holds before rendering.
-
-       The mode decides whether it is reportable at all. A [Start] renders the
-       whole list into the prompt, so its bytes are attributable. A [Resume]
-       renders only the turn-local carrier and the goal
-       ([prompt_for_turn] above): the accumulated history stays in the
-       conversation the CLI owns and never leaves this process, so there is
-       nothing here to measure. Reporting the local list on a resume attributed
-       history that was not sent, and -- because carrier removal is what
-       [provider_content_of_transmitted] does -- deleted the one message that
-       was. That is masc#32995 with its sign flipped. *)
-    on_transmitted_model_input
-      (if is_resume
-       then Host.Held_by_client_session
-       else Host.Whole_input_transmitted prepared.messages);
+    (* This is the prepared attribution, not transmission evidence. The
+       runtime emits it only after writing the complete prompt to the CLI. *)
+    let report_transmitted_input () =
+      on_transmitted_model_input
+        (if is_resume
+         then Host.Held_by_client_session
+         else Host.Whole_input_transmitted prepared.messages)
+    in
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
@@ -894,6 +885,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                             ~expected
                             ~session_id:conversation_id
                             ~updated_at:(Time_compat.now ())))
+                      ~on_prompt_sent:report_transmitted_input
                       ~on_stream_event:stream.on_runtime_event
                       client_config
                       ~prompt))

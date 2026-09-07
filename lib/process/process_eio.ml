@@ -852,20 +852,28 @@ let invoke_output_chunk_callback f s =
    would SIGPIPE a child that is still doing legitimate work and would lose
    both the exit status and the stream tail. [Exec_buffer] discards the
    middle instead, so this loop is O(bytes) in time and O(caps) in space. *)
-let rec drain_into r acc ~on_chunk chunk =
+let rec drain_into ?file_capture r acc ~on_chunk chunk =
   match
     try Eio.Flow.single_read r chunk with
     | End_of_file -> 0
   with
-  | 0 -> Eio.Flow.close r
+  | 0 ->
+      Option.iter
+        (fun (capture, stream) ->
+          Process_output_capture.end_of_stream capture ~stream)
+        file_capture;
+      Eio.Flow.close r
   | n ->
       let s = Cstruct.to_string (Cstruct.sub chunk 0 n) in
+      Option.iter
+        (fun (capture, stream) -> Process_output_capture.append capture ~stream s)
+        file_capture;
       invoke_output_chunk_callback on_chunk s;
       Exec_buffer.add_string acc s;
-      drain_into r acc ~on_chunk chunk
+      drain_into ?file_capture r acc ~on_chunk chunk
 
-let drain_to_eof r acc ~on_chunk =
-  drain_into r acc ~on_chunk (Cstruct.create drain_chunk_size)
+let drain_to_eof ?file_capture r acc ~on_chunk =
+  drain_into ?file_capture r acc ~on_chunk (Cstruct.create drain_chunk_size)
 
 let ignore_chunk (_ : string) = ()
 
@@ -911,7 +919,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
     much of it as its head/tail caps allow. Each buffer has exactly one
     draining fiber, which is what [Exec_buffer]'s single-producer contract
     requires. *)
-let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf
+let spawn_and_drain_both ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf
     stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
@@ -933,14 +941,20 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
-        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk)
-        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:ignore_chunk);
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stdout) output_capture)
+            stdout_r stdout_buf ~on_chunk:ignore_chunk)
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stderr) output_capture)
+            stderr_r stderr_buf ~on_chunk:ignore_chunk);
       let s = Eio.Process.await proc in
       status := Some s;
       s)
   |> unix_status_of_eio_status
 
-let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
+let spawn_and_drain_both_streaming ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_source ~clock argv
     ~on_stdout_chunk ~on_stderr_chunk stdout_buf stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
@@ -962,8 +976,14 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
-        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
-        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stdout) output_capture)
+            stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stderr) output_capture)
+            stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
       let s = Eio.Process.await proc in
       status := Some s;
       s)
@@ -1198,6 +1218,7 @@ let run_argv_with_stdin_and_status_split
     ?timeout_sec
     ?env
     ?cwd
+    ?output_capture
     ?on_stdout_chunk
     ?on_stderr_chunk
     ~(stdin_content : string)
@@ -1205,6 +1226,11 @@ let run_argv_with_stdin_and_status_split
   let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
   let fallback_with_callbacks () =
+    Option.iter
+      (fun capture ->
+        Process_output_capture.unavailable capture
+          ~message:"Unix fallback provides retained output without authoritative pipe EOF")
+      output_capture;
     let status, stdout, stderr =
       run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
         ?cwd ~stdin_content argv
@@ -1239,7 +1265,7 @@ let run_argv_with_stdin_and_status_split
                     with_explicit_timeout_exn clk timeout_sec (fun () ->
                         match on_stdout_chunk, on_stderr_chunk with
                         | None, None ->
-                            spawn_and_drain_both ~phase_ref ~sw pm
+                            spawn_and_drain_both ~phase_ref ?output_capture ~sw pm
                               ~cwd:effective_cwd ?env ~stdin_source ~clock:clk argv
                               stdout_buf stderr_buf
                         | _ ->
@@ -1255,6 +1281,7 @@ let run_argv_with_stdin_and_status_split
                             in
                             spawn_and_drain_both_streaming
                               ~phase_ref
+                              ?output_capture
                               ~sw
                               pm
                               ~cwd:effective_cwd
@@ -1656,6 +1683,7 @@ let run_argv_with_status_split_streaming
     ?timeout_sec
     ?env
     ?cwd
+    ?output_capture
     ~on_stdout_chunk
     ~on_stderr_chunk
     (argv : string list)
@@ -1664,6 +1692,11 @@ let run_argv_with_status_split_streaming
   let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   let fallback_with_callbacks () =
+    Option.iter
+      (fun capture ->
+        Process_output_capture.unavailable capture
+          ~message:"Unix fallback provides retained output without authoritative pipe EOF")
+      output_capture;
     let status, stdout, stderr =
       run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
     in
@@ -1694,6 +1727,7 @@ let run_argv_with_status_split_streaming
                   with_explicit_timeout_exn clk timeout_sec (fun () ->
                       spawn_and_drain_both_streaming
                         ~phase_ref
+                        ?output_capture
                         ~sw
                         pm
                         ~cwd:effective_cwd

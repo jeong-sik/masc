@@ -1701,12 +1701,13 @@ let serialize_candidates candidates =
    more than [compaction_ratio] times as many decoded rows as live candidates
    rewrites the store as the latest set instead of appending, so the file
    holds at most [compaction_ratio * live] rows plus the rows of that write.
-   A store with an undecodable row is rewritten on its next write regardless;
-   that is the promise in [load_candidates_with_rejections]. *)
+   A store containing rejected rows stays append-only. Rewriting only decoded
+   candidates would erase unknown pending obligations and the evidence needed
+   for an explicit repair. Reading and appending valid candidates still work. *)
 let compaction_ratio = 2
 
 let needs_compaction ~decoded_rows ~rejected_rows ~live =
-  rejected_rows > 0 || decoded_rows > compaction_ratio * live
+  rejected_rows = 0 && decoded_rows > compaction_ratio * live
 ;;
 
 let validate_for_persistence candidates =

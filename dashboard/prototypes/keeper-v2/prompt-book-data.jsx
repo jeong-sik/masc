@@ -258,7 +258,7 @@ function pbFill(keeper) {
     ? [['sangsu', 'writer.ml 패치 올렸습니다'], ['qa-king', 'docs 검증 통과'], ['scholar', '메모리 정리 완료']].filter(r => r[0] !== keeper.id)
     : null;
   const surfaceCh = { 'sangsu': '#core-eng · slack', 'nick0cave': '#core-scheduler · discord',
-    'qa-king': '#war-room · discord', 'masc-improver': '#kidsnote-growth · discord' }[keeper.id] || null;
+    'qa-king': '#war-room · discord', 'masc-improver': '#exampleorg-growth · discord' }[keeper.id] || null;
   return {
     last_turn_digest: hasRecall
       ? `DONE: traced ${keeper.ns || 'lib'} regression\nNEXT: land the fix\nOpenQuestions: 1 failing test`

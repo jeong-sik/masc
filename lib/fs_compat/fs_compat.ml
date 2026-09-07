@@ -308,6 +308,10 @@ let save_file_atomic_strict_staged path content =
   Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
+let write_file_atomic_strict_staged path ~write =
+  Atomic_write.write_file_atomic_strict_staged path ~write
+;;
+
 let save_file_atomic_strict path content =
   Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
@@ -320,6 +324,14 @@ module Atomic_replace_for_testing = struct
       ~save_file:save_file_blocking
       path
       content
+  ;;
+
+  let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
+    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+      ?sync_file
+      ~sync_parent
+      path
+      ~write
   ;;
 end
 
@@ -1267,28 +1279,52 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
     a malformed log from either path uses the same orchestrate system. *)
+(* One row, with the row number the warning prints. A caller that walks rows
+   itself - to stop before the end of a window - parses through this so the
+   warning it prints is the same one, in the same shape, as the whole-list
+   parse below. *)
+let parse_jsonl_line ~(source : string) ~(line_no : int) (line : string)
+  : Yojson.Safe.t option
+  =
+  match Yojson.Safe.from_string line with
+  | json -> Some json
+  | exception Yojson.Json_error msg ->
+    Stdlib.Printf.eprintf
+      "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+      source
+      line_no
+      msg;
+    None
+;;
+
+(* Blank lines do not take a number, matching what [cat -n] shows for the
+   printed JSONL rows. A caller that needs those numbers without parsing
+   uses this. *)
+let number_jsonl_lines (lines : string list) : (int * string) list =
+  let line_no = ref 0 in
+  List.filter_map
+    (fun line ->
+       let trimmed = String.trim line in
+       if String.equal trimmed ""
+       then None
+       else begin
+         incr line_no;
+         Some (!line_no, trimmed)
+       end)
+    lines
+;;
+
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
-  let line_no = ref 0 in
   let parsed =
     List.filter_map
-      (fun line ->
-         let trimmed = String.trim line in
-         if String.equal trimmed ""
-         then None
-         else (
-           incr line_no;
-           match Yojson.Safe.from_string trimmed with
-           | json -> Some json
-           | exception Yojson.Json_error msg ->
-             incr malformed;
-             Stdlib.Printf.eprintf
-               "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-               source
-               !line_no
-               msg;
-             None))
-      lines
+      (fun (line_no, trimmed) ->
+         match parse_jsonl_line ~source ~line_no trimmed with
+         | Some json -> Some json
+         | None ->
+           incr malformed;
+           None)
+      (number_jsonl_lines lines)
   in
   parsed, !malformed
 ;;
@@ -1340,6 +1376,51 @@ let read_slice ~path ~from ~len =
    back to a full scan from byte 0; callers detect shrinkage the same way
    via the returned boundary. Blank lines advance the boundary but are not
    folded. *)
+(* [fold_appended_lines] with the byte offset each line starts at, so a
+   caller building an index can record where a row lives and read it back
+   later with [read_slice ~from:offset ~len:(String.length line)]. The loop
+   already tracks the offset one past each newline; the line that follows
+   starts there. *)
+let fold_appended_lines_with_offsets ~path ~from ~init ~f =
+  if not (file_exists path)
+  then init, 0
+  else begin
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         let from = if from < 0 || from > len then 0 else from in
+         seek_in ic from;
+         let chunk = Bytes.create 65536 in
+         let line_buf = Buffer.create 256 in
+         let acc = ref init in
+         let boundary = ref from in
+         let pos = ref from in
+         let rec loop () =
+           let n = input ic chunk 0 (Bytes.length chunk) in
+           if n > 0
+           then begin
+             for i = 0 to n - 1 do
+               match Bytes.get chunk i with
+               | '\n' ->
+                 let line = Buffer.contents line_buf in
+                 Buffer.clear line_buf;
+                 let line_start = !boundary in
+                 boundary := !pos + i + 1;
+                 if not (String.equal (String.trim line) "")
+                 then acc := f !acc ~offset:line_start line
+               | c -> Buffer.add_char line_buf c
+             done;
+             pos := !pos + n;
+             loop ()
+           end
+         in
+         loop ();
+         !acc, !boundary)
+  end
+;;
+
 let fold_appended_lines ~path ~from ~init ~f =
   if not (file_exists path)
   then init, 0

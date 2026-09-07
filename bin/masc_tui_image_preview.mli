@@ -1,48 +1,24 @@
-(** Which image Ctrl-O shows.
-
-    The key has two places to find a picture: a [.png] path the conversation
-    named, and the images the composer is staging for the next message. When
-    both exist the newer one wins: a screenshot Ctrl-V'd a keystroke ago is
-    what the key was pressed to see, while a path named after that paste is
-    what the operator just read. The choice is made here, away from the
-    terminal, so each of the three answers can be checked without one. *)
-
-type order =
-  | Named_is_newer
-      (** The message naming the path arrived after the attachment was
-          staged: what the operator just read outranks what is still waiting
-          to be sent. *)
-  | Staged_is_newer
-      (** The attachment entered the composer after the naming message. This
-          is the keystroke the key exists for -- stage a screenshot, press
-          Ctrl-O, see that screenshot. *)
-  | Unordered
-      (** Recency could not be established -- the history row that marked the
-          staging has since been replaced by the transcript. The named path
-          keeps the key, which is the answer it gave before staging order was
-          tracked. *)
+(** Ctrl-O chooses the newest image in the current conversation or composer.
+    Sent attachments retain a typed content address; filenames are labels,
+    never local paths. *)
+type order = Named_is_newer | Staged_is_newer | Unordered
 
 type preview =
   | Named_path of string
-      (** A path the transcript named. It wins when its message is the newer
-          one, and when neither can be shown to be: a named picture already
-          arrived in the conversation, which is what the operator just read,
-          while a staged one is still waiting to be sent. *)
   | Staged of Masc_tui_keeper_chat_projection.attachment
-      (** Nothing was named, or the staging is the newer act. The newest
-          staged is the answer: staging is why the key is pressed -- a
-          screenshot Ctrl-V'd a moment ago never enters the transcript, so
-          without this door the key reported nothing with a picture sitting
-          right there. *)
+  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref }
+  | Unavailable_attachment of string
   | No_image
-      (** Neither. One answer for the two empties, so the refusal can say
-          both facts at once instead of naming one and hiding the other. *)
 
-val choose_preview
-  :  named:string option
-  -> staged:Masc_tui_keeper_chat_projection.attachment list
-  -> order:order
-  -> preview
-(** [staged] is in staging order, oldest first, so the newest is the last.
-    [order] is consulted only when a named path and a staged attachment both
-    exist; with one candidate there is nothing to order. *)
+val persisted_attachment : name:string -> mime:string -> data:string option -> preview
+(** Only a validated durable blob marker is readable. Image metadata without
+    retained bytes is explicitly unavailable. Non-images produce [No_image]. *)
+
+val in_message : text:string -> attachments:preview list -> preview
+(** The last image attachment, otherwise the last path in the original text.
+    Attachment display labels must never be included in [text]. *)
+
+val choose_preview : conversation:preview -> staged:Masc_tui_keeper_chat_projection.attachment list -> order:order -> preview
+
+val decode_payload : string -> (string, string) result
+(** Decode a retained wire payload (bare base64 or a base64 data URI). *)

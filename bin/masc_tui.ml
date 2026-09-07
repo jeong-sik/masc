@@ -269,11 +269,16 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
       in
+      let scrolled =
+        if state.view = Memory && Option.is_none state.memory_facts_keeper then
+          memory_overview_scrolled ~cursor state
+        else scrolled
+      in
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the
@@ -1346,7 +1351,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      other one, and without it there is no way to abandon a recording that
      picked up something the operator did not mean to send. *)
   | "esc" when Option.is_some state.voice_capture ->
-    state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+    request_voice_stop state Masc.Voice_bridge.Discard;
     state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
@@ -1782,6 +1787,7 @@ type async_msg =
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
+  | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
   (* Carries the keeper it was asked about: the browser can be closed or
      pointed at another keeper while a load is in flight, and a late answer
@@ -1808,6 +1814,9 @@ type async_msg =
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_lane_loaded of
+      int * (Browser_lane_view.reading, string) result
+  | Browser_lane_action_done of int * (unit, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -1833,6 +1842,13 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Sent_image_ready of {
+      generation : int;
+      view : surface;
+      keeper_name : string option;
+      name : string;
+      result : (string, string) result;
+    }
   | Image_render_ready of {
       title : string;
       caption : string list;
@@ -1858,7 +1874,7 @@ type async_msg =
       (** approval id, rearm outcome, and the action slot this explicit retry
           owns. The server accepts it only if every observed identity field
           still matches the blocked row. *)
-  | Gate_external_mode_set of string * (unit, string) result
+  | Gate_mode_set of gate_lane * string * (unit, string) result
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
   | Surface_tool_approval_answered of
@@ -2080,6 +2096,10 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_turn_sequence = None;
           me_operation_seq = operation_seq;
           me_text = text;
+          me_image = Masc_tui_image_preview.in_message ~text
+            ~attachments:(match role with
+              | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
+              | _ -> []);
           me_memory_summary = None;
           me_gate = None;
           me_submitted_at = submitted_at;
@@ -2589,16 +2609,20 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
                      Error "Eio switch is unavailable",
                      generation )))
 
-let launch_gate_external_mode_set state ~mailbox ~mode =
+let launch_gate_mode_set state ~mailbox ~lane ~mode =
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode with
+      try
+        (match lane with
+         | Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
+         | External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Gate_external_mode_set (mode, result))
+    enqueue_async mailbox (Gate_mode_set (lane, mode, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2607,7 +2631,7 @@ let launch_gate_external_mode_set state ~mailbox ~mode =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Gate_external_mode_set (mode, Error "Eio switch is unavailable"))
+        (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
   (* [reserve_refresh] declines while the operator's own press is still in
@@ -3994,6 +4018,43 @@ let launch_connectors_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
 
+let launch_browser_lane state ~mailbox operation =
+  let open Browser_lane_view in
+  match state.browser_lane with
+  | None -> ()
+  | Some view when busy view -> ()
+  | Some view ->
+      state.browser_lane_generation <- state.browser_lane_generation + 1;
+      let generation = state.browser_lane_generation in
+      state.browser_lane <- Some { view with load = Loading (generation, operation) };
+      let host = server_peer_host and port = state.port in
+      let perform () =
+        (* The mailbox is the effect boundary. Cancellation still belongs to
+           the switch; unexpected transport failures become visible errors. *)
+        let call f =
+          try f () with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        match operation with
+        | Read -> Browser_lane_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
+        | Open_session | Close_session | Goto _ -> Browser_lane_action_done
+            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+           enqueue_async mailbox (perform ()); `Stop_daemon)
+       | None ->
+           state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
+
+let open_browser_lane state ~mailbox app =
+  release_composer_for_browser_reader state;
+  state.view <- Connectors;
+  state.browser_lane <- Some (Browser_lane_view.create app);
+  state.search <- None;
+  launch_browser_lane state ~mailbox Browser_lane_view.Read
+
 let launch_runtime_surface_load state ~mailbox ~force =
   match state.runtime_surface_inflight with
   | Some _ -> if force then state.runtime_surface_force_pending <- true
@@ -4380,6 +4441,27 @@ let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
    by "what has this keeper been doing"; the server's own ceiling is what the
    read costs, and it clamps anything wider. *)
 let changes_window_hours = 24.0
+
+let launch_workspace_activity state ~mailbox ~repo_id =
+  match Masc_tui_fetched.start ~equal:String.equal state.workspace_activity ~key:repo_id with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+      state.workspace_activity <- next;
+      let keepers = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
+        |> List.sort_uniq String.compare in
+      let run () =
+        let reads = List.map (fun keeper_name ->
+          let result = try Masc_tui_loader.load_keeper_file_changes
+              ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
+            with Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> Error (Printexc.to_string exn) in
+          (keeper_name, result)) keepers in
+        enqueue_async mailbox (Workspace_activity_loaded (request,
+          Ok {war_at = Unix.gettimeofday (); war_hours = changes_window_hours; war_keepers = reads}))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+      | None -> enqueue_async mailbox (Workspace_activity_loaded (request, Error "Eio switch is unavailable"))
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -5044,7 +5126,12 @@ let goto_surface state ~mailbox (destination : surface) =
        match state.changes_keeper with
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
        | None -> ())
-   | Connectors -> launch_connectors_load state ~mailbox
+   | Connectors ->
+       (match state.browser_lane with
+        | None -> launch_connectors_load state ~mailbox
+        | Some _ ->
+            release_composer_for_browser_reader state;
+            launch_browser_lane state ~mailbox Browser_lane_view.Read)
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config -> (
@@ -5521,14 +5608,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     then clock_text_of_unix source_at
     else "--:--:--"
   in
-  (* A file the row carries, said on a line of its own under the words. The
-     store has held these since the composer learned to stage one; the pane
-     never looked, so a message that arrived with a 70 KB image read as the
-     sentence beside it and nothing else.
-
-     Named, not drawn: the bytes stay where they are and [Ctrl-O] opens a path
-     the conversation mentions. What the reader needs here is to know a file
-     is there at all. *)
+  (* Display metadata without pulling image bytes into every history page.
+     The typed preview below is derived from the original text and refs. *)
   let text =
     Keeper_chat_history.text_with_attachments
       ~format_bytes:Masc_tui_context_inspector.format_bytes ~text
@@ -5547,6 +5628,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_image = Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
+      ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments)
   ; me_memory_summary =
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
@@ -5827,7 +5910,9 @@ let update_queued_history_text state (request : Keeper_chat.request) =
           (match entry.me_role with Message_user _ -> true | _ -> false)
           && String.equal entry.me_request_id request.Keeper_chat.request_id
           && String.equal entry.me_keeper_name request.keeper_name
-        then { entry with me_text = text }
+        then { entry with me_text = text;
+          me_image = Masc_tui_image_preview.in_message ~text:request.message
+            ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
         else entry)
       state.msg_history
 
@@ -6004,7 +6089,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                        | Message_autonomous | Message_status | Message_local
                        | Message_error | Message_tool | Message_skill _
                        | Message_thinking | Message_memory -> false
-                     then { entry with me_text = safe_text }
+                     then { entry with me_text = safe_text;
+                       me_image = Masc_tui_image_preview.in_message ~text:request.message
+                         ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
                      else entry)
                    state.msg_history;
                clear_current_message_draft state;
@@ -6235,6 +6322,7 @@ let chat_notice state ~keeper_name ~role text =
               me_turn_sequence = None;
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_image = Masc_tui_image_preview.No_image;
               me_memory_summary = None;
               me_gate = None;
               me_submitted_at = None;
@@ -6514,7 +6602,10 @@ let draw_image state ?(caption = []) ~refuse ~title data =
          site, URL). The image starts below the header and the footer sits on
          the last row, so the picture never overlaps the text. With no caption
          this is the old title-only layout. *)
-      let header_lines = title :: caption in
+      let header_lines =
+        List.map (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
+          (title :: caption)
+      in
       let header_rows = List.length header_lines in
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
@@ -6780,19 +6871,8 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* The picture this conversation last named, if it named one. Newest first
-   because that is why the key is pressed: something just arrived. Older ones
-   stay reachable by their path through /image -- cycling would make this key
-   a cursor, and a cursor needs state that has to be told when the
-   conversation changed underneath it.
-
-   The row's position comes back with the path: when the composer is also
-   holding a staged image, Ctrl-O weighs the two by which arrived later, and
-   the position is what the weighing compares against the staging marker.
-
-   Read at the keystroke rather than kept beside the history: the scan costs
-   one pass over what is loaded, once, and a kept list would have to be
-   rewritten at every place a line is appended or a page is paged in. *)
+(* Read the newest typed image in this Keeper's loaded conversation. Display
+   labels are never parsed as paths. The row index preserves staging order. *)
 let newest_named_image state =
   let in_this_chat entry =
     match state.msg_target_keeper_name with
@@ -6804,11 +6884,9 @@ let newest_named_image state =
   |> List.find_mapi (fun from_newest entry ->
          if not (in_this_chat entry) then None
          else
-           match List.rev (Masc_tui_image_ref.paths entry.me_text) with
-           | [] -> None
-           (* Last named in the newest line: one message can carry several,
-              and the reader means the one nearest what they just read. *)
-           | last :: _ -> Some (length - 1 - from_newest, last))
+           match entry.me_image with
+           | Masc_tui_image_preview.No_image -> None
+           | image -> Some (length - 1 - from_newest, image))
 
 (* Both a named path and a staged attachment: which is newer. The marker left
    by [note_attachment_staged] anchors the row that was newest when the newest
@@ -6828,35 +6906,57 @@ let named_vs_staged_order state ~named_index =
       then Masc_tui_image_preview.Staged_is_newer
       else Masc_tui_image_preview.Named_is_newer)
 
-(* Ctrl-O. What it opens is chosen by [Masc_tui_image_preview.choose_preview]:
-   the newer of the path the conversation last named and the newest staged
-   attachment. A screenshot staged a keystroke ago never enters the
-   transcript, so when the staging is the newer act it is what the key was
-   pressed to see; when the naming message is newer, what the operator just
-   read wins. The refusal when there is neither is text for the pane rather
-   than a cleared screen: a key that did nothing and a key that found nothing
-   look the same otherwise, which is the shape of failure this whole surface
-   keeps having. *)
-let open_named_image state =
+(* Fetch retained wire bytes through the authenticated artifact endpoint. No
+   local filename or reference-supplied URL is ever opened. The render fiber
+   receives only the decoded image after network work completes. *)
+let open_stored_image state ~mailbox ~notice ~name reference =
+  if !terminal_draws_images = Some false then
+    notice ~role:Message_error terminal_draws_no_images
+  else begin
+    notice ~role:Message_local (Printf.sprintf "Loading sent image (any key cancels): %s" name);
+    let port = state.port in
+    let keeper_name = state.msg_target_keeper_name in
+    let generation = state.image_request_generation in
+    let view = state.view in
+    let run () =
+      let result =
+        Eio_guard.run_in_systhread ~label:"tui-sent-image-bytes" (fun () ->
+          let response = Masc_tui_http.get_json ~host:server_peer_host ~port
+              ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) in
+          Result.bind response (function
+            | `Assoc fields ->
+                (match List.assoc_opt "content" fields with
+                 | Some (`String payload) -> Masc_tui_image_preview.decode_payload payload
+                 | Some _ | None -> Error "sent image response has no payload")
+            | _ -> Error "invalid sent image response"))
+      in
+      enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> notice ~role:Message_error "sent image preview requires an active connection"
+  end
+
+let open_named_image state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let named, order =
+  let conversation, order =
     match newest_named_image state with
-    | Some (named_index, path) ->
-        Some path, named_vs_staged_order state ~named_index
-    | None -> None, Masc_tui_image_preview.Unordered
+    | Some (named_index, image) ->
+        image, named_vs_staged_order state ~named_index
+    | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
   in
   match
-    Masc_tui_image_preview.choose_preview ~named ~staged:state.msg_attachments
-      ~order
+    Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
   with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
-  | Masc_tui_image_preview.Staged attachment ->
-      open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Stored_attachment { name; reference } ->
+      open_stored_image state ~mailbox ~notice ~name reference
+  | Masc_tui_image_preview.Unavailable_attachment name ->
+      notice ~role:Message_error
+        (Printf.sprintf "Ctrl-O %s: this attachment has no retained image payload; attach it again to preview it" name)
   | Masc_tui_image_preview.No_image ->
-      notice ~role:Message_local
-        (Printf.sprintf
-           "Ctrl-O: this conversation names no %s to look at, and no image is staged for the next message"
-           Masc_tui_image_ref.extension)
+      notice ~role:Message_local "Ctrl-O: no image in this conversation or the composer"
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -7272,6 +7372,22 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           notice ~role:Message_local
             "an interrupt is already outstanding for this turn"
       | None -> notice ~role:Message_local "no turn is streaming in this pane")
+  | Masc_tui_command.Interrupt_keeper_turn name -> (
+      Buffer.clear state.msg_input;
+      (* The pane's own turn is [Interrupt_turn]'s business. This arm is for
+         the turn the pane only tells the operator about -- the "(also
+         sending to X ...)" row -- which nothing else could reach: every
+         other way in reads [msg_live], and the key that would put that
+         keeper on screen is refused while any request is in flight, which
+         is exactly when one is running (#33852).
+
+         Matched by the name the row prints, so what the operator types is
+         what they just read. *)
+      match Masc_tui_types.inflight_for_keeper state name with
+      | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
+      | None ->
+          notice ~role:Message_local
+            (Printf.sprintf "no turn of %S is in flight from this pane" name))
   | Masc_tui_command.Steer_missing_message ->
       notice ~role:Message_error "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
@@ -7716,6 +7832,8 @@ let apply_planning_load state = function
         Planning_selection.reconcile ~current_ids
           ~next_ids:(goal_ids planning) ~current
       in
+      if Option.is_none state.planning_baseline then
+        state.planning_baseline <- Some planning;
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -7737,6 +7855,10 @@ let apply_planning_load state = function
 
 let apply_fusion_runs_load state = function
   | Ok snapshot ->
+      let keeper_run_id =
+        Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
+          (selected_keeper_run state)
+      in
       let current_selected_id =
         match state.fusion_mode with
         | Fusion_detail run_id -> Some run_id
@@ -7762,6 +7884,11 @@ let apply_fusion_runs_load state = function
               ~default:fallback_cursor
       in
       state.fusion_runs <- Some snapshot;
+      let keeper_runs = selected_keeper_runs state in
+      state.keeper_run_cursor <-
+        Option.bind keeper_run_id (fun id ->
+          List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
+        |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_error <- None;
       state.fusion_cursor <- next_cursor;
       (match state.fusion_mode, current_selected_id with
@@ -7990,6 +8117,7 @@ let load_keeper_logs_if_safe state base_path limit keeper =
 ;;
 
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
+  state.keeper_run_cursor <- 0;
   match selected_keeper state with
   | None -> ()
   | Some keeper ->
@@ -8040,6 +8168,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
+  state.keeper_run_cursor <- 0;
   state.view <- Keepers Keeper_detail;
   state.keeper_detail_focus <- Right_pane;
   state.detail_scroll <- 0;
@@ -8601,6 +8730,7 @@ let enter_ask_answering state =
       state.approval_detail_open <- false;
       state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
       state.ask_question_cursor <- 0;
+      state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
       state.pending_ask_submit <- None
 
@@ -8616,6 +8746,7 @@ let move_ask_cursor state delta =
     if next <> state.ask_cursor then begin
       state.ask_cursor <- next;
       state.ask_question_cursor <- 0;
+      state.ask_question_scroll <- 0;
       state.pending_ask_submit <- None;
       match (state.ask_answer_mode, List.nth_opt rows next) with
       (* Walking the list while browsing is not answering. Opening a draft
@@ -8634,9 +8765,11 @@ let move_ask_question_cursor state delta =
   | None -> ()
   | Some (row : Tui_decode.ask_row) ->
       let count = List.length row.Tui_decode.ar_questions in
-      if count > 0 then
+      if count > 0 then begin
         state.ask_question_cursor <-
-          max 0 (min (count - 1) (state.ask_question_cursor + delta))
+          max 0 (min (count - 1) (state.ask_question_cursor + delta));
+        state.ask_question_scroll <- 0
+      end
 
 let with_ask_draft state f =
   match (selected_ask_row state, selected_ask_question state) with
@@ -9604,6 +9737,7 @@ let rearm_continuous_capture state ~mailbox ~keeper =
 
 let handle_composer_key state ~base_path ~mailbox key =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+     || Option.is_some (browser_lane_on_screen state)
   then false
   else
   let composer = Composer_projection.of_state state in
@@ -9644,7 +9778,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          leaving two recorders on one device with no way to end either. *)
       (match state.voice_capture, composer.Composer.target with
        | Some _, _ ->
-           state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+           request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
            state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
@@ -9673,7 +9807,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          said; this abandons it. *)
       (match state.voice_capture with
        | Some _ ->
-           state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+           request_voice_stop state Masc.Voice_bridge.Discard;
            state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
        | None ->
            save_message_draft state;
@@ -9728,7 +9862,9 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
          | Masc_tui_command.Set_embeds _
-        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+        | Masc_tui_command.Interrupt_turn
+        | Masc_tui_command.Interrupt_keeper_turn _
+        | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
@@ -9760,7 +9896,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state)
+                   ~open_named_image:(fun () -> open_named_image state ~mailbox)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
@@ -9889,12 +10025,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.voice_config <- None;
            state.voice_config_error <- Some message)
   | Voice_level { keeper; db } ->
-      if state.voice_capture = Some keeper then state.voice_level_db <- Some db
+      if state.voice_capture = Some keeper
+         && state.voice_stop_requested <> Some Masc.Voice_bridge.Discard
+      then state.voice_level_db <- Some db
   | Voice_transcribed { keeper; text } ->
-      if state.voice_capture = Some keeper then (
-        state.voice_capture <- None;
-        state.voice_level_db <- None;
+      (match settle_voice_transcript state ~keeper with
+       | None -> ()
+       | Some disposition ->
         rearm_continuous_capture state ~mailbox ~keeper;
+        match disposition with
+        | Masc.Voice_bridge.Discard -> ()
+        | Masc.Voice_bridge.Keep_what_was_heard ->
         (* Appended, not replacing: an operator who typed part of a message and
            then spoke the rest keeps both. A separator only where there is
            something to separate. *)
@@ -11123,6 +11264,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Sent_image_ready { generation; view; keeper_name; name; result } ->
+      if generation = state.image_request_generation
+         && view = state.view && keeper_name = state.msg_target_keeper_name then begin
+        let notice = chat_notice state ~keeper_name in
+        let refuse reason =
+          notice ~role:Message_error (Printf.sprintf "sent image %s: %s" name reason)
+        in
+        match result with
+        | Error reason -> refuse reason
+        | Ok data -> draw_image state ~refuse ~title:name data
+      end
   | Image_render_ready { title; caption; result } ->
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
@@ -11215,16 +11367,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            add_event state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
                 detail))
-  | Gate_external_mode_set (mode, result) ->
+  | Gate_mode_set (lane, mode, result) ->
       (match result with
        | Ok () ->
            add_event state "system"
-             (Printf.sprintf "External-services Gate lane set to %s" mode);
+             (Printf.sprintf "%s Gate set to %s" (gate_lane_label lane) mode);
            launch_gate_snapshot_load state ~mailbox
        | Error detail ->
            add_event state "error"
-             (Printf.sprintf "External-services Gate lane change failed: %s"
-                detail))
+             (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
        | Ok (modes, judges) ->
@@ -11599,6 +11750,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
                detail))
+  | Browser_lane_loaded (generation, result) ->
+      state.browser_lane <- Option.map
+        (Browser_lane_view.accept ~generation result) state.browser_lane
+  | Browser_lane_action_done (generation, result) ->
+      (match state.browser_lane with
+       | Some view ->
+           (match view.Browser_lane_view.load with
+            | Browser_lane_view.Loading (current, (Open_session | Close_session | Goto _))
+              when generation = current ->
+                (match result with
+                 | Error detail ->
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
+                 | Ok () ->
+                     state.browser_lane <- Some
+                       { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
+                     launch_browser_lane state ~mailbox Browser_lane_view.Read)
+            | Loading _ | Idle | Failed _ -> ())
+       | None -> ())
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -11658,6 +11827,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
       end
+  | Workspace_activity_loaded (request, result) ->
+      apply_workspace_activity_read state request result
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -12256,6 +12427,12 @@ let main () =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
+  (match Masc_tui_config.board_sort ~base_path with
+   | None -> ()
+   | Some value ->
+       (match board_sort_of_string value with
+        | Some sort -> state.board_sort <- sort
+        | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
   (match Masc_tui_config.theme ~base_path with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
@@ -13811,7 +13988,10 @@ and is loaded on demand through keeper_skill.
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
-      if Option.is_some input then Atomic.set interrupt_armed false;
+      if Option.is_some input then begin
+        Atomic.set interrupt_armed false;
+        state.image_request_generation <- state.image_request_generation + 1
+      end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
          here rather than inside the surfaces is what keeps a paste from
@@ -13905,6 +14085,11 @@ and is loaded on demand through keeper_skill.
             (* Typing in row search moves the cursor to the first match as
                each character lands, so a paste has to jump the same way or
                the query on screen and the row under it disagree. *)
+            | Some Text_browser_url ->
+                state.browser_lane <- Option.map
+                  (fun (view : Browser_lane_view.t) ->
+                    { view with url_draft = Some (Option.value ~default:"" view.url_draft ^ text) })
+                  state.browser_lane
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -13951,6 +14136,10 @@ and is loaded on demand through keeper_skill.
                      paste.Masc_tui_paste.text))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
+       | Some (Pasted _) when Option.is_some (browser_lane_on_screen state) ->
+           (* The URL field above owns paste while open; a page reader has
+              no hidden Keeper composer or attachment destination. *)
+           ()
        | Some (Pasted paste)
          when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The
@@ -14051,7 +14240,9 @@ and is loaded on demand through keeper_skill.
       in
       let quit_key =
         match key with
-        | Some k -> Render_schedule.Input_shortcut.is_quit ~message_mode k
+        | Some k ->
+            text_input_target state ~compact_viewport <> Some Text_browser_url
+            && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
@@ -14116,6 +14307,7 @@ and is loaded on demand through keeper_skill.
         && (not state.palette_open)
         && Option.is_none state.runtime_param_edit
         && Option.is_none state.search
+        && text_input_target state ~compact_viewport <> Some Text_browser_url
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
@@ -14274,8 +14466,16 @@ and is loaded on demand through keeper_skill.
               && not state.context_inspector_open ->
            (match k with
             | "esc" -> leave_ask_answering state
-            | "up" | "k" | "wheel-up" -> move_ask_question_cursor state (-1)
-            | "down" | "j" | "wheel-down" -> move_ask_question_cursor state 1
+            | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
+            | "right" | "down" | "j" -> move_ask_question_cursor state 1
+            | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
+                let delta = match k with
+                  | "pageup" -> -(Masc_tui_render.ask_question_page_size state)
+                  | "pagedown" -> Masc_tui_render.ask_question_page_size state
+                  | "wheel-up" -> -1 | _ -> 1 in
+                state.ask_question_scroll <- max 0
+                  (min (Masc_tui_render.ask_question_scroll_limit state)
+                     (state.ask_question_scroll + delta))
             | "[" -> move_ask_cursor state (-1)
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
@@ -14558,17 +14758,34 @@ and is loaded on demand through keeper_skill.
             | "?" | "esc" ->
                 state.help_open <- false;
                 state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" ->
+            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
                 (* Bounded against the sheet the frame draws, which folds to
                    two columns on a wide terminal and so holds half the rows
-                   the lines were written as. *)
+                   the lines were written as. A page moves by the viewport
+                   height the sheet itself claims, so one press lands the
+                   reader where the last visible line was the first. *)
                 let count, height = Masc_tui_render.help_viewport state in
+                let step =
+                  match k with
+                  | "pageup" | "pagedown" -> max 1 height
+                  | _ -> 1
+                in
                 let move =
                   match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
+                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
                   | _ -> Masc_tui_scroll.up
                 in
-                state.help_scroll <- move ~count ~height state.help_scroll
+                (* [down]/[up] move by one; the page keys repeat the single
+                   step so the bound stays the scroll module's, not a
+                   re-derived one. *)
+                let rec repeat n scroll =
+                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
+                in
+                state.help_scroll <- repeat step state.help_scroll
+            | "g" -> state.help_scroll <- 0
+            | "G" ->
+              let count, height = Masc_tui_render.help_viewport state in
+              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
             | _ -> ())
        (* Modal for the same reason the help sheet is: a panel that is
           answering "what is coming" should not have a surface binding fire
@@ -14862,8 +15079,13 @@ and is loaded on demand through keeper_skill.
                 in
                 close ();
                 (match chosen with
+                 | Some (_, Masc_tui_types.Palette_browser_lane app) ->
+                     open_browser_lane state ~mailbox:async_messages app
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
+                 | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->
+                     launch_gate_mode_set state ~mailbox:async_messages ~lane
+                       ~mode:(Masc.Keeper_gate_mode.to_string mode)
                  | Some (_, Masc_tui_types.Palette_config pane) ->
                      state.config_pane <- pane;
                      state.config_scroll <- 0;
@@ -14899,6 +15121,15 @@ and is loaded on demand through keeper_skill.
                      (match index_of 0 state.tasks with
                       | Some index -> state.task_cursor <- index
                       | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
+                     state.board_hearth <- hearth;
+                     state.board_cursor <- 0;
+                     state.board_mode <- Board_list;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_http_refresh state ~host:server_peer_host ~port:state.port
+                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_board_post post_id) ->
                      goto_surface state ~mailbox:async_messages Board;
                      let rec find i = function
@@ -15180,6 +15411,174 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key
+         when text_input_target state ~compact_viewport = Some Text_browser_url ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let draft = Option.value ~default:"" view.Browser_lane_view.url_draft in
+                let edit url_draft = state.browser_lane <- Some { view with url_draft } in
+                (match key with
+                 | "esc" -> edit None
+                 | "\r" | "\n" | "enter" ->
+                     let url = String.trim draft in
+                     if url = "" then
+                       state.browser_lane <- Some { view with load = Failed "Enter a URL" }
+                     else begin
+                       edit None;
+                       launch_browser_lane state ~mailbox:async_messages (Browser_lane_view.Goto url)
+                     end
+                 | "\127" | "\b" | "backspace" ->
+                     edit (Some (Masc_tui_message_layout.drop_last_utf8_scalar draft))
+                 | "ctrl-u" | "\021" -> edit (Some "")
+                 | text when String.length text > 0
+                             && Char.code text.[0] >= 32
+                             && (String.length text = 1 || Char.code text.[0] >= 128) ->
+                     edit (Some (draft ^ text))
+                 | _ -> ()))
+       | Some (("B" | "S") as key) when state.view = Connectors ->
+           open_browser_lane state ~mailbox:async_messages
+             (if key = "B" then Browser_lane_view.Browser else Slack)
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+               | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
+               | "o" | "x" | "g") as key)
+         when state.view = Connectors && Option.is_some state.browser_lane ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let open Browser_lane_view in
+                let scroll delta =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let limit = Masc_tui_render.browser_lane_scroll_limit state ~terminal_rows ~cols view in
+                  state.browser_lane <- Some
+                    { view with scroll = max 0 (min limit (min limit view.scroll + delta)) }
+                in
+                let read view =
+                  state.browser_lane <- Some view;
+                  launch_browser_lane state ~mailbox:async_messages Read
+                in
+                (match key with
+                 | "esc" | "left" ->
+                     state.browser_lane <- None;
+                     launch_connectors_load state ~mailbox:async_messages
+                 | "l" | "a" ->
+                     read (switch_source (if key = "l" then Live else Automation) view)
+                 | "[" | "]" when not (busy view) ->
+                     read (select_tab (if key = "[" then -1 else 1) view)
+                 | "r" -> read (refresh view)
+                 | "g" when view.source = Automation && not (busy view) ->
+                     state.browser_lane <- Some { view with url_draft = Some "" }
+                 | "g" when view.source = Live ->
+                     add_event state "system" "Select automation (a) to navigate its Firefox session"
+                 | "o" | "x" when view.source = Automation ->
+                     launch_browser_lane state ~mailbox:async_messages
+                       (if key = "o" then Open_session else Close_session)
+                 | "o" | "x" ->
+                     add_event state "system" "Select automation (a) to open or close its Firefox session"
+                 | "j" | "down" -> scroll 1
+                 | "k" | "up" -> scroll (-1)
+                 | "pagedown" | "pageup" ->
+                     let rows, _ = get_terminal_size () in
+                     let delta = max 1 (rows - 10) in
+                     scroll (if key = "pagedown" then delta else -delta)
+                 | "home" -> state.browser_lane <- Some { view with scroll = 0 }
+                 | _ -> ()))
+       | Some key
+         when state.view = Connectors && Option.is_some state.browser_lane
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+           (* The child owns its keys. In particular b/u must never mutate a
+              hidden connector binding while Firefox content is on screen. *)
+           ()
+       | Some ("j" | "down" | "k" | "up" as move)
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
+              && not (Masc_tui_roster_pane.arrows_go_left
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
+           let count = List.length (selected_keeper_runs state) in
+           let delta = if move = "j" || move = "down" then 1 else -1 in
+           state.keeper_run_cursor <- max 0 (min (count - 1) (state.keeper_run_cursor + delta));
+           state.detail_scroll <- state.keeper_run_cursor
+       | Some ("\r" | "\n" | "right")
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
+              && not (Masc_tui_roster_pane.arrows_go_left
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
+           (match selected_keeper_run state with
+            | None -> ()
+            | Some (_, run) ->
+                state.followed_from <- Some (state.view, None);
+                goto_surface state ~mailbox:async_messages Fusion;
+                state.fusion_mode <- Fusion_detail run.fur_run_id;
+                state.fusion_scroll <- 0;
+                state.fusion_detail <- None;
+                state.fusion_detail_error <- None;
+                launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "K" when state.view = Fusion ->
+           let run = match state.fusion_mode, state.fusion_runs with
+             | Fusion_detail id, Some snapshot -> List.find_opt
+                 (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
+             | Fusion_list, Some snapshot -> List.nth_opt snapshot.fus_runs state.fusion_cursor
+             | _, None -> None in
+           (match Option.bind run (fun (run : Tui_decode.fusion_run) ->
+              List.find_index (fun (k : keeper) -> String.equal k.k_name run.fur_keeper) state.keepers) with
+            | None -> add_event state "system" "The calling Keeper is not in the current roster"
+            | Some index ->
+                state.followed_from <- Some (state.view, None);
+                state.keeper_cursor <- index;
+                Option.iter (open_keeper_detail state ~base_path ~mailbox:async_messages) (selected_keeper state);
+                state.detail_tab <- Detail_runs;
+                state.keeper_run_cursor <-
+                  Option.bind run (fun (run : Tui_decode.fusion_run) ->
+                    List.find_index (fun (candidate : Tui_decode.fusion_run) ->
+                      String.equal candidate.fur_run_id run.fur_run_id)
+                      (selected_keeper_runs state))
+                  |> Option.value ~default:0)
+       | Some "B" when state.view = Fusion ->
+           (match state.fusion_mode, state.fusion_detail with
+            | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
+                (match detail.fud_evidence with
+                 | None -> add_event state "system" "No Board evidence has been recorded for this run"
+                 | Some evidence ->
+                     state.followed_from <- Some (state.view, Some id);
+                     state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_focus <- Right_pane;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                       ~post_id:evidence.fe_post_id ~mailbox:async_messages)
+            | _ -> add_event state "system" "Open a Fusion run to follow its Board evidence")
+       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open ->
+           (match state.repositories with
+            | None -> ()
+            | Some snapshot ->
+                Option.iter (fun (repo : Tui_decode.repository) ->
+                  state.workspace_activity_repo <- Some repo.rp_id;
+                  state.workspace_activity_cursor <- 0;
+                  launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
+                  (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
+       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           state.workspace_activity_repo <- None
+       | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
+             state.workspace_activity_repo
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
+           let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
+           state.workspace_activity_cursor <- max 0 (min (List.length (workspace_activity_rows state) - 1)
+             (state.workspace_activity_cursor + delta))
+       | Some ("\r" | "\n" | "right")
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           let _, _, selected = workspace_activity_selection state in
+           (match state.workspace_activity_repo, selected with
+            | Some repo_id, Some (change, relative_path) ->
+                let path = Playground_paths.bundle_relative_repo_path ~repo_id relative_path in
+                enter_keeper_code_file state ~keeper:change.Tui_decode.fc_keeper ~path;
+                launch_code_entries_load state ~mailbox:async_messages;
+                launch_code_file_load state ~mailbox:async_messages ~path
+            | None, _ | _, None -> ())
+       | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
+           && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
@@ -15520,10 +15919,17 @@ and is loaded on demand through keeper_skill.
           in this match owns every key before these can see one. *)
        | Some ("s" | "S") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Resources
+       | Some "9" when state.view = Config ->
+           cancel_theme_preview ();
+           goto_surface state ~mailbox:async_messages Runtime
        | Some ("t" | "T") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some "1" when state.view = Acting || state.view = System_logs ->
+           goto_surface state ~mailbox:async_messages Acting
+       | Some "2" when state.view = Acting || state.view = System_logs ->
+           goto_surface state ~mailbox:async_messages System_logs
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
         (* Metrics shortcuts: 'm' from Overview navigates to visual telemetry,
@@ -15699,7 +16105,7 @@ and is loaded on demand through keeper_skill.
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
                    ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state)
+                   ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
@@ -15721,7 +16127,7 @@ and is loaded on demand through keeper_skill.
                          launch_voice_capture state ~mailbox:async_messages ~keeper
                      (* The same toggle the composer row carries. *)
                      | Some _ ->
-                         state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+                         request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
                          state.last_action <-
                            Some ("voice: stopping", Unix.gettimeofday ())
                      | None -> ())
@@ -15772,6 +16178,49 @@ and is loaded on demand through keeper_skill.
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
+       | Some "r"
+         when (not message_mode)
+              && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
+              && state.context_inspector_open = false ->
+           (* The listing footers have promised [r:refresh] since the footer
+              tables existed; no handler ever answered it. This arm makes the
+              sheet true everywhere a listing draws it. The guards stay out
+              of the two surfaces that own their own r — the identity pane
+              and the context inspector — and out of the composer, where r
+              must type. *)
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
+       | Some "i"
+         when (not message_mode)
+              && (match state.msg_target_keeper_name with
+                 | Some _ -> true
+                 | None ->
+                   (* With no conversation open, the shown keeper is whoever
+                      the list cursor names; that is who the composer
+                      addresses. *)
+                   Option.is_some (selected_keeper state))
+              && not (state.view = Config && state.config_pane = Config_prompts) ->
+           (* The sheet has promised [i] as "focus the composer" as long as
+              it promised [r]. It opens the chat of the keeper the screen is
+              about — the open conversation's keeper, else the one under the
+              list cursor. The config pane keeps its own i. *)
+           let target =
+             match state.msg_target_keeper_name with
+             | Some keeper_name -> Some keeper_name
+             | None ->
+               (match selected_keeper state with
+                | Some keeper -> Some keeper.k_name
+                | None -> None)
+           in
+           Option.iter
+             (fun keeper_name ->
+                open_message_for_keeper ~return_to:state.msg_return state keeper_name
+                  ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox:async_messages);
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message)
+             target
        | Some "@" ->
            state.answering_open <- true;
            state.answering_scroll <- 0;
@@ -15785,6 +16234,16 @@ and is loaded on demand through keeper_skill.
               with
               | index :: _ -> index
               | [] -> 0)
+       | Some "w" when state.view = Approvals ->
+           state.palette_open <- true;
+           state.palette_mode <- Palette_jump;
+           state.palette_query <- "gate Workspace / ";
+           state.palette_cursor <- 0
+       | Some "H" when state.view = Board && state.board_mode <> Board_compose ->
+           state.palette_open <- true;
+           state.palette_mode <- Palette_jump;
+           state.palette_query <- "hearth ";
+           state.palette_cursor <- 0
        | Some ":" ->
            state.palette_open <- true;
            state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -16426,7 +16885,10 @@ and is loaded on demand through keeper_skill.
                     launch_file_changes_load state ~mailbox:async_messages
                       ~keeper_name
                 | None -> ())
-            | Connectors -> launch_connectors_load state ~mailbox:async_messages
+            | Connectors ->
+                (match state.browser_lane with
+                 | None -> launch_connectors_load state ~mailbox:async_messages
+                 | Some _ -> launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read)
             | Runtime ->
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
@@ -16676,7 +17138,7 @@ and is loaded on demand through keeper_skill.
                   state.runtime_detail_target <- None;
                   state.runtime_detail_scroll <- 0
                 end
-                else state.view <- Overview
+                else goto_surface state ~mailbox:async_messages Config
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then begin
                   state.system_logs_detail_seq <- None;
@@ -17858,10 +18320,9 @@ and is loaded on demand through keeper_skill.
                        keeper's facts themselves. *)
                     match state.memory_health with
                     | None -> ()
-                    | Some snapshot -> (
+                    | Some _ -> (
                         match
-                          List.nth_opt snapshot.Masc.Tui_decode.mhs_keepers
-                            state.memory_health_cursor
+                          selected_memory_keeper state
                         with
                         | None -> ()
                         | Some keeper ->
@@ -17969,8 +18430,8 @@ and is loaded on demand through keeper_skill.
               [fetch_board] -- so this refetches rather than filtering the
               page in hand. *)
            state.board_hearth <-
-             Board_hearth.next ~current:state.board_hearth
-               ~census:state.board_hearths;
+             (if key = Some "F" then Board_hearth.previous else Board_hearth.next)
+               ~current:state.board_hearth ~census:state.board_hearths;
            state.board_cursor <- 0;
            state.board_mode <- Board_list;
            add_event state "system"
@@ -18745,6 +19206,9 @@ and is loaded on demand through keeper_skill.
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
                      state.board_sort <- next_board_sort state.board_sort;
+                     (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
+                      | Ok () -> ()
+                      | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
                      add_event state "system"
                        ("Board order: "
                         ^ board_sort_label state.board_sort);
@@ -18853,36 +19317,10 @@ and is loaded on demand through keeper_skill.
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->
-                (* Cycle the external-services Gate lane: what happens to a
-                   Keeper's call into an attached outside service. Its own
-                   switch — the workspace lane never opens it. An unknown
-                   stored value cycles to manual, the fail-closed end. *)
-                (match state.gate_modes with
-                 | None ->
-                     add_event state "system"
-                       "Gate lanes are not loaded yet; wait for the refresh"
-                 | Some modes ->
-                     (* Cycle through the closed Keeper_gate_mode variants
-                        rather than a string re-spelling: a fourth mode
-                        makes this match a compile error instead of a
-                        silent fall-through to manual. An unrecognized
-                        stored value still cycles to manual, the
-                        fail-closed end. *)
-                     let next =
-                       match
-                         Masc.Keeper_gate_mode.of_string
-                           modes.Tui_decode.glm_external
-                       with
-                       | Some Masc.Keeper_gate_mode.Manual ->
-                           Masc.Keeper_gate_mode.Auto_judge
-                       | Some Masc.Keeper_gate_mode.Auto_judge ->
-                           Masc.Keeper_gate_mode.Always_allow
-                       | Some Masc.Keeper_gate_mode.Always_allow | None ->
-                           Masc.Keeper_gate_mode.Manual
-                     in
-                     launch_gate_external_mode_set state
-                       ~mailbox:async_messages
-                       ~mode:(Masc.Keeper_gate_mode.to_string next))
+                state.palette_open <- true;
+                state.palette_mode <- Palette_jump;
+                state.palette_query <- "gate Outside services / ";
+                state.palette_cursor <- 0
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness
@@ -19113,8 +19551,14 @@ and is loaded on demand through keeper_skill.
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
          | Connectors ->
-             (* Reachability is the column that moves on its own. *)
-             launch_connectors_load state ~mailbox:async_messages
+             (match state.browser_lane with
+              | None -> launch_connectors_load state ~mailbox:async_messages
+              | Some view when Browser_lane_view.should_refresh_on_tick view ->
+                  (* Live extension reads do not focus Firefox tabs. Reuse
+                     this surface's configured cadence for the Slack stream;
+                     automation still reads only on an operator action. *)
+                  launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read
+              | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)

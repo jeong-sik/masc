@@ -55,7 +55,7 @@
   </p>
   <ul class="meta">
     <li>상태 · 초안</li>
-    <li>계기 · kidsnote keeper, 2026-08-27 05:03 KST</li>
+    <li>계기 · exampleorg keeper, 2026-08-27 05:03 KST</li>
     <li>영향 · 바깥 서비스에 쓰는 모든 호출</li>
     <li>선행 · 없음</li>
   </ul>
@@ -63,7 +63,7 @@
   <h2>1. 무슨 일이 있었나</h2>
 
   <p>
-    kidsnote keeper 가 Slack 스레드를 읽고 Jira 에서 상위 티켓을 조회했다.
+    exampleorg keeper 가 Slack 스레드를 읽고 Jira 에서 상위 티켓을 조회했다.
     <code>subtasks</code> 필드가 빈 배열이길래 "이 일들은 티켓이 없다"고 판단하고
     <strong>티켓 3개를 새로 만들었다</strong>(PK-38859 / 38860 / 38861).
     나중에 <code>parent =</code> 로 다시 조회하니 자식 티켓 42개가 이미 있었고 전부 완료 상태였다.
@@ -198,7 +198,7 @@ match ctx.approval_gate with
 lib/server/server_routes_http_keeper_stream.ml:1759   ← 여기 한 곳뿐</code></pre>
 
   <p>
-    kidsnote 는 대시보드에서 턴을 돌렸다. 그 경로에는 게이트가 없었으므로,
+    exampleorg 는 대시보드에서 턴을 돌렸다. 그 경로에는 게이트가 없었으므로,
     Gate 모드가 <code>Human</code> 이든 <code>Auto Judge</code> 든 결과가 같았다.
   </p>
 

@@ -64,6 +64,7 @@ val guest_target
   -> cwd:string
   -> timeout_sec:float
   -> base_path:string
+  -> ?capture_dir:string
   -> unit
   -> (guest_dispatch, target_error) result
 

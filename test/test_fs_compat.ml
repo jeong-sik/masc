@@ -13,6 +13,23 @@ let with_tmp_dir (f : string -> unit) : unit =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () -> f tmp)
 ;;
 
+(* [raise_with_backtrace] uses the supplied trace as the exception's origin;
+   propagation through the callback, cleanup and atomic writer may append
+   frames. Every original raw slot must remain in order at the front. Raw
+   slots have process-local identity and can be compared (Printexc's public
+   contract), so no rendered location text or re-raise wording is involved. *)
+let check_backtrace_origin label expected observed =
+  let origin_length = Printexc.raw_backtrace_length expected in
+  check bool (label ^ ": captured origin is nonempty") true (origin_length > 0);
+  check bool (label ^ ": origin is not truncated") true
+    (Printexc.raw_backtrace_length observed >= origin_length);
+  for index = 0 to origin_length - 1 do
+    check bool (Printf.sprintf "%s: origin slot %d" label index) true
+      (Printexc.get_raw_backtrace_slot expected index
+       = Printexc.get_raw_backtrace_slot observed index)
+  done
+;;
+
 let rec mkdir_p_unix path =
   if path = "" || path = Filename.dirname path then ()
   else (
@@ -218,9 +235,8 @@ let test_save_file_atomic_strict_payload_sync_cancellation () =
    | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
      check bool "original cancellation preserved" true
        (failure.exception_ == cancellation);
-     check string "original cancellation backtrace preserved"
-       (Printexc.raw_backtrace_to_string cancellation_backtrace)
-       (Printexc.raw_backtrace_to_string failure.backtrace)
+     check_backtrace_origin "original cancellation backtrace preserved"
+       cancellation_backtrace failure.backtrace
    | Error failure ->
      failf
        "payload sync cancellation reported after rename: %s"
@@ -282,9 +298,8 @@ let check_save_file_atomic_strict_parent_sync_failure
    | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
      check bool (label ^ " preserves original exception") true
        (failure.exception_ == exception_);
-     check string (label ^ " preserves original backtrace")
-       (Printexc.raw_backtrace_to_string injected_backtrace)
-       (Printexc.raw_backtrace_to_string failure.backtrace)
+     check_backtrace_origin (label ^ " preserves original backtrace")
+       injected_backtrace failure.backtrace
    | Error failure ->
      failf
        "%s reported before rename: %s"
@@ -305,6 +320,88 @@ let test_save_file_atomic_strict_parent_sync_cancellation () =
   check_save_file_atomic_strict_parent_sync_failure
     ~label:"parent sync cancellation"
     ~exception_:(Eio.Cancel.Cancelled Exit)
+;;
+
+let test_streaming_atomic_replace_preserves_bytes () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "runs.jsonl" in
+  let chunks = [ "first\r\n"; "\000second\026"; "\nthird\n" ] in
+  let callback_context = ref None in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.write_file_atomic_strict_staged target ~write:(fun channel ->
+       callback_context := Some (Fs_compat.execution_context ());
+       List.iter (output_string channel) chunks;
+       flush channel;
+       check string "staged bytes have not replaced the target" "old"
+         (Fs_compat.load_file target))
+   with
+   | Ok () -> ()
+   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure));
+  check bool "stream callback runs off the Eio fiber" true
+    (!callback_context = Some Fs_compat.Non_eio);
+  check string "every streamed byte is published" (String.concat "" chunks)
+    (Fs_compat.load_file target);
+  check (list string) "successful replacement removes its stage" [ "runs.jsonl" ]
+    (Sys.readdir base |> Array.to_list)
+;;
+
+let check_streaming_atomic_callback_failure ~exception_ () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "runs.jsonl" in
+  let injected_backtrace = Printexc.get_callstack 32 in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.write_file_atomic_strict_staged target ~write:(fun channel ->
+       output_string channel "partial row";
+       flush channel;
+       Printexc.raise_with_backtrace exception_ injected_backtrace)
+   with
+   | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
+     check bool "callback exception is preserved" true
+       (failure.exception_ == exception_);
+     check_backtrace_origin "callback backtrace is preserved"
+       injected_backtrace failure.backtrace
+   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "failed streaming callback was published");
+  check string "failed stream preserves original bytes" "old"
+    (Fs_compat.load_file target);
+  check (list string) "partial stage is removed" [ "runs.jsonl" ]
+    (Sys.readdir base |> Array.to_list)
+;;
+
+let test_streaming_atomic_parent_sync_failure () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "runs.jsonl" in
+  let exception_ = Unix.Unix_error (Unix.EIO, "fsync", base) in
+  let injected_backtrace = Printexc.get_callstack 32 in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.Atomic_replace_for_testing.write_file_atomic_strict_staged
+       ~sync_parent:(fun _ ->
+         Printexc.raise_with_backtrace exception_ injected_backtrace)
+       target
+       ~write:(fun channel ->
+         output_string channel "first\n";
+         output_string channel "second\n")
+   with
+   | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
+     check bool "parent sync exception is preserved" true
+       (failure.exception_ == exception_);
+     check_backtrace_origin "parent sync backtrace is preserved"
+       injected_backtrace failure.backtrace
+   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "failed parent sync was accepted");
+  check string "complete replacement remains visible after rename" "first\nsecond\n"
+    (Fs_compat.load_file target);
+  check (list string) "published stream leaves no temporary file" [ "runs.jsonl" ]
+    (Sys.readdir base |> Array.to_list)
 ;;
 
 (* Inside Eio the three primitives run their Unix implementation on a
@@ -656,6 +753,24 @@ let () =
             "commit syscalls run off the fiber"
             `Quick
             test_save_file_atomic_commit_runs_off_the_fiber
+        ; test_case
+            "streamed replacement preserves bytes off the fiber"
+            `Quick
+            test_streaming_atomic_replace_preserves_bytes
+        ; test_case
+            "stream callback failure preserves the target and cleans its stage"
+            `Quick
+            (check_streaming_atomic_callback_failure
+               ~exception_:(Unix.Unix_error (Unix.EIO, "write", "stage")))
+        ; test_case
+            "stream callback cancellation preserves the target and cleans its stage"
+            `Quick
+            (check_streaming_atomic_callback_failure
+               ~exception_:(Eio.Cancel.Cancelled Exit))
+        ; test_case
+            "stream parent sync failure retains the published target"
+            `Quick
+            test_streaming_atomic_parent_sync_failure
         ; test_case
             "temp writer uses canonical shared shape"
             `Quick

@@ -607,6 +607,13 @@ let execute_output_schema =
           ; "output_artifact", normalized_artifact_ref_schema
           ; "stdout_artifact", normalized_artifact_ref_schema
           ; "stderr_artifact", normalized_artifact_ref_schema
+          ; ( "output_completeness"
+            , `Assoc
+                [ "type", `String "string"
+                ; "enum", `List [ `String "complete"; `String "capture_only" ]
+                ; "description", `String
+                    "complete means both streams reached EOF and were preserved; capture_only means the producer supplied retained output without that proof."
+                ] )
           ; "typed", `Assoc [ "type", `String "boolean" ]
           ; "execution_time_ms", `Assoc [ "type", `String "integer" ]
           ] )
@@ -850,8 +857,10 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.browser_session_schema.name
       ~description:Tool_schemas_misc.browser_session_schema.description
       ~input_schema:Tool_schemas_misc.browser_session_schema.input_schema
-      ~ordinary_execution_mode:Concurrent
-      ~policy:(policy ~readonly:true ())
+      (* Session lifecycle changes must preserve tool-call order relative to
+         browser reads and navigation in the same batch. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
       ~executor:In_process
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
@@ -2279,11 +2288,10 @@ let internal_descriptors : t list =
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
-      (* [Operator_only]: the model has its own analyze_image builtin and the
-         .masc/tool_calls log shows this keeper-facing name was never called;
-         hiding it takes its schema off every keeper turn. The handler and the
-         read-only sub-call stay available to operator entrypoints. *)
-      ~keeper_model_projection:Operator_only
+      (* Unread image placeholders carry a keeper-local artifact handle.
+         The model needs this reader to recover those pixels through the
+         existing vision sub-call, including on text-only runtime lanes. *)
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
       ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name
@@ -2479,10 +2487,12 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
+  (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────── *)
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "config" "masc_config"
        ~readonly:true
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "slack_read" "masc_slack_read" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor

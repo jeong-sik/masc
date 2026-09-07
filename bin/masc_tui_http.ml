@@ -5,9 +5,20 @@ let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 (* A request, a mailbox wait or a loop gap at least this long is written to
    the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
    time. A request that took ten seconds of elapsed and none of CPU was
-   waiting on something; the cadence's routine polls stay under this and out
-   of the log. This is measurement, not a fix: the stall it exists to place
-   has not been placed yet.
+   waiting on something. This is measurement, not a fix: the stall it exists
+   to place has been placed since -- #33772 timed it as the main loop's own
+   iteration cost, paid once per step of a reply -- and the fix, which is
+   render and I/O sharing one domain, is not here.
+
+   This threshold was written believing the cadence's routine polls would
+   stay under it and out of the log. They do not. Measured over the live
+   TUI logs on this host, 2026-09-07: 43 of the 72 lines are the three
+   requests that ride every tick -- /gate/keepers 29 (median 2972 ms),
+   /keepers/turns 12 (median 1298 ms), /keepers/tool-approvals 2. Which is
+   the same finding from the other side: the loop is what slows a request,
+   and a poll issued by that loop is slowed by it too. Raising the number
+   would only hide the majority case, so it stays and the premise is
+   written down as measured rather than as assumed.
 
    Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. The stall
    being chased is around ten seconds, and a wall clock corrected by that
@@ -1331,6 +1342,13 @@ let post_dashboard_gate_external_mode ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate external mode" json
 
+let post_dashboard_gate_workspace_mode ~(host : string) ~(port : int)
+    ~(mode : string) : (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [("mode", `String mode)]) in
+  match post_json ~host ~port ~path:"/api/v1/dashboard/gate/mode" ~body with
+  | Error detail -> Error detail
+  | Ok json -> expect_ok_true ~what:"gate workspace mode" json
+
 (** GET /api/v1/dashboard/gate/keeper-settings — durable per-keeper Gate
     settings: which Keepers were held stricter than the workspace, and which
     judge each is put to first. *)
@@ -2428,3 +2446,29 @@ let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : stri
       Error (Printf.sprintf "another surface answered first: %s" response_body)
   | Ok (status, response_body) ->
       Error (Printf.sprintf "answer returned %d: %s" status response_body)
+
+(** Browser Lane shares the authenticated TUI transport. Reads are POST because
+    selecting the Firefox tab belongs to the request body. *)
+let fetch_browser_lane ~host ~port view =
+  (* The server can spend 20s listing tabs and 20s reading the page. *)
+  match post_json_with_timeout ~timeout_sec:45.0 ~host ~port
+          ~path:"/api/v1/dashboard/browser-lane/read"
+          ~body:(Yojson.Safe.to_string (Masc_tui_types.Browser_lane_view.request_body view)) with
+  | Error detail -> Error detail
+  | Ok json -> Masc_tui_types.Browser_lane_view.decode json
+
+let browser_lane_action ~host ~port operation =
+  let open Masc_tui_types.Browser_lane_view in
+  let request = match operation with
+    | Read -> Error "read is not a browser action"
+    | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
+    | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
+  in
+  let* endpoint, json, timeout_sec = request in
+  let body = Yojson.Safe.to_string json in
+  (* Native startup allows 60s; navigation may include Firefox loading. *)
+  let* json = post_json_with_timeout ~timeout_sec ~host ~port
+      ~path:("/api/v1/dashboard/browser-lane/" ^ endpoint) ~body in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail

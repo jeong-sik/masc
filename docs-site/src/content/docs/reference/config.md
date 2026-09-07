@@ -23,8 +23,8 @@ file** rather than write one from scratch.
 
 A roster is per workspace, so `masc init` creates `keepers/` and puts nothing in
 it. Connector settings (Discord, Slack) are not separate files either: they are
-tables inside `runtime.toml` (e.g. `[discord]`). `repositories.toml` and
-`keeper_repo_mappings.toml` appear once you use those features.
+tables inside `runtime.toml` (e.g. `[discord]`). `repositories.toml` appears
+once you register a repository.
 
 There is no `.env.local`. Settings live in TOML and credentials live in the
 environment the server is started in — see [Environment variables](/reference/env-contract/).

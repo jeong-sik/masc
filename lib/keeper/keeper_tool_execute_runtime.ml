@@ -134,7 +134,19 @@ let composable_output_fields ~base_path ~stdout ~stderr ~output =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
 
+let secret_files_for_source ~source ~observed ~prepare =
+  match source with
+  | Keeper_gate.Observed_in_box _ -> Ok (observed ())
+  | Keeper_gate.One_shot_resolution _
+  | Keeper_gate.Exact_always_rule _
+  | Keeper_gate.Keeper_always_allow
+  | Keeper_gate.Workspace_always_allow
+  | Keeper_gate.Readonly_sandbox -> prepare ()
+;;
+
 module For_testing = struct
+  let secret_files_for_source = secret_files_for_source
+
   (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
      through this override instead of the real shell dispatch. The override
      returns a controlled [Execute_shell_ir.dispatch_error] so tests can
@@ -191,6 +203,7 @@ type dispatch_bundle =
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
   ; github_secret_files : unit -> (string list, string) result
+  ; observed_github_secret_files : unit -> string list
   ; observe_route : unit -> Keeper_sandbox_shell_ir_target.observe_route
     (* Where this call can run boxed before the judge is asked (RFC-0422).
        Lazy: resolving it may acquire the guest. *)
@@ -281,6 +294,8 @@ let handle_tool_execute_typed
                    ~actual:Remote_ssh)
           | Runtime binding ->
             guest_sandbox_target
+              ~capture_dir:(Keeper_execute_output_files.capture_directory
+                ~base_path:config.base_path)
               ~binding
               ~meta
               ~cwd
@@ -323,6 +338,7 @@ let handle_tool_execute_typed
                      @ endpoint_fields
                  ; base_host_env = None
                  ; github_secret_files = (fun () -> Ok [])
+                 ; observed_github_secret_files = (fun () -> [])
                  ; observe_route = dispatch.observe_route
                  ; cleanup = Fun.id
                  })
@@ -347,6 +363,10 @@ let handle_tool_execute_typed
                   (fun () ->
                      Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
                        ~timeout_sec
+                       dispatch.runtime)
+              ; observed_github_secret_files =
+                  (fun () ->
+                     Keeper_turn_sandbox_runtime.github_identity_secret_files
                        dispatch.runtime)
               ; observe_route = dispatch.observe_route
               ; cleanup = Fun.id
@@ -516,7 +536,7 @@ let handle_tool_execute_typed
                  , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
                      (Keeper_gate.observed_refusal ~status ~stderr) )
                ]
-             | Some (Keeper_gate.Observed_clean _ | Keeper_gate.Observation_unavailable _)
+             | Some (Keeper_gate.Observed_result _ | Keeper_gate.Observation_unavailable _)
              | None -> []
            in
            Keeper_gate_deferred_payload.create
@@ -544,7 +564,17 @@ let handle_tool_execute_typed
           let authorized result =
             Keeper_tool_execution.with_gate_authorization authorization result
           in
-          (match dispatch_bundle.github_secret_files () with
+          (* A boxed call already acquired a running guest and its identity.
+             Preparing again can fail a token refresh or replace that guest
+             after a partial write, discarding the real result as pre-effect.
+             Read the bound snapshot for redaction; prepare only a call that
+             still needs dispatch. *)
+          (match
+             secret_files_for_source
+               ~source:authorization.source
+               ~observed:dispatch_bundle.observed_github_secret_files
+               ~prepare:dispatch_bundle.github_secret_files
+           with
            | Error err ->
              authorized
                (typed_error_json
@@ -710,36 +740,10 @@ let handle_tool_execute_typed
             match !For_testing.dispatch_override with
             | Some override -> override ()
             | None ->
-              (match
-                 ( authorization.source
-                 , Keeper_tool_execute_observe.observed_result observation )
-               with
-               | Keeper_gate.Observed_in_box _, Some result ->
-                 (* The box already ran this call and the kernel says it
-                    changed nothing, so its output is the answer; running it
-                    again would be a second read for no new fact. Replayed
-                    through the stream so the operator surface sees what the
-                    keeper receives. *)
-                 if not (String.equal result.stdout "")
-                 then on_output_chunk (`Stdout result.stdout);
-                 if not (String.equal result.stderr "")
-                 then on_output_chunk (`Stderr result.stderr);
-                 Ok result
-               | Keeper_gate.Observed_in_box _, None ->
-                 (* Unreachable by construction: the stage stores the result
-                    before it answers clean. Should it ever happen, the call
-                    runs once unboxed -- the same thing an allow from the
-                    tables does -- and says so. *)
-                 Log.Keeper.warn
-                   ~keeper_name:meta.name
-                   "observed_in_box authorization without a stored result; running the call once";
-                 dispatch_unboxed ()
-               | ( Keeper_gate.One_shot_resolution _
-                 | Keeper_gate.Exact_always_rule _
-                 | Keeper_gate.Keeper_always_allow
-                 | Keeper_gate.Workspace_always_allow
-                 | Keeper_gate.Readonly_sandbox )
-               , _ -> dispatch_unboxed ())
+              Keeper_tool_execute_observe.dispatch_authorized
+                ~source:authorization.source
+                ~on_output_chunk
+                ~dispatch:dispatch_unboxed
           in
           let dispatch_result =
             match dispatch_sandbox with
@@ -917,34 +921,42 @@ let handle_tool_execute_typed
               exit_report.Keeper_tool_execute_exit_report.error_fields
             in
             let output_fields =
-              if succeeded
-              then
+              match result.output_files with
+              | Some files ->
+                Keeper_execute_output_files.publish
+                  ~base_path:config.base_path ~redaction:output_redaction files
+              | None ->
                 composable_output_fields
-                  ~base_path:config.base_path
-                  ~stdout
-                  ~stderr
-                  ~output
-              else Ok [ "output", `String output ]
+                  ~base_path:config.base_path ~stdout ~stderr ~output
+                |> Result.map (fun fields ->
+                  { Keeper_execute_output_files.fields =
+                      ("output_completeness", `String "capture_only") :: fields
+                  ; release_sources = (fun () -> ())
+                  })
+                |> Result.map_error (fun message ->
+                  Keeper_execute_output_files.Persistence_failed message)
             in
             (match output_fields with
              | Error detail ->
                Log.Keeper.warn
                  ~keeper_name:meta.name
                  "execute output artifact persistence failed after process completion: %s"
-                 detail;
+                 (Keeper_execute_output_files.error_to_string detail);
                authorized
                  (Keeper_tool_execution.failure
                     ~effect_disposition:Tool_result.Proven_post_effect
                     (error_json
                        ~fields:
                          ([ "typed", `Bool true
-                          ; "code", `String "execute_output_externalization_failed"
+                          ; "code", `String (Keeper_execute_output_files.error_code detail)
                           ; "status", status_json
+                          ; "output", `String output
                           ; "execution_time_ms", `Int elapsed_ms
                           ]
                           @ dispatched_model_location_fields)
-                       "Execute completed, but its oversized output artifact could not be persisted."))
-             | Ok output_fields ->
+                       "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
+             | Ok publication ->
+               let output_fields = publication.Keeper_execute_output_files.fields in
                let timeout_fields =
                  exit_report.Keeper_tool_execute_exit_report.timeout_fields
                in
@@ -987,7 +999,9 @@ let handle_tool_execute_typed
                        in
                        answered)
                   with
-                  | Ok result -> Keeper_tool_execution.of_tool_result result
+                  | Ok result ->
+                    publication.release_sources ();
+                    Keeper_tool_execution.of_tool_result result
                   | Error _ ->
                     Keeper_tool_execution.failure
                       ~effect_disposition:Tool_result.Proven_post_effect
@@ -996,6 +1010,7 @@ let handle_tool_execute_typed
                            ([ "typed", `Bool true
                             ; "code", `String "execute_result_manifest_failed"
                             ; "status", status_json
+                            ; "output", `String output
                             ; "execution_time_ms", `Int elapsed_ms
                             ]
                             @ dispatched_model_location_fields)

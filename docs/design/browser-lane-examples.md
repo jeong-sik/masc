@@ -1,6 +1,6 @@
 # Browser Lane 사용예시 — keeper 요리법
 
-2026-09-07. PR #33738의 4개 도구로 실제로 할 수 있는 일. 설계는
+4개 Keeper 도구의 사용 흐름. 설계는
 `docs/design/browser-lane.md`.
 
 도구 요약:
@@ -12,11 +12,21 @@
 
 ## 0. 세팅 (운영자, 한 번)
 
+```sh
+bash connectors/browser/install-host.sh \
+  --binary /path/to/masc-browser-host \
+  --base-path /path/to/workspace \
+  --server http://127.0.0.1:8935
+geckodriver --host 127.0.0.1 --port 4444
 ```
-bash connectors/browser/install-host.sh          # 토큰 + live 호스트 등록
-# B(live): Firefox/Zen → about:debugging → 임시 확장 적재
-# A(automation): npm i playwright && npx playwright install firefox
-node connectors/browser/automation/masc-browser-automation.js &
+
+Firefox `about:debugging`에서 `connectors/browser/extension/manifest.json`을
+적재하면 `live`가 연결된다. 자동화는 workspace의 `runtime.toml`에 다음을
+설정하고 MASC를 재시작해야 한다. 설정이 없으면 `Lane_absent`로 응답한다.
+
+```toml
+[browser]
+webdriver_url = "http://127.0.0.1:4444"
 ```
 
 ## 1. "지금 뭐 봐?" — 운영자 브라우저 상태 공유 (live)
@@ -61,8 +71,8 @@ masc_browser_goto  {url: "https://..."}                  # 다음 후보
 masc_browser_session {action: "close"}                   # 정리
 ```
 
-프로파일이 유지되므로 한 번 로그인하면(수동 1회) 다음 세션부터는
-해당 사이트 로그인 상태로 조사 가능 — 운영자 세션과는 분리.
+세션은 운영자 프로파일을 빌리지 않는 격리 프로파일로 열린다.
+세션을 닫은 뒤 다시 열면 이전 로그인 상태를 보존한다고 가정하지 않는다.
 
 ## 4. 반복 점검 — 매일 같은 페이지 확인 (automation + schedule)
 
@@ -93,4 +103,5 @@ masc_browser_read {lane: "live", tabId: 12}
 - live에서 `masc_browser_session`/`goto`를 호출하면 즉시 거부된다
   (verb_allowed_on_live). automation에서만 조작.
 - click/submit 동사는 act-게이트 설계 전까지 프로토콜에 없다.
-- page.read 캡 50k — 더 길면 [TRUNCATED] 마커와 함께 잘린다.
+- page.read의 기본 캡은 50k이며, 전체 길이는 `chars`, 잘림 여부는
+  `truncated` 필드로 확인한다.

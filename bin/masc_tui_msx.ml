@@ -8,11 +8,43 @@
    surface underneath: the loop intercepts it before computing [key], exactly
    where it intercepts the dismiss key of a showing picture. *)
 
+(* The ROM set comes from the environment, not from the client's knowledge
+   of where the core repo lives: MSX_ROMS names a directory holding the
+   C-BIOS triple (main_msx2, logo_msx2, sub). Without it the machine still
+   runs -- on 0xff bus reads, so the screen stays black; the title says so. *)
+let rom_dir () = try Sys.getenv "MSX_ROMS" with Not_found -> ""
+
+let read_file path =
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
+
+let load_roms dir =
+  if dir = "" then []
+  else
+    List.filter_map
+      (fun f ->
+        let path = Filename.concat dir f in
+        if Sys.file_exists path then Some (read_file path) else None)
+      [ "cbios_main_msx2.rom"; "cbios_logo_msx2.rom"; "cbios_sub.rom" ]
+
+(* Single-machine module, like state.msx itself: the title wants to know how
+   the one machine booted without threading a flag through state. *)
+let booted_with_roms = ref false
+
 let machine_of (state : Masc_tui_types.state) =
   match state.msx with
   | Some m -> m
   | None ->
-      let m = Msx.create ~machine:{ ram_kb = 128; vram_kb = 128; roms = [] } in
+      let roms = load_roms (rom_dir ()) in
+      booted_with_roms := roms <> [];
+      let m = Msx.create ~machine:{ ram_kb = 512; vram_kb = 128; roms } in
+      (* Run ahead to the boot logo (~30 frames in, full at 45) so the first
+         paint shows something; afterwards one key is one frame -- the
+         spectator contract. *)
+      Msx.step m ~frames:45;
       state.msx <- Some m;
       m
 
@@ -45,7 +77,11 @@ let draw ~write (state : Masc_tui_types.state) =
   done;
   let buf = Buffer.create (pcols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols " ocaml-msx (stub) — MSX2 core attachment demo");
+  let title =
+    if !booted_with_roms then " ocaml-msx — MSX2 C-BIOS"
+    else " ocaml-msx — no ROM (set MSX_ROMS to a C-BIOS directory)"
+  in
+  Buffer.add_string buf (fit_line cols title);
   Buffer.add_string buf "\027[0K\r\n";
   List.iter
     (fun line ->

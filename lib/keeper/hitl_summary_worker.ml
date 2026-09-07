@@ -1254,7 +1254,8 @@ let try_cli_slots
     let prompt = cli_prompt ~context_bundle:prepared.context_bundle in
     let prompt_sha = Digestif.SHA256.(digest_string prompt |> to_hex) in
     let quarantine_cause_of_failure = function
-      | Keeper_lane_cli_oneshot.Invalid_json_output _ -> Exact_domain_invalid_output
+      | Keeper_lane_cli_oneshot.Invalid_json_output _
+      | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> Exact_domain_invalid_output
       | Keeper_lane_cli_oneshot.Not_an_official_client _
       | Keeper_lane_cli_oneshot.Execution_failed _ -> Exact_flow_execution_failed
     in
@@ -1265,7 +1266,8 @@ let try_cli_slots
       | Error error ->
         Error (Keeper_approval_queue.exact_attempt_error_to_string error)
     in
-    let rec walk ~bound ~released_entry_binding ~last_cli_failure = function
+    let rec walk ~bound ~released_entry_binding ~last_cli_failure slots =
+      match Keeper_lane_cli_oneshot.order_slots slots with
       | [] ->
         (match bound, last_cli_failure with
          | Some identity, Some failure ->

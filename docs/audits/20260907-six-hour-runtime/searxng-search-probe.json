@@ -1,0 +1,43 @@
+{
+  "at": "2026-09-07T04:40:49.132823+00:00",
+  "query": "OCaml Eio GitHub",
+  "elapsed_s": 2.355,
+  "result_count": 37,
+  "top_results": [
+    {
+      "title": "GitHub - ocaml-multicore/eio: Effects-based direct-style IO for multicore OCaml \u00b7 GitHub",
+      "url": "https://github.com/ocaml-multicore/eio",
+      "engine": "brave"
+    },
+    {
+      "title": "Eio (eio.Eio)",
+      "url": "https://ocaml-multicore.github.io/eio/eio/Eio/index.html",
+      "engine": "brave"
+    },
+    {
+      "title": "ocaml-uring -- bindings to Linux io_uring - GitHub",
+      "url": "https://github.com/ocaml-multicore/ocaml-uring",
+      "engine": "google cse"
+    },
+    {
+      "title": "Module Eio_unix",
+      "url": "https://ocaml-multicore.github.io/eio/eio/Eio_unix/index.html",
+      "engine": "google cse"
+    },
+    {
+      "title": "eio/doc/rationale.md at main \u00b7 ocaml-multicore/eio",
+      "url": "https://github.com/ocaml-multicore/eio/blob/main/doc/rationale.md",
+      "engine": "brave"
+    }
+  ],
+  "unresponsive_engines": [
+    [
+      "duckduckgo",
+      "CAPTCHA"
+    ],
+    [
+      "startpage",
+      "parsing error"
+    ]
+  ]
+}

@@ -55,8 +55,8 @@ let lane_of_request request =
       request.Httpun.Request.headers
       "x-lane"
   with
-  | Some lane when List.mem lane Browser_lane.allowed_lane_names -> Ok lane
-  | Some other -> Error ("unknown lane: " ^ other)
+  | Some lane when String.equal lane Browser_lane.external_lane_name -> Ok lane
+  | Some _ -> Error "external browser transport requires the live lane"
   | None -> Error "x-lane header is required"
 ;;
 
@@ -80,6 +80,7 @@ let add_routes router =
       (error_json "lane token required")
   in
   router
+  |> Server_routes_http_browser_surface.add_routes
   |> Http.Router.post "/browser-lane/poll" (fun request reqd ->
        if not (lane_authorized request) then refuse request reqd
        else

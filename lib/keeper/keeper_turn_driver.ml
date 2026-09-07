@@ -154,6 +154,13 @@ let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
   }
 ;;
 
+let canonical_checkpoint_sink ~replay_prefix_projection sink
+    (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection snapshot.checkpoint with
+  | Error error -> Error (Keeper_replay_prefix.restore_error_to_string error)
+  | Ok checkpoint -> sink { snapshot with checkpoint }
+;;
+
 let project_provider_attempt_result ~replay_prefix_projection provider_result =
   let turn_result =
     match provider_result with
@@ -582,33 +589,13 @@ type attempt_input =
   ; attempt_replay_prefix_projection : Keeper_replay_prefix.projection
   }
 
-(* RFC-0265 follow-up -- graceful media degrade floor, decided per attempt.
-   A lane walk crosses runtimes with different input capabilities, so the
-   strip is decided against the runtime actually being dispatched rather than
-   once against the lane head. With the strip bound before the walk, a lane
-   ordered [text-only; vision] handed the vision candidate a stripped turn,
-   and one ordered [vision; text-only] handed the text-only candidate the
-   images the vision candidate had just failed on -- the hard multimodal gate
-   that #33034 moved only the deferred head off.
-
-   The decision is the RFC-0265 one with no reroute candidates, so it is
-   [No_reroute_needed] (this runtime admits the turn's modality: dispatch
-   untouched) or [No_capable_runtime] (it does not: strip the unsupported
-   media from the goal, the prior [initial_messages] and the resumed
-   checkpoint, append a degraded [Runtime_routed] manifest row and inject a
-   text notice so the turn runs on text instead of the loud terminal reject in
-   [Runtime_agent.run_blocks]). [Reroute] names a target drawn from the
-   candidate list, and that list is empty here, so it has no producer on this
-   call. The drop is non-silent (WARN log + runtime manifest row + injected
-   model-input notice -- RFC-0126/0145). The stripped checkpoint is the
-   dispatch view only; the persisted checkpoint is unchanged, so a later
-   vision-capable candidate in the same walk still sees the original media.
-
-   [initial_messages] is the caller's canonical pre-turn history and is the
-   exact prefix checked later by replay persistence. A resumed checkpoint is
-   only the AGENT_CORE dispatch carrier; media degradation may project its
-   messages without changing this canonical history. *)
+(* Project against the candidate being dispatched, preserving the canonical
+   input for subsequent candidates. Inline images that this candidate cannot
+   see are delegated through the turn-scoped projector before the generic
+   media strip. A failed vision head must not make a text fallback forget the
+   picture. Other unsupported media retain the explicit degrade contract. *)
 let project_input_for_attempt
+    ~project_images
     ~keeper_name
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -648,14 +635,59 @@ let project_input_for_attempt
   | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> unchanged
   | Runtime_agent.No_capable_runtime { required } ->
     let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+    let project ~mode blocks =
+      if caps.supports_image_input
+      then { Keeper_vision_ingest.blocks; delegated_images = 0 }
+      else project_images ~mode blocks
+    in
+    let projected_goal = project ~mode:Keeper_vision_ingest.Eager current_goal_blocks in
+    let project_messages messages =
+      let projected =
+        List.map
+          (fun (message : Agent_core.Types.message) ->
+            let projection =
+              project ~mode:Keeper_vision_ingest.Store_only message.content
+            in
+            { message with content = projection.blocks }, projection.delegated_images)
+          messages
+      in
+      List.map fst projected,
+      List.fold_left (fun count (_, images) -> count + images) 0 projected
+    in
+    let projected_initial, initial_images = project_messages initial_messages in
+    let projected_checkpoint, checkpoint_images =
+      match agent_core_checkpoint with
+      | None -> None, 0
+      | Some (checkpoint : Agent_core.Checkpoint.t) ->
+        let messages, count = project_messages checkpoint.messages in
+        Some { checkpoint with messages }, count
+    in
+    let delegated_images =
+      projected_goal.delegated_images + initial_images + checkpoint_images
+    in
+    if delegated_images > 0 then (
+      Log.Keeper.info
+        "%s: image fallback on %s -- projected %d image occurrences to readings or references"
+        keeper_name runtime_id delegated_images;
+      emit_runtime_manifest
+        ~status:"delegated"
+        ~decision:
+          (Keeper_runtime_manifest.with_payload_role
+             ~payload_role:Keeper_runtime_manifest.Operator_evidence
+             (`Assoc
+               [ "routing_action", `String "images_delegated_for_candidate"
+               ; "runtime_id", `String runtime_id
+               ; "image_occurrences", `Int delegated_images
+               ]))
+        Keeper_runtime_manifest.Runtime_routed);
     let stripped_goal, goal_dropped =
-      Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
+      Runtime_agent.strip_unsupported_modality_blocks caps projected_goal.blocks
     in
     let stripped_initial, initial_dropped =
-      Runtime_agent.strip_unsupported_modality_messages caps initial_messages
+      Runtime_agent.strip_unsupported_modality_messages caps projected_initial
     in
     let stripped_checkpoint, checkpoint_dropped =
-      match agent_core_checkpoint with
+      match projected_checkpoint with
       | None -> None, []
       | Some (checkpoint : Agent_core.Checkpoint.t) ->
         let messages, dropped =
@@ -671,7 +703,7 @@ let project_input_for_attempt
         checkpoint_dropped
     in
     (match Runtime_agent.media_degrade_note ~runtime_id dropped with
-     | None ->
+     | None when delegated_images = 0 ->
        (* [required] is non-empty -- that is why the decision was
           [No_capable_runtime] -- yet nothing was strippable, so there is no
           text-only turn to offer and the provider capability floor will reject
@@ -702,31 +734,58 @@ let project_input_for_attempt
                 ]))
          Keeper_runtime_manifest.Runtime_routed;
        unchanged
-     | Some note ->
-       Log.Keeper.warn
-         "%s: RFC-0265 media degrade on %s -- dropped %s, continuing text-only"
-         keeper_name
-         runtime_id
-         (modality_counts_summary dropped);
-       emit_runtime_manifest
-         ~status:"degraded"
-         ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
-         Keeper_runtime_manifest.Runtime_routed;
+     | note ->
+       Option.iter
+         (fun _ ->
+           Log.Keeper.warn
+             "%s: RFC-0265 media degrade on %s -- dropped %s, continuing text-only"
+             keeper_name runtime_id (modality_counts_summary dropped);
+           emit_runtime_manifest
+             ~status:"degraded"
+             ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
+             Keeper_runtime_manifest.Runtime_routed)
+         note;
        let goal_with_note =
-         stripped_goal @ [ Agent_core.Types.text_block note ]
+         stripped_goal
+         @ (match note with
+            | None -> []
+            | Some text -> [ Agent_core.Types.text_block text ])
        in
        let dispatch_prefix =
          match stripped_checkpoint with
          | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
          | None -> stripped_initial
        in
-       { attempt_goal_blocks = Some goal_with_note
+       let replay_projection =
+         match goal_blocks with
+         | Some canonical_blocks when canonical_blocks <> goal_with_note ->
+           (* Agent_input.append_user_input appends this exact sanitized User
+              message after the seed history. Record the boundary now, before
+              the provider can append answers, tools or injected context. *)
+           let input_message blocks =
+             Agent_core.Types.user_msg_blocks
+               (List.map
+                  (function
+                    | Agent_core.Types.Text text ->
+                      Agent_core.Types.Text (Llm_provider.Utf8_sanitize.sanitize text)
+                    | block -> block)
+                  blocks)
+           in
+           Keeper_replay_prefix.media_degraded_with_current_input
+             ~canonical_prefix:initial_messages ~dispatch_prefix
+             ~canonical_input:(input_message canonical_blocks)
+             ~dispatch_input:(input_message goal_with_note)
+         | Some _ | None ->
+           Keeper_replay_prefix.media_degraded
+             ~canonical_prefix:initial_messages ~dispatch_prefix
+       in
+       { attempt_goal_blocks =
+           (match goal_blocks, goal_with_note with
+            | None, [] -> None
+            | _ -> Some goal_with_note)
        ; attempt_initial_messages = stripped_initial
        ; attempt_agent_core_checkpoint = stripped_checkpoint
-       ; attempt_replay_prefix_projection =
-           Keeper_replay_prefix.media_degraded
-             ~canonical_prefix:initial_messages
-             ~dispatch_prefix
+       ; attempt_replay_prefix_projection = replay_projection
        })
 
 type attempt_inference_policy =
@@ -755,7 +814,16 @@ let run_named
     ~goal
     ?goal_blocks
     ?session_id
-    ?(system_prompt = "")
+    (* Required, not defaulted to "". Three of the runtimes this dispatches to
+       -- Codex, Claude Code, Antigravity -- refuse a blank composition in
+       [Keeper_official_client_host.prepare_turn], because a blank one runs the
+       turn under the vendor's built-in instructions with masc's tool surface
+       still attached (#33165). A default that part of the domain rejects is not
+       a default: it left 34 cases red across the three official-client suites
+       and #33165 fixed one of the five call sites, because an optional
+       argument asks nobody. Callers that mean "no system prompt" now say so
+       (#33862). *)
+    ~system_prompt
     ?(tools = [])
     ~agent_core_tools
     ?(initial_messages = [])
@@ -981,6 +1049,7 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
+  let project_images = Keeper_vision_ingest.fallback_projector ~keeper_name () in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -1037,6 +1106,7 @@ let run_named
           ; attempt_replay_prefix_projection = replay_prefix_projection
           } =
         project_input_for_attempt
+          ~project_images
           ~keeper_name
           ~emit_runtime_manifest
           ~goal_blocks
@@ -1459,7 +1529,14 @@ let run_named
                  take [tools] whole. A caller that named no lane view is not
                  deferring anything, so this lane sends every tool too --
                  which is what every caller did before the listing existed. *)
-              tools = agent_core_tools
+              tools =
+                (match agent_ref with
+                 | None -> agent_core_tools
+                 | Some agent_cell ->
+                   (* A previous provider attempt may have loaded more tools.
+                      Carry its actual callable set into the next agent. *)
+                   Keeper_agent_tool_surface.on_the_wire
+                     ~agent_cell ~built:agent_core_tools)
             ; initial_messages
             ; model_input_projection
             ; stream_idle_timeout_s
@@ -1522,7 +1599,10 @@ let run_named
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
-            ; checkpoint_sink
+            ; checkpoint_sink =
+                Option.map
+                  (canonical_checkpoint_sink ~replay_prefix_projection)
+                  checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector
             ; context
@@ -1574,6 +1654,7 @@ module For_testing = struct
   ;;
 
   let project_provider_attempt_result = project_provider_attempt_result
+  let canonical_checkpoint_sink = canonical_checkpoint_sink
   let provider_result outcomes = outcomes.provider_result
   let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt

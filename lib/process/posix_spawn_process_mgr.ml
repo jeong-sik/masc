@@ -76,6 +76,16 @@ module Impl = struct
     let spawn_unix () ~sw ?cwd ~env ~fds ~executable args =
       let cwd = Option.map Eio.Path.native_exn cwd in
       Switch.check sw;
+      (* [reap] below waits on [Eio_unix.Process.sigchld], and only a backend
+         that installs a SIGCHLD handler ever broadcasts it. eio_posix does;
+         eio_linux reaps through process descriptors and installs none, so on
+         Linux the wait never ends and the child stays defunct -- four suites
+         sat that way for over an hour in the 2026-09-06 nightly (#33807).
+         Installed here rather than once at startup because that is the point
+         a child can first exit, and set every spawn rather than behind a flag
+         because [Sys.set_signal] is idempotent and a flag would let a second
+         domain spawn while the first is still installing. *)
+      Eio_unix.Process.install_sigchld_handler ();
       let exit_status, set_exit_status = Promise.create () in
       let child_fds = List.map (fun (child_fd, _, _) -> child_fd) fds in
       let modes = List.map (fun (_, _, mode) -> mode) fds in

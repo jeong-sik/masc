@@ -263,10 +263,7 @@ let require_equal ~field left right =
    both transports: did this answer judge exactly this candidate. Only the
    provenance recorded alongside differs, so the two callers share this. *)
 let verdict_of_batch_output candidate output =
-  let* items =
-    Keeper_board_attention_judgment.batch_of_yojson output
-    |> Result.map_error (fun detail -> Domain_output_invalid detail)
-  in
+  let* items = Keeper_board_attention_judgment.batch_of_yojson output in
   match items with
   | [ item ]
     when String.equal
@@ -274,18 +271,12 @@ let verdict_of_batch_output candidate output =
            candidate.Keeper_board_attention_candidate.candidate_id ->
     Ok item.verdict
   | [ item ] ->
-    Error
-      (Domain_output_invalid
-         (Printf.sprintf
-            "singleton verdict identity mismatch expected=%S actual=%S"
-            candidate.Keeper_board_attention_candidate.candidate_id
-            item.candidate_id))
+    Error (Printf.sprintf
+      "singleton verdict identity mismatch expected=%S actual=%S"
+      candidate.Keeper_board_attention_candidate.candidate_id item.candidate_id)
   | items ->
-    Error
-      (Domain_output_invalid
-         (Printf.sprintf
-            "singleton verdict count must be exactly one, got %d"
-            (List.length items)))
+    Error (Printf.sprintf "singleton verdict count must be exactly one, got %d"
+      (List.length items))
 ;;
 
 let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
@@ -355,7 +346,8 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
       selected_request_body_sha256
       success_request_body_sha256
   in
-  let* verdict = verdict_of_batch_output candidate success.output in
+  let* verdict = verdict_of_batch_output candidate success.output
+    |> Result.map_error (fun detail -> Domain_output_invalid detail) in
   Ok
     { Keeper_board_attention_candidate.verdict
     ; slot_id
@@ -380,10 +372,6 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
 type cli_tail_error =
   | No_cli_slots
   | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
-  | Cli_output_invalid of
-      { slot_id : string
-      ; detail : string
-      }
 
 let cli_slots prepared = prepared.cli_slots
 
@@ -393,8 +381,7 @@ let cli_tail_error_to_string = function
     String.concat
       "; "
       (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
-  | Cli_output_invalid { slot_id; detail } ->
-    Printf.sprintf "slot=%s output invalid: %s" slot_id detail
+
 ;;
 
 let run_cli_tail ?runner ~base_path prepared =
@@ -409,27 +396,22 @@ let run_cli_tail ?runner ~base_path prepared =
          ~system_prompt:""
          ~requirement:prepared.requirement
          ~prompt:prepared.prompt
+         ~validate:(verdict_of_batch_output prepared.candidate)
+         ~on_failure:(fun failure ->
+           Log.Keeper.warn ~keeper_name:prepared.candidate.keeper_name
+             "board attention cli lane-slot failed: %s"
+             (Keeper_lane_cli_oneshot.failure_to_string failure))
          ()
      with
      | Error failures -> Error (Cli_slots_exhausted failures)
-     | Ok (slot_id, output) ->
-       (match verdict_of_batch_output prepared.candidate output with
-        | Error (Domain_output_invalid detail) ->
-          Error (Cli_output_invalid { slot_id; detail })
-        | Error _ ->
-          (* [verdict_of_batch_output] only ever fails as Domain_output_invalid;
-             the other arms of the execution error are unreachable here. *)
-          Error
-            (Cli_output_invalid
-               { slot_id; detail = "unexpected verdict failure" })
-        | Ok verdict ->
-          Ok
-            ( slot_id
-            , { Keeper_board_attention_candidate.verdict
-              ; slot_id = slot_id
-              ; source = Keeper_board_attention_candidate.Cli_lane_slot
-              ; judged_at = Time_compat.now ()
-              } )))
+     | Ok (slot_id, verdict) ->
+       Ok
+         ( slot_id
+         , { Keeper_board_attention_candidate.verdict
+           ; slot_id
+           ; source = Keeper_board_attention_candidate.Cli_lane_slot
+           ; judged_at = Time_compat.now ()
+           } ))
 ;;
 
 type terminal_outcome =

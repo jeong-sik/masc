@@ -118,7 +118,7 @@ let caller ~(dispatch : dispatch) ~(descriptor : Keeper_tool_descriptor.t)
   match dispatch ~descriptor ~args:args_json with
   | None ->
     Sandbox_target.Transport_failed
-      { reason = "shell command: the tool runtime returned no execution"
+      { output_files = None; reason = "shell command: the tool runtime returned no execution"
       ; stdout = ""
       ; stderr = "shell command: the tool runtime returned no execution"
       }
@@ -127,14 +127,14 @@ let caller ~(dispatch : dispatch) ~(descriptor : Keeper_tool_descriptor.t)
     | Tool_result.Completed _ ->
       let stdout = execution.Keeper_tool_execution.raw_output in
       (match on_stdout_chunk with Some emit -> emit stdout | None -> ());
-      Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; stderr = "" }
+      Sandbox_target.Ran { output_files = None; status = Unix.WEXITED 0; stdout; stderr = "" }
     | Tool_result.Failed _ ->
       let stderr = execution.Keeper_tool_execution.raw_output in
       (match on_stderr_chunk with Some emit -> emit stderr | None -> ());
-      Sandbox_target.Ran { status = Unix.WEXITED 1; stdout = ""; stderr }
+      Sandbox_target.Ran { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr }
     | Tool_result.Deferred _ ->
       Sandbox_target.Ran
-        { status = Unix.WEXITED 1
+        { output_files = None; status = Unix.WEXITED 1
         ; stdout = ""
         ; stderr =
             Printf.sprintf

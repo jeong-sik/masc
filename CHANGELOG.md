@@ -2801,7 +2801,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   by a dedicated negative test (`test_jest_vitest_banner_
   required`).  Verifier runtime now covers dune + cargo + pytest
   + go test + jest + vitest, bringing JavaScript-ecosystem
-  runner output (Kidsnote FE repos, most npm projects) into the
+  runner output (ExampleOrg FE repos, most npm projects) into the
   same typed-marker surface the rest of the runtime consumes.
 
 ## [0.12.0] - 2026-04-20

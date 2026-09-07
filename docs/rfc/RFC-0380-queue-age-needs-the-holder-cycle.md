@@ -36,11 +36,11 @@ durable 이벤트는 사이클 입구에서만 턴에 투입되고, 사이클 �
 
 같은 헬스 증상(`runnable_backlog_stale`)이 서로 다른 두 경로에서 났다.
 
-**(a) provider 실패가 사이클을 태움** — sangsu 이벤트 `51398c19`(06:14:09Z 도착): 06:25:45Z 사이클 입구에서 소비 → 19분 뒤 `Network error: Broken pipe`로 turn terminal → `source moved to queue tail reason=transient_turn_failure` → 06:49:48Z 재투입 → 06:53:45Z ack. **총 39분 36초**. kidsnote `1ef615b1`도 동형(34분 07초).
+**(a) provider 실패가 사이클을 태움** — sangsu 이벤트 `51398c19`(06:14:09Z 도착): 06:25:45Z 사이클 입구에서 소비 → 19분 뒤 `Network error: Broken pipe`로 turn terminal → `source moved to queue tail reason=transient_turn_failure` → 06:49:48Z 재투입 → 06:53:45Z ack. **총 39분 36초**. exampleorg `1ef615b1`도 동형(34분 07초).
 
 **(b) 정상 장기 tool 루프** — rondo 06:50:22Z `idle -> phase_gating action=StartTurn` 후 23회 provider turn으로 실제 빌드·파일 편집을 수행, 32분+ 동안 실패 0건. 그 뒤에 도착한 이벤트 3건은 그냥 줄 서 있을 뿐인데 oldest age 1,953s로 `operator_action_required=true`가 켜졌다.
 
-정체는 keeper 속성이 아니라 "지금 긴 사이클 안에 있는 keeper"를 따라 **회전**했다(sangsu → kidsnote → rondo → taskmaster). RFC-0373류 lane 굶김(`holder_lane=chat_operation`)은 이 구간에 0건 — 별개 결함이다. 소비 코드는 계약대로 동작했다: kidsnote의 autonomous 사이클은 06:22:20Z에 `autonomous turn yields to durable stimulus`로 정상 양보했다.
+정체는 keeper 속성이 아니라 "지금 긴 사이클 안에 있는 keeper"를 따라 **회전**했다(sangsu → exampleorg → rondo → taskmaster). RFC-0373류 lane 굶김(`holder_lane=chat_operation`)은 이 구간에 0건 — 별개 결함이다. 소비 코드는 계약대로 동작했다: exampleorg의 autonomous 사이클은 06:22:20Z에 `autonomous turn yields to durable stimulus`로 정상 양보했다.
 
 사이클 중앙값은 16초지만 장기 사이클은 30분+다. 600초 임계는 이벤트 나이 축에서는 두 세계를 구분할 수 없다.
 

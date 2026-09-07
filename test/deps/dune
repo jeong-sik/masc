@@ -91,6 +91,7 @@
   (re_export masc.keeper_chat_delivery_identity)
   (re_export masc.keeper_chat_operations)
   (re_export masc.keeper_contract)
+  (re_export masc.keeper_tool_call_index)
   ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
   (re_export masc.attribution)
   ;; RFC-0056 Phase 1M — Execution policy leaf sub-library.
@@ -184,6 +185,7 @@
   (re_export qcheck-core)
   (re_export re)
   (re_export runtime_events)
+  (re_export sqlite3)
   (re_export str)
   (re_export time_compat)
   (re_export unix)

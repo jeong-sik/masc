@@ -2,6 +2,13 @@
 ;; Uses h2-eio for unlimited SSE streams per connection (no browser 6-conn limit)
 
 (executable
+ (name masc_browser_host)
+ (modules masc_browser_host)
+ (public_name masc-browser-host)
+ (package masc)
+ (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix))
+
+(executable
  (name main_eio)
  (modules main_eio)
  (public_name masc)
@@ -434,6 +441,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
   masc.keeper_chat_delivery_identity
@@ -970,7 +978,9 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
-  msx
+  masc_tui_frame
+  masc_tui_image_preview
+  ocaml-msx.msx
   masc
   masc_tui_acting_pane
   masc_tui_gate_text
@@ -1092,6 +1102,8 @@
   masc_types
   masc_tui_ansi
   masc_tui_context_inspector
+  masc_tui_frame
+  masc_tui_scroll
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1130,6 +1142,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi
   masc_tui_answering
@@ -1347,7 +1360,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64))
 
 (library
  (name masc_tui_link_label)
@@ -1365,19 +1378,16 @@
  (name masc_tui_image_mosaic)
  (wrapped false)
  (modules masc_tui_image_mosaic))
-
-;; The MSX spectator screen. Depends on the worktree-local copy of the
-;; ocaml-msx core (lib/msx) -- see that directory's comment for the
-;; pin-instead-of-copy graduation path.
 (library
  (name masc_tui_msx)
- (wrapped false)
+;; The MSX spectator screen, over the opam path-pinned ocaml-msx core.
+;; pin: opam pin add ocaml-msx --kind=path <core repo>
  (modules masc_tui_msx)
  (libraries
   masc_tui_types
   masc_tui_ansi
   masc_tui_image_mosaic
-  msx))
+  ocaml-msx.msx))
 
 ;; RFC-0429 §3.0: the same HTTP client the TUI uses, with no TUI around it.
 ;; A request the server answers in milliseconds is logged by the live TUI as

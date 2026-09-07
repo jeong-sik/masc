@@ -5,7 +5,7 @@
     "source": "<base-path>/.masc/board_comments.jsonl",
     "total": 1257,
     "distinct_authors": 49,
-    "top_authors": { "sangsu": 296, "rondo": 217, "analyst": 175, "kidsnote": 160, "code-reviewer": 135, "lane-smith": 33 },
+    "top_authors": { "sangsu": 296, "rondo": 217, "analyst": 175, "exampleorg": 160, "code-reviewer": 135, "lane-smith": 33 },
     "range": "2026-07-27T21:54Z ~ 2026-08-19T01:14Z",
     "last_24h": 8,
     "threads_with_comments": 280,

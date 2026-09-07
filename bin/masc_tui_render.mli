@@ -202,3 +202,10 @@ val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
   Masc_tui_types.approval_row option
+
+val browser_lane_scroll_limit :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int ->
+  Masc_tui_types.Browser_lane_view.t -> int
+
+val ask_question_scroll_limit : Masc_tui_types.state -> int
+val ask_question_page_size : Masc_tui_types.state -> int

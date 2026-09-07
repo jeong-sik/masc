@@ -433,6 +433,149 @@ let test_scan_scope_limits_a_submission_to_its_own_verification () =
     (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
 
 
+(* Release each real retry fiber explicitly, so simultaneous deferrals and
+   arrivals during dispatch are exercised without a wall-clock delay. *)
+let with_retry_interval f =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+    Eio.Switch.run (fun sw ->
+      let timers = Eio.Stream.create 4 in
+      let waits = ref 0 in
+      let wait () =
+        incr waits;
+        let released, release = Eio.Promise.create () in
+        Eio.Stream.add timers release;
+        Eio.Promise.await released
+      in
+      f ~sw ~wait ~waits ~timers))
+
+let retry_key task_id verification_id : CA.For_testing.review_key =
+  { task_id; verification_id }
+
+let retry_scope_names scope entries =
+  CA.For_testing.entries_in_scope ~scope entries
+  |> List.map (fun ((key : CA.For_testing.review_key), _) ->
+       key.task_id ^ "/" ^ key.verification_id)
+  |> List.sort String.compare
+
+let test_retry_batch_keeps_concurrent_verifications () =
+  let a = retry_key "task-a" "vrf-1" in
+  let b = retry_key "task-b" "vrf-1" in
+  let c = retry_key "task-a" "vrf-2" in
+  List.iter
+    (fun keys ->
+      with_retry_interval (fun ~sw ~wait ~waits ~timers ->
+        let delivered = Eio.Stream.create 1 in
+        let schedule =
+          CA.For_testing.make_retry_scheduler ~sw ~wait
+            ~dispatch:(Eio.Stream.add delivered)
+        in
+        let accepted =
+          Eio.Fiber.List.map
+            (fun key -> schedule (CA.For_testing.Targets [ key ])) keys
+        in
+        Alcotest.(check (list bool)) "each concurrent deferral is retained"
+          (List.map (fun _ -> true) keys) accepted;
+        Alcotest.(check bool) "same verification shares its pending retry" false
+          (schedule (CA.For_testing.Targets [ a ]));
+        let release = Eio.Stream.take timers in
+        Alcotest.(check int) "all pending keys share one interval" 1 !waits;
+        Eio.Promise.resolve release ();
+        let scope = Eio.Stream.take delivered in
+        let entries =
+          List.map (fun key -> key, ())
+            (retry_key "task-a" "vrf-older" :: keys)
+        in
+        Alcotest.(check (list string)) "only the exact deferred verifications retry"
+          (retry_scope_names (CA.For_testing.Targets keys) entries)
+          (retry_scope_names scope entries)))
+    [ [ a; b ]; [ a; b; c ] ]
+
+let test_retry_batch_keeps_backlog_read_recovery () =
+  let a = retry_key "task-a" "vrf-1" in
+  let b = retry_key "task-b" "vrf-2" in
+  let open CA.For_testing in
+  List.iter
+    (fun scopes ->
+      with_retry_interval (fun ~sw ~wait ~waits ~timers ->
+        let delivered = Eio.Stream.create 1 in
+        let schedule = make_retry_scheduler ~sw ~wait ~dispatch:(Eio.Stream.add delivered) in
+        List.iter
+          (fun scope ->
+            Alcotest.(check bool) "new retry scope is admitted" true (schedule scope))
+          scopes;
+        Alcotest.(check bool) "repeated read failure shares the sweep" false
+          (schedule Whole_backlog);
+        let release = Eio.Stream.take timers in
+        Alcotest.(check int) "read recovery and named retries share one timer" 1 !waits;
+        Eio.Promise.resolve release ();
+        Alcotest.(check bool) "backlog read failure retains a whole-backlog retry" true
+          (Eio.Stream.take delivered = Whole_backlog)))
+    [ [ Targets [ a ]; Whole_backlog; Targets [ b ] ]
+    ; [ Whole_backlog; Targets [ a ]; Targets [ b ] ]
+    ]
+
+let test_retry_arrival_during_drain_keeps_its_next_batch () =
+  let a = retry_key "task-a" "vrf-1" in
+  let b = retry_key "task-b" "vrf-2" in
+  let c = retry_key "task-c" "vrf-3" in
+  with_retry_interval (fun ~sw ~wait ~waits ~timers ->
+    let delivered = Eio.Stream.create 2 in
+    let during_dispatch = ref None in
+    let dispatch scope =
+      Eio.Stream.add delivered scope;
+      match !during_dispatch with
+      | None -> ()
+      | Some enqueue ->
+        during_dispatch := None;
+        Alcotest.(check bool) "an arrival during dispatch starts the next batch" true
+          (enqueue (CA.For_testing.Targets [ b ]))
+    in
+    let schedule = CA.For_testing.make_retry_scheduler ~sw ~wait ~dispatch in
+    during_dispatch := Some schedule;
+    Alcotest.(check bool) "first retry is admitted" true
+      (schedule (CA.For_testing.Targets [ a ]));
+    Eio.Promise.resolve (Eio.Stream.take timers) ();
+    let entries = [ a, (); b, (); c, () ] in
+    Alcotest.(check (list string)) "first drain owns only its detached batch"
+      [ "task-a/vrf-1" ] (retry_scope_names (Eio.Stream.take delivered) entries);
+    let release_next = Eio.Stream.take timers in
+    Alcotest.(check bool) "a third deferral joins the new batch" true
+      (schedule (CA.For_testing.Targets [ c ]));
+    Alcotest.(check bool) "new batch still owns its first arrival" false
+      (schedule (CA.For_testing.Targets [ b ]));
+    Eio.Promise.resolve release_next ();
+    Alcotest.(check (list string)) "the next drain keeps both new arrivals"
+      [ "task-b/vrf-2"; "task-c/vrf-3" ]
+      (retry_scope_names (Eio.Stream.take delivered) entries);
+    Alcotest.(check int) "one interval per drained batch" 2 !waits)
+
+let test_cancelled_retry_does_not_publish_into_a_fresh_runtime () =
+  let observed = ref [] in
+  let dispatch scope = observed := scope :: !observed in
+  (try
+     with_retry_interval (fun ~sw ~wait ~waits:_ ~timers ->
+       let schedule = CA.For_testing.make_retry_scheduler ~sw ~wait ~dispatch in
+       Alcotest.(check bool) "retry is pending before cancellation" true
+         (schedule
+            (CA.For_testing.Targets [ retry_key "task-awaiting" "vrf-awaiting" ]));
+       let (_ : unit Eio.Promise.u) = Eio.Stream.take timers in
+       Eio.Switch.fail sw Exit)
+   with
+   | Exit -> ());
+  Alcotest.(check int) "cancelled timer never dispatches" 0 (List.length !observed);
+  with_retry_interval (fun ~sw ~wait ~waits:_ ~timers ->
+    let delivered, resolve_delivered = Eio.Promise.create () in
+    let schedule =
+      CA.For_testing.make_retry_scheduler ~sw ~wait
+        ~dispatch:(fun scope -> dispatch scope; Eio.Promise.resolve resolve_delivered scope)
+    in
+    Alcotest.(check bool) "fresh runtime admits recovery of awaiting tasks" true
+      (schedule CA.For_testing.Whole_backlog);
+    Eio.Promise.resolve (Eio.Stream.take timers) ();
+    Alcotest.(check bool) "recovery is the fresh whole-backlog scope" true
+      (Eio.Promise.await delivered = CA.For_testing.Whole_backlog))
+
 (* RFC-0417 §4.1/§6.3: the system lane's authority ends where a cancellation
    begins. The routing is pure and read off the status; the runtime path
    consults it before any review starts, records a cancel claim as
@@ -954,7 +1097,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -996,7 +1139,6 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
-          CA.start ~sw ~clock ~config;
           (match
              W.transition_task_r
                config
@@ -1008,6 +1150,10 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+          (* A cancelled runtime leaves this durable awaiting state behind.
+             Starting after submission proves boot recovery without relying
+             on the submission hook or a surviving interval timer. *)
+          CA.start ~sw ~clock ~config;
           Eio.Time.with_timeout_exn clock 5.0 (fun () ->
             Eio.Promise.await reviewer_called;
             Eio.Promise.await verdict_committed;
@@ -1185,7 +1331,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some (Masc.Task.Anti_rationalization.Approve "")));
@@ -2388,7 +2534,7 @@ let test_transport_projection_bounds_the_evidence_total () =
           | VS.Evidence_artifact { truncated; _ } ->
             Alcotest.(check bool) "no item is truncated on its own" false truncated
           | VS.Evidence_note _ | VS.Evidence_invalid_reference
-          | VS.Evidence_artifact_unreadable _ -> ())
+          | VS.Evidence_artifact_unreadable _ | VS.Evidence_artifact_binary _ -> ())
         items;
       Alcotest.(check bool)
         "the stored snapshot carries every byte"
@@ -2941,7 +3087,7 @@ let test_injected_artifact_read_answers_the_snapshot () =
              if
                String.equal worker "endpoint-worker"
                && String.equal relative "evidence.txt"
-             then Ok ("captured-by-backend", 20, false)
+             then Ok (VS.Text_payload ("captured-by-backend", 20, false))
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -2965,13 +3111,50 @@ let test_injected_artifact_read_answers_the_snapshot () =
         "read_error"
         (List.nth items 1 |> member "reason" |> member "code" |> to_string))
 
+(* An injected reader answers under the same text line the direct read
+   holds: binary bytes are typed invalid_utf8, and a truncated read may stop
+   mid-character exactly where the direct prefix can. *)
+let test_an_injected_reader_answers_under_the_text_line () =
+  with_temp_dir (fun base_path ->
+      let artifact_read =
+        Some
+          (fun ~worker ~relative ->
+             ignore worker;
+             if String.equal relative "logo.png" then
+               (* a reader that hands non-text bytes to the text payload
+                  still meets the store's own line *)
+               Ok (VS.Text_payload ("\xff\xd8\xff\xe0garbage", 12, false))
+             else if String.equal relative "cut.txt" then
+               Ok (VS.Text_payload ("abc\xe2\x82", 5, true))
+             else Error (VS.Evidence_read_error "backend: not found"))
+      in
+      let json =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:logo.png"; "artifact:cut.txt" ]
+      in
+      let open Yojson.Safe.Util in
+      let items = json |> to_list in
+      Alcotest.(check string) "binary bytes are refused, typed"
+        "artifact_unreadable"
+        (List.nth items 0 |> member "kind" |> to_string);
+      Alcotest.(check string) "with the text-line reason"
+        "invalid_utf8"
+        (List.nth items 0 |> member "reason" |> member "code" |> to_string);
+      Alcotest.(check string) "a truncated multibyte cut keeps the whole characters"
+        "abc" (List.nth items 1 |> member "content" |> to_string);
+      Alcotest.(check bool) "and stays marked truncated"
+        true (List.nth items 1 |> member "truncated" |> to_bool))
+
 let test_artifact_reference_size_uses_the_injected_reader () =
   with_temp_dir (fun base_path ->
       let artifact_read =
         Some
           (fun ~worker ~relative ->
              ignore worker;
-             if String.equal relative "big.log" then Ok ("", 90_000, true)
+             if String.equal relative "big.log" then Ok (VS.Text_payload ("", 90_000, true))
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       Alcotest.(check (option int))
@@ -3015,6 +3198,131 @@ let test_reader_routes_by_where_the_tree_lives () =
         (route "microvm");
       Alcotest.(check bool) "docker keeps the direct host read" false
         (route "docker"))
+
+(* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
+   snapshot keeps the hash, size and format, and files the bytes as the
+   evidence body when the caller names the request. *)
+let test_a_binary_payload_is_adopted_and_filed () =
+  with_temp_dir (fun base_path ->
+      let png_bytes = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" in
+      let artifact_read =
+        Some
+          (fun ~worker ~relative ->
+             ignore worker;
+             if String.equal relative "shot.png" then
+               Ok
+                 (VS.Binary_payload
+                    { data = png_bytes
+                    ; bytes = String.length png_bytes
+                    ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
+                    ; format = "png"
+                    })
+             else Error (VS.Evidence_read_error "backend: not found"))
+      in
+      let filed =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~request_id:"vrf-binary-test"
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:shot.png" ]
+      in
+      let open Yojson.Safe.Util in
+      let item = List.nth (filed |> to_list) 0 in
+      Alcotest.(check string) "adopted as a binary artifact"
+        "artifact_binary" (item |> member "kind" |> to_string);
+      Alcotest.(check int) "with its byte count"
+        (String.length png_bytes) (item |> member "bytes" |> to_int);
+      Alcotest.(check string) "with its format" "png"
+        (item |> member "format" |> to_string);
+      let body_path = item |> member "body" |> to_string in
+      Alcotest.(check string) "the body is filed under the request"
+        "evidence/vrf-binary-test/0.bin" body_path;
+      let masc_dir = CU.masc_dir_from_base_path ~base_path in
+      let filed_bytes = Fs_compat.load_file (Filename.concat masc_dir body_path) in
+      Alcotest.(check string) "the filed bytes are the read bytes" png_bytes filed_bytes;
+      let unfiled =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:shot.png" ]
+      in
+      let open Yojson.Safe.Util in
+      let bare = List.nth (unfiled |> to_list) 0 in
+      Alcotest.(check bool) "without a request id there is no body field"
+        false (bare |> member "body" != `Null))
+
+(* RFC-0436 §4.3: the judge reads a filed binary body back as base64, and
+   only an image format counts as an attached image. A body that was never
+   filed is an error, not a guess. *)
+let test_a_filed_binary_body_reads_back_and_only_images_attach () =
+  with_temp_dir (fun base_path ->
+      let png_bytes = "\x89PNG\r\n\x1a\n" in
+      let body =
+        VS.persist_binary_body
+          ~base_path ~request_id:"vrf-readback" ~index:0 png_bytes
+      in
+      let image_item =
+        VS.Evidence_artifact_binary
+          { reference = "artifact:shot.png"
+          ; bytes = String.length png_bytes
+          ; sha256 = "e3b0c442"
+          ; format = "png"
+          ; body
+          }
+      in
+      (match VS.read_binary_body_base64 ~base_path image_item with
+       | Ok encoded ->
+         Alcotest.(check string)
+           "the body reads back as base64"
+           (Base64.encode_string png_bytes) encoded
+       | Error detail -> Alcotest.failf "read failed: %s" detail);
+      (match
+         VS.read_binary_body_base64 ~base_path
+           (VS.Evidence_artifact_binary
+              { reference = "artifact:gone.bin"
+              ; bytes = 1
+              ; sha256 = "x"
+              ; format = "bin"
+              ; body = None
+              })
+       with
+       | Ok _ -> Alcotest.fail "a bodyless item must not read back"
+       | Error _ -> ());
+      (* A body above the capture ceiling is not delivered — the judge falls
+         back to the reference-and-hash line (RFC-0436 §4.5). *)
+      let oversized =
+        String.make (VS.verification_evidence_max_bytes + 1) 'x'
+      in
+      let big_body =
+        VS.persist_binary_body
+          ~base_path ~request_id:"vrf-readback" ~index:1 oversized
+      in
+      (match
+         VS.read_binary_body_base64 ~base_path
+           (VS.Evidence_artifact_binary
+              { reference = "artifact:big.png"
+              ; bytes = String.length oversized
+              ; sha256 = "y"
+              ; format = "png"
+              ; body = big_body
+              })
+       with
+       | Ok _ -> Alcotest.fail "an oversized body must not be delivered"
+       | Error detail ->
+         Alcotest.(check bool)
+           "the refusal names the ceiling" true
+           (Astring.String.is_infix ~affix:"delivery" detail));
+      Alcotest.(check (option string))
+        "png attaches as an image" (Some "image/png")
+        (VS.image_media_type_of_binary_format "png");
+      Alcotest.(check (option string))
+        "jpg attaches as image/jpeg" (Some "image/jpeg")
+        (VS.image_media_type_of_binary_format "jpg");
+      Alcotest.(check (option string))
+        "a markdown diff does not attach" None
+        (VS.image_media_type_of_binary_format "md"))
 
 let test_checkout_relative_artifact_is_not_guessed () =
   with_temp_dir (fun base_path ->
@@ -3224,6 +3532,14 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "concurrent verification retries share one timer without losing keys" `Quick
+        test_retry_batch_keeps_concurrent_verifications;
+      Alcotest.test_case "named retries retain a concurrent failed-backlog sweep" `Quick
+        test_retry_batch_keeps_backlog_read_recovery;
+      Alcotest.test_case "arrivals during retry dispatch keep the next batch" `Quick
+        test_retry_arrival_during_drain_keeps_its_next_batch;
+      Alcotest.test_case "cancelled retries do not publish into a fresh runtime" `Quick
+        test_cancelled_retry_does_not_publish_into_a_fresh_runtime;
       Alcotest.test_case "a cancel claim is routed to the operator" `Quick
         test_cancel_claim_is_routed_to_the_operator;
       Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
@@ -3240,7 +3556,7 @@ let () =
         test_system_llm_rejection_prefers_registered_producer_binding;
       Alcotest.test_case "system LLM rejection does not derive unregistered Keeper" `Quick
         test_system_llm_rejection_does_not_derive_unregistered_keeper;
-      Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
+      Alcotest.test_case "boot recovery commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
       Alcotest.test_case "system LLM invalid contract remains pending" `Quick
         test_system_llm_agent_defers_invalid_contract_without_rejecting_task;
@@ -3338,5 +3654,11 @@ let () =
         test_artifact_reference_size_uses_the_injected_reader;
       Alcotest.test_case "the reader routes by where the tree lives" `Quick
         test_reader_routes_by_where_the_tree_lives;
+      Alcotest.test_case "an injected reader answers under the text line" `Quick
+        test_an_injected_reader_answers_under_the_text_line;
+      Alcotest.test_case "a binary payload is adopted and filed" `Quick
+        test_a_binary_payload_is_adopted_and_filed;
+      Alcotest.test_case "a filed body reads back and only images attach" `Quick
+        test_a_filed_binary_body_reads_back_and_only_images_attach;
     ];
   ]

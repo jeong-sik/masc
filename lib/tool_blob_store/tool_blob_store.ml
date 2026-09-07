@@ -273,6 +273,127 @@ let put_durable =
     ~operation:"put_durable"
 ;;
 
+let scan_file_for_ingest ~buffer ~copy_to channel =
+  let preview = Buffer.create preview_max in
+  let rec loop digest total =
+    match input channel buffer 0 (Bytes.length buffer) with
+    | 0 -> Digestif.SHA256.get digest, total, make_preview (Buffer.contents preview)
+    | count ->
+      Option.iter (fun output_channel -> output output_channel buffer 0 count) copy_to;
+      let preview_count = min count (preview_max - Buffer.length preview) in
+      Buffer.add_subbytes preview buffer 0 preview_count;
+      loop
+        (Digestif.SHA256.feed_bytes digest ~off:0 ~len:count buffer)
+        (total + count)
+  in
+  loop Digestif.SHA256.empty 0
+;;
+
+let same_ingest_source (before : Unix.stats) (after : Unix.stats) =
+  before.st_dev = after.st_dev
+  && before.st_ino = after.st_ino
+  && before.st_kind = after.st_kind
+  && before.st_size = after.st_size
+  && before.st_mtime = after.st_mtime
+  && before.st_ctime = after.st_ctime
+;;
+
+let put_file_durable_with ~after_hash t ~path:source_path ~mime =
+  Eio_guard.run_in_systhread ~label:"tool-blob-put-file-durable" (fun () ->
+    try
+      (* Nonblocking open lets the regular-file check reject a FIFO without
+         waiting for a writer. It has no effect on a regular spool file. *)
+      let source_fd =
+        Unix.openfile source_path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0
+      in
+      let source, source_stat =
+        match
+          let source_stat = Unix.fstat source_fd in
+          if source_stat.Unix.st_kind <> Unix.S_REG
+          then
+            raise
+              (Sys_error
+                 ("tool_blob_store.put_file_durable: source is not a regular file: "
+                  ^ source_path));
+          Unix.in_channel_of_descr source_fd, source_stat
+        with
+        | value -> value
+        | exception exception_ ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          (try Unix.close source_fd with Unix.Unix_error _ -> ());
+          Printexc.raise_with_backtrace exception_ backtrace
+      in
+      (* fun-protect-finally-ok: this entire operation is synchronous inside
+         the blocking job. A normal close failure is reported; cleanup while
+         unwinding preserves the original read/publication exception. *)
+      Fun.protect ~finally:(fun () -> close_in_noerr source) (fun () ->
+        let check_source_snapshot () =
+          if not (same_ingest_source source_stat (Unix.fstat (Unix.descr_of_in_channel source)))
+          then
+            raise
+              (Sys_error
+                 ("tool_blob_store.put_file_durable: source changed during ingestion: "
+                  ^ source_path))
+        in
+        let buffer = Bytes.create Sys.io_buffer_size in
+        let digest, bytes, preview = scan_file_for_ingest ~buffer ~copy_to:None source in
+        check_source_snapshot ();
+        after_hash ();
+        let sha256 = Digestif.SHA256.to_hex digest in
+        let reference =
+          match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+          | Ok reference -> reference
+          | Error error ->
+            invalid_arg
+              ("tool_blob_store.put_file_durable: " ^ Tool_output.make_error_to_string error)
+        in
+        let target = shard_path t sha256 in
+        ensure_parent_dir target;
+        seek_in source 0;
+        let publication =
+          Fs_compat.write_file_atomic_strict_staged target ~write:(fun output_channel ->
+            let copied_digest, copied_bytes, _ =
+              scan_file_for_ingest ~buffer ~copy_to:(Some output_channel) source
+            in
+            if copied_bytes <> bytes || not (Digestif.SHA256.equal copied_digest digest)
+            then
+              raise
+                (Sys_error
+                   ("tool_blob_store.put_file_durable: source contents changed while copying: "
+                    ^ source_path));
+            check_source_snapshot ())
+        in
+        (match publication with
+         | Ok () -> ()
+         | Error failure ->
+           (match failure.Fs_compat.exception_ with
+            | Sys_error _ | Unix.Unix_error _ ->
+              Printexc.raise_with_backtrace
+                (Sys_error (Fs_compat.atomic_replace_failure_to_string failure))
+                failure.backtrace
+            | exception_ ->
+              Printexc.raise_with_backtrace exception_ failure.backtrace));
+        remove_validated_snapshot target;
+        close_in source;
+        reference)
+    with
+    | Unix.Unix_error _ as exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace
+        (Sys_error
+           (Printf.sprintf
+              "tool_blob_store.put_file_durable %s: %s"
+              source_path
+              (Printexc.to_string exception_)))
+        backtrace)
+;;
+
+let put_file_durable = put_file_durable_with ~after_hash:(fun () -> ())
+
+module For_testing = struct
+  let put_file_durable = put_file_durable_with
+end
+
 let list_all t =
   if not (Sys.file_exists t.root) then []
   else

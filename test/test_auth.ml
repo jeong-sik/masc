@@ -110,6 +110,16 @@ let keeper_strict_auth_regression_tools =
     "masc_board_search";
     "keeper_tools_list";
     "keeper_capability_search";
+    "keeper_analyze_image";
+    "masc_browser_tabs";
+    "masc_browser_read";
+    "masc_browser_session";
+    "masc_browser_goto";
+    "masc_web_search";
+    "masc_web_fetch";
+    "masc_file_list";
+    "masc_file_upload";
+    "masc_file_delete";
   ]
 
 (* ============================================ *)
@@ -1184,6 +1194,11 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
+  (match Tool_catalog.registered_metadata "masc_browser_session" with
+   | Some metadata ->
+     check bool "browser lifecycle requires write authority" true
+       (metadata.required_permission = Masc_domain.CanBroadcast)
+   | None -> fail "browser session has no catalog authority");
   let result =
     List.fold_left
       (fun acc tool_name ->

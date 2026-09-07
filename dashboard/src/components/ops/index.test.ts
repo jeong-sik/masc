@@ -513,7 +513,7 @@ describe('Ops surface', () => {
           },
         },
         {
-          name: 'kidsnote',
+          name: 'exampleorg',
           context_metrics_unavailable: null,
         },
       ],

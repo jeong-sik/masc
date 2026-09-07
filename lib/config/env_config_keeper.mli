@@ -160,12 +160,6 @@ module WorkAsHeartbeat : sig
   val enabled : bool
 end
 
-(** {1 Keeper health policy} *)
-
-module KeeperHealth : sig
-  val durable_queue_stale_sec : unit -> float
-end
-
 (** {1 Keeper keepalive loop} *)
 
 module KeeperKeepalive : sig

@@ -616,7 +616,6 @@ different config root.
 | `agent-core-models-overlay.toml` | Optional deployment-specific model capability rows; the embedded Agent Core catalog is used when the file is absent |
 | `keepers/<name>.toml` | Everything one Keeper needs: operational settings, prompt instructions, and tool postures in `[keeper.tools]` |
 | `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
-| `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
 
 One directory below the same root is authored rather than generated:
 

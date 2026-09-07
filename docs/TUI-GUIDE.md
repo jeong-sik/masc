@@ -8,14 +8,14 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config.
+Board, Planning, Fusion, Workspace, Config.
 Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
-Config reaches Resources with `s` and Tools with `t`, and Activity
+Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
 Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
 entries;
@@ -958,7 +958,7 @@ completion judge, `Task Review·7` is tasks waiting for an operator.
    show executing + verifying · order phase order, then P1→P5
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
- >   [dropped ] P1  Reduce all kidsnote service backlogs to 0
+ >   [dropped ] P1  Reduce all exampleorg service backlogs to 0
      [executi~] P1  Multi-Keeper real-world mission keeper-collab-e0-r7
   j/k:move  Enter:detail  r:refresh  Tab:next  | Port: 8935
 ```
@@ -1349,7 +1349,7 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 
 ### System Logs
 
-The log browser hangs off Activity under `l`; Esc returns there.
+Activity combines Events and Logs: `1` opens Events and `2` opens Logs from either view. `l` also opens Logs from Events; Esc returns there.
 
 The server's log ring, the same source the dashboard `logs` tab reads.
 
@@ -1555,3 +1555,33 @@ keeper is in. The header's `N unread` counts the same rows.
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
 recorded in Recent Events.
+
+### Questions and Gate modes
+
+In Approvals, `a` opens the selected Ask in a dedicated answer reader. The header shows Ask and Question position plus answered count. Left/Right (or j/k) changes the question; PgUp/PgDn and the wheel scroll long prompts and choices. `[`/`]` changes the Ask, and Esc returns to Approvals. Choice digits apply only to the active question.
+
+`w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading.
+
+### Board navigation and Planning changes
+
+Board `s` stores the chosen order in `[tui].board_sort` in the resolved `runtime.toml`. `f` and `F` move to the next and previous Hearth; `H` opens a searchable chooser including all Hearths. IDs use subdued text, Hearths the information color, and authors the success color; votes retain their sign and replies remain an explicit count.
+
+Planning shows net changes in completed Goals, completed Tasks, and pending Goal reviews since the first successful Planning reading in this TUI session. The displayed baseline timestamp defines the window. These are changes in snapshot counts, not a durable completion history or operator-approval throughput.
+
+### Memory overview
+
+The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
+
+Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
+
+### Following a Fusion run
+
+Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+### Workspace activity
+
+On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
+
+Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.

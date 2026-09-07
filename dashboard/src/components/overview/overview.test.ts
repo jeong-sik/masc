@@ -797,7 +797,7 @@ describe('Overview v2 marker classes', () => {
 })
 
 describe('Overview backend composite health', () => {
-  function stubOverviewFetch(operatorActionRequired: boolean) {
+  function stubOverviewFetch(operatorActionRequired: boolean, keeperEventQueue?: unknown) {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = `${input}`
       if (url.includes('/health?full=1')) {
@@ -805,6 +805,7 @@ describe('Overview backend composite health', () => {
           overall_status: 'degraded',
           operator_action_required: operatorActionRequired,
           operator_action_reasons: operatorActionRequired ? ['keeper_event_queue'] : [],
+          keeper_event_queue: keeperEventQueue,
           full_health_snapshot: {
             status: 'ready',
             stale_reason: null,
@@ -835,6 +836,28 @@ describe('Overview backend composite health', () => {
     cleanup()
     dashboardFullHealthResource.reset()
     vi.unstubAllGlobals()
+  })
+
+  it('shows old source age and unknown residence without a stall claim', async () => {
+    stubOverviewFetch(false, {
+      status: 'warning', operator_action_required: false, status_reasons: ['runnable_backlog=2'],
+      backlog_clean: false,
+      storage_integrity: { status: 'ok', counts_complete: true, read_error_count: 0, transition_outbox_count: 0, operator_action_required: false },
+      work_liveness: {
+        status: 'warning', state: 'backlogged', runnable_backlog_count: 2,
+        runnable_oldest_source_age_seconds: 6000,
+        queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
+        operator_action_required: false,
+      },
+    })
+    const { container } = render(h(Overview, null))
+    await waitFor(() => {
+      const text = container.querySelector('[data-testid="fleet-queue-work"]')?.textContent
+      expect(text).toContain('backlogged · 2')
+      expect(text).toContain('oldest source 6000s')
+      expect(text).toContain('queue residence unknown')
+      expect(text).not.toContain('stalled')
+    })
   })
 
   it('joins one backend action requirement into the KPI and attention panel', async () => {

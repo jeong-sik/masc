@@ -38,6 +38,8 @@ ASSETS=(
   "masc-tui-$ARCH"
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
+  "masc-dashboard-$ARCH.tar.gz"
+  "masc-release-dashboard-bundle-$ARCH.py"
 )
 for a in "${ASSETS[@]}"; do
   [ -f "$BIN_DIR/$a" ] || { echo "install-smoke: missing release asset $BIN_DIR/$a" >&2; exit 2; }
@@ -138,7 +140,9 @@ echo "install-smoke: installer seeded config and left the keeper roster empty"
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"
-MASC_BASE_PATH="$base" MASC_BASE_PATH_INPUT="$base" MASC_OTEL_ENABLED=0 \
+mkdir -p "$work/outside-checkout"
+cd "$work/outside-checkout"
+env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_BASE_PATH_INPUT="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
@@ -156,4 +160,6 @@ case "$health" in
   *) echo "install-smoke: /health did not report ok: ${health:-<no response>}" >&2; cat "$log" >&2; exit 1 ;;
 esac
 
+python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
+  --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"
 echo "install-smoke: PASS"

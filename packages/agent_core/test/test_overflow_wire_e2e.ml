@@ -111,8 +111,10 @@ let test_attribution_end_to_end () =
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 
-(* --- Negative control: a non-overflow finish_reason on an empty turn must stay
-       provider-unavailable (the arm the overflow used to be misrouted to). --- *)
+(* --- Negative control: a non-overflow finish_reason on an empty turn must not
+       reach the overflow arm. It lands in EmptyCompletion, which #32497 split
+       out of ProviderUnavailable on 2026-09-02; what this guards is that the
+       overflow routing does not swallow it, not which of the two it is. --- *)
 let test_non_overflow_control () =
   let body = empty_completion_body ~finish_reason:"stop" in
   let stop_reason = empty_completion_stop_reason "glm" (Glm.parse_response_result body) in
@@ -124,10 +126,10 @@ let test_non_overflow_control () =
   match
     Attribution.core_error_of_http_error (Http.empty_completion_error ~stop_reason)
   with
-  | Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+  | Error.Provider (Llm_provider.Error.EmptyCompletion _) -> ()
   | other ->
     Alcotest.failf
-      "expected Provider unavailable for non-overflow empty turn, got %s"
+      "expected EmptyCompletion for non-overflow empty turn, got %s"
       (Error.to_string other)
 ;;
 

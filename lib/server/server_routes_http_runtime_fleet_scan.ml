@@ -20,7 +20,41 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-let effective_autoboot_enabled = Keeper_meta_store.effective_autoboot_enabled
+let configured_keeper_names ?profile_snapshot config =
+  match profile_snapshot with
+  | Some snapshot -> Keeper_types_profile.snapshot_configured_keeper_names snapshot
+  | None -> Keeper_meta_store.configured_keeper_names config
+
+let profile_defaults ?profile_snapshot config name =
+  match profile_snapshot with
+  | Some snapshot -> Keeper_types_profile.snapshot_profile_defaults snapshot name
+  | None -> Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path name
+
+let effective_autoboot_enabled ?profile_snapshot config name meta =
+  match profile_defaults ?profile_snapshot config name with
+  | Error _ -> false
+  | Ok defaults -> Option.value defaults.autoboot_enabled ~default:meta.Keeper_meta_contract.autoboot_enabled
+
+let declarative_autoboot_enabled ?profile_snapshot config name =
+  match profile_defaults ?profile_snapshot config name with
+  | Error _ -> false
+  | Ok defaults -> Option.value defaults.autoboot_enabled ~default:true
+
+let read_effective_meta ?profile_snapshot config name =
+  match profile_snapshot with
+  | None -> Keeper_meta_store.read_effective_meta config name
+  | Some _ ->
+    match Keeper_meta_store.read_meta config name with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some meta) ->
+      match profile_defaults ?profile_snapshot config meta.name with
+      | Error error -> Error (Printf.sprintf "invalid keeper profile for keeper %s: %s"
+          meta.name (Keeper_types_profile.keeper_toml_load_error_to_string error))
+      | Ok defaults ->
+        Keeper_meta_contract.effective_meta_of_profile_defaults defaults meta
+        |> Result.map Option.some
 
 let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
@@ -180,13 +214,13 @@ let sort_paused_keeper_details details =
       String.compare (name left) (name right))
     details
 
-let keeper_fleet_meta_scan ?(include_paused_details = true) config =
+let keeper_fleet_meta_scan ?profile_snapshot ?(include_paused_details = true) config =
   (* The dashboard light shell needs fleet counts on every header refresh.
      Keep this as a single pass over keeper meta so it does not repeat the
      paused, autoboot, and bootable scans on the hot path. *)
   (* NDT-OK: request-boundary wall clock only for dashboard pause-age display. *)
   let now = Unix.gettimeofday () in
-  let configured_names = Keeper_meta_store.configured_keeper_names config in
+  let configured_names = configured_keeper_names ?profile_snapshot config in
   let all_names =
     sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
   in
@@ -212,7 +246,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            in
            match Keeper_meta_store.read_meta config name with
            | Ok (Some meta) ->
-             let autoboot_enabled = effective_autoboot_enabled config name meta in
+             let autoboot_enabled = effective_autoboot_enabled ?profile_snapshot config name meta in
              let acc =
                if
                  (not meta.paused)
@@ -254,7 +288,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            | Ok None ->
              if
                should_count_autoboot_target name
-               && Keeper_meta_store.declarative_autoboot_enabled_by_default config name
+               && declarative_autoboot_enabled ?profile_snapshot config name
              then add_autoboot acc name |> fun acc -> add_bootable acc name
              else acc
            | Error err ->
@@ -539,7 +573,7 @@ let empty_keeper_execution_snapshot =
   { owners = []; executable_names = [] }
 ;;
 
-let keeper_execution_snapshot config =
+let keeper_execution_snapshot ?profile_snapshot config =
   let base_path = config.Workspace.base_path in
   let registry_names =
     Keeper_registry.all ~base_path ()
@@ -555,7 +589,7 @@ let keeper_execution_snapshot config =
     List.map
       (fun keeper_name ->
         let meta_result =
-          match Keeper_meta_store.read_effective_meta config keeper_name with
+          match read_effective_meta ?profile_snapshot config keeper_name with
           | Ok (Some meta) -> Ok meta
           | Ok None -> Error "durable keeper metadata missing"
           | Error detail -> Error detail
@@ -841,14 +875,14 @@ type keeper_agent_binding_scan = {
 let empty_keeper_agent_binding_scan =
   { enabled_keeper_names = []; disabled_agent_names = []; binding_read_errors = [] }
 
-let keeper_agent_bindings config =
-  Keeper_meta_store.configured_keeper_names config
+let keeper_agent_bindings ?profile_snapshot config =
+  configured_keeper_names ?profile_snapshot config
   |> sorted_unique_strings
   |> List.fold_left
        (fun scan name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) ->
-             if effective_autoboot_enabled config name meta then
+             if effective_autoboot_enabled ?profile_snapshot config name meta then
                {
                  scan with
                  enabled_keeper_names = meta.name :: scan.enabled_keeper_names;
@@ -883,9 +917,9 @@ let is_credentialed_external_client config assignee =
   | Some _ -> true
   | None -> false
 
-let active_task_owner_fiber_scan config ~executable_names =
+let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
   let executable_set = string_set_of_list executable_names in
-  let binding_scan = keeper_agent_bindings config in
+  let binding_scan = keeper_agent_bindings ?profile_snapshot config in
   let agent_bindings = binding_scan.enabled_keeper_names in
   let meta_read_errors = binding_scan.binding_read_errors in
   match Workspace.read_backlog_observation_with_source_r config with
@@ -996,6 +1030,7 @@ let active_task_owner_fiber_scan config ~executable_names =
 
 
 let keeper_fleet_safety_health_json
+    ?profile_snapshot
     ?bootable_names:bootable_names_override
     ?autoboot_scan:autoboot_scan_override
     ?phase_snapshot
@@ -1071,6 +1106,7 @@ let keeper_fleet_safety_health_json
     match current_server_state_opt () with
     | Some state ->
         active_task_owner_fiber_scan
+          ?profile_snapshot
           (Mcp_server.workspace_config state)
           ~executable_names
     | None -> empty_active_task_owner_fiber_scan

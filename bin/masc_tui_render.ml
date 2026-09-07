@@ -15308,6 +15308,44 @@ let render_code (state : state) =
                 ^ Terminal_text.single_line note ^ Ansi.reset
             | None -> base
           in
+          (* What the memo on the cursor's line says. The gutter already
+             marks which rows carry one (RFC-0429 §3.1); a mark alone makes
+             the reader open the list to learn what it marks. This rides the
+             title for the same reason blame's status does: the margin is one
+             cell wide and has no pane to speak in.
+
+             Only where the body is the thing on screen. The overlays replace
+             it, so under them the cursor's line is not drawn and the rider
+             would caption a row nobody can see.
+
+             No width arithmetic here: framed_line fits the title to the pane,
+             which is the truncation §3.1 asks for. *)
+          let with_note =
+            if notes_showing || diff_showing || history_showing then with_note
+            else
+              let line = state.code_file_cursor + 1 in
+              match
+                List.find_opt
+                  (fun found -> Masc_tui_memo.line_of found = line)
+                  state.code_memos
+              with
+              | None -> with_note
+              | Some (Masc_tui_memo.Memo_at (_, memo)) ->
+                  let kind =
+                    match Ide_memo.kind_word memo.Ide_memo.kind with
+                    | None -> ""
+                    | Some word -> " (" ^ word ^ ")"
+                  in
+                  with_note ^ "  "
+                  ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  ^ "memo "
+                  ^ Terminal_text.single_line memo.Ide_memo.author
+                  ^ kind ^ Ansi.reset ^ " "
+                  ^ Terminal_text.single_line memo.Ide_memo.text
+              | Some (Masc_tui_memo.Broken_at (_, why)) ->
+                  with_note ^ "  " ^ Theme.bad () ^ "memo unreadable: "
+                  ^ Terminal_text.single_line why ^ Ansi.reset
+          in
           (* A blame that did not come back has no pane of its own to say so
              in -- the margin is beside the code, not instead of it -- so the
              refusal rides the title the way a language-server answer does.

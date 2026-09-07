@@ -10171,6 +10171,14 @@ def code_lane_fixtures() -> HttpFixtures:
 
 
 CODE_MEMO_FILE_PATH = "/api/v1/workspace/file?path=init.lua"
+# The gutter mark a memo row wears (RFC-0429 §3.1); a Keeper's own change
+# wears a dimmer one, so the two are told apart by glyph.
+MEMO_GUTTER_MARK = "\u25cf".encode()
+# What the title says while the cursor sits on the memo's line. Truncated by
+# the frame if the pane is narrow, so the needle stops well before the end of
+# the memo's text.
+MEMO_CURSOR_RIDER = b"memo alpha (decision) keep the coroutine"
+
 CODE_MEMO_SOURCE = (
     "local lock = 1\n"
     "-- masc(alpha) decision: keep the coroutine, the pool is single threaded\n"
@@ -10230,6 +10238,34 @@ def code_memo_interaction(
     if "notes: init.lua" in CSI_RE.sub(b"", closed).decode("utf-8"):
         raise AssertionError(
             f"a second m left the memo list open: {closed!r}"
+        )
+
+    # RFC-0429 §3.1: the memo is a margin, not a replacement. With the body
+    # back, the row that carries the memo wears a mark in the gutter, and
+    # putting the cursor on that row says what the mark marks without opening
+    # the list again. These run after the list is closed on purpose: the
+    # rider repeats the memo's words in the title, and asserting them earlier
+    # would let a title redraw satisfy a needle meant for the overlay.
+    rows = screen_rows(bytes(output))
+    memo_rows = [text for text in rows.values() if b"masc(alpha) decision" in text]
+    if not memo_rows:
+        raise AssertionError(f"the memo's own row is not on screen: {rows!r}")
+    if not any(MEMO_GUTTER_MARK in text for text in memo_rows):
+        raise AssertionError(
+            f"the row carrying a memo wears no gutter mark: {memo_rows!r}"
+        )
+
+    # The memo sits on line 2 and the file opens on line 1. The needle is the
+    # memo's own row: the cursor line carries its gutter in reverse video, so
+    # landing there redraws that row whatever the title does. A needle taken
+    # from the title would make this wait, not the assertion below, the thing
+    # that notices a missing rider.
+    on_the_memo = send_and_wait(process, master_fd, output, b"j", b"masc(alpha)")
+    title = screen_text(bytes(output))
+    if MEMO_CURSOR_RIDER not in title:
+        raise AssertionError(
+            "the cursor on a memo line did not say what the memo says: "
+            f"{CSI_RE.sub(b'', on_the_memo)!r}"
         )
     os.write(master_fd, b"q")
 

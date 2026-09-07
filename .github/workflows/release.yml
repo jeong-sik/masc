@@ -126,6 +126,7 @@ jobs:
           opam exec -- dune build --release \
             bin/main_eio.exe \
             bin/masc_tui.exe \
+            bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
 
       # Prove the self-contained claim: neither shipped binary may keep a
@@ -191,12 +192,14 @@ jobs:
           mkdir -p dist
           cp _build/default/bin/main_eio.exe dist/masc-${{ matrix.arch }}
           cp _build/default/bin/masc_tui.exe dist/masc-tui-${{ matrix.arch }}
+          cp _build/default/bin/masc_browser_host.exe dist/masc-browser-host-${{ matrix.arch }}
           cp _build/default/bin/deployment_preflight_helper.exe \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }}
           cp scripts/check-runtime-deployment-preflight.sh \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
           chmod +x dist/masc-${{ matrix.arch }}
           chmod +x dist/masc-tui-${{ matrix.arch }}
+          chmod +x dist/masc-browser-host-${{ matrix.arch }}
           chmod +x \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}

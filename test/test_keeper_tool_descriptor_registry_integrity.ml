@@ -1439,6 +1439,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_goal_list"
     ; "masc_plan_get_task"
     ; "masc_run_list"
+    ; "masc_slack_read"
     ; "masc_task_history"
     ; "masc_tasks"
     ; "masc_tool_help"

@@ -439,6 +439,34 @@ let stage_release_mirror base_path =
     (Unix.realpath
        (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
     gate;
+  let bundle_helper =
+    Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
+  in
+  write_file
+    (Filename.concat dir ("masc-release-dashboard-bundle-" ^ suffix ^ ".py"))
+    (read_file bundle_helper);
+  (* These are test-owned bundle bytes, never a product dashboard build. The
+     packaging tool still pairs them with the actual tested binary digest. *)
+  let dashboard = Filename.concat dir "fixture-dashboard" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote dashboard));
+  write_file (Filename.concat dashboard "index.html") "<html>installer fixture</html>";
+  write_file (Filename.concat dashboard ".build-stamp") "2026-09-07T00:00:00Z\n";
+  let commit_channel =
+    Unix.open_process_in (Filename.quote asset ^ " build-commit")
+  in
+  let commit = String.trim (In_channel.input_all commit_channel) in
+  (match Unix.close_process_in commit_channel with
+   | Unix.WEXITED 0 -> ()
+   | _ -> fail "release fixture binary must report embedded commit");
+  let package_command =
+    String.concat " "
+      (List.map Filename.quote
+         [ "python3"; bundle_helper; "package"; "--binary"; asset
+         ; "--binary-asset"; platform_release_asset (); "--assets"; dashboard
+         ; "--source-commit"; commit; "--archive"
+         ; Filename.concat dir ("masc-dashboard-" ^ suffix ^ ".tar.gz") ])
+  in
+  check int "release fixture packages matching dashboard" 0 (Sys.command package_command);
   "file://" ^ Filename.concat base_path ".release"
 ;;
 

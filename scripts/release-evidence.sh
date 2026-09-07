@@ -289,7 +289,7 @@ MCP_URL="${BASE_URL}/mcp"
 copy_install_smoke
 installed_version="$(capture_installed_version)"
 
-env \
+(cd "$base_path" && exec env \
   MASC_BASE_PATH="$base_path" \
   MASC_ADMIN_TOKEN= \
   MASC_INTERNAL_MCP_TOKEN= \
@@ -297,7 +297,7 @@ env \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
   MASC_KEEPER_BOOTSTRAP_ENABLED=false \
-  "$BINARY" --base-path "$base_path" --port "$PORT" >"$server_log" 2>&1 &
+  "$installed_bin" --base-path "$base_path" --port "$PORT") >"$server_log" 2>&1 &
 SERVER_PID=$!
 
 if ! wait_for_http "${BASE_URL}/health"; then

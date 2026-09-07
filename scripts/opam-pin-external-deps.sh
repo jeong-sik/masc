@@ -29,10 +29,29 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-if [[ "${MASC_OPAM_WRITE_LEASE_HELD:-0}" != "1" ]]; then
+# --check reads the pin table and writes nothing, so it takes a read lease.
+# A write lease waits behind every reader, which turned the check into a 5s
+# refusal whenever anything else held the switch -- including the read lease
+# dune-local.sh is already holding when it calls this.
+lease_mode=write
+lease_flag=MASC_OPAM_WRITE_LEASE_HELD
+for arg in "$@"; do
+  if [[ "${arg}" == "--check" ]]; then
+    lease_mode=read
+    lease_flag=MASC_OPAM_READ_LEASE_HELD
+  fi
+done
+
+lease_already_held() {
+  [[ "${MASC_OPAM_WRITE_LEASE_HELD:-0}" == "1" ]] && return 0
+  # A write lease covers a read; the reverse does not hold.
+  [[ "${lease_mode}" == "read" && "${MASC_OPAM_READ_LEASE_HELD:-0}" == "1" ]]
+}
+
+if ! lease_already_held; then
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   exec "${SCRIPT_DIR}/opam-switch-rw-lock.sh" \
-    write -- "${ENV_CMD:-/usr/bin/env}" MASC_OPAM_WRITE_LEASE_HELD=1 \
+    "${lease_mode}" -- "${ENV_CMD:-/usr/bin/env}" "${lease_flag}=1" \
     "${script_path}" "$@"
 fi
 
@@ -87,6 +106,7 @@ readonly COHTTP_EIO_SHA="45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
 include_bisect=false
 include_compact_protocol=false
 do_install=false
+do_check=false
 for arg in "$@"; do
   case "$arg" in
     --with-bisect)
@@ -97,6 +117,9 @@ for arg in "$@"; do
       ;;
     --install)
       do_install=true
+      ;;
+    --check)
+      do_check=true
       ;;
     *)
       echo "unknown argument: $arg" >&2
@@ -110,10 +133,53 @@ done
 # --install mode can rebuild exactly the set that changed, nothing more.
 pinned_pkgs=()
 
+# --check reports which of the pins below the active switch is missing or
+# holding at a different target, and pins nothing. It exists because a pin
+# added here reaches a developer's switch only when they re-run this script,
+# and nothing told them to: cohttp-eio was pinned on 2026-09-05 (#33206) to
+# stop a body-flow bug that silently corrupts SSE payloads, and two days
+# later the switch this was written on still had the stock build. The check
+# reads one `opam pin list`, so adding a pin above is enough to cover it.
+pin_drift=()
+# One "name<TAB>target" line per live pin. A table rather than an associative
+# array: macOS ships bash 3.2, where `declare -A` does not exist.
+live_pin_table=""
+
+load_live_pins() {
+  # `opam pin list` prints `name.version  kind  target  (at sha)`, and writes
+  # the target with a `git+` prefix that `opam pin add` does not take.
+  live_pin_table="$(opam pin list 2>/dev/null | awk '
+    { name = $1; sub(/\..*/, "", name)
+      target = $3; sub(/^git\+/, "", target)
+      print name "\t" target }')"
+}
+
+live_pin_target() {
+  printf '%s\n' "${live_pin_table}" | awk -F'\t' -v want="$1" '$1 == want { print $2; exit }'
+}
+
+check_pin() {
+  local package="${1%%.*}"
+  local want="$2"
+  local have
+  have="$(live_pin_target "${package}")"
+
+  if [[ -z "${have}" ]]; then
+    pin_drift+=("${package}: not pinned; expected ${want}")
+  elif [[ "${have}" != "${want}" ]]; then
+    pin_drift+=("${package}: pinned to ${have}; expected ${want}")
+  fi
+}
+
 opam_pin_add() {
   local package="$1"
   local source="$2"
   shift 2
+
+  if $do_check; then
+    check_pin "${package}" "${source}"
+    return 0
+  fi
 
   local max_attempts="${OPAM_PIN_RETRIES:-4}"
   local retry_delay_sec="${OPAM_PIN_RETRY_DELAY_SEC:-5}"
@@ -136,6 +202,10 @@ opam_pin_add() {
     attempt=$((attempt + 1))
   done
 }
+
+if $do_check; then
+  load_live_pins
+fi
 
 if $include_compact_protocol; then
   opam_pin_add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
@@ -165,6 +235,18 @@ if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.
   opam_pin_add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
   pinned_pkgs+=("bisect_ppx")
+fi
+
+if $do_check; then
+  if [[ ${#pin_drift[@]} -eq 0 ]]; then
+    echo "[opam-pin] all ${#pinned_pkgs[@]} pins are in place"
+    exit 0
+  fi
+  echo "[opam-pin] the active switch does not carry these pins:" >&2
+  printf '[opam-pin]   %s\n' "${pin_drift[@]}" >&2
+  echo "[opam-pin] the installed build is not the one this repo expects" >&2
+  echo "[opam-pin] repair: bash scripts/opam-pin-external-deps.sh --install" >&2
+  exit 1
 fi
 
 if $do_install; then

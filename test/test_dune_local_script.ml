@@ -786,6 +786,138 @@ exit 0
   write_executable opam_path opam_script;
   (bin_dir, dune_log)
 
+(* --- external pin guard tests ------------------------------------------
+   The guard runs the real scripts/opam-pin-external-deps.sh --check against a
+   fake opam whose `pin list` the test writes. Phase one hands it an empty
+   table and reads the expectations out of the report; phase two hands those
+   back. So the SHAs stay in the script and the test still pins both answers. *)
+
+let pin_script_path () =
+  Filename.concat (Filename.concat (source_root ()) "scripts")
+    "opam-pin-external-deps.sh"
+
+let setup_repo_for_pin_check base =
+  let scripts_dir = Filename.concat base "scripts" in
+  let bin_dir = Filename.concat base "bin" in
+  mkdir_p scripts_dir;
+  mkdir_p bin_dir;
+  write_file (Filename.concat base "dune-project")
+    {|(lang dune 3.22)
+(package
+ (name masc)
+ (depends
+  (ocaml (= 5.5.0))))
+|};
+  write_executable
+    (Filename.concat scripts_dir "opam-pin-external-deps.sh")
+    (read_file (pin_script_path ()));
+  let table_path = Filename.concat base "pin-table.txt" in
+  write_file table_path "";
+  write_executable (Filename.concat bin_dir "opam")
+    (Printf.sprintf
+       {|#!/bin/sh
+case "$1 $2" in
+  "switch show") printf 'fake-switch
+'; exit 0 ;;
+  "var prefix") printf '%%s
+' %s; exit 0 ;;
+  "pin list") cat %s; exit 0 ;;
+esac
+if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.0
+'; exit 0; fi
+exit 0
+|}
+       (quote base) (quote table_path));
+  (bin_dir, table_path)
+
+let run_pin_check base bin_dir =
+  let system_path =
+    match Sys.getenv_opt "PATH" with Some p -> p | None -> "/usr/bin:/bin"
+  in
+  run_process ~cwd:base
+    ~env:
+      [ ("PATH", Printf.sprintf "%s:%s" bin_dir system_path)
+      ; ("MASC_OPAM_READ_LEASE_HELD", "1")
+      ]
+    ~unset_env:[ "OPAM_SWITCH_PREFIX"; "MASC_OPAM_WRITE_LEASE_HELD" ]
+    "/bin/bash"
+    [| "/bin/bash"
+     ; Filename.concat (Filename.concat base "scripts") "opam-pin-external-deps.sh"
+     ; "--check"
+    |]
+
+(* "[opam-pin]   package: not pinned; expected <target>" -> (package, target) *)
+let expectation_of_line line =
+  let line =
+    (* Every line the script writes carries its own tag, and the package name
+       starts after it. Without this cut the tag joins the package name. *)
+    match substring_index line "] " with
+    | Some at -> String.sub line (at + 2) (String.length line - at - 2)
+    | None -> line
+  in
+  let line = String.trim line in
+  match String.index_opt line ':' with
+  | None -> None
+  | Some colon ->
+    let package = String.sub line 0 colon in
+    let rest = String.sub line (colon + 1) (String.length line - colon - 1) in
+    let marker = "expected " in
+    (match substring_index rest marker with
+     | None -> None
+     | Some at ->
+       let start = at + String.length marker in
+       Some (package, String.trim (String.sub rest start (String.length rest - start))))
+
+let test_pin_check_names_every_absent_pin () =
+  with_temp_dir "opam-pin-check-empty" (fun dir ->
+    let bin_dir, _table = setup_repo_for_pin_check dir in
+    let code, _stdout, stderr = run_pin_check dir bin_dir in
+    check int "an empty switch fails the check" 1 code;
+    check_contains "the report names cohttp-eio" stderr "cohttp-eio: not pinned";
+    check_contains "the report names the repair" stderr
+      "scripts/opam-pin-external-deps.sh --install")
+
+let test_pin_check_accepts_what_it_asks_for () =
+  with_temp_dir "opam-pin-check-satisfied" (fun dir ->
+    let bin_dir, table_path = setup_repo_for_pin_check dir in
+    let _code, _stdout, stderr = run_pin_check dir bin_dir in
+    let expectations =
+      String.split_on_char '\n' stderr |> List.filter_map expectation_of_line
+    in
+    check bool "the empty run stated some expectations" true (expectations <> []);
+    let rows =
+      List.map
+        (fun (package, target) ->
+          Printf.sprintf "%s.0.0    git    git+%s    (at deadbeef)" package target)
+        expectations
+    in
+    write_file table_path (String.concat "\n" rows ^ "\n");
+    let code, stdout, stderr = run_pin_check dir bin_dir in
+    if code <> 0 then failf "check rejected its own expectations: %s%s" stdout stderr;
+    check_contains "the report says the pins are in place" stdout "pins are in place")
+
+let test_pin_drift_aborts_build () =
+  with_temp_dir "dune-local-pin-drift" (fun dir ->
+    let bin_dir, dune_log = setup_fake_repo dir in
+    (* The wiring, not the check: dune-local must stop on a non-zero --check
+       and say what it read. setup_fake_repo copies no pin script, so every
+       other case in this suite leaves the guard inert. *)
+    write_executable
+      (Filename.concat (Filename.concat dir "scripts") "opam-pin-external-deps.sh")
+      {|#!/bin/sh
+echo "[opam-pin] the active switch does not carry these pins:" >&2
+echo "[opam-pin]   cohttp-eio: not pinned; expected https://example.invalid/repo.git#sha" >&2
+exit 1
+|};
+    let code, _stdout, stderr =
+      run_dune_local dir bin_dir ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_DEPS_CHECK" ] "build"
+    in
+    check int "exits non-zero on pin drift" 1 code;
+    check_contains "the pin report reaches the caller" stderr
+      "cohttp-eio: not pinned";
+    check_contains "the bypass is named" stderr "MASC_SKIP_DEPS_CHECK=1";
+    check bool "dune not invoked" false (Sys.file_exists dune_log))
+
 let test_missing_deps_aborts_build () =
   with_temp_dir "dune-local-missing-deps" (fun dir ->
     let bin_dir, dune_log = setup_repo_with_missing_deps dir in
@@ -976,6 +1108,15 @@ let () =
             test_missing_deps_aborts_build;
           test_case "MASC_SKIP_DEPS_CHECK=1 bypasses deps guard" `Quick
             test_skip_deps_check_env_bypasses_guard;
+        ] );
+      ( "pin_guard",
+        [
+          test_case "an absent pin is named" `Quick
+            test_pin_check_names_every_absent_pin;
+          test_case "the check accepts what it asks for" `Quick
+            test_pin_check_accepts_what_it_asks_for;
+          test_case "pin drift aborts the build" `Quick
+            test_pin_drift_aborts_build;
         ] );
       ( "ocaml_version_guard",
         [

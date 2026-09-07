@@ -338,6 +338,16 @@ blocking_pr_lints() {
     bash scripts/check-keeper-runtime-setting-registry.sh
   run_lint "Env snapshot default drift" \
     python3 scripts/ci/check-env-snapshot-default-drift.py
+  # 30 checks over retired concepts and ownership boundaries, each with its
+  # own baseline or forbidden-match list, and no workflow had ever run any of
+  # them. Planting "self_correction_required" in lib/ reports
+  # V7j-retired-consecutive-tool-failure-guard.
+  #
+  # 48s, which is most of what this suite costs on its own. Everything else
+  # here together is about 60s. Worth it while the alternative is a retired
+  # concept walking back in unnoticed, but it is the first place to look if
+  # the lint job gets slow.
+  run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
 }
 
 advisory_lints() {

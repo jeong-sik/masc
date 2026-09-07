@@ -55,7 +55,6 @@ scripts/audit-tla-ml-line-refs.sh  # green, but 0 citations exist to check
 scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-boundary-guard-mli-pairs.sh  # green; diff-driven on BASE_REF, and no
 #   planted violation has been shown to fail it yet
-scripts/check-boundary-guard.sh
 scripts/check-ollama-model-context.py
 scripts/check-pr-hygiene.sh
 scripts/check-pr-sync.sh

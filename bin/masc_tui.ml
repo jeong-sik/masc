@@ -12447,6 +12447,7 @@ let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
   (* See above: a refusal is a hangup, which ends the session either way. *)
   ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool);
+  (* See masc_tui_termios_stubs.c: unsupported VDISCARD is a no-op; tty hangup follows the contract above. *)
   ignore (Masc_tui_termios.disable_discard_output Unix.stdin : bool)
 ;;
 
@@ -12614,6 +12615,7 @@ let main () =
       (* See the guard above: a refusal here is the terminal already gone. *)
       ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
     if old_discard_output >= 0 then
+      (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
       ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
   in
 

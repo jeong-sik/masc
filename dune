@@ -50,3 +50,25 @@
   (source_tree .))
  (action
   (run scripts/ci/check-keeper-instructions-placeholders.sh .)))
+
+; Consumer check for the committed tool parity baselines (task-1460): the
+; generator is rerun against config/tools inside a scratch tree and its
+; output is byte-compared with test/golden/tool_parity_*.txt. The committed
+; baselines are only read, never written; a config/tools edit that is not
+; followed by a baseline regeneration fails here instead of drifting
+; silently. Runs under dune test / @runtest (make test-unit, CI).
+(rule
+ (alias runtest)
+ (target tool_parity_golden_check.stamp)
+ (deps
+  (source_tree config/tools)
+  (glob_files test/golden/tool_parity_*.txt)
+  %{exe:bin/tool_parity_generator.exe}
+  scripts/ci/check-tool-parity-golden.sh)
+ (action
+  (progn
+   (run scripts/ci/check-tool-parity-golden.sh
+     %{exe:bin/tool_parity_generator.exe})
+   (with-stdout-to
+    tool_parity_golden_check.stamp
+    (run echo "tool parity golden check ok")))))

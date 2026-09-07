@@ -203,7 +203,7 @@ let queue_assoc_bool name ~default fields =
   | _ -> default
 ;;
 
-let keeper_event_queue_health_dimensions ~stale_after_sec = function
+let keeper_event_queue_health_dimensions = function
   | `Assoc fields ->
     let source_status =
       match List.assoc_opt "status" fields with
@@ -266,8 +266,8 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       + retained_disabled_backlog_count
       + paused_dead_backlog_count
     in
-    let runnable_oldest_age_seconds =
-      queue_assoc_float_opt "runnable_oldest_age_seconds" fields
+    let runnable_oldest_source_age_seconds =
+      queue_assoc_float_opt "runnable_oldest_source_age_seconds" fields
     in
     let storage_degraded =
       (not source_unavailable)
@@ -278,18 +278,15 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       else if storage_degraded then "degraded"
       else "ok"
     in
-    let backlog_stale =
-      runnable_backlog_count > 0
-      && Option.fold
-           ~none:false
-           ~some:(fun age -> age >= stale_after_sec)
-           runnable_oldest_age_seconds
-    in
+    (* The producer's timestamp can predate durable intake by hours. No queue
+       entry records its first admission, so source age never proves a stall. *)
+    let queue_residence = Keeper_event_queue_persistence.(
+      queue_residence_to_yojson
+        (Unknown (if source_unavailable || not counts_complete
+                  then Queue_observation_incomplete else First_admission_not_recorded))) in
     let work_status, work_state =
       if source_unavailable || not counts_complete
       then "unavailable", "unknown"
-      else if backlog_stale
-      then "degraded", "stalled"
       else if runnable_backlog_count > 0
       then "warning", "backlogged"
       else if actionable_backlog_count > 0
@@ -300,7 +297,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       queue_assoc_bool "operator_action_required" ~default:false fields
     in
     let work_action_required =
-      backlog_stale || actionable_backlog_count > 0
+      actionable_backlog_count > 0
     in
     let operator_action_required =
       source_action_required || storage_degraded || work_action_required
@@ -334,14 +331,13 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       |> backlog_reason "retained_disabled_backlog" retained_disabled_backlog_count
       |> backlog_reason "paused_dead_backlog" paused_dead_backlog_count
       |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
-      |> (fun reasons ->
-        if backlog_stale then "runnable_backlog_stale" :: reasons else reasons)
       |> List.rev
     in
     let without name fields = List.remove_assoc name fields in
     let fields =
       fields
       |> without "schema"
+      |> without "queue_residence"
       |> without "status"
       |> without "operator_action_required"
       |> without "status_reasons"
@@ -350,7 +346,8 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       |> without "backlog_clean"
     in
     `Assoc
-      ([ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
+      ([ "schema", `String "masc.keeper_event_queue.fleet_summary.v5"
+       ; "queue_residence", queue_residence
        ; "status", `String status
        ; "operator_action_required", `Bool operator_action_required
        ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
@@ -373,16 +370,16 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
              ] )
        ; ( "work_liveness"
          , `Assoc
-             [ "schema", `String "masc.keeper_event_queue.work_liveness.v1"
+             [ "schema", `String "masc.keeper_event_queue.work_liveness.v2"
              ; "status", `String work_status
              ; "state", `String work_state
              ; "runnable_backlog_count", `Int runnable_backlog_count
-             ; ( "runnable_oldest_age_seconds"
+             ; ( "runnable_oldest_source_age_seconds"
                , Option.fold
                    ~none:`Null
                    ~some:(fun value -> `Float value)
-                   runnable_oldest_age_seconds )
-             ; "stale_after_seconds", `Float stale_after_sec
+                   runnable_oldest_source_age_seconds )
+             ; "queue_residence", queue_residence
              ; "operator_action_required", `Bool work_action_required
              ] )
        ]
@@ -391,12 +388,11 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
 ;;
 
 let keeper_event_queue_health_json ~execution_snapshot () =
-  let stale_after_sec = Env_config.KeeperHealth.durable_queue_stale_sec () in
   match current_server_state_opt () with
   | None ->
-    keeper_event_queue_health_dimensions ~stale_after_sec
+    keeper_event_queue_health_dimensions
       (`Assoc
-      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v3"
+      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
       ; "status", `String "unavailable"
       ; "operator_action_required", `Bool false
       ; "keeper_count", `Int 0
@@ -405,31 +401,31 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ; "total_count", `Int 0
       ; "transition_outbox_count", `Int 0
       ; "counts_complete", `Bool false
-      ; "oldest_arrived_at_unix", `Null
-      ; "oldest_age_seconds", `Null
+      ; "oldest_source_arrived_at_unix", `Null
+      ; "oldest_source_age_seconds", `Null
       ; "runnable_backlog_count", `Int 0
-      ; "runnable_oldest_arrived_at_unix", `Null
-      ; "runnable_oldest_age_seconds", `Null
+      ; "runnable_oldest_source_arrived_at_unix", `Null
+      ; "runnable_oldest_source_age_seconds", `Null
       ; "runnable_by_keeper", `List []
       ; "recoverable_backlog_count", `Int 0
-      ; "recoverable_oldest_arrived_at_unix", `Null
-      ; "recoverable_oldest_age_seconds", `Null
+      ; "recoverable_oldest_source_arrived_at_unix", `Null
+      ; "recoverable_oldest_source_age_seconds", `Null
       ; "recoverable_by_keeper", `List []
       ; "retained_disabled_backlog_count", `Int 0
-      ; "retained_disabled_oldest_arrived_at_unix", `Null
-      ; "retained_disabled_oldest_age_seconds", `Null
+      ; "retained_disabled_oldest_source_arrived_at_unix", `Null
+      ; "retained_disabled_oldest_source_age_seconds", `Null
       ; "retained_disabled_by_keeper", `List []
       ; "paused_dead_backlog_count", `Int 0
-      ; "paused_dead_oldest_arrived_at_unix", `Null
-      ; "paused_dead_oldest_age_seconds", `Null
+      ; "paused_dead_oldest_source_arrived_at_unix", `Null
+      ; "paused_dead_oldest_source_age_seconds", `Null
       ; "paused_dead_by_keeper", `List []
       ; "shutdown_fenced_backlog_count", `Int 0
-      ; "shutdown_fenced_oldest_arrived_at_unix", `Null
-      ; "shutdown_fenced_oldest_age_seconds", `Null
+      ; "shutdown_fenced_oldest_source_arrived_at_unix", `Null
+      ; "shutdown_fenced_oldest_source_age_seconds", `Null
       ; "shutdown_fenced_by_keeper", `List []
       ; "unclassified_count", `Int 0
-      ; "unclassified_oldest_arrived_at_unix", `Null
-      ; "unclassified_oldest_age_seconds", `Null
+      ; "unclassified_oldest_source_arrived_at_unix", `Null
+      ; "unclassified_oldest_source_age_seconds", `Null
       ; "unclassified_by_keeper", `List []
       ; "pending_by_keeper", `List []
       ; "read_error_count", `Int 0
@@ -465,7 +461,7 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ~now
       ~base_path
       ~owner_lifecycle
-    |> keeper_event_queue_health_dimensions ~stale_after_sec
+    |> keeper_event_queue_health_dimensions
 
 let keeper_fleet_runtime_resolution_base_fields
     ?profile_snapshot

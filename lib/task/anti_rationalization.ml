@@ -14,6 +14,19 @@ open Printf
 (* Types                                                            *)
 (* ================================================================ *)
 
+(* RFC-0436 §4.3: a binary image artifact the judge receives as an attached
+   image block. The body is a base64 copy read from the snapshot's filed body
+   at assembly time; the hash and size recorded in the snapshot stay the
+   authority the prompt text cites, so a vision evaluator can see the image
+   while a text-only one still judges from the reference line. *)
+type evidence_image =
+  { image_reference : string
+  ; image_sha256 : string
+  ; image_bytes : int
+  ; image_media_type : string
+  ; image_body_base64 : string
+  }
+
 type review_request =
   { task_title : string
   ; task_description : string
@@ -21,6 +34,7 @@ type review_request =
   ; agent_name : string
   ; task_id : string
   ; evidence_refs : string list
+  ; evidence_images : evidence_image list
   }
 
 type lookup_surface =
@@ -52,13 +66,14 @@ let run_llm_reviewer_fn
      ?sw:Eio.Switch.t ->
      evaluator_runtime:string ->
      prompt:string ->
+     ?goal_blocks:Agent_core.Types.content_block list ->
      report_tool_schema:Types_core.tool_schema ->
      lookup:lookup_surface ->
      on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
      on_runtime_attempt_error:
        (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
      unit -> (verdict option, Agent_core.Error.t) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: the verdict vocabulary is owned by this variant. Witness
@@ -224,6 +239,32 @@ let lookup_section lookup =
       [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
 ;;
 
+(* The image-evidence section: data lines (reference, hash, size, media
+   type) assembled here under the template's header prose. An empty list
+   renders an empty section, so a review without image artifacts reads
+   exactly as before this existed. The lines survive on text-only evaluators
+   — media degrade strips the attached blocks, not the prompt text — which is
+   the RFC-0436 §4.4 reference-plus-hash degradation. *)
+let image_evidence_section (req : review_request) =
+  match req.evidence_images with
+  | [] -> Ok ""
+  | images ->
+    let lines =
+      images
+      |> List.map (fun img ->
+             sprintf
+               "- %s (sha256=%s, bytes=%d, media_type=%s)"
+               img.image_reference
+               img.image_sha256
+               img.image_bytes
+               img.image_media_type)
+      |> String.concat "\n"
+    in
+    render
+      Prompt_names.verification_image_evidence
+      [ "image_evidence_lines", lines ]
+;;
+
 let build_prompt
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
@@ -239,6 +280,7 @@ let build_prompt
   let* verification_contract_section = contract_section completion_contract in
   let* required_evidence_section = evidence_section ~required_evidence in
   let* evidence_posture_section = posture_section evidence_posture in
+  let* image_evidence_section = image_evidence_section req in
   let evidence_refs_json =
     req.evidence_refs
     |> List.map (fun reference -> `String reference)
@@ -253,6 +295,7 @@ let build_prompt
     ; "verification_contract_section", verification_contract_section
     ; "evidence_section", required_evidence_section
     ; "evidence_posture_section", evidence_posture_section
+    ; "image_evidence_section", image_evidence_section
     ; "evidence_refs", evidence_refs_json
     ; "lookup_section", lookup_section
     ; "calibration_section", calibration_section
@@ -361,6 +404,11 @@ let run
       ~(log_info : string -> unit)
       ~(log_warn : string -> unit)
       ~(render_prompt : unit -> (string, string) result)
+      (* RFC-0436 §4.3: attached media blocks for the review turn. When
+         present, the reviewer runs on these blocks with the rendered prompt
+         as the leading [Text] block; when absent, the prompt string stays
+         the whole goal, as before. *)
+      ?goal_blocks
       ~(lookup : lookup_surface)
       ~base_path
       ()
@@ -421,6 +469,16 @@ let run
          ; evaluator_error_retryable = None
          }
      | Ok prompt ->
+       (* The rendered prompt rides as the first block; attached evidence
+          images follow. One list serves every slot: a text-only candidate
+          strips the media it cannot take in [Keeper_turn_driver], which
+          leaves the prompt text — and the reference-plus-hash lines inside
+          it — intact (RFC-0436 §4.4). *)
+       let goal_blocks =
+         Option.map
+           (fun blocks -> Agent_core.Types.text_block prompt :: blocks)
+           goal_blocks
+       in
        (match generator_runtime with
         | Some generator when List.exists (String.equal generator) (first_slot :: rest_slots) ->
           task_warn
@@ -447,6 +505,7 @@ let run
                ?sw
                ~evaluator_runtime:slot
                ~prompt
+               ?goal_blocks
                ~report_tool_schema:report_review_verdict_schema
                ~lookup
                ~on_tool_result
@@ -573,12 +632,25 @@ let review
       (req : review_request)
   : review_result
   =
+  (* RFC-0436 §4.3: each recorded image becomes an attached block. The base64
+     body was read at assembly time, so a missing or unreadable body never
+     reaches this list — the artifact stays in the prompt as its reference and
+     hash line only, which is the §4.4 posture for it. *)
+  let image_blocks =
+    req.evidence_images
+    |> List.map (fun img ->
+           Agent_core.Types.image_block
+             ~media_type:img.image_media_type
+             ~data:img.image_body_base64
+             ())
+  in
   run
     ?evaluator_runtime
     ?generator_runtime
     ?on_verdict
     ?on_tool_result
     ~sw
+    ?goal_blocks:(if image_blocks = [] then None else Some image_blocks)
     ~log_info:(fun message ->
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
     ~log_warn:(fun message ->

@@ -386,14 +386,18 @@ module Make (Payload : Payload) = struct
       replace_entry_locked t entry)
   ;;
 
-  let complete t ~id ~completion =
+  let complete_with t ~id ~make_completion =
     Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
       let current = Atomic.get t.entries in
-      if not (List.exists (fun entry -> String.equal entry.id id) current)
-      then (
+      match List.find_opt (fun entry -> String.equal entry.id id) current with
+      | None ->
         Log.Misc.warn "%s: completion for unknown id %s" Payload.name id;
-        `Unknown)
-      else (
+        `Unknown
+      | Some entry ->
+        let previous =
+          match entry.status with Running -> None | Completed completion -> Some completion
+        in
+        let completion = make_completion previous in
         let next =
           current
           |> List.map (fun entry ->
@@ -406,7 +410,11 @@ module Make (Payload : Payload) = struct
         | Error detail -> `Persistence_failed detail
         | Ok () ->
           Atomic.set t.entries next;
-          `Completed))
+          `Completed)
+  ;;
+
+  let complete t ~id ~completion =
+    complete_with t ~id ~make_completion:(fun _ -> completion)
   ;;
 
   let list_entries t =

@@ -6,7 +6,7 @@ status: Draft
 # RFC 0012 — Mid-Turn Progress Probe
 
 - Status: Draft
-- Author: Vincent (vincent.dev@kidsnote.com)
+- Author: Vincent (vincent.dev@example.invalid)
 - Date: 2026-04-29
 - Related memory:
   `feedback_oas_execution_uncancellable_mid_turn`,

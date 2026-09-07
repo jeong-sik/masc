@@ -30,6 +30,12 @@ let verification_evidence_posture_usable =
   "verification.evidence_posture.usable"
 ;;
 
+(* RFC-0436: the image-evidence header for a review whose goal blocks carry
+   binary image artifacts. The lines under it are data (reference + sha256 +
+   media type) and are assembled in code; only the header prose lives here. *)
+let verification_image_evidence = "verification.image_evidence"
+;;
+
 (* One key per typed degraded-observation state. Each names what the Keeper may
    and may not conclude from that state, which is prose about a data condition
    and belongs beside the other prompt text rather than inside the projection

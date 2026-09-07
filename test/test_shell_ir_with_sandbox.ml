@@ -11,7 +11,7 @@ module Target = Masc_exec.Sandbox_target
 
 let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_
     ~env:_ ~cwd:_ =
-  Target.Ran { status = Unix.WEXITED 0; stdout = ""; stderr = "" }
+  Target.Ran { output_files = None; status = Unix.WEXITED 0; stdout = ""; stderr = "" }
 ;;
 
 (* A guest-shaped target with a mock runner, so a rewritten stage cannot

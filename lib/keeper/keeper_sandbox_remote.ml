@@ -609,11 +609,11 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
      old 3-tuple could not tell apart from grep's real exit 1 -- the silent
      failure the read backend then read as "no match". *)
   let ran status stdout stderr =
-    Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+    Masc_exec.Sandbox_target.Ran { output_files = None; status; stdout; stderr }
   in
   let transport_failed ?(stdout = "") ?(prefix_stderr = "") reason =
     Masc_exec.Sandbox_target.Transport_failed
-      { reason; stdout; stderr = append_error prefix_stderr reason }
+      { output_files = None; reason; stdout; stderr = append_error prefix_stderr reason }
   in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match wire_env t env with

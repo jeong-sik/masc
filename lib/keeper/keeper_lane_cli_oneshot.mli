@@ -32,6 +32,11 @@ type failure =
       ; detail : string
       }
       (** The client answered, but the text is not one JSON value. *)
+  | Invalid_domain_output of
+      { runtime_id : string
+      ; detail : string
+      }
+      (** JSON parsed, but the consumer rejected its domain value. *)
 
 val failure_to_string : failure -> string
 
@@ -75,10 +80,17 @@ val walk
   -> system_prompt:string
   -> requirement:Agent_core.Exact_output.output_requirement
   -> prompt:string
+  -> validate:(Yojson.Safe.t -> ('a, string) result)
+  -> on_failure:(failure -> unit)
   -> unit
-  -> (string * Yojson.Safe.t, failure list) result
+  -> (string * 'a, failure list) result
 (** Walk [cli_slots] with stable quota ordering and return the first slot whose
-    answer parses, as [(runtime_id, value)]. [Error failures] carries every
+    answer parses and passes the consumer-owned [validate] function, as
+    [(runtime_id, accepted_value)]. Domain rejection advances to the remaining
+    candidates and is retained as [Invalid_domain_output]. [validate] must be
+    side-effect-free. [on_failure] observes each refusal once before advancing,
+    including refusals before a later success, so accepted fallbacks do not
+    erase their preceding failure evidence. [Error failures] carries every
     slot's failure in walk order when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
     from "declared and exhausted" by the list it passed in. *)

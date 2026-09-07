@@ -519,6 +519,7 @@ let test_prompt_states_the_root_and_not_a_repository () =
       ; completion_notes = "n"
       ; task_id = "task-403"
       ; evidence_refs = []
+      ; evidence_images = []
       }
     in
     let text =
@@ -567,6 +568,7 @@ let test_prompt_states_the_available_surface () =
       ; completion_notes = "n"
       ; task_id = "task-001"
       ; evidence_refs = []
+      ; evidence_images = []
       }
     in
     let render lookup =

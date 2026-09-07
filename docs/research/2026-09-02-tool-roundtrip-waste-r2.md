@@ -46,7 +46,7 @@ r1 의 세 수정은 착지했다. `unchanged` 직후 동일-인자 재호출은
 
 ## 같은 모양의 다른 루프 (이번 범위 밖)
 
-`atlassian_searchJiraIssuesUsingJql` 348쌍(kidsnote-pr-jira-checker)과 `masc_board_post_get`
+`atlassian_searchJiraIssuesUsingJql` 348쌍(exampleorg-pr-jira-checker)과 `masc_board_post_get`
 100쌍은 시간 대기가 아니라 관찰 폴링이다. `docs/audits/keeper-fleet-waiting-audit-20260902.md`
 §3 과 `RFC-observe-by-waking-not-polling`(Draft) 영역이다.
 

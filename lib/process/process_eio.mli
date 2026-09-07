@@ -153,6 +153,7 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?output_capture:Process_output_capture.t ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
@@ -317,14 +318,17 @@ val run_argv_with_status_split_streaming :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?output_capture:Process_output_capture.t ->
   on_stdout_chunk:(string -> unit) ->
   on_stderr_chunk:(string -> unit) ->
   string list ->
   (Unix.process_status * string * string)
 (** Like [run_argv_with_status_split], but invokes [on_stdout_chunk] and
     [on_stderr_chunk] for every chunk read from the child pipes while the
-    process is still running. The returned strings still contain the full
-    captured output. *)
+    process is still running. The returned strings are bounded previews.
+    [output_capture], when supplied, preserves raw chunks independently of
+    callbacks and marks completeness only at pipe EOF. Unix fallback has no
+    authoritative chunk/EOF contract and marks capture unavailable. *)
 
 type pipeline_stage = {
   argv : string list;

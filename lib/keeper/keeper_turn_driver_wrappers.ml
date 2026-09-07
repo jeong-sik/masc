@@ -22,6 +22,7 @@ let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")
     ~goal
+    ?goal_blocks
     ~base_path
     ~system_prompt
     ~(masc_tools : Masc_domain.tool_schema list)
@@ -54,6 +55,7 @@ let run_named_with_masc_tools
       ~runtime_id
       ~keeper_name
       ~goal
+      ?goal_blocks
       ~base_path
       ~system_prompt
       ~tools:bridged_tools

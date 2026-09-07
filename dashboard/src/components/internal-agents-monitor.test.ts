@@ -298,7 +298,7 @@ describe('InternalAgentsMonitor', () => {
         runId: 'exact-lib-1',
         lane: 'librarian_exact',
         subjectId: 'trace-1',
-        actor: 'kidsnote',
+        actor: 'exampleorg',
         startedAt: 1786000000,
         status: 'succeeded',
         elapsedSeconds: 2,
@@ -310,7 +310,7 @@ describe('InternalAgentsMonitor', () => {
       runId: 'exact-lib-1',
       lane: 'librarian_exact',
       subjectId: 'trace-1',
-      actor: 'kidsnote',
+      actor: 'exampleorg',
       startedAt: 1786000000,
       status: 'succeeded',
       elapsedSeconds: 2,
@@ -345,7 +345,7 @@ describe('InternalAgentsMonitor', () => {
       },
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       dashboardSurface: '/api/v1/keepers/:name/memory-journal',
       returned: 1,
       undecodableLines: 0,
@@ -399,7 +399,7 @@ describe('InternalAgentsMonitor', () => {
     fireEvent.click(renderedPromptButton)
     expect(container.textContent).toContain('Current=[m1] old fact')
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
-      'kidsnote',
+      'exampleorg',
       500,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )

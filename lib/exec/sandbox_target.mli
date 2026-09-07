@@ -17,8 +17,21 @@
     that never ran. A local docker/host exec has no transport that can fail
     before an exit, so its runner is always [Ran]. *)
 type run_outcome =
-  | Ran of { status : Unix.process_status; stdout : string; stderr : string }
-  | Transport_failed of { reason : string; stdout : string; stderr : string }
+  | Ran of {
+      status : Unix.process_status;
+      stdout : string;
+      stderr : string;
+      output_files : Process_output_capture.files option;
+    }
+  | Transport_failed of {
+      reason : string;
+      stdout : string;
+      stderr : string;
+      output_files : Process_output_capture.files option;
+    }
+(** [output_files] names the original stream captures owned by the caller.
+    [None] means this producer did not preserve files; captured text alone
+    is not evidence that the complete streams were retained. *)
 
 (** Collapse a [run_outcome] to the legacy [status, stdout, stderr] tuple for
     consumers that treat a transport failure the same as any command failure

@@ -875,6 +875,57 @@ let persist_binary_body ~base_path ?request_id ?index data =
     Some (Filename.concat (Filename.concat "evidence" request_id) file)
   | _ -> None
 
+(* RFC-0436 §4.3: whether a binary artifact's format is an image a runtime
+   accepts as attached input, and as which media type. The four accepted
+   types are the same set every runtime's image cap lists, decided here so
+   the format taxonomy stays with the store that produces it. *)
+let image_media_type_of_binary_format = function
+  | "png" -> Some "image/png"
+  | "jpeg" | "jpg" -> Some "image/jpeg"
+  | "gif" -> Some "image/gif"
+  | "webp" -> Some "image/webp"
+  | _ -> None
+
+(* The filed body read back as base64 for an attached media block. Only a
+   binary artifact captured in-process carries a body path; one decoded from
+   persistence files none, and this reader reports that as an error rather
+   than guessing at the bytes. A body above the capture ceiling is refused
+   the same way (RFC-0436 §4.5): the judge then rests on the recorded hash
+   and size, which is the §4.4 posture for it. The ceiling is the capture
+   ceiling on purpose — a body the store would not capture is not a body it
+   delivers, so both limits are one number (#27397's rule, applied here). *)
+let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
+  match item with
+  | Evidence_artifact_binary { reference; body = Some relative; _ } ->
+    let path =
+      Filename.concat
+        (Workspace_utils.masc_dir_from_base_path ~base_path)
+        relative
+    in
+    (try
+       let data = Fs_compat.load_file path in
+       if String.length data > verification_evidence_max_bytes
+       then
+         Error
+           (Printf.sprintf
+              "binary evidence body %s of %s exceeds the judge delivery \
+               ceiling of %d bytes; judged on its recorded hash and size"
+              relative
+              reference
+              verification_evidence_max_bytes)
+       else Ok (Base64.encode_string data)
+     with Sys_error reason ->
+       Error
+         (Printf.sprintf
+            "binary evidence body %s of %s unreadable: %s"
+            relative reference reason))
+  | Evidence_artifact_binary { reference; body = None; _ } ->
+    Error (Printf.sprintf "binary evidence %s filed no body" reference)
+  | Evidence_note _ -> Error "not a binary artifact"
+  | Evidence_artifact _ -> Error "not a binary artifact"
+  | Evidence_invalid_reference -> Error "not a binary artifact"
+  | Evidence_artifact_unreadable _ -> Error "not a binary artifact"
+
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
     ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)

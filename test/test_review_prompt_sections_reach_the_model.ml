@@ -36,6 +36,7 @@ let request : AR.review_request =
   ; completion_notes = marker "completion_notes"
   ; task_id = "task-403"
   ; evidence_refs = [ marker "evidence_refs" ]
+  ; evidence_images = []
   }
 ;;
 
@@ -81,6 +82,52 @@ let test_supplied_evidence_refs_reach_the_task_prompt () =
   init ();
   check bool "the submitted evidence refs are rendered" true
     (Astring.String.is_infix ~affix:(marker "evidence_refs") (rendered_with_lookup ()))
+;;
+
+(* RFC-0436 §4.3/§4.4: a review with image artifacts names them in the prompt
+    with their reference and hash — the text a text-only evaluator is degraded
+    to — and a review without none renders no section at all, so the prompt of
+    an imageless review is byte-identical to before this channel existed. *)
+let test_image_evidence_section_reaches_the_task_prompt () =
+  init ();
+  let image_request =
+    { request with
+      evidence_images =
+        [ { AR.image_reference = marker "image_reference"
+          ; image_sha256 = marker "image_sha256"
+          ; image_bytes = 42
+          ; image_media_type = "image/png"
+          ; image_body_base64 = "aGk="
+          }
+        ]
+    }
+  in
+  let text =
+    match
+      AR.build_prompt
+        ~question:
+          { AR.completion_contract = None
+         ; required_evidence = []
+         ; evidence_posture = AR.Note_only
+         ; few_shot_block = ""
+         }
+        ~lookup:AR.No_lookup_surface
+        image_request
+    with
+    | Ok text -> text
+    | Error detail -> failf "task prompt render failed: %s" detail
+  in
+  check bool "the image evidence section is rendered" true
+    (Astring.String.is_infix ~affix:"<image_evidence>" text);
+  check bool "the reference line names the artifact" true
+    (Astring.String.is_infix ~affix:(marker "image_reference") text);
+  check bool "the reference line carries the hash" true
+    (Astring.String.is_infix ~affix:(marker "image_sha256") text);
+  check bool "an imageless review renders no image section" true
+    (not
+       (Astring.String.is_infix
+          ~affix:"<image_evidence>"
+          (rendered_with_lookup ())))
 ;;
 
 (* Every section template the code can select must exist and render. A section
@@ -233,6 +280,10 @@ let () =
             "evidence_refs is rendered where evidence is judged"
             `Quick
             test_supplied_evidence_refs_reach_the_task_prompt
+        ; test_case
+            "image evidence carries its reference and hash into the prompt"
+            `Quick
+            test_image_evidence_section_reaches_the_task_prompt
         ; test_case
             "every section template renders"
             `Quick

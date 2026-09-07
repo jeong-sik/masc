@@ -1482,7 +1482,7 @@ describe('ApprovalsSurface', () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({
         id: 'appr-identity',
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         tool_name: 'identity_call',
         input: {
           provider_id: 'atlassian',
@@ -1586,7 +1586,7 @@ describe('ApprovalsSurface', () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], undefined, undefined, undefined, undefined, undefined, undefined, {
       keeper_modes: [
         {
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           mode: 'manual',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
@@ -1594,7 +1594,7 @@ describe('ApprovalsSurface', () => {
       ],
       keeper_exact_lanes: [
         {
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           lane_id: 'hitl_auto_judge',
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
@@ -1608,7 +1608,7 @@ describe('ApprovalsSurface', () => {
 
     const modeRows = container.querySelectorAll('[data-testid="keeper-mode-row"]')
     expect(modeRows.length).toBe(1)
-    expect(modeRows[0]?.textContent).toContain('kidsnote')
+    expect(modeRows[0]?.textContent).toContain('exampleorg')
     // The label an operator picked in the mode control, not the wire value.
     expect(modeRows[0]?.textContent).toContain('Human')
     const exactLaneRows = container.querySelectorAll('[data-testid="keeper-exact-lane-row"]')

@@ -13,7 +13,7 @@ let boxed () =
 ;;
 
 let process_result status =
-  { Masc_exec.Exec_dispatch.status; stdout = "out"; stderr = "err" }
+  { Masc_exec.Exec_dispatch.status; stdout = "out"; stderr = "err"; output_files = None }
 ;;
 
 let result status = Ok (process_result status)
@@ -288,6 +288,77 @@ let test_observe_failure_still_reaches_the_judge () =
   | Gate.Allow _ | Gate.Unavailable _ -> fail "Observe failure did not reach the Judge"
 ;;
 
+let test_observed_capture_is_returned_without_second_child () =
+  with_execution_workspace @@ fun base_path ->
+  let argv =
+    [ "sh"; "-c"; "printf x >> append.txt; printf 'captured stdout\\n'; printf 'captured stderr\\n' >&2" ]
+  in
+  let dispatch_count = ref 0 in
+  let dispatch _ =
+    incr dispatch_count;
+    let (status, stdout, stderr), files =
+      Process_output_capture.with_capture
+        ~capture_dir:(Filename.concat base_path "capture") (fun capture ->
+          Process_eio.run_argv_with_status_split_streaming
+            ~cwd:base_path ~output_capture:capture
+            ~on_stdout_chunk:(fun _ -> ()) ~on_stderr_chunk:(fun _ -> ()) argv)
+    in
+    Ok { Masc_exec.Exec_dispatch.status; stdout; stderr; output_files = Some files }
+  in
+  let target = Masc_exec.Sandbox_target.host () in
+  let stage = Stage.create ~route:(fun () -> Target.Boxed { target; run = observe_run }) ~dispatch in
+  let request : Gate.request =
+    { keeper_name = "settlement"
+    ; operation = "tool_execute"
+    ; input = `Assoc [ "input", `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv) ] ]
+    ; call_summary = None
+    ; base_path
+    ; causal_context = None
+    ; task_id = None
+    ; continuation_channel = None
+    ; sandbox_profile = Some Keeper_types_profile_sandbox.Remote_ssh
+    }
+  in
+  let decision = Gate.decide ~keeper_always_allow:false ~observe:(Stage.observe stage) request in
+  let original =
+    match Stage.outcome stage with
+    | Some (Gate.Observed_result { result = { output_files = Some files; _ }; _ }) -> files
+    | _ -> fail "the actual observation did not retain its captured files"
+  in
+  let returned =
+    match decision with
+    | Gate.Allow { source = Gate.Observed_in_box _ as source; _ } ->
+      (match Stage.dispatch_authorized ~source ~on_output_chunk:(fun _ -> ())
+               ~dispatch:(fun () -> dispatch target) with
+       | Ok result -> result
+       | Error _ -> fail "observed capture was rejected")
+    | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ ->
+      fail "successful observation was not used as the authorization source"
+  in
+  check int "one actual child execution" 1 !dispatch_count;
+  check string "the child appended once" "x"
+    (In_channel.with_open_bin (Filename.concat base_path "append.txt") In_channel.input_all);
+  (match Masc.Keeper_approval_queue.pending_count_for_keeper_in_workspace
+           ~base_path ~keeper_name:"settlement" with
+   | Ok count -> check int "no Judge or replay is pending" 0 count
+   | Error error -> fail (Masc.Keeper_approval_queue.storage_error_to_string error));
+  check bool "the original completed status survives" true (returned.status = Unix.WEXITED 0);
+  match returned.output_files with
+  | None -> fail "authorized dispatch discarded the actual captured files"
+  | Some files ->
+    check bool "authorization preserves the same captured file receipt" true (files == original);
+    let complete expected = function
+      | Process_output_capture.Complete_file { path; byte_length } ->
+        check int "EOF length survives" (String.length expected) byte_length;
+        check string "the original file is still readable" expected
+          (In_channel.with_open_bin path In_channel.input_all)
+      | Process_output_capture.Incomplete_file _ | Process_output_capture.Capture_failed _ ->
+        fail "a completed child did not leave an EOF-confirmed capture"
+    in
+    complete "captured stdout\n" files.stdout;
+    complete "captured stderr\n" files.stderr
+;;
+
 let test_manual_approval_does_not_prepare_identity () =
   with_execution_workspace @@ fun base_path ->
   (match
@@ -462,6 +533,8 @@ let () =
             test_guest_local_failure_returns_the_execution_once
         ; test_case "successful boxed results are not reexecuted" `Quick
             test_successful_boxed_results_are_not_reexecuted
+        ; test_case "observed output files survive authorization without a second child" `Quick
+            test_observed_capture_is_returned_without_second_child
         ; test_case "Observe failure still reaches the Judge" `Quick
             test_observe_failure_still_reaches_the_judge
         ; test_case "manual approval does not prepare identity" `Quick

@@ -2490,7 +2490,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
 let test_transport_failure_is_error_not_empty () =
   let outcome =
     Masc_exec.Sandbox_target.Transport_failed
-      { reason = "remote_ssh_version_error: trailer carries v=2"
+      { output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
       ; stdout = ""
       ; stderr = "remote_ssh_version_error"
       }
@@ -2508,7 +2508,7 @@ let test_transport_failure_is_error_not_empty () =
 let test_real_no_match_is_ok () =
   let outcome =
     Masc_exec.Sandbox_target.Ran
-      { status = Unix.WEXITED 1; stdout = ""; stderr = "" }
+      { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = "" }
   in
   match
     Keeper_sandbox_read_backend.classify_read_outcome ~lane:"microvm_remote"
@@ -2523,7 +2523,7 @@ let test_read_lane_still_rejects_exit_1 () =
      must not weaken that. *)
   let outcome =
     Masc_exec.Sandbox_target.Ran
-      { status = Unix.WEXITED 1; stdout = ""; stderr = "boom" }
+      { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = "boom" }
   in
   match
     Keeper_sandbox_read_backend.classify_read_outcome ~lane:"microvm_remote"

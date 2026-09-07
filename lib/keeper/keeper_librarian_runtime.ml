@@ -486,27 +486,19 @@ let try_cli_slots
             ~system_prompt:""
             ~requirement:librarian_output_requirement
             ~prompt
+            ~validate:(fun output ->
+              Keeper_librarian.selection_of_json_result selected_input output
+              |> Result.map (fun selection -> selection, output)
+              |> Result.map_error Keeper_librarian.parse_error_to_string)
+            ~on_failure:(fun failure ->
+              Log.Keeper.warn ~keeper_name:keeper_id
+                "librarian cli lane-slot failed: %s"
+                (Keeper_lane_cli_oneshot.failure_to_string failure))
             ()
         with
-        | Error failures ->
-          List.iter
-            (fun failure ->
-               Log.Keeper.warn
-                 ~keeper_name:keeper_id
-                 "librarian cli lane-slot failed: %s"
-                 (Keeper_lane_cli_oneshot.failure_to_string failure))
-            failures;
-          None
-        | Ok (runtime_id, output) ->
-          (match Keeper_librarian.selection_of_json_result selected_input output with
-           | Ok selection -> Some (runtime_id, selection, output)
-           | Error error ->
-             Log.Keeper.warn
-               ~keeper_name:keeper_id
-               "librarian cli output invalid slot=%s: %s"
-               runtime_id
-               (Keeper_librarian.parse_error_to_string error);
-             None)))
+        | Error _failures -> None
+        | Ok (runtime_id, (selection, output)) ->
+          Some (runtime_id, selection, output)))
 ;;
 
 let execute_exact_output_classified

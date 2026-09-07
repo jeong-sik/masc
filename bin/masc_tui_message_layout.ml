@@ -720,7 +720,12 @@ let speaker_mark : style -> string = function
   | User -> "\xe2\x96\xb6"      (* the operator sends *)
   | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
   | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
-  | Status -> "?"
+  (* The Keeper's own mark, unfilled: this row is the pane's note about a
+     turn rather than the Keeper speaking in it. It used to be a question
+     mark, which is the one thing in this alphabet that is not a shape -- and
+     it stayed a question on a row that had already settled, so a gate that
+     finished still read as one nobody had answered. *)
+  | Status -> "\xe2\x97\x8b"
   (* The same mark the composer prompt draws, because that is where this row
      came from: the pane answering what was typed at it. *)
   | Local -> "\xe2\x80\xba"
@@ -1187,9 +1192,23 @@ let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
   | Origin_row -> None
   | Origin_inline | Origin_bare ->
+      (* Drawn when it moved. A clock's job is to say when a thing happened,
+         and a value identical to the one on the row above says nothing while
+         taking the cells the eye lands on first -- two speakers a second
+         apart both read 10:52. The column is held either way, so nothing
+         shifts when a minute repeats, and a continuation whose clock did move
+         still shows the new time: that gap is what a reader checks here. *)
       let clock =
         match origin with
-        | Origin_inline -> pad_clock (short_clock entry.timestamp) ^ " "
+        | Origin_inline ->
+            let now = short_clock entry.timestamp in
+            let unchanged =
+              match previous with
+              | None -> false
+              | Some previous ->
+                  String.equal (short_clock previous.timestamp) now
+            in
+            pad_clock (if unchanged then "" else now) ^ " "
         | Origin_row | Origin_bare -> ""
       in
       (* The margin is taken from the body, so it cannot be wider than what
@@ -1262,10 +1281,11 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            the same second has nothing new to say, and [fit_width] measures the
            cells a label actually occupies where [String.make] would count its
            bytes. *)
-        (* The clock stays. A continuation says the same speaker is still
-           talking, not that time stopped: the gap between two things one
-           Keeper said is exactly what a reader checks here, and blanking the
-           whole margin took it away along with the name.
+        (* The clock stays, on the same terms as everywhere else: it is
+           drawn when it moved. A continuation says the same speaker is still
+           talking, not that time stopped, and the gap between two things one
+           Keeper said is exactly what a reader checks here -- blanking the
+           whole margin took that away along with the name.
 
            The name is what goes, since repeating it says nothing, and the mark
            drops to the quietest glyph so a row that continues reads as lower

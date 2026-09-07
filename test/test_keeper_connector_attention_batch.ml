@@ -339,12 +339,12 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
         ~pending_board_events:[]
     in
     check int "all nine ready sources are admitted in one turn" 9
-      intake.consumed_stimulus_count;
+      (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "admission preserves durable urgency then arrival order"
       (List.map (fun (source : Q.stimulus) -> source.post_id) sources)
-      (List.map (fun (source : Q.stimulus) -> source.post_id) intake.consumed_stimuli);
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "five Board and three Schedule observations reach the turn" 8
       (List.length intake.pending_board_events);
     check int "intake alone never ACKs actionable sources" 9
@@ -368,15 +368,15 @@ let test_one_intake_admits_only_one_hitl_resolution () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "one turn owns one exact HITL grant" 1 intake.consumed_stimulus_count;
+    check int "one turn owns one exact HITL grant" 1 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "the oldest ready approval is the only admitted source"
       [ first.post_id ]
-      (List.map (fun (source : Q.stimulus) -> source.post_id) intake.consumed_stimuli);
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "turn completion can ACK only that exact approval" 1
-      (List.length intake.consumed_selections);
-    (match intake.consumed_selections with
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
+    (match (Keeper_heartbeat_source_batch.selections intake.source_batch) with
      | [ selection ] ->
        (match
           Keeper_registry_event_queue.terminalize_pending_turn_completed_result
@@ -408,7 +408,7 @@ let test_one_intake_admits_only_one_hitl_resolution () =
       (list string)
       "the next turn admits the remaining exact approval"
       [ second.post_id ]
-      (List.map (fun (source : Q.stimulus) -> source.post_id) next.consumed_stimuli))
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli next.source_batch)))
 ;;
 
 (* Adversarial review P1-2: the turn-completion/failure batch disposition
@@ -556,21 +556,21 @@ let test_batch_admits_same_conversation_in_arrival_order_leaves_other_channel_qu
         ~pending_board_events:[]
     in
     check int "channel A's 3 pending messages are all admitted in one turn" 3
-      intake.consumed_stimulus_count;
+      (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "consumed_stimuli are exactly channel A's, in arrival order"
       [ a1.Q.post_id; a2.Q.post_id; a3.Q.post_id ]
-      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) intake.consumed_stimuli);
+      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "consumed_selections mirrors the same batch" 3
-      (List.length intake.consumed_selections);
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     check
       (list string)
       "consumed_selections carries channel A's sources, in arrival order"
       [ a1.Q.post_id; a2.Q.post_id; a3.Q.post_id ]
       (List.map
          (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.Q.post_id)
-         intake.consumed_selections);
+         (Keeper_heartbeat_source_batch.selections intake.source_batch));
     check int "the turn context carries all 3 observations" 3
       (List.length intake.pending_board_events);
     List.iteri
@@ -622,12 +622,12 @@ let test_batch_retires_permanent_board_poison_between_connector_matches () =
         ~pending_board_events:[]
     in
     check int "only the two connector entries are admitted, not the board signal"
-      2 intake.consumed_stimulus_count;
+      2 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "batch is exactly the two connector entries, in arrival order"
       [ a1.Q.post_id; a2.Q.post_id ]
-      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) intake.consumed_stimuli);
+      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
       | Ok queue -> queue
@@ -671,9 +671,9 @@ let test_batch_turn_failure_leaves_every_member_queued () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
+    check int "all 3 admitted as one batch" 3 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check int "consumed_selections mirrors the batch" 3
-      (List.length intake.consumed_selections);
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     let failed_cycle_outcome =
       failed_outcome
         ~source_disposition:Keeper_unified_turn.Follow_failure_route
@@ -732,9 +732,9 @@ let test_batch_completion_acks_every_member () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
+    check int "all 3 admitted as one batch" 3 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check int "consumed_selections mirrors the batch" 3
-      (List.length intake.consumed_selections);
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     (match
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
          (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
@@ -753,7 +753,7 @@ let test_batch_completion_acks_every_member () =
               | Ok _ -> true
               | Error detail ->
                 failf "ack failed for %s: %s" selection.source.Q.post_id detail)
-           intake.consumed_selections
+           (Keeper_heartbeat_source_batch.selections intake.source_batch)
        in
        check bool "every batch member acks cleanly" true acked
      | Keeper_heartbeat_loop.Batch_ack_attention_only ->
@@ -769,11 +769,84 @@ let test_batch_completion_acks_every_member () =
       (Q.length queued))
 ;;
 
+let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
+  with_ctx "mixed-scope-transport" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Batch = Keeper_heartbeat_source_batch in
+    let module Persistence = Keeper_event_queue_persistence in
+    let require label = function
+      | Ok value -> value
+      | Error detail -> failf "%s: %s" label detail
+    in
+    let sources = List.init 3 (fun index ->
+      { Q.post_id = "mixed-" ^ string_of_int index
+      ; urgency = Q.Normal
+      ; arrived_at = Float.of_int index
+      ; payload = Q.Bootstrap }) in
+    List.iter (enqueue_exn ~base_path keeper_name) sources;
+    let initial = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "initial selections" in
+    let first, second = match initial with
+      | first :: second :: _ -> first, second
+      | _ -> fail "fixture did not enqueue three sources"
+    in
+    let direct = Keeper_chat_operation.Operation_id.of_string "originating-direct"
+      |> require "operation ID" |> Keeper_execution_scope_id.direct_operation in
+    let autonomous =
+      match Uuidm.of_string "fde5c983-7a6f-4d87-bdad-53a51316f40d" with
+      | Some id -> Keeper_execution_scope_id.autonomous_admission id
+      | None -> fail "fixture UUID is invalid"
+    in
+    List.iter (fun (selection, scope) ->
+      let (_ : Keeper_event_queue_state.pending_selection list) =
+        Persistence.bind_pending_repetition_scope_result
+          ~base_path ~keeper_name ~selections:[selection] ~scope ()
+        |> require "bind distinct scopes" in
+      ()) [first, direct; second, autonomous];
+    let expected = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "bound selections" in
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check bool "successful intake has no diagnostic authority" true
+      (Option.is_none intake.diagnostic_selection);
+    let input = Batch.for_turn ~reactive:false intake.source_batch in
+    let batch = Batch.sources input in
+    check bool "all exact identities and mixed bindings reach turn input" true
+      (Batch.selections batch = expected);
+    (match Batch.wake input with
+     | Keeper_registry.Woken payloads ->
+       check int "cadence-discovered batch retains reactive payload view" 3 (List.length payloads)
+     | _ -> fail "selected sources became a source-free cadence tick");
+    let checked = ref [] in
+    Keeper_turn_dispatch_authority.run (fun token ->
+      Keeper_turn_dispatch_authority.install token (fun () ->
+        Batch.validate ~diagnostic:intake.diagnostic_selection
+          ~validate_selection:(fun selection ->
+            checked := selection :: !checked;
+            Keeper_registry_event_queue.validate_pending_selection_result
+              ~base_path keeper_name ~selection)
+          batch)
+      |> require "install dispatch authority";
+      Keeper_turn_dispatch_authority.validate token |> require "dispatch validation");
+    check bool "dispatch validates the same complete exact batch" true
+      (List.rev !checked = expected);
+    List.iter (fun selection ->
+      let (_ : Keeper_registry_event_queue.source_ack_result) =
+        Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path keeper_name ~applied_at:1000. ~selection
+        |> require "settle exact source" in
+      ()) (Batch.selections batch);
+    let remaining = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "settled queue" in
+    check int "every transported selection was durably settled" 0 (List.length remaining))
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
     [ ( "all-ready Event Queue intake"
-      , [ test_case
+      , [ test_case "exact mixed bindings reach dispatch and settlement" `Quick
+            test_exact_mixed_bindings_reach_dispatch_and_settlement
+        ; test_case
             "admits all ready Board, Schedule, and Bootstrap sources in one turn"
             `Quick
             test_one_intake_admits_every_ready_non_connector_in_queue_order

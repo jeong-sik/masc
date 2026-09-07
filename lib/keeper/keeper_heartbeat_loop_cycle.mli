@@ -48,7 +48,7 @@ val run_keeper_cycle
   -> obs:Keeper_world_observation.world_observation
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> shared_context:Agent_core.Context.t
-  -> wake:Keeper_registry.wake_reason
+  -> turn_input:Keeper_heartbeat_source_batch.turn_input
   -> unit
   -> cycle_outcome
 (** [?previous_turn_stop] overrides the shared stop cell for this turn —

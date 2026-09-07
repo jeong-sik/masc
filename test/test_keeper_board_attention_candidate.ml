@@ -874,11 +874,9 @@ let test_record_dedupes_exact_identity_and_rejects_conflict () =
   Alcotest.(check bool) "conflict preserved original" true (load_one ~base_path = original)
 ;;
 
-(* One unreadable row used to fail the whole read, and the write path reads
-   before it writes, so compaction could never remove it. Measured 2026-08-28:
-   17 of 575 rows carried a field a hard cut had removed and stopped all 10
-   keeper ledgers, 402 WARN/day. The reader must keep the rows it can parse and
-   let the next write compact the rest away. *)
+(* A rejected record is still evidence of an obligation. Valid candidates
+   remain usable, while writes preserve the original bytes even when ordinary
+   decoded-row compaction would otherwise run. *)
 let test_unreadable_row_does_not_hide_the_rest () =
   with_temp_base "board-attention-candidate-partial-read" @@ fun base_path ->
   let persisted = record ~base_path (candidate (signal "post-partial")) in
@@ -890,28 +888,29 @@ let test_unreadable_row_does_not_hide_the_rest () =
       "alpha.jsonl"
   in
   let good = In_channel.with_open_bin path In_channel.input_all in
-  Alcotest.(check bool) "fixture wrote a row" true (String.length good > 0);
-  (* A row the current decoder refuses, ahead of the good one — the shape a
-     removed field leaves behind. *)
-  replace_ledger_bytes path ("{\"schema_version\":5,\"unreadable\":true}\n" ^ good);
-  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
-   | Ok [ loaded ] ->
-     Alcotest.(check bool) "readable row survives" true (loaded = persisted)
-   | Ok candidates ->
-     Alcotest.failf "expected the one readable candidate, got %d" (List.length candidates)
-   | Error detail -> Alcotest.failf "one bad row failed the whole read: %s" detail);
-  (* The next write compacts the file, so the bad row does not come back. *)
-  let _ = record ~base_path (candidate (signal "post-partial-second")) in
-  let after = In_channel.with_open_bin path In_channel.input_all in
-  let contains haystack needle =
-    let hn = String.length haystack and nn = String.length needle in
-    let rec scan i = i + nn <= hn && (String.sub haystack i nn = needle || scan (i + 1)) in
-    scan 0
+  let unsupported =
+    match A.candidate_to_json persisted with
+    | `Assoc fields -> `Assoc (("schema_version", `Int (-1)) :: List.remove_assoc "schema_version" fields)
+    | _ -> Alcotest.fail "candidate fixture is not an object"
   in
-  Alcotest.(check bool)
-    "next write drops the unreadable row"
-    false
-    (contains after "unreadable")
+  let rejected = "{not-json}\n" ^ Yojson.Safe.to_string unsupported ^ "\n" in
+  let original = rejected ^ String.concat "" (List.init 5 (fun _ -> good)) in
+  replace_ledger_bytes path original;
+  let loaded, rejections = ok "read rejected evidence"
+      (A.load_candidates_with_rejections ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check bool) "readable candidate survives" true (loaded = [ persisted ]);
+  Alcotest.(check int) "both rejected rows remain visible" 2 (List.length rejections);
+  let second = record ~base_path (candidate (signal "post-partial-second")) in
+  let third = record ~base_path (candidate (signal "post-partial-third")) in
+  let after = In_channel.with_open_bin path In_channel.input_all in
+  Alcotest.(check bool) "writes preserve every original byte" true
+    (String.starts_with ~prefix:original after);
+  let loaded, rejections = ok "reload rejected evidence after writes"
+      (A.load_candidates_with_rejections ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check bool) "new valid candidates remain usable" true
+    (loaded = [ persisted; second; third ]);
+  Alcotest.(check int) "writes do not erase rejected obligations" 2
+    (List.length rejections)
 ;;
 
 let test_record_requests_worker_without_invoking_judgment () =

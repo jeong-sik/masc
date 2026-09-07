@@ -66,7 +66,14 @@ let test_closed_cycle_and_pending_tail () =
   check string "index and proposal preserve canonical bytes" bytes (Store.exact_snapshot_canonical_bytes raw);
   let retained = P.validate ~source (propose source [P.Retain 0;P.Retain 1;P.Retain 2]) |> ok in
   let retained = List.concat_map (function P.Original m -> m | P.Derived _ -> fail "unexpected derived segment") (P.segments retained) in
-  exact "signed blocks, nested payload, IDs, and ordering remain exact" messages retained
+  let decoded = Store.exact_snapshot_messages raw in
+  exact "canonical decoded blocks, IDs, and ordering remain exact" decoded retained;
+  (match (List.nth decoded 1).content with
+   | T.Thinking {signature=Some "fixture signature"; _} :: _ -> ()
+   | _ -> fail "source fixture lost its signed block");
+  (match (List.nth decoded 2).content with
+   | [T.ToolResult {content_blocks=Some [T.ToolUse {id="nested-only"; _}]; _}] -> ()
+   | _ -> fail "source fixture lost its nested non-anchor payload")
 
 let test_host_requirements_and_coverage () =
   let instruction,cycle,suffix = fixture () in

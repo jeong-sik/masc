@@ -45,6 +45,7 @@ let () =
 
 
 let result_prefix = "__KEEPER_TOOL_MATRIX_RESULT__"
+exception Case_completed of int
 
 let emit_result ~base_path name = function
   | Ok () ->
@@ -88,6 +89,8 @@ let () =
       flush stdout;
       Unix._exit 2
   | Some schema ->
+      let exit_code =
+      try
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Masc.Mcp_server_eio.set_net (Eio.Stdenv.net env);
@@ -104,7 +107,11 @@ let () =
       emit_result ~base_path tool_name result;
       flush stdout;
       flush stderr;
-      Unix._exit
-        (match result with
+      raise (Case_completed (match result with
         | Ok () -> 0
-        | Error _ -> 1)
+        | Error _ -> 1))
+      with Case_completed code -> code
+      in
+      (* Cancel fixture owners and reap spawned processes before exiting.
+         A normal return would wait for the server's long-lived fibers. *)
+      Unix._exit exit_code

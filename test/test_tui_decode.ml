@@ -5186,6 +5186,10 @@ let picker_default_runtime =
     [ ("id", `String "ollama_cloud.deepseek")
     ; ("provider", `String "Ollama Cloud")
     ; ("model", `String "deepseek-v4-flash:0731")
+    ; ("effective_max_context", `Int 200000)
+    ; ("max_context_source", `String "override_clamped_by_capability")
+    ; ("max_output_tokens", `Int 8192)
+    ; ("is_local", `Bool false)
     ; ("keeper_dispatchable", `Bool true)
     ; ("keeper_dispatch_blocked_reason", `Null)
     ; ("is_default", `Bool false)
@@ -5204,6 +5208,10 @@ let runtime_resolved_json =
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
               ; ("model", `String "embed")
+              ; ("effective_max_context", `Int 8192)
+              ; ("max_context_source", `String "capability")
+              ; ("max_output_tokens", `Null)
+              ; ("is_local", `Bool true)
               ; ("keeper_dispatchable", `Bool false)
               ; ("keeper_dispatch_blocked_reason", `String "not a keeper model")
               ; ("is_default", `Bool false)
@@ -5244,7 +5252,12 @@ let test_decode_runtime_resolved () =
            Alcotest.(check string) "id" "ollama_cloud.deepseek"
              first.Tui_decode.ro_id;
            Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
-           Alcotest.(check bool) "top-level default" true first.ro_is_default
+           Alcotest.(check bool) "top-level default" true first.ro_is_default;
+           Alcotest.(check int) "effective context" 200000 first.ro_effective_max_context;
+           Alcotest.(check string) "context provenance" "override_clamped_by_capability"
+             (Tui_decode.runtime_context_source_label first.ro_max_context_source);
+           Alcotest.(check (option int)) "max output" (Some 8192) first.ro_max_output_tokens;
+           Alcotest.(check bool) "locality" false first.ro_is_local
        | [] -> Alcotest.fail "no runtimes");
       (match assignments with
        | [ a ] ->
@@ -5494,6 +5507,75 @@ let test_runtime_probe_rejects_status_reachability_disagreement () =
   with
   | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
   | Error _ -> ()
+
+let test_runtime_catalog_probe_is_independent_of_dispatch () =
+  let map_field key f = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+        name, (if name = key then f value else value)) fields)
+    | json -> json
+  in
+  let probe_json = runtime_probe_surface_json ()
+    |> map_field "probe" (map_field "providers" (function
+        | `List rows -> `List (List.map (function
+            | `Assoc fields when List.assoc_opt "runtime_id" fields = Some (`String "runtime-c") ->
+                runtime_probe_provider ~status:"endpoint_not_found" ~reachable:(`Bool false)
+                  ~http_status:(`Int 404) ~error:(`String "HTTP 404") "runtime-c"
+            | row -> row) rows)
+        | json -> json))
+  in
+  match Tui_decode.decode_runtime_surface_snapshot ~probe_json
+      ~resolved_json:(runtime_resolved_surface_json ()) with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+      let runtime = List.find (fun row -> row.Tui_decode.ro_id = "runtime-c")
+          snapshot.rss_resolved.rrs_runtimes in
+      Alcotest.(check bool) "dispatch remains allowed" true runtime.ro_dispatchable;
+      (match Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id with
+       | None -> Alcotest.fail "catalog lost failed provider observation"
+       | Some probe -> Alcotest.(check string) "failure remains independently visible"
+           "endpoint_not_found" (Tui_decode.runtime_provider_status_to_string probe.rpp_status);
+           Alcotest.(check (option int)) "actual HTTP result" (Some 404) probe.rpp_http_status);
+      Alcotest.(check bool) "missing observation stays absent" true
+        (Option.is_none (Tui_decode.runtime_probe_for_id snapshot ~runtime_id:"runtime-d"))
+
+let test_runtime_limits_reject_unknown_or_invalid_values () =
+  let replace name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | json -> json
+  in
+  let other_runtimes = match runtime_resolved_json with
+    | `Assoc fields -> (match List.assoc "runtimes" fields with
+        | `List (_ :: rest) -> rest | _ -> Alcotest.fail "invalid fixture")
+    | _ -> Alcotest.fail "invalid fixture"
+  in
+  (match Tui_decode.decode_runtime_resolved_snapshot runtime_resolved_json with
+   | Ok _ -> () | Error detail -> Alcotest.fail detail);
+  List.iter (fun runtime ->
+    let json = replace "default_runtime" runtime runtime_resolved_json
+      |> replace "runtimes" (`List (runtime :: other_runtimes)) in
+    match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "invalid runtime limit/provenance accepted")
+    [replace "max_context_source" (`String "guessed") picker_default_runtime;
+     replace "effective_max_context" (`Int 0) picker_default_runtime;
+     replace "max_output_tokens" (`Int (-1)) picker_default_runtime]
+
+let test_runtime_default_limits_must_match_listed_row () =
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | _ -> Alcotest.fail "invalid runtime fixture"
+  in
+  List.iter (fun (key, value) ->
+    let different_default = replace key value picker_default_runtime in
+    let json = replace "default_runtime" different_default runtime_resolved_json in
+    match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Error detail -> Alcotest.(check string) key
+        "default_runtime disagrees with its resolved runtime row" detail
+    | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
+    ["effective_max_context", `Int 100000;
+     "max_context_source", `String "capability";
+     "max_output_tokens", `Null;
+     "is_local", `Bool true]
 
 let test_runtime_resolved_rejects_half_preference () =
   match
@@ -7878,6 +7960,12 @@ let () =
           test_runtime_probe_status_round_trips
       ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
           test_runtime_probe_rejects_status_reachability_disagreement
+      ; Alcotest.test_case "catalog probe is independent of dispatch" `Quick
+          test_runtime_catalog_probe_is_independent_of_dispatch
+      ; Alcotest.test_case "limits reject invalid values" `Quick
+          test_runtime_limits_reject_unknown_or_invalid_values
+      ; Alcotest.test_case "default limits match listed runtime" `Quick
+          test_runtime_default_limits_must_match_listed_row
       ; Alcotest.test_case "rejects half a sticky preference" `Quick
           test_runtime_resolved_rejects_half_preference
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick

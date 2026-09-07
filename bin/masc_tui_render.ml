@@ -13751,6 +13751,9 @@ let runtime_probe_badge = function
       in
       style ^ label ^ Ansi.reset
 
+let runtime_route_probe_badge runtime probe =
+  runtime_route_badge runtime ^ " / " ^ runtime_probe_badge probe
+
 let runtime_probe_detail = function
   | None -> []
   | Some (probe : Masc.Tui_decode.runtime_provider_probe) ->
@@ -13843,10 +13846,7 @@ let runtime_detail_lines state target ~width =
         |> List.find_opt (fun (runtime, _) -> String.equal runtime.ro_id runtime_id)
         |> Option.map (fun (runtime, lanes) ->
                let probe =
-                 Option.bind snapshot.rss_probe (fun probe_snapshot ->
-                     List.find_opt
-                       (fun row -> String.equal row.rpp_runtime_id runtime.ro_id)
-                       probe_snapshot.rps_providers)
+                 Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id
                in
                runtime, lanes, None, None, probe)
   in
@@ -13860,6 +13860,16 @@ let runtime_detail_lines state target ~width =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
+        @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
+            (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Context source"
+            (runtime_context_source_label runtime.ro_max_context_source)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Max output"
+            (match runtime.ro_max_output_tokens with
+             | Some tokens -> Printf.sprintf "%d tokens" tokens
+             | None -> "not specified")
+        @ runtime_detail_field ~width ~style:Ansi.reset "Local runtime"
+            (runtime_bool runtime.ro_is_local)
         @ runtime_detail_field ~width ~style:Ansi.reset "Used by lanes"
             (match lanes with [] -> "unassigned" | values -> String.concat ", " values)
         @ runtime_detail_field ~width ~style:Ansi.reset "Dispatchable"
@@ -13964,7 +13974,6 @@ let render_runtime (state : state) =
     runtime_column_widths cols
   in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let candidates =
     match state.runtime_surface with
     | None -> []
@@ -14021,7 +14030,8 @@ let render_runtime (state : state) =
         Printf.sprintf "%s  %s  %s  %s%s  %s  %s"
           (screen_title " MASC Config / Runtime")
           (tab ~active:lanes_active
-             (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count shown))
+             (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count
+                 (List.length snapshot.rss_candidates)))
           (tab ~active:(not lanes_active)
              (Printf.sprintf "All runtimes (%d)" all_count))
           probe_status probe_read timestamp (connection_badge state)
@@ -14061,17 +14071,29 @@ let render_runtime (state : state) =
           "  SSOT: runtime.toml  projections: resolved + probe  %s  %s%s%s"
           summary_text config probe_only_note probe_note
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
+  let chrome_rows = runtime_surface_listing_chrome state in
+  let content_height = max 0 (rows - chrome_rows) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+  let scroll_hint =
+    if shown > content_height then Printf.sprintf "[%d rows, scroll %d]  " shown scroll else ""
+  in
+  let hints =
+    Printf.sprintf "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
+      scroll_hint
+      (match state.runtime_mode with Runtime_lanes -> "all runtimes" | Runtime_all -> "service lanes")
+    ^ (match state.runtime_mode with Runtime_lanes -> "  e:add failover" | Runtime_all -> "")
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
+    ~body:(fun ~budget:_ c ->
   let authority_style =
     match state.runtime_surface with
     | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
     | Some _ | None -> Ansi.dim
   in
-  box_line_styled buf cols ~style:authority_style authority_line;
-  box_divider buf cols;
-  box_line_styled buf cols ~style:(Theme.recede ())
+  c.push_styled ~style:authority_style authority_line;
+  c.push_divider ();
+  c.push_styled ~style:(Theme.recede ())
     ("  "
      ^ runtime_column runtime_lane_width
          (match state.runtime_mode with
@@ -14086,95 +14108,45 @@ let render_runtime (state : state) =
      ^ runtime_column runtime_identity_width "PROVIDER / MODEL" ^ " "
      ^ runtime_column runtime_status_width "ROUTE / PROBE"
      ^ " DETAIL");
-  box_divider buf cols;
+  c.push_divider ();
   (match state.runtime_surface_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
+       c.push_styled ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
+       c.push_divider ());
   (match state.runtime_lane_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
+       c.push_styled ~style:(Theme.bad ())
          ("  lane write refused: " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  (match state.runtime_lane_pick with
+       c.push_divider ());
+  (match runtime_picker_projection state with
    | None -> ()
-   | Some lane ->
-       box_line_styled buf cols ~style:(Theme.info ())
-         (Printf.sprintf
-            "  adding a failover candidate to %s \xe2\x80\x94 j/k move, Enter append, e cancel"
-            (Terminal_text.single_line lane));
-       (* Three rows of the ranked list, not one: a picker that shows only the
-          highlighted entry gives no reason to move, and the reason to move is
-          that the next one is a different provider. *)
-       let already =
-         match state.runtime_surface with
-         | None -> []
-         | Some snapshot ->
-             snapshot.Masc.Tui_decode.rss_resolved.Masc.Tui_decode.rrs_lanes
-             |> List.find_opt (fun (l : Masc.Tui_decode.runtime_resolved_lane) ->
-                  String.equal l.Masc.Tui_decode.rrl_id lane)
-             |> (function
-                  | Some l -> l.Masc.Tui_decode.rrl_runtime_ids
-                  | None -> [])
-       in
-       let lane_providers =
-         already
-         |> List.filter_map (fun id ->
-              List.find_opt
-                (fun (r : Masc.Tui_decode.runtime_option) ->
-                   String.equal r.Masc.Tui_decode.ro_id id)
-                state.runtime_catalog
-              |> Option.map (fun (r : Masc.Tui_decode.runtime_option) ->
-                   r.Masc.Tui_decode.ro_provider))
-       in
-       let ranked =
-         Masc_tui_types.runtimes_for_lane_picker ~lane_providers ~already
-           state.runtime_catalog
-       in
-       if ranked = [] then
-         box_line_styled buf cols ~style:(Theme.recede ())
-           "  (runtime catalogue unread)"
+   | Some picker ->
+       c.push_styled ~style:(Theme.info ())
+         (Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            (Terminal_text.single_line picker.rlp_lane));
+       if picker.rlp_choices = [] then
+         c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
        else
-         List.iteri
-           (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
-              let index = state.runtime_lane_pick_cursor + offset in
-              match List.nth_opt ranked index with
-              | None -> ()
-              | Some _ ->
-                  let note =
-                    if List.exists
-                         (String.equal runtime.Masc.Tui_decode.ro_id) already
-                    then "  (already a candidate)"
-                    else if not runtime.Masc.Tui_decode.ro_dispatchable then
-                      "  (blocked)"
-                    else if
-                      List.exists
-                        (String.equal runtime.Masc.Tui_decode.ro_provider)
-                        lane_providers
-                    then "  (same provider as a current candidate)"
-                    else ""
-                  in
-                  box_line buf cols
-                    (Printf.sprintf "  %s %s   %s / %s%s"
-                       (if offset = 0 then ">" else " ")
-                       (Terminal_text.single_line runtime.Masc.Tui_decode.ro_id)
-                       (Terminal_text.single_line
-                          runtime.Masc.Tui_decode.ro_provider)
-                       (Terminal_text.single_line runtime.Masc.Tui_decode.ro_model)
-                       (Ansi.dim ^ note ^ Ansi.reset)))
-           (List.filteri
-              (fun i _ ->
-                 i >= state.runtime_lane_pick_cursor
-                 && i < state.runtime_lane_pick_cursor + 3)
-              ranked);
-       box_divider buf cols);
-  let chrome_rows = runtime_listing_chrome ~error:state.runtime_surface_error in
-  let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+         List.iteri (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
+           let note =
+             if List.exists (String.equal runtime.ro_id) picker.rlp_already
+             then "  (already a candidate)"
+             else if not runtime.ro_dispatchable then "  (blocked)"
+             else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+             then "  (same provider as a current candidate)"
+             else ""
+           in
+           c.push
+             (Printf.sprintf "  %s %s   %s / %s%s"
+                (if offset = 0 then ">" else " ")
+                (Terminal_text.single_line runtime.ro_id)
+                (Terminal_text.single_line runtime.ro_provider)
+                (Terminal_text.single_line runtime.ro_model)
+                (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
+       c.push_divider ());
   if shown = 0 then begin
     let empty =
       match
@@ -14188,9 +14160,9 @@ let render_runtime (state : state) =
            | Masc_tui_types.Runtime_lanes -> "  (no runtime lanes configured)"
            | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
     in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    c.push_styled ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
-      box_empty buf cols
+      c.push_empty ()
     done
   end
   else
@@ -14198,7 +14170,7 @@ let render_runtime (state : state) =
       match state.runtime_mode with
       | Masc_tui_types.Runtime_all ->
           (match List.nth_opt all_runtimes (index + scroll) with
-           | None -> box_empty buf cols
+           | None -> c.push_empty ()
            | Some (runtime, lanes) ->
                let open Masc.Tui_decode in
                let used_by =
@@ -14215,7 +14187,10 @@ let render_runtime (state : state) =
                        with
                        | Some reason -> [ "blocked: " ^ reason ]
                        | None -> [])
-                    @ (match lanes with [] -> [] | l -> [ String.concat ", " l ]))
+                    @ (match lanes with [] -> [] | l -> [ String.concat ", " l ])
+                    @ runtime_probe_detail
+                        (Option.bind state.runtime_surface (fun snapshot ->
+                           Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
                in
                let line =
                  "  " ^ runtime_column runtime_lane_width used_by ^ " "
@@ -14224,15 +14199,18 @@ let render_runtime (state : state) =
                  ^ runtime_column runtime_identity_width
                      (Terminal_text.single_line
                         (runtime.ro_provider ^ " / " ^ runtime.ro_model)) ^ " "
-                 ^ runtime_column runtime_status_width (runtime_route_badge runtime)
+                 ^ runtime_column runtime_status_width
+                      (runtime_route_probe_badge runtime
+                         (Option.bind state.runtime_surface (fun snapshot ->
+                            Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
                  ^ " " ^ Ansi.dim ^ detail ^ Ansi.reset
                in
                if index + scroll = state.runtime_cursor then
-                 box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-               else box_line buf cols line)
+                 c.push_selected (Masc_tui_theme.strip_sgr line)
+               else c.push line)
       | Masc_tui_types.Runtime_lanes ->
       match List.nth_opt candidates (index + scroll) with
-      | None -> box_empty buf cols
+      | None -> c.push_empty ()
       | Some candidate ->
           let open Masc.Tui_decode in
           let runtime = candidate.rcr_runtime in
@@ -14246,8 +14224,7 @@ let render_runtime (state : state) =
               (runtime.ro_provider ^ " / " ^ runtime.ro_model)
           in
           let route_probe =
-            runtime_route_badge runtime ^ " / "
-            ^ runtime_probe_badge candidate.rcr_probe
+            runtime_route_probe_badge runtime candidate.rcr_probe
           in
           let route_detail =
             if runtime.ro_dispatchable then []
@@ -14282,28 +14259,10 @@ let render_runtime (state : state) =
             ^ " " ^ detail
           in
           if index + scroll = state.runtime_cursor then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-          else box_line buf cols line
+            c.push_selected (Masc_tui_theme.strip_sgr line)
+          else c.push line
     done;
-  let scroll_hint =
-    if shown > content_height then
-      Printf.sprintf "[%d candidates, scroll %d]  " shown scroll
-    else ""
-  in
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf
-            "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
-            scroll_hint
-            (match state.runtime_mode with
-             | Masc_tui_types.Runtime_lanes -> "all runtimes"
-             | Masc_tui_types.Runtime_all -> "service lanes")
-          ^ (match state.runtime_mode with
-             | Masc_tui_types.Runtime_lanes -> "  e:add failover"
-             | Masc_tui_types.Runtime_all -> "")));
-  finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
+)
 
 let tools_scrolled_for_lines state display_lines =
   { sc_count = List.length display_lines

@@ -1,75 +1,124 @@
 ---
 title: Browser Lane Guide
-description: Read the operator's real Firefox (live lane) or a keeper-owned browser (automation lane) from masc — setup, tools, and the TUI reader.
+description: Connect Firefox or Zen, read and interact with pages, and use the Browser Lane TUI.
 ---
 
-A browser lane is one connected browser backend. masc has two:
+MASC has two browser sources:
 
-- **live** — the operator's real Firefox through the browser-lane extension
-  and its native-messaging host. It exists only while that Firefox runs with
-  the extension loaded. Reads whatever tabs are open, as the operator sees
-  them. Read-only by construction: the live lane exposes `tabs.list` and
-  `page.read` and refuses navigation verbs.
-- **automation** — a keeper-owned Playwright Firefox, separate from the
-  operator's profile. Navigation (`page.goto`) and session open/close live
-  here.
+- **live** connects the operator's Firefox or Zen through the browser extension
+  and OCaml native-messaging host. It uses that browser's existing tabs and login
+  session. It supports text, element lists, viewport screenshots, and explicit-tab
+  click, fill, and scroll. These interactions can change the page or trigger its
+  handlers, including navigation.
+- **automation** uses MASC's OCaml WebDriver client and geckodriver to manage a
+  separate Gecko browser session. It starts with an isolated profile, without the
+  operator's logins. Session open/close and direct URL navigation belong here.
+  The server owns this session; coordinate its use before closing a session
+  another task is using.
 
-## Setup (live lane)
+## Setup: live
 
-The server side ships with masc. Two pieces run on the operator's machine:
+Install a built OCaml native host on the browser's machine. `--binary` here names
+**masc-browser-host**, not the Firefox or Zen executable. `--base-path` is the
+workspace containing `.masc`, not the `.masc` directory itself.
 
-1. **Native messaging host** — install the built host into Firefox's
-   NativeMessagingHosts directory:
+```bash
+bash connectors/browser/install-host.sh \
+  --binary /path/to/masc-browser-host \
+  --base-path /path/to/workspace \
+  --server http://127.0.0.1:8935
+```
 
-   ```bash
-   ./connectors/browser/install-host.sh --base-path <your .masc base>
-   ```
+The installer supports macOS and Linux and registers a Mozilla native-messaging
+manifest. `--manifest-dir` selects a different manifest directory when needed.
+In Firefox or Zen, open `about:debugging` → **Load Temporary Add-on** and select `connectors/browser/extension/manifest.json`. Temporary loading
+ends when that browser exits.
 
-2. **Extension** — load `connectors/browser/extension/` via
-   `about:debugging` → *Load Temporary Add-on*. A temporary add-on unloads
-   when Firefox exits; a persistent install needs a signed build.
+Each running connection reports its browser identity and a `clientId` UUID. One
+live connection can be selected automatically; with several, choose the desired
+UUID. Tab IDs belong to a connection and can overlap between browsers. A stale
+UUID is refused instead of selecting another browser. Reconnecting creates a new
+UUID, so discover and select it again.
 
-With Firefox running, the host long-polls the masc server and the lane
-reports `[connected]`.
+## Setup: automation
 
-## Keeper tools
+Start geckodriver on loopback:
 
-| Tool | Lane | Reads |
+```bash
+geckodriver --host 127.0.0.1 --port 4444
+```
+
+Set the following in the resolved configuration directory's `runtime.toml`, then
+restart MASC:
+
+```toml
+[browser]
+webdriver_url = "http://127.0.0.1:4444"
+# Optional: select an installed Firefox or Zen executable.
+# binary = "/path/to/Zen.app/Contents/MacOS/zen"
+```
+
+`webdriver_url` must be a loopback HTTP origin. `binary` must be an absolute path
+and requires `webdriver_url`. When omitted, geckodriver discovers the browser;
+set it explicitly to select Firefox or Zen. Changing it does not select a live
+connection. Automation opens headless by default.
+
+## Keeper and MCP tools
+
+Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_*`.
+
+| Keeper tool | MCP name | Source and behavior |
 | --- | --- | --- |
-| `masc_browser_tabs` | live, automation | Open tabs: id, title, url, active |
-| `masc_browser_read` | live, automation | One page's visible text (50k cap, `[TRUNCATED]` marker) |
+| `BrowserTabs` | `masc_browser_tabs` | Both: list tabs and discover the live connection identity |
+| `BrowserRead` | `masc_browser_read` | Both: text, visible elements, or a viewport PNG |
+| `BrowserInteract` | `masc_browser_interact` | Both: click, fill, or scroll one explicit tab |
+| `BrowserSession` | `masc_browser_session` | Automation: open or close the session |
+| `BrowserGoto` | `masc_browser_goto` | Automation: navigate to an HTTP(S) URL |
+| `BrowserAct` | `masc_browser_act` | Automation: open/close tabs, click, fill, press, select, scroll, back, forward, or reload |
 
-Both are reads. A lane with no recent poll answers "not connected"
-immediately — the operator's browser is not always on.
+After discovery, pass the observed `clientId` and `tabId` to live reads and
+interactions. A `clientId` is required when several live browsers are connected;
+omit it for automation.
 
-## The TUI reader
+`BrowserRead` defaults to `mode="text"`, `format="text"`, and 50,000 Unicode code
+points; `maxChars` can rise to 100,000. Inspect `truncated` in the result.
+`mode="elements"` returns up to 200 visible controls with labels and observed CSS
+selectors. `format="image"` requires an explicit `tabId`; Keeper calls return a
+durable artifact handle for image analysis. Text and element reads describe the
+current rendered page, not every hidden or virtualized item.
 
-Open `:` → `go Browser Lane`, or press `B` from Connectors. The reader
-starts on the live lane and lists its open tabs; `[`/`]` steps through tabs
-and reads each page. `l`/`a` switches live/automation. In automation, `g`
-enters a URL, `o`/`x` opens and closes the session, `Ctrl-O` previews a PNG
-of the selected tab. `Ctrl-^` hides the reader; the selected tab, scroll and
-unsent chat draft survive the toggle.
+Use observed selectors for `BrowserInteract` click/fill and `BrowserAct` element
+actions; a selector must match exactly one element. For `BrowserInteract`, pass
+`expectedUrl` from the last read to reject intervening navigation. Fill emits page
+events and does not itself press Enter or submit. Read or capture the page after
+an action, including an error, before deciding whether to retry.
 
-Entering Browser ends continuous voice mode and discards any capture in
-flight, including a transcript awaiting delivery.
+## TUI reader
+
+Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
+Connectors. The reader starts on live. Use `b` to choose Firefox or Zen, move with
+`j`/`k`, and confirm with Enter; `r` reloads the chooser and Esc returns. Reads and
+screenshots pin the selected connection. A disconnected selection requires an
+explicit new choice.
 
 | Key | Action |
 | --- | --- |
-| `l` / `a` | Live / automation Firefox |
-| `[` / `]` | Previous / next tab, reading its page |
+| `l` / `a` | Live / automation source |
+| `b` | Choose a live browser connection |
+| `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
-| `r` | Rediscover tabs and refresh the page |
-| `Ctrl-O` | PNG preview of the selected tab |
-| `g` | Enter a URL (automation); Enter opens, Esc cancels |
+| `r` | Rediscover and refresh |
+| `Ctrl-O` | Preview the selected tab's PNG; any key returns |
+| `g` | Enter an automation URL; Enter navigates, Esc cancels |
 | `o` / `x` | Open / close the automation session |
-| `Ctrl-^` / Esc / Left | Hide the reader, return to the previous surface |
+| `Ctrl-^` / Esc / Left | Hide the reader and return |
 
-## Reading with the operator's own session
+For an automation page, use `a`, then `o`, then `g` and a URL. PNG previews require
+terminal image support; otherwise the reader explains the limitation. The preview
+is not sent to a Keeper. TUI keys provide reading, capture, and automation session
+navigation; element interaction is available through the tools above.
 
-The live lane is how a keeper reads a page the way the operator sees it —
-including pages behind the operator's own login, with no app token, no API
-credential, and no write path. If the page is open in Firefox, the lane can
-read it; if it is not, it cannot, and nothing is opened on the operator's
-behalf.
+Hiding preserves the selected tab, text scroll, and unsent chat draft in this TUI
+session. Entering Browser ends continuous voice mode and discards pending voice
+capture, including a transcript awaiting delivery.

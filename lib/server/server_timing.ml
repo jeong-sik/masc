@@ -114,5 +114,7 @@ let to_header_value t =
 let extra_header t =
   match to_header_value t with
   | "" -> []
-  | v -> [ "Server-Timing", v ]
+  (* H2 encodes supplied field names unchanged; use a name valid on both
+     transports. Timing values remain local to the request. *)
+  | v -> [ "server-timing", v ]
 ;;

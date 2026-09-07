@@ -52,6 +52,10 @@ let weak_etag_of_string s =
 let payload_prepared_hook : (cached_payload -> unit) option Atomic.t =
   Atomic.make None
 
+let refresh_registered_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
+type refresh_registration = Queued | Registered | Abandoned
+
 let payload_of_json json =
   let raw_json = Yojson.Safe.to_string json in
   let etag = weak_etag_of_string raw_json in
@@ -475,22 +479,50 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | _ -> ((), map)
         )
       in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           (try
-              Eio.Fiber.fork ~sw (fun () ->
-                try do_bg_compute ()
-                with
-                | Eio.Cancel.Cancelled _ as e ->
+      (* Snapshot refreshes can read this cache from an executor worker. Eio
+         switches belong to one domain: forking there with the server's root
+         switch raises before the refresh starts. Only register the fork on
+         the root owner; [compute] still submits its work to the executor.
+         The root lifetime also keeps this shared refresh outside a reader's
+         turn switch. *)
+      let registration = Atomic.make Queued in
+      let abandon_registration () =
+        if Atomic.compare_and_set registration Queued Abandoned then
+          restore_stale_ready ()
+      in
+      let register_refresh () =
+        match SMap.find_opt key (Atomic.get table) with
+        | Some (Computing { token = current; _ })
+          when current = token
+            && Atomic.compare_and_set registration Queued Registered ->
+          (* Once the root claims registration, it owns cleanup even if the
+             reader is cancelled before the dispatch acknowledgement arrives.
+             Resetting its slot from that reader would start a second refresh
+             while the first one is still alive. *)
+          (try
+             (match Eio_context.get_root_switch_opt () with
+              | Some sw ->
+                Eio.Fiber.fork ~sw (fun () ->
+                  try do_bg_compute () with
+                  | Eio.Cancel.Cancelled _ as e ->
                     restore_stale_ready ();
-                    raise e)
-            with
-            | Invalid_argument _ ->
-                restore_stale_ready ()
-            | Eio.Cancel.Cancelled _ -> ())
-       | None ->
-           Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
-           do_bg_compute ());
+                    raise e);
+                Option.iter (fun hook -> hook ()) (Atomic.get refresh_registered_hook)
+              | None ->
+                Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
+                do_bg_compute ())
+           with
+           | Invalid_argument _ -> restore_stale_ready ()
+           | Eio.Cancel.Cancelled _ as e ->
+             restore_stale_ready ();
+             raise e)
+        | _ -> ()
+      in
+      (try Eio_context.run_on_owner_domain register_refresh with
+       | Invalid_argument _ -> abandon_registration ()
+       | Eio.Cancel.Cancelled _ as e ->
+         abandon_registration ();
+         raise e);
       stale_entry
     | `Compute token ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
@@ -822,6 +854,12 @@ let invalidate_all () =
   clear_timeout_circuit_all ()
 
 module For_testing = struct
+  let with_refresh_registered_hook hook f =
+    let previous = Atomic.exchange refresh_registered_hook (Some hook) in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set refresh_registered_hook previous)
+      f
+
   let with_payload_prepared_hook hook f =
     let previous = Atomic.exchange payload_prepared_hook (Some hook) in
     Fun.protect

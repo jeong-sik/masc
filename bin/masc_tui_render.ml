@@ -4045,6 +4045,21 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     done
   end;
 
+  (* Reading without a position is guessing: the post body and the comment
+     thread each name where they stand, the same "rows X-Y of Z" shape the
+     other reading surfaces carry. *)
+  if total_lines > content_height || detail_line_count > comment_height then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (Printf.sprintf "post rows %d-%d of %d%s"
+         (min total_lines (scroll.body_offset + 1))
+         (min total_lines (scroll.body_offset + content_height))
+         total_lines
+         (if detail_line_count > comment_height then
+            Printf.sprintf "  \xc2\xb7  comments rows %d-%d of %d"
+              (min detail_line_count (scroll.comment_offset + 1))
+              (min detail_line_count (scroll.comment_offset + comment_height))
+              detail_line_count
+          else ""));
   box_bottom buf cols;
   scroll.normalized_scroll
 
@@ -8314,11 +8329,14 @@ let render_keeper_logs (state : state) =
       done
     end;
 
-    (* Scroll indicator *)
+    (* Scroll indicator: the same "rows X-Y of Z" shape the tool-call pane
+       reads, so one glance answers both how far and how much is left -- a
+       bare "scroll N" said the offset but not the distance either way. *)
     if total_entries > content_height then begin
       let indicator =
-        Printf.sprintf "[%d/%d entries, scroll %d]" total_entries total_entries
-          scroll
+        Printf.sprintf "rows %d-%d of %d" (scroll + 1)
+          (min total_entries (scroll + content_height))
+          total_entries
       in
       box_line_styled buf cols ~style:(Theme.recede ()) indicator
     end;
@@ -14679,6 +14697,8 @@ let render_acting_evidence (state : state) entry =
   box_line_styled buf cols ~style:Ansi.dim " Selected event snapshot; new arrivals do not replace this reading";
   box_line_styled buf cols ~style:Ansi.dim
     (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
+  box_line_styled buf cols ~style:Ansi.dim
+    (" " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_divider buf cols;
   let lines =
     Masc_tui_acting.evidence_fields entry
@@ -14847,6 +14867,8 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
@@ -15647,7 +15669,17 @@ let render_code (state : state) =
                       (blame_cell (row_index + 1))
                       mark gutter_style (row_index + 1) Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
-           done);
+           done;
+           (* A file pane without a position is a corridor without doors:
+              the same "rows X-Y of Z" line the reading surfaces carry. The
+              fetched-match closes with this loop's done-paren, so the line
+              belongs inside the arm, before box_bottom draws for every
+              arm. *)
+           if total_lines > content_height then
+             box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+               (Printf.sprintf "lines %d-%d of %d" (scroll + 1)
+                  (min total_lines (scroll + content_height))
+                  total_lines));
     box_bottom pane_buf pane_cols
   in
   (if split then begin

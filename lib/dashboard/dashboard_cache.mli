@@ -11,7 +11,9 @@
 
     {b Runtime prerequisites}: callers must initialise [Time_compat.set_clock]
     and [Eio_context.set_switch] before using the cache. Background
-    stale-while-revalidate fibers are forked via [Eio_context.get_switch_opt]. *)
+    stale-while-revalidate fibers are registered on the root switch's owning
+    domain and survive the requesting fiber or turn switch. Computation still
+    uses the executor pool. *)
 
 type cached_payload = {
   json : Yojson.Safe.t;
@@ -124,6 +126,11 @@ val stats : unit -> Yojson.Safe.t
     for diagnostics. *)
 
 module For_testing : sig
+  val with_refresh_registered_hook : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Pause after the root refresh is forked but before its registration is
+      acknowledged to the reader. Process-wide; tests must not overlap other
+      cache refreshes. The previous hook is restored on return or exception. *)
+
   val with_payload_prepared_hook :
     (cached_payload -> unit) -> (unit -> 'a) -> 'a
   (** Observe completed serialization before publication; restore the previous

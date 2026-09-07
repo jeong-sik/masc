@@ -122,6 +122,25 @@ module For_testing : sig
     :  autonomous_yield_request
     -> Runtime_agent.cooperative_yield_reason
 
+  (** The three detectors below run on Direct turns and nowhere else.
+
+      [direct_repetition_boundary] is installed only when
+      [repetition_execution] is [Some], and one call site supplies it:
+      keeper_turn.ml passes it with [turn_kind:Turn_record.Direct]. The
+      autonomous path (keeper_unified_turn_execution.ml, [Turn_record.Autonomous])
+      passes none, so a keeper driving itself is not measured by any of them.
+
+      That is not an omitted argument. {!Keeper_repetition_scope.Execution}
+      has one constructor, [direct_operation], keyed by a
+      [Keeper_chat_operation.Operation_id.t] -- an autonomous turn has no such
+      id, and no scope was designed for it.
+
+      Measured 2026-09-07 in trace-1788623557478-00000: an autonomous keeper
+      ran 1,484 turns and called Execute 186 times consecutively with
+      byte-identical input, every call returning exit 0. [threshold] for
+      [repeated_tool_call_input] is 5. Whether the autonomous path should
+      carry these is #34083, because installing them there changes what an
+      autonomous keeper does. *)
   val repeated_exact_tool_call
     :  threshold:int
     -> tool_call_detail list

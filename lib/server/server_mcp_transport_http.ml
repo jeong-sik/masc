@@ -678,6 +678,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 (Server_mcp_transport_http_headers.last_event_id_error_to_string
                    error)
           | Ok last_event_id ->
+      let observer_headers, last_event_id =
+        match sse_kind with
+        | Sse.Observer ->
+            let handshake, cursor =
+              Sse_wire.negotiate_observer
+                ~instance_id:Build_identity.runtime_instance_id
+                ~headers:(Httpun.Headers.to_list request.headers) ~last_event_id
+            in
+            Sse_wire.observer_response_headers handshake, cursor
+        | Sse.Agent_stream | Sse.Presence -> [], last_event_id
+      in
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
       in
@@ -717,7 +728,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
            | Ok (client_id, event_stream, evicted) ->
               let headers =
                 Httpun.Headers.of_list
-                  (sse_stream_headers ~deps session_id protocol_version origin)
+                  (observer_headers
+                   @ sse_stream_headers ~deps session_id protocol_version origin)
               in
               let response = Httpun.Response.create ~headers `OK in
               let writer = Httpun.Reqd.respond_with_streaming reqd response in

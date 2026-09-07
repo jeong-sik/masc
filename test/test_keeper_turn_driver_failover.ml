@@ -3000,6 +3000,90 @@ let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
       .Provider_context_overflow _ ->
     Alcotest.fail "network exhaustion must not enter an outer catalog fallback"
 
+let access_error_from_http code =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    ~provider:"candidate-access-fixture"
+    (Llm_provider.Http_client.HttpError
+       { code; body = "candidate access denied"; retry_after_header = None })
+;;
+
+let test_candidate_access_denial_reaches_the_next_declared_runtime () =
+  List.iter (fun code ->
+    let denied = access_error_from_http code in
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        attempts := runtime_id :: !attempts;
+        attempt_without_effect
+          (if runtime_id = "denied" then Error denied else Ok runtime_id) None)
+      ["denied"; "available"] in
+    (match result with
+     | Ok selected -> Alcotest.(check string) "available candidate finishes" "available" selected
+     | Error error -> Alcotest.failf "HTTP%d stopped the lane: %s" code (Agent_core.Error.to_string error));
+    Alcotest.(check (list string)) "walk stays inside declared candidates"
+      ["denied"; "available"] (List.rev !attempts)) [401;403]
+;;
+
+let test_access_failover_preserves_effect_and_caller_authority () =
+  List.iter (fun code ->
+    List.iter (fun disposition ->
+      let attempts = ref 0 in
+      let result = Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+          incr attempts;
+          if runtime_id <> "denied" then Alcotest.fail "possible effect was replayed";
+          Error (access_error_from_http code), None, disposition)
+        ["denied"; "available"] in
+      Alcotest.(check int) "effect owner attempted once" 1 !attempts;
+      match result with
+      | Error error ->
+        (match Driver.classify_masc_internal_error error with
+         | Some (Driver.Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+           Alcotest.(check bool) "exact effect disposition preserved" true
+             (effect_disposition = disposition)
+         | _ -> Alcotest.fail "access error lost the effect fence")
+      | Ok _ -> Alcotest.fail "effectful access denial unexpectedly succeeded")
+      [Masc.Keeper_provider_attempt_effect.Effect_attempted;
+       Masc.Keeper_provider_attempt_effect.Observation_unavailable];
+    let attempts = ref 0 in
+    let deferred = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+        incr attempts; attempt_without_effect (Error (access_error_from_http code)) None)
+      ["denied"; "available"] in
+    Alcotest.(check bool) "caller denial remains an error" true (Result.is_error result);
+    Alcotest.(check int) "caller denies immediate second attempt" 1 !attempts;
+    Alcotest.(check int) "existing deferred retry path retains the successor" 1 (List.length !deferred))
+    [401;403]
+;;
+
+let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
+  List.iter (fun code ->
+    let denied = access_error_from_http code in
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        attempts := runtime_id :: !attempts; attempt_without_effect (Error denied) None)
+      ["first"; "last"] in
+    let expected = if code = 400 then ["first"] else ["first"; "last"] in
+    Alcotest.(check (list string)) "no candidate beyond the declared suffix"
+      expected (List.rev !attempts);
+    match result with
+    | Error error -> Alcotest.(check string) "original terminal diagnostic retained"
+        (Agent_core.Error.to_string denied) (Agent_core.Error.to_string error)
+    | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") [400;401;403]
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -3232,6 +3316,12 @@ let () =
             "missing deferred head is consumed once"
             `Quick
             test_missing_deferred_head_is_consumed_once;
+          Alcotest.test_case "candidate access denial tries the next runtime" `Quick
+            test_candidate_access_denial_reaches_the_next_declared_runtime;
+          Alcotest.test_case "access failover preserves effect and caller authority" `Quick
+            test_access_failover_preserves_effect_and_caller_authority;
+          Alcotest.test_case "access exhaustion and bad requests remain terminal" `Quick
+            test_exhausted_access_errors_and_bad_requests_remain_terminal;
           Alcotest.test_case
             "initial lane exhaustion cannot escape declared candidates"
             `Quick

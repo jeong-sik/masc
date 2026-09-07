@@ -105,6 +105,10 @@ val embedded_commit_age_seconds : now:float -> int option
 val current : unit -> t
 (** Snapshot of the running build identity with current uptime. *)
 
+val runtime_instance_id : string
+(** Immutable process identity minted at initialization. Reading this value
+    performs no repository or executable provenance probes. *)
+
 type executable_provenance = {
   binary_commit : string;
   build_input_fingerprint : string;

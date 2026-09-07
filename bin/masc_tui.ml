@@ -383,21 +383,64 @@ let create_input_reader () =
     partial_scalar = "";
   }
 
+(* Whether the terminal has bytes for us, waited for inside Eio rather than
+   in the kernel.
+
+   [Unix.select] blocks the whole domain, not one fiber. Every fiber waiting
+   on a socket then advances only when this loop comes back round, so a reply
+   costs the number of steps it takes times what one pass of the loop costs.
+   That is how a request the server answers in milliseconds reached the
+   ten-second timeout: measured with masc-http-probe, the same 1.8 MB read
+   takes 5.5 seconds beside a loop that waits this way and 26 ms beside one
+   that waits through Eio (RFC-0429 §3.0). Waiting through Eio takes this
+   fiber out of the run queue, and those fibers run until they block in turn.
+
+   Only the readiness wait races the deadline. The read below is never
+   cancelled, so no keystroke is taken from the terminal and then dropped
+   with the losing fiber -- which is what racing the read itself would risk.
+
+   A wait with no time left has nothing to register: asking Eio for one would
+   cancel it in the same breath, and the kernel answers that question without
+   blocking anyway. *)
+let terminal_has_bytes ~remaining =
+  let kernel_wait seconds =
+    match Unix.select [ Unix.stdin ] [] [] seconds with
+    | ready, _, _ -> ready <> []
+  in
+  if remaining <= 0.0 then kernel_wait 0.0
+  else
+    match (Eio_guard.is_eio_fiber (), Eio_context.get_clock_opt ()) with
+    | true, Some clock ->
+        Eio.Fiber.first
+          (fun () ->
+            Eio_unix.await_readable Unix.stdin;
+            true)
+          (fun () ->
+            Eio.Time.sleep clock remaining;
+            false)
+    | true, None | false, _ ->
+        (* The startup terminal probe reads through this same reader from
+           inside [Eio_guard.run_in_systhread], where an Eio effect has no
+           handler. The kernel wait is the right one there for the same
+           reason the probe runs on a thread at all: blocking a system
+           thread does not stop the domain. *)
+        kernel_wait remaining
+
 let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
   in
   let poll remaining =
-    match Unix.select [Unix.stdin] [] [] remaining with
-    | ready, _, _ when ready <> [] ->
-        (match
-           Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
-         with
-         | count when count > 0 -> Render_schedule.Input_wait.Ready count
-         | _ -> Render_schedule.Input_wait.Timed_out
-         | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-             Render_schedule.Input_wait.Interrupted)
-    | _ -> Render_schedule.Input_wait.Timed_out
+    match terminal_has_bytes ~remaining with
+    | true -> (
+        match
+          Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
+        with
+        | count when count > 0 -> Render_schedule.Input_wait.Ready count
+        | _ -> Render_schedule.Input_wait.Timed_out
+        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+            Render_schedule.Input_wait.Interrupted)
+    | false -> Render_schedule.Input_wait.Timed_out
     | exception Unix.Unix_error (Unix.EINTR, _, _) ->
         Render_schedule.Input_wait.Interrupted
   in

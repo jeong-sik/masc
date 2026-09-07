@@ -5,8 +5,8 @@
     "count": 1698,
     "note": "1698 quota events; propagated fences are overlapping observations",
     "source": "lib/runtime/runtime_claude_code.ml",
-    "action": "API diagnostic 수정은 배포 관측. #33855는 typed CLI quota scope와 후보 순서를 공유하도록 병합됐으며 fixture 후속 #33873 검증 중.",
-    "status": "quota-code-fix",
+    "action": "API diagnostic와 exact CLI quota 수정은 이전에 관측한 binary fe702d71da에 포함. 후속 #33873 exact CLI11/11, HITL46/47; 기존1개 실패로 전체 CI는 FAIL. 실제 failover 연속성은 별도 검증 필요.",
+    "status": "quota-tested",
     "first": {
       "seq": 25985026,
       "ts": "2026-09-06T21:05:47Z",
@@ -59,8 +59,8 @@
     "count": 48,
     "note": "",
     "source": "lib/keeper/keeper_librarian_runtime.ml",
-    "action": "Librarian/Board/HITL CLI 후보에 Codex luna 추가. 04:25:28Z durable 적용 영수증과 파일 재조회 일치. Codex schema2/2 성공; 실제 lane의 Codex 선택은 미확인.",
-    "status": "config-applied",
+    "action": "Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI 최초 attempt는 결제/한도로 미시작했으나 현재 재실행 중. 배포·실제후속선택은 미검증.",
+    "status": "domain-failover-tested",
     "first": {
       "seq": 25990215,
       "ts": "2026-09-06T21:21:58Z",
@@ -167,8 +167,8 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "#33857: 과거 도구 이력을 현재 실행 증거와 분리, 39/39 테스트 통과. 반복 판정 자체는 여전히 전체 이력을 사용하므로 Fresh/Resume의 명시적 영속 scope가 남음.",
-    "status": "partial-code-fix",
+    "action": "반복 루프는 미해결. #33950의 작업별 기록·checkpoint 복원 기반은72deb19a38에서6/6 PASS. bdc8852ccc는 관련 파일 동일·충돌 해소 후 필수 검사 진행 중. Context-only 상태 유실을 막는 #33953은 별도 검증 중이다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.",
+    "status": "scope-design-required",
     "first": {
       "seq": 25984123,
       "ts": "2026-09-06T21:00:25Z",
@@ -275,8 +275,8 @@
     "count": 6,
     "note": "",
     "source": "lib/keeper/keeper_shutdown_finalize.ml",
-    "action": "operation은 retain_meta인데 실제 owner/meta 부재. Remove_meta용 기존 성공 경로를 재사용하면 계약 위반. 명시적인 retired-owner reconciliation 절차 필요.",
-    "status": "data-reconciliation",
+    "action": "ACK 도메인은 ad2af057c9에서103/103 PASS 후 외부가 cdae490f8774로 병합. HTTP는21500fe6d6에서34/34 PASS; 최종81c9f393967e는 ACK 파일 동일·필수 검사 PASS 후 외부가8ac44f2af180으로 병합. 실제 ACK는 미실행.",
+    "status": "acknowledgement-stack",
     "first": {
       "seq": 26080010,
       "ts": "2026-09-06T23:26:03Z",
@@ -302,8 +302,8 @@
     "count": 12,
     "note": "2 files across 6 boots; not 12 distinct corrupted files",
     "source": "lib/keeper/keeper_board_attention_candidate.ml",
-    "action": "현재 schema5 원본 두 파일을 보존. gondolin pending5, k3think pending12가 있어 삭제나 성공 처리하지 않음. 명시적 실패 보존/재조정 경로 필요.",
-    "status": "pending-preserved",
+    "action": "원본2파일30행 보존. 거부 행 자동 삭제를 막는 #33906은76/76 PASS 후11aa475082로 병합됐으며 잠시 실행한9c81559b에 포함. 원래17Pending·기존 파티션 재접수는 별도 미완료.",
+    "status": "retention-merged-tested",
     "first": {
       "seq": 26080097,
       "ts": "2026-09-06T23:26:05Z",
@@ -329,8 +329,8 @@
     "count": 111,
     "note": "shell_light70 among111; other18 slow render not added",
     "source": "lib/dashboard/dashboard_snapshot.ml",
-    "action": "#33877: 한 shell projection에서 TOML 선언 snapshot을 공유, 반복 읽기 제거. 기존 실측 runtime_resolution3468/3873ms 및1215/1292ms. 개선 후 지연/UI는 미측정.",
-    "status": "performance-code-fix",
+    "action": "선언 TOML을 요청당 한 번 읽어 fleet에 공유하는 #33877 병합. 새4개 포함90/91 PASS, 기존 identity scan 실패. 05:15Z 당시 fe702d71da에는 아직 없으므로 성능 개선 미측정.",
+    "status": "performance-merged",
     "first": {
       "seq": 26080100,
       "ts": "2026-09-06T23:26:05Z",
@@ -356,8 +356,8 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "#33867: 직접 Vite 빌드도 stamp 생성, 원격 번들/소스 영수증 workflow 추가. 기본 브랜치에 workflow가 없어 dispatch404; 실제 artifact/build/deploy 미확인.",
-    "status": "artifact-code-fix",
+    "action": "설치 resolver3d3695a1f3에서17/17·Web39/39 PASS. 외부가 관련 파일 동일한8a67c07c99를c328dbe8로 병합했다. Release34098251245의 Linux x64/ARM64 실제 설치·자산 응답·손상 거부 PASS, x64 패키지642개 파일 해시도 독립 확인. macOS는 진행 중이며 운영 설치는 미실행.",
+    "status": "distribution-stack",
     "first": {
       "seq": 26156709,
       "ts": "2026-09-07T00:47:21Z",
@@ -383,7 +383,7 @@
     "count": 68,
     "note": "68 wait lines, 23 WARN, max119.4s",
     "source": "lib/server/server_runtime_bootstrap.ml",
-    "action": "#33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 최신 배포에는 미포함.",
+    "action": "#33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 05:15Z 당시 fe702d71da에 병합 커밋57ca6d5399 포함을 확인. 성공 VM 생성은 미검증.",
     "status": "tested-code-fix",
     "first": {
       "seq": 26080169,
@@ -437,8 +437,8 @@
     "count": 12,
     "note": "",
     "source": "connectors/browser",
-    "action": "native host가 설치 토큰 파일을 읽지 않고 wrapper는 과거 worktree를 참조하는 결함 확인. 수정 중. 실제 Firefox/Zen extension 연결은 별도 검증 필요.",
-    "status": "host-code-repair",
+    "action": "#33881 Node5/5 PASS. native host 실제 설치·원본 토큰 보존 확인. 사용자 확장 추가 뒤 Firefox 자식86997→8935 TCP 연결. 탭/본문 왕복 및 두 live 브라우저 구분은 미확인.",
+    "status": "host-installed-connected",
     "first": {
       "seq": 26003629,
       "ts": "2026-09-06T22:12:34Z",
@@ -491,7 +491,7 @@
     "count": 19,
     "note": "search6 + fetch13; one query may fail two providers",
     "source": "lib/tool_misc_web_search.ml",
-    "action": "localhost:8888 connection refused 확인 후 공식 SearXNG digest 고정 서비스 복구. 직접 질의2.355초/37결과. MASC 내부 WebSearch 경유와 별도 WebFetch401/404는 아직 미검증.",
+    "action": "실제 WebSearch·WebFetch 성공과 원래13개 URL 오류는 구분한다. HTTP 실패 분류·코드 보존#33936은120422bb9b에서 WebFetch14/14·bridge20/20 및 필수 검사 PASS. 외부가c7fe4f67a1로 병합; 원래 URL 접근 복구·배포는 미검증.",
     "status": "search-service-recovered",
     "first": {
       "seq": 25984475,
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "04:40:49Z binary1ec84be0a4 재조회: runnable27 oldest4595초, degraded. 큐 감소로 소비/효과 전달을 성공 처리하지 않음.",
-    "status": "live-acceptance"
+    "action": "#33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 및 필수 검사 PASS 후 이 세션이d5e0685b38로 병합. 원본 시각과 큐 체류 시간을 구분하는 #33938도6a13f6a84a로 외부 병합; exact827803의6개 suite는34099718437에서 검증 중. 전체 FIFO 소비·현재 배포·장기 연속성은 미검증.",
+    "status": "batch-drain-observed"
   }
 ]

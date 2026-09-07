@@ -1,0 +1,56 @@
+{
+  "start": "2026-09-07T06:11:10Z",
+  "end": "2026-09-07T06:14:10Z",
+  "binary_commit": "9c81559bb7df52999fc62c0def1fa6d61d9e482b",
+  "records": {
+    "board_completed_snapshot_settled": [
+      {
+        "ts": "2026-09-07T06:11:38Z",
+        "seq": 26938951,
+        "message": "board_attention_completed_snapshot_settled keeper=code-reviewer count=1"
+      },
+      {
+        "ts": "2026-09-07T06:11:40Z",
+        "seq": 26939029,
+        "message": "board_attention_completed_snapshot_settled keeper=geek-scout count=1"
+      },
+      {
+        "ts": "2026-09-07T06:11:41Z",
+        "seq": 26939050,
+        "message": "board_attention_completed_snapshot_settled keeper=lane-smith count=1"
+      },
+      {
+        "ts": "2026-09-07T06:11:42Z",
+        "seq": 26939068,
+        "message": "board_attention_completed_snapshot_settled keeper=polisher count=1"
+      },
+      {
+        "ts": "2026-09-07T06:11:44Z",
+        "seq": 26939079,
+        "message": "board_attention_completed_snapshot_settled keeper=pr-updater count=2"
+      },
+      {
+        "ts": "2026-09-07T06:12:51Z",
+        "seq": 26939449,
+        "message": "board_attention_completed_snapshot_settled keeper=slack-inbox count=2"
+      },
+      {
+        "ts": "2026-09-07T06:12:56Z",
+        "seq": 26939467,
+        "message": "board_attention_completed_snapshot_settled keeper=jazz-developer count=2"
+      }
+    ],
+    "repeated_yield": [
+      {
+        "ts": "2026-09-07T06:13:07Z",
+        "seq": 26939619,
+        "message": "yielding repeated exact tool loop tool=masc_board_search count=4"
+      },
+      {
+        "ts": "2026-09-07T06:13:07Z",
+        "seq": 26939624,
+        "message": "yielding repeated exact tool loop tool=Execute count=934"
+      }
+    ]
+  }
+}

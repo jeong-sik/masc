@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-07T05:44:58.570964+00:00",
+  "source_commit": "362f55b1dc17d2f8fbdf8b393d7c05a90596e16f",
+  "runtime_commit": "362f55b1dc17d2f8fbdf8b393d7c05a90596e16f",
+  "workflow_run_id": "34087501979",
+  "archive_sha256": "c518f0827c00868136d2deb5548b4bd3691368ddc31ae3f550b26a009293c656",
+  "index_sha256": "8e3b1f76c3619a1ea72494125e462bd1b3b4c49d72ba8fd5cf5c0870b35adb61",
+  "destination": "/Users/dancer/me/assets/dashboard",
+  "verified_files": 642,
+  "replaced_files": [
+    ".build-stamp"
+  ],
+  "build_stamp": "2026-09-07T05:38:46.390Z",
+  "stamp_mtime_preserved": true,
+  "runtime_restarted": false,
+  "prior_assets_retained": true
+}

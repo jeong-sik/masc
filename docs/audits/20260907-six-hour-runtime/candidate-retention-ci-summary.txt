@@ -1,0 +1,6 @@
+test suite	Test	2026-09-07T05:49:44.9306897Z Testing `keeper_board_attention_candidate'.
+test suite	Test	2026-09-07T05:49:45.1025708Z Test Successful in 0.172s. 21 tests run.
+test suite	Test	2026-09-07T05:49:45.1615258Z Testing `keeper_board_attention_worker'.
+test suite	Test	2026-09-07T05:49:46.2901529Z Test Successful in 1.128s. 40 tests run.
+test suite	Test	2026-09-07T05:49:46.3346104Z Testing `keeper_board_attention_partition'.
+test suite	Test	2026-09-07T05:49:46.7000176Z Test Successful in 0.366s. 15 tests run.

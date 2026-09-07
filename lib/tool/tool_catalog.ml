@@ -226,6 +226,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_status", read_state_tool);
     ("masc_tasks", read_state_tool);
     ("masc_messages", with_semantic_flags ~mcp_context_required:true read_state_tool);
+    ("masc_slack_read", read_state_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);

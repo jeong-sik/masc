@@ -1561,3 +1561,9 @@ recorded in Recent Events.
 Config Presets distinguishes the selected saved preset from a settings match. Its detail shows the server-resolved preset directory, whether the settings currently saved in the workspace match, and the actual Markdown path/current source for each overridden prompt. A selection alone does not apply a preset. A saved-settings match does not claim every Keeper has reloaded its instructions.
 
 Config Prompts labels whether the effective text comes from an override or the Markdown file. When an override is active, the displayed Markdown path identifies the base file, not the effective override storage.
+
+### Workspace activity
+
+On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
+
+Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.

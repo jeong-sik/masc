@@ -199,9 +199,9 @@ let is_read_only = function
      Browser_lane is this classification's source of truth. *)
   | Tool_schemas_misc.Misc_browser_tabs
   | Tool_schemas_misc.Misc_browser_read
-  | Tool_schemas_misc.Misc_slack_read
-  (* Session open/close manage a keeper-owned resource, not the web. *)
-  | Tool_schemas_misc.Misc_browser_session -> true
+  | Tool_schemas_misc.Misc_slack_read -> true
+  (* Starting and stopping the automation browser changes its lifecycle. *)
+  | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask
   | Tool_schemas_misc.Misc_ask_withdraw
   | Tool_schemas_misc.Misc_config

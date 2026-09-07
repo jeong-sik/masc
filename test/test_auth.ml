@@ -1194,6 +1194,11 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
+  (match Tool_catalog.registered_metadata "masc_browser_session" with
+   | Some metadata ->
+     check bool "browser lifecycle requires write authority" true
+       (metadata.required_permission = Masc_domain.CanBroadcast)
+   | None -> fail "browser session has no catalog authority");
   let result =
     List.fold_left
       (fun acc tool_name ->

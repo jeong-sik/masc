@@ -2131,7 +2131,7 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
         attempts := !attempts @ [runtime_id];
         attempt_without_effect
           (if String.equal runtime_id "shared_a.test_model" then
-            Error (rate_limit_error_from_a_429 ~retry_after_header:(Some "300") ~body:"{}" ())
+            Error (rate_limit_error_from_a_429 ~retry_after_header:(Some 300.) ~body:"{}" ())
            else Ok ()) None)
       (backpressure_order ids) in
     (match result with Ok () -> () | Error _ -> Alcotest.fail "all-demoted fallback was blocked");

@@ -150,12 +150,14 @@ chore: bump version to 0.34.0
 7. Pull requests are squash-merged. Never push to a branch whose pull request
    has merged; open a new one.
 8. When the work is ready to verify, hand it over with typed evidence. Every
-   `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a file
-   the reviewer opens and snapshots) or `note:<text>` (prose the reviewer
-   reads but cannot inspect); see RFC-0417. A PR URL, a commit, or a board
-   post id inside a `note:` is narrative until something opens it — pair it
-   with an `artifact:` entry, and never let a `note:` stand alone as
-   completion evidence.
+   `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a
+   producer-relative file opened and snapshotted on submission; the reviewer
+   reads that snapshot) or `note:<text>` (prose the reviewer reads but cannot
+   inspect); see RFC-0417. A PR URL, a commit, or a board post id inside a
+   `note:` is narrative until something opens it — pair it with an
+   `artifact:` entry, and never let a `note:` stand alone as completion
+   evidence. Submission moves the task to awaiting_verification; completion
+   requires the completion authority's verdict.
 
 ## Issues
 

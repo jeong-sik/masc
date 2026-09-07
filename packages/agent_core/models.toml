@@ -41,6 +41,46 @@ output_per_million = 30.0
 cache_read_multiplier = 0.1
 
 [[models]]
+# The same model on the Responses wire. It needs a row of its own rather than
+# falling back to the bare gpt-5.5 one: a provider label that resolves answers
+# before the bare row is read (#33893), so without this the wire would take
+# the openai_chat provider defaults -- 128K and no declared efforts -- which
+# is narrower than the model and drops the very capability this wire exists
+# to carry. Measured 2026-09-07 with a probe over the embedded catalog.
+#
+# Why the wire: /v1/chat/completions refuses function tools together with a
+# reasoning_effort for this family and names /v1/responses as the answer. The
+# chat row above stays correct for a caller that sends no tools.
+id_prefix = "gpt-5.5"
+base = "openai_chat"
+provider_name = "openai-responses"
+chat_output_budget_field = "max_completion_tokens"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high"]
+# 2026-09-07 probe, this key: a 1.2M-character prompt (~300K tokens) was not
+# refused for length -- the 400 named the output budget -- and larger ones came
+# back 429 "for limit gpt-5.5-long-context ... tokens per min", a rate limit
+# rather than a context one. So the ceiling is the family's, which
+# developers.openai.com/api/docs/models states as 1.05M for the gpt-5.6 and
+# gpt-6 rows beside it and which this catalog's own bare gpt-5.5 row already
+# carries. 272000 was the conservative value this row started at.
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+supports_image_input = true
+supports_native_streaming = true
+input_per_million = 5.0
+output_per_million = 30.0
+cache_read_multiplier = 0.1
+
+[[models]]
 id_prefix = "claude-fable-5"
 base = "anthropic"
 anthropic_thinking_control = "always_adaptive"

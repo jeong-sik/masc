@@ -411,7 +411,35 @@ let test_openai_responses_row_targets_the_responses_path () =
      and both rows draw on the same key. *)
   let chat = row "openai" in
   check string "the chat row is unchanged" "/v1/chat/completions" chat.request_path;
-  check string "both rows read one credential" chat.api_key_env responses.api_key_env
+  check string "both rows read one credential" chat.api_key_env responses.api_key_env;
+  (* A provider label that resolves answers before the bare model row is read
+     (#33893), so the wire needs a model row scoped to it or it takes the
+     openai_chat provider defaults -- 128K and no declared efforts, narrower
+     than the model and missing the capability this wire exists to carry.
+     Measured 2026-09-07 before the row was added. *)
+  let caps label =
+    match
+      Llm_provider.Capabilities.for_provider_model_id
+        ~wire:None
+        ~allow_bare_fallback:true
+        ~provider_label:label
+        ~model_id:"gpt-5.5"
+    with
+    | Some c -> c
+    | None -> failf "%s resolves no capabilities for gpt-5.5" label
+  in
+  let on_chat = caps "openai" in
+  let on_responses = caps "openai-responses" in
+  check
+    (option int)
+    "both wires see the same context"
+    on_chat.max_context_tokens
+    on_responses.max_context_tokens;
+  check
+    bool
+    "the responses wire declares the efforts it exists to carry"
+    true
+    (on_responses.accepted_reasoning_efforts <> None)
 ;;
 
 

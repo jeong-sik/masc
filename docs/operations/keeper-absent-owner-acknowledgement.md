@@ -12,11 +12,36 @@ observation time, and authoritative backlog version. It never fabricates metadat
 removal, settles work, or deletes the shutdown record. Ordinary replacement and
 terminal reclamation cannot alter or erase the acknowledgement.
 
-This first implementation supplies the domain/store transaction. An authenticated
-operator transport is a separate follow-up; no public endpoint invokes it yet.
-That transport must require `CanAdmin`, supply its authenticated actor rather than
-trusting an actor in the request body, and require the exact operation ID,
-operation revision, backlog version, and an explicit reason.
+The operator endpoint is
+`/api/v1/keepers/<name>/shutdown-operations/<operation-id>/absence-acknowledgement`.
+Both GET and POST require a bearer credential with `CanAdmin`; workspace auth
+must be enabled and require tokens. The authenticated credential owner supplies
+the actor. A body actor or an identity header cannot change that attribution.
+
+GET returns the exact durable operation and current primary backlog version,
+with `expected_revision`, `expected_backlog_version`, and
+`eligibility_checked: false`. It is an observation for review, not a reservation
+or an assurance that acknowledgement can proceed. It does not modify the record,
+and responses are not cached. A changed owner or backlog can make POST fail after
+the preview. POST repeats every eligibility check below under the transaction's
+locks.
+
+POST accepts exactly these fields (the two revisions come from the preview):
+
+```json
+{
+  "schema": "masc.keeper_shutdown.absence_acknowledgement.request.v1",
+  "expected_revision": 4,
+  "expected_backlog_version": 3260,
+  "reason": "Confirmed this retained shutdown has no remaining owner or work"
+}
+```
+
+The example revisions are illustrative, not live instructions. The operation ID
+and Keeper name are selected by the URL. Duplicate, missing, or unknown fields,
+an actor field, non-integer revisions, and a blank reason are rejected. The HTTP
+contract uses exact operation/backlog revisions; it does not accept or claim a
+caller-supplied digest precondition. The retained original digest is audit evidence.
 
 The first acknowledgement requires all of the following:
 
@@ -54,8 +79,11 @@ still belonging to the acknowledged operation. It does not inspect, overwrite,
 or release a later owner's state. Boot recovery retains this terminal observation
 without retrying old finalization; corrupt siblings still restore their fence.
 
-The tests exercise real Eio creation paths and durable SQLite/backlog files,
+The domain tests exercise real Eio creation paths and durable SQLite/backlog files,
 including queued and running operations, corruption, revision conflicts, a
 post-CAS/pre-release retry, and a creator blocked until the acknowledgement
-commits. Remote CI is the execution evidence; source inspection alone does not
-establish that these tests pass. No live acknowledgement accompanies this change.
+commits. The HTTP tests dispatch through the actual dashboard router with real
+credentials, checking authorization, actor attribution, exact body parsing,
+post-preview conflicts, durable acknowledgement, and retry behavior. Remote CI is
+the execution evidence; source inspection alone does not establish that these
+tests pass. No live acknowledgement accompanies this change.

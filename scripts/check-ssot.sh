@@ -139,15 +139,33 @@ check_rule "R5-health-path" 0 \
 # SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
 # from an explicit base path and then append .masc.
 #
-# Immutable evidence bundles may quote external prompts, runtime paths, and
-# session transcripts verbatim. Rewriting those captures to satisfy R6 would
-# falsify the evidence and invalidate its digest, so exclude only
-# [docs/evidence/] while continuing to scan all authored documentation.
+# Split in two on 2026-09-08, because the single rule could not be read.
+# It stood at 70 over a baseline of 0, and 69 of the 70 were prose: RFC
+# bodies, runbooks, an OCaml comment recording where a measurement was taken,
+# a script's usage example. Exactly one was a home-anchored root a program
+# actually used -- tui-frame-latency.py defaulted --base-path to one
+# machine's home directory, so anyone else ran the probe against a path they
+# had never named.
+#
+# A rule whose red is 99% quotation reports nothing, and its cheapest
+# resolution is to raise the baseline. Code and prose are counted apart now:
+# code is what the rule is about and stays at 0, prose is a debt that can
+# only shrink.
+#
+# Rewriting a quotation to satisfy a lint falsifies it, which is the argument
+# [docs/evidence/] was already excluded on. It applies to any capture; what
+# does not follow is that an RFC may keep teaching the path.
 check_rule "R6-home-masc-root" 0 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
+  '' \
+  bin lib scripts
+
+check_rule "R6-home-masc-root-docs" 67 \
+  "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
+  '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '^docs/evidence/' \
-  bin lib scripts docs
+  docs
 
 # SSOT-R7 — OTel metric label key for keeper identity is "keeper".
 # "keeper_name" in a metric label list splits the label vocabulary: Grafana

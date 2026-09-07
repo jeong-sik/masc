@@ -110,7 +110,8 @@ let lane_policies =
        store) against a single closure. Of the 23,293 finished turns that hold
        a Runtime_routed row, 153 (0.66%) hold no Runtime_completed and no
        Runtime_failed — that is the condition this reports. Measured
-       2026-09-04 over ~/.masc/keepers/*/runtime-manifests, keyed the way
+       2026-09-04 over keepers/*/runtime-manifests under the base path,
+       keyed the way
        read_runtime_manifest_scan scopes a turn (keeper_name, trace_id,
        keeper_turn_id). *)
   ; { lane = "masc_policy_runtime"

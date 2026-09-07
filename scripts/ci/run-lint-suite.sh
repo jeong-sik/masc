@@ -288,6 +288,12 @@ blocking_pr_lints() {
   # no switch. Same split as the env-read floor check above.
   run_lint "Sublib leaf boundary self-test" \
     python3 scripts/audit-sublib-cycle.py --self-test
+  # Thirteen SSOT rules, each a pattern with a baseline, five of them carrying
+  # their own pattern self-tests. It was the last red one on #34018's list and
+  # is green now: R2 and R10 were fixed (#34199, #34198), R4 was pointed at
+  # three filenames that no longer exist (#34201), and R6 counted 69 prose
+  # mentions alongside the one root a program used. 2.7s.
+  run_lint "SSOT rules" bash scripts/check-ssot.sh
 }
 
 advisory_lints() {

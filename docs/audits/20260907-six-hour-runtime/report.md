@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 직접 요청 scope #33967은124/125 PASS(기존 Antigravity 전송 관측1 FAIL) 후 외부 병합. 후속 #33982는94/94, #33994 Codex·Claude는205/205 PASS 후 외부 병합됐다. 큐 binding #33984는77/77 PASS 및 필수 검사 후 외부 병합. source-batch #33990은122/124 PASS·fixture2 FAIL, 응답 #34012 검증 중. journal #34021은 대기 작업의 실행 슬롯 해제·동일 scope 복구를 구현했으나 자동 스케줄러·자식/세션 연결·중단 실행 증거 재조정은 남아 있다.
+- 조치: 직접 요청 scope #33967은124/125 PASS(기존 Antigravity 전송 관측1 FAIL) 후 외부 병합. 후속 #33982는94/94, #33994 Codex·Claude는205/205 PASS 후 외부 병합됐다. 큐 binding #33984는77/77 PASS 및 필수 검사 후 외부 병합. source-batch #33990은122/124 PASS. #34012에서 실제 HITL 사례9/9 PASS지만 lane 전환의 fence 대기 실패는 남아 원인 조사 중. journal #34021의 첫 CI는 컴파일 경고 오류로 실패했고 직접/자율 작업 식별자를 함께 보존하도록 수정 중이며, 자동 스케줄러·자식/세션 연결·중단 실행 증거 재조정은 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -440,4 +440,14 @@ Antigravity #33982의 [수정 head f97d8de9c8 증거](antigravity-transmission-c
 
 [#33994 정확한 head 검증](official-transmission-ci-summary.json)은563bc3492d의205/205 PASS다. Codex70/Claude63/Keeper Claude23/carriage3/host46이며, 필수 검사 후 외부 세션이10:11:09Z82cf770d12로 병합했다. 전송 전·후 실패를 구분하고 callback 관측 실패가 같은 작업 재실행을 허가하지 않도록 보강했다. 배포나 실제 provider 사용의 증거는 아니다.
 
-[#33990 원격 실행](heartbeat-source-batch-ci-summary.json)은b73711aa27의122/124 PASS다. 새 mixed-binding 검증은 통과했지만 실제 Gate 승인이 없는 HITL fixture와 초기 lane의 idle 전제를 검증하지 않은 cancellation fixture가 실패했다. #34012가 production 경계를 느슨하게 하지 않고 fixture를 실제 상태로 구성하며 원격 재검증 중이다. #33990의 외부 병합은 전체 동작 PASS와 구분한다.
+[#33990 원격 실행](heartbeat-source-batch-ci-summary.json)은b73711aa27의122/124 PASS다. 새 mixed-binding 검증은 통과했지만 실제 Gate 승인이 없는 HITL fixture와 초기 lane의 idle 전제를 검증하지 않은 cancellation fixture가 실패했다. #34012의71d0a43e8a는 실제 HITL connector9/9 PASS지만 heartbeat60/61 PASS로 fence 대기 실패가 남았다. idle 전제를 실제 확인한 뒤에도 실패하므로 초기 startup race 추정만으로 설명할 수 없으며 현재 원인을 조사 중이다. #33990의 외부 병합은 전체 동작 PASS와 구분한다.
+
+
+## 후속 검증에서 확인된 미해결 경계
+
+#34021의 e14cd2f9ee [34113305320](https://github.com/jeong-sik/masc/actions/runs/34113305320)은 컴파일 단계의 fatal warning 4로 실패했다. 새 SQLite20개 사례의 실행 성공 증거가 아니다. domain과 SQLite 결과의 exhaustive pattern matching을 보완하고 있으며, 동시에 journal identity를 기존 Direct_operation / Autonomous_admission으로 일반화한다. 직접 요청의 응답 완료 뒤 승인·자식 작업이 남는 경우를 자율 UUID 별칭으로 연결하면 부모 실행을 잘못 재개할 수 있기 때문이다.
+
+현재 Gate deferral은 해당 호출을 보류하고 같은 턴은 계속 진행한다. Awaiting_gate_approval outcome에는 현재 producer가 없으므로 이 outcome만 보고 부모 대기를 결정할 수 없다. durable child acceptance의 명시적 부모 binding, 실제 턴 종료, 정확한 checkpoint·session·effect receipt를 연결해야 한다. 대기 중인 A가 다른 B의 실행을 막지 않고, B 완료 후 A가 동일한 실행으로 돌아오는 시나리오의 전체 런타임 검증은 아직 남아 있다.
+
+
+11:04Z [새 읽기 전용 관측](runtime-stuck-followup-1104.json)의 직전1시간28,225행에서 exact-tool 반복10건, browser lane 부재2건, Claude quota1건이 다시 관측됐다. 이전09:40Z 실제 브라우저 왕복 성공은 당시 성공이며 지속 가용성을 보장하지 않는다. 현재 실행 binary는2fc09f02d9, 외부 재시작10:41:44Z, runtime root는~/me/.masc이며 overall degraded·dashboard stale다. 이 세션은 해당 재시작이나 자산 교체를 수행하지 않았다. 관측 구간에 배포가 섞여 있어 전후 개선율로 해석하지 않는다.

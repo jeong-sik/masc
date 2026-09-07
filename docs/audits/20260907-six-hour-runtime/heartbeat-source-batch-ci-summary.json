@@ -32,10 +32,11 @@
   "response_pr": "https://github.com/jeong-sik/masc/pull/34012",
   "response_head": "71d0a43e8a6978cadb3c5e4477315e191ab4db7a",
   "response_run": "https://github.com/jeong-sik/masc/actions/runs/34112320413",
-  "response_result": "pending at capture",
+  "response_result": "failure; connector 9/9 PASS, heartbeat 60/61 PASS; lane-swap fence wait still times out after idle precondition was established",
   "merge": {
     "commit_prefix": "f261139935",
     "at": "2026-09-07T10:09:31Z",
     "by_this_session": false
-  }
+  },
+  "response_limit": "Initial idle-race explanation is insufficient: corrected fixture proves idle but update remains suspended before fence. Cause under investigation; no production fix or passing rerun claimed."
 }

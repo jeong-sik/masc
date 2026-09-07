@@ -1674,6 +1674,10 @@ let skill_snapshot_json ?(rejections = []) () =
     ; "rejections", `List rejections
     ]
 
+let skill_usage_coverage_json ?(loaded = 1) ?(unavailable = []) () =
+  `Assoc ["ledgers_loaded", `Int loaded;
+          "unavailable", `List (List.map (fun detail -> `String detail) unavailable)]
+
 let skills_catalog_json ?(usage = true) ?(flow = true) () =
   let usage_json =
     if usage then
@@ -1719,6 +1723,7 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
     ; ("state", `String "ready")
+    ; ("usage_coverage", skill_usage_coverage_json ())
     ; ("snapshot", skill_snapshot_json ())
     ; ( "surfaces",
         `List
@@ -1742,6 +1747,47 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
 (* The discovery roots ride the same response the surfaces do, and the
    projection dropped them: a Skill that never loaded had nowhere on screen
    to say which root was looked at, or that the root was not there. *)
+let test_decode_skills_catalog_keeps_usage_scope () =
+  let payload ?(usage = true) coverage =
+    match skills_catalog_json ~usage () with
+    | `Assoc fields -> `Assoc (("usage_coverage", coverage) :: List.remove_assoc "usage_coverage" fields)
+    | _ -> Alcotest.fail "invalid catalog fixture" in
+  let read ?(usage = true) coverage =
+    match Tui_decode.decode_skills_catalog (payload ~usage coverage) with
+    | Ok catalog -> catalog
+    | Error error -> Alcotest.fail error in
+  let partial = read (skill_usage_coverage_json ~loaded:19
+      ~unavailable:["bravo: metadata unavailable"; "charlie: invalid_ledger"] ()) in
+  (match partial.sc_usage_coverage with
+   | Some coverage ->
+       Alcotest.(check int) "loaded ledgers are observed" 19 coverage.suc_ledgers_loaded;
+       Alcotest.(check (list string)) "unavailable reasons survive unchanged"
+         ["bravo: metadata unavailable"; "charlie: invalid_ledger"] coverage.suc_unavailable
+   | None -> Alcotest.fail "ready response lost coverage");
+  (match partial.sc_surfaces with
+   | [surface] ->
+       (match surface.scs_usage with
+        | [usage] -> Alcotest.(check int) "known invocation count survives partial coverage" 12 usage.su_invocations
+        | _ -> Alcotest.fail "known usage was dropped")
+   | _ -> Alcotest.fail "known surface was dropped");
+  let no_ledgers = read ~usage:false (skill_usage_coverage_json ~loaded:0
+      ~unavailable:["keeper catalog: unavailable"] ()) in
+  (match no_ledgers.sc_usage_coverage with
+   | Some coverage -> Alcotest.(check int) "zero loaded is explicit" 0 coverage.suc_ledgers_loaded
+   | None -> Alcotest.fail "unavailable ledger inventory disappeared");
+  List.iter (fun bad ->
+      match Tui_decode.decode_skills_catalog (payload bad) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "malformed coverage must not become an observed zero")
+    [ `Null; skill_usage_coverage_json ~loaded:(-1) ();
+      `Assoc ["ledgers_loaded", `Int 1; "unavailable", `List [`Int 1]] ];
+  match skills_catalog_json () with
+  | `Assoc fields ->
+      (match Tui_decode.decode_skills_catalog (`Assoc (List.remove_assoc "usage_coverage" fields)) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "missing coverage was accepted")
+  | _ -> Alcotest.fail "invalid catalog fixture"
+
 let test_decode_skills_catalog_reads_the_discovery_roots () =
   let snapshot =
     `Assoc
@@ -1782,6 +1828,7 @@ let test_decode_skills_catalog_reads_the_discovery_roots () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", snapshot
       ; "surfaces", `List []
       ]
@@ -1888,6 +1935,7 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
       (`Assoc
          [ ("schema", `String "masc.skill-snapshot/v1")
          ; ("state", `String "ready")
+    ; ("usage_coverage", skill_usage_coverage_json ())
          ; ("snapshot", skill_snapshot_json ())
          ; ("surfaces", `List [ bad_surface ])
          ])
@@ -1902,6 +1950,7 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "surfaces", `List []
       ; ( "snapshot"
         , skill_snapshot_json
@@ -1973,6 +2022,7 @@ let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", skill_snapshot_json ~rejections:[ rejection ] ()
       ; "surfaces", `List []
       ]
@@ -2015,6 +2065,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
        ; "snapshot", `Assoc [ "rejections", `List [] ]
        ; "surfaces", `List []
        ]);
@@ -2037,6 +2088,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
        ; ( "snapshot"
          , skill_snapshot_json ~rejections:[ missing_nullable_rejection ] () )
        ; "surfaces", `List []
@@ -8484,7 +8536,8 @@ let () =
           test_decode_gate_row_missing_id_is_an_error;
       ] );
     ( "skills_catalog",
-      [
+      [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
+          test_decode_skills_catalog_keeps_usage_scope;
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick

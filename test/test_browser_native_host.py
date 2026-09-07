@@ -118,7 +118,7 @@ class NativeHost(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_tabs_and_page_roundtrip_fragmented_utf8(self):
-        for index, verb in enumerate(["tabs.list", "page.read"]):
+        for index, verb in enumerate(["tabs.list", "page.read", "page.capture"]):
             command = {"id": str(index), "verb": verb, "args": {"tabId": 42} if index else {}}
             self.server.commands.put(command)
             self.assertEqual(read_frame(self.process.stdout), command)
@@ -133,11 +133,11 @@ class NativeHost(unittest.TestCase):
             self.assertEqual(self.server.results.get(timeout=5), reply)
 
     def test_screenshot_reply_larger_than_command_limit(self):
-        command = {"id": "screenshot", "verb": "page.screenshot", "args": {"tabId": 73}}
+        command = {"id": "screenshot", "verb": "page.capture", "args": {"tabId": 73}}
         self.server.commands.put(command)
         self.assertEqual(read_frame(self.process.stdout), command)
         reply = {"id": "screenshot", "ok": True, "data": {
-            "tabId": 73, "base64": "A" * (2 * 1024 * 1024),
+            "tabId": 73, "data": "A" * (2 * 1024 * 1024),
             "url": "https://example.org", "title": "Screenshot"}}
         self.process.stdin.write(encode_frame(reply))
         self.process.stdin.flush()

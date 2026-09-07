@@ -368,6 +368,12 @@ type skills_catalog_state =
   | Skills_uninitialized
   | Skills_invalid_workspace
 
+(** Coverage of current Keeper trace activation ledgers, not lifetime usage. *)
+type skill_usage_coverage = {
+  suc_ledgers_loaded : int;
+  suc_unavailable : string list;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -376,6 +382,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_usage_coverage : skill_usage_coverage option;
 }
 
 val skills_catalog_state_to_string : skills_catalog_state -> string

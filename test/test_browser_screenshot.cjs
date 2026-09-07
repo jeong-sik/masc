@@ -17,17 +17,17 @@ function fixture({navigates=false,encoded='cGl4ZWxz'}={}) {
 }
 test('capture names the requested tab without selecting or querying the active tab',async()=>{
   const f=fixture();
-  const result=await vm.runInContext('pageScreenshot({tabId:73})',f.context);
+  const result=await vm.runInContext('pageCapture({tabId:73})',f.context);
   assert.equal(result.tabId,73);assert.equal(result.url,'https://example.org/old');
   assert.deepEqual(f.captures,[[73,'png']]);
-  await assert.rejects(vm.runInContext('pageScreenshot({})',f.context),/requires_tab_id/);
+  await assert.rejects(vm.runInContext('pageCapture({})',f.context),/tab_id_required/);
 });
 test('navigation during capture discards ambiguous pixels',async()=>{
   const f=fixture({navigates:true});
-  await assert.rejects(vm.runInContext('pageScreenshot({tabId:73})',f.context),/navigated_during/);
+  await assert.rejects(vm.runInContext('pageCapture({tabId:73})',f.context),/navigated_during/);
 });
 test('oversized reply becomes a bounded error before native messaging',async()=>{
   const f=fixture({encoded:'A'.repeat(8*1024*1024)});
-  await vm.runInContext('onHostMessage({id:"shot",verb:"page.screenshot",args:{tabId:73}})',f.context);
+  await vm.runInContext('onHostMessage({id:"shot",verb:"page.capture",args:{tabId:73}})',f.context);
   assert.deepEqual(f.replies,[{id:'shot',ok:false,error:'browser_reply_exceeds_8_mib'}]);
 });

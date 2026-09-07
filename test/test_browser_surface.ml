@@ -47,8 +47,33 @@ let test_empty_browser () =
        && Yojson.Safe.Util.member "page" data = `Null);
     check (list int) "empty browser does not read an arbitrary page" [] !reads)
 
+let test_capture_identity () =
+  check bool "capture requires an explicit tab" true
+    (Result.is_error (Surface.parse_capture_request (`Assoc [])));
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let actual_id = ref 7 in
+      let payload = ref (Base64.encode_string "\137PNG\r\n\026\nfixture") in
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_capture {tab_id=7} ->
+          answer (`Assoc ["tabId", `Int !actual_id; "url", `String "https://example.org";
+            "title", `String "Fixture"; "mimeType", `String "image/png";
+            "data", `String !payload])
+        | _ -> fail "capture used an implicit or different target"));
+      Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+      check bool "explicit capture succeeds" true
+        (Result.is_ok (Surface.capture (request (Some 7))));
+      actual_id := 8;
+      check bool "wrong tab result refused" true
+        (Result.is_error (Surface.capture (request (Some 7))));
+      actual_id := 7; payload := Base64.encode_string "not PNG";
+      check bool "non-image payload refused" true
+        (Result.is_error (Surface.capture (request (Some 7))))))
+
 let () = run "browser surface" ["behavior",[
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;
   test_case "invalid input is refused" `Quick test_strict_input;
-  test_case "backend failure is visible" `Quick test_remote_failure]]
+  test_case "backend failure is visible" `Quick test_remote_failure;
+  test_case "capture target and image identity" `Quick test_capture_identity]]

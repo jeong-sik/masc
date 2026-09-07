@@ -16,7 +16,7 @@ let http_timeout_sec = 55.
 let extension_timeout_sec = 20.
 let reconnect_delay_sec = 5.
 
-type verb = Tabs_list | Page_read | Page_elements | Page_screenshot
+type verb = Tabs_list | Page_read | Page_elements | Page_capture
 type command = { id : string; verb : verb; args : Yojson.Safe.t }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
@@ -55,7 +55,7 @@ let decode_poll json =
       | "tabs.list" -> Ok (Forward { id; verb = Tabs_list; args })
       | "page.read" -> Ok (Forward { id; verb = Page_read; args })
       | "page.elements" -> Ok (Forward { id; verb = Page_elements; args })
-      | "page.screenshot" -> Ok (Forward { id; verb = Page_screenshot; args })
+      | "page.capture" -> Ok (Forward { id; verb = Page_capture; args })
       | _ -> Ok (Reject id)
 
 let command_json command =
@@ -66,7 +66,7 @@ let command_json command =
          | Tabs_list -> "tabs.list"
          | Page_read -> "page.read"
          | Page_elements -> "page.elements"
-         | Page_screenshot -> "page.screenshot")
+         | Page_capture -> "page.capture")
     ; "args", command.args
     ]
 

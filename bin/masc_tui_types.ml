@@ -2925,6 +2925,17 @@ type runtime_config_reading = {
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
 }
 
+(* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
+   RGB plus what to title it. The spectator downsamples the pixels itself. *)
+type msx_frame = {
+  msx_number : int;
+  msx_width : int;
+  msx_height : int;
+  msx_rgb : string;
+  msx_mode : string;
+  msx_cartridge : string option;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3054,7 +3065,10 @@ type state = {
      machine is [Option] so it exists only once the screen has been opened,
      and it survives closing -- reopening continues the same frame. *)
   mutable msx_open: bool;
-  mutable msx: Msx.t option;
+  (* RFC-0439 §3.7: the TUI no longer owns a machine. The spectator caches
+     the last frame the server handed it and when it last asked. *)
+  mutable msx_frame: msx_frame option;
+  mutable msx_last_poll_ns: int64;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -4583,7 +4597,8 @@ let create_state
   image_open = false;
   image_request_generation = 0;
   msx_open = false;
-  msx = None;
+  msx_frame = None;
+  msx_last_poll_ns = 0L;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

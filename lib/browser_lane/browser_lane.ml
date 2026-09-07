@@ -17,25 +17,25 @@ module Action = Browser_action
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
+  | Page_downloads of { tab_id : int }
+  | Page_capture of { tab_id : int }
   | Session_open of { headless : bool option }
   | Session_close
   | Page_goto of { url : string; tab_id : int option }
   | Page_elements of { tab_id : int option }
   | Page_act of Browser_action.t
-  | Page_downloads of { tab_id : int }
-  | Page_screenshot of { tab_id : int }
   | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements | `Frames | `Dialog ] }
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"
+  | Page_downloads _ -> "page.downloads"
+  | Page_capture _ -> "page.capture"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
   | Page_goto _ -> "page.goto"
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
-  | Page_downloads _ -> "page.downloads"
-  | Page_screenshot _ -> "page.screenshot"
   | Page_context _ -> "page.context"
 ;;
 
@@ -53,6 +53,10 @@ let verb_json = function
              ]
              |> List.filter_map Fun.id) )
       ]
+  | Page_downloads {tab_id} ->
+    `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
+  | Page_capture { tab_id } ->
+    `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
   | Session_open { headless } ->
     `Assoc
       [ ("verb", `String "session.open")
@@ -66,10 +70,6 @@ let verb_json = function
   | Page_elements { tab_id } ->
     `Assoc ["verb", `String "page.elements"; "args", `Assoc
       (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
-  | Page_downloads {tab_id} ->
-    `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
-  | Page_screenshot {tab_id} ->
-    `Assoc ["verb",`String "page.screenshot";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_context {tab_id;frame_path;mode} ->
     let name, extra = match mode with
       | `Text cap -> "text", ["maxChars",`Int cap]
@@ -86,16 +86,16 @@ let verb_json = function
    - [verb_is_read]: does this leave the browser session lifecycle unchanged?
      Opening and closing a keeper-owned browser are lifecycle writes.
    - [verb_allowed_on_live]: may this run against the operator's browser?
-     Only the two readers — the live lane exists to be read; sessions own
+     Only the readers — the live lane exists to be read; sessions own
      nothing there and a navigation acts with the operator's logins. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ | Page_context _ | Page_downloads _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ | Page_downloads _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;
 
 let verb_allowed_on_live = function
   | Page_context _ | Page_downloads _ -> false
-  | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;
 

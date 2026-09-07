@@ -4,7 +4,7 @@ let persist ~keeper_name json =
     | `Assoc fields -> (match List.assoc_opt key fields with
         | Some (`String value) -> Ok value | _ -> Error ("screenshot missing " ^ key))
     | _ -> Error "screenshot must be an object" in
-  let* encoded = string "base64" in
+  let* encoded = string "data" in
   let* url = string "url" in
   let* title = string "title" in
   let* tab_id = match json with

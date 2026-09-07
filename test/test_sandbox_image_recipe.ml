@@ -47,6 +47,34 @@ let test_build_argv_reads_the_recipe_from_stdin () =
     [ "build"; "-t"; "masc-sandbox:general"; "-" ]
     (Keeper_sandbox_image.build_argv ~tag:Keeper_sandbox_image.default_tag)
 
+(* Each microVM runtime keeps its images apart from Docker's, so "build it
+   first" has to name one -- and they do not all take the recipe the same
+   way. These are read off the CLIs rather than assumed from a family
+   resemblance, so the test states what was read. *)
+let test_each_runtime_says_how_it_takes_the_recipe () =
+  let delivery backend =
+    match Masc.Keeper_microvm_backend.recipe_delivery backend with
+    | Masc.Keeper_microvm_backend.On_stdin -> "stdin"
+    | Masc.Keeper_microvm_backend.In_a_context_directory -> "directory"
+    | Masc.Keeper_microvm_backend.Builds_no_images -> "none"
+  in
+  check string "container build takes a context directory, and has no -"
+    "directory"
+    (delivery Masc.Keeper_microvm_backend.Apple_container);
+  check string "msb has pull, load and save and no build" "none"
+    (delivery Masc.Keeper_microvm_backend.Microsandbox);
+  check string "nerdctl speaks Docker's grammar" "stdin"
+    (delivery Masc.Keeper_microvm_backend.Nerdctl_kata)
+
+let test_context_directory_argv_names_the_recipe_and_its_directory () =
+  check
+    (list string)
+    "build -t <tag> -f <dockerfile> <context>"
+    [ "build"; "-t"; "masc-sandbox:general"; "-f"; "/tmp/ctx/Dockerfile"; "/tmp/ctx" ]
+    (Keeper_sandbox_image.context_directory_build_argv
+       ~tag:Keeper_sandbox_image.default_tag ~dockerfile:"/tmp/ctx/Dockerfile"
+       ~context:"/tmp/ctx")
+
 (* A Keeper that names no image gets the general one, under Docker and under
    microVM alike -- both guest paths read this same default
    (keeper_sandbox_factory.resolve_guest). The Keepers that want MASC's own
@@ -77,6 +105,12 @@ let () =
     ; ( "build_argv"
       , [ test_case "reads the recipe from stdin" `Quick
             test_build_argv_reads_the_recipe_from_stdin
+        ] )
+    ; ( "runtime store"
+      , [ test_case "each runtime says how it takes the recipe" `Quick
+            test_each_runtime_says_how_it_takes_the_recipe
+        ; test_case "a directory context names the recipe and its directory"
+            `Quick test_context_directory_argv_names_the_recipe_and_its_directory
         ] )
     ; ( "runtime default"
       , [ test_case "is the general image" `Quick

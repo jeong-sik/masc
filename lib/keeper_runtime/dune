@@ -33,6 +33,7 @@
   masc_eio_context
   masc.config
   masc.keeper_registry
+  masc.keeper_execution_scope
   masc.keeper_toml
   masc.masc_types
   masc.tool_types

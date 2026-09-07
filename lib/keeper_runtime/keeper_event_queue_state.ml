@@ -94,7 +94,27 @@ type pending_selection =
   { source : Keeper_event_queue.stimulus
   ; admitted_revision : int64
   ; checkpoint_retentions : int
+  ; repetition_scope : Keeper_execution_scope_id.t option
   }
+
+type scope_binding_error =
+  | Empty_scope_batch
+  | Duplicate_scope_selection
+  | Invalid_scope_selection of string
+  | Scope_binding_conflict of
+      { requested : Keeper_execution_scope_id.t
+      ; existing : Keeper_execution_scope_id.t
+      }
+
+let scope_binding_error_to_string = function
+  | Empty_scope_batch -> "repetition scope binding requires a nonempty source batch"
+  | Duplicate_scope_selection -> "repetition scope batch repeats an exact selection"
+  | Invalid_scope_selection detail -> "repetition scope selection is stale: " ^ detail
+  | Scope_binding_conflict { requested; existing } ->
+    Printf.sprintf "repetition scope binding conflict: requested %s, existing %s"
+      (Yojson.Safe.to_string (Keeper_execution_scope_id.to_json requested))
+      (Yojson.Safe.to_string (Keeper_execution_scope_id.to_json existing))
+;;
 
 type t =
   { revision : int64
@@ -375,6 +395,7 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
                @ [ { source = transfer.source
                    ; admitted_revision = state.revision
                    ; checkpoint_retentions = 0
+                   ; repetition_scope = None
                    }
                  ]
            ; accepted_transfer_projections =
@@ -439,7 +460,8 @@ let with_pending pending state =
       let entry =
         match existing with
         | Some entry -> entry
-        | None -> { source; admitted_revision = state.revision; checkpoint_retentions = 0 }
+        | None -> { source; admitted_revision = state.revision; checkpoint_retentions = 0
+                 ; repetition_scope = None }
       in
       reconcile available (entry :: acc) rest
   in
@@ -530,6 +552,34 @@ let ack_pending ~(selection : pending_selection) state =
     Ok { state with pending_entries }
 ;;
 
+let bind_pending_repetition_scope ~selections ~scope state =
+  let ( let* ) = Result.bind in
+  let* () = if selections = [] then Error Empty_scope_batch else Ok () in
+  let rec validate seen = function
+    | [] -> Ok ()
+    | selection :: rest ->
+      let* () = if List.mem selection seen then Error Duplicate_scope_selection else Ok () in
+      let* () = validate_pending_selection ~selection state
+        |> Result.map_error (fun detail -> Invalid_scope_selection detail) in
+      let* () = match selection.repetition_scope with
+        | None -> Ok ()
+        | Some existing when Keeper_execution_scope_id.equal existing scope -> Ok ()
+        | Some existing -> Error (Scope_binding_conflict { requested = scope; existing }) in
+      validate (selection :: seen) rest
+  in
+  let* () = validate [] selections in
+  if List.for_all (fun selection -> Option.is_some selection.repetition_scope) selections
+  then Ok (state, selections)
+  else
+    let updates = List.map (fun selection ->
+      selection, { selection with repetition_scope = Some scope }) selections in
+    let pending_entries = List.map (fun entry ->
+      match List.assoc_opt entry updates with
+      | Some updated -> updated
+      | None -> entry) state.pending_entries in
+    Ok ({ state with pending_entries }, List.map snd updates)
+;;
+
 (* A checkpoint-yield turn retains Connector_attention entries instead of
    acking them (see [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome]).
    That retention is a typed fact about delivery, so it is counted on the
@@ -569,6 +619,7 @@ let reprioritize_pending
         { source = { selection.source with urgency }
         ; admitted_revision = next_revision
         ; checkpoint_retentions = selection.checkpoint_retentions
+        ; repetition_scope = selection.repetition_scope
         }
       in
       let pending_entries =
@@ -1784,10 +1835,12 @@ let outbox_entry_of_yojson json =
 
 let pending_entry_to_yojson entry =
   `Assoc
-    [ "source", Keeper_event_queue.stimulus_to_yojson entry.source
-    ; "admitted_revision", int64_json entry.admitted_revision
-    ; "checkpoint_retentions", `Int entry.checkpoint_retentions
-    ]
+    ([ "source", Keeper_event_queue.stimulus_to_yojson entry.source
+     ; "admitted_revision", int64_json entry.admitted_revision
+     ; "checkpoint_retentions", `Int entry.checkpoint_retentions
+     ] @ match entry.repetition_scope with
+       | None -> []
+       | Some scope -> [ "repetition_scope", Keeper_execution_scope_id.to_json scope ])
 ;;
 
 let pending_entry_of_yojson json =
@@ -1796,7 +1849,8 @@ let pending_entry_of_yojson json =
   let* () =
     exact_fields
       ~context
-      ~expected:[ "source"; "admitted_revision"; "checkpoint_retentions" ]
+      ~expected:([ "source"; "admitted_revision"; "checkpoint_retentions" ]
+        @ if List.mem_assoc "repetition_scope" fields then [ "repetition_scope" ] else [])
       fields
   in
   let* source_json = required_field ~context "source" fields in
@@ -1811,7 +1865,11 @@ let pending_entry_of_yojson json =
   then Error "event queue pending admission revision must not be negative"
   else if checkpoint_retentions < 0 then
     Error "event queue pending checkpoint retentions must not be negative"
-  else Ok { source; admitted_revision; checkpoint_retentions }
+  else
+    let* repetition_scope = match List.assoc_opt "repetition_scope" fields with
+      | None -> Ok None
+      | Some json -> Keeper_execution_scope_id.of_json json |> Result.map Option.some in
+    Ok { source; admitted_revision; checkpoint_retentions; repetition_scope }
 ;;
 
 let to_yojson state =

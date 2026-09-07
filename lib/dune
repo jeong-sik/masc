@@ -107,6 +107,7 @@
   masc.event_bus_slots
   masc.keeper_chat_delivery_identity
   masc.keeper_chat_operations
+  masc.keeper_execution_scope
   masc.runtime_model
   masc.runtime
   masc.egress_host

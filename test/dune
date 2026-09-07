@@ -3769,6 +3769,26 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-code-memo)))
 
+; RFC-0429 §4 asks a chat PTY scenario to show the mermaid drawing reaching
+; the screen. test_tui_mermaid pins what the renderer produces; this pins that
+; the fence is routed to it at all, which a golden cannot see.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-mermaid-chat)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   mermaid-chat)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-mermaid-chat)))
+
 (rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps

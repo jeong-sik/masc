@@ -13193,6 +13193,106 @@ def run_config_regression(executable: str) -> None:
     )
 
 
+# RFC-0429 §3.3 draws a mermaid fence rather than lexing it, and §4 asks a
+# chat PTY scenario to show that the drawing reaches the screen. The golden
+# suite (test_tui_mermaid) already pins what the renderer produces; what it
+# cannot see is the wiring -- chat text goes through Masc_tui_render's
+# [chat_markdown], which reaches Masc_tui_markdown under a local alias, and a
+# fence whose language is not routed there falls through to the plain code
+# path and prints its own source.
+MERMAID_CHAT_SOURCE_ARROW = b"-->"
+MERMAID_CHAT_LABELS = (b"Intake", b"Gate", b"Keeper")
+
+
+def mermaid_chat_history_fixture() -> HttpResponse:
+    return (
+        200,
+        [
+            {
+                "id": "mermaid-chat-reply",
+                "role": "assistant",
+                "content": (
+                    "Here is the shape:\n\n"
+                    "```mermaid\n"
+                    "graph TD\n"
+                    "  intake[Intake] --> gate{Gate}\n"
+                    "  gate --> keeper[Keeper]\n"
+                    "```\n"
+                ),
+                "ts": 1787348491.3,
+            }
+        ],
+    )
+
+
+def mermaid_chat_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # run_terminal_scenario already opens the pty at 30x100, so resizing to
+    # that size draws nothing and a wait on the first screen starves.
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=5.0
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    # Enter opens the keeper's Info tabs; the transcript hangs off the palette.
+    # The wait needle is a node label because the fallback prints the source,
+    # which carries the labels too -- the assertions below, not this wait,
+    # decide whether it was drawn.
+    drawn = palette_go(
+        process, master_fd, output, b"keeper alpha", MERMAID_CHAT_LABELS[0]
+    )
+    # A frame carries only the rows that changed, so the box may have been
+    # written before the row this wait returned on. Ask the reconstructed
+    # screen, not the last frame.
+    screen = screen_text(drawn)
+
+    missing = [label for label in MERMAID_CHAT_LABELS if label not in screen]
+    if missing:
+        raise AssertionError(
+            "the mermaid fence lost its node labels "
+            f"{[label.decode() for label in missing]}: {screen!r}"
+        )
+    if MERMAID_CHAT_SOURCE_ARROW in screen:
+        raise AssertionError(
+            "the mermaid fence printed its own source instead of a drawing -- "
+            "either the fence never reached Masc_tui_mermaid, or the render "
+            f"failed and fell back to the source: {screen!r}"
+        )
+    # Labels without a frame around them would also satisfy the two checks
+    # above, and that is what the plain code path draws.
+    if not any(glyph in screen for glyph in ("┌".encode(), "─".encode(), "│".encode())):
+        raise AssertionError(
+            f"the node labels are on screen but nothing was drawn around them: {screen!r}"
+        )
+
+    # Leaving the transcript before q: the chat surface does not quit on q,
+    # and where Escape lands (keeper detail or the list) is not what this
+    # scenario is about. send_and_wait only scans bytes written after the key,
+    # so the repainted tab bar is enough to say the surface changed.
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers")
+    os.write(master_fd, b"q")
+
+
+def run_mermaid_chat_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="A mermaid fence in keeper chat is drawn, not printed",
+        interact=mermaid_chat_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": mermaid_chat_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                200,
+                {"messages": [], "has_more": False, "next_before": None},
+            ),
+        },
+    )
+
+
 def run_chat_clarity_regression(executable: str) -> None:
     fixtures = chat_clarity_http_fixtures()
     tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
@@ -13886,6 +13986,10 @@ def main() -> None:
         run_msx_palette_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX palette regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "mermaid-chat":
+        run_mermaid_chat_regression(os.path.abspath(sys.argv[1]))
+        print("tui mermaid chat regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
         print("tui chat clarity regression: PASS")
@@ -13930,8 +14034,8 @@ def main() -> None:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
-            "memory-journal|skill-usage-coverage]"
+            "chat-clarity|mermaid-chat|runtime|resources|keepers-lanes|"
+            "board-json|code-memo|memory-journal|skill-usage-coverage]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

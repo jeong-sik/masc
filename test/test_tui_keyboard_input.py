@@ -7120,7 +7120,9 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     return fixtures
 
 
-def skills_usage_clarity_http_fixtures() -> HttpFixtures:
+def skills_usage_clarity_http_fixtures(
+    *, ledgers_loaded: int = 19, unavailable: tuple[str, ...] = (), observed: bool = True
+) -> HttpFixtures:
     fixtures = keeper_runtime_http_fixtures()
     fixtures["/api/v1/dashboard/tools?keeper=alpha"] = (
         200,
@@ -7136,6 +7138,10 @@ def skills_usage_clarity_http_fixtures() -> HttpFixtures:
         {
             "schema": "masc.skill-snapshot/v1",
             "state": "ready",
+            "usage_coverage": {
+                "ledgers_loaded": ledgers_loaded,
+                "unavailable": list(unavailable),
+            },
             "snapshot": {
                 "snapshot_revision": "snapshot-rev1",
                 "catalog_revision": "catalog-rev1",
@@ -7157,7 +7163,7 @@ def skills_usage_clarity_http_fixtures() -> HttpFixtures:
                         "content_revision": "rev1",
                     },
                     "kind": "instruction",
-                    "usage": [
+                    "usage": ([
                         {
                             "keeper": "alpha",
                             "invocations": 12,
@@ -7165,16 +7171,27 @@ def skills_usage_clarity_http_fixtures() -> HttpFixtures:
                             "actions": 9,
                             "last_used_at": "2026-08-28T03:04:05Z",
                         }
-                    ],
+                    ] if observed else []),
                     "profile": {"flow": None, "plan": {}, "context": {}},
-                }
+                },
+                {
+                    "reference": {
+                        "identity": {"source_id": "workspace", "package_id": "pkg", "name": "unobserved-skill"},
+                        "content_revision": "rev2",
+                    },
+                    "kind": "composition",
+                    "usage": [],
+                    "profile": {"flow": None, "plan": {}, "context": {}},
+                },
             ],
         },
     )
     return fixtures
 
 
-def skills_usage_clarity_interaction() -> Interaction:
+def skills_usage_clarity_interaction(
+    *, ledgers_loaded: int = 19, unavailable: tuple[str, ...] = (), observed: bool = True
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -7199,21 +7216,86 @@ def skills_usage_clarity_interaction() -> Interaction:
             master_fd,
             output,
             b"p" * 3,
-            b"Skill Usage",
+            f"{1 if observed else 0} of 2 catalog Skills observed".encode(),
         )
         rendered = CSI_RE.sub(b"", usage)
-        for needle in (
-            b"work-intake",
-            b"alpha 12/12/9",
-            b"2026-08-28T03:04:05Z",
-        ):
+        expected = [
+            f"{1 if observed else 0} of 2 catalog Skills observed; {1 if observed else 2} without retained invocation".encode(),
+            b"Scope: exact Skill revisions in current Keeper sessions",
+            f"Activation ledgers loaded: {ledgers_loaded}; unavailable: {len(unavailable)}".encode(),
+        ]
+        expected.extend(f"Unavailable: {reason}".encode() for reason in unavailable)
+        if observed:
+            expected.extend((b"work-intake", b"alpha 12/12/9", b"2026-08-28T03:04:05Z"))
+        for needle in expected:
             if needle not in rendered:
-                raise AssertionError(
-                    f"Skill usage did not show {needle!r}: {usage!r}"
-                )
+                raise AssertionError(f"Skill usage did not show {needle!r}: {usage!r}")
+        if b"never invoked" in rendered:
+            raise AssertionError(f"Unknown historical usage was called never invoked: {usage!r}")
+        if not observed and b"alpha 12/12/9" in rendered:
+            raise AssertionError(f"Unobserved usage inherited a previous count: {usage!r}")
         os.write(master_fd, b"q")
 
     return interact
+
+
+def run_skill_usage_coverage_regression(executable: str) -> None:
+    for description, loaded, unavailable, observed in (
+        ("loaded current sessions do not prove lifetime non-use", 19, (), True),
+        ("partial ledger coverage preserves known usage", 1, ("bravo: metadata unavailable",), True),
+        ("unavailable inventory is not global zero usage", 0, ("keeper catalog: unavailable",), False),
+    ):
+        run_terminal_scenario(
+            executable,
+            description=f"Skill usage coverage: {description}",
+            interact=skills_usage_clarity_interaction(
+                ledgers_loaded=loaded, unavailable=unavailable, observed=observed
+            ),
+            http_fixtures=skills_usage_clarity_http_fixtures(
+                ledgers_loaded=loaded, unavailable=unavailable, observed=observed
+            ),
+        )
+
+
+def run_skill_usage_coverage_error_regression(executable: str) -> None:
+    for initial_error in (True, False):
+        fixtures = skills_usage_clarity_http_fixtures()
+        good = fixtures["/api/v1/skills"]
+        if not isinstance(good, tuple):
+            raise AssertionError("Skill catalog fixture must be a JSON response")
+        bad_payload = dict(good[1])
+        del bad_payload["usage_coverage"]
+        fail_reads = threading.Event()
+        if initial_error:
+            fail_reads.set()
+        fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
+
+        def interact(process, master_fd, _slave_fd, output, _base_path):
+            resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
+            tab_until(process, master_fd, output, b"MASC Config")
+            send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
+            frame = send_and_wait(
+                process, master_fd, output, b"p" * 3,
+                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+            )
+            if not initial_error:
+                fail_reads.set()
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
+            rendered = CSI_RE.sub(b"", frame)
+            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
+                raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
+            if initial_error:
+                if b"unavailable (no catalog reading)" not in rendered:
+                    raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
+            elif b"alpha 12/12/9" not in rendered:
+                raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")
+            os.write(master_fd, b"q")
+
+        run_terminal_scenario(
+            executable,
+            description=f"Skill usage coverage error: {'initial' if initial_error else 'refresh'}",
+            interact=interact, http_fixtures=fixtures,
+        )
 
 
 def message_origin_history_fixture() -> HttpResponse:
@@ -13244,12 +13326,17 @@ def main() -> None:
         run_memory_journal_regression(os.path.abspath(sys.argv[1]))
         print("tui Memory journal regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "skill-usage-coverage":
+        run_skill_usage_coverage_regression(os.path.abspath(sys.argv[1]))
+        run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
+        print("tui Skill usage coverage regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
             "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
-            "memory-journal]"
+            "memory-journal|skill-usage-coverage]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

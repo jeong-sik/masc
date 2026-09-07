@@ -2821,13 +2821,13 @@ module Browser_lane_view = struct
                  { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
                  purpose = Read_after_discovery
              | _, _, _ ->
-                 let detail = match t.selected_client, clients with
-                   | Some _, _ -> "Selected browser disconnected; b:choose browser"
-                   | None, [] -> "No connected browser; r:refresh connections"
-                   | None, _ -> "Choose a browser connection"
+                 let load = match t.selected_client, clients with
+                   | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
+                   | None, [] -> Failed "No connected browser; r:refresh connections"
+                   | None, _ -> Idle
                  in
                  { next with selected_tab = None; reading = None; scroll = 0;
-                   client_picker = Some 0; load = Failed detail }, false)
+                   client_picker = Some 0; load }, false)
     | Loading _ | Idle | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function

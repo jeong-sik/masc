@@ -134,7 +134,7 @@ let test_screenshot_ownership_and_draft () =
 let test_client_connection_ownership () =
   let discover t = { t with load = Loading (20, Discover Read_after_discovery) } in
   let choose, read = accept_clients ~generation:20 (Ok [firefox; zen]) (discover (create ())) in
-  expect "two clients require explicit choice, no read" (not read && choose.selected_client = None && choose.client_picker = Some 0);
+  expect "two clients require explicit choice, no read" (not read && choose.selected_client = None && choose.client_picker = Some 0 && read_status choose = Unread);
   let first, read = accept_clients ~generation:20 (Ok [firefox]) (discover (create ())) in
   expect "fresh singleton can be pinned" (read && first.selected_client = Some firefox);
   let old = { (loaded ()) with scroll = 8 } in

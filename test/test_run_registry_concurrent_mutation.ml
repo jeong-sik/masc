@@ -200,6 +200,43 @@ let test_exact_lane_completion_against_registration () =
         (exact_ids t))
 ;;
 
+let test_fusion_concurrent_reprojections_keep_first_completion () =
+  let module F = Fusion_run_registry in
+  let path = fresh_path "-fusion-completion.jsonl" in
+  Fun.protect ~finally:(fun () -> remove_if_exists path) (fun () ->
+    let registry = F.create ~path () in
+    F.register_running registry ~run_id:"fusion-concurrent" ~keeper:"k" ~preset:"p"
+      ~topology:Fusion_types.Simple ~started_at:1.0;
+    (* Durable append suspends inside the first completion's mutation lock.
+       The sibling must derive its timestamp from the completion committed
+       there, not from a Running snapshot read before acquiring that lock. *)
+    Eio_main.run (fun _env ->
+      Eio.Fiber.both
+        (fun () -> F.mark_completed registry ~run_id:"fusion-concurrent" ~outcome:F.Succeeded)
+        (fun () -> F.mark_completed registry ~run_id:"fusion-concurrent"
+          ~outcome:(F.Succeeded_with_summary
+            { decision = F.decision_preview_of_string "publish"; summary = "ready" })));
+    let times =
+      Fs_compat.load_file path |> String.split_on_char '\n'
+      |> List.filter_map (function
+        | "" -> None
+        | line ->
+          let open Yojson.Safe.Util in
+          let event = Yojson.Safe.from_string line in
+          match event |> member "event" |> to_string with
+          | "complete" -> Some (event |> member "completion" |> member "finished_at" |> to_float)
+          | _ -> None)
+    in
+    match times with
+    | [ first; second ] ->
+      check (float 0.0) "both durable completions retain the first timestamp" first second;
+      (match F.get (F.replay path) ~run_id:"fusion-concurrent" with
+       | Some run -> check (option (float 0.0)) "replay retains that same timestamp"
+           (Some first) run.finished_at
+       | None -> fail "concurrent completion was lost on replay")
+    | _ -> fail "both completion projections must reach the durable log")
+;;
+
 let () =
   run
     "run_registry_concurrent_mutation"
@@ -227,4 +264,7 @@ let () =
             `Quick
             test_exact_lane_completion_against_registration
         ] )
+    ; ( "Fusion completion identity"
+      , [ test_case "concurrent reprojections retain the first terminal time" `Quick
+            test_fusion_concurrent_reprojections_keep_first_completion ] )
     ]

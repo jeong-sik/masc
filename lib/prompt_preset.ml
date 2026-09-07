@@ -791,7 +791,7 @@ let matches_saved_settings ~base_path snapshot =
       if Sys.file_exists dir && not (Sys.is_directory dir) then
         Error (dir ^ ": expected a Keeper configuration directory")
       else
-        Keeper_types_profile.discover_keepers_toml_with_paths dir
+        Keeper_types_profile_toml.discover_keepers_toml_with_paths dir
         |> List.fold_left (fun result (path, discovery) ->
           let* instructions = result in
           match discovery with

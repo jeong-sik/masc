@@ -1114,7 +1114,10 @@ let test_map_http_error_provider_parse_failure () =
   | _ -> Alcotest.fail "expected provider ParseError"
 ;;
 
-let test_map_http_error_empty_completion_maps_to_unavailable () =
+(* #32497 (2026-09-02) split the empty completion out of ProviderUnavailable.
+   The mapping still has to carry a detail through; the arm it carries it in
+   has a name of its own now. *)
+let test_map_http_error_empty_completion_is_its_own_variant () =
   List.iter
     (fun expected ->
        let err =
@@ -1122,9 +1125,9 @@ let test_map_http_error_empty_completion_maps_to_unavailable () =
            (Llm_provider.Http_client.empty_completion_error ~stop_reason:expected)
        in
        match err with
-       | Error.Provider (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
+       | Error.Provider (Llm_provider.Error.EmptyCompletion { detail; _ }) ->
          Alcotest.(check bool) "nonempty detail" true (String.trim detail <> "")
-       | _ -> Alcotest.fail "expected provider unavailable")
+       | _ -> Alcotest.fail "expected EmptyCompletion")
     [ Llm_provider.Types.EndTurn; Llm_provider.Types.MaxTokens ]
 ;;
 
@@ -1300,7 +1303,7 @@ let () =
         ; Alcotest.test_case
             "empty completion maps to unavailable"
             `Quick
-            test_map_http_error_empty_completion_maps_to_unavailable
+            test_map_http_error_empty_completion_is_its_own_variant
         ] )
     ]
 ;;

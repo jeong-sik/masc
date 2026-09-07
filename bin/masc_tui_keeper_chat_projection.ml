@@ -13,11 +13,20 @@ type attachment = {
   data : string;
 }
 
+(* An image reference staged with :ref (#33728): an external http(s) URL the
+   provider fetches or a Files-API id an upload minted. No bytes ride the
+   request — the reference travels as its user_block carrier only, so it never
+   appears in the attachments array. *)
+type image_reference =
+  | Ref_url of string
+  | Ref_file_id of string
+
 type request = {
   request_id : string;
   keeper_name : string;
   message : string;
   attachments : attachment list;
+  references : image_reference list;
 }
 
 type acceptance_state =
@@ -136,12 +145,13 @@ type error_certainty =
 
 let ( let* ) = Result.bind
 
-let create_request ?(attachments = []) ~keeper_name ~message () =
+let create_request ?(attachments = []) ?(references = []) ~keeper_name ~message () =
   {
     request_id = "tui-" ^ Random_id.uuid_v7 ();
     keeper_name;
     message;
     attachments;
+    references;
   }
 
 (* The endpoint reads the payload from [attachments] and the ordering from
@@ -167,6 +177,12 @@ let attachment_block_to_yojson attachment =
     ; "size", `Int attachment.size
     ]
 
+(* The carrier form the server parses (#33728): one field names how the
+   provider resolves the image; a reference sends no bytes. *)
+let image_reference_block_to_yojson = function
+  | Ref_url url -> `Assoc [ "type", `String "image"; "url", `String url ]
+  | Ref_file_id file_id -> `Assoc [ "type", `String "image"; "file_id", `String file_id ]
+
 (* [since_seq] is where a re-POST of the same operation asks the stream to
    resume: after the last journal seq the pane holds, or the whole turn. It
    belongs to the POST, not to the request -- the request is what the
@@ -186,18 +202,20 @@ let request_to_yojson ~since_seq request =
     | None -> []
     | Some seq -> [ "since_seq", `Int seq ]
   in
-  match request.attachments with
-  | [] -> `Assoc (base @ resume)
-  | attachments ->
-    `Assoc
-      (base
-       @ [ "attachments", `List (List.map attachment_to_yojson attachments)
-         ; ( "user_blocks"
-           , `List
-               (List.map attachment_block_to_yojson attachments
-                @ [ `Assoc [ "type", `String "text"; "text", `String request.message ] ]) )
-         ]
-       @ resume)
+  match request.attachments, request.references with
+  | [], [] -> `Assoc (base @ resume)
+  | attachments, references ->
+    let blocks =
+      List.map attachment_block_to_yojson attachments
+      @ List.map image_reference_block_to_yojson references
+      @ [ `Assoc [ "type", `String "text"; "text", `String request.message ] ]
+    in
+    let attachment_field =
+      match attachments with
+      | [] -> []
+      | _ -> [ ("attachments", `List (List.map attachment_to_yojson attachments)) ]
+    in
+    `Assoc (base @ attachment_field @ [ ("user_blocks", `List blocks) ] @ resume)
 
 let request_body ~since_seq request =
   Yojson.Safe.to_string (request_to_yojson ~since_seq request)

@@ -114,6 +114,12 @@ type memo_line_refusal =
 
 val memo_line_refusal_to_string : memo_line_refusal -> string
 
+(** The comment markers a memo takes in the file at [path], or why it can
+    take none there: the extension names no language here, or the language
+    (JSON) has no comment. The writer spells the memo with them and the
+    reader looks for them, so the two agree on every file by construction. *)
+val memo_markers_of_path : string -> (Ide_memo.markers, memo_line_refusal) result
+
 (** The one comment line a memo becomes in the file at [path], or why it
     cannot become one there. The tool that writes it and the projection that
     records the call both spell it here. *)

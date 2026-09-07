@@ -270,14 +270,18 @@ let memo_line_refusal_to_string = function
 (* The comment line a memo becomes in the file at [path]. One function, so
    the tool that writes the line and the projection that records the call
    spell it the same way. *)
-let memo_line ~path (memo : Ide_memo.t) =
+let memo_markers_of_path path =
   let extension = String.lowercase_ascii (Filename.extension path) in
   match language_of_extension extension with
   | None -> Error (Extension_unknown extension)
   | Some language ->
     (match memo_markers_of_language language with
      | None -> Error (No_comment_syntax language)
-     | Some markers -> Ok (Ide_memo.to_line markers memo))
+     | Some markers -> Ok markers)
+;;
+
+let memo_line ~path (memo : Ide_memo.t) =
+  Result.map (fun markers -> Ide_memo.to_line markers memo) (memo_markers_of_path path)
 ;;
 
 let covered_extensions () = List.concat_map extensions_of_language all_languages

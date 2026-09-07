@@ -30,6 +30,8 @@ let global =
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+  ; b Meta "&"
+      "the MSX screen: the emulator core over the whole terminal (esc: back)"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \
@@ -69,7 +71,8 @@ let for_surface = function
       ]
       @ listing_meta
   | Acting ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "1 / 2" "Events / Logs"
+      ; b Navigate "j/k" "scroll"
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
@@ -133,7 +136,7 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
-      ; b Act "Ctrl-N" "memory detail"
+      ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
              so a help promising "full detail" sends a reader looking for a
@@ -189,8 +192,9 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next post"
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
-      ; b Search "f" "hearth"
-          ~help:"narrow to one sub-board, busiest first; again for the next"
+      ; b Search "f / F" "next / previous hearth"
+          ~help:"move forward or backward through all hearths"
+      ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
@@ -216,9 +220,10 @@ let for_surface = function
           ~help:"only when the blocked row is safely rearmable"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "w" "Workspace Gate mode"
+          ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
       ; b Act "e" "external Gate lane"
-          ~help:"cycle manual / auto_judge / always_allow for calls into \
-                 attached outside services"
+          ~help:"choose how calls into outside services are reviewed; Enter applies"
       ]
       @ listing_meta
   | Planning ->
@@ -298,6 +303,8 @@ let for_surface = function
       ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Navigate "K" "calling Keeper"
+      ; b Navigate "B" "Board evidence"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
@@ -318,6 +325,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
           ~help:"open the repository tree, or the selected changed file"
+      ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"
       ; b Act "d" "Git changes"
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
@@ -345,7 +353,9 @@ let for_surface = function
       ]
       @ listing_meta
   | Connectors ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "B / S" "Browser / Slack Lane"
+          ~help:"read Firefox tabs and page text; switch live / automation inside the lane"
+      ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
@@ -374,6 +384,8 @@ let for_surface = function
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "9" "Runtime"
+          ~help:"runtime status, lane routing, probes and connected clients"
       ; b Navigate "s" "resources"
           ~help:"the MCP resource catalog, off the ring under Config"
       ; b Navigate "t" "tools"
@@ -479,7 +491,8 @@ let for_surface = function
       ]
       @ listing_meta
   | System_logs ->
-      [ b Navigate "j/k" "move / scroll"
+      [ b Navigate "1 / 2" "Events / Logs"
+      ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while detail is open, inspect the adjacent visible log entry"
@@ -673,9 +686,6 @@ let footer_hints_memory_facts =
      ]
      @ listing_meta)
 
-let footer_hints_metrics =
-  hints_of_bindings (for_surface Metrics)
-
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
@@ -685,8 +695,8 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
-  ; "Runtime / Lanes", Lanes
-  ; "Runtime / Clients", Clients
+  ; "Config / Runtime / Lanes", Lanes
+  ; "Config / Runtime / Clients", Clients
   ; "Board", Board
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning
@@ -698,7 +708,7 @@ let help_surfaces : (string * surface) list =
   ; "Workspace", Repositories
   ; "Workspace / Code", Code
   ; "Changes", Changes
-  ; "Runtime", Runtime
+  ; "Config / Runtime", Runtime
   ; "Config", Config
   ; "Config / Resources", Resources
   ; "Config / Tools", Tools
@@ -808,3 +818,15 @@ let help_sections ?current () =
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
     :: List.map (fun (_, section) -> section) rest
+
+let footer_hints_browser_lane =
+  hints_of_bindings
+    [ b Navigate "B / S" "Browser / Slack"
+    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "[ / ]" "tab"
+    ; b Navigate "j/k" "text"
+    ; b Act "g" "URL"
+    ; b Act "o / x" "open / close session"
+    ; b Act "r" "refresh"
+    ; b Navigate "Esc" "connectors"
+    ]

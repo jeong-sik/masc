@@ -97,14 +97,19 @@ let handle_plan_clear_task ~tool_name ~start_time ctx _args : Tool_result.result
 
 (** {1 Dispatcher} *)
 
+(* The wire name is parsed once and the operations are matched, so an operation
+   added to [Tool_schemas_misc.plan_operation] is a compile error here. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let lift r = Some r in
-  match name with
-  | "masc_plan_set_task" -> lift (handle_plan_set_task ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_get_task" -> lift (handle_plan_get_task ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_clear_task" -> lift (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
+  match Tool_schemas_misc.plan_operation_of_tool_name name with
+  | None -> None
+  | Some Tool_schemas_misc.Plan_set_task ->
+    lift (handle_plan_set_task ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Plan_get_task ->
+    lift (handle_plan_get_task ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Plan_clear_task ->
+    lift (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
 
 (* RFC-0057 PR-2: schemas binding removed; plan tools now emitted via
    config/tools/masc_plan_*.toml (Tool_schemas_misc.schemas chain). *)
@@ -113,25 +118,23 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_plan_get_task" ]
+let is_read_only = function
+  | Tool_schemas_misc.Plan_get_task -> true
+  | Tool_schemas_misc.Plan_clear_task | Tool_schemas_misc.Plan_set_task -> false
 
+(* Registration walks the same list [dispatch] matches. It used to scan the
+   whole misc schema list through an [is_plan] string filter, so the filter,
+   the dispatcher and the read-only list were three copies of one vocabulary. *)
 let () =
-  let is_plan = function
-    | "masc_plan_set_task"
-    | "masc_plan_get_task"
-    | "masc_plan_clear_task" -> true
-    | _ -> false
-  in
-  List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-      if is_plan s.name then
-        Tool_spec.register
-          (Tool_spec.create
-             ~name:s.name
-             ~description:s.description
-             ~module_tag:Tool_dispatch.Mod_plan
-             ~input_schema:s.input_schema
-             ~handler_binding:Tag_dispatch
-             ~is_read_only:(List.mem s.name tool_spec_read_only)
-             ()))
-    Tool_schemas_misc.schemas
+  Tool_schemas_misc.plan_operations
+  |> List.iter (fun operation ->
+       let schema = Tool_schemas_misc.plan_schema operation in
+       Tool_spec.register
+         (Tool_spec.create
+            ~name:(Tool_schemas_misc.plan_tool_name operation)
+            ~description:schema.description
+            ~module_tag:Tool_dispatch.Mod_plan
+            ~input_schema:schema.input_schema
+            ~handler_binding:Tag_dispatch
+            ~is_read_only:(is_read_only operation)
+            ()))

@@ -717,7 +717,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            |> Result.map (fun released -> session_state := released))
       | Ambiguous | Fatal -> require_recovery detail
     in
-    let process_mgr = Eio.Stdenv.process_mgr env in
+    let process_mgr = Posix_spawn_process_mgr.mgr in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
       let stream =

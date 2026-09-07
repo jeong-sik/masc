@@ -1782,9 +1782,16 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                 ()))))))
 ;;
 
+(* [system_prompt] is what the production keeper path always supplies
+   ([Keeper_agent_run]'s call passes the composed turn prompt), and
+   [Keeper_official_client_host.prepare_turn] refuses a blank one: a blank
+   composition would run the turn under Codex's built-in instructions with
+   masc's tool surface attached (#33165). The sibling suites for the other two
+   official clients name a fixture prompt the same way. *)
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
     ?on_event ?(keeper_name = "codex-fixture")
+    ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
   let owns_base_path = Option.is_none base_path in
@@ -1833,6 +1840,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~keeper_name
                       ~base_path
                       ~goal
+                      ~system_prompt
                       ~tools
                       ~agent_core_tools:tools
                       ~initial_messages
@@ -2900,6 +2908,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let resume_capture = Filename.temp_file "masc-codex-context-resume-" ".jsonl" in
   let dynamic_context = "DYNAMIC_CONTEXT_RAW\nsecond line" in
   let goal = "WIRE_GOAL_EXACT\nsecond line" in
+  (* Named here rather than taken from [run_keeper_turn]'s default, because
+     the expectation below is built from it. *)
+  let system_prompt = "CONTEXT_WIRE_SYSTEM_PROMPT" in
   let hooks : Agent_core.Hooks.hooks =
     { Agent_core.Hooks.empty with
       before_turn_params =
@@ -2958,6 +2969,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
                 ~base_path
                 ~hooks
                 ~goal
+                ~system_prompt
                 ~cli_path
                 ~model:"gpt-fixture"
                 ()
@@ -2979,6 +2991,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
                 ~base_path
                 ~hooks
                 ~goal
+                ~system_prompt
                 ~cli_path
                 ~model:"gpt-fixture"
                 ()
@@ -2997,9 +3010,15 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          "start and resume receive identical developer instructions"
          start_instructions
          resume_instructions;
-       (* This fixture has two non-empty instruction sections, in this order:
-          the Native_read posture note and the typed dynamic-context envelope.
-          Read both from their production owners. Searching for a JSON-looking
+       (* Three non-empty instruction sections, in this order: the keeper's
+          composed system prompt, the Native_read posture note, and the typed
+          dynamic-context envelope. [Keeper_codex_runtime] joins them as
+          [system_prompt :: native_posture_note ...], and the host refuses a
+          blank prompt (#33165), so a shape without the first section is one
+          no turn can reach. This case used to assert exactly that shape,
+          which held only while the fixture supplied no prompt (#33862).
+
+          Read from their production owners. Searching for a JSON-looking
           paragraph would let the posture note disappear or move unnoticed. *)
        let posture_note =
          match
@@ -3009,14 +3028,14 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          | [] -> fail "Native_read posture note disappeared"
          | sections -> String.concat "\n\n" sections
        in
-       let instruction_prefix = posture_note ^ "\n\n" in
+       let instruction_prefix = system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" in
        let prefix_bytes = String.length instruction_prefix in
        let context_envelope_text =
          if String.length start_instructions < prefix_bytes then
-           fail "developer instructions are shorter than the posture prefix"
+           fail "developer instructions are shorter than the prompt and posture prefix"
          else (
            check string
-             "Native_read posture note is the developer-instruction prefix"
+             "the prompt and the Native_read posture note lead the developer instructions"
              instruction_prefix
              (String.sub start_instructions 0 prefix_bytes);
            String.sub start_instructions prefix_bytes

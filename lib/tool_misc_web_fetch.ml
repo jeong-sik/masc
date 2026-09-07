@@ -629,9 +629,34 @@ type fetch_failure =
   | Redirect_limit_exceeded
   | Unsupported_content_type of string
 
+(* HTTP semantics are supplied by the response status, never inferred from
+   its body. A 404 also covers a server declining to disclose a resource;
+   it cannot establish deletion or public visibility (RFC 9110 section15.5). *)
+let http_failure_guidance = function
+  | 401 ->
+      "The upstream requires valid authentication. Use an authorized connector \
+       or authenticated client for this resource; WebFetch does not add account credentials."
+  | 403 ->
+      "The upstream refused access. Check access with an authorized client; \
+       repeating this request does not grant permission."
+  | 404 ->
+      "The upstream did not provide this resource. Verify the exact URL and \
+       its visibility with an authorized client; this does not prove deletion."
+  | 410 ->
+      "The upstream reports that this resource is gone. Find its authoritative \
+       replacement before requesting another URL."
+  | 429 ->
+      "The upstream rejected this request because of rate limiting. No reset \
+       time was established by this fetch; check the service's retry guidance."
+  | status when status >= 500 && status < 600 ->
+      "The upstream could not fulfill this request. Check the service's state \
+       before deciding whether another request is useful."
+  | _ -> "The upstream did not return a successful representation. Check its HTTP status."
+
 let fetch_failure_to_string = function
   | Transport_error detail -> Printf.sprintf "fetch failed: %s" detail
-  | Http_status status -> Printf.sprintf "HTTP %d" status
+  | Http_status status ->
+      Printf.sprintf "Upstream HTTP %d. %s" status (http_failure_guidance status)
   | No_http_status -> "no HTTP status received"
   | Invalid_redirect reason -> "invalid redirect: " ^ reason
   | Redirect_limit_exceeded ->
@@ -642,7 +667,7 @@ let fetch_failure_to_string = function
 let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   function
   | Transport_error _ -> Tool_result.Dependency_unavailable
-  | Http_status _ -> Tool_result.Runtime_failure
+  | Http_status _ -> Tool_result.Dependency_unavailable
   | No_http_status -> Tool_result.Runtime_failure
   | Invalid_redirect _ -> Tool_result.Workflow_rejection
   | Redirect_limit_exceeded -> Tool_result.Runtime_failure
@@ -761,18 +786,29 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
           match content_kind_of_content_type response.content_type with
           | Error content_type -> Error (Unsupported_content_type content_type)
           | Ok content_kind ->
-              let title =
-                match content_kind with
-                | Html -> extract_title response.body
-                | Plain_text | Json_text | Xml_text -> None
-              in
-              let description =
-                match content_kind with
-                | Html -> extract_description response.body
-                | Plain_text | Json_text | Xml_text -> None
-              in
-              let rendered, extraction_source =
-                render_payload ~extract_mode ~content_kind response.body
+              (* Parsing the document, the regex passes over it and the
+                 markdown rendering are pure CPU over [response.body]. On the
+                 calling fiber they held the main domain 430-625 ms per fetch
+                 (2026-09-06 trace, label [tool masc_web_fetch]; the stack
+                 sample there was Markup's encoder and [extract_description]).
+                 The three run as one job on the domain pool when one is
+                 installed, and inline otherwise. [truncate_text] stays on the
+                 fiber: it offloads the full text to a file. *)
+              let title, description, (rendered, extraction_source) =
+                Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                  let title =
+                    match content_kind with
+                    | Html -> extract_title response.body
+                    | Plain_text | Json_text | Xml_text -> None
+                  in
+                  let description =
+                    match content_kind with
+                    | Html -> extract_description response.body
+                    | Plain_text | Json_text | Xml_text -> None
+                  in
+                  ( title
+                  , description
+                  , render_payload ~extract_mode ~content_kind response.body ))
               in
               let text, truncated, full_text_sha256 =
                 truncate_text ~max_chars ~source_url:response.final_url ~title
@@ -794,15 +830,10 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
 (* RFC-0189 PR-1b.8 — typed result.
    Failure-class assignments live with construction:
    - [Workflow_rejection]: caller-input violation (invalid URL).
-   - [Dependency_unavailable]:    rate-limit hit + transport-level failure
-                           ([fetch_failure_class] for transport).
-                           Both retry-friendly by nature; clients can
-                           now back off automatically based on the
-                           tag instead of pattern-matching the message
-                           string.
-   - [Runtime_failure]:    upstream HTTP non-2xx or missing status —
-                           server-side or malformed, retry is not
-                           always safe.
+   - [Dependency_unavailable]: transport failure or an upstream HTTP response
+                           without the requested representation. The class
+                           does not establish that retry will succeed.
+   - [Runtime_failure]: missing status or an unsupported response format.
 
    Note: no substring classifier downstream. Each [fetch_failure]
    variant carries its own [fetch_failure_class], assigned at the
@@ -896,8 +927,16 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                         cache_store key data now;
                         ok_from_data data
          | Error failure ->
+           let metadata =
+             match failure with
+             | Http_status status ->
+                 Some (`Assoc [ "upstream_http_status", `Int status ])
+             | Transport_error _ | No_http_status | Invalid_redirect _
+             | Redirect_limit_exceeded | Unsupported_content_type _ -> None
+           in
            Tool_result.make_err
              ~tool_name
              ~class_:(fetch_failure_class failure)
              ~start_time
+             ?metadata
              (fetch_failure_to_string failure))

@@ -175,6 +175,16 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
+# Runtime.validate_request_body_cap refuses a keeper turn on a runtime with no
+# positive ceiling, and every Keeper provider-call boundary calls it. The TOML
+# parser allows the key to be omitted ("no declared ceiling"), so a fixture
+# without it loads clean and dies at the first turn instead.
+#
+# The key belongs on the runtime row, not on [providers.<name>]: that is where
+# test_runtime_per_keeper_routing puts it ([runpod_mtp.qwen], [openai.gpt]) and
+# where the ceiling is read from. A first attempt placed it on the provider
+# and the turn failed exactly as before.
+max-request-body-bytes = 1048576
 |}
   in
   let path = Filename.temp_file "heartbeat_integ_runtime_" ".toml" in
@@ -299,6 +309,17 @@ let install_test_env env =
      fixtures that then submit to that lane get Rejected_draining. *)
   Eio_context.set_net (Eio.Stdenv.net env);
   Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
+
+(* [Memory_lane.submit] has four ways to not accept a unit and its .mli gives
+   each a different meaning -- Rejected_draining even names the call a later
+   lifecycle has to make first. Both fixture sites collapsed all four into one
+   sentence, so a failure said only that it was not Submitted. *)
+let memory_lane_outcome_name : Memory_lane.outcome -> string = function
+  | Memory_lane.Submitted -> "Submitted"
+  | Memory_lane.Coalesced -> "Coalesced"
+  | Memory_lane.Ran_inline -> "Ran_inline"
+  | Memory_lane.Dropped -> "Dropped"
+  | Memory_lane.Rejected_draining -> "Rejected_draining"
 
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
@@ -1070,11 +1091,13 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
                  Eio.Promise.await never)
           with
           | Memory_lane.Submitted -> ()
-          | Memory_lane.Coalesced
-          | Memory_lane.Ran_inline
-          | Memory_lane.Dropped
-          | Memory_lane.Rejected_draining ->
-            fail "failed Librarian receipt fixture was not submitted");
+          | ( Memory_lane.Coalesced
+            | Memory_lane.Ran_inline
+            | Memory_lane.Dropped
+            | Memory_lane.Rejected_draining ) as other ->
+            failf
+              "failed Librarian receipt fixture was not submitted: %s"
+              (memory_lane_outcome_name other));
          Eio.Promise.await started;
          Eio.Switch.fail librarian_sw Librarian_executor_cancel
        with
@@ -1491,6 +1514,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
@@ -2389,11 +2413,13 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               Eio.Promise.await release_librarian)
        with
        | Memory_lane.Submitted -> ()
-       | Memory_lane.Coalesced
-       | Memory_lane.Ran_inline
-       | Memory_lane.Dropped
-       | Memory_lane.Rejected_draining ->
-         fail "cancelled-update Librarian fixture was not submitted");
+       | ( Memory_lane.Coalesced
+         | Memory_lane.Ran_inline
+         | Memory_lane.Dropped
+         | Memory_lane.Rejected_draining ) as other ->
+         failf
+           "cancelled-update Librarian fixture was not submitted: %s"
+           (memory_lane_outcome_name other));
       Eio.Promise.await librarian_started;
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
@@ -3291,6 +3317,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "idle lane did not reach Joined_idle");
       check bool
         "shutdown operation records lane join evidence"
@@ -3534,6 +3561,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "not-started lane did not reach Joined_idle");
       (match Lane.peek_exit entry.lane with
        | Some { outcome = Lane.Shutdown_before_start; cleanup_error = None } -> ()
@@ -3798,6 +3826,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "shutdown did not reach Finalized");
       (match
          begin_owner_shutdown_exn

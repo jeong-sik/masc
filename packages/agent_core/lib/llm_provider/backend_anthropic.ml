@@ -256,6 +256,44 @@ let project_history config messages =
     messages
 ;;
 
+(* The checkpoint codec stores every media carrier as {type, media_type,
+   data}. Messages uses different source fields for references. Keep that
+   provider projection here, including images returned by tools, so replay
+   retains the original typed source instead of adopting a wire format.
+   https://platform.claude.com/docs/en/build-with-claude/vision *)
+let rec anthropic_content_block_to_json = function
+  | Image { media_type; data; source_type } ->
+    let source =
+      match source_type with
+      | Base64 ->
+        [ "type", `String "base64"
+        ; "media_type", `String media_type
+        ; "data", `String data
+        ]
+      | Url -> [ "type", `String "url"; "url", `String data ]
+      | File_id -> [ "type", `String "file"; "file_id", `String data ]
+    in
+    `Assoc [ "type", `String "image"; "source", `Assoc source ]
+  | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->
+    `Assoc
+      [ "type", `String "tool_result"
+      ; "tool_use_id", `String tool_use_id
+      ; "content", `List (List.map anthropic_content_block_to_json blocks)
+      ; "is_error", `Bool (tool_result_outcome_is_error outcome)
+      ]
+  | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+    | ToolUse _ | ToolResult { content_blocks = None; _ }
+    | Document _ | Audio _ ) as block -> Api_common.content_block_to_json block
+;;
+
+let anthropic_message_to_json (msg : message) =
+  let role = match msg.role with Assistant -> "assistant" | User | System | Tool -> "user" in
+  `Assoc
+    [ "role", `String role
+    ; "content", `List (List.map anthropic_content_block_to_json msg.content)
+    ]
+;;
+
 let build_request_payload
       ~request_mode
       ?anthropic_thinking_control
@@ -342,7 +380,7 @@ let build_request_payload
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
   let message_to_json =
     match config.kind with
-    | Provider_config.Anthropic -> Api_common.message_to_json
+    | Provider_config.Anthropic -> anthropic_message_to_json
     | Provider_config.Kimi -> Api_common.kimi_message_to_json
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
@@ -550,7 +588,22 @@ let build_request_artifact_with_thinking_control
 let nonexact_anthropic_thinking_control (config : Provider_config.t) =
   match config.kind with
   | Provider_config.Anthropic ->
-    Capabilities.anthropic_thinking_control_for_model_id config.model_id
+    (* Provider-qualified rows (deepseek on the Anthropic-compatible surface)
+       are invisible to the bare lookup, so a provider label resolves them
+       first; without one — or when the provider row declares no policy — the
+       bare reading stands. Adversarial F1. *)
+    (match config.provider_id with
+     | Some provider_label -> (
+       match
+         Capabilities.anthropic_thinking_control_for_provider_model_id
+           ~provider_label
+           ~model_id:config.model_id
+       with
+       | Some _ as control -> control
+       | None ->
+         Capabilities.anthropic_thinking_control_for_model_id config.model_id)
+     | None ->
+       Capabilities.anthropic_thinking_control_for_model_id config.model_id)
   | Provider_config.Kimi
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama

@@ -231,8 +231,8 @@ val content_blocks_for_run :
 val input_capabilities_of_runtime :
   Runtime.t -> Llm_provider.Capabilities.capabilities
 (** Effective input capabilities of a materialized runtime: provider caps overlaid
-    with the model's declared media capabilities (the MASC SSOT). Used to score the
-    assigned runtime and reroute candidates. *)
+    with the model's declarations, constrained by the execution transport.
+    Used by reroute, candidate projection, and image delegation. *)
 
 val caps_admit_required_modalities :
   Llm_provider.Capabilities.capabilities -> string list -> bool

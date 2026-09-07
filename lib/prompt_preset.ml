@@ -766,3 +766,45 @@ let restore ~base_path name =
   in
   Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result }
 ;;
+
+let same_settings (left : snapshot) (right : snapshot) =
+  let ordered rows = List.sort Stdlib.compare rows in
+  ordered left.prompt_overrides = ordered right.prompt_overrides
+  && ordered left.instructions = ordered right.instructions
+  && ordered left.assignments = ordered right.assignments
+  && ordered left.lanes = ordered right.lanes
+
+let source_directory ~base_path snapshot = preset_dir ~base_path snapshot.name
+
+let matches_saved_settings ~base_path snapshot =
+  guard (fun () ->
+    let overrides_path =
+      Filename.concat (Config_dir_resolver.masc_root ~base_path) overrides_file
+    in
+    let* prompt_overrides =
+      if not (Sys.file_exists overrides_path) then Ok []
+      else Override.load ~path:overrides_path
+        |> Result.map_error (fun error -> overrides_path ^ ": " ^ Override.error_to_string error)
+    in
+    let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let* instructions =
+      if Sys.file_exists dir && not (Sys.is_directory dir) then
+        Error (dir ^ ": expected a Keeper configuration directory")
+      else
+        Keeper_types_profile_toml.discover_keepers_toml_with_paths dir
+        |> List.fold_left (fun result (path, discovery) ->
+          let* instructions = result in
+          match discovery with
+          | Keeper_types_profile.Invalid { error; _ } ->
+              Error (path ^ ": " ^ Keeper_types_profile.keeper_toml_load_error_to_string error)
+          | Keeper_types_profile.Loaded { defaults; _ } ->
+              let entry = Option.map (fun text ->
+                Filename.remove_extension (Filename.basename path), text)
+                defaults.Keeper_types_profile_defaults.instructions
+              in
+              Ok (match entry with None -> instructions | Some entry -> entry :: instructions))
+          (Ok [])
+    in
+    let* assignments, lanes = capture_runtime ~base_path in
+    Ok (same_settings snapshot
+      { snapshot with prompt_overrides; instructions; assignments; lanes }))

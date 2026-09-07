@@ -83,16 +83,15 @@ let test_render_columns_line_up () =
   match rendered with
   | header :: rows ->
     let effort_col =
-      match String.index_opt header 'e' with
-      | _ ->
-        (* locate by the header word rather than a fixed number so the test
-           tracks the layout instead of restating it *)
-        let rec find i =
-          if i + 6 > String.length header then -1
-          else if String.equal (String.sub header i 6) "effort" then i
-          else find (i + 1)
-        in
-        find 0
+      (* Locate by the header word rather than a fixed number so the test
+         tracks the layout instead of restating it. [String.index_opt] used
+         to be matched here and the single arm ignored it. *)
+      let rec find i =
+        if i + 6 > String.length header then -1
+        else if String.equal (String.sub header i 6) "effort" then i
+        else find (i + 1)
+      in
+      find 0
     in
     check bool "effort header found" true (effort_col >= 0);
     List.iter

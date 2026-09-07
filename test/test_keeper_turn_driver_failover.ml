@@ -672,6 +672,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
     let current_goal = "current goal" in
     (match
        Driver.run_named
+         ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"primary.test_model"
          ~keeper_name:"prior-checkpoint-current-goal"
          ~base_path:(Filename.get_temp_dir_name ())
@@ -737,6 +738,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
     in
     let result =
       Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-request-cap"
         ~base_path:(Filename.get_temp_dir_name ())
@@ -870,20 +872,21 @@ let test_run_named_media_degrade_emits_typed_manifest () =
       ; manifest_keeper_turn_id = Some 1
       }
     in
-    let image =
-      Agent_core.Types.image_block
-        ~media_type:"image/png"
-        ~data:(Base64.encode_string "synthetic-image")
+    let audio =
+      Agent_core.Types.audio_block
+        ~media_type:"audio/wav"
+        ~data:(Base64.encode_string "synthetic-audio")
         ()
     in
     ignore
       (Driver.run_named
+         ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"resilient"
          ~keeper_name:"media-degrade-keeper"
          ~base_path:(Filename.get_temp_dir_name ())
          ~agent_core_tools:[]
-         ~goal:"inspect the image"
-         ~goal_blocks:[ image ]
+         ~goal:"inspect the audio"
+         ~goal_blocks:[ audio ]
          ~runtime_manifest_context:context
          ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
          ~body_timeout_s:0.5
@@ -974,12 +977,13 @@ let image_count_in_messages (messages : Agent_core.Types.message list) =
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
-    ~data:(Base64.encode_string "synthetic-image")
+    ~source_type:Agent_core.Types.Url
+    ~data:"https://example.invalid/screenshot.png"
     ()
 
-(* Per-attempt RFC-0265 projection: one image turn projected for the text-only
-   candidate loses its images in the goal and the history and records the
-   degrade against that runtime; projected for the vision candidate it is
+(* Per-attempt image projection: one image turn projected for the text-only
+   candidate retains image references in the goal and the history and records
+   delegation against that runtime; projected for the vision candidate it is
    untouched and records nothing. The view is a property of the runtime being
    dispatched, not of the lane head. *)
 let test_attempt_input_is_projected_per_runtime () =
@@ -996,10 +1000,15 @@ let test_attempt_input_is_projected_per_runtime () =
           [ Agent_core.Types.Text "earlier image turn"; image ]
       ]
     in
+    let project_images =
+      Masc.Keeper_vision_ingest.fallback_projector
+        ~keeper_name:"per-attempt-projection" ()
+    in
     let project runtime_id =
       let events = ref [] in
       let projected =
         Driver.For_testing.project_input_for_attempt
+          ~project_images
           ~keeper_name:"per-attempt-projection"
           ~emit_runtime_manifest:(emit_manifest_collector events)
           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ])
@@ -1018,8 +1027,17 @@ let test_attempt_input_is_projected_per_runtime () =
          "text-only goal loses the image"
          0
          (image_count_in_blocks blocks);
+       Alcotest.(check bool)
+         "the unread URL remains in the provider input"
+         true
+         (List.exists
+            (function
+              | Agent_core.Types.Text text ->
+                contains ~needle:"https://example.invalid/screenshot.png" text
+              | _ -> false)
+            blocks);
        Alcotest.(check int)
-         "text-only goal is the text plus the degrade notice"
+         "text-only goal retains the image reference alongside the text"
          2
          (List.length blocks));
     Alcotest.(check int)
@@ -1027,13 +1045,13 @@ let test_attempt_input_is_projected_per_runtime () =
       0
       (image_count_in_messages text_view.Driver.attempt_initial_messages);
     (match text_events with
-     | [ (Runtime_manifest.Runtime_routed, Some "degraded", Some decision) ] ->
+     | [ (Runtime_manifest.Runtime_routed, Some "delegated", Some decision) ] ->
        Alcotest.(check string)
-         "the degrade names the text-only runtime"
+         "the delegation names the text-only runtime"
          "primary.text_model"
-         (string_member "degraded_runtime_id" decision)
+         (string_member "runtime_id" decision)
      | events ->
-       Alcotest.failf "expected one degraded row, got %d" (List.length events));
+       Alcotest.failf "expected one delegated row, got %d" (List.length events));
     let vision_view, vision_events = project "lanevision.vision_model" in
     (match vision_view.Driver.attempt_goal_blocks with
      | None -> Alcotest.fail "the vision goal must stay present"
@@ -1051,6 +1069,160 @@ let test_attempt_input_is_projected_per_runtime () =
       "the vision projection records nothing"
       0
       (List.length vision_events))
+
+let test_image_fallback_checkpoint_keeps_canonical_prefix () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id =
+      match Runtime.get_runtime_by_id id with
+      | Some value -> value
+      | None -> Alcotest.failf "missing runtime %s" id
+    in
+    let image = synthetic_image () in
+    let nested =
+      Agent_core.Types.ToolResult
+        { tool_use_id = "screenshot"; content = "captured screenshot"
+        ; outcome = Agent_core.Types.Tool_succeeded; json = None
+        ; content_blocks = Some [ image ] }
+    in
+    let history = [ message [ nested ] ] in
+    let checkpoint =
+      { (checkpoint_with_session_id "image-fallback") with messages = history }
+    in
+    let project_images =
+      Masc.Keeper_vision_ingest.fallback_projector ~keeper_name:"image-checkpoint" ()
+    in
+    let project ?(goal_blocks = Some [ image ]) runtime_id =
+      Driver.For_testing.project_input_for_attempt
+        ~project_images ~keeper_name:"image-checkpoint"
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint) ~runtime_id (runtime runtime_id)
+    in
+    let history_only = project ~goal_blocks:None "primary.text_model" in
+    Alcotest.(check bool) "history projection preserves the separate plain goal"
+      true (history_only.Driver.attempt_goal_blocks = None);
+    let text = project "primary.text_model" in
+    let dispatch_checkpoint =
+      match text.Driver.attempt_agent_core_checkpoint with
+      | Some value -> value
+      | None -> Alcotest.fail "checkpoint disappeared"
+    in
+    Alcotest.(check (list string)) "nested images became text references" []
+      (Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+         ~checkpoint_messages:dispatch_checkpoint.messages
+         ~initial_messages:text.Driver.attempt_initial_messages
+         ~goal_blocks:(Option.value text.Driver.attempt_goal_blocks ~default:[]));
+    let suffix = [ message [ Agent_core.Types.Text "answer" ] ] in
+    let current_input = Agent_core.Types.user_msg_blocks
+        (Option.get text.Driver.attempt_goal_blocks) in
+    (match Masc.Keeper_replay_prefix.restore_messages
+             text.Driver.attempt_replay_prefix_projection
+             (dispatch_checkpoint.messages @ [ current_input ] @ suffix) with
+     | Error error -> Alcotest.fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
+     | Ok restored ->
+       Alcotest.(check bool) "persisted prefix keeps the original image"
+         true (restored = history @ [ Agent_core.Types.user_msg_blocks [ image ] ] @ suffix));
+    let vision = project "lanevision.vision_model" in
+    Alcotest.(check bool) "a later vision candidate gets the original checkpoint"
+      true (vision.Driver.attempt_agent_core_checkpoint = Some checkpoint);
+    Alcotest.(check bool) "a later vision candidate gets the original goal"
+      true (vision.Driver.attempt_goal_blocks = Some [ image ]))
+
+let test_current_image_checkpoint_survives_text_fallback () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id = match Runtime.get_runtime_by_id id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" id in
+    let image = Agent_core.Types.image_block ~media_type:"image/png"
+        ~data:(Base64.encode_string "original current-goal pixels") () in
+    let canonical_blocks = [ Agent_core.Types.Text "inspect this"; image ] in
+    let history = [ message [ Agent_core.Types.Text "previous turn" ] ] in
+    let checkpoint =
+      { (checkpoint_with_session_id "current-image-checkpoint") with messages = history } in
+    (* Only the semantic-reader boundary is substituted. The driver captures
+       the exact current-input boundary and restores the emitted checkpoint. *)
+    let project_images ~mode:_ blocks =
+      { Masc.Keeper_vision_ingest.blocks =
+          List.map (function
+            | Agent_core.Types.Image _ -> Agent_core.Types.Text "[image reading: blue circle]"
+            | block -> block) blocks
+      ; delegated_images = image_count_in_blocks blocks } in
+    let text_view = Driver.For_testing.project_input_for_attempt
+        ~project_images ~keeper_name:"current-image-checkpoint"
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks:(Some canonical_blocks) ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint)
+        ~runtime_id:"primary.text_model" (runtime "primary.text_model") in
+    let projected_input = Agent_core.Types.user_msg_blocks
+        (Option.get text_view.Driver.attempt_goal_blocks) in
+    let canonical_input = Agent_core.Types.user_msg_blocks canonical_blocks in
+    let dispatch_prefix =
+      (Option.get text_view.Driver.attempt_agent_core_checkpoint).messages in
+    let suffix =
+      [ message [ Agent_core.Types.ToolUse
+          { id = "status-call"; name = "status"; input = `Assoc [] } ]
+      ; message ~role:Agent_core.Types.Tool
+          [ Agent_core.Types.ToolResult
+              { tool_use_id = "status-call"; content = "unchanged tool answer"
+              ; outcome = Agent_core.Types.Tool_succeeded; json = None
+              ; content_blocks = None } ]
+      ; message ~role:Agent_core.Types.User [ Agent_core.Types.Text "injected context" ]
+      ; message [ Agent_core.Types.Text "The circle is blue." ] ] in
+    let provider_checkpoint =
+      { checkpoint with messages = dispatch_prefix @ [ projected_input ] @ suffix } in
+    let provider_result =
+      { (completed_run_result ()) with checkpoint = Some provider_checkpoint } in
+    let projection = text_view.Driver.attempt_replay_prefix_projection in
+    let restored =
+      match Driver.For_testing.project_provider_attempt_result
+              ~replay_prefix_projection:projection (Ok provider_result)
+            |> Driver.For_testing.turn_result with
+      | Ok { Runtime_agent.checkpoint = Some checkpoint; _ } -> checkpoint
+      | Ok _ -> Alcotest.fail "successful text fallback lost its checkpoint"
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+    Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
+      true (restored.messages = history @ [ canonical_input ] @ suffix);
+    let persisted = ref [] in
+    let sink = Driver.For_testing.canonical_checkpoint_sink
+        ~replay_prefix_projection:projection
+        (fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
+          persisted := snapshot.checkpoint :: !persisted; Ok ()) in
+    let snapshot checkpoint =
+      { Agent_core.Agent.stage = Agent_core.Agent.After_tool_results_appended
+      ; turn = 1; timestamp = 1.; checkpoint } in
+    (match sink (snapshot provider_checkpoint) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    Alcotest.(check bool) "mutation-boundary sink also stores canonical current input"
+      true ((List.hd !persisted).messages = restored.messages);
+    (match sink (snapshot restored) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    Alcotest.(check bool) "already-canonical checkpoints remain identical"
+      true ((List.hd !persisted).messages = restored.messages);
+    let bad_inputs =
+      [ suffix
+      ; message ~role:Agent_core.Types.User [ Agent_core.Types.Text "different input" ]
+        :: projected_input :: suffix
+      ; { projected_input with role = Agent_core.Types.Assistant } :: suffix
+      ; { projected_input with metadata = [ "unexpected", `Bool true ] } :: suffix ] in
+    List.iter (fun bad_suffix ->
+      match sink (snapshot { provider_checkpoint with messages = dispatch_prefix @ bad_suffix }) with
+      | Error _ -> ()
+      | Ok () -> Alcotest.fail "mismatched current input reached checkpoint persistence") bad_inputs;
+    Alcotest.(check int) "invalid boundaries never call the persistence sink" 2 (List.length !persisted);
+    let reloaded =
+      match Agent_core.Checkpoint.of_json (Agent_core.Checkpoint.to_json restored) with
+      | Ok checkpoint -> checkpoint
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+    let native_view = Driver.For_testing.project_input_for_attempt
+        ~project_images ~keeper_name:"current-image-checkpoint"
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ])
+        ~initial_messages:reloaded.messages ~agent_core_checkpoint:(Some reloaded)
+        ~runtime_id:"lanevision.vision_model" (runtime "lanevision.vision_model") in
+    Alcotest.(check bool) "fresh native turn recovers the persisted canonical image blocks"
+      true (native_view.Driver.attempt_initial_messages = history @ [ canonical_input ] @ suffix);
+    Alcotest.(check bool) "native checkpoint replay retains original current-input bytes"
+      true (native_view.Driver.attempt_agent_core_checkpoint = Some reloaded))
 
 (* Drives a two-candidate deferred lane through [run_named] on an image turn
    and records, per dispatched candidate, whether the history the provider
@@ -1082,6 +1254,17 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
     in
     let current_attempt = ref None in
     let observed = ref [] in
+    let rec carries_reference blocks =
+      List.exists
+        (function
+          | Agent_core.Types.Text text ->
+            contains ~needle:"[unread image URL:" text
+            && contains ~needle:"https://example.invalid/screenshot.png" text
+          | Agent_core.Types.ToolResult { content_blocks = Some nested; _ } ->
+            carries_reference nested
+          | _ -> false)
+        blocks
+    in
     let deferred_runtime_lane =
       Driver.For_testing.make_deferred_runtime_lane
         ~assignment_id:"resilient"
@@ -1092,6 +1275,7 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
     in
     let result =
       Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-per-candidate"
         ~base_path:(Filename.get_temp_dir_name ())
@@ -1101,7 +1285,10 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
         ~initial_messages:history
         ~model_input_projection:(fun messages ->
           observed :=
-            (!current_attempt, image_count_in_messages messages > 0) :: !observed;
+            ( !current_attempt
+            , image_count_in_messages messages > 0
+            , List.exists (fun (message : Agent_core.Types.message) ->
+                carries_reference message.content) messages ) :: !observed;
           Ok messages)
         ~on_runtime_attempt:(fun attempt ->
           current_attempt := Some attempt.Driver.runtime_id)
@@ -1119,7 +1306,7 @@ let check_deferred_lane_views ~order (result, observed, manifests) =
   let saw_image runtime_id =
     match
       List.filter_map
-        (fun (attempt, has_image) ->
+        (fun (attempt, has_image, _) ->
            match attempt with
            | Some id when String.equal id runtime_id -> Some has_image
            | Some _ | None -> None)
@@ -1133,7 +1320,7 @@ let check_deferred_lane_views ~order (result, observed, manifests) =
   in
   let first_seen =
     List.fold_left
-      (fun seen (attempt, _) ->
+      (fun seen (attempt, _, _) ->
          match attempt with
          | Some id when not (List.mem id seen) -> seen @ [ id ]
          | Some _ | None -> seen)
@@ -1149,19 +1336,26 @@ let check_deferred_lane_views ~order (result, observed, manifests) =
     true
     (saw_image "lanevision.vision_model");
   Alcotest.(check bool)
-    "the text-only candidate loses the image"
+    "the text-only candidate receives references instead of image blocks"
     false
     (saw_image "primary.text_model");
-  (match routed_rows_with_status "degraded" manifests with
+  Alcotest.(check bool)
+    "real driver includes the surviving image reference in the text request"
+    true
+    (List.exists
+       (fun (runtime_id, _, has_reference) ->
+         runtime_id = Some "primary.text_model" && has_reference)
+       observed);
+  (match routed_rows_with_status "delegated" manifests with
    | [ manifest ] ->
      let decision =
        Runtime_manifest.public_projection_of_decision manifest.decision
      in
      Alcotest.(check string)
-       "the one degrade names the text-only candidate"
+       "delegation names the text-only candidate"
        "primary.text_model"
-       (string_member "degraded_runtime_id" decision)
-   | rows -> Alcotest.failf "expected one degraded row, got %d" (List.length rows));
+       (string_member "runtime_id" decision)
+   | rows -> Alcotest.failf "expected one delegated row, got %d" (List.length rows));
   match result with
   | Error
       (Agent_core.Error.Config
@@ -1214,6 +1408,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
     in
     match
       Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
         ~base_path:(Filename.get_temp_dir_name ())
@@ -1855,6 +2050,72 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
+(* The wiring, not the module. A 429 is what a spent quota actually arrives
+   as, and it reaches the driver as [RateLimit], not [HardQuota] -- 402 is the
+   only thing that becomes [HardQuota]. Matching [HardQuota] alone meant this
+   loop recorded nothing for any real rate limit, which the tests above could
+   not see because they hand-build the error. This one builds it the way the
+   transport does, so it fails if the driver stops reading the classifier's
+   own answer. *)
+let rate_limit_error_from_a_429 ~body =
+  match
+    Llm_provider.Error.of_retry_api_error
+      ~provider:"shared_a"
+      (Llm_provider.Retry.classify_error ~retry_after_header:None ~status:429 ~body)
+  with
+  | Llm_provider.Error.RateLimit _ as e -> Agent_core.Error.Provider e
+  | other ->
+    Alcotest.failf
+      "a 429 must classify as RateLimit; got %s"
+      (Llm_provider.Error.to_string other)
+;;
+
+let test_a_rate_limited_account_is_demoted_in_the_same_walk () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempts = ref [] in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:Fun.id
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+               attempts := !attempts @ [ runtime_id ];
+               match runtime_id with
+               | "shared_a.test_model" ->
+                 (* The body ollama.com actually returns: a message and no
+                    retry_after, so nothing states when the account is back. *)
+                 attempt_without_effect
+                   (Error
+                      (rate_limit_error_from_a_429
+                         ~body:
+                           {|{"error":{"message":"you have reached your weekly usage limit","type":"api_error"}}|}))
+                   None
+               | "other.test_model" -> attempt_without_effect (Ok runtime_id) None
+               | "shared_b.test_model" ->
+                 Alcotest.fail
+                   "a sibling on the same credential must move behind the \
+                    unrelated account"
+               | other -> Alcotest.failf "unexpected candidate %s" other)
+             [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+         in
+         (match result with
+          | Ok runtime_id ->
+            Alcotest.(check string)
+              "the unrelated account serves the turn"
+              "other.test_model"
+              runtime_id
+          | Error error ->
+            Alcotest.failf "expected fallback success: %s" (Agent_core.Error.to_string error));
+         Alcotest.(check (list string))
+           "a 429 with no stated reset reorders the rest of this walk"
+           [ "shared_a.test_model"; "other.test_model" ]
+           !attempts))
+;;
+
 let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2021,6 +2282,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
          let transformed_urls = ref [] in
          let result =
            Driver.run_named
+             ~system_prompt:"You are the runtime failover test Keeper."
              ~runtime_id:"quota_lane"
              ~keeper_name:"deferred-frozen-quota-order"
              ~base_path:(Filename.get_temp_dir_name ())
@@ -2688,6 +2950,14 @@ let () =
             `Quick
             test_attempt_input_is_projected_per_runtime;
           Alcotest.test_case
+            "image fallback restores canonical checkpoint and later vision input"
+            `Quick
+            test_image_fallback_checkpoint_keeps_canonical_prefix;
+          Alcotest.test_case
+            "text fallback preserves the current input at both checkpoint boundaries"
+            `Quick
+            test_current_image_checkpoint_survives_text_fallback;
+          Alcotest.test_case
             "deferred lane vision then text projects per candidate"
             `Quick
             test_deferred_lane_vision_then_text_projects_per_candidate;
@@ -2771,6 +3041,10 @@ let () =
             "hard quota reorders shared sibling in same turn"
             `Quick
             test_attempt_loop_reorders_shared_quota_sibling_same_turn;
+          Alcotest.test_case
+            "a 429 with no stated reset demotes in the same walk"
+            `Quick
+            test_a_rate_limited_account_is_demoted_in_the_same_walk;
           Alcotest.test_case
             "hard quota keeps attempted scope across runtime reload"
             `Quick

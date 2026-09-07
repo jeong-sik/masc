@@ -134,9 +134,24 @@ function editedUserBlocks(
 ): KeeperUserInputBlock[] | undefined {
   if (!blocks) return undefined
   const attachmentIds = new Set((attachments ?? []).map(attachment => attachment.id))
-  const retained = blocks.filter(block => (
-    block.type === 'text' || attachmentIds.has(block.attachmentId)
-  ))
+  // A reference block names no attachment id (its carrier is url/file_id), so
+  // it survives the edit filter exactly when a still-attached chip carries the
+  // same reference value.
+  const referenceValues = new Set(
+    (attachments ?? []).flatMap((attachment) =>
+      attachment.kind === 'url'
+        ? [attachment.url]
+        : attachment.kind === 'file_id'
+          ? [attachment.fileId]
+          : [],
+    ),
+  )
+  const retained = blocks.filter(block => {
+    if (block.type === 'text') return true
+    if ('url' in block) return referenceValues.has(block.url)
+    if ('fileId' in block) return referenceValues.has(block.fileId)
+    return attachmentIds.has(block.attachmentId)
+  })
   const nextText = content
   if (previousContent === nextText) {
     return retained.length > 0 ? retained : undefined

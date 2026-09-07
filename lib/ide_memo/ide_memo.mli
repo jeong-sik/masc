@@ -51,9 +51,15 @@ val to_line : markers -> t -> string
 (** The memo as one comment line in a language's syntax:
     ["// masc(alpha) question: why"] or ["(* masc(alpha): why *)"]. *)
 
+val word_of_kind : Agent_observation.annotation_kind -> string
+(** The grammar's word for every kind, the plain [comment] included. *)
+
+val kind_words : string list
+(** [word_of_kind] over every kind, in constructor order: what a schema
+    enum lists and what [kind_of_word] accepts. *)
+
 val kind_of_word : string -> Agent_observation.annotation_kind option
-(** The grammar's kind words, plus [comment] for the plain kind. [None]
-    for any other word. *)
+(** The kind a word names, [comment] included. [None] for any other word. *)
 
 val make
   :  author:string

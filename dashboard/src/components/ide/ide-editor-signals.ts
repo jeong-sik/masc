@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import type { UnifiedDiffRow } from '../../api/workspace'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
@@ -17,12 +16,10 @@ export interface CurrentFileSignal {
 
 export function buildCurrentFileSignals({
   filePath,
-  annotations,
   diffRows,
   traceEvents,
 }: {
   readonly filePath: string
-  readonly annotations: ReadonlyArray<IdeAnnotation>
   readonly diffRows: ReadonlyArray<UnifiedDiffRow>
   readonly traceEvents: ReadonlyArray<KeeperTraceEvent>
 }): ReadonlyArray<CurrentFileSignal> {
@@ -34,9 +31,6 @@ export function buildCurrentFileSignals({
   const diagnosticCount = normalizedFile
     ? lspDiagnosticSnapshot.value.get(normalizedFile)?.length ?? 0
     : 0
-  const annotationCount = annotations.filter(annotation =>
-    matchesCurrentFile(annotation.file_path),
-  ).length
   const threadSnapshot = ideConversationThreadSnapshot.value
   const threadCount = matchesCurrentFile(threadSnapshot.filePath)
     ? threadSnapshot.threads.length
@@ -58,12 +52,6 @@ export function buildCurrentFileSignals({
       label: 'LSP',
       count: diagnosticCount,
       title: `${diagnosticCount} current-file diagnostic${diagnosticCount === 1 ? '' : 's'}`,
-    },
-    {
-      id: 'notes',
-      label: 'Notes',
-      count: annotationCount,
-      title: `${annotationCount} current-file annotation${annotationCount === 1 ? '' : 's'}`,
     },
     {
       id: 'threads',

@@ -98,6 +98,24 @@ function dashboardModulePreloadContractPlugin(): Plugin {
   }
 }
 
+// Emit the marker with the bundle itself: pnpm build, Docker, and the shell
+// wrapper all run Vite, whose emptyOutDir removes any previous marker.
+// The server currently reads this file's mtime; its contents record the real
+// build time rather than a deployment-time claim about freshness.
+function dashboardBuildStampPlugin(): Plugin {
+  return {
+    apply: 'build',
+    name: 'masc-dashboard-build-stamp',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: '.build-stamp',
+        source: `${new Date().toISOString()}\n`,
+      })
+    },
+  }
+}
+
 export default defineConfig(({ command }) => {
   const proxyTarget = process.env.MASC_DASHBOARD_PROXY_TARGET
   if (command === 'serve' && !proxyTarget) {
@@ -123,6 +141,7 @@ export default defineConfig(({ command }) => {
       preact(),
       ...reportPlugins,
       dashboardModulePreloadContractPlugin(),
+      dashboardBuildStampPlugin(),
     ],
     base: dashboardBasePath,
     build: {

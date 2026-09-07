@@ -32,6 +32,11 @@ type failure =
       ; detail : string
       }
       (** The client answered, but the text is not one JSON value. *)
+  | Invalid_domain_output of
+      { runtime_id : string
+      ; detail : string
+      }
+      (** JSON parsed, but the consumer rejected its domain value. *)
 
 val failure_to_string : failure -> string
 
@@ -62,6 +67,12 @@ val run
 (** Execute [prompt] (suffixed with the lane schema instruction) once on
     [runtime_id] and parse the answer as a single JSON value. *)
 
+val order_slots : string list -> string list
+(** Stable quota ordering for the remaining declared CLI candidates. Reapply
+    before dispatch and after a failed candidate; exhausted scopes move to the
+    tail, but every declared candidate remains eligible. Shared with the HITL
+    walker, whose release/bind transitions must precede each dispatch. *)
+
 val walk
   :  ?runner:runner
   -> base_dir:string
@@ -69,10 +80,17 @@ val walk
   -> system_prompt:string
   -> requirement:Agent_core.Exact_output.output_requirement
   -> prompt:string
+  -> validate:(Yojson.Safe.t -> ('a, string) result)
+  -> on_failure:(failure -> unit)
   -> unit
-  -> (string * Yojson.Safe.t, failure list) result
-(** Walk [cli_slots] in declaration order and return the first slot whose
-    answer parses, as [(runtime_id, value)]. [Error failures] carries every
+  -> (string * 'a, failure list) result
+(** Walk [cli_slots] with stable quota ordering and return the first slot whose
+    answer parses and passes the consumer-owned [validate] function, as
+    [(runtime_id, accepted_value)]. Domain rejection advances to the remaining
+    candidates and is retained as [Invalid_domain_output]. [validate] must be
+    side-effect-free. [on_failure] observes each refusal once before advancing,
+    including refusals before a later success, so accepted fallbacks do not
+    erase their preceding failure evidence. [Error failures] carries every
     slot's failure in walk order when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
     from "declared and exhausted" by the list it passed in. *)

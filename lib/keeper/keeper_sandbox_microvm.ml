@@ -1023,7 +1023,7 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
     (match listing with
      | None ->
        Volume_probe_failed
-         "container volume inspect exited 1 and no listing was taken to           confirm whether the volume is absent"
+         "container volume inspect exited 1 and no listing was taken to confirm whether the volume is absent"
      | Some (Unix.WEXITED 0, stdout, _) ->
        (match Yojson.Safe.from_string stdout with
         | exception Yojson.Json_error message ->

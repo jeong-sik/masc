@@ -440,6 +440,7 @@ type librarian_drain_outcome =
 type librarian_drain_error =
   | Librarian_interrupted of Keeper_lane.outcome
   | Librarian_cleanup_failed of string
+  | Librarian_drain_timed_out of float
 
 type librarian_abort_outcome =
   | Librarian_abort_idle
@@ -468,6 +469,10 @@ let librarian_drain_error_to_string = function
     "Librarian drain ended without completion: "
     ^ librarian_lane_outcome_to_string outcome
   | Librarian_cleanup_failed detail -> "Librarian cleanup failed: " ^ detail
+  | Librarian_drain_timed_out seconds ->
+    Printf.sprintf
+      "Librarian drain timed out after %.0fs waiting for the owner lane to exit"
+      seconds
 ;;
 
 let librarian_abort_error_to_string = function
@@ -504,6 +509,24 @@ let abort_librarian ~base_path ~keeper_name =
           Error (Librarian_abort_not_committed exn)))
 ;;
 
+(* Cap on how long a graceful drain waits for the Librarian owner lane to
+   exit. [finish_lifecycle] joins from inside [Eio.Cancel.protect], so an
+   outer cancellation (or a test's [with_timeout_exn]) cannot interrupt the
+   join; a Librarian unit parked on an external promise would otherwise hang
+   keeper termination forever (issue #33576). The race below uses the fiber's
+   own cancellation token, which works inside [Cancel.protect]. When no
+   global Eio clock is installed the join stays unbounded as before. *)
+let librarian_drain_timeout_sec = 30.0
+
+(* Test override so RED/GREEN runs need not wait the production cap. *)
+let drain_timeout_override_sec = ref None
+
+let current_drain_timeout_sec () =
+  match !drain_timeout_override_sec with
+  | Some seconds -> seconds
+  | None -> librarian_drain_timeout_sec
+;;
+
 let drain_and_join_librarian ~base_path ~keeper_name =
   let entry =
     let key = entry_key ~base_path ~keeper_name in
@@ -525,21 +548,41 @@ let drain_and_join_librarian ~base_path ~keeper_name =
   match owner_lane with
   | None -> Ok No_librarian_work
   | Some owner_lane ->
-    let exit = Keeper_lane.await_exit owner_lane in
-    (match exit.cleanup_error with
-     | Some detail -> Error (Librarian_cleanup_failed detail)
-     | None ->
-       (match exit.outcome with
-        | Keeper_lane.Completed -> Ok Librarian_drained
-        | outcome -> Error (Librarian_interrupted outcome)))
+    let join () = Keeper_lane.await_exit owner_lane in
+    let exit_or_timeout :
+        [ `Joined of Keeper_lane.exit | `Timed_out of float ] =
+      match Eio_context.get_clock_opt () with
+      | None -> `Joined (join ())
+      | Some clock ->
+        let timeout_sec = current_drain_timeout_sec () in
+        Eio.Fiber.first
+          (fun () -> `Joined (join ()))
+          (fun () ->
+             Eio.Time.sleep clock timeout_sec;
+             `Timed_out timeout_sec)
+    in
+    match exit_or_timeout with
+    | `Timed_out seconds -> Error (Librarian_drain_timed_out seconds)
+    | `Joined exit ->
+      (match exit.cleanup_error with
+       | Some detail -> Error (Librarian_cleanup_failed detail)
+       | None ->
+         (match exit.outcome with
+          | Keeper_lane.Completed -> Ok Librarian_drained
+          | outcome -> Error (Librarian_interrupted outcome)))
 ;;
 
 module For_testing = struct
   let reset () =
     Stdlib.Mutex.protect registry_mu (fun () ->
       Hashtbl.reset entries;
-      executor_sw := None)
+      executor_sw := None;
+      drain_timeout_override_sec := None)
   ;;
+
+  let set_drain_timeout_sec seconds = drain_timeout_override_sec := Some seconds
+  let drain_timeout_sec () = current_drain_timeout_sec ()
+;;
 
   let pending ~base_path ~keeper_name =
     let key = entry_key ~base_path ~keeper_name in

@@ -683,6 +683,7 @@ let test_tool_use_rejects_non_input_delta_kinds () =
       , MediaDelta
           { media_type = "image/png"; source_type = Base64; data = "not args" } )
     ; "thinking signature", ThinkingSignatureDelta "not args"
+    ; "redacted snapshot", RedactedThinkingSnapshot "not args"
     ]
   in
   List.iter
@@ -707,6 +708,7 @@ let test_tool_use_rejects_non_input_delta_kinds () =
               | "reasoning" -> "reasoning_details"
               | "media" -> "media"
               | "thinking signature" -> "thinking_signature"
+              | "redacted snapshot" -> "redacted_thinking_snapshot"
               | _ -> assert false)
          in
          Alcotest.(check string)
@@ -787,6 +789,44 @@ let expect_parse_failure expected events =
     Alcotest.(check string) "provider payload omitted" "" raw
   | Error err -> fail_unexpected_stream_error err
   | Ok _ -> Alcotest.fail (expected ^ " was accepted")
+;;
+
+let test_redacted_thinking_snapshot_is_explicit_and_one_way () =
+  let start kind =
+    ContentBlockStart
+      { index = 0; content_type = kind; tool_id = None; tool_name = None }
+  in
+  let snapshot = ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "opaque-final" } in
+  let thinking = ContentBlockDelta { index = 0; delta = ThinkingDelta "visible summary" } in
+  let acc = Streaming.create_stream_acc () in
+  acc_events acc [ start "thinking"; thinking; snapshot ];
+  let response = finalize_with_end_turn acc in
+  Alcotest.(check bool) "canonical opaque carrier replaces the summary" true
+    (response.content = [ RedactedThinking "opaque-final" ]);
+  expect_parse_failure "content_block_delta_without_start:index:0" [ snapshot ];
+  expect_parse_failure
+    "content_block_delta_kind_mismatch:index:0:block:text:delta:redacted_thinking_snapshot"
+    [ start "text"; snapshot ];
+  expect_parse_failure "content_block_delta_after_stop:index:0"
+    [ start "thinking"; thinking; ContentBlockStop { index = 0 }; snapshot ];
+  expect_parse_failure "content_block_delta_after_terminal"
+    [ start "thinking"; MessageDelta { stop_reason = Some EndTurn; usage = None }; snapshot ];
+  expect_parse_failure "invalid_redacted_thinking_snapshot:index:0"
+    [ start "thinking"; ContentBlockDelta { index = 0; delta = ThinkingSignatureDelta "sig" }; snapshot ];
+  expect_parse_failure "invalid_redacted_thinking_snapshot:index:0"
+    [ start "thinking"; ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot " " } ];
+  expect_parse_failure
+    "content_block_delta_kind_mismatch:index:0:block:redacted_thinking:delta:redacted_thinking_snapshot"
+    [ start "thinking"; snapshot; snapshot ];
+  expect_parse_failure
+    "content_block_delta_kind_mismatch:index:0:block:redacted_thinking:delta:thinking"
+    [ start "thinking"; snapshot; thinking ];
+  expect_parse_failure "content_block_start_conflict:index:0"
+    [ start "thinking"; thinking
+    ; ContentBlockStart
+        { index = 0; content_type = "redacted_thinking"
+        ; tool_id = Some "opaque-final"; tool_name = None }
+    ]
 ;;
 
 let test_message_start_replay_requires_exact_metadata () =
@@ -1114,7 +1154,10 @@ let test_map_http_error_provider_parse_failure () =
   | _ -> Alcotest.fail "expected provider ParseError"
 ;;
 
-let test_map_http_error_empty_completion_maps_to_unavailable () =
+(* #32497 (2026-09-02) split the empty completion out of ProviderUnavailable.
+   The mapping still has to carry a detail through; the arm it carries it in
+   has a name of its own now. *)
+let test_map_http_error_empty_completion_is_its_own_variant () =
   List.iter
     (fun expected ->
        let err =
@@ -1122,9 +1165,9 @@ let test_map_http_error_empty_completion_maps_to_unavailable () =
            (Llm_provider.Http_client.empty_completion_error ~stop_reason:expected)
        in
        match err with
-       | Error.Provider (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
+       | Error.Provider (Llm_provider.Error.EmptyCompletion { detail; _ }) ->
          Alcotest.(check bool) "nonempty detail" true (String.trim detail <> "")
-       | _ -> Alcotest.fail "expected provider unavailable")
+       | _ -> Alcotest.fail "expected EmptyCompletion")
     [ Llm_provider.Types.EndTurn; Llm_provider.Types.MaxTokens ]
 ;;
 
@@ -1219,6 +1262,10 @@ let () =
             "redacted thinking block"
             `Quick
             test_finalize_redacted_thinking_block
+        ; Alcotest.test_case
+            "redacted thinking snapshot is explicit and one-way"
+            `Quick
+            test_redacted_thinking_snapshot_is_explicit_and_one_way
         ; Alcotest.test_case "tool_use" `Quick test_finalize_tool_use
         ; Alcotest.test_case
             "duplicate tool start before payload is idempotent"
@@ -1300,7 +1347,7 @@ let () =
         ; Alcotest.test_case
             "empty completion maps to unavailable"
             `Quick
-            test_map_http_error_empty_completion_maps_to_unavailable
+            test_map_http_error_empty_completion_is_its_own_variant
         ] )
     ]
 ;;

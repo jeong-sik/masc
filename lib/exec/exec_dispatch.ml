@@ -9,6 +9,7 @@ type dispatch_result = {
   status : Unix.process_status;
   stdout : string;
   stderr : string;
+  output_files : Process_output_capture.files option;
 }
 
 let ( let* ) = Result.bind
@@ -223,10 +224,13 @@ let apply_redirect_plan plan result =
     |> add_redirected_output plan.stdout_target result.stdout
     |> add_redirected_output plan.stderr_target result.stderr
   in
-  { result with stdout; stderr }
+  let output_files =
+    if plan = default_redirect_plan then result.output_files else None
+  in
+  { result with stdout; stderr; output_files }
 
 let unsupported_redirect_result message =
-  { status = Unix.WEXITED 1; stdout = ""; stderr = message }
+  { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = message }
 
 type output_emission =
   { stdout_emitted : bool ref
@@ -397,13 +401,13 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
             with
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn ->
-              { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-            | Sandbox_target.Transport_failed { reason = _; stdout; stderr } ->
+              { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+            | Sandbox_target.Transport_failed { reason = _; stdout; stderr; output_files = _ } ->
               (* The lane never delivered a command result; surface it the way
                  an exception is -- a failed status with the error already in
                  stderr -- so a boxed command is not read as a clean run. *)
-              { status = Unix.WEXITED 1; stdout; stderr }
-            | Sandbox_target.Ran { status; stdout; stderr } ->
+              { output_files = None; status = Unix.WEXITED 1; stdout; stderr }
+            | Sandbox_target.Ran { status; stdout; stderr; output_files = _ } ->
               (match
                  ( deliver_capture attachments.stdout_to stdout
                  , deliver_capture attachments.stderr_to stderr )
@@ -411,7 +415,7 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
                | Error message, _ | _, Error message ->
                  unsupported_redirect_result message
                | Ok stdout, Ok stderr ->
-                 apply_redirect_plan redirect_plan { status; stdout; stderr }))
+                 apply_redirect_plan redirect_plan { output_files = None; status; stdout; stderr }))
          | Host ->
         let host_env = resolve_host_env ?base_host_env s.env in
         let stdin_from =
@@ -438,10 +442,10 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
          with
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
-           { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+           { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
          | Error message -> unsupported_redirect_result message
          | Ok (status, stdout, stderr) ->
-           apply_redirect_plan redirect_plan { status; stdout; stderr })))
+           apply_redirect_plan redirect_plan { output_files = None; status; stdout; stderr })))
     | Ok (redirect_plan, _) -> (
       let child_on_output_chunk =
         if s.redirects = [] then on_output_chunk else None
@@ -489,12 +493,12 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
         (match run () with
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
-             { status = Unix.WEXITED 1
+             { output_files = None; status = Unix.WEXITED 1
              ; stdout = ""
              ; stderr = Printexc.to_string exn
              }
          | status, stdout, stderr ->
-             apply_redirect_plan redirect_plan { status; stdout; stderr })
+             apply_redirect_plan redirect_plan { output_files = None; status; stdout; stderr })
       | Docker { runner; _ }
       | Micro_vm { runner; _ }
       | Ssh { runner; _ }
@@ -507,23 +511,25 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
               , Some (fun chunk -> on_chunk (`Stderr chunk)) )
         in
         (match
-           Sandbox_target.status_tuple
-             (runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd)
+           runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
          with
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
-             { status = Unix.WEXITED 1
+             { output_files = None; status = Unix.WEXITED 1
              ; stdout = ""
              ; stderr = Printexc.to_string exn
              }
-         | status, stdout, stderr ->
-             apply_redirect_plan redirect_plan { status; stdout; stderr }))
+         | Sandbox_target.Ran { status; stdout; stderr; output_files } ->
+             apply_redirect_plan redirect_plan { status; stdout; stderr; output_files }
+         | Sandbox_target.Transport_failed { reason = _; stdout; stderr; output_files } ->
+             apply_redirect_plan redirect_plan
+               { status = Unix.WEXITED 1; stdout; stderr; output_files }))
   in
   emit_unseen_captured_output on_output_chunk emitted result
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
-let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
+let invalid_pipeline stderr = { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr }
 
 (* A stage's own redirections travel with it, so a pipeline that names a file
    still runs on real process pipes. Dropping to the buffered chain instead
@@ -635,7 +641,7 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                       ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
                       specs
               with
-              | Ok (status, stdout, stderr) -> { status; stdout; stderr }
+              | Ok (status, stdout, stderr) -> { output_files = None; status; stdout; stderr }
               | Error message -> unsupported_redirect_result message)
          | None -> (
              match sandbox_pipeline_specs stages with
@@ -651,10 +657,10 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                    Sandbox_target.status_tuple
                      (runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs)
                  in
-                 { status; stdout; stderr }
+                 { output_files = None; status; stdout; stderr }
              | None ->
                  let rec chain ~prev_stdout ~status ~stderr = function
-                   | [] -> { status; stdout = prev_stdout; stderr }
+                   | [] -> { output_files = None; status; stdout = prev_stdout; stderr }
                    | Shell_ir.Simple s :: rest ->
                        let is_final = match rest with [] -> true | _ -> false in
                        let stage_on_output_chunk =
@@ -695,7 +701,7 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                                on_output_chunk
                                stage_result
                          in
-                         { status; stdout = stage_result.stdout; stderr })
+                         { output_files = None; status; stdout = stage_result.stdout; stderr })
                        else (
                          let () =
                            if stage_streamed
@@ -712,7 +718,7 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                            ~stderr
                            rest)
                    | (Pipeline _ | Sequence _) :: _ ->
-                       { status = Unix.WEXITED 1
+                       { output_files = None; status = Unix.WEXITED 1
                        ; stdout = ""
                        ; stderr =
                            stderr
@@ -760,7 +766,7 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                                 on_output_chunk
                                 first_result
                           in
-                          { status
+                          { output_files = None; status
                           ; stdout = first_result.stdout
                           ; stderr = first_result.stderr
                           })
@@ -808,7 +814,7 @@ and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail (
       else (
         let next = run ir in
         step
-          { status = next.status
+          { output_files = None; status = next.status
           ; stdout = acc.stdout ^ next.stdout
           ; stderr = acc.stderr ^ next.stderr
           }

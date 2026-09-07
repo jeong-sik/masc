@@ -29,8 +29,8 @@ let install_fresh_ide_sink () =
   Ide_bridge.install_agent_observation_sinks ()
 ;;
 
-(* RFC-0378 A2: test-side attribution builder ([file_attribution] for
-   annotation facts; wrap in [File] for tool facts). *)
+(* RFC-0378 A2: test-side attribution builder; wrap in [File] for tool
+   facts. *)
 let addressed_file ~codebase ~path =
   match Agent_observation.Code_address.v ~codebase ~path with
   | Ok address -> Agent_observation.Addressed { address; checkout = None }
@@ -74,95 +74,6 @@ let test_tool_observation_reaches_ide_storage () =
     | _ -> fail "expected one tool event")
 ;;
 
-let test_annotation_request_reaches_ide_storage () =
-  with_temp_dir (fun base_dir ->
-    install_fresh_ide_sink ();
-    let result =
-      Agent_observation.emit_annotation_request
-        { base_path = base_dir
-        ; attribution =
-            addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/annotated.ml"
-        ; keeper_id = "keeper-epsilon"
-        ; line_start = 7
-        ; line_end = 9
-        ; kind = Agent_observation.Decision
-        ; content = "route through neutral observation bus"
-        ; goal_id = Some "goal-17"
-        ; task_id = None
-        ; references =
-            [ { relation = "discussion"; reference = "thread-3" } ]
-        }
-    in
-    match result with
-    | Error msg -> failf "annotation request failed: %s" msg
-    | Ok created ->
-      check string "result file" "lib/annotated.ml" created.file_path;
-      check int "result line start" 7 created.line_start;
-      check int "result line end" 9 created.line_end;
-      let filter : Ide_annotation_types.annotation_filter =
-        { file_path = Some "lib/annotated.ml"
-        ; keeper_id = Some "keeper-epsilon"
-        ; goal_id = Some "goal-17"
-        ; task_id = None
-        }
-      in
-      (match
-         Ide_annotations.list
-           ~base_dir
-           ~codebase:("github.com_owner_repo")
-           ~filter
-           ()
-       with
-       | [ annotation ] ->
-         check string "id" created.id annotation.id;
-         check string "content" "route through neutral observation bus" annotation.content;
-         check yojson "opaque reference preserved"
-           (`List
-             [ `Assoc
-                 [ "relation", `String "discussion"
-                 ; "reference", `String "thread-3"
-                 ]
-             ])
-           (Agent_observation.annotation_references_to_json annotation.references);
-         (match annotation.kind with
-          | Ide_annotation_types.Decision -> ()
-          | _ -> fail "expected Decision annotation kind")
-       | rows -> failf "expected one annotation, got %d" (List.length rows)))
-;;
-
-let test_annotation_references_reject_malformed_entries () =
-  let malformed =
-    `List
-      [ `Assoc
-          [ "relation", `String "discussion"
-          ; "reference", `String ""
-          ]
-      ]
-  in
-  match Agent_observation.annotation_references_of_json malformed with
-  | Ok _ -> fail "blank opaque reference was accepted"
-  | Error msg ->
-    check string "explicit malformed reference error"
-      "references[0] relation and reference must be non-empty strings"
-      msg
-;;
-
-let test_annotation_references_preserve_unknown_relations () =
-  let opaque =
-    `List
-      [ `Assoc
-          [ "relation", `String "producer-defined-relation"
-          ; "reference", `String "opaque://value"
-          ]
-      ]
-  in
-  match Agent_observation.annotation_references_of_json opaque with
-  | Error msg -> failf "opaque reference rejected: %s" msg
-  | Ok references ->
-    check yojson "unknown relation round-trips without interpretation" opaque
-      (Agent_observation.annotation_references_to_json references)
-;;
-
 let test_snapshot_reset_clears_accumulated_observations () =
   Agent_observation.reset_for_testing ();
   Agent_observation.emit_tool_event
@@ -188,11 +99,12 @@ let test_snapshot_reset_clears_accumulated_observations () =
   check int "tool events cleared" 0 (summary_count "tool_event_count" after)
 ;;
 
-(* keeper_ide_annotate declares kind as a JSON-schema enum and the runtime
-   parses it back with annotation_kind_of_string. Two hand-written lists of the
-   same four names drift silently: before this test the runtime folded every
-   unrecognised value onto Comment, so a schema that grew a fifth kind would
-   have filed it as a comment rather than failing. Compare the two directly. *)
+(* keeper_ide_annotate declares kind as a JSON-schema enum in its TOML and
+   the runtime parses it back with [Ide_memo.kind_of_word]. A hand-written
+   enum and the constructor-derived word list drift silently: before this
+   test the runtime folded every unrecognised value onto Comment, so a schema
+   that grew a fifth kind would have filed it as a comment rather than
+   failing. Compare the two directly. *)
 let schema_kind_enum () =
   let annotate =
     List.find
@@ -212,24 +124,7 @@ let test_annotation_kind_enum_matches_variants () =
   check (list string)
     "schema enum == annotation_kind constructors"
     (schema_kind_enum ())
-    Agent_observation.valid_annotation_kind_strings
-;;
-
-let test_annotation_kind_parser_round_trips_every_kind () =
-  List.iter
-    (fun k ->
-      let s = Agent_observation.annotation_kind_to_string k in
-      match Agent_observation.annotation_kind_of_string s with
-      | Some back -> check bool ("round trip " ^ s) true (back = k)
-      | None -> failf "annotation_kind_of_string rejected %S" s)
-    Agent_observation.all_annotation_kinds
-;;
-
-let test_annotation_kind_parser_rejects_wrong_case () =
-  (* The casing an LLM reaches for. The runtime now rejects it instead of
-     filing the annotation as a Comment. *)
-  check bool "lowercase decision is not a kind" true
-    (Agent_observation.annotation_kind_of_string "decision" = None)
+    Ide_memo.kind_words
 ;;
 
 let () =
@@ -241,14 +136,6 @@ let () =
             `Quick
             test_tool_observation_reaches_ide_storage
         ; test_case
-            "annotation request reaches IDE storage"
-            `Quick
-            test_annotation_request_reaches_ide_storage
-        ; test_case "annotation references reject malformed entries" `Quick
-            test_annotation_references_reject_malformed_entries
-        ; test_case "annotation references preserve unknown relations" `Quick
-            test_annotation_references_preserve_unknown_relations
-        ; test_case
             "snapshot reset clears accumulated observations"
             `Quick
             test_snapshot_reset_clears_accumulated_observations
@@ -256,14 +143,6 @@ let () =
             "annotation kind enum matches variants"
             `Quick
             test_annotation_kind_enum_matches_variants
-        ; test_case
-            "annotation kind parser round trips every kind"
-            `Quick
-            test_annotation_kind_parser_round_trips_every_kind
-        ; test_case
-            "annotation kind parser rejects wrong case"
-            `Quick
-            test_annotation_kind_parser_rejects_wrong_case
         ] )
     ]
 ;;

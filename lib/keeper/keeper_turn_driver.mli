@@ -112,7 +112,7 @@ val run_named :
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   ?session_id:string ->
-  ?system_prompt:string ->
+  system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
   agent_core_tools:Agent_core.Tool.t list ->
   ?initial_messages:Agent_core.Types.message list ->
@@ -227,6 +227,10 @@ module For_testing : sig
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     provider_attempt_outcomes
 
+  val canonical_checkpoint_sink :
+    replay_prefix_projection:Keeper_replay_prefix.projection ->
+    Agent_core.Agent.checkpoint_sink -> Agent_core.Agent.checkpoint_sink
+
   val provider_result :
     provider_attempt_outcomes ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -296,6 +300,9 @@ module For_testing : sig
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
   val project_input_for_attempt :
+    project_images:
+      (mode:Keeper_vision_ingest.mode ->
+       Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->
     keeper_name:string ->
     emit_runtime_manifest:
       (?status:string ->
@@ -309,8 +316,8 @@ module For_testing : sig
     Runtime.t ->
     attempt_input
   (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
-      when the runtime admits the turn's modalities, otherwise the stripped
-      view plus the degraded manifest row emitted through
+      when the runtime admits the turn's modalities, otherwise image readings/references
+      precede the strip of other unsupported media, with manifest rows through
       [emit_runtime_manifest]. [Reroute] has no producer here because the
       decision is taken with no reroute candidates. *)
 

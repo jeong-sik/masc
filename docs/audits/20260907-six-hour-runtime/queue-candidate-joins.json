@@ -1,0 +1,399 @@
+[
+  {
+    "schema_version": 6,
+    "candidate_id": "f64c6589b31bcea6ef86fad6eb46020dd38d643708d7953249fd57a1abd4efd1",
+    "keeper_name": "code-reviewer",
+    "recorded_at": 1788749857.944823,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and comments directly discuss a blocked `gh api` command that was executed by the code-reviewer keeper (visible in the post's approval input showing the command and the keeper's name). The thread analyzes why the command was blocked (due to `-o /tmp/...` file write effect), discusses the approval queue behavior, and proposes alternative approaches (e.g., piping without `-o`, using MCP GitHub tools). This is directly pertinent to the code-reviewer's ongoing work of reading code files and reviewing diffs, as it concerns the tooling and process for accessing repository content. The discussion also includes corrections and clarifications about the approval mechanism, which affects how the code-reviewer can execute read commands in the future."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "cdc405c14581724508571b5f445d2dd8",
+          "plan_fingerprint": "f4627ff58ac703885a975430c2fcff1df82dbf7ec75eb8b49a3e180aa535fde8",
+          "request_body_sha256": "aa38687b7b32a46bd3f3d2a37e6ea6bb2fa78b680030464b15ec32e0d6505e31"
+        },
+        "judged_at": 1788749995.821151
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756510.293342
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "dc9874ff1f8dd6d47d4dee7b092a899678b9906b0fba25e19d85fb012a357ff7",
+    "keeper_name": "code-reviewer",
+    "recorded_at": 1788749902.719107,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The comment directly addresses the code-reviewer's blocked `gh api` command (shown in the post) and discusses the approval-gate classification of the `-o /tmp/...` write effect, which is central to the code-reviewer's current task of understanding why the command was blocked. The comment also corrects the layer distinction between read-path (sealed vs inline) and window-offset defects, which are relevant to the code-reviewer's review findings and the ongoing discussion about the tool execution issue."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "3d27eb7626eaf5d846644c02d3f7ffc6",
+          "plan_fingerprint": "e242019d42fd22ab54dff6adf0f81c8291af83642cb0f38214798ddea989e803",
+          "request_body_sha256": "40483acfedd5d3d3f10dedabe0e84548ed79626f6eb2418b3ba9e759fe7f01cb"
+        },
+        "judged_at": 1788750108.510931
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756639.199161
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "df10cd182131cc2b50d77f6c827f87d202cb8c9e78c5df8998daa8c1276bb572",
+    "keeper_name": "code-reviewer",
+    "recorded_at": 1788750033.336802,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and its extensive comment thread directly concern the code-reviewer Keeper's domain: they document repeated verification rejections of task-1393 and related tasks due to artifact snapshot capture failures, including detailed analysis of evaluator behavior, live-lookup confirmations, and the recursive blockage of the fix (task-1344/1357). This is precisely the kind of defect-finding and review coordination the Keeper is instructed to engage in, as it involves diagnosing platform-level capture-layer failures that prevent valid code artifacts from being accepted, and the thread explicitly discusses review findings, reproduction conditions, and escalation paths. The content is not merely tangential but central to the Keeper's ongoing context of reviewing code deliverables and identifying systemic flaws."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "bddeaee4faf4b8fb775e6074e365e8bd",
+          "plan_fingerprint": "25d327a635a97ab4b14a42b108f296efa9c781cfb475e5c5e277f41f418246ea",
+          "request_body_sha256": "89648c25c108d9181496d4ea4b2a152388b28498cc94a8aac4fa165f80b50f32"
+        },
+        "judged_at": 1788750233.421676
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756887.597951
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "727c2c9de739c51e909e4ecae5d03faa616a8bf55ae1babaa5c414a2b37c4b91",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750033.189396,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and its extensive comment thread directly concern the ongoing investigation and diagnosis of a platform-level snapshot capture defect (#33745) that has caused repeated verification rejections for tasks including task-1393, task-1407, and task-1325. The thread includes detailed analysis of the failure modes, cross-validation of evaluator runtimes, created_at citation issues, and the recursive blockage of the root fix (task-1344/1357). This is directly relevant to the keeper's context as it involves the same verification gate and snapshot layer that the keeper's own work would be subject to, and it documents the current state of the platform defect and the operator decision points that affect all keepers."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "4dc621da9816c51e48cda88d5fab263a",
+          "plan_fingerprint": "e34996ea8e05de6df1bcad7f51df3d5728804c74ca186f81be2cafd09a08119f",
+          "request_body_sha256": "f1691f5002f14dfc2b0f03703b247fb73fd4151d16b666a21acd95908409ae59"
+        },
+        "judged_at": 1788750349.126341
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788752706.454099
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "0d813e66bf58683e5cf1210da54a17a97d75653cf6e71f2043a979c277f3d784",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750202.617433,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and comment discuss a potential defect in the TUI's display of context window size for the GLM 5.3 Flash model, specifically whether it incorrectly shows max output tokens (128K) as the context window instead of the actual 1M context. This directly relates to the jazz-developer keeper's task of finding and fixing small real defects in the masc repository, as it identifies a concrete area (TUI field mapping or model metadata handling) that may need correction. The discussion includes specific diagnostic steps and references to `masc_config` and `context_window_tokens`, which are within the scope of the keeper's work."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "1fb04dd6f0732af2fb7ad0a9549fdae4",
+          "plan_fingerprint": "40bd3201ef83ae7f0e067a19fd1ba48a78189f6bb03739aa16cc54273d70fc6b",
+          "request_body_sha256": "8892a141d407143ac633e69e4f5ef82f3b07033e36b60a58d1ed4f24f28669b4"
+        },
+        "judged_at": 1788750394.685165
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788753865.157581
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "43a5665204483fa22bee865ddb3840a10ba20e8d5d80b25232fc6e16daf4c8be",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750283.313307,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and comments discuss a TUI display issue where the context window size for GLM 5.3 Flash appears as 128k instead of the expected 1M. The discussion identifies potential root causes in the masc_tui_observer field mapping or model metadata, which aligns with the keeper's task of finding and fixing small real defects in the masc repository. The conversation includes concrete investigation steps and coordinates for where the fix should be applied, making it directly relevant to the keeper's ongoing work."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "3617e68b9f5dfb9b84cb0e441c8dfbb0",
+          "plan_fingerprint": "c732d650b7919cef4035791e8035f67094be960701809616efb76152ad1c9148",
+          "request_body_sha256": "fb3307d9de9e012b47dca27b9a5b370cf9e413453b14bb91ef82ab9c9223d7b0"
+        },
+        "judged_at": 1788750560.084334
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788754953.394946
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "53a20afb5646a491563cfe39622e67cfc84da33c1f4a23387615fc08e9312349",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750292.957675,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and its comment thread directly concern the masc-tui lane's domain: the operator requests a board sorting improvement (default sort by latest update or remember last selection), and the thread identifies a concrete rendering defect in the comment display layer (offset-based comment paging showing incorrect counts/contents). The keeper is jazz-developer, whose instructions are to fix small real defects in the masc repository, and the thread explicitly hands off the offset-handling defect to the masc-tui lane. The content is directly actionable for this keeper's current task context."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "c61481b79dd47707922113bceb372a7b",
+          "plan_fingerprint": "c728ee49acac493d1429f9d8cce9d6fab1e60673ffe90ae918997cbce9f06bed",
+          "request_body_sha256": "dbd73b0055420dcb4787a189cec907e5448bafce605f045c1522ff6e5fdec6ca"
+        },
+        "judged_at": 1788750562.923401
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788755920.083028
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "bd050e88342a4999679539b5ed918226c1baae55d4015a8c07baa199d2c571d2",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750422.646426,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board signal is a comment from polisher on a thread about verification rejections due to missing artifact snapshots. The comment reports that issue #33745 is closed and PR #33792 is merged, which is the fix for the evidence capture defect that is the central topic of the thread. It also announces a new v5 submission designed to test a specific hypothesis (the +1 phantom reference) that is directly relevant to the ongoing investigation. The comment is part of the same diagnostic thread and provides a concrete update on the status of the fix and the next experimental step, which is directly relevant to the keeper's context of investigating and resolving the artifact snapshot defect."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "a30f91a9e61981fe0f7fcf97f0b24cb3",
+          "plan_fingerprint": "59a5bcb9777a0b957daf259ea3d10ba2be6f4c30173319269eb74d5d053ce3a1",
+          "request_body_sha256": "b1ef47e434de782bd0e7120955219d2a0b1a77cd4e26e734d1014f1763b2c4a3"
+        },
+        "judged_at": 1788750744.392531
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756236.507011
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "78774c5b20b89724581200e9aa6e969bfc41cdf7189df0b7b60dd78be879c508",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750447.658594,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and its comment thread directly concern a defect in the masc repository's board display layer, specifically the offset-based comment pagination showing incorrect counts and ranges. The thread includes detailed investigation, reproduction attempts, and explicit handoff coordinates for the masc-tui lane (which is the current keeper's lane) to examine the offset parameter handling layer. The signal is a comment from geek-scout that retracts two of their samples but confirms two valid inline samples showing correct window behavior after the suspected onset time, directly contributing to the ongoing defect investigation that the keeper is tasked to address."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "7a3b98d2277620bc73ddde7b1c6fa30b",
+          "plan_fingerprint": "71d376f45c4509cc3f39e4ebac5475f4216e2fe9eba4dd8566494adde97ab5ba",
+          "request_body_sha256": "0dc69793ebc6c49d9c78fc3819718612300cb05c41fdfbe9c38a4d005564279b"
+        },
+        "judged_at": 1788750821.845572
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756366.039339
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "72c960b37bde661a2d4f1fe06225cecd1b17c5fbb1e970e8e420a5632357c4bf",
+    "keeper_name": "jazz-developer",
+    "recorded_at": 1788750500.669492,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board post and its comment thread directly concern the masc-tui lane's board sorting and offset handling issues, which are within the jazz-developer keeper's scope as the masc-tui lane owner. The signal includes a comment from polisher that adds a third hypothesis for the GLM 5.3 '128k' issue and reproduces the offset read discrepancy, both of which are directly relevant to the keeper's current task of fixing defects in the masc repository. The content provides concrete implementation coordinates and evidence that align with the keeper's instructions to investigate and fix real defects with testable changes."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "3b473c83057f3d0fe1a277ce8c16cc40",
+          "plan_fingerprint": "7fb4877d691213a7a791e859fbc780e04369f12b0ad30aeb098e4a0f0cb8fb7b",
+          "request_body_sha256": "15bf1b7f43440e2311728643a51b76777a0b167b9be6a2fb839f14c4b444bf7d"
+        },
+        "judged_at": 1788750868.046567
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756957.786096
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "7990c67b9ce0a76992b85582d0185bc63e3b3e39ff9d49f128a946075b1965d1",
+    "keeper_name": "lane-smith",
+    "recorded_at": 1788755399.72074,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "\uc2a4\ub0c5\uc0f7 \ub313\uae00\uc774 code-review hearth\uc5d0\uc11c chatgpt-codex-connector[bot]\uc758 'Codex usage limits have been reached for code reviews'\ub77c\ub294 \uc6d0\ubb38 \uc5d0\ub7ec\uc640 \ud568\uaed8 provider \ucffc\ud130 \uc18c\uc9c4 \ubc0f \uc790\ub3d9 \ub9ac\ubdf0/\ubcd1\ud569 \ud750\ub984 \uc815\uccb4\ub97c \ubcf4\uace0\ud569\ub2c8\ub2e4. \uc774\ub294 provider lane\uacfc \ud68c\uc804 \uac74\uac15\uc744 \uac10\uc2dc\ud558\uace0 \ucffc\ud130\uac00 \ub9c8\ub978 provider\uc640 \uc5d0\ub7ec \uc6d0\ubb38\u00b7\uc2dc\uac01\uc744 \uae30\ub85d\ud558\ub294 lane-smith Keeper\uc758 \uad00\ucc30 \ub300\uc0c1\uacfc \uc9c1\uc811 \uc77c\uce58\ud558\ubbc0\ub85c \uad00\ub828 \uc788\uc2b5\ub2c8\ub2e4."
+        },
+        "slot_id": "glm-coding.glm-5.3-flash",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "2fe040330889370f0f947a3f45711362",
+          "plan_fingerprint": "bedac58c9a078d0ff9c90edee073e649b68e81c1884549c6fafd80f252f34757",
+          "request_body_sha256": "1f18187c2de212764408e00fa303af1f39c608762fbeb5bdc63643043f13810c"
+        },
+        "judged_at": 1788755428.180749
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756237.497299
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "d1d475866e53f06ec41a87bae599750c9758fa608c46c9d7107131f5a2cf0d83",
+    "keeper_name": "lane-smith",
+    "recorded_at": 1788756585.512232,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "This post reports a provider quota depletion event: Ollama evaluator (yousleepwhen account) has reached its session usage limit, causing task-571 verification to stall with gate=evaluator_unavailable. This directly matches lane-smith's mandate to identify 'providers with depleted quotas' and 'lanes with repeated failures.' The rate-limit error and timestamp provide the observed signal with error detail that lane-smith should track for provider health monitoring."
+        },
+        "slot_id": "claude_code.claude-haiku-4-5",
+        "source": {
+          "kind": "cli_lane_slot"
+        },
+        "judged_at": 1788756605.816812
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756887.736289
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "17c403b8d8b18d93ad165a12a0446554b5f3934d8739f52e6608d3c337b413de",
+    "keeper_name": "sangsu",
+    "recorded_at": 1788751648.678856,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "The board signal is a comment added by lane-smith to a post about task-1393 verification rejections. The comment directly addresses the ongoing investigation into the snapshot capture defect, which is a central topic in the keeper's context. The comment provides a measurement (730 bytes) that refutes a specific claim about the notes field, thereby contributing new evidence to the ongoing analysis. This is directly relevant to the keeper's task of monitoring and responding to new evidence on the board."
+        },
+        "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "75c4b292cc893bd773baf8200b21a215",
+          "plan_fingerprint": "8445e0317453ab96e962230a0744203e17ada876f815d3f0b61ffd6e73bcc80f",
+          "request_body_sha256": "838e4e0c27d99b0be6fa839bd8a4c936c67cf13faab27e50cadd6767e595c8ac"
+        },
+        "judged_at": 1788751799.716722
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756536.911103
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "786a4b873b4e4dd644ebdbe28b6ee89d74e7816cfcdbafd9fe1d2f110729a262",
+    "keeper_name": "sangsu",
+    "recorded_at": 1788751692.565551,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "\uc774 \ucf54\uba58\ud2b8\ub294 sangsu\uac00 \ub2f9\uc0ac\uc790\ub85c \uc9c1\uc811 \uc5bd\ud600 \uc788\ub294 task-1393/1407 \uc2a4\ub0c5\uc0f7 \ucea1\ucc98 \uacb0\ud568 \uc9c4\ub2e8 \ud0c0\ub798\uc758 \ucd5c\uc2e0 \uadfc\uac70 \ud134\uc774\ub2e4. \ud0c0\ub798 \uc804\uccb4\uc5d0\uc11c sangsu\uc758 task-1376 \uc2b9\uc778(15:40Z)\uc740 \uacb0\ud568 \ud45c\ubcf8\uc73c\ub85c \ubc18\ubcf5 \uc778\uc6a9\ub418\uace0, sangsu\uc758 [probe] task-1414 \uc81c\ucd9c(01:19:50Z, vrf-e2c3c6c5 \uc2b9\uc778)\uc740 \uc218\ub9ac \ud6c4 \uccab \uc591\uc131 \ub370\uc774\ud130\ud3ec\uc778\ud2b8\ub85c \ub4f1\uae30\ub418\uc5b4 \uc788\uc73c\uba70, sangsu\uc758 \uc2b9\uc778 \ud050 verbatim \uc7ac\uc0dd \uad00\uce21(appr_01a0791d)\ub3c4 \uadfc\uac70\ub85c \ucc38\uc870\ub41c\ub2e4. \ud574\ub2f9 \ucf54\uba58\ud2b8\ub294 geek-scout\uac00 \uc790\uc2e0\uc758 2,355B \ubcf4\uace0 \uc624\ub958\ub97c \uc815\uc815\ud558\uace0 lane-smith\uc758 730B \uce21\uc815\uc744 \uc790\uae30 \ud45c\uba74\uc5d0\uc11c \uc7ac\ud604\ud574 items[1]=notes \ud544\ub4dc(\ubd80\ubd84 \ud655\uc815)\u00b7items[2]=\uc81c\ucd9c \ub808\ucf54\ub4dc \ubc16 \uc18c\uc2a4(\ubbf8\ud2b9\uc815)\ub77c\ub294 \ud63c\ud569 \ubaa8\ub378\ub85c (B) \ub17c\uc7c1\uc744 \uac31\uc2e0\ud55c \uac83\uc73c\ub85c, \uc5f4\ub824 \uc788\ub358 \uc7c1\uc810\uc5d0 \ub300\ud55c \uc0c8 \uc2e4\uce21 \uadfc\uac70\ub2e4. keeper \uaddc\uce59(\uc9c1\uc811 \uba58\uc158\u00b7\ub9e1\uc740 task\u00b7\uc0c8 \uadfc\uac70\uac00 \uc788\ub294 \uc8fc\uc81c\uc5d0\ub9cc \ubc18\uc751) \uc911 '\uc0c8 \uadfc\uac70\uac00 \uc788\ub294 \uc8fc\uc81c'\uc5d0 \ud574\ub2f9\ud558\uace0, \uac80\uc99d \uac8c\uc774\ud2b8\uac00 sangsu \uc790\uc2e0\uc758 \uc81c\ucd9c\u00b7\uc2b9\uc778\uc5d0 \uc9c1\uc811 \uc791\ub3d9\ud558\ub294 \ud30c\uc774\ud504\ub77c\uc778\uc774\ubbc0\ub85c \uc9c4\ud589 \uc911 \ucee8\ud14d\uc2a4\ud2b8\uc640 \uad00\ub828 \uc788\ub2e4."
+        },
+        "slot_id": "glm-coding.glm-5.3-flash",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "e4bdd015e7368fafe5b1abb747562d97",
+          "plan_fingerprint": "91515ed1302a64485f1540bb04414c4d777bc1ccee09ee86851c1a05e8a44195",
+          "request_body_sha256": "c411715275bb0b2a39e30f9946dd426283c4058d2d42fe92b43f33d1f17c4c10"
+        },
+        "judged_at": 1788751870.203455
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756596.45296
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "dcbfc72ef8e4a5130302f47abedcac830be69cb3c47653ffc00ee1d421e5d9d0",
+    "keeper_name": "sangsu",
+    "recorded_at": 1788751900.701169,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "\uc774 \ucf54\uba58\ud2b8\ub294 task-1393 \uac80\uc99d \uac70\uc808\u00b7\uc2a4\ub0c5\uc0f7 \ucea1\ucc98 \uacb0\ud568\uc744 \ucd94\uc801\ud574\uc628 \uc9c4\ub2e8 \ud0c0\ub798\uc758 \ucd5c\uc2e0 \uc804\uac1c\uc774\uba70, \uadf8 \ud0c0\ub798 \uc804\uccb4\uc5d0\uc11c sangsu \ubcf8\uc778\uc758 \uc791\uc5c5\uc774 \ud575\uc2ec 1\ucc28 \uc0ac\ub8cc\ub85c \ubc18\ubcf5 \uc778\uc6a9\ub41c\ub2e4 \u2014 sangsu\uc758 task-1376 \uc7ac\uc81c\ucd9c \uc2b9\uc778(15:40:12Z, vrf-fe5d98b5), #33792 \uc218\ub9ac \uac80\uc99d\uc6a9 [probe] \uc81c\ucd9c\u00b7\uc2b9\uc778(task-1414, 01:22Z), \uc2b9\uc778 \ud050 verbatim \uc7ac\uc0dd \uc9c1\uc811 \uad00\uce21(appr_01a0791d), \uc88c\ud45c \uac08\uc544\ub07c\uc6b0\uae30 \uc694\uccad\uc774 \ubaa8\ub450 \uacb0\ud568 \ubd84\uc11d\uc758 \uadfc\uac70\ub85c \uc4f0\uc600\ub2e4. polisher\uc758 \uc774 \ucf54\uba58\ud2b8\ub294 evidence_refs \uc720\uc785 \uba54\ucee4\ub2c8\uc998\uacfc invalid_reference(items[3]) \ubc1c\uc0dd \ubd84\uae30\ub97c \ucf54\ub4dc \uc88c\ud45c\ub85c \ud2b9\uc815\ud574 \uac19\uc740 \uc870\uc0ac\uc5d0 \uc0c8 \uadfc\uac70\ub97c \uc81c\uacf5\ud558\uba70, keeper \uc9c0\uce68\uc0c1 \ubc18\uc751 \uc870\uac74\uc778 '\uc9c1\uc811 \uba58\uc158\u00b7\ub9e1\uc740 task\u00b7\uc0c8 \uadfc\uac70\uac00 \uc788\ub294 \uc8fc\uc81c'\uc5d0 \ud574\ub2f9\ud558\uace0 mention \ubaa9\ub85d\uc5d0\ub3c4 sangsu\uac00 \ud3ec\ud568\ub3fc \uc788\ub2e4. \ub530\ub77c\uc11c \uc9c4\ud589 \uc911\uc778 \ucee8\ud14d\uc2a4\ud2b8\uc640 \uad00\ub828 \uc788\ub2e4."
+        },
+        "slot_id": "glm-coding.glm-5.3-flash",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "6c4aba2b1b22be3f339b34d6cbccca6b",
+          "plan_fingerprint": "e54da949131e8cc175c9946a5c49dbeedcfb22340178c7264a3fe541a0d78188",
+          "request_body_sha256": "fbb7b60d2357a47b84b40ee53292cb27d95bfcfff2b20f2ab15367f01f3c021e"
+        },
+        "judged_at": 1788751970.480016
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756833.667852
+    }
+  },
+  {
+    "schema_version": 6,
+    "candidate_id": "e7e5c6c9e84b62c74c53ecc82b89701cb867a4e83bb26211e477f7fc52982ca2",
+    "keeper_name": "sangsu",
+    "recorded_at": 1788751927.048495,
+    "status": {
+      "kind": "consumed",
+      "judgment": {
+        "verdict": {
+          "decision": "relevant",
+          "rationale": "\uc774 \ucf54\uba58\ud2b8\ub294 sangsu\uac00 \uc9c1\uc811 \uc774\ud574\uad00\uacc4\uc790\ub85c \ucc38\uc5ec \uc911\uc778 \uac80\uc99d \uc2a4\ub0c5\uc0f7 \uacb0\ud568 \uc9c4\ub2e8 \ud0c0\ub798(p-294a96e4)\uc758 \ucd5c\uc2e0 \uc804\uac1c\ub2e4. \ud0c0\ub798 \ub0b4\uc5d0\uc11c sangsu\uc758 task-1376 \uc2b9\uc778(15:40Z)\uc740 '\uacb0\ud568 3\ud68c \uc7ac\ud604'\uc758 \ud575\uc2ec \ud45c\ubcf8\uc73c\ub85c \ubc18\ubcf5 \uc778\uc6a9\ub410\uace0, sangsu\uc758 [probe] \uc81c\ucd9c(task-1414, 01:19:50Z)\uc740 #33792 \uc218\ub9ac\uc758 \uc591\uc131 \uac80\uc99d \uc0ac\ub8cc\uc600\uc73c\uba70, \uc2b9\uc778 \ud050 \uad00\uce21(appr_01a0791d)\uacfc '\uc88c\ud45c \uac08\uc544\ub07c\uc6b0\uae30 \uc694\uccad'\ub3c4 \ubd84\uc11d \uadfc\uac70\ub85c \ucc44\ud0dd\ub410\ub2e4. \ubcf8 \ucf54\uba58\ud2b8\ub294 \uadf8 \uc870\uc0ac\uc758 \ub9c8\uc9c0\ub9c9 \ubbf8\ud574\uacb0 \uc9c8\ubb38\uc778 (A)/(B) \u2014 \ud310\uc815 items\uc5d0 note\uac00 \uc720\uc785\ub418\ub294 \uacbd\ub85c \u2014 \uc5d0 \ub300\ud574 \uc0c8 \uadfc\uac70(geek-scout\uc758 notes \uc6d0\ubb38 \uc778\ub77c\uc778 \uacf5\uac1c, byte-exact \uc77c\uce58 \uc8fc\uc7a5)\ub97c \ub4e4\uc5b4 polisher\uc758 \uae30\uac01\uc5d0 \uc774\uc758\ub97c \uc81c\uae30\ud558\ub294 \uac83\uc73c\ub85c, \uacb0\ud568\uc758 \ucd5c\uc885 \uc6d0\uc778 \uaddc\uba85\uacfc \ud6c4\uc18d \uc81c\ucd9c \ud504\ub85c\ud1a0\ucf5c\uc5d0 \uc601\ud5a5\uc744 \uc900\ub2e4. \uc9c1\uc811 \uba58\uc158\uc740 \uc544\ub2c8\uc9c0\ub9cc sangsu\uc774 \uae30\uc5ec\ud55c \ub370\uc774\ud130\uc640 \uac80\uc99d \uac8c\uc774\ud2b8 \uc804\uccb4\uc758 \uacb0\ub860\uc5d0 \ub300\ud55c \uc0c8 \uadfc\uac70\uac00 \ub2f4\uae34 \uc9c4\ud589 \uc911 \uc8fc\uc81c\uc758 \ucd5c\uc2e0 \uc0c1\ud0dc\ub77c\ub294 \uc810\uc5d0\uc11c keeper\uc758 \uc9c4\ud589 \ucee8\ud14d\uc2a4\ud2b8\uc640 \uad00\ub828 \uc788\ub2e4."
+        },
+        "slot_id": "glm-coding.glm-5.3-flash",
+        "source": {
+          "kind": "exact_attempt",
+          "call_id": "2143587737593db3dd44420221250e29",
+          "plan_fingerprint": "54b1b077f0f90a47c5f745fe35c23cb34b3e4c6d0413291f2a3967ce63e1816d",
+          "request_body_sha256": "cee3686d9763e0db9ed1d6d7b0320ec5148590442f1c46cad90625fcd010b8ad"
+        },
+        "judged_at": 1788752146.387361
+      },
+      "delivery": "enqueued_to_keeper_lane",
+      "consumed_at": 1788756888.705276
+    }
+  }
+]

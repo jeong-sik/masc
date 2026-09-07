@@ -1,0 +1,20 @@
+name = "ayu-mirage"
+light = false
+
+[palette]
+base00 = "1f2430"
+base01 = "242936"
+base02 = "323844"
+base03 = "4a5059"
+base04 = "707a8c"
+base05 = "cccac2"
+base06 = "d9d7ce"
+base07 = "f3f4f5"
+base08 = "f28779"
+base09 = "ffad66"
+base0a = "ffd173"
+base0b = "d5ff80"
+base0c = "95e6cb"
+base0d = "73d0ff"
+base0e = "d4bfff"
+base0f = "f27983"

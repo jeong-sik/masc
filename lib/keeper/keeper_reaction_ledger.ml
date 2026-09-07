@@ -1120,6 +1120,76 @@ let unique_stimulus_ids stimulus_ids =
   |> List.rev
 ;;
 
+(* The dashboard asks this on every refresh, for every Keeper with a wake,
+   and the answer used to come from a full scan of that Keeper's ledger.
+   Measured 2026-09-07: 22 Keepers hold about 100 MB of reaction ledger, the
+   largest 33 MB, and the scan was 4.1% of the process's allocation - a share
+   that grows with the ledger, because a ledger only gets longer.
+
+   A day file is append-only, so an answer can be kept and advanced.
+   [Dated_jsonl.fold_range_appended] folds only what each file gained since
+   the cursors say it was read to, which is the same primitive
+   [Keeper_tool_call_log] uses for its trailing window.
+
+   What is kept per Keeper: the cursors, and one accumulator per stimulus the
+   dashboard has asked about. Not the ledger, and not every stimulus in it -
+   an id nobody asks about is never tracked. An accumulator is five booleans,
+   six timestamps, two counts, a reason and the event ids seen for that one
+   stimulus.
+
+   A stimulus asked about for the first time cannot be answered from a
+   partial read, so it clears the cursors and every tracked accumulator
+   restarts from an empty ledger read. That is the same full scan as before,
+   once per stimulus rather than once per refresh.
+
+   Bounding the scan by the wake's [started_at] would be wrong, and the
+   reason is not obvious: [Keeper_wake_enqueued] carries an
+   [occurrence_status], and [Keeper_wake_already_acked] means the wake is a
+   repeat for a stimulus enqueued much earlier. Starting the read there drops
+   that stimulus's evidence and the dashboard shows "no evidence" for a
+   reaction that happened (issue #33798). *)
+(* The read covers the whole ledger, so the range starts before any month
+   directory could exist. [Dated_jsonl] lists the month directories that are
+   there and ignores the rest of the range, so an early date costs nothing. *)
+let event_queue_reaction_evidence_epoch = "1970-01-01"
+
+type event_queue_reaction_evidence_cache =
+  { mutable cursors : (string * int) list
+  ; tracked : (string, event_queue_reaction_evidence_accumulator) Hashtbl.t
+  }
+
+(* Keyed by the store directory, so two base paths never share an entry and a
+   test working in its own directory starts with an empty cache. *)
+let event_queue_reaction_evidence_caches
+  : (string, event_queue_reaction_evidence_cache) Hashtbl.t
+  =
+  Hashtbl.create 8
+;;
+
+let event_queue_reaction_evidence_cache_mu = Stdlib.Mutex.create ()
+
+let restart_tracked_accumulators cache =
+  let ids = Hashtbl.fold (fun id _ ids -> id :: ids) cache.tracked [] in
+  List.iter
+    (fun id ->
+       Hashtbl.replace cache.tracked id (empty_event_queue_reaction_evidence_accumulator ()))
+    ids;
+  cache.cursors <- []
+;;
+
+(* A file shorter than its cursor was rotated or rewritten, and
+   [fold_range_appended] re-reads it from zero rather than skipping rows -
+   so the accumulators it just fed have counted those rows twice. The whole
+   cache for this Keeper is dropped and read again. *)
+let cursor_went_backwards ~previous ~next =
+  List.exists
+    (fun (path, boundary) ->
+       match List.assoc_opt path previous with
+       | Some earlier -> boundary < earlier
+       | None -> false)
+    next
+;;
+
 let event_queue_reaction_evidence_batch_result
       ~base_path
       ~keeper_name
@@ -1132,46 +1202,91 @@ let event_queue_reaction_evidence_batch_result
     match stimulus_ids with
     | [] -> Ok []
     | _ ->
-      let accumulators = Hashtbl.create (List.length stimulus_ids) in
-      let requested =
-        List.map
-          (fun stimulus_id ->
-             stimulus_id, empty_event_queue_reaction_evidence_accumulator ())
-          stimulus_ids
-      in
-      List.iter
-        (fun (stimulus_id, accumulator) ->
-           Hashtbl.add accumulators stimulus_id accumulator)
-        requested;
-      let note_parsed_row row =
-        match string_field "stimulus_id" row with
-        | Some stimulus_id ->
-          (match Hashtbl.find_opt accumulators stimulus_id with
-           | Some accumulator ->
-             note_event_queue_reaction_evidence_row
-               ~keeper_name
-               accumulator
-               row
-           | None -> ())
-        | None -> ()
-      in
       let store = store_for_base_path ~base_path ~keeper_name in
-      (match
-         Dated_jsonl.iter_all_entries_result store (function
-           | Dated_jsonl.Parsed row -> note_parsed_row row
-           | Dated_jsonl.Malformed_json _ -> ())
-       with
-       | Error error -> Error (Evidence_read_error error)
-       | Ok () ->
-         Ok
-           (List.map
-              (fun (stimulus_id, accumulator) ->
-                 ( stimulus_id
-                 , event_queue_reaction_evidence_of_accumulator
-                     ~keeper_name
-                     ~stimulus_id
-                     accumulator ))
-              requested))
+      let base_dir = Dated_jsonl.base_dir store in
+      let until = Jsonl_writer.day_key ~ts:(Time_compat.now ()) in
+      Stdlib.Mutex.protect event_queue_reaction_evidence_cache_mu (fun () ->
+        let cache =
+          match Hashtbl.find_opt event_queue_reaction_evidence_caches base_dir with
+          | Some cache -> cache
+          | None ->
+            let cache = { cursors = []; tracked = Hashtbl.create 8 } in
+            Hashtbl.replace event_queue_reaction_evidence_caches base_dir cache;
+            cache
+        in
+        let untracked =
+          List.filter (fun id -> not (Hashtbl.mem cache.tracked id)) stimulus_ids
+        in
+        if untracked <> []
+        then begin
+          List.iter
+            (fun id ->
+               Hashtbl.replace
+                 cache.tracked
+                 id
+                 (empty_event_queue_reaction_evidence_accumulator ()))
+            untracked;
+          restart_tracked_accumulators cache
+        end;
+        let advance () =
+          let previous = cache.cursors in
+          let (), next =
+            Dated_jsonl.fold_range_appended
+              store
+              ~since:event_queue_reaction_evidence_epoch
+              ~until
+              ~cursors:previous
+              ~init:()
+              ~f:(fun () row ->
+                match string_field "stimulus_id" row with
+                | Some stimulus_id ->
+                  (match Hashtbl.find_opt cache.tracked stimulus_id with
+                   | Some accumulator ->
+                     note_event_queue_reaction_evidence_row
+                       ~keeper_name
+                       accumulator
+                       row
+                   | None -> ())
+                | None -> ())
+          in
+          cache.cursors <- next;
+          cursor_went_backwards ~previous ~next
+        in
+        match advance () with
+        | exception Sys_error detail ->
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Error
+            (Evidence_read_error
+               (Dated_jsonl.Io_error
+                  { operation = Dated_jsonl.Read_file; path = base_dir; detail }))
+        | went_backwards ->
+          let rebuilt =
+            if went_backwards
+            then begin
+              restart_tracked_accumulators cache;
+              match advance () with
+              | exception Sys_error detail -> Error detail
+              | _ -> Ok ()
+            end
+            else Ok ()
+          in
+          (match rebuilt with
+           | Error detail ->
+             Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+             Error
+               (Evidence_read_error
+                  (Dated_jsonl.Io_error
+                     { operation = Dated_jsonl.Read_file; path = base_dir; detail }))
+           | Ok () ->
+             Ok
+               (List.map
+                  (fun stimulus_id ->
+                     ( stimulus_id
+                     , event_queue_reaction_evidence_of_accumulator
+                         ~keeper_name
+                         ~stimulus_id
+                         (Hashtbl.find cache.tracked stimulus_id) ))
+                  stimulus_ids)))
 ;;
 
 let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
@@ -1264,7 +1379,7 @@ let nested_float_field outer inner json =
 ;;
 
 let summary_schema = "keeper.reaction_ledger.summary.v2"
-let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v2"
+let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v3"
 
 let cap_list limit values =
   let rec loop remaining acc = function
@@ -1299,19 +1414,11 @@ type durable_event_queue_health =
   ; durable_event_queue_count : int
   ; durable_event_queue_pending_count : int
   ; immediate_count : int
-  ; oldest_arrived_at : float option
-  ; newest_arrived_at : float option
+  ; oldest_source_arrived_at : float option
+  ; newest_source_arrived_at : float option
   ; payload_kind_counts : (string * int) list
   ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
   }
-
-let durable_event_queue_is_stale ~now ~stale_after_sec health =
-  health.durable_event_queue_count > 0
-  &&
-  match health.oldest_arrived_at with
-  | None -> false
-  | Some arrived_at -> now -. arrived_at >= stale_after_sec
-;;
 
 let payload_kind_count_pairs stimuli =
   let tbl = Hashtbl.create 8 in
@@ -1331,7 +1438,7 @@ let durable_event_queue_health ~base_path ~keeper_name =
   in
   let queue = snapshot.pending in
   let stimuli = Keeper_event_queue.to_list queue in
-  let oldest_arrived_at, newest_arrived_at =
+  let oldest_source_arrived_at, newest_source_arrived_at =
     List.fold_left
       (fun (oldest, newest) (stimulus : Keeper_event_queue.stimulus) ->
         let arrived_at = stimulus.arrived_at in
@@ -1357,14 +1464,14 @@ let durable_event_queue_health ~base_path ~keeper_name =
   ; durable_event_queue_count = Keeper_event_queue.length queue
   ; durable_event_queue_pending_count = Keeper_event_queue.length snapshot.pending
   ; immediate_count
-  ; oldest_arrived_at
-  ; newest_arrived_at
+  ; oldest_source_arrived_at
+  ; newest_source_arrived_at
   ; payload_kind_counts = payload_kind_count_pairs stimuli
   ; read_errors = snapshot.read_errors
   }
 ;;
 
-let durable_event_queue_health_json ~now ~stale_after_sec health =
+let durable_event_queue_health_json ~now health =
   let float_opt_to_json = function
     | None -> `Null
     | Some value -> `Float value
@@ -1373,7 +1480,6 @@ let durable_event_queue_health_json ~now ~stale_after_sec health =
     | None -> `Null
     | Some value -> `Int (int_of_float (max 0.0 (now -. value)))
   in
-  let stale = durable_event_queue_is_stale ~now ~stale_after_sec health in
   let read_errors_json =
     List.map
       (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
@@ -1396,12 +1502,13 @@ let durable_event_queue_health_json ~now ~stale_after_sec health =
     ; ( "durable_event_queue_pending_count"
       , `Int health.durable_event_queue_pending_count )
     ; "immediate_count", `Int health.immediate_count
-    ; "oldest_arrived_at_unix", float_opt_to_json health.oldest_arrived_at
-    ; "oldest_age_sec", age_opt_to_json health.oldest_arrived_at
-    ; "newest_arrived_at_unix", float_opt_to_json health.newest_arrived_at
-    ; "newest_age_sec", age_opt_to_json health.newest_arrived_at
-    ; "stale_after_sec", `Float stale_after_sec
-    ; "stale", `Bool stale
+    ; "oldest_source_arrived_at_unix", float_opt_to_json health.oldest_source_arrived_at
+    ; "oldest_source_age_seconds", age_opt_to_json health.oldest_source_arrived_at
+    ; "newest_source_arrived_at_unix", float_opt_to_json health.newest_source_arrived_at
+    ; "newest_source_age_seconds", age_opt_to_json health.newest_source_arrived_at
+    ; "queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
+        (Unknown (if health.read_errors = [] then First_admission_not_recorded
+                  else Queue_observation_incomplete)))
     ; "read_error_count", `Int (List.length health.read_errors)
     ; "read_errors", `List read_errors_json
     ; ( "payload_kind_counts"
@@ -1690,14 +1797,11 @@ let unavailable_fleet_summary_json () =
     ; "durable_event_queue_discovered_keeper_names", `List []
     ; "durable_event_queue_discovery_error", `Null
     ; "durable_event_queue_discovery_error_count", `Int 0
-    ; ( "durable_event_queue_stale_after_sec"
-      , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
-    ; "durable_event_queue_stale_count", `Int 0
-    ; "durable_event_queue_stale_keeper_count", `Int 0
+    ; "durable_event_queue_residence", Keeper_event_queue_persistence.(
+        queue_residence_to_yojson (Unknown Queue_observation_incomplete))
     ; "durable_event_queue_read_error_count", `Int 0
     ; "durable_event_queue_read_errors_by_keeper", `List []
     ; "durable_event_queue_by_keeper", `List []
-    ; "durable_event_queue_stale_by_keeper", `List []
     ; "durable_event_queue_payload_counts", `List []
     ; "pending_by_keeper", `List []
     ; "read_error_count", `Int 0
@@ -1715,7 +1819,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       String.compare
       (keeper_names @ durable_event_queue_discovery.keeper_names)
   in
-  (* NDT-OK: fleet summary health renders stale-age telemetry at the read
+  (* NDT-OK: fleet summary health renders source-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
   let summaries_with_status =
@@ -1727,9 +1831,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
-  in
-  let durable_event_queue_stale_after_sec =
-    Env_config.KeeperHealth.durable_queue_stale_sec ()
   in
   let total_int name =
     List.fold_left (fun acc summary -> acc + int_field name summary) 0 summaries
@@ -1750,25 +1851,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     durable_event_queue_summaries
     |> List.filter (fun summary -> summary.durable_event_queue_count > 0)
     |> List.map
-         (durable_event_queue_health_json
-            ~now
-            ~stale_after_sec:durable_event_queue_stale_after_sec)
-  in
-  let durable_event_queue_stale_summaries =
-    List.filter
-      (durable_event_queue_is_stale
-         ~now
-         ~stale_after_sec:durable_event_queue_stale_after_sec)
-      durable_event_queue_summaries
-  in
-  let durable_event_queue_stale_count =
-    List.fold_left
-      (fun acc summary -> acc + summary.durable_event_queue_count)
-      0
-      durable_event_queue_stale_summaries
-  in
-  let durable_event_queue_stale_keeper_count =
-    List.length durable_event_queue_stale_summaries
+         (durable_event_queue_health_json ~now)
   in
   let durable_event_queue_read_error_count =
     List.fold_left
@@ -1780,16 +1863,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     durable_event_queue_summaries
     |> List.filter (fun summary -> summary.read_errors <> [])
     |> List.map
-         (durable_event_queue_health_json
-            ~now
-            ~stale_after_sec:durable_event_queue_stale_after_sec)
-  in
-  let durable_event_queue_stale_by_keeper =
-    durable_event_queue_stale_summaries
-    |> List.map
-         (durable_event_queue_health_json
-            ~now
-            ~stale_after_sec:durable_event_queue_stale_after_sec)
+         (durable_event_queue_health_json ~now)
   in
   let durable_event_queue_payload_counts =
     let tbl = Hashtbl.create 8 in
@@ -1895,10 +1969,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       if quarantined_row_count > 0
       then "reaction_ledger_quarantined_row" :: reasons
       else reasons)
-    |> (fun reasons ->
-      if durable_event_queue_stale_count > 0
-      then "durable_event_queue_stale" :: reasons
-      else reasons)
     |> List.rev
   in
   let status =
@@ -1911,7 +1981,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       List.exists
         (fun (status, _) -> status = Summary_degraded)
         summaries_with_status
-      || durable_event_queue_stale_count > 0
     then Summary_degraded
     else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
     else Summary_ok
@@ -1954,15 +2023,14 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
         | None -> `Null )
     ; ( "durable_event_queue_discovery_error_count"
       , `Int durable_event_queue_discovery_error_count )
-    ; "durable_event_queue_stale_after_sec", `Float durable_event_queue_stale_after_sec
-    ; "durable_event_queue_stale_count", `Int durable_event_queue_stale_count
-    ; ( "durable_event_queue_stale_keeper_count"
-      , `Int durable_event_queue_stale_keeper_count )
+    ; "durable_event_queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
+        (Unknown (if durable_event_queue_discovery_error_count > 0
+                     || durable_event_queue_read_error_count > 0
+                  then Queue_observation_incomplete else First_admission_not_recorded)))
     ; "durable_event_queue_read_error_count", `Int durable_event_queue_read_error_count
     ; ( "durable_event_queue_read_errors_by_keeper"
       , `List durable_event_queue_read_errors_by_keeper )
     ; "durable_event_queue_by_keeper", `List durable_event_queue_by_keeper
-    ; "durable_event_queue_stale_by_keeper", `List durable_event_queue_stale_by_keeper
     ; "durable_event_queue_payload_counts", durable_event_queue_payload_counts
     ; "pending_by_keeper", `List pending_by_keeper
     ; "read_error_count", `Int read_error_count

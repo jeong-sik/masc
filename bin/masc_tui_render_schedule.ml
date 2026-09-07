@@ -407,17 +407,17 @@ module Table = Masc_tui_table
    [memory_cells] is this screen's description of its columns; {!Masc_tui_table}
    draws both the header and the rows from it, so the two cannot drift. *)
 
-let memory_state_width = 10
+let memory_state_width = 2
 let memory_minimum_name_width = 16
 let memory_maximum_name_width = 26
-let memory_revision_width = 6
+let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
 let memory_delta_width = 6
 
 type memory_columns = {
-  mcol_show_revision : bool;
+  mcol_show_updated : bool;
   mcol_show_source : bool;
   mcol_name : int;
 }
@@ -425,7 +425,7 @@ type memory_columns = {
 type memory_row_values = {
   mrow_state : string;
   mrow_name : string;
-  mrow_revision : string;
+  mrow_updated : string;
   mrow_facts : string;
   mrow_size : string;
   mrow_source : string;
@@ -437,7 +437,7 @@ type memory_row_values = {
 let memory_no_values =
   { mrow_state = ""
   ; mrow_name = ""
-  ; mrow_revision = ""
+  ; mrow_updated = ""
   ; mrow_facts = ""
   ; mrow_size = ""
   ; mrow_source = ""
@@ -447,9 +447,9 @@ let memory_no_values =
 let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
     columns values =
   let revision =
-    if columns.mcol_show_revision then
-      [ Table.cell ~align:Table.Right ~header:"REV"
-          ~width:memory_revision_width values.mrow_revision
+    if columns.mcol_show_updated then
+      [ Table.cell ~align:Table.Right ~header:"UPDATED"
+          ~width:memory_updated_width values.mrow_updated
       ]
     else []
   in
@@ -460,7 +460,7 @@ let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
       ]
     else []
   in
-  [ Table.cell ~style:state_style ~header:"STATE" ~width:memory_state_width
+  [ Table.cell ~style:state_style ~header:"ST" ~width:memory_state_width
       values.mrow_state
   ; Table.cell ~header:"KEEPER" ~width:columns.mcol_name values.mrow_name
   ]
@@ -490,7 +490,7 @@ let memory_columns_used_width columns =
    16, and the same keeper read worse on the wider terminal. *)
 let memory_columns_minimum_inner_width ~show_revision ~show_source =
   memory_columns_used_width
-    { mcol_show_revision = show_revision
+    { mcol_show_updated = show_revision
     ; mcol_show_source = show_source
     ; mcol_name = memory_maximum_name_width
     }
@@ -506,7 +506,7 @@ let allocate_memory_columns ~inner_width =
     >= memory_columns_minimum_inner_width ~show_revision:true ~show_source:true
   in
   let base =
-    { mcol_show_revision = show_revision
+    { mcol_show_updated = show_revision
     ; mcol_show_source = show_source
     ; mcol_name = memory_minimum_name_width
     }
@@ -803,11 +803,17 @@ let change_row ~op_style ~result_style ~summary_width values =
    fourteen in the row, so the column had no end where it was named and an
    invisible one where it was filled. *)
 
-let fusion_time_width = 8
+let fusion_time_width = 16
 let fusion_age_width = 7
 let fusion_state_width = 18
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
+
+type fusion_columns = {
+  fcol_keeper : int;
+  fcol_run : int;
+  fcol_show_preset : bool;
+}
 
 type fusion_row_values = {
   frow_time : string;
@@ -827,31 +833,42 @@ let fusion_no_values =
   ; frow_run = ""
   }
 
-let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
-  [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
+let fusion_cells ?(state_style = "") columns values =
+  [ Table.cell ~header:"STARTED" ~width:fusion_time_width values.frow_time
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
       values.frow_age
   ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
       values.frow_state
-  ; Table.cell ~header:"KEEPER" ~width:keeper_width values.frow_keeper
-  ; Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset
-  ; Table.cell ~header:"RUN" ~width:run_width values.frow_run
+  ; Table.cell ~header:"KEEPER" ~width:columns.fcol_keeper values.frow_keeper
   ]
+  @ (if columns.fcol_show_preset then
+       [Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset]
+     else [])
+  @ [Table.cell ~header:"RUN" ~width:columns.fcol_run values.frow_run]
 
-let fusion_run_width ~inner_width ~keeper_width =
+let allocate_fusion_columns ~inner_width ~keeper_width =
+  let full = { fcol_keeper = keeper_width; fcol_run = fusion_minimum_run_width;
+               fcol_show_preset = true } in
+  let fcol_show_preset =
+    Table.used_width (fusion_cells full fusion_no_values) <= inner_width
+  in
   let named =
     Table.used_width
-      (fusion_cells ~keeper_width ~run_width:0 fusion_no_values)
+      (fusion_cells { fcol_keeper = 0; fcol_run = 0; fcol_show_preset } fusion_no_values)
   in
-  max fusion_minimum_run_width (inner_width - named)
+  (* Keep dates and state intact. The detail shows the omitted preset and
+     complete identities; narrow tables first give those cells to the row. *)
+  let fcol_keeper = min keeper_width (max 6 (inner_width - named - fusion_minimum_run_width)) in
+  let fcol_run = max 3 (inner_width - named - fcol_keeper) in
+  { fcol_keeper; fcol_run; fcol_show_preset }
 
-let fusion_header_row ~keeper_width ~run_width =
+let fusion_header_row columns =
   Table.header_row
-    (fusion_cells ~keeper_width ~run_width fusion_no_values)
+    (fusion_cells columns fusion_no_values)
 
-let fusion_row ~state_style ~keeper_width ~run_width values =
+let fusion_row ~state_style columns values =
   Table.row
-    (fusion_cells ~state_style ~keeper_width ~run_width values)
+    (fusion_cells ~state_style columns values)
 
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id

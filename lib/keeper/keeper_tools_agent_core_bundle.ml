@@ -373,12 +373,17 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
                  | Keeper_tool_descriptor.Tool_web_search
                  | Keeper_tool_descriptor.Tool_web_fetch
+                 | Keeper_tool_descriptor.Tool_browser_tabs
+                 | Keeper_tool_descriptor.Tool_browser_read
+                 | Keeper_tool_descriptor.Tool_browser_session
+                 | Keeper_tool_descriptor.Tool_browser_goto
                  | Keeper_tool_descriptor.Tool_masc_control_dispatch
                  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
                  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
                  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
                  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
                  | Keeper_tool_descriptor.Tool_masc_fusion_status
+                 | Keeper_tool_descriptor.Tool_masc_file_dispatch
                  | Keeper_tool_descriptor.Tool_masc_library_dispatch
                  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
                  | Keeper_tool_descriptor.Tool_analyze_image ) ->
@@ -608,38 +613,57 @@ let make_tool_bundle_for_descriptors_with_policy
          | Tool_definition_toml.Always_loaded -> false)
       (descriptor_tools @ composition_tools)
   in
-  let deferred_of tool =
-    { Keeper_identity_tool_search.tool
-    ; summary =
-        Keeper_identity_tool_search.summary_of
-          tool.Agent_core.Tool.schema.description
-    }
+  let deferred_of source tool =
+    ( { Keeper_identity_tool_search.tool
+      ; summary =
+          Keeper_identity_tool_search.summary_of
+            tool.Agent_core.Tool.schema.description
+      }
+    , { Keeper_tool_load_receipts.source; schema = tool.Agent_core.Tool.schema } )
   in
   let identity_listing =
     match identity_surface with
-    | None ->
-      (match deferred_builtin_tools with
-       | [] -> None
-       | _ :: _ ->
-         Keeper_identity_tool_search.make
-           ~keeper_name:meta.Keeper_meta_contract.name
-           { Keeper_identity_tool_search.deferred =
-               List.map deferred_of deferred_builtin_tools
-           ; agent_cell = ref None
-           ; history = []
-           ; carry_window = Keeper_config.keeper_tool_carry_window ()
-           })
+    | None -> None
     | Some surface ->
+      let deferred, receipt_surface =
+        List.split
+          (List.map
+             (fun (offered : Keeper_identity_tools.offered_tool) ->
+               deferred_of
+                 (Keeper_tool_load_receipts.Attached
+                    { provider_id = offered.provider.id
+                    ; endpoint = offered.provider.mcp_url
+                    ; remote_name = offered.remote_name
+                    })
+                 (gate_wrapped offered))
+             surface.Keeper_tools_agent_core.offered
+           @ List.map (deferred_of Keeper_tool_load_receipts.Builtin) deferred_builtin_tools)
+      in
+      let receipts =
+        Keeper_tool_load_receipts.create
+          ~restored:surface.load_receipts
+          ~trace_id:meta.runtime.trace_id
+          ~task_id:meta.current_task_id
+          ~current_task_id:(fun () ->
+            match
+              Keeper_owner_registry.get
+                ~base_path:config.base_path ~keeper_name:meta.name
+            with
+            | Error error ->
+              Error (Keeper_owner_registry.lookup_error_to_string error)
+            | Ok owner ->
+              (match (Keeper_owner.projection owner).meta with
+               | None -> Error "Keeper metadata is absent"
+               | Some current -> Ok current.current_task_id))
+          ~surface:receipt_surface
+      in
       Keeper_identity_tool_search.make
         ~keeper_name:meta.Keeper_meta_contract.name
-        { Keeper_identity_tool_search.deferred =
-            List.map
-              (fun offered -> deferred_of (gate_wrapped offered))
-              surface.Keeper_tools_agent_core.offered
-            @ List.map deferred_of deferred_builtin_tools
+        { Keeper_identity_tool_search.deferred
         ; agent_cell = surface.Keeper_tools_agent_core.agent_cell
         ; history = surface.Keeper_tools_agent_core.history
         ; carry_window = Keeper_config.keeper_tool_carry_window ()
+        ; receipts
         }
   in
   (* The lanes that cannot widen a turn get every tool as a schema: holding
@@ -649,15 +673,14 @@ let make_tool_bundle_for_descriptors_with_policy
   ; agent_core_tools =
       always_loaded
       @ (match identity_listing with
-         | None -> []
+         | None ->
+           (* Without a live agent cell there is no callable loader. Keep
+              these schemas available instead of advertising a search whose
+              extension can never be installed. *)
+           deferred_builtin_tools
          | Some listing ->
-           (* The listing, plus the attached tools this conversation has
-              run. A load reaches the agent of the turn that made it and no
-              further, so without the second part the model asks again every
-              turn: one Keeper asked for [github_issue_read] on five
-              consecutive turns. Placing them here rather than widening after
-              the agent exists means the first request of the turn already
-              carries them, so no round trip is spent re-asking. *)
+           (* Pending successful loads and recently used tools belong on the
+              first request of the next turn, before the agent exists. *)
            listing.Keeper_identity_tool_search.tool
            :: listing.Keeper_identity_tool_search.already_used)
   ; listing =

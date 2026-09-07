@@ -59,7 +59,12 @@ let can_send composer =
   | No_target | Unreachable _ -> false
   | Ready _ -> String.trim composer.draft <> ""
 
-let is_send_key key = String.equal key "\r"
+(* The key that sends. Named so a caller that has to send without a keypress
+   -- a voice capture that ends the sentence itself -- can hand it to
+   [classify_key] instead of reaching into the send path directly, which would
+   be a second answer to what a draft is. *)
+let send_key = "\r"
+let is_send_key key = String.equal key send_key
 
 type key_outcome =
   | Take_focus

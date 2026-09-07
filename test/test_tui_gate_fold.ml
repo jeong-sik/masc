@@ -6,6 +6,17 @@ open Masc.Keeper_chat_store
 open Alcotest
 module Types = Masc_tui_types
 module Gate_text = Masc_tui_gate_text
+module Layout = Masc_tui_message_layout
+
+let contains haystack needle =
+  let hay = String.length haystack and need = String.length needle in
+  let rec scan at =
+    if at + need > hay then false
+    else if String.sub haystack at need = needle then true
+    else scan (at + 1)
+  in
+  need = 0 || scan 0
+;;
 
 let entry ?gate role text =
   { Types.me_role = role
@@ -16,6 +27,7 @@ let entry ?gate role text =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = text
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
   ; me_gate = gate
   ; me_submitted_at = None
@@ -45,7 +57,7 @@ let fold entries = describe (Types.fold_gate_runs (rows entries))
 
 let test_one_approval_is_one_row () =
   check (list string) "the whole run says where the effect ended up"
-    [ "Execute · 미뤘던 호출 적용됨 · 턴 이어서 진행" ]
+    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute" ]
     (fold
        [ step Approval_requested
        ; step Approval_resolved_approved
@@ -58,7 +70,7 @@ let test_the_summary_names_the_deferred_call () =
      line says what was gated even though the request row itself is gone. *)
   let summary = Some "git reflog --date=iso | head -30" in
   check (list string) "the folded line keeps the call's own words"
-    [ "tool_execute · git reflog --date=iso | head -30 · 미뤘던 호출 적용됨" ]
+    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30" ]
     (fold
        [ step ~tool:"tool_execute" ~summary Approval_requested
        ; step ~tool:"tool_execute" ~summary Approval_resolved_approved
@@ -70,7 +82,7 @@ let test_a_correction_supersedes_the_row_it_corrects () =
      canonical phase. Ranking by severity kept showing the phase the
      correction exists to overturn. *)
   check (list string) "the canonical phase is the one drawn"
-    [ "Execute · 미뤘던 호출 적용됨" ]
+    [ "미뤘던 호출 적용됨 · Execute" ]
     (fold
        [ step Approval_resolved_approved
        ; step Approval_replay_failed
@@ -79,7 +91,7 @@ let test_a_correction_supersedes_the_row_it_corrects () =
 
 let test_a_replay_outranks_the_resolution_before_it () =
   check (list string) "the outcome, not how the Gate answered"
-    [ "Execute · 적용 여부 불명 · 대상을 직접 확인하세요" ]
+    [ "적용 여부 불명 · 대상을 직접 확인하세요 · Execute" ]
     (fold
        [ step Approval_requested
        ; step Approval_resolved_approved
@@ -91,7 +103,7 @@ let test_a_problem_outranks_a_later_step () =
      has to see that the effect never landed. The turn did carry on, so that
      stays on the line -- it just does not get to be the whole line. *)
   check (list string) "the failure is the outcome, not the newest step"
-    [ "Execute · 적용 실패 · 턴 이어서 진행" ]
+    [ "적용 실패 · 턴 이어서 진행 · Execute" ]
     (fold
        [ step Approval_resolved_approved
        ; step Approval_replay_failed
@@ -100,9 +112,9 @@ let test_a_problem_outranks_a_later_step () =
 
 let test_a_waiting_request_keeps_its_own_row () =
   check (list string) "a request still waiting is not folded away"
-    [ "Execute · 판정 중 · 이 호출은 미뤄짐"
+    [ "판정 중 · 이 호출은 미뤄짐 · Execute"
     ; "말"
-    ; "Execute · 미뤘던 호출 적용됨"
+    ; "미뤘던 호출 적용됨 · Execute"
     ]
     (fold
        [ step Approval_requested
@@ -113,7 +125,7 @@ let test_a_waiting_request_keeps_its_own_row () =
 
 let test_two_approvals_stay_two_rows () =
   check (list string) "back to back approvals do not merge"
-    [ "Execute · 미뤘던 호출 적용됨"; "Write · 승인 거절" ]
+    [ "미뤘던 호출 적용됨 · Execute"; "승인 거절 · Write" ]
     (fold
        [ step ~approval:"appr_1" Approval_resolved_approved
        ; step ~approval:"appr_1" Approval_replay_applied
@@ -128,8 +140,66 @@ let test_rows_that_are_not_gate_rows_are_untouched () =
    draws it as its whole line rather than folding to nothing. *)
 let test_a_run_of_only_continuations_still_draws () =
   check (list string) "the continuation is the line"
-    [ "Execute · 턴 이어서 진행" ]
+    [ "턴 이어서 진행 · Execute" ]
     (fold [ step Approval_continuation_recorded ])
+
+(* Cells, not bytes: a Korean status word is one cell wide per glyph and three
+   bytes long, so a byte budget would fold a line that fits and leave one that
+   does not. *)
+let test_a_line_within_the_cap_comes_back_whole () =
+  let line = "tool_execute \xc2\xb7 ls" in
+  check string "unchanged" line ((Gate_text.fold_argument ~cap:40 line).Gate_text.fa_text)
+;;
+
+let test_a_long_argument_folds_and_says_how_much () =
+  let argument = String.make 300 'x' in
+  let line = "tool_execute \xc2\xb7 " ^ argument in
+  let folded = (Gate_text.fold_argument ~cap:40 line).Gate_text.fa_text in
+  check int "the fold fits the cap plus its tail" 40
+    (Layout.display_width (Layout.take_cells folded 40));
+  check bool "and names the cells it is holding" true
+    (contains folded
+       (Printf.sprintf "%d" (Layout.display_width line - 40)))
+;;
+
+(* Newlines are what made one argument eight rows. Flattened, the fold decides
+   the height rather than the argument's own line breaks. *)
+let test_newlines_are_flattened_before_the_cap_applies () =
+  let line = "tool_execute \xc2\xb7 a\nb\nc" in
+  let folded = (Gate_text.fold_argument ~cap:80 line).Gate_text.fa_text in
+  check bool "no newline survives" false (String.contains folded '\n')
+;;
+
+(* Counted in cells so the count survives whatever width the pane wraps at.
+   A count that changed with the pane would be describing the pane, not the
+   text. *)
+let test_the_held_count_does_not_depend_on_the_cap_being_a_row () =
+  let line = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
+  let held cap =
+    Layout.display_width line - cap
+  in
+  List.iter
+    (fun cap ->
+      check bool
+        (Printf.sprintf "cap %d names %d" cap (held cap))
+        true
+        (contains (Gate_text.fold_argument ~cap line).Gate_text.fa_text
+           (Printf.sprintf "%d" (held cap))))
+    [ 24; 40; 120 ]
+;;
+
+(* The caller decides whether a row can be pressed from this number, so it has
+   to be zero exactly when nothing was folded. Comparing the text against the
+   input instead would read the newline flattening as a fold. *)
+let test_held_cells_is_zero_exactly_when_nothing_folded () =
+  let short = "tool_execute \xc2\xb7 a\nb" in
+  check int "a flattened line holds nothing" 0
+    (Gate_text.fold_argument ~cap:80 short).Gate_text.fa_held_cells;
+  let long = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
+  check int "and a folded one holds the difference"
+    (Layout.display_width long - 40)
+    (Gate_text.fold_argument ~cap:40 long).Gate_text.fa_held_cells
+;;
 
 let () =
   run "tui_gate_fold"
@@ -151,5 +221,17 @@ let () =
             test_rows_that_are_not_gate_rows_are_untouched
         ; test_case "a run of only continuations still draws" `Quick
             test_a_run_of_only_continuations_still_draws
+        ] )
+    ; ( "argument fold"
+      , [ test_case "a line within the cap comes back whole" `Quick
+            test_a_line_within_the_cap_comes_back_whole
+        ; test_case "a long argument folds and says how much" `Quick
+            test_a_long_argument_folds_and_says_how_much
+        ; test_case "newlines are flattened before the cap applies" `Quick
+            test_newlines_are_flattened_before_the_cap_applies
+        ; test_case "the held count is in cells, not rows" `Quick
+            test_the_held_count_does_not_depend_on_the_cap_being_a_row
+        ; test_case "held cells is zero exactly when nothing folded" `Quick
+            test_held_cells_is_zero_exactly_when_nothing_folded
         ] )
     ]

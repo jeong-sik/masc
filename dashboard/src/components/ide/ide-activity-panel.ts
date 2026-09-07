@@ -6,7 +6,6 @@ import { get } from '../../api/core'
 import { fetchIdeEvents, type IdeBridgeEvent } from '../../api/ide'
 import { asRecord, isPositiveSafeInteger } from '../common/normalize'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import { KeeperBadge } from '../keeper-badge'
 import type { Goal, Task } from '../../types'
@@ -87,7 +86,6 @@ interface ActivityRefreshState {
 
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const EMPTY_KEEPERS: ReadonlyArray<string> = []
-const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
 const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
 const INITIAL_REFRESH_STATE: ActivityRefreshState = {
@@ -158,7 +156,6 @@ export interface IdeActivityPanelProps {
   readonly activeFile?: string | null
   /** RFC-0378 §5.3b: canonical codebase slug — the wire key. */
   readonly codebase?: string | null
-  readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
   readonly compact?: boolean
@@ -444,7 +441,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
     codebase = null,
-    annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
     compact = false,
@@ -559,7 +555,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         <${RunProgressStrip} summary=${progress} />
         <${IdeContextLens}
           filePath=${activeFile}
-          annotations=${annotations}
           diffRows=${diffRows}
           events=${events}
           threads=${threads}
@@ -590,7 +585,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
             <${RunProgressStrip} summary=${progress} />
             <${IdeContextLens}
               filePath=${activeFile}
-              annotations=${annotations}
               diffRows=${diffRows}
               events=${events}
               threads=${threads}

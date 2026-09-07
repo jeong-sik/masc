@@ -1,0 +1,9 @@
+name = "masc_file_list"
+description = """
+List the files currently stored in the provider Files API.
+
+Each row carries \
+file_id, name, size, and upload time — enough to find a previously \
+uploaded image to reuse in a vision request."""
+
+defer_loading = true

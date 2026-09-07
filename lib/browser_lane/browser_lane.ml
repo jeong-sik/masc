@@ -1,0 +1,220 @@
+(** Browser_lane — the in-process state of the masc ↔ browser lanes
+    (docs/design/browser-lane.md, task-1382).
+
+    A lane is one connected browser backend: "live" is the user's real
+    Firefox/Zen through the extension's native-messaging host. "automation"
+    is the in-process OCaml WebDriver executor. Only the live host long-polls
+    this process and posts results through the HTTP transport; automation
+    owns its session directly inside the server.
+
+    Verbs are a closed variant: an unknown verb is refused by name on every
+    boundary (tool input, lane issue, backend), the same rule the observe
+    gate learned the hard way (#33638). *)
+
+open Time_compat
+
+type verb =
+  | Tabs_list
+  | Page_read of { tab_id : int option; max_chars : int option }
+  | Session_open of { headless : bool option }
+  | Session_close
+  | Page_goto of { url : string }
+
+let verb_to_string = function
+  | Tabs_list -> "tabs.list"
+  | Page_read _ -> "page.read"
+  | Session_open _ -> "session.open"
+  | Session_close -> "session.close"
+  | Page_goto _ -> "page.goto"
+;;
+
+(* The wire carries a verb name plus args; the closed variant is the only
+   thing that crosses a boundary. *)
+let verb_json = function
+  | Tabs_list -> `Assoc [ ("verb", `String "tabs.list"); ("args", `Assoc []) ]
+  | Page_read { tab_id; max_chars } ->
+    `Assoc
+      [ ("verb", `String "page.read")
+      ; ( "args"
+        , `Assoc
+            ([ Option.map (fun v -> ("tabId", `Int v)) tab_id
+             ; Option.map (fun v -> ("maxChars", `Int v)) max_chars
+             ]
+             |> List.filter_map Fun.id) )
+      ]
+  | Session_open { headless } ->
+    `Assoc
+      [ ("verb", `String "session.open")
+      ; ( "args"
+        , `Assoc (Option.map (fun v -> ("headless", `Bool v)) headless |> Option.to_list) )
+      ]
+  | Session_close -> `Assoc [ ("verb", `String "session.close"); ("args", `Assoc []) ]
+  | Page_goto { url } ->
+    `Assoc [ ("verb", `String "page.goto"); ("args", `Assoc [ ("url", `String url) ]) ]
+;;
+
+(* Two different questions, two different classifications, both exhaustive
+   over the closed verb set:
+
+   - [verb_is_read]: does this leave the browser session lifecycle unchanged?
+     Opening and closing a keeper-owned browser are lifecycle writes.
+   - [verb_allowed_on_live]: may this run against the operator's browser?
+     Only the two readers — the live lane exists to be read; sessions own
+     nothing there and a navigation acts with the operator's logins. *)
+let verb_is_read = function
+  | Tabs_list | Page_read _ -> true
+  | Session_open _ | Session_close | Page_goto _ -> false
+;;
+
+let verb_allowed_on_live = function
+  | Tabs_list | Page_read _ -> true
+  | Session_open _ | Session_close | Page_goto _ -> false
+;;
+
+type issued = { id : string; verb_json : Yojson.Safe.t }
+
+type answer =
+  | Answered of Yojson.Safe.t
+  | Lane_absent
+  | Timed_out
+  | Refused of string
+
+(* The public tool surface also accepts "automation", but external transports
+   can only register the operator's live browser. *)
+let external_lane_name = "live"
+
+type lane =
+  { name : string
+  ; commands : issued Eio.Stream.t
+  ; mutex : Eio.Mutex.t
+  ; waiters : (string, Yojson.Safe.t Eio.Promise.t * Yojson.Safe.t Eio.Promise.u) Hashtbl.t
+  (* When the lane stops counting as connected, rather than when it last
+     polled. The predicate subtracted the wall clock from the stored reading,
+     so an NTP step decided whether a live lane existed. *)
+  ; mutable connected_until : Monotonic_deadline.t
+  }
+
+let lanes : (string, lane) Hashtbl.t = Hashtbl.create 4
+let lanes_mutex = Eio.Mutex.create ()
+
+let lane_named ~name =
+  if not (String.equal name external_lane_name) then None
+  else
+  Eio.Mutex.use_rw ~protect:true lanes_mutex (fun () ->
+      match Hashtbl.find_opt lanes name with
+      | Some lane -> Some lane
+      | None ->
+          let lane =
+            { name
+            ; commands = Eio.Stream.create 16
+            ; mutex = Eio.Mutex.create ()
+            ; waiters = Hashtbl.create 8
+            ; connected_until = Monotonic_deadline.after ~seconds:0.
+            }
+          in
+          Hashtbl.replace lanes name lane;
+          Some lane)
+;;
+
+(* The poll side: carry one command to the browser, or [None] after the
+   window — the host loops and polls again. *)
+(* How long a poll keeps the lane connected. Long enough that a lane between
+   polls still counts, short enough that a lane that stopped polling drops. *)
+let lane_connected_window_sec = 120.
+
+let take_command ~lane_name ~window_sec =
+  match lane_named ~name:lane_name with
+  | None -> Error "unknown_lane"
+  | Some lane ->
+    lane.connected_until <-
+      Monotonic_deadline.after ~seconds:lane_connected_window_sec;
+    Ok
+      (Eio.Fiber.first
+         (fun () -> Some (Eio.Stream.take lane.commands))
+         (fun () ->
+            Time_compat.sleep window_sec;
+            None))
+;;
+
+(* The result side: resolve the tool call waiting on this id. *)
+let deliver_result ~lane_name ~id ~payload =
+  if not (String.equal lane_name external_lane_name) then Error "unknown_lane"
+  else
+  match Hashtbl.find_opt lanes lane_name with
+  | None -> Error "unknown_lane"
+  | Some lane ->
+    let waiter =
+      Eio.Mutex.use_rw ~protect:true lane.mutex (fun () ->
+          match Hashtbl.find_opt lane.waiters id with
+          | Some promise ->
+            Hashtbl.remove lane.waiters id;
+            Some promise
+          | None -> None)
+    in
+    (match waiter with
+    | Some (_, resolver) -> Eio.Promise.resolve resolver payload
+    | None -> ());
+    Ok ()
+;;
+
+let unregister_waiter lane id =
+  Eio.Mutex.use_rw ~protect:true lane.mutex (fun () ->
+      Hashtbl.remove lane.waiters id)
+;;
+
+(* The tool side: issue one verb and await its answer, bounded by the
+   timeout. A lane that has never polled does not exist yet and the call
+   says so instead of timing out into silence. *)
+let lane_connected ~lane_name =
+  match Hashtbl.find_opt lanes lane_name with
+  | Some lane -> not (Monotonic_deadline.passed lane.connected_until)
+  | None -> false
+;;
+
+(* The live lane is the operator's browser: it exists to be read. Sessions
+   belong to nobody here (the browser is already open), and a navigation can
+   act with the operator's logins — both stay on the automation lane, whose
+   profile no human owns. The extension refuses them too; this is the
+   server-side half of that defence in depth. *)
+let live_lane_refused =
+  Refused
+    "the live lane is read-only: session and navigation verbs belong to the \
+     automation lane"
+;;
+
+let issue_queued ~lane_name ~verb:v ~timeout_sec =
+  match Hashtbl.find_opt lanes lane_name with
+  | Some lane when not (lane_connected ~lane_name) -> Lane_absent
+  | None -> Lane_absent
+  | Some { name = "live"; _ } when not (verb_allowed_on_live v) -> live_lane_refused
+  | Some lane ->
+    let id =
+      Printf.sprintf "bl%d-%06d" (Unix.time () |> int_of_float) (Random.int 1_000_000)
+    in
+    let promise, resolver = Eio.Promise.create () in
+    Eio.Mutex.use_rw ~protect:true lane.mutex (fun () ->
+        Hashtbl.replace lane.waiters id (promise, resolver));
+    Eio.Stream.add lane.commands { id; verb_json = verb_json v };
+    let outcome =
+      Eio.Fiber.first
+        (fun () -> Answered (Eio.Promise.await promise))
+        (fun () ->
+           Time_compat.sleep timeout_sec;
+           Timed_out)
+    in
+    unregister_waiter lane id;
+    outcome
+;;
+
+(* Installed by server bootstrap. Native automation owns its session directly;
+   the live extension continues to use the command queue. *)
+let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
+let install_automation_executor executor = Atomic.set automation_executor executor
+let issue ~lane_name ~verb ~timeout_sec =
+  match lane_name, Atomic.get automation_executor with
+  | "automation", Some execute ->
+    Eio.Fiber.first
+      (fun () -> execute verb)
+      (fun () -> Time_compat.sleep timeout_sec; Timed_out)
+  | "automation", None -> Lane_absent
+  | _ -> issue_queued ~lane_name ~verb ~timeout_sec

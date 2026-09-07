@@ -122,13 +122,23 @@ type log_entry = Tui_decode.log_entry
     Each arm carries the label to draw. The label is a rendering of the fact;
     the constructor is the fact. *)
 type message_author =
-  | Sent_by_operator of string
-      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
-          where the line came in from somewhere other than the dashboard. *)
-  | Sent_by_other of string
+  | Sent_by_operator of { surface : string option }
+      (** The person reading this pane, and the door they came in by when it
+          was not the dashboard -- an operator can write to a keeper from a
+          connector. Apart for the same reason as the arm below, and it was
+          joined here while that one was split: at a ten-cell column
+          ["you \xc2\xb7 broadcast"] was cut to ["yo\xe2\x80\xa6dcast"],
+          losing the speaker to keep the tail of the surface. *)
+  | Sent_by_other of
+      { speaker : string
+      ; surface : string option
+      }
       (** Anyone else: another agent's broadcast, a connector, a second
-          operator. Named as the server named them, with the surface it
-          arrived on. *)
+          operator. Kept apart rather than joined here because the speaker
+          column is narrower than the pair: joined, the fit cuts the middle of
+          one string and the tail it favours is the surface, so the row keeps
+          which door it came in by and loses who came through it. Whoever
+          knows the column decides. *)
 
 type msg_role =
   | Message_user of message_author
@@ -244,8 +254,12 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
     List.filter_map Fun.id
       [ (match memory with
          | Memory_summary -> None
-         | Memory_hidden -> Some "memory:off"
-         | Memory_full -> Some "memory:full")
+         (* Named for the rows it governs, which the pane labels JOURNAL and
+            the footer reaches with Ctrl-N:journal. It read "memory" here and
+            "journal" there, so pressing the key and looking for what moved
+            meant knowing the two words were one axis. *)
+         | Memory_hidden -> Some "journal:off"
+         | Memory_full -> Some "journal:full")
       ; (* The clock-free gutter is the resting layout: the speaker mark and
            label retain who/what, while timestamps and request ids remain one
            keypress away. Name only the denser projection's added metadata so
@@ -354,6 +368,7 @@ type msg_entry = {
       (** Structural producer position within one request. Inside that request,
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
+  me_image: Masc_tui_image_preview.preview;
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -828,33 +843,66 @@ type turn_edge =
    reopen it around the interruption -- drawing two turns where the keeper took
    one. The edges are the request's first and last row in this list, not the
    gaps between neighbours. *)
+(* A bracket says everything between the corners is one turn, and the pane has
+   one column to say it in. So a turn can only be bracketed over rows that sit
+   together.
+
+   This used to take each request's first and last row anywhere in the list.
+   When two turns interleaved, both drew their corners into the same column and
+   the claims crossed: on a live pane three [Rail_opens] arrived before any
+   close, and the first turn's bracket ran thirty-one minutes past a date
+   divider with three other turns' rows inside it. Nothing was left to say
+   which turn a [Rail_says] belonged to.
+
+   Rows outside every turn stay transparent. A journal commit or somebody
+   else's broadcast draws a siding meeting the line rather than a piece of it,
+   so a turn's rows are still together across one -- that is increment 2 of
+   RFC-chat-turn-rail-and-side-lanes, and it is why the interruption cases
+   below keep one bracket rather than three.
+
+   What this gives up: two rows of one turn, split by another turn's row, now
+   draw as two lone rows rather than one bracket. That much is what the column
+   can carry -- they are not adjacent, and a corner pair around them would be
+   claiming otherwise. *)
 let mark_turn_edges rows =
-  let first = Hashtbl.create 16 in
-  let last = Hashtbl.create 16 in
-  List.iteri
-    (fun index row ->
-      match chat_row_lane row with
-      | Lane_unowned | Lane_memory -> ()
-      | Lane_turn request_id ->
-          if not (Hashtbl.mem first request_id) then
-            Hashtbl.replace first request_id index;
-          Hashtbl.replace last request_id index)
-    rows;
+  let edges = Hashtbl.create 16 in
+  let close_run = function
+    | [] -> ()
+    | [ only ] -> Hashtbl.replace edges only Turn_alone
+    | opens_at :: rest ->
+        Hashtbl.replace edges opens_at Turn_opens;
+        let rec mark = function
+          | [] -> ()
+          | [ closes_at ] -> Hashtbl.replace edges closes_at Turn_closes
+          | index :: tl ->
+              Hashtbl.replace edges index Turn_continues;
+              mark tl
+        in
+        mark rest
+  in
+  (* [run] holds the rows of the turn being walked, newest first. *)
+  let rec walk running run = function
+    | [] -> close_run (List.rev run)
+    | (index, row) :: tl -> (
+        match chat_row_lane row with
+        | Lane_unowned | Lane_memory -> walk running run tl
+        | Lane_turn request_id ->
+            if
+              match running with
+              | Some current -> String.equal current request_id
+              | None -> false
+            then walk running (index :: run) tl
+            else (
+              close_run (List.rev run);
+              walk (Some request_id) [ index ] tl))
+  in
+  walk None [] (List.mapi (fun index row -> (index, row)) rows);
   List.mapi
     (fun index row ->
-      let edge =
-        match chat_row_lane row with
-        | Lane_unowned | Lane_memory -> Turn_outside
-        | Lane_turn request_id -> (
-            let opens = Hashtbl.find_opt first request_id = Some index in
-            let closes = Hashtbl.find_opt last request_id = Some index in
-            match opens, closes with
-            | true, true -> Turn_alone
-            | true, false -> Turn_opens
-            | false, true -> Turn_closes
-            | false, false -> Turn_continues)
-      in
-      (row, edge))
+      ( row
+      , match Hashtbl.find_opt edges index with
+        | Some edge -> edge
+        | None -> Turn_outside ))
     rows
 ;;
 
@@ -1685,6 +1733,14 @@ let board_sort_label = function
   | Board_updated -> "updated"
   | Board_discussed -> "discussed"
 
+let board_sort_of_string = function
+  | "hot" -> Some Board_hot
+  | "trending" -> Some Board_trending
+  | "recent" -> Some Board_recent
+  | "updated" -> Some Board_updated
+  | "discussed" -> Some Board_discussed
+  | _ -> None
+
 let board_sort_explanation = function
   | Board_hot -> "net votes first; newer breaks ties"
   | Board_trending -> "net votes / √age-hours"
@@ -2033,7 +2089,6 @@ let surface_ring : (surface * string) list =
     (Planning, "Planning");
     (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Runtime, "Runtime");
     (Config, "Config");
   ]
 
@@ -2056,8 +2111,7 @@ let surface_ring_index (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -2548,12 +2602,55 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
+let memory_state (k : Tui_decode.memory_keeper_health) =
+  if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
+  then Memory_read_error
+  else if
+    (not k.mkh_snapshot_present)
+    && k.mkh_librarian_failures > 0
+    && not k.mkh_source_snapshot_present
+  then Memory_starving
+  else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
+  then Memory_source_only
+  else if not k.mkh_snapshot_present
+  then Memory_no_current
+  else if k.mkh_librarian_failures > 0
+  then Memory_degraded
+  else if
+    List.exists
+      (fun alert ->
+        match Tui_decode.memory_alert_severity alert.Tui_decode.ma_code with
+        | `Warn -> true
+        | `Error -> false)
+      k.mkh_alerts
+  then Memory_warning
+  else Memory_ordinary
+
+let memory_state_label = function
+  | Memory_ordinary -> "ok"
+  | Memory_warning -> "warning"
+  | Memory_degraded -> "degraded"
+  | Memory_no_current -> "no-current"
+  | Memory_source_only -> "source-only"
+  | Memory_starving -> "STARVING"
+  | Memory_read_error -> "read-error"
+
 type memory_overview_sort =
   | Mem_overview_facts
   | Mem_overview_size
   | Mem_overview_delta
   | Mem_overview_state
   | Mem_overview_name
+  | Mem_overview_updated
 
 let memory_overview_sort_label = function
   | Mem_overview_facts -> "Facts (Most)"
@@ -2561,13 +2658,15 @@ let memory_overview_sort_label = function
   | Mem_overview_delta -> "Delta (Recent changes)"
   | Mem_overview_state -> "State (Attention first)"
   | Mem_overview_name -> "Name (A-Z)"
+  | Mem_overview_updated -> "Updated (Newest first)"
 
 let next_memory_overview_sort = function
   | Mem_overview_facts -> Mem_overview_size
   | Mem_overview_size -> Mem_overview_delta
   | Mem_overview_delta -> Mem_overview_state
   | Mem_overview_state -> Mem_overview_name
-  | Mem_overview_name -> Mem_overview_facts
+  | Mem_overview_name -> Mem_overview_updated
+  | Mem_overview_updated -> Mem_overview_facts
 
 type metrics_section =
   | Section_fleet
@@ -2601,6 +2700,176 @@ type palette_mode =
       choice_line : int;  (* 1-based, what the title says *)
     }
 
+(* Browser reads remain separate from connector routing. A request generation
+   belongs to this view instance, so late Firefox replies cannot replace a
+   different app, source or tab after the operator moves. *)
+module Browser_lane_view = struct
+  type source = Live | Automation
+  type app = Browser | Slack
+  type tab = { id : int; title : string; url : string; active : bool }
+  type page = {
+    tab_id : int; title : string; url : string; text : string;
+    chars : int; truncated : bool;
+  }
+  type reading = {
+    tabs : tab list; page : page option; source : source; app : app;
+    elapsed_ms : float;
+  }
+  type operation = Read | Open_session | Close_session | Goto of string
+  type load = Idle | Loading of int * operation | Failed of string
+  type t = {
+    app : app; source : source; selected_tab : int option; scroll : int;
+    reading : reading option; load : load; url_draft : string option;
+  }
+
+  let source_name = function Live -> "live" | Automation -> "automation"
+  let app_name = function Browser -> "browser" | Slack -> "slack"
+  let context_label t =
+    let app = match t.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
+    Printf.sprintf "%s · %s · Firefox page reader" app (source_name t.source)
+  let create app =
+    { app; source = Live; selected_tab = None; scroll = 0;
+      reading = None; load = Idle; url_draft = None }
+  let switch_source source t =
+    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle; url_draft = None }
+  let refresh t = { t with selected_tab = None; scroll = 0 }
+  let fail_action detail t =
+    let url_draft = match t.load with
+      | Loading (_, Goto url) -> Some url
+      | Loading _ | Idle | Failed _ -> t.url_draft
+    in
+    { t with load = Failed detail; url_draft }
+  type read_status = Unread | Reading | Operating | Read_ok | Read_failed
+  let read_status t =
+    match t.load, t.reading with
+    | Idle, None -> Unread
+    | Idle, Some _ -> Read_ok
+    | Loading (_, Read), _ -> Reading
+    | Loading (_, (Open_session | Close_session | Goto _)), _ -> Operating
+    | Failed _, _ -> Read_failed
+  let read_status_label = function
+    | Unread -> "HTTP unread"
+    | Reading -> "HTTP reading"
+    | Operating -> "HTTP action"
+    | Read_ok -> "HTTP read ok"
+    | Read_failed -> "HTTP failed"
+  let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
+  let should_refresh_on_tick t =
+    match t.app, t.source, t.url_draft, t.load with
+    | Slack, Live, None, (Idle | Failed _) -> true
+    | _ -> false
+  let request_body t =
+    `Assoc ([ "lane", `String (source_name t.source);
+              "app", `String (app_name t.app) ]
+            @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
+  let ( let* ) = Result.bind
+  let field name = function
+    | `Assoc fields -> (match List.assoc_opt name fields with
+        | Some value -> Ok value | None -> Error ("missing " ^ name))
+    | _ -> Error "expected object"
+  let string = function `String s -> Ok s | _ -> Error "expected string"
+  let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
+  let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
+  let parse_source = function
+    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
+    | _ -> Error "unknown browser source"
+  let parse_app = function
+    | `String "browser" -> Ok Browser | `String "slack" -> Ok Slack
+    | _ -> Error "unknown browser app"
+  let get parse name json = let* value = field name json in parse value
+  let parse_tab json =
+    let* id = get integer "id" json in
+    let* title = get string "title" json in
+    let* url = get string "url" json in
+    let* active = get boolean "active" json in
+    Ok { id; title; url; active }
+  let parse_page = function
+    | `Null -> Ok None
+    | json ->
+        let* tab_id = get integer "tabId" json in
+        let* title = get string "title" json in
+        let* url = get string "url" json in
+        let* text = get string "text" json in
+        let* chars = get integer "chars" json in
+        let* truncated = get boolean "truncated" json in
+        Ok (Some { tab_id; title; url; text; chars; truncated })
+  let parse_tabs = function
+    | `List tabs ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest -> let* tab = parse_tab json in loop (tab :: acc) rest
+        in loop [] tabs
+    | _ -> Error "expected tabs array"
+  let milliseconds = function
+    | `Float f when Float.is_finite f && f >= 0. -> Ok f
+    | `Int n when n >= 0 -> Ok (float_of_int n)
+    | _ -> Error "expected nonnegative elapsed_ms"
+  let decode json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* tabs = get parse_tabs "tabs" data in
+      let* page = get parse_page "page" data in
+      let* source = get parse_source "source" data in
+      let* app = get parse_app "app" data in
+      let* elapsed_ms = get milliseconds "elapsed_ms" data in
+      match page with
+      | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
+          Error "page tab is absent from returned tabs"
+      | _ -> Ok { tabs; page; source; app; elapsed_ms }
+  let accept ~generation (result : (reading, string) result) t =
+    match t.load with
+    | Loading (current, Read) when current = generation ->
+        (match result with
+         | Ok reading when reading.source = t.source && reading.app = t.app ->
+             { t with reading = Some reading; load = Idle;
+               selected_tab = Option.map (fun page -> page.tab_id) reading.page }
+         | Ok _ -> { t with load = Failed "browser response source/app mismatch" }
+         | Error detail -> { t with load = Failed detail })
+    | Loading _ | Idle | Failed _ -> t
+  let select_tab direction t =
+    match t.reading with
+    | None -> t
+    | Some reading ->
+        let count = List.length reading.tabs in
+        if count = 0 then t else
+        let current =
+          let rec find i = function
+            | [] -> 0
+            | (tab : tab) :: rest ->
+                if Some tab.id = t.selected_tab then i else find (i + 1) rest
+          in find 0 reading.tabs
+        in
+        let index = (current + direction + count) mod count in
+        match List.nth_opt reading.tabs index with
+        | None -> t
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; load = Idle }
+end
+
+let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+  match view.reading with
+  | None -> []
+  | Some reading ->
+      match reading.page with
+      | None -> []
+      | Some page ->
+          String.split_on_char '\n'
+            (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
+          |> List.concat_map (fun line ->
+              if line = "" then [""] else
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
+
+let browser_lane_url_line ~cols draft =
+  let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
+  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
+
+type workspace_activity_read = {
+  war_at : float;
+  war_hours : float;
+  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -2632,6 +2901,11 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  (* Whether ^Y ending a voice capture also sends what was heard
+     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     in the draft either way, and that draft is also where a spoken
+     half-sentence waits for typing. *)
+  mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2718,6 +2992,14 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  mutable image_request_generation: int;
+  (* Any new input cancels an outstanding asynchronous image preview. *)
+  (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
+     set the loop draws no frames and every key belongs to the emulator. The
+     machine is [Option] so it exists only once the screen has been opened,
+     and it survives closing -- reopening continues the same frame. *)
+  mutable msx_open: bool;
+  mutable msx: Msx.t option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -2827,6 +3109,7 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable keeper_run_cursor: int;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -2992,6 +3275,7 @@ type state = {
   mutable ask_answer_mode: ask_answer_mode;
   mutable ask_cursor: int;
   mutable ask_question_cursor: int;
+  mutable ask_question_scroll: int;
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
@@ -3116,6 +3400,7 @@ type state = {
      arm time and a press on a different row re-arms for that row. *)
   mutable board_vote_armed: (string * bool) option;
   mutable planning: planning_snapshot option;
+  mutable planning_baseline: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: int;
@@ -3198,6 +3483,8 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_async_observation: Yojson.Safe.t option;
   mutable tools_async_observation_error: string option;
+  mutable browser_lane: Browser_lane_view.t option;
+  mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -3225,6 +3512,9 @@ type state = {
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
+  mutable workspace_activity_repo: string option;
+  mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
+  mutable workspace_activity_cursor: int;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_scroll: int;
@@ -3318,11 +3608,11 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
-  (* The file pane's notes view: m on an open file (repository scope only --
-     the annotation routes are scoped by the server-minted codebase slug,
-     which only a Repositories row carries) swaps the content for the notes
-     anchored to the file. *)
-  (* The notes anchored to the open file, keyed by its path. *)
+  (* The file pane's notes view: m on an open file swaps the content for
+     the memos written as comments in the file itself. Read off the rows
+     once at load, like the width above: the memos change when the file
+     does, and rebuilding them per frame walks every row of it. *)
+  mutable code_memos: Masc_tui_memo.found list;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -3449,6 +3739,10 @@ type state = {
      message: switching keepers or abandoning the draft must not leave an image
      attached to whatever is typed later. *)
   mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
+  (* Image references staged with :ref (#33728) — a URL the provider fetches
+     or a Files-API id. Same lifecycle as [msg_attachments]: part of the unsent
+     message, consumed by the send that consumes the draft. *)
+  mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
      history row that was newest when the newest attachment entered the
@@ -3608,7 +3902,43 @@ type state = {
    paint had to draw compact is not showing the field, and the two identity
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
+(* Browser and Slack are operator readers inside Connectors. A retained
+   reader model must not change chrome after the operator leaves its view. *)
+let browser_lane_on_screen (state : state) =
+  match state.view with Connectors -> state.browser_lane | _ -> None
+
+(* Discard belongs to this capture until it settles. A later stop/keep key
+   must not revive a transcript whose recording the operator abandoned. *)
+let request_voice_stop (state : state) request =
+  match state.voice_stop_requested with
+  | Some Masc.Voice_bridge.Discard -> ()
+  | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
+      state.voice_stop_requested <- Some request
+
+let release_composer_for_browser_reader (state : state) =
+  state.composer_focused <- false;
+  state.voice_continuous <- None;
+  state.voice_floor <- None;
+  state.voice_level_db <- None;
+  (* Keep the occupied capture until its callback, so returning to the
+     composer cannot start a second microphone while this one shuts down. *)
+  if Option.is_some state.voice_capture then
+    request_voice_stop state Masc.Voice_bridge.Discard
+
+(* The transcript may already be in the mailbox when the reader opens.
+   Settle ownership before deciding whether its text can reach the draft. *)
+let settle_voice_transcript (state : state) ~keeper =
+  if state.voice_capture <> Some keeper then None
+  else begin
+    let disposition = Option.value state.voice_stop_requested
+        ~default:Masc.Voice_bridge.Keep_what_was_heard in
+    state.voice_capture <- None;
+    state.voice_level_db <- None;
+    Some disposition
+  end
+
 type text_input_target =
+  | Text_browser_url
   | Text_preset_name
   | Text_runtime_param
   | Text_palette
@@ -3635,6 +3965,9 @@ let text_input_target (state : state) ~compact_viewport =
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
+  else if state.view = Connectors && not compact_viewport
+          && Option.is_some (Option.bind state.browser_lane (fun view -> view.Browser_lane_view.url_draft))
+  then Some Text_browser_url
   else if identity_surface && Option.is_some state.identity_app_form then
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then
@@ -3925,8 +4258,83 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let selected_keeper_runs (state : state) =
+  match selected_keeper state, state.fusion_runs with
+  | Some keeper, Some snapshot ->
+      List.filter (fun (run : Tui_decode.fusion_run) ->
+          String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
+  | _ -> []
+
+let selected_keeper_run (state : state) =
+  let runs = selected_keeper_runs state in
+  let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
+  Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
+
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
+let workspace_activity_rows (state : state) =
+  match state.workspace_activity_repo with
+  | None -> []
+  | Some repo_id ->
+      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+      | Masc_tui_fetched.Ready reading ->
+          List.concat_map (fun (_, result) -> match result with
+            | Error _ -> []
+            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
+                List.filter_map (fun (change : Tui_decode.file_change) ->
+                  match change.fc_location with
+                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                      Some (change, location.relative_path)
+                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+                  snapshot.fcs_changes) reading.war_keepers
+          |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
+              Float.compare b.fc_at a.fc_at)
+
+let workspace_activity_page_rows ~surface_rows = max 1 (surface_rows - 12)
+
+(* The frame, Enter and a completed refresh share the same visible selection,
+   including when the latest reading contains fewer rows. *)
+let workspace_activity_selection state =
+  let rows = workspace_activity_rows state in
+  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  (rows, cursor, List.nth_opt rows cursor)
+
+let apply_workspace_activity_read state request result =
+  state.workspace_activity <-
+    Masc_tui_fetched.complete ~equal:String.equal state.workspace_activity
+      request result;
+  let _, cursor, _ = workspace_activity_selection state in
+  state.workspace_activity_cursor <- cursor
+
+let enter_keeper_code_file state ~keeper ~path =
+  state.code_scope <- Code_scope_keeper keeper;
+  let parent = Filename.dirname path in
+  state.code_dir <- (if String.equal parent "." then "" else parent);
+  state.code_cursor <- 0;
+  state.code_entries <- [];
+  state.code_entries_error <- None;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_cursor <- 0;
+  state.code_file_scroll <- 0;
+  state.code_file_hscroll <- 0;
+  state.code_file_max_width <- 0;
+  state.code_target_line <- None;
+  state.code_lsp_note <- None;
+  state.code_history <- Masc_tui_fetched.clear state.code_history;
+  state.code_history_open <- false;
+  state.code_history_scroll <- 0;
+  state.code_diff <- Masc_tui_fetched.clear state.code_diff;
+  state.code_diff_open <- false;
+  state.code_diff_scroll <- 0;
+  state.code_memos <- [];
+  state.code_notes_open <- false;
+  state.code_notes_scroll <- 0;
+  state.code_blame <- Masc_tui_fetched.clear state.code_blame;
+  state.code_focus_file <- Right_pane;
+  state.followed_from <- Some (state.view, None);
+  state.view <- Code
+
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
   | Some snapshot ->
@@ -3986,13 +4394,23 @@ let composing_for_keeper (state : state) keeper_name =
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
-    turn settles. A retained roster is not enough after a failed refresh:
-    switching is disabled until the roster is readable again. *)
+    turn settles — this pane's own, which is what the pin is for. A request
+    in flight to some other keeper used to disable the switch too, and the
+    pane draws exactly that request as an "(also sending to X …)" row: the
+    row being on screen meant the key that would take the operator to it was
+    refused, which is the one moment it is wanted (#33852). A retained roster
+    is not enough after a failed refresh: switching is disabled until the
+    roster is readable again. *)
 let next_keeper_message_target (state : state) =
+  let this_pane_has_a_request_in_flight =
+    match state.msg_target_keeper_name with
+    | None -> false
+    | Some current -> Option.is_some (inflight_for_keeper state current)
+  in
   if
     Option.is_some state.keepers_error
     || Option.is_some state.msg_live
-    || state.msg_inflight <> []
+    || this_pane_has_a_request_in_flight
   then
     Masc_tui_keeper_selection.No_alternative
   else
@@ -4025,6 +4443,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -4059,6 +4478,9 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  image_request_generation = 0;
+  msx_open = false;
+  msx = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -4105,6 +4527,7 @@ let create_state
   runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
+  keeper_run_cursor = 0;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
@@ -4180,6 +4603,7 @@ let create_state
   ask_answer_mode = Ask_browsing;
   ask_cursor = 0;
   ask_question_cursor = 0;
+  ask_question_scroll = 0;
   ask_draft = None;
   ask_text_entry = None;
   pending_ask_submit = None;
@@ -4229,6 +4653,7 @@ let create_state
   board_post_error = None;
   board_vote_armed = None;
   planning = None;
+  planning_baseline = None;
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = 0;
@@ -4283,6 +4708,8 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  browser_lane = None;
+  browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
@@ -4305,6 +4732,9 @@ let create_state
   repositories_error = None;
   repositories_scroll = 0;
   repositories_cursor = 0;
+  workspace_activity_repo = None;
+  workspace_activity = Masc_tui_fetched.initial;
+  workspace_activity_cursor = 0;
   memory_health = None;
   memory_health_error = None;
   memory_health_scroll = 0;
@@ -4351,6 +4781,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
+  code_memos = [];
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
@@ -4416,6 +4847,7 @@ let create_state
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
+  msg_references = [];
   msg_attachments_since = None;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
@@ -4725,6 +5157,14 @@ type clamped_scroll =
      end. Same report the diff already makes. *)
   | Resource_scroll of int
   | Approval_detail_scroll of int
+  (* Both modals draw over a surface rather than being one, and both counted
+     their rows the same way the diff does: the patch modal out of the recorded
+     diff, the link preview out of the card the drawing formats. Neither count
+     is knowable at the keypress, which steps by one or jumps to 9999 and lets
+     the frame say where that landed. They wrote the answer back from inside
+     the drawing instead, which is the one thing the renderer must not do. *)
+  | Patch_modal_scroll of int
+  | Link_modal_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -4748,6 +5188,8 @@ let apply_clamped_scroll (state : state) = function
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
+  | Patch_modal_scroll value -> state.patch_modal_scroll <- value
+  | Link_modal_scroll value -> state.link_modal_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
@@ -4916,6 +5358,103 @@ let palette_starts_with ~needle haystack =
     (String.lowercase_ascii haystack)
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
+
+let memory_overview_query (state : state) =
+    match state.search with
+    | Some q -> String.lowercase_ascii (String.trim q)
+    | None ->
+        if String.length (String.trim state.search_last) > 0 then
+          String.lowercase_ascii (String.trim state.search_last)
+        else ""
+
+
+let visible_memory_keepers (state : state) =
+  let open Tui_decode in
+  let raw_keepers =
+    match state.memory_health with
+    | None -> []
+    | Some s -> s.mhs_keepers
+  in
+  let sorted_keepers =
+    match state.memory_overview_sort with
+    | Mem_overview_facts ->
+        List.sort
+          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+            if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_size ->
+        List.sort
+          (fun a b ->
+            if a.mkh_snapshot_bytes <> b.mkh_snapshot_bytes then
+              Stdlib.compare b.mkh_snapshot_bytes a.mkh_snapshot_bytes
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_delta ->
+        List.sort
+          (fun a b ->
+            let da = a.mkh_added + a.mkh_removed in
+            let db = b.mkh_added + b.mkh_removed in
+            if da <> db then Stdlib.compare db da
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_state ->
+        List.sort
+          (fun a b ->
+            let sa = memory_state a in
+            let sb = memory_state b in
+            if sa <> sb then Stdlib.compare sb sa
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_updated ->
+        List.sort (fun a b ->
+            let by_time = Stdlib.compare b.mkh_updated_at a.mkh_updated_at in
+            if by_time <> 0 then by_time else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_name ->
+        List.sort
+          (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+  in
+  let query = memory_overview_query state in
+    if query = "" then sorted_keepers
+    else
+      List.filter
+        (fun k ->
+          palette_contains ~needle:query k.mkh_keeper_id
+          || palette_contains ~needle:query (memory_state_label (memory_state k)))
+        sorted_keepers
+
+
+
+let selected_memory_keeper (state : state) =
+  let rows = visible_memory_keepers state in
+  List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
+
+let memory_overview_scrolled ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let count = List.length keepers in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context_rows =
+    match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
+    | None -> 0
+    | Some keeper ->
+        (* Divider, snapshot, facts, source, Librarian and Vision, then the
+           selected keeper's read errors and server alerts. *)
+        6 + List.length keeper.mkh_alerts
+        + (if Option.is_some keeper.mkh_read_error then 1 else 0)
+        + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+  in
+  { sc_count = count
+  ; sc_chrome =
+      Masc_tui_frame.chrome_rows
+      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
+      + 7 + context_rows
+      + (if memory_overview_query state <> "" then 1 else 0)
+      + (if Option.is_some state.memory_health_error then 2 else 0)
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
 
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
@@ -5193,13 +5732,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        (* Fleet rows plus the detail panel of the row the cursor names. The
-           panel is one scroll unit: its own height follows the render, and
-           search only needs to land on rows that exist. *)
-        listing ~error:state.memory_health_error
-          (match state.memory_health with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
+        Some (memory_overview_scrolled state)
   | Changes ->
       Some
         { sc_count =
@@ -5217,6 +5750,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.repository_changes with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rcs_changes)
+  | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -5319,9 +5853,9 @@ let visible_surface_ring_index (state : state) (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
+    | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -5479,11 +6013,11 @@ let surface_row_texts (state : state) : surface -> string list option = function
                   rows))
       else
         Option.map
-          (fun s ->
+          (fun _ ->
             List.map (fun k -> k.Tui_decode.mkh_keeper_id)
-              s.Tui_decode.mhs_keepers
-            @ [ "memory detail" ])
+              (visible_memory_keepers state))
           state.memory_health
+  | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
       Option.map
         (fun s ->
@@ -5713,11 +6247,25 @@ let keeper_message_support_status_rows state ~status_rows =
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
+type gate_lane = Workspace_gate | External_gate
+
+let gate_lane_label = function
+  | Workspace_gate -> "Workspace"
+  | External_gate -> "Outside services"
+
+let gate_mode_label = function
+  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
+
 type palette_action =
+  | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
+  | Palette_board_hearth of string option
   | Palette_board_post of string
   (* (question, symbol): a language-server question about a name on the
      Code pane's cursor line — the K/D candidates ride the palette as
@@ -5799,6 +6347,12 @@ let lsp_question_prefixes =
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
+  @ List.concat_map (fun lane ->
+      List.map (fun mode ->
+        ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
+         Palette_gate_mode (lane, mode)))
+        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
+      [Workspace_gate; External_gate]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
@@ -5806,6 +6360,8 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  @ [ "go Browser Lane", Palette_browser_lane Browser_lane_view.Browser;
+      "go Slack Lane", Palette_browser_lane Browser_lane_view.Slack ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]
@@ -5822,6 +6378,10 @@ let palette_entries (state : state) =
   @ List.map
       (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
       state.tasks
+  @ [ "hearth all", Palette_board_hearth None ]
+  @ List.map (fun (name, count) ->
+      (Printf.sprintf "hearth %s (%d posts)" name count, Palette_board_hearth (Some name)))
+      state.board_hearths
   @ List.map
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))

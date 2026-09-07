@@ -319,7 +319,7 @@ let replay_call_with_outcome
             ())
      | Keeper_gate.Unavailable reason ->
        Keeper_tool_execution.failure
-         ~class_:Tool_result.Runtime_failure
+         ~class_:Tool_result.Dependency_unavailable
          ~effect_disposition:Tool_result.Proven_pre_effect
          (gate_unavailable_message reason)
      | Keeper_gate.Allow authorization ->

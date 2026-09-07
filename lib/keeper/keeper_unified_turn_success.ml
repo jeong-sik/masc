@@ -522,7 +522,9 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
       turns_used
       tool_name
       repeated_count;
-    reset_failure_state ()
+    (* A repeated-tool stop checkpoints progress but is not a successful turn;
+       preserve failure evidence and budgets for the next cycle. *)
+    ()
   | Runtime_agent.Yielded_after_repeated_assistant_text
       { turns_used; repeated_count } ->
     Log.Keeper.warn ~keeper_name:updated_meta.name
@@ -530,7 +532,8 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
        checkpoint saved — will resume next cycle"
       turns_used
       repeated_count;
-    reset_failure_state ()
+    (* Repeated assistant text is likewise a non-completion stop. *)
+    ()
   | Runtime_agent.InputRequired { turns_used; request } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "typed input required after %d turn(s), checkpoint saved request_id=%s"
@@ -590,6 +593,9 @@ let handle
       ~keeper_turn_id
       execution_outcome
   =
+  (* Named so post-turn work (checkpoint, metrics, memory, projections)
+     reads as [turn:post] in the trace. *)
+  Eio_guard.with_named_switch "turn:post" @@ fun () ->
   let result = Keeper_execution_outcome.result execution_outcome in
   let channel = Keeper_execution_outcome.metrics_channel execution_outcome in
   let run_projection terminal_effect f =

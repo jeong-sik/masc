@@ -46,8 +46,8 @@ let entries events =
   |> List.map (fun (at, event) -> { Acting.ae_at = at; ae_event = event })
   |> List.sort (fun a b -> Float.compare b.Acting.ae_at a.Acting.ae_at)
 
-let keeper ?(mark = "\xe2\x97\x8f") ?(tone = Pane.Ok) name : Pane.keeper =
-  { Pane.name; mark; mark_tone = tone; trace_id = "trace-" ^ name }
+let keeper ?(mark = "\xe2\x97\x8f") ?(tone = Pane.Ok) ?(health = None) name : Pane.keeper =
+  { Pane.name; mark; mark_tone = tone; health; trace_id = "trace-" ^ name }
 
 let lane = "agent_core-glm-coding.glm-5.3"
 
@@ -70,6 +70,15 @@ let fixture : Pane.input =
   ; entries =
       entries
         [ (900., settled ~at:900. "rondo")
+        ; ( 905.
+          , Observer.Keeper_tool_call
+              { Observer.kt_keeper = "rondo"
+              ; kt_turn = None
+              ; kt_tool = "keeper_artifact_read"
+              ; kt_duration_ms = Some 5.
+              ; kt_disposition = Some "completed"
+              ; kt_at = 905.
+              } )
         ; ( 980.
           , agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
               ~correlation:"trace-sangsu" lane )
@@ -128,6 +137,99 @@ let index_of_in texts name =
   go 0 texts
 
 let index_of name = index_of_in texts name
+
+(* The focus header repeats a name the fleet row already used; its own row
+   is the later one. *)
+let last_index_of_in texts name =
+  let rec go i best = function
+    | [] -> Option.value ~default:0 best
+    | row :: rest ->
+        go (i + 1) (if contains name row then Some i else best) rest
+  in
+  go 0 None texts
+
+let last_index_of name = last_index_of_in texts name
+
+(* goner's process is gone: the mark says the keeper is not there, the
+   health reading is Offline. Its last turn never settled — the end event
+   died with the keeper — so neither the fleet row nor the focus block may
+   read that turn as running. *)
+let dead_fixture : Pane.input =
+  { fixture with
+    Pane.keepers =
+      keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
+        ~health:(Some Masc.Tui_decode.Health_offline) "goner"
+      :: keeper "bare"
+      :: keeper "mute"
+      :: fixture.Pane.keepers
+  ; selected = Some "goner"
+  ; entries =
+      fixture.Pane.entries
+      @ entries
+          [ ( 995.
+            , agent_core ~kind:Observer.Turn_started ~turn:7 ~at:995.
+                ~correlation:"trace-goner" lane )
+          ; ( 996.
+            , agent_core ~tool:"Read" ~turn:7 ~tool_use_id:"c" ~at:996.
+                ~correlation:"trace-goner" lane )
+          ; ( 997.
+            , agent_core ~kind:Observer.Turn_started ~turn:9 ~at:997.
+                ~correlation:"trace-bare" lane )
+          ; ( 908.
+            , Observer.Keeper_turn_complete
+                { Observer.tc_keeper = "mute"
+                ; tc_turn = None
+                ; tc_model = None
+                ; tc_input_tokens = Some 120
+                ; tc_output_tokens = Some 30
+                ; tc_cost_usd = Some 0.001
+                ; tc_tool_calls = Some 2
+                ; tc_at = 908.
+                } )
+          ]
+  }
+
+let dead_drawn = Pane.lines ~rows ~cols ~scroll:0 dead_fixture
+let dead_texts = List.map text dead_drawn.Pane.rows
+
+let test_a_settle_without_a_number_names_no_turn () =
+  let drawn =
+    Pane.lines ~rows ~cols ~scroll:0 { dead_fixture with Pane.selected = Some "mute" }
+  in
+  let texts = List.map text drawn.Pane.rows in
+  let header = List.nth texts (last_index_of_in texts "mute") in
+  check bool "settles with its state" true (contains "settled" header);
+  check bool "no turn is named" false (contains "turn" header)
+
+let test_a_gone_keepers_turn_is_not_read_as_running () =
+  let row = find_row_in dead_texts "goner" in
+  check bool "the gone row says unfinished" true (contains "unfinished" row);
+  check bool "the gone row does not say running" false (contains "running" row)
+
+let test_a_settled_row_counts_only_what_the_settle_confirmed () =
+  (* The ledger row above landed after the settle and carries no turn
+     number; before the fix it made the settled row count the running
+     ledger total instead of the turn's confirmed calls. *)
+  let row = find_row "rondo" in
+  check bool "the settle's count stands" true (contains "3 calls" row);
+  check bool "no running total took the count" false (contains "4 calls" row);
+  check bool "a settled age says since when" true (contains "1m35s ago" row)
+
+let test_a_live_keeper_without_a_tool_says_in_turn () =
+  let row = find_row_in dead_texts "bare" in
+  check bool "a live turn with no call names its state" true
+    (contains "in turn" row);
+  check bool "the fleet row never borrows the phase word" false
+    (contains "running" row)
+
+let test_a_gone_keepers_focus_header_says_unfinished () =
+  let header = index_of_in dead_texts "goner" in
+  check bool "the focus header says unfinished" true
+    (contains "unfinished" (List.nth dead_texts header));
+  check bool "the focus header does not say in turn" false
+    (contains "in turn" (List.nth dead_texts header));
+  check bool "an open turn does not borrow the session number" false
+    (contains "turn 7" (List.nth dead_texts header))
 
 (* ── width contract ─────────────────────────────────────────────────── *)
 
@@ -190,18 +292,21 @@ let test_fleet_rows_read_the_state () =
   check bool "quiet says so" true (contains "quiet" (find_row "quiet-one"))
 
 let test_focus_block_names_the_current_turn () =
-  let header = index_of "turn 5" in
+  let header = last_index_of "sangsu" in
   check bool "the turn is in flight" true (contains "in turn" (nth header));
   check bool "first call returned" true (contains "Read" (nth (header + 1)));
   check bool "with its duration" true (contains "2.0s" (nth (header + 1)));
   check bool "second call still out" true (contains "Execute" (nth (header + 2)));
-  check bool "marked running" true (contains "running" (nth (header + 2)))
+  check bool "the last call says since when, not the header's state" true
+    (contains "10.0s ago" (nth (header + 2)));
+  check bool "the call line does not repeat the header's state" false
+    (contains "in turn" (nth (header + 2)))
 
 let test_focus_falls_back_to_who_acted_last () =
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.selected = None } in
   let texts = List.map text drawn.Pane.rows in
   check bool "sangsu acted last" true
-    (List.exists (fun row -> contains "turn 5" row) texts)
+    (List.exists (fun row -> contains "sangsu" row) texts)
 
 let test_narrow_budget_folds_the_fleet () =
   let drawn = Pane.lines ~rows:4 ~cols ~scroll:0 fixture in
@@ -223,7 +328,7 @@ let test_targets_name_the_keeper_under_each_fleet_row () =
   check string "then the settled one" "keeper:rondo" (List.nth targets 3);
   check string "then the quiet one" "keeper:quiet-one" (List.nth targets 4);
   check string "the rule acts on nothing" "none" (List.nth targets 5);
-  check string "focus rows act on nothing" "none" (List.nth targets (index_of "turn 5"));
+  check string "focus rows act on nothing" "none" (List.nth targets (last_index_of "sangsu"));
   check string "padding acts on nothing" "none" (List.nth targets (rows - 1))
 
 (* ── scroll ─────────────────────────────────────────────────────────── *)
@@ -405,9 +510,10 @@ let test_changes_overflow_folds_and_scrolls () =
 let test_state_text_reads_each_case () =
   let plain spans = String.concat "" (List.map (fun s -> s.Pane.text) spans) in
   check bool "approval outranks a running turn" true
-    (contains "approval" (plain (Pane.keeper_state_text ~now ~approval:(Some "Write") None)));
-  check string "no chunk is quiet" "\xc2\xb7 quiet"
-    (plain (Pane.keeper_state_text ~now ~approval:None None))
+    (contains "approval"
+       (plain (Pane.keeper_state_text ~now ~health:None ~approval:(Some "Write") None)));
+  check string "no chunk is quiet, and draws no mark" "  quiet"
+    (plain (Pane.keeper_state_text ~now ~health:None ~approval:None None))
 
 let test_tokens_and_ages_are_compact () =
   check string "both sides summed" "74.2k tok" (Pane.tokens_text (Some 73_877, Some 358));
@@ -439,6 +545,18 @@ let () =
         ; test_case "focus falls back to who acted last" `Quick
             test_focus_falls_back_to_who_acted_last
         ; test_case "narrow budget folds the fleet" `Quick test_narrow_budget_folds_the_fleet
+        ] )
+    ; ( "a gone keeper"
+      , [ test_case "a gone keeper's turn is not read as running" `Quick
+            test_a_gone_keepers_turn_is_not_read_as_running
+        ; test_case "a gone keeper's focus header says unfinished" `Quick
+            test_a_gone_keepers_focus_header_says_unfinished
+        ; test_case "a live keeper without a tool says in turn" `Quick
+            test_a_live_keeper_without_a_tool_says_in_turn
+        ; test_case "a settled row counts only what the settle confirmed" `Quick
+            test_a_settled_row_counts_only_what_the_settle_confirmed
+        ; test_case "a settle without a number names no turn" `Quick
+            test_a_settle_without_a_number_names_no_turn
         ] )
     ; ( "targets"
       , [ test_case "targets name the keeper under each fleet row" `Quick

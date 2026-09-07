@@ -2997,6 +2997,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("added", `Int (ordinary_count 2))
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
+      ; ("updated_at", if present then `Float 1700000000. else `Null)
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -3033,7 +3034,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v3")
+      [ ("schema", `String "keeper.memory_os.current_health.v4")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
@@ -3170,11 +3171,24 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; "duplicate keeper identity rejects", duplicate_keeper
     ; "alert target mismatch rejects", wrong_alert_target
     ; "duplicate vision reason rejects", duplicate_vision_reason
+    ; "timestamp without readable snapshot rejects",
+      map_keeper 0 (replace_field "updated_at" (`Float 1700000000.)) json
+    ; "readable snapshot without timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" `Null) json
+    ; "negative snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float (-1.))) json
+    ; "nonfinite snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float infinity)) json
+    ; "text snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`String "1700000000")) json
     ];
   match Tui_decode.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
+      Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
+        [None; Some 1700000000.]
+        (List.map (fun keeper -> keeper.Tui_decode.mkh_updated_at) snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2
@@ -3215,7 +3229,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v3")
+    [ ("schema", `String "keeper.memory_os.current_health.v4")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ("cadence_counter_entries", `Int 0)
     ; ( "keepers"
@@ -3231,6 +3245,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("added", `Int 0)
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
+              ; ("updated_at", `Null)
               ; ("librarian_lane_busy", `Int 0)
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
@@ -4037,6 +4052,7 @@ let fusion_run_json ?(status = "completed") ?(topology = "simple")
      ; "preset", `String "trio"
      ; "topology", `String topology
      ; "started_at", `Float 1787557669.715736
+     ; "finished_at", (if status = "running" then `Null else `Float 1787557684.715736)
      ; "status", `String status
      ; "stage", `String stage
      ; "progress", progress
@@ -4393,6 +4409,10 @@ let test_decode_fusion_progress_and_completion_summary () =
   (match Tui_decode.decode_fusion_snapshot (snapshot [ running; completed ]) with
    | Error detail -> Alcotest.fail detail
    | Ok { Tui_decode.fus_runs = [ running; completed ]; _ } ->
+       Alcotest.(check (option (float 0.))) "running has no completion time" None
+         running.fur_finished_at;
+       Alcotest.(check (option (float 0.))) "terminal completion time"
+         (Some 1787557684.715736) completed.fur_finished_at;
        (match running.fur_stage with
         | Tui_decode.Fusion_stage_judge progress ->
             Alcotest.(check int) "answered" 2 progress.frs_answered;
@@ -4403,6 +4423,20 @@ let test_decode_fusion_progress_and_completion_summary () =
        Alcotest.(check (option string)) "summary"
          (Some "Two panels support the change.") completed.fur_summary
    | Ok _ -> Alcotest.fail "expected running and completed rows");
+  List.iter
+    (fun (label, row, timestamp) ->
+      let invalid = match row with
+        | `Assoc fields -> `Assoc (("finished_at", timestamp) :: List.remove_assoc "finished_at" fields)
+        | _ -> Alcotest.fail "fixture run must be an object"
+      in
+      Alcotest.(check bool) label true
+        (Result.is_error (Tui_decode.decode_fusion_snapshot (snapshot [invalid]))))
+    [ "running completion timestamp rejected", running, `Float 1787557684.
+    ; "terminal null completion rejected", completed, `Null
+    ; "negative completion rejected", completed, `Float (-1.)
+    ; "nonfinite completion rejected", completed, `Float infinity
+    ; "text completion rejected", completed, `String "1787557684"
+    ];
   let bad_counts =
     fusion_run_json ~status:"running" ~stage:"computed"
       ~progress:
@@ -5805,6 +5839,45 @@ let test_decode_prompts_reads_the_live_shape () =
       (first.Tui_decode.pr_operator_surface = Tui_decode.Prompt_primary);
     Alcotest.(check (list string)) "template input names"
       [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
+
+(* The field the wire has carried since the registry started quarantining
+   overrides, and the snapshot dropped until 2026-09-07. A held-back key
+   renders from its file, so the reader's only clue that an override exists
+   and is not running comes from here. *)
+let held_back_payload =
+  `Assoc
+    [ ("prompts", `List [])
+    ; ( "held_back"
+      , `List
+          [ `Assoc
+              [ ("key", `String "keeper")
+              ; ("bytes", `Int 1240)
+              ; ("contract_revision", `String "01e7760f")
+              ]
+          ] )
+    ]
+
+let test_decode_prompts_reads_held_back () =
+  match Tui_decode.decode_prompts held_back_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "one held back" 1
+      (List.length snapshot.Tui_decode.ps_held_back);
+    let entry = List.hd snapshot.Tui_decode.ps_held_back in
+    Alcotest.(check string) "key" "keeper" entry.Tui_decode.hbo_key;
+    Alcotest.(check int) "saved bytes" 1240 entry.Tui_decode.hbo_bytes;
+    Alcotest.(check string) "the revision it was pinned to" "01e7760f"
+      entry.Tui_decode.hbo_contract_revision
+
+(* A server with nothing quarantined omits the field, and so does one that
+   predates it. Neither is an error, and both mean the same thing to a
+   reader. *)
+let test_decode_prompts_absent_held_back_is_empty () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "no held back" 0
+      (List.length snapshot.Tui_decode.ps_held_back)
 
 let test_decode_prompts_reads_runtime_assets () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -7748,6 +7821,28 @@ let test_decode_file_change_reads_an_insert () =
      | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
 ;;
 
+let test_required_display_renders_numeric_epoch_as_date () =
+  (* A server too old to carry [created_at_iso] sends a bare numeric epoch.
+     The pane must show a date, not the raw number. [Time_codec.rfc3339_of_unix]
+     renders UTC whole seconds, so 1788000000.0 is the exact text a numeric
+     field has to produce here (2026-08-29T10:40:00Z, checked the way the
+     dedicated time-codec tests check their fixed points). *)
+  let epoch = 1788000000.0 in
+  let fixture = `Assoc [ ("created_at", `Float epoch) ] in
+  match Tui_decode.required_display_any_field fixture [ "created_at_iso"; "created_at" ] with
+  | Error detail -> Alcotest.failf "unexpected error: %s" detail
+  | Ok rendered ->
+    Alcotest.(check string) "a numeric epoch renders as its UTC date"
+      "2026-08-29T10:40:00Z" rendered
+
+let test_required_display_keeps_rfc3339_string_verbatim () =
+  let fixture = `Assoc [ ("created_at", `String "2026-08-29T10:40:00Z") ] in
+  match Tui_decode.required_display_any_field fixture [ "created_at_iso"; "created_at" ] with
+  | Error detail -> Alcotest.failf "unexpected error: %s" detail
+  | Ok rendered ->
+    Alcotest.(check string) "a present ISO twin is kept verbatim"
+      "2026-08-29T10:40:00Z" rendered
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -8185,6 +8280,10 @@ let () =
           test_a_json_refusal_shows_its_sentence_not_the_envelope;
         Alcotest.test_case "reads separate read-only runtime assets" `Quick
           test_decode_prompts_reads_runtime_assets;
+        Alcotest.test_case "reads the held-back overrides" `Quick
+          test_decode_prompts_reads_held_back;
+        Alcotest.test_case "an absent held_back is empty, not an error" `Quick
+          test_decode_prompts_absent_held_back_is_empty;
         Alcotest.test_case "hides assembly fragments by default" `Quick
           test_prompt_rows_hide_fragments_by_default;
         Alcotest.test_case "legacy rows default to primary" `Quick
@@ -8334,6 +8433,12 @@ let () =
           test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation
       ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
           test_decode_skill_evidence_tie_compares_rfc3339_instants
+      ] );
+    ( "decode_timestamp_display",
+      [ Alcotest.test_case "renders a numeric epoch as a date, not a bare number" `Quick
+          test_required_display_renders_numeric_epoch_as_date
+      ; Alcotest.test_case "keeps a present ISO twin verbatim" `Quick
+          test_required_display_keeps_rfc3339_string_verbatim
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );

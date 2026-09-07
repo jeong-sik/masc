@@ -54,6 +54,72 @@ let test_later_reset_extends_earlier_is_ignored () =
 let candidates =
   [ "claude_code.sonnet"; "ollama.qwen"; "claude_code.opus"; "codex.spark" ]
 
+(* An observation is a fact without an end time. Both metered providers this
+   fleet reaches 429 without Retry-After (2026-09-06), so a table that only
+   records stated windows stays empty while every lane re-dispatches into a
+   spent account. *)
+let test_an_observation_demotes_and_a_success_clears_it () =
+  reset ();
+  let scope = provider_scope "ollama_cloud" in
+  Alcotest.(check bool) "nothing recorded" false (Q.is_exhausted ~scope ~now:100.0);
+  Q.note_observed_exhausted ~scope;
+  Alcotest.(check bool) "an observation holds it back" true
+    (Q.is_exhausted ~scope ~now:100.0);
+  (* No time is claimed, so no time answers when it ends. *)
+  Alcotest.(check (option (float 0.0)))
+    "an observation names no reset"
+    None
+    (Q.active_until ~scope ~now:100.0);
+  (* And it does not age out: a clock cannot know a quota came back. *)
+  Alcotest.(check bool) "time alone does not clear it" true
+    (Q.is_exhausted ~scope ~now:1_000_000.0);
+  Q.note_succeeded ~scope;
+  Alcotest.(check bool) "a call getting through clears it" false
+    (Q.is_exhausted ~scope ~now:100.0)
+;;
+
+(* The provider's own answer outranks an observation in both directions, and a
+   success inside a stated window does not make that window untrue. *)
+let test_a_stated_window_outranks_an_observation () =
+  reset ();
+  let scope = provider_scope "api_z_ai" in
+  Q.note_observed_exhausted ~scope;
+  Q.note_exhausted ~scope ~resets_at:500.0;
+  Alcotest.(check (option (float 0.0)))
+    "a stated reset replaces an observation"
+    (Some 500.0)
+    (Q.active_until ~scope ~now:100.0);
+  Q.note_observed_exhausted ~scope;
+  Alcotest.(check (option (float 0.0)))
+    "an observation does not weaken a stated window"
+    (Some 500.0)
+    (Q.active_until ~scope ~now:100.0);
+  Q.note_succeeded ~scope;
+  Alcotest.(check (option (float 0.0)))
+    "a success does not end a stated window"
+    (Some 500.0)
+    (Q.active_until ~scope ~now:100.0);
+  Alcotest.(check bool) "and the stated window still expires on time" false
+    (Q.is_exhausted ~scope ~now:500.1)
+;;
+
+(* The safety line. Demotion is ordering, not admission: an observed scope is
+   still attempted when it is all a lane has left, so a provider blip cannot
+   take a lane out. *)
+let test_an_observed_scope_is_demoted_not_excluded () =
+  reset ();
+  Q.note_observed_exhausted ~scope:(provider_scope "ollama_cloud");
+  let candidates = [ "ollama_cloud.glm-5-3"; "deepseek.v4-flash" ] in
+  Alcotest.(check (list string))
+    "an observed candidate goes to the tail"
+    [ "deepseek.v4-flash"; "ollama_cloud.glm-5-3" ]
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates);
+  Alcotest.(check (list string))
+    "and is still there when it is all there is"
+    [ "ollama_cloud.glm-5-3" ]
+    (Q.demote_order ~now:100.0 ~quota_scope_of [ "ollama_cloud.glm-5-3" ])
+;;
+
 let test_demote_moves_exhausted_provider_to_tail () =
   reset ();
   Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
@@ -236,6 +302,18 @@ let () =
             "shared credential demotes siblings"
             `Quick
             test_shared_credential_scope_demotes_siblings
+        ; Alcotest.test_case
+            "an observation demotes and a success clears it"
+            `Quick
+            test_an_observation_demotes_and_a_success_clears_it
+        ; Alcotest.test_case
+            "a stated window outranks an observation"
+            `Quick
+            test_a_stated_window_outranks_an_observation
+        ; Alcotest.test_case
+            "an observed scope is demoted, not excluded"
+            `Quick
+            test_an_observed_scope_is_demoted_not_excluded
         ] )
     ; ( "scope"
       , [ Alcotest.test_case

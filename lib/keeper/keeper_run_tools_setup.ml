@@ -291,7 +291,14 @@ let seed_tool_calls_from_history
    body to [] is exactly the pre-fix behavior. *)
 let initial_tool_calls ~(history_messages : Agent_core.Types.message list) :
     Keeper_agent_result.tool_call_detail list =
-  seed_tool_calls_from_history ~history_messages
+  (* Serialising and hashing every tool call in the history is pure, so the
+     pool does it. The walk is over the whole history, which measured
+     1,278,158 B above, and it runs once per turn between the raw-trace
+     append and [Keeper_identity_tools.for_turn]: the 2026-09-06 20:29 KST
+     trace shows that stretch as the longest run left on the main domain,
+     55-222 ms across five Keepers. *)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    seed_tool_calls_from_history ~history_messages)
 ;;
 
 let prepare_agent_setup
@@ -461,24 +468,21 @@ let prepare_agent_setup
          Agent_core.Error.Internal
            (Keeper_skill_activation_recorder.error_to_string error))
   in
-  let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
-    { meta
-    ; tool_calls = initial_tool_calls ~history_messages
-    ; current_turn = 0
-    ; tool_surface =
+  let* load_receipts =
+    Keeper_tool_load_receipts.restore
+      ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
+      ~target:shared_context
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal (Keeper_tool_load_receipts.error_to_string error))
+  in
+  let acc =
+    Keeper_run_tools_hook_accumulator.create ~meta
+      ~historical_tool_calls:(initial_tool_calls ~history_messages)
+      ~tool_surface:
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; config_root
         ; runtime_config_path
         }
-    ; requested_tool_names = []
-    ; receipt_completion_contract_result =
-        Keeper_execution_receipt.Completion_observation_unknown
-    ; receipt_actionable_signal = None
-    ; prompt_blocks = []
-    ; extra_system_context_digest = None
-    ; extra_system_context_size = None
-    ; assistant_turn_texts = []
-    }
   in
   (* The agent this turn will run, made here because the tools are made here
      and one of them widens the callable set while the turn is running. It is
@@ -555,6 +559,7 @@ let prepare_agent_setup
             identity_allow.Keeper_identity_tool_allow.kept
         ; agent_cell
         ; history = history_messages
+        ; load_receipts
         }
       ?composition_plan_index
       ~skill_activation_context

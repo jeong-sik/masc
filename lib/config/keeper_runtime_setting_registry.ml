@@ -195,15 +195,6 @@ let all =
       ~category:"heartbeat"
       "Upper bound for rate-limit failure-route backoff in seconds"
   ; setting
-      ~range:(float_range ~min:0.0 ())
-      ~env_name:"MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
-      ~exposure:(Toml_and_env "health.durable_queue_stale_sec")
-      ~value_kind:Float
-      ~default:"0.0"
-      ~consumers:[ "Env_config_keeper.KeeperHealth"; "Server_health" ]
-      ~category:"health"
-      "Durable queue backlog age before health degrades"
-  ; setting
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"
       ~exposure:(Toml_and_env "wire_capture.enabled")
       ~value_kind:Boolean

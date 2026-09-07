@@ -1,0 +1,12 @@
+{
+  "observation": "post-service-recovery; provider causality not measured",
+  "records": [
+    {
+      "ts": "2026-09-07T05:12:44Z",
+      "seq": 26725344,
+      "level": "INFO",
+      "module": "Keeper",
+      "message": "keeper:geek-scout tool_call tool=WebSearch source=- params=[includeContent,limit,query] input_shape=[includeContent=bool,limit=int,query=string:41] outcome=ok out_len=23844 failed_params=- error_preview=-"
+    }
+  ]
+}

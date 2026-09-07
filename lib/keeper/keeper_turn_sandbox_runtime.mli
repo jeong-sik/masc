@@ -23,6 +23,14 @@ val create :
   t
 
 val host_root : t -> string
+
+val github_identity_secret_files : t -> string list
+(** Credential files of the microvm identity snapshots already bound to this
+    runtime, including retained snapshots. Reads the in-memory binding only:
+    no token refresh, boot or guest replacement. A boxed execution has already
+    acquired that binding; inspecting its output must not prepare a different
+    identity after the command ran. *)
+
 val prepare_github_identity_secret_files :
   ?timeout_sec:float -> t -> (string list, string) result
 (** After authorization, observe and bind the container to the current GitHub
@@ -146,6 +154,7 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
+  ?output_capture:Process_output_capture.t ->
   stdin_content:string ->
   string list ->
   Unix.process_status * string * string
@@ -193,6 +202,23 @@ val run_exec_with_status_split :
 (** Execute [command_argv] inside the turn-scoped container and return split
     stdout/stderr without applying success-code policy. This is the argv-level
     entrypoint used by Shell IR dispatch. *)
+
+val run_exec_with_output_files :
+  ?stdin_content:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  ?timeout_sec:float ->
+  capture_dir:string ->
+  t ->
+  cwd:string ->
+  command_argv:string list ->
+  (Unix.process_status * string * string * Process_output_capture.files option, string) result
+(** The same execution and container recovery path as
+    {!run_exec_with_status_split}, with fresh private output files per actual
+    process attempt. Capture errors never alter the command's status or cause
+    a retry. The returned files belong to the final attempt; prior attempt
+    files are retained under [capture_dir]. Cancellation closes and retains
+    partial files before propagating. *)
 
 type exec_pipeline_stage = {
   command_argv : string list;
@@ -250,3 +276,15 @@ val teardown_keeper_sandbox :
     shutdown finalization. A missing container is a successful teardown.
     The MicroVM identity snapshot is released only after its guest has
     stopped and been deleted. *)
+
+val sweep_abandoned_microvm_guests :
+  base_path:string ->
+  command_available:(string -> bool) ->
+  timeout_sec:float ->
+  is_pid_alive:(int -> bool) ->
+  run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
+  (Keeper_microvm_backend.t * Keeper_sandbox_microvm.sweep_outcome) list
+(** Collect abandoned guests under the same lifecycle lock as boot and
+    teardown. The lock covers listing through deletion: stable guest names
+    may otherwise be reused between observing a dead owner and removing it.
+    Guest commands and unrelated Keeper lanes do not acquire this lock. *)

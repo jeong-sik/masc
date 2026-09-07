@@ -56,6 +56,9 @@ type surface =
             without a cell are tools this can name and never make callable. *)
   ; history : Agent_core.Types.message list
         (** The conversation this turn continues, read for {!already_used}. *)
+  ; receipts : Keeper_tool_load_receipts.t
+        (** Successful outstanding loads restored from Checkpoint Context and
+            bound to this turn's trace, Task, and complete deferred surface. *)
   ; carry_window : int
         (** How far back through the conversation a tool's last call may be
             and still be placed with its schema, counted in [ToolUse] blocks
@@ -117,23 +120,14 @@ type placement =
             that used the listing loaded a tool the turn then ended before
             using.
 
-            Derived from history, the way the Claude API, Claude Code, and
-            Hermes all carry a discovered tool forward: the conversation is
-            the record, so a crash, a resume, or a failed turn needs no
-            reconciliation.
+            ToolUse history supplies tools already dispatched. Successful
+            outstanding loads come from [receipts], so another sibling call
+            cannot revoke them. A load is consumed only when its own handler
+            is reached, or retired when its Task/trace or deferred surface
+            changes. Failed and unknown requests never enter that state.
 
-            Read from the tools' own [ToolUse] blocks, not from what was asked
-            for. Asking is not evidence of need, and carrying every request
-            grows the surface back toward the full attached list -- measured
-            an hour after that change shipped, one Keeper was at 111 tools of
-            a possible 133 and still climbing. Use stops where the work stops.
-
-            Empty until something runs, so a Keeper that never reaches its
-            attached services pays nothing for this. The set is a fold over
-            the conversation's own history, so it survives anything short of
-            that history being dropped ([masc_keeper_clear], checkpoint
-            purge). A restart is not one of those: it restores the same
-            history from the checkpoint and rebuilds the same set.
+            Checkpoint Context preserves these receipts even when successful
+            result bodies are purged. The tool result's prose is not parsed.
 
             Cut back to [carry_window] on the calls that grow the carry -- a
             call to a tool the carry does not already hold. The tool array is
@@ -156,28 +150,9 @@ type placement =
             makes to a dropped name is refused by admission and costs a round
             trip -- see {!make} for what the model is told.
 
-            The claim once made here that the 138 and 150-tool requests
-            (masc#32939) are this set is withdrawn: those requests carry no
-            listing at all -- they are official-client lanes, which pin their
-            tool set at spawn and hold every tool as a schema. Measured
-            2026-09-04 over 8,105 [kind:request] rows in
-            [wire-capture/2026-09] with each request's tool array resolved
-            through [tools_ref._blob.sha256]: requests with no
-            [keeper_tool_search] in the array are 28.2% of all tool-schema
-            bytes, and the (138, no-listing) and (150, no-listing) shapes
-            account for 374 and 177 requests. Nothing here reaches them.
-
-            The sizing figures below are inherited from the replay that chose
-            the default and were produced against the earlier cut rule (cut at
-            a name's first use in the conversation), not the rule above; they
-            are the reason for the default rather than a measurement of what
-            ships. Measured over 19,100 turns 2026-09-01..03: per-keeper median
-            carried 32.1 KB falling to 17.4 KB at a window of 300, turns whose
-            array differs rising from 1.0% to 3.3%, against 57,600 tokens of
-            prefix at the measured median. The current rule cuts strictly more
-            often than the rule those came from, so the carried figure is an
-            upper bound and the differing-turns figure a lower one. Re-running
-            the replay against this rule is not done. *)
+            This placement applies to lanes that can extend a running tool
+            set. Official-client lanes that pin their tools at spawn receive
+            their complete tool set from the bundle. *)
   ; observe_turn : unit -> turn_discovery
         (** Call once when the turn ends, on both the ordinary and the raised
             path, and records {!Loaded_unused} where an operator can read it.
@@ -207,6 +182,12 @@ val make : keeper_name:string -> surface -> placement option
     the name is unknown, because here it is not. Recovering costs one round
     trip. This is why the carry exists at all: a tool the conversation is
     still using should be placed rather than re-asked for.
+
+    Successful loads survive the turn boundary through [receipts]. Loading
+    requires an exact execution invocation; an unwired invocation returns a
+    non-retryable typed failure before any tools are installed. The Task at
+    load time owns the receipt. An unavailable work identity is a retryable
+    infrastructure failure and leaves both the callable set and receipts intact.
 
     Raises [Invalid_argument] if the argument schema this builds is refused,
     which can only be a defect in the literal it is built from. *)

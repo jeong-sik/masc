@@ -60,6 +60,11 @@ val continuous_key : string
     Ctrl-A, chosen for the same reason as {!listen_key}: a focused row spends
     every printable key on draft text. *)
 
+val send_key : string
+(** The key {!classify_key} answers {!Send} for. Exposed so a caller that must
+    send without a keypress hands this to {!classify_key} rather than calling
+    the send path itself. *)
+
 val listen_key : string
 (** The key that starts a microphone capture from a focused row. Ctrl-Y.
 

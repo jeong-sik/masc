@@ -461,7 +461,7 @@ let rec remove_tree_blocking path =
 ;;
 
 let remove_tree path =
-  try Eio_guard.run_in_systhread (fun () -> remove_tree_blocking path) with
+  try Eio_guard.run_in_systhread ~label:"shutdown-remove-tree" (fun () -> remove_tree_blocking path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
@@ -681,6 +681,7 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
   | Cleanup_ready _
   | Reconciliation_required _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
 ;;
 
@@ -886,6 +887,7 @@ let run ~config ~entry ?successor_operation_id operation =
   | Joining_lanes
   | Reconciliation_required _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
 ;;
 

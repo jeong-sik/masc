@@ -82,6 +82,7 @@ type keeper_turn_complete = {
 
 type keeper_tool_call = {
   kt_keeper : string;
+  kt_turn : int option;
   kt_tool : string;
   kt_duration_ms : float option;
   kt_disposition : string option;
@@ -247,6 +248,7 @@ let decode_keeper_tool_call fields =
   Ok
     (Keeper_tool_call
        { kt_keeper
+       ; kt_turn = int_field fields "turn"
        ; kt_tool
        ; kt_duration_ms = float_field fields "duration_ms"
        ; kt_disposition = string_field fields "disposition"

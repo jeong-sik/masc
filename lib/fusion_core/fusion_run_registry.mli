@@ -60,6 +60,7 @@ type run =
           배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 수 있는 자리는 여기뿐이다.
           topology 를 담지 않은 예전 replay 레코드는 스킵된다(레거시 폴백 없음). *)
   ; started_at : float
+  ; finished_at : float option
   ; status : run_status
   ; progress : progress option
       (** Process-local live observation. Replay drops running workers, so an
@@ -83,7 +84,8 @@ val register_running
 
 val mark_completed : t -> run_id:string -> outcome:outcome -> unit
 (** Complete a registered run. An unknown [run_id] is logged and is not written
-    to the append-only log. *)
+    to the append-only log. Re-projecting a completed run preserves its first
+    [finished_at], including after replay, while updating its outcome. *)
 
 val mark_progress : t -> run_id:string -> progress:progress -> unit
 (** Update the live stage only while the exact run remains [Running]. Unknown

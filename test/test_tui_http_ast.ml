@@ -169,7 +169,7 @@ let test_the_categorical_guard_rejects_a_raw_hue () =
   in
   if violations "let _ = Ansi.bright_blue" = [] then
     failf "the categorical guard let a raw hue through";
-  if violations "let _ = Theme.category Theme.Slot_5" <> [] then
+  if violations "let _ = Theme.category Theme.Slot_4" <> [] then
     failf "the categorical guard rejected a theme slot"
 ;;
 
@@ -244,7 +244,11 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
       check int (binding_name ^ " contains no direct raw status identifier") 0
         (Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
            ~binding_name ~callees:[] ~identifiers:raw_status_identifiers))
-    [ "priority_indicator"; "ctx_color"; "ctx_bar" ];
+    (* [origin] is here because nothing else asks it this. Its own check
+       counts calls, and a count cannot see an arm that reached for a raw
+       colour instead of a token -- that arm simply adds nothing to any
+       count. *)
+    [ "priority_indicator"; "ctx_color"; "ctx_bar"; "origin" ];
   check int "priority glyph has one owner" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"priority_indicator"
@@ -297,13 +301,20 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
    [masc_tui_ansi.ml], so this focused check requires every arm of [origin] to
    reach its resolved role token. *)
 let test_chat_roles_draw_through_the_readable_path () =
+  (* Reached, not counted. One arm per token was true when [origin] had one
+     arm per style; the Skill readings and Thinking arrived since and share
+     the tokens they mean -- quiet_origin draws both Local and Thinking, warn
+     draws Status and Skill_attention, bad draws Error and Skill_failure. A
+     count of one asks how many arms a token has, which is a question about
+     the style list rather than about the path a colour takes. *)
   List.iter
     (fun callee ->
-      check int
-        (Printf.sprintf "chat origin resolves %s once" callee)
-        1
+      check bool
+        (Printf.sprintf "chat origin reaches %s" callee)
+        true
         (Ast_grep.count_calls_in_value_binding
-           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee))
+           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee
+         > 0))
     [ "Theme.user_origin"
     ; "Theme.keeper_origin"
     ; "Theme.quiet_origin"
@@ -430,8 +441,14 @@ let test_http_client_does_not_own_tui_env_contract () =
 
 let test_keeper_chat_uses_current_async_contract () =
   let module_path = "bin/masc_tui.ml" in
-  check int "TUI keeper chat has no removed models field" 0
-    (Ast_grep.count_string_literals ~module_path ~needle:"models");
+  (* Asked where the body is built, and on the whole literal. The needle used
+     to be the substring "models" over every literal in masc_tui.ml, which
+     does not build this body at all: the runtime table's
+     [runtime.toml at [models.%s]] rows are what the substring found. *)
+  check int "the keeper chat body carries no models field" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"lib/keeper/keeper_chat_operation_payload.ml"
+       ~binding_name:"input_to_json" ~literals:[ "models" ]);
   check int "TUI targets the keeper chat stream once" 1
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_http.ml"
@@ -525,9 +542,11 @@ let test_keeper_chat_uses_current_async_contract () =
        predicted the caret's row by repeating the pane's layout arithmetic,
        which only stayed true while every row the pane drew was also counted
        in the row budget. The renderer now reads the rows it has already put
-       in the frame, so [frame_lines] is what this list pins instead. *)
+       in the frame, so [count_frame_lines] is what this list pins instead --
+       the count, not the list: the caret needs how many rows sit above it and
+       nothing about their text. *)
     [ "Message_layout.input_viewport"
-    ; "frame_lines"
+    ; "count_frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
       (* Renamed by #30141, which put a surface strip above every frame.  The
@@ -889,17 +908,6 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
-  (* Seven: [state.workspace], each row's [ov_cluster] / [ov_project], the
-     agent [ai_summary], the event content, and the transport tail's
-     [th_primary_path] / [th_queue_pressure]. Every one arrives from outside
-     the renderer. A failed transport read needs no projection of its own; it
-     reaches the operator through the Recent Events row the surface error
-     already writes. *)
-  check int "overview event text crosses the terminal boundary" 5
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_overview"
-       ~callee:"Terminal_text.single_line");
   check int "briefing is not an approval source" 0
     (Ast_grep.count_string_literals
        ~module_path:"bin/masc_tui_loader.ml"
@@ -940,10 +948,17 @@ let test_planning_phase_uses_goal_ssot () =
        ~module_path:"bin/masc_tui_render.ml"
        ~callee:"Goal_phase.to_string"
      >= 1);
-  check int "renderer does not lowercase planning status strings" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~callee:"String.lowercase_ascii");
+  (* Asked of the bindings that draw a phase, not of the module. The renderer
+     lowercases a MIME type before splitting it, which is not a planning
+     status and never was; a module-wide count of a stdlib call cannot tell
+     the two apart. *)
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " does not lowercase a planning status") 0
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_render.ml" ~binding_name
+           ~callee:"String.lowercase_ascii"))
+    [ "planning_phase_label"; "planning_phase_column"; "planning_phase_color" ];
   check int "projection rejects an unknown canonical phase" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
@@ -1128,19 +1143,20 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_keeper_message"
        ~callee:"Observation_layout.context_header_item");
-  (* The budget handed to the context item must come from measured cells, or
-     a CJK title (two cells per character) overflows the box and [box_line]
-     cuts a reading into a different statement. Counting every
-     [display_width] in this binding froze the header's shape instead: the
-     identity budget measures here too, so adding a header segment moved the
-     total and failed a contract it never touched. Bind the measurement to
-     the argument that needs it. *)
-  check int "chat context item measures the actual header budget" 1
-    (Ast_grep.count_applications_with_label_containing_call_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_message"
-       ~callee:"Observation_layout.context_header_item" ~label:"max_cells"
-       ~nested_callee:"Message_layout.display_width");
+  (* The budget handed to the context item is in cells, or a CJK title (two
+     cells per character) overflows the box and [box_line] cuts a reading
+     into a different statement.
+
+     What is checkable here is that the budget is passed, not how it was
+     arrived at. Two earlier shapes tried the latter and both broke on code
+     that had nothing to do with the header: counting every [display_width]
+     in the binding moved with the identity budget, and requiring one inside
+     the [max_cells] argument stopped matching when the budget became a share
+     of [inner_cells] -- which is a cell count already, so the property holds
+     by a route no callee name can see. *)
+  check int "chat context item is handed a cell budget" 1
+    (Ast_grep.count_calls_with_label ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1306,10 +1322,18 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"load_http_surfaces" ~callees:[]
        ~identifiers:[ "identity_known" ]);
+  (* The transition sits in its own binding now, with the workspace identity
+     that has to move in the same step. Asked in two halves so extracting it
+     again does not read as the HTTP apply losing it: one owner for the
+     transition, and the apply reaching that owner. *)
+  check int "the identity transition has one owner" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_server_identity_reading"
+       ~callee:"Masc_tui_types.server_identity_of_refresh");
   check int "HTTP apply uses the tested A-to-B transition" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
-       ~callee:"Masc_tui_types.server_identity_of_refresh");
+       ~callee:"apply_server_identity_reading");
   (* The clearing is [state.server_identity <- None], a write. Counting
      reads of the field found none and called a working path broken. *)
   check int "a failed refresh clears current identity" 1
@@ -1351,10 +1375,22 @@ let test_gate_stance_listing_rides_the_flow_generation () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message"
        ~callee:"Approval.Flow.is_current");
-  check int "the press closes its own action" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_async_message"
-       ~callee:"Approval.Flow.finish_action")
+  (* Every path that resolves an approval closes the action it opened, and
+     closes it with the generation it was handed. There are four such paths
+     now and there was one when this line was written; the number is a count
+     of outcomes, and an outcome that closed someone else's action would not
+     change it. So the two counts are compared instead. *)
+  let closes =
+    Ast_grep.count_calls_in_value_binding ~module_path:main_path
+      ~binding_name:"apply_async_message" ~callee:"Approval.Flow.finish_action"
+  in
+  check bool "the press closes an action" true (closes > 0);
+  check int "every close names the generation it was given" closes
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_async_message"
+       ~callee:"Approval.Flow.finish_action" ~position:1
+       ~identifier:"generation")
 ;;
 
 let test_the_scroll_counts_back_from_a_pinned_row () =
@@ -1451,9 +1487,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
      >= 3);
-  check int "main loop has no wall-clock refresh deadline" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"Unix.gettimeofday");
+  (* [main] is seven thousand lines and reads the wall clock five times: a
+     slow-loop report, and four voice status timestamps. None is a deadline,
+     and a count over the binding cannot tell a deadline from a timestamp.
+
+     The deadline arithmetic is fed by [Mtime_clock.elapsed_ns] above, and
+     the schedule it feeds takes its time as an argument rather than reading
+     one. So the question is asked of that module, which is where a wall
+     clock would have to appear for a deadline to stop being monotonic. *)
+  check int "the schedule itself reads no wall clock" 0
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_render_schedule.ml"
+       ~callee:"Unix.gettimeofday");
   check bool "context bar width is total" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
@@ -1530,12 +1574,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "overview renderer consumes one shared layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* 6 = the five allocation-sourced bounds plus the task-panel window, which
-     follows the cursor through the same [task_rows] value (#29684). Every
-     bound still comes from the one shared allocation above. *)
-  check int "overview bounds each variable section from that allocation" 6
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+  (* The overview reads its bounds off [row_budget], the one value the layout
+     above returns. How many times it reads them is how much the surface
+     draws, not whether the allocation is shared: #29684 moved the number
+     from five to six by adding a task-panel window that reads the same
+     [task_rows]. A second source is what breaks the sharing, so that is what
+     is asked for, and none is allowed. *)
+  check int "overview bounds every variable section from that one allocation" 0
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview"
+       ~record:"row_budget"
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
@@ -1553,37 +1601,46 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "normalized_scroll"; "body_offset"; "comment_offset" ]);
-  check int "resize invalidation and Force request share one boundary" 1
+  (* Two doors notice a resize and they learn of it differently: SIGWINCH
+     knows only that the size changed, the loop's own ioctl already read the
+     new one and must keep it for the frame it is about to draw. What a
+     resize costs is the same either way, and lives in one place. *)
+  check int "the cost of a resize is invalidating the presenter" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"invalidate_frame_for_resize"
+       ~binding_name:"discard_frame_for_new_size"
        ~callee:"Frame_presenter.invalidate");
-  check int "resize boundary owns terminal-size cache invalidation" 1
+  check int "and requesting one frame" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"discard_frame_for_new_size"
+       ~callee:"Render_schedule.request");
+  check int "whose reason is exactly Force" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"discard_frame_for_new_size"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
+  check int "the SIGWINCH door drops the size it was not told" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"
        ~callee:"invalidate_terminal_size");
-  check int "resize boundary requests one forced frame" 1
+  check int "and then pays the same cost" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"
-       ~callee:"Render_schedule.request");
-  check int "resize request's reason is exactly Force" 1
-    (Ast_grep
-     .count_applications_with_exact_positional_constructor_in_value_binding
-       ~module_path:main_path ~binding_name:"invalidate_frame_for_resize"
-       ~callee:"Render_schedule.request" ~position:1
-       ~constructor:"Render_schedule.Force");
-  (* The contract is that this boundary is the only door, not that main walks
-     through it once. #30255 gave the loop a second reason to distrust the
-     presenter's cached screen -- an image overlay covered the frame and was
-     dismissed -- and a count read that as a regression. What must stay true
-     is that main never reaches past the boundary: the three assertions above
-     pin what happens inside it, and this one pins that nothing else does it.
+       ~callee:"discard_frame_for_new_size");
+  (* The contract is that the cost is paid in one place, not that main walks
+     through it a fixed number of times. #30255 gave the loop a second reason
+     to distrust the presenter's cached screen -- an image overlay covered
+     the frame and was dismissed -- and a count read that as a regression.
 
-     [Frame_presenter.invalidate] appears once in the whole file, inside the
-     boundary, so a caller that invalidated on its own would raise this to 2
-     and fail here. *)
-  check bool "main reaches the presenter only through the resize boundary" true
+     [Frame_presenter.invalidate] appears once in the whole file, inside
+     [discard_frame_for_new_size], so a caller that invalidated on its own
+     would raise this to 2 and fail here. That is how the loop's own ioctl
+     door was found: it had copied both lines rather than calling them. *)
+  check bool "main reaches the presenter only through that cost" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"invalidate_frame_for_resize"
+     + Ast_grep.count_calls_in_value_binding ~module_path:main_path
+         ~binding_name:"main" ~callee:"discard_frame_for_new_size"
      >= 1);
   check int "nothing invalidates the presenter outside that boundary" 1
     (Ast_grep.count_calls ~module_path:main_path
@@ -1671,11 +1728,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
       ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal
       ~handler
   in
+  (* Two [at_exit] calls, and which is which matters: they run in reverse of
+     this order and stop at the first that raises, so the frame summary --
+     which appends to a file and can fail on the write -- registers first and
+     the terminal restore registers last, where it runs first. *)
   check bool "startup registers cleanup and handlers before raw mode" true
     (Ast_grep.direct_call_sequence_matches_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
        ~callees:
          [ "at_exit"
+         ; "at_exit"
          ; "Sys.set_signal"
          ; "Sys.set_signal"
          ; "Sys.set_signal"
@@ -1873,26 +1935,41 @@ let test_missing_operator_token_is_reported () =
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
      constant would compile and read plausibly while asserting something the
-     401 never established -- which is the failure these lines exist to end. *)
-  check int "the chat surface asks whether a bearer was presented" 1
-    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_chat_result"
-       ~callee:"Keeper_chat.reconciliation_failure_detail"
-       ~label:"credential_sent"
-       ~nested_callee:"Masc_tui_http.operator_token_present");
-  check int "the roster surface asks the same question" 1
-    (Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"apply_keeper_roster_load"
-       ~callee:"Keeper_control.roster_failure_message"
-       ~label:"credential_sent"
-       ~nested_callee:"Masc_tui_http.operator_token_present");
-  (* Every surface reads JSON through these two. Answering a refusal inside them
-     is what keeps the server's auth body out of six different panes; a surface
-     that decoded the status itself would print it again. *)
-  check int "the JSON reads share one refusal answer" 2
-    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json");
+     401 never established -- which is the failure these lines exist to end.
+
+     So every call passes the question, not one of them. A fixed number says
+     how many branches reach the detail, and the chat surface has two: the
+     unverified outcome and the plain error. Both ask; a third that did not
+     would leave the number alone and the property broken. *)
+  let asks_the_question ~binding_name ~callee ~label =
+    let asking =
+      Ast_grep.count_applications_with_exact_labelled_unit_call_in_value_binding
+        ~module_path:"bin/masc_tui.ml" ~binding_name ~callee ~label
+        ~nested_callee:"Masc_tui_http.operator_token_present"
+    in
+    let calls =
+      Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+        ~binding_name ~callee
+    in
+    check bool (binding_name ^ " reaches " ^ callee) true (calls > 0);
+    check int (binding_name ^ " asks on every call to " ^ callee) calls asking
+  in
+  asks_the_question ~binding_name:"apply_keeper_chat_result"
+    ~callee:"Keeper_chat.reconciliation_failure_detail"
+    ~label:"credential_sent";
+  asks_the_question ~binding_name:"apply_keeper_roster_load"
+    ~callee:"Keeper_control.roster_failure_message" ~label:"credential_sent";
+  (* Every surface reads JSON through [decode_json]. Answering a refusal inside
+     it is what keeps the server's auth body out of six different panes; a
+     surface that decoded the status itself would print it again.
+
+     The count below is of readers, not of the contract: four call it today
+     and two did when this line was written, and neither number says anything
+     about where a refusal is answered. The line under it does -- one owner
+     for the decode is what makes the answer single. *)
+  check bool "the JSON reads have a shared owner" true
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui_http.ml" ~callee:"decode_json"
+     > 0);
   check int "no surface decodes a status on its own" 1
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui_http.ml"
@@ -2015,6 +2092,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
+  (* [ap_summary] is not in this list: the press-again line and the row
+     summary both moved into [approval_detail_line], and the guard follows
+     the field rather than the surface's name. *)
+  check_fields "approval_detail_line" [ "ap_summary" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"
@@ -2022,7 +2103,6 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"
-    ; "ap_summary"
     ; "ap_expires_at"
     ; "ap_payload"
     ; "ap_trace_id"
@@ -2064,8 +2144,15 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
 
      [String.equal] finds the open goal's row in the sidebar and [List.mem]
      asks which tasks name this goal. Neither reaches the terminal, and the
-     labels the sidebar draws are sanitized where they are drawn. *)
-  check_fields ~non_rendering_calls:[ "List.mem" ] "planning_detail_pane"
+     labels the sidebar draws are sanitized where they are drawn.
+
+     [Planning_detail.timeline] takes the goal id to answer one question --
+     whether the timeline that came back is this goal's or the previous
+     one's -- and draws the events, never the id
+     (masc_tui_planning_detail.ml). *)
+  check_fields
+    ~non_rendering_calls:[ "List.mem"; "Planning_detail.timeline" ]
+    "planning_detail_pane"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];

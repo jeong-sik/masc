@@ -799,13 +799,19 @@ export interface DashboardKeeperQueueStorageIntegrity {
   operator_action_required: boolean
 }
 
+export interface DashboardKeeperQueueResidence {
+  status: 'unknown'
+  oldest_age_seconds: null
+  reason: 'first_admission_not_recorded' | 'queue_observation_incomplete'
+}
+
 export interface DashboardKeeperQueueWorkLiveness {
   schema?: string
   status: string
-  state: 'idle' | 'backlogged' | 'blocked' | 'stalled' | 'unknown'
+  state: 'idle' | 'backlogged' | 'blocked' | 'unknown'
   runnable_backlog_count: number
-  runnable_oldest_age_seconds: number | null
-  stale_after_seconds: number | null
+  runnable_oldest_source_age_seconds: number | null
+  queue_residence: DashboardKeeperQueueResidence | null
   operator_action_required: boolean
 }
 
@@ -1020,6 +1026,13 @@ function normalizeFullHealthSnapshot(raw: unknown): DashboardFullHealthSnapshot 
   }
 }
 
+function normalizeKeeperQueueResidence(raw: unknown): DashboardKeeperQueueResidence | null {
+  const record = asRecord(raw)
+  if (!record || record.status !== 'unknown' || record.oldest_age_seconds !== null) return null
+  if (record.reason !== 'first_admission_not_recorded' && record.reason !== 'queue_observation_incomplete') return null
+  return { status: 'unknown', oldest_age_seconds: null, reason: record.reason }
+}
+
 function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueueHealth | null {
   const record = asRecord(raw)
   if (!record) return null
@@ -1030,7 +1043,6 @@ function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueu
     workState === 'idle'
       || workState === 'backlogged'
       || workState === 'blocked'
-      || workState === 'stalled'
       ? workState
       : 'unknown'
   return {
@@ -1059,10 +1071,9 @@ function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueu
           state: normalizedWorkState,
           runnable_backlog_count:
             typeof work.runnable_backlog_count === 'number' ? work.runnable_backlog_count : 0,
-          runnable_oldest_age_seconds:
-            typeof work.runnable_oldest_age_seconds === 'number' ? work.runnable_oldest_age_seconds : null,
-          stale_after_seconds:
-            typeof work.stale_after_seconds === 'number' ? work.stale_after_seconds : null,
+          runnable_oldest_source_age_seconds:
+            typeof work.runnable_oldest_source_age_seconds === 'number' ? work.runnable_oldest_source_age_seconds : null,
+          queue_residence: normalizeKeeperQueueResidence(work.queue_residence),
           operator_action_required: work.operator_action_required === true,
         }
       : null,

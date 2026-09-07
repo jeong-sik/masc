@@ -529,34 +529,26 @@ let goal_handler : Tool_name.Goal_name.t -> dispatch_handler = function
   | Tool_name.Goal_name.Goal_transition -> Workspace_goals.handle_goal_transition
 ;;
 
-let dispatch_bindings : (string * dispatch_handler) list =
-  [ "masc_heartbeat", handle_heartbeat
-  ; "masc_check", handle_check
-  ]
-;;
-
 let dispatchable_names =
-  ("masc_status" :: List.map fst dispatch_bindings)
+  List.map Tool_schemas_workspace_core.tool_name Tool_schemas_workspace_core.operations
   @ List.map Tool_name.Goal_name.to_string Tool_name.Goal_name.all
 
+(* Both families route on their closed type. [Status] takes the task-list
+   projection the other two do not, which is why it kept a separate arm rather
+   than a shared handler table. *)
 let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
   let start_time = Time_compat.now () in
-  if String.equal name "masc_status"
-  then
-    Some
-      (handle_status
-         ~task_list_projection
-         ~tool_name:name
-         ~start_time
-         ctx
-         args)
-  else
-    match Tool_name.Goal_name.of_string name with
-    | Some goal -> Some (goal_handler goal ~tool_name:name ~start_time ctx args)
-    | None ->
-      (match List.assoc_opt name dispatch_bindings with
-       | Some handle -> Some (handle ~tool_name:name ~start_time ctx args)
-       | None -> None)
+  match Tool_schemas_workspace_core.operation_of_tool_name name with
+  | Some Tool_schemas_workspace_core.Status ->
+    Some (handle_status ~task_list_projection ~tool_name:name ~start_time ctx args)
+  | Some Tool_schemas_workspace_core.Check ->
+    Some (handle_check ~tool_name:name ~start_time ctx args)
+  | Some Tool_schemas_workspace_core.Heartbeat ->
+    Some (handle_heartbeat ~tool_name:name ~start_time ctx args)
+  | None ->
+    (match Tool_name.Goal_name.of_string name with
+     | Some goal -> Some (goal_handler goal ~tool_name:name ~start_time ctx args)
+     | None -> None)
 ;;
 
 let dispatch ctx ~name ~args =
@@ -575,25 +567,60 @@ let dispatch_for_keeper ctx ~name ~args =
     ~args
 ;;
 
-let schemas = Tool_schemas_workspace.schemas
-
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_status"; "masc_check"; "masc_goal_list" ];;
+let core_is_read_only = function
+  | Tool_schemas_workspace_core.Status | Tool_schemas_workspace_core.Check -> true
+  | Tool_schemas_workspace_core.Heartbeat -> false
+;;
 
+let goal_is_read_only = function
+  | Tool_name.Goal_name.Goal_list -> true
+  | Tool_name.Goal_name.Goal_transition | Tool_name.Goal_name.Goal_upsert -> false
+;;
+
+let goal_schema goal =
+  let name = Tool_name.Goal_name.to_string goal in
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+      Tool_schemas_workspace_extra.schemas
+  with
+  | Some schema -> schema
+  | None -> invalid_arg ("missing workspace goal schema: " ^ name)
+;;
+
+(* Registration walks the same two closed types [dispatch] matches, so the
+   advertised set and the routed set are the same set by construction --
+   [test_tool_registry_consistency] compared them at test time, and PR CI does
+   not run tests. read_only used to come from a membership list over three name
+   strings; it is a match on each type now. *)
 let () =
+  let register ~name ~(schema : Masc_domain.tool_schema) ~is_read_only =
+    Tool_spec.register
+      (Tool_spec.create
+         ~name
+         ~description:schema.description
+         ~module_tag:Tool_dispatch.Mod_state
+         ~input_schema:schema.input_schema
+         ~handler_binding:Tag_dispatch
+         ~is_read_only
+         ())
+  in
   List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-       Tool_spec.register
-         (Tool_spec.create
-            ~name:s.name
-            ~description:s.description
-            ~module_tag:Tool_dispatch.Mod_state
-            ~input_schema:s.input_schema
-            ~handler_binding:Tag_dispatch
-            ~is_read_only:(List.mem s.name tool_spec_read_only)
-            ()))
-    schemas
+    (fun operation ->
+       register
+         ~name:(Tool_schemas_workspace_core.tool_name operation)
+         ~schema:(Tool_schemas_workspace_core.schema operation)
+         ~is_read_only:(core_is_read_only operation))
+    Tool_schemas_workspace_core.operations;
+  List.iter
+    (fun goal ->
+       register
+         ~name:(Tool_name.Goal_name.to_string goal)
+         ~schema:(goal_schema goal)
+         ~is_read_only:(goal_is_read_only goal))
+    Tool_name.Goal_name.all
 ;;

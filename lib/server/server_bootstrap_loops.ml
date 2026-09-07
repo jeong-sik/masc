@@ -1242,12 +1242,13 @@ let start_keeper_loops_owned
     let started_at = Hashtbl.create 16 in
     let hung_threshold_sec = 60.0 in
     let boot_guard_sec =
-      match Sys.getenv_opt "MASC_LAZY_TASK_BOOT_GUARD_SEC" with
+      let declared = Env_setting.Float_knob.default Lazy_task_boot_guard_sec in
+      match Sys.getenv_opt (Env_setting.Float_knob.env_name Lazy_task_boot_guard_sec) with
       | Some v ->
         (match float_of_string_opt (String.trim v) with
          | Some f when f > 0.0 -> f
-         | _ -> 120.0)
-      | None -> 120.0
+         | _ -> declared)
+      | None -> declared
     in
     let format_pending now pending =
       pending

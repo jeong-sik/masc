@@ -18,6 +18,26 @@ let authority_actor = Runtime.verifier_exact_lane_id
    cut. *)
 let judge_few_shot_examples = 3
 
+type review_key =
+  { task_id : string
+  ; verification_id : string
+  }
+
+module Review_keys = Set.Make (struct
+  type t = review_key
+
+  let compare left right =
+    match String.compare left.task_id right.task_id with
+    | 0 -> String.compare left.verification_id right.verification_id
+    | order -> order
+  ;;
+end)
+
+type retry_batch =
+  { keys : Review_keys.t
+  ; sweep : bool
+  }
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
@@ -31,15 +51,12 @@ type runtime =
           The submission hook already receives [task], [assignee] and
           [verification_id]; carrying them here is what keeps one submission
           from re-reviewing every other awaiting Task. *)
-  ; retry_scheduled : bool Atomic.t
+  ; retry_pending : retry_batch option Atomic.t
+      (** [Some] owns one interval timer and every retry admitted before its
+          atomic drain. The timer flag cannot outlive or forget its work. *)
   ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
   ; review_slots : Eio.Semaphore.t
-  }
-
-and review_key =
-  { task_id : string
-  ; verification_id : string
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
@@ -259,11 +276,55 @@ let evidence_posture_of_snapshot
            | Workspace_verification_store.Evidence_artifact
                { reference = _; content = _; bytes = _; truncated = false } ->
              true
+           | Workspace_verification_store.Evidence_artifact_binary _ ->
+             (* A binary item is judgeable on its own terms: the hash, the
+                size, and the filed body are the facts the verdict can rest
+                on (RFC-0436 §4.1). *)
+             true
            | _ -> false)
       |> List.length
   in
   if usable = 0 then Task.Anti_rationalization.Note_only
   else Task.Anti_rationalization.Usable_artifacts usable
+;;
+
+(* RFC-0436 §4.3: the binary image artifacts the judge receives as attached
+   blocks. An image whose format the runtimes do not take as attached input,
+   or whose filed body cannot be read back, stays out of the list — its
+   reference and hash remain in the prompt text, which is the §4.4 posture
+   for it. A failed read is not fatal to the review: the artifact is still
+   judgeable on the recorded hash and size. *)
+let evidence_images_of_snapshot ~base_path
+      (snapshot : Workspace_verification_store.submitted_evidence_access) :
+      Task.Anti_rationalization.evidence_image list =
+  let module Store = Workspace_verification_store in
+  match snapshot with
+  | Store.Evidence_unavailable _ -> []
+  | Store.Evidence_available { request = _; items } ->
+    List.filter_map
+      (fun (item : Store.submitted_evidence_item) ->
+         match item with
+         | Store.Evidence_artifact_binary
+             { reference; bytes; sha256; format; body = _ } ->
+           (match Store.image_media_type_of_binary_format format with
+            | None -> None
+            | Some media_type -> (
+              match Store.read_binary_body_base64 ~base_path item with
+              | Error _reason -> None
+              | Ok body_base64 ->
+                Some
+                  Task.Anti_rationalization.
+                    { image_reference = reference
+                    ; image_sha256 = sha256
+                    ; image_bytes = bytes
+                    ; image_media_type = media_type
+                    ; image_body_base64 = body_base64
+                    }))
+         | Store.Evidence_note _ -> None
+         | Store.Evidence_artifact _ -> None
+         | Store.Evidence_invalid_reference -> None
+         | Store.Evidence_artifact_unreadable _ -> None)
+      items
 ;;
 
 type prepared_review =
@@ -408,6 +469,8 @@ let prepare_review
               ; agent_name = assignee
               ; task_id = task.id
               ; evidence_refs
+              ; evidence_images =
+                  evidence_images_of_snapshot ~base_path:config.base_path evidence_access
               }
           ; question
           }
@@ -836,22 +899,67 @@ let request_review (runtime : runtime) key =
   Eio.Condition.broadcast runtime.wake
 ;;
 
+let queue_retry ~sw ~wait ~dispatch pending scope =
+  Eio.Switch.check sw;
+  let rec enqueue () =
+    let current = Atomic.get pending in
+    let batch =
+      match current with
+      | None -> { keys = Review_keys.empty; sweep = false }
+      | Some batch -> batch
+    in
+    let next =
+      match scope with
+      | Whole_backlog -> { batch with sweep = true }
+      | Targets keys ->
+        { batch with
+          keys = List.fold_left (fun set key -> Review_keys.add key set) batch.keys keys
+        }
+    in
+    if batch.sweep = next.sweep && Review_keys.equal batch.keys next.keys
+    then false
+    else if Atomic.compare_and_set pending current (Some next)
+    then (
+      (match current with
+       | Some _ -> ()
+       | None ->
+         Eio.Fiber.fork ~sw (fun () ->
+           wait ();
+           (* Detach the entire batch before publication. A retry arriving
+              during dispatch owns the next timer and cannot be cleared by
+              this one. A cancelled timer leaves the durable awaiting Tasks
+              for the next runtime's boot sweep. *)
+           match Atomic.exchange pending None with
+           | None -> ()
+           | Some { keys; sweep } ->
+             dispatch
+               (if sweep then Whole_backlog else Targets (Review_keys.elements keys))));
+      true)
+    else enqueue ()
+  in
+  enqueue ()
+;;
+
+let schedule_retry_scope (runtime : runtime) scope =
+  queue_retry
+    ~sw:runtime.sw
+    ~wait:(fun () -> Eio.Time.sleep runtime.clock runtime.retry_interval_sec)
+    ~dispatch:(function
+      | Whole_backlog -> request_sweep runtime
+      | Targets keys -> List.iter (request_review runtime) keys)
+    runtime.retry_pending
+    scope
+;;
+
 let schedule_retry (runtime : runtime) key =
-  if Atomic.compare_and_set runtime.retry_scheduled false true
-  then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
-      Atomic.set runtime.retry_scheduled false;
-      request_review runtime key)
+  schedule_retry_scope runtime (Targets [ key ])
 ;;
 
 let schedule_sweep_retry (runtime : runtime) =
-  if Atomic.compare_and_set runtime.retry_scheduled false true
-  then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
-      Atomic.set runtime.retry_scheduled false;
-      request_sweep runtime)
+  (* The backlog-read diagnostic already names this request. A duplicate
+     sweep shares the existing timer and needs no separate notification. *)
+  let (_ : bool) = schedule_retry_scope runtime Whole_backlog in
+  ()
 ;;
 
 let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
@@ -871,12 +979,13 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
     in
     match outcome with
     | Retryable_deferred ->
-      Log.Misc.info
-        "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
-        task.id
-        verification_id
-        runtime.retry_interval_sec;
-      schedule_retry runtime key
+      if schedule_retry runtime key
+      then
+        Log.Misc.info
+          "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
+          task.id
+          verification_id
+          runtime.retry_interval_sec
     | Committed -> ()
     | Deferred ->
       (* Nothing schedules another look at this key: the scope rule admits it
@@ -978,7 +1087,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; wake = Eio.Condition.create ()
     ; sweep_pending = Atomic.make true
     ; targets = Atomic.make []
-    ; retry_scheduled = Atomic.make false
+    ; retry_pending = Atomic.make None
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
     ; review_slots = Eio.Semaphore.make 4
@@ -1039,6 +1148,11 @@ module For_testing = struct
     | Targets of review_key list
 
   let entries_in_scope = entries_in_scope
+
+  let make_retry_scheduler ~sw ~wait ~dispatch =
+    let pending = Atomic.make None in
+    queue_retry ~sw ~wait ~dispatch pending
+  ;;
 
   type nonrec admission = admission =
     | Review_completion

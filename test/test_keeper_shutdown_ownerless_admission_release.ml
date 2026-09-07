@@ -765,11 +765,363 @@ let test_boot_recovery_settles_pending_completion_after_removal () =
               ~keeper_name:name)))
 ;;
 
+module Reconciliation = Keeper_shutdown_reconciliation
+
+let retained_absent_operation name =
+  let operation = make_operation ~keeper_name:name
+      ~phase:(Finalized (finalized_retained_evidence name))
+      ~cleanup_intent:{ reason = Operator_stop_retain_meta; remove_session = false } in
+  { operation with join_evidence = Some
+      { lane_outcome = Lane_shutdown_requested; terminal = Terminal_stopped; cleanup_error = None } }
+;;
+
+let strict_backlog_exn config =
+  match Workspace_backlog.read_backlog_r config with
+  | Ok backlog -> backlog | Error detail -> fail detail
+;;
+
+let acknowledge ?revision ?backlog_version ~config operation =
+  Reconciliation.acknowledge_absent_owner ~config ~keeper_name:operation.keeper_name
+    ~operation_id:operation.operation_id
+    ~expected_revision:(Option.value revision ~default:operation.revision)
+    ~expected_backlog_version:(Option.value backlog_version
+      ~default:(strict_backlog_exn config).version)
+    ~actor:"operator" ~reason:"Confirmed owner and canonical files are absent"
+;;
+
+let acknowledged_exn = function
+  | Ok (Keeper_shutdown_store.Absence_acknowledged operation
+       | Keeper_shutdown_store.Absence_already_acknowledged operation) -> operation
+  | Error error -> fail (Reconciliation.error_to_string error)
+;;
+
+let load_operation_exn ~config operation =
+  match Keeper_shutdown_store.load ~config ~keeper_name:operation.keeper_name operation.operation_id with
+  | Ok current -> current | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+;;
+
+let chat_store_ok = function
+  | Ok value -> value
+  | Error error -> fail (Keeper_chat_operation_store.error_to_string error)
+;;
+
+let test_absence_acknowledgement_checks_durable_chat_operations () =
+  with_workspace (fun ~config ->
+    let module Store = Keeper_chat_operation_store in
+    let operation = retained_absent_operation "absent-ack-chat" in
+    persist_exn ~config operation;
+    let path = Store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_name:operation.keeper_name in
+    Unix.mkdir (Filename.dirname path) 0o755;
+    let operation_id = match Keeper_chat_operation.Operation_id.of_string "unsettled-chat" with
+      | Ok id -> id | Error detail -> fail detail in
+    let store = chat_store_ok (Store.open_or_create ~path) in
+    Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
+      ignore (chat_store_ok (Store.submit store ~now:1. ~operation_id
+        ~source:(`Assoc ["kind", `String "dashboard"])
+        ~input:(`Assoc ["message", `String "durable queued work"])));
+      let require_refusal label =
+        (match acknowledge ~config operation with
+         | Error (Reconciliation.Outstanding_chat_operations [observed]) ->
+           check bool label true (Keeper_chat_operation.Operation_id.equal operation_id observed)
+         | Error error -> fail (Reconciliation.error_to_string error)
+         | Ok _ -> fail "outstanding chat operation authorized acknowledgement");
+        check bool "refusal preserves shutdown evidence" true
+          (load_operation_exn ~config operation = operation)
+      in
+      require_refusal "queued operation identity";
+      ignore (chat_store_ok (Store.claim_next store ~now:2.));
+      require_refusal "running operation identity";
+      ignore (chat_store_ok (Store.succeed_running store ~now:3. ~operation_id
+        ~outcome_ref:"receipt:confirmed-terminal")));
+    let before = In_channel.with_open_bin path In_channel.input_all in
+    ignore (acknowledged_exn (acknowledge ~config operation));
+    check string "read-only check preserves operation bytes" before
+      (In_channel.with_open_bin path In_channel.input_all))
+;;
+
+let test_absence_acknowledgement_rejects_corrupt_chat_store () =
+  with_workspace (fun ~config ->
+    let module Store = Keeper_chat_operation_store in
+    let operation = retained_absent_operation "absent-ack-corrupt-chat" in
+    persist_exn ~config operation;
+    let path = Store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_name:operation.keeper_name in
+    Unix.mkdir (Filename.dirname path) 0o755;
+    Out_channel.with_open_bin path (fun channel -> output_string channel "corrupt operation evidence");
+    (match acknowledge ~config operation with
+     | Error (Reconciliation.Chat_operations_unavailable _) -> ()
+     | _ -> fail "corrupt chat database treated as an empty queue");
+    check string "corrupt database not initialized or repaired" "corrupt operation evidence"
+      (In_channel.with_open_bin path In_channel.input_all);
+    check bool "failed inspection preserves original evidence" true
+      (load_operation_exn ~config operation = operation))
+;;
+
+let test_absence_acknowledgement_retains_evidence_and_recovery () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "absent-ack" in
+    persist_exn ~config operation;
+    (match recover_fence ~config operation with
+     | Error _ -> () | Ok _ -> fail "unacknowledged retained owner must still fail");
+    ignore (Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path
+      ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id);
+    let acknowledged = acknowledged_exn (acknowledge ~config operation) in
+    check bool "matching reservation released after commit" true
+      (Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name = None);
+    ignore (Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path
+      ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id);
+    let crash_replay = acknowledged_exn (acknowledge ~config operation) in
+    check bool "post-CAS pre-release crash replay preserves evidence" true (crash_replay = acknowledged);
+    check bool "crash replay releases only the old reservation" true
+      (Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name = None);
+    (match acknowledged.phase, operation.phase with
+     | Operator_absence_acknowledged ack, Finalized original ->
+       check bool "original finalization retained" true (ack.finalization = original);
+       check bool "no fabricated removal" false ack.finalization.meta_removed;
+       check string "authenticated caller attribution" "operator" ack.actor;
+       check int "exact prior revision" operation.revision ack.prior_revision
+     | _ -> fail "expected retained acknowledgement");
+    check int "one CAS increment" (operation.revision + 1) acknowledged.revision;
+    let reread = load_operation_exn ~config operation in
+    check bool "durable codec round trip" true (reread = acknowledged);
+    (match Keeper_shutdown_runtime.recover_at_boot ~config with
+     | [Ok recovered] -> check bool "boot keeps acknowledged record" true (recovered = acknowledged)
+     | _ -> fail "acknowledged owner returned to finalization");
+    (match Keeper_shutdown_store.delete_terminal ~config ~keeper_name:operation.keeper_name
+             ~operation_id:operation.operation_id with
+     | Ok Keeper_shutdown_store.Terminal_retained -> ()
+     | _ -> fail "audit acknowledgement was erased");
+    let repeated = acknowledged_exn (acknowledge ~config operation) in
+    check bool "retry does not change revision or evidence" true (repeated = acknowledged);
+    (match acknowledged.phase with
+     | Operator_absence_acknowledged ack ->
+       let tampered = { acknowledged with phase = Operator_absence_acknowledged
+           { ack with prior_operation_sha256 = String.make 64 '0' } } in
+       (match Keeper_shutdown_store.of_json (Keeper_shutdown_store.to_json tampered) with
+        | Error _ -> () | Ok _ -> fail "tampered original observation accepted")
+     | _ -> fail "missing acknowledgement"))
+;;
+
+let test_absence_acknowledgement_refuses_present_paths_and_conflicts () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "absent-ack-conflict" in
+    persist_exn ~config operation;
+    let unchanged () = check bool "refusal leaves original evidence" true
+        (load_operation_exn ~config operation = operation) in
+    (match acknowledge ~revision:(operation.revision + 1) ~config operation with
+     | Error (Reconciliation.Store_error (Keeper_shutdown_store.Revision_conflict _)) -> ()
+     | _ -> fail "stale revision accepted");
+    unchanged ();
+    (match acknowledge ~backlog_version:((strict_backlog_exn config).version + 1) ~config operation with
+     | Error (Reconciliation.Backlog_revision_conflict _) -> ()
+     | _ -> fail "stale backlog version accepted");
+    unchanged ();
+    let meta_path = Keeper_types_profile.keeper_meta_path config operation.keeper_name in
+    let oc = open_out meta_path in output_string oc "{broken"; close_out oc;
+    (match acknowledge ~config operation with
+     | Error (Reconciliation.Path_present path) -> check string "canonical corrupt file" meta_path path
+     | _ -> fail "corrupt metadata treated as absence");
+    unchanged ();
+    Sys.remove meta_path;
+    Unix.symlink (meta_path ^ ".missing") meta_path;
+    (match acknowledge ~config operation with
+     | Error (Reconciliation.Path_present _) -> ()
+     | _ -> fail "dangling metadata symlink treated as absence");
+    Sys.remove meta_path;
+    unchanged ();
+    create_owner_meta_exn ~config operation.keeper_name;
+    (match acknowledge ~config operation with
+     | Error Reconciliation.Owner_present -> ()
+     | _ -> fail "new owner was acknowledged absent");
+    unchanged ())
+;;
+
+let test_absence_acknowledgement_preserves_corrupt_sibling_fence () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "absent-ack-corrupt" in
+    persist_exn ~config operation;
+    let sibling = { operation with operation_id = Operation_id.generate () } in
+    persist_exn ~config sibling;
+    let sibling_path = match Keeper_shutdown_store.path ~config
+        ~keeper_name:sibling.keeper_name sibling.operation_id with
+      | Ok path -> path | Error error -> fail (Keeper_shutdown_store.error_to_string error) in
+    let oc = open_out sibling_path in output_string oc "{broken"; close_out oc;
+    ignore (Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path
+      ~keeper_name:sibling.keeper_name ~operation_id:sibling.operation_id);
+    (match acknowledge ~config operation with
+     | Error (Reconciliation.Corrupt_sibling _) -> ()
+     | _ -> fail "corrupt sibling did not refuse acknowledgement");
+    check bool "original retained" true (load_operation_exn ~config operation = operation);
+    check bool "corrupt sibling fence retained" true
+      (match Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path:config.base_path
+          ~keeper_name:operation.keeper_name with
+       | Some id -> Operation_id.equal id sibling.operation_id | None -> false))
+;;
+
+let test_lifecycle_key_is_retained_across_gc () =
+  with_workspace (fun ~config ->
+    Eio.Switch.run @@ fun sw ->
+    let keeper_name = "lifecycle-key-gc" in
+    let locked, locked_r = Eio.Promise.create () in
+    let release, release_r = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Keeper_lifecycle_reservation.with_key_lock ~base_path:config.base_path ~keeper_name
+        (fun () -> Eio.Promise.resolve locked_r (); Eio.Promise.await release));
+    Eio.Promise.await locked;
+    Gc.full_major ();
+    let second_entered = ref false in
+    let done_p, done_r = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Keeper_lifecycle_reservation.with_key_lock ~base_path:config.base_path ~keeper_name
+        (fun () -> second_entered := true);
+      Eio.Promise.resolve done_r ());
+    Eio.Fiber.yield ();
+    check bool "GC cannot create a second lock for the held key" false !second_entered;
+    Eio.Promise.resolve release_r ();
+    Eio.Promise.await done_p;
+    check bool "same-key waiter progresses after release" true !second_entered)
+;;
+
+let test_absence_acknowledgement_orders_real_creation () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "absent-ack-creation" in
+    persist_exn ~config operation;
+    Eio.Switch.run @@ fun sw ->
+    let locked, locked_r = Eio.Promise.create () in
+    let release, release_r = Eio.Promise.create () in
+    let expected_backlog_version = (strict_backlog_exn config).version in
+    let ack_result, ack_result_r = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result = Reconciliation.For_testing.acknowledge_absent_owner
+        ~on_guards_acquired:(fun () -> Eio.Promise.resolve locked_r (); Eio.Promise.await release)
+        ~config ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id
+        ~expected_revision:operation.revision ~expected_backlog_version
+        ~actor:"operator" ~reason:"Confirmed owner and canonical files are absent" in
+      Eio.Promise.resolve ack_result_r result);
+    Eio.Promise.await locked;
+    let creator_done, creator_done_r = Eio.Promise.create () in
+    let registry_done, registry_done_r = Eio.Promise.create () in
+    let created = ref false and registered = ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      create_owner_meta_exn ~config operation.keeper_name;
+      created := true;
+      Eio.Promise.resolve creator_done_r ());
+    Eio.Fiber.fork ~sw (fun () ->
+      ignore (Keeper_registry.register_offline ~base_path:config.base_path
+        operation.keeper_name (fixture_meta_exn operation.keeper_name));
+      registered := true;
+      Eio.Promise.resolve registry_done_r ());
+    Eio.Fiber.yield ();
+    check bool "meta creator waits for reconciliation" false !created;
+    check bool "ordinary registry writer waits for reconciliation" false !registered;
+    Eio.Promise.resolve release_r ();
+    let acknowledged = acknowledged_exn (Eio.Promise.await ack_result) in
+    Eio.Promise.await creator_done;
+    Eio.Promise.await registry_done;
+    let successor = Operation_id.generate () in
+    ignore (Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path
+      ~keeper_name:operation.keeper_name ~operation_id:successor);
+    let repeated = acknowledged_exn (acknowledge ~config operation) in
+    check bool "retry does not inspect or overwrite the new owner" true (repeated = acknowledged);
+    check bool "retry preserves new owner's reservation" true
+      (match Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path:config.base_path
+          ~keeper_name:operation.keeper_name with
+       | Some id -> Operation_id.equal id successor | None -> false))
+;;
+
+let test_absence_acknowledgement_refuses_task_and_receipt_obligations () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "absent-ack-tasks" in
+    persist_exn ~config operation;
+    let added = match Workspace.add_task_with_result config ~title:"owned work"
+        ~priority:1 ~description:"retained owner obligation" with
+      | Ok added -> added | Error error -> fail (Workspace.add_task_error_to_string error) in
+    let now = Masc_domain.now_iso () in
+    let statuses =
+      [ Masc_domain.Claimed { assignee = operation.keeper_name; claimed_at = now }
+      ; Masc_domain.AwaitingVerification
+          { assignee = operation.keeper_name; started_at = now; submitted_at = now
+          ; intent = Masc_domain.Complete_task; verification_id = "verification-absence-fixture" } ] in
+    List.iter (fun status ->
+      let backlog = strict_backlog_exn config in
+      Workspace_backlog.write_backlog config
+        { backlog with tasks = List.map (fun (task : Masc_domain.task) ->
+            if task.id = added.task_id then { task with task_status = status } else task) backlog.tasks };
+      (match acknowledge ~config operation with
+       | Error (Reconciliation.Outstanding_tasks ids) ->
+         check (list string) "exact unresolved task identity" [added.task_id] ids
+       | _ -> fail "outstanding task/verification obligation was acknowledged");
+      check bool "task refusal preserves original operation" true
+        (load_operation_exn ~config operation = operation)) statuses;
+    let pending = pending_completion_operation "absent-ack-receipt" in
+    persist_exn ~config pending;
+    (match acknowledge ~config pending with
+     | Error Reconciliation.Ineligible_operation -> ()
+     | _ -> fail "pending completion receipt was acknowledged"))
+;;
+
+let test_absence_acknowledgement_requires_authoritative_backlog_and_no_declaration () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "absent-ack-config" in
+    persist_exn ~config operation;
+    let old_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+    let root = Filename.concat config.base_path "ack-config" in
+    let keepers = Filename.concat root "keepers" in
+    Unix.mkdir root 0o700;
+    Unix.mkdir keepers 0o700;
+    Fun.protect ~finally:(fun () -> Unix.putenv "MASC_CONFIG_DIR"
+      (Option.value old_config ~default:"")) (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" root;
+      let declaration = Filename.concat keepers (operation.keeper_name ^ ".toml") in
+      let oc = open_out declaration in output_string oc "malformed declaration"; close_out oc;
+      (match acknowledge ~config operation with
+       | Error (Reconciliation.Path_present path) -> check string "resolved declaration path" declaration path
+       | _ -> fail "present/corrupt declaration was treated as absence");
+      Sys.remove declaration;
+      let backlog = strict_backlog_exn config in
+      (* A valid recovery copy cannot authorize a decision over a corrupt primary. *)
+      Workspace_backlog.write_backlog config backlog;
+      let expected = (strict_backlog_exn config).version in
+      let oc = open_out (Workspace_backlog.backlog_path config) in
+      output_string oc "{corrupt"; close_out oc;
+      (match Reconciliation.acknowledge_absent_owner ~config
+          ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id
+          ~expected_revision:operation.revision ~expected_backlog_version:expected
+          ~actor:"operator" ~reason:"test authoritative rejection" with
+       | Error (Reconciliation.Backlog_unavailable _) -> ()
+       | _ -> fail "recovered backlog authorized absence acknowledgement");
+      check bool "refusals leave original operation" true
+        (load_operation_exn ~config operation = operation)))
+;;
+
 let () =
   Alcotest.run
     "keeper_shutdown_ownerless_admission_release"
     [ ( "recovery"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "absence acknowledgement checks durable queued and running chat" `Quick
+            test_absence_acknowledgement_checks_durable_chat_operations
+        ; Alcotest.test_case "absence acknowledgement refuses corrupt chat evidence" `Quick
+            test_absence_acknowledgement_rejects_corrupt_chat_store
+        ; Alcotest.test_case "absence acknowledgement rejects tasks and completion receipts" `Quick
+            test_absence_acknowledgement_refuses_task_and_receipt_obligations
+        ; Alcotest.test_case "absence acknowledgement checks declaration and authoritative backlog" `Quick
+            test_absence_acknowledgement_requires_authoritative_backlog_and_no_declaration
+        ; Alcotest.test_case "absence acknowledgement retains evidence and survives recovery" `Quick
+            test_absence_acknowledgement_retains_evidence_and_recovery
+        ; Alcotest.test_case "absence acknowledgement rejects paths and CAS conflicts" `Quick
+            test_absence_acknowledgement_refuses_present_paths_and_conflicts
+        ; Alcotest.test_case "absence acknowledgement preserves corrupt sibling fence" `Quick
+            test_absence_acknowledgement_preserves_corrupt_sibling_fence
+        ; Alcotest.test_case "lifecycle key remains reachable across suspended callback and GC" `Quick
+            test_lifecycle_key_is_retained_across_gc
+        ; Alcotest.test_case "absence acknowledgement orders real metadata and registry creation" `Quick
+            test_absence_acknowledgement_orders_real_creation
+        ; Alcotest.test_case
             "finalized operation settles when keeper removed"
             `Quick
             test_finalized_operation_settles_when_keeper_removed

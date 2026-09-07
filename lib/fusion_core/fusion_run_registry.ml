@@ -59,6 +59,7 @@ type run =
   ; preset : string
   ; topology : Fusion_types.fusion_topology
   ; started_at : float
+  ; finished_at : float option
   ; status : run_status
   ; progress : progress option
   }
@@ -73,7 +74,7 @@ module Payload = struct
     ; topology : Fusion_types.fusion_topology
     }
 
-  type completion = outcome
+  type completion = { outcome : outcome; finished_at : float }
 
   let name = "fusion_run_registry"
   let running_noun = "run(s)"
@@ -115,7 +116,7 @@ module Payload = struct
     | Some topology -> Ok { keeper; preset; topology }
   ;;
 
-  let completion_to_yojson = function
+  let outcome_to_yojson = function
     | Succeeded -> `Assoc [ "outcome", `String "succeeded" ]
     | Succeeded_with_summary { decision; summary } ->
       `Assoc
@@ -131,7 +132,7 @@ module Payload = struct
         ]
   ;;
 
-  let completion_of_yojson json =
+  let outcome_of_yojson json =
     let ( let* ) = Result.bind in
     let* fields = Run_registry_core.Json.object_fields json in
     let* label = Run_registry_core.Json.string_field "outcome" fields in
@@ -166,6 +167,21 @@ module Payload = struct
       Ok (Failed { reason; code })
     | other -> Error (Printf.sprintf "unknown fusion outcome %S" other)
   ;;
+  let completion_to_yojson completion =
+    `Assoc ["result", outcome_to_yojson completion.outcome;
+            "finished_at", `Float completion.finished_at]
+
+  let completion_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* () = Run_registry_core.Json.exact_fields ~required:["result"; "finished_at"] fields in
+    let* finished_at = Run_registry_core.Json.float_field "finished_at" fields in
+    let* () = if Float.is_finite finished_at && finished_at >= 0. then Ok ()
+      else Error "Fusion finished_at must be a finite timestamp" in
+    match List.assoc_opt "result" fields with
+    | None -> Error "Fusion completion result is missing"
+    | Some result -> let* outcome = outcome_of_yojson result in Ok { outcome; finished_at }
+
 end
 
 module Store = Run_registry_core.Make (Payload)
@@ -210,7 +226,17 @@ let mark_progress t ~run_id ~progress =
 ;;
 
 let mark_completed t ~run_id ~outcome =
-  match Store.complete t.store ~id:run_id ~completion:outcome with
+  match Store.complete_with t.store ~id:run_id
+      ~make_completion:(fun previous ->
+        (* A durable continuation wake can fail after the sink published this
+           completion. Its retry may update the outcome projection, but it
+           cannot move the run's first terminal observation to the retry time. *)
+        let finished_at =
+          match previous with
+          | Some completion -> completion.Payload.finished_at
+          | None -> Unix.gettimeofday ()
+        in
+        { Payload.outcome; finished_at }) with
   | `Completed ->
     Stdlib.Mutex.protect t.progress_mutex (fun () ->
       Hashtbl.remove t.progress_by_run run_id)
@@ -219,7 +245,7 @@ let mark_completed t ~run_id ~outcome =
 ;;
 
 let run_of_entry t (entry : Store.entry) =
-  let status, progress =
+  let status, progress, finished_at =
     match entry.status with
     | Store.Running ->
       let progress =
@@ -227,14 +253,15 @@ let run_of_entry t (entry : Store.entry) =
           Hashtbl.find_opt t.progress_by_run entry.id)
         |> Option.value ~default:Progress_accepted
       in
-      Running, Some progress
-    | Store.Completed outcome -> Completed outcome, None
+      Running, Some progress, None
+    | Store.Completed completion -> Completed completion.outcome, None, Some completion.finished_at
   in
   { run_id = entry.id
   ; keeper = entry.registration.keeper
   ; preset = entry.registration.preset
   ; topology = entry.registration.topology
   ; started_at = entry.started_at
+  ; finished_at
   ; status
   ; progress
   }
@@ -306,6 +333,7 @@ let run_to_yojson run =
     ; "preset", `String run.preset
     ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
     ; "started_at", `Float run.started_at
+    ; "finished_at", (match run.finished_at with None -> `Null | Some ts -> `Float ts)
     ; "status", `String (status_label run.status)
     ; "stage", `String stage
     ; "progress", progress_json

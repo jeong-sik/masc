@@ -376,6 +376,44 @@ let rec remove_tree path =
   | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
   | exception Unix.Unix_error _ -> ()
 
+(* RFC-0422 diagnosis: one line per request on the guest's tmpfs, so the
+   mode a request was framed with and the plan it actually got are readable
+   from the host after the fact. Best-effort by construction -- a trace that
+   could fail a dispatch would measure the trace, not the box. Capped so a
+   guest whose tmpfs hosts the trace can never be filled by it. *)
+let request_trace_path = "/tmp/masc-shim-requests.log"
+
+let request_trace_byte_cap = 4 * 1024 * 1024
+
+let trace_request ~mode ~plan argv =
+  try
+    (* An absent trace has size zero, not an exception -- otherwise the
+       guard would swallow the very first write. *)
+    let size =
+      match Unix.stat request_trace_path with
+      | { Unix.st_size; _ } -> st_size
+      | exception Unix.Unix_error _ -> 0
+    in
+    if size <= request_trace_byte_cap then begin
+      let fd =
+        Unix.openfile request_trace_path
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ]
+          0o644
+      in
+      let line =
+        Printf.sprintf "%d v=%s mode=%s plan=%s argv0=%s\n"
+          (int_of_float (Unix.time ()))
+          (string_of_int Exec_ssh_protocol.protocol_version ^ Shim_build_id.suffix)
+          (Exec_ssh_protocol.mode_to_string mode) plan
+          (match argv with arg0 :: _ -> arg0 | [] -> "-")
+      in
+      (* fire-and-forget: a short write only shortens one trace line *)
+      ignore (Unix.write_substring fd line 0 (String.length line));
+      Unix.close fd
+    end
+  with Unix.Unix_error _ -> ()
+;;
+
 let scratch_env ~scratch env =
   let upsert (k, v) env = (k, v) :: List.remove_assoc k env in
   env |> upsert ("HOME", scratch) |> upsert ("TMPDIR", scratch)
@@ -427,8 +465,11 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
     Unix.set_nonblock stdin_w;
     (pid, stdin_w, stdout_r, stderr_r)
 
+(* Every instant in this loop is an interval's endpoint -- the timeout, the
+   SIGKILL grace, the post-reap drain -- and none is reported as a time. So
+   they are read off a clock no correction moves; see [Shim_clock]. *)
 let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
-  let deadline = Unix.gettimeofday () +. timeout_sec in
+  let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
   let payload_off = ref 0 in
   let payload_len = String.length stdin_payload in
   let stdin_open = ref (payload_len > 0) in
@@ -475,7 +516,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     then (
       kill_started := true;
       kill_remaining := kill_policy trigger;
-      step_kill (Unix.gettimeofday ())) in
+      step_kill (Shim_clock.elapsed_seconds ())) in
   let poll_child () =
     match !status with
     | Some _ -> ()
@@ -484,7 +525,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
        | 0, _ -> ()
        | _, st ->
          status := Some st;
-         reaped_at := Some (Unix.gettimeofday ())) in
+         reaped_at := Some (Shim_clock.elapsed_seconds ())) in
   (* Forward drained child output to our own stdout/stderr.  If the peer
      went away (EPIPE) keep draining so the child cannot block on a full
      pipe, drop the bytes, and apply the channel-EOF kill policy. *)
@@ -508,7 +549,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       Unix.close pipe_fd;
       false in
   while !status = None || !out_open || !err_open do
-    let now = Unix.gettimeofday () in
+    let now = Shim_clock.elapsed_seconds () in
     if !status = None && (not !kill_started) && now >= deadline
     then (
       (* Only attribute [timed_out] when the deadline is what started the
@@ -678,14 +719,21 @@ let run () =
                    req.Exec_ssh_protocol.mode
                with
                | Refuse_observe_unsupported ->
+                 trace_request
+                   ~mode:req.Exec_ssh_protocol.mode
+                   ~plan:"refused_unsupported"
+                   argv;
                  shim_fail
                    (Printf.sprintf
                       "%s: this host cannot box a payload (Landlock ABI %d); \
                        the request asked for %s"
                       observe_unsupported_code (observe_support_abi ())
                       (Exec_ssh_protocol.mode_to_string req.Exec_ssh_protocol.mode))
-               | Run_effect -> None
+               | Run_effect ->
+                 trace_request ~mode:req.Exec_ssh_protocol.mode ~plan:"effect" argv;
+                 None
                | Run_boxed { deny_fs; deny_net } ->
+                 trace_request ~mode:req.Exec_ssh_protocol.mode ~plan:"boxed" argv;
                  let scratch =
                    match make_scratch ~root:config.scratch_root with
                    | Ok path -> path
@@ -717,8 +765,10 @@ let run () =
 let probe () =
   Exec_ssh_protocol.
     { name = "masc-exec-shim"
-    ; version = Printf.sprintf "%d.0.0" protocol_version
+    ; version =
+      Printf.sprintf "%d.0.0%s" protocol_version Shim_build_id.suffix
     ; capabilities = (if observe_supported () then [ observe_capability ] else [])
+    ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
     }
 
 let main () =

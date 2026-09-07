@@ -128,6 +128,10 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -137,6 +141,7 @@ type runtime_handler =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
@@ -249,6 +254,10 @@ let runtime_handler_to_string = function
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_web_search -> "tool_web_search"
   | Tool_web_fetch -> "tool_web_fetch"
+  | Tool_browser_tabs -> "tool_browser_tabs"
+  | Tool_browser_read -> "tool_browser_read"
+  | Tool_browser_session -> "tool_browser_session"
+  | Tool_browser_goto -> "tool_browser_goto"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
@@ -258,6 +267,7 @@ let runtime_handler_to_string = function
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_masc_file_dispatch -> "tool_masc_file_dispatch"
   | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_analyze_image -> "tool_analyze_image"
@@ -458,6 +468,10 @@ let descriptor
       | Tool_masc_misc_dispatch
       | Tool_web_search
       | Tool_web_fetch
+      | Tool_browser_tabs
+      | Tool_browser_read
+      | Tool_browser_session
+      | Tool_browser_goto
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
@@ -465,6 +479,7 @@ let descriptor
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
+      | Tool_masc_file_dispatch
       | Tool_masc_library_dispatch
       | Tool_masc_local_runtime_dispatch
       | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
@@ -592,6 +607,13 @@ let execute_output_schema =
           ; "output_artifact", normalized_artifact_ref_schema
           ; "stdout_artifact", normalized_artifact_ref_schema
           ; "stderr_artifact", normalized_artifact_ref_schema
+          ; ( "output_completeness"
+            , `Assoc
+                [ "type", `String "string"
+                ; "enum", `List [ `String "complete"; `String "capture_only" ]
+                ; "description", `String
+                    "complete means both streams reached EOF and were preserved; capture_only means the producer supplied retained output without that proof."
+                ] )
           ; "typed", `Assoc [ "type", `String "boolean" ]
           ; "execution_time_ms", `Assoc [ "type", `String "integer" ]
           ] )
@@ -788,6 +810,82 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_web_fetch
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_tabs"
+      ~public_name:"BrowserTabs"
+      ~internal_name:Tool_schemas_misc.browser_tabs_schema.name
+      ~description:Tool_schemas_misc.browser_tabs_schema.description
+      ~input_schema:Tool_schemas_misc.browser_tabs_schema.input_schema
+      (* Concurrent: one lane queue hop; the wait is bounded by the tool's
+         own timeout. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_tabs
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_read"
+      ~public_name:"BrowserRead"
+      ~internal_name:Tool_schemas_misc.browser_read_schema.name
+      ~description:Tool_schemas_misc.browser_read_schema.description
+      ~input_schema:Tool_schemas_misc.browser_read_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_read
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_session"
+      ~public_name:"BrowserSession"
+      ~internal_name:Tool_schemas_misc.browser_session_schema.name
+      ~description:Tool_schemas_misc.browser_session_schema.description
+      ~input_schema:Tool_schemas_misc.browser_session_schema.input_schema
+      (* Session lifecycle changes must preserve tool-call order relative to
+         browser reads and navigation in the same batch. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_session
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_goto"
+      ~public_name:"BrowserGoto"
+      ~internal_name:Tool_schemas_misc.browser_goto_schema.name
+      ~description:Tool_schemas_misc.browser_goto_schema.description
+      ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
+      (* A navigation reaches the web from the automation profile; the live
+         lane refuses navigation verbs at the state layer. Serial: the
+         automation lane is one browser, and Concurrent here demands a
+         statically read-only tool this is not. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_goto
       ~input_translation:(Identity Validate_once_before_translation)
       ()
   ]
@@ -2153,14 +2251,47 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
       ()
+    (* ── provider Files tools (RFC-0430 Phase 3) ──────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.upload"
+      ~name:Keeper_runtime_schemas_toml.file_upload.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_upload.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_upload.Masc_domain.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.delete"
+      ~name:Keeper_runtime_schemas_toml.file_delete.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_delete.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_delete.Masc_domain.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.list"
+      ~name:Keeper_runtime_schemas_toml.file_list.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_list.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_list.Masc_domain.input_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
-      (* [Operator_only]: the model has its own analyze_image builtin and the
-         .masc/tool_calls log shows this keeper-facing name was never called;
-         hiding it takes its schema off every keeper turn. The handler and the
-         read-only sub-call stay available to operator entrypoints. *)
-      ~keeper_model_projection:Operator_only
+      (* Unread image placeholders carry a keeper-local artifact handle.
+         The model needs this reader to recover those pixels through the
+         existing vision sub-call, including on text-only runtime lanes. *)
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
       ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name
@@ -2356,10 +2487,12 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
+  (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────── *)
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "config" "masc_config"
        ~readonly:true
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "slack_read" "masc_slack_read" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor

@@ -233,6 +233,15 @@ let mkdir_p_unix (path : string) : unit =
    main-domain-scheduler-latency §8.8). Inside an Eio fiber the three
    primitives therefore run their Unix implementation on a system thread;
    outside Eio they run it inline, as before. *)
+(* The label reaches the runtime-events ring as the fiber's suspend reason
+   ([Eio_unix.run_in_systhread] calls [Trace.suspend_fiber label]), and a
+   trace reads a long run as "resumed from X, suspended on Y". With the file
+   named, X and Y identify the code: a run between
+   [fs-compat-append-file chat.jsonl] and [fs-compat-load-file memory.json]
+   needs no further instrumentation to place. The basename alone keeps the
+   label short and is unique enough among the stores a keeper touches. *)
+let labelled operation path = operation ^ " " ^ Filename.basename path
+
 let on_systhread ~label f =
   let result = Eio_unix.run_in_systhread ~label f in
   Eio.Fiber.check ();
@@ -246,7 +255,10 @@ let load_file (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> load_file_unix path)
-    (fun _fs -> on_systhread ~label:"fs-compat-load-file" (fun () -> load_file_unix path))
+    (fun _fs ->
+       on_systhread
+         ~label:(labelled "fs-compat-load-file" path)
+         (fun () -> load_file_unix path))
 ;;
 
 (* The write behind [save_file] and the atomic writers: the path guard on
@@ -266,7 +278,9 @@ let save_file (path : string) (content : string) : unit =
     ~path
     ~fallback:(fun () -> save_file_unix path content)
     (fun _fs ->
-       on_systhread ~label:"fs-compat-save-file" (fun () -> save_file_unix path content))
+       on_systhread
+         ~label:(labelled "fs-compat-save-file" path)
+         (fun () -> save_file_unix path content))
 ;;
 
 let save_file_atomic path content =
@@ -294,6 +308,10 @@ let save_file_atomic_strict_staged path content =
   Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
+let write_file_atomic_strict_staged path ~write =
+  Atomic_write.write_file_atomic_strict_staged path ~write
+;;
+
 let save_file_atomic_strict path content =
   Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
@@ -306,6 +324,14 @@ module Atomic_replace_for_testing = struct
       ~save_file:save_file_blocking
       path
       content
+  ;;
+
+  let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
+    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+      ?sync_file
+      ~sync_parent
+      path
+      ~write
   ;;
 end
 
@@ -598,7 +624,9 @@ let append_file (path : string) (content : string) : unit =
     ~path
     ~fallback:(fun () -> append_file_unix path content)
     (fun _fs ->
-       on_systhread ~label:"fs-compat-append-file" (fun () -> append_file_unix path content))
+       on_systhread
+         ~label:(labelled "fs-compat-append-file" path)
+         (fun () -> append_file_unix path content))
 ;;
 
 (** Check if file exists.
@@ -956,7 +984,7 @@ let load_owned_regular_file_with_snapshot ~ownership_root path =
       load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
              ~ownership_root
              path)
@@ -1010,7 +1038,7 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
         ~ownership_root ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
        in
@@ -1066,7 +1094,7 @@ let load_owned_regular_file_range
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
        in
@@ -1105,7 +1133,7 @@ let file_size (path : string) : int option =
       try Some (Unix.stat path).st_size with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1116,7 +1144,7 @@ let file_mtime (path : string) : float option =
       try Some (Unix.stat path).st_mtime with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1175,14 +1203,14 @@ let remove_tree (path : string) : unit =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> remove_tree_unix path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
 ;;
 
 let realpath_lenient (path : string) : string =
@@ -1251,28 +1279,52 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
     a malformed log from either path uses the same orchestrate system. *)
+(* One row, with the row number the warning prints. A caller that walks rows
+   itself - to stop before the end of a window - parses through this so the
+   warning it prints is the same one, in the same shape, as the whole-list
+   parse below. *)
+let parse_jsonl_line ~(source : string) ~(line_no : int) (line : string)
+  : Yojson.Safe.t option
+  =
+  match Yojson.Safe.from_string line with
+  | json -> Some json
+  | exception Yojson.Json_error msg ->
+    Stdlib.Printf.eprintf
+      "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+      source
+      line_no
+      msg;
+    None
+;;
+
+(* Blank lines do not take a number, matching what [cat -n] shows for the
+   printed JSONL rows. A caller that needs those numbers without parsing
+   uses this. *)
+let number_jsonl_lines (lines : string list) : (int * string) list =
+  let line_no = ref 0 in
+  List.filter_map
+    (fun line ->
+       let trimmed = String.trim line in
+       if String.equal trimmed ""
+       then None
+       else begin
+         incr line_no;
+         Some (!line_no, trimmed)
+       end)
+    lines
+;;
+
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
-  let line_no = ref 0 in
   let parsed =
     List.filter_map
-      (fun line ->
-         let trimmed = String.trim line in
-         if String.equal trimmed ""
-         then None
-         else (
-           incr line_no;
-           match Yojson.Safe.from_string trimmed with
-           | json -> Some json
-           | exception Yojson.Json_error msg ->
-             incr malformed;
-             Stdlib.Printf.eprintf
-               "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-               source
-               !line_no
-               msg;
-             None))
-      lines
+      (fun (line_no, trimmed) ->
+         match parse_jsonl_line ~source ~line_no trimmed with
+         | Some json -> Some json
+         | None ->
+           incr malformed;
+           None)
+      (number_jsonl_lines lines)
   in
   parsed, !malformed
 ;;
@@ -1324,6 +1376,51 @@ let read_slice ~path ~from ~len =
    back to a full scan from byte 0; callers detect shrinkage the same way
    via the returned boundary. Blank lines advance the boundary but are not
    folded. *)
+(* [fold_appended_lines] with the byte offset each line starts at, so a
+   caller building an index can record where a row lives and read it back
+   later with [read_slice ~from:offset ~len:(String.length line)]. The loop
+   already tracks the offset one past each newline; the line that follows
+   starts there. *)
+let fold_appended_lines_with_offsets ~path ~from ~init ~f =
+  if not (file_exists path)
+  then init, 0
+  else begin
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         let from = if from < 0 || from > len then 0 else from in
+         seek_in ic from;
+         let chunk = Bytes.create 65536 in
+         let line_buf = Buffer.create 256 in
+         let acc = ref init in
+         let boundary = ref from in
+         let pos = ref from in
+         let rec loop () =
+           let n = input ic chunk 0 (Bytes.length chunk) in
+           if n > 0
+           then begin
+             for i = 0 to n - 1 do
+               match Bytes.get chunk i with
+               | '\n' ->
+                 let line = Buffer.contents line_buf in
+                 Buffer.clear line_buf;
+                 let line_start = !boundary in
+                 boundary := !pos + i + 1;
+                 if not (String.equal (String.trim line) "")
+                 then acc := f !acc ~offset:line_start line
+               | c -> Buffer.add_char line_buf c
+             done;
+             pos := !pos + n;
+             loop ()
+           end
+         in
+         loop ();
+         !acc, !boundary)
+  end
+;;
+
 let fold_appended_lines ~path ~from ~init ~f =
   if not (file_exists path)
   then init, 0

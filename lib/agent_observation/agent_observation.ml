@@ -240,7 +240,7 @@ type unaddressed =
        records that never joined a codebase. *)
   }
 
-(* Where a fact that names a file belongs. An annotation or write region
+(* Where a fact that names a file belongs. A write region
    always names a file, so [Pathless] is unrepresentable for them. *)
 type file_attribution =
   | Addressed of addressed
@@ -275,129 +275,21 @@ type annotation_kind =
   | Question
   | Bookmark
 
-let annotation_kind_to_string = function
-  | Comment -> "Comment"
-  | Decision -> "Decision"
-  | Question -> "Question"
-  | Bookmark -> "Bookmark"
-;;
-
 let all_annotation_kinds = [ Comment; Decision; Question; Bookmark ]
 
-let valid_annotation_kind_strings =
-  List.map annotation_kind_to_string all_annotation_kinds
-;;
-
-let annotation_kind_of_string = function
-  | "Comment" -> Some Comment
-  | "Decision" -> Some Decision
-  | "Question" -> Some Question
-  | "Bookmark" -> Some Bookmark
-  | _ -> None
-;;
-
-type annotation_reference =
-  { relation : string
-  ; reference : string
-  }
-
-let annotation_reference_to_json reference =
-  `Assoc
-    [ "relation", `String reference.relation
-    ; "reference", `String reference.reference
-    ]
-;;
-
-let annotation_references_to_json references =
-  `List (List.map annotation_reference_to_json references)
-;;
-
-let annotation_references_of_json = function
-  | `Null -> Ok []
-  | `List items ->
-    let parse_one index = function
-      | `Assoc fields ->
-        let field_values key =
-          List.filter_map
-            (fun (candidate, value) -> if String.equal key candidate then Some value else None)
-            fields
-        in
-        (match
-           List.find_opt
-             (fun (key, _) ->
-                not (String.equal key "relation" || String.equal key "reference"))
-             fields
-         with
-         | Some (key, _) ->
-           Error (Printf.sprintf "references[%d] has unknown field: %s" index key)
-         | None ->
-           match field_values "relation", field_values "reference" with
-         | [ `String relation ], [ `String reference ]
-           when String.trim relation <> "" && String.trim reference <> "" ->
-           Ok { relation; reference }
-         | [ `String _ ], [ `String _ ] ->
-           Error
-             (Printf.sprintf
-                "references[%d] relation and reference must be non-empty strings"
-                index)
-         | _ ->
-           Error
-             (Printf.sprintf
-                "references[%d] requires string relation and reference fields"
-                index))
-      | _ -> Error (Printf.sprintf "references[%d] must be an object" index)
-    in
-    let rec loop index acc = function
-      | [] -> Ok (List.rev acc)
-      | item :: rest ->
-        (match parse_one index item with
-         | Ok reference -> loop (index + 1) (reference :: acc) rest
-         | Error _ as error -> error)
-    in
-    loop 0 [] items
-  | _ -> Error "references must be an array"
-;;
-
-type annotation_request =
-  { base_path : string
-  ; attribution : file_attribution
-  ; keeper_id : string
-  ; line_start : int
-  ; line_end : int
-  ; kind : annotation_kind
-  ; content : string
-  ; goal_id : string option
-  ; task_id : string option
-  ; references : annotation_reference list
-  }
-
-type annotation_result =
-  { id : string
-  ; file_path : string
-  ; line_start : int
-  ; line_end : int
-  }
-
 type tool_event_sink = tool_event -> unit
-type annotation_sink = annotation_request -> (annotation_result, string) result
 
 let noop_tool_event_sink (_ : tool_event) = ()
-let noop_annotation_sink (_ : annotation_request) = Error "annotation sink is not installed"
 
 let tool_event_sink = Atomic.make noop_tool_event_sink
-let annotation_sink = Atomic.make noop_annotation_sink
 
 let register_tool_event_sink sink = Atomic.set tool_event_sink sink
-let register_annotation_sink sink = Atomic.set annotation_sink sink
 
 (* ── Observation snapshot accumulator (task-1686) ──────────────────── *)
 
-type snapshot =
-  { tool_events : tool_event list
-  ; annotations : annotation_request list
-  }
+type snapshot = { tool_events : tool_event list }
 
-let empty_snapshot = { tool_events = []; annotations = [] }
+let empty_snapshot = { tool_events = [] }
 
 let current_snapshot = Atomic.make empty_snapshot
 
@@ -407,11 +299,7 @@ let rec update_snapshot f =
   if not (Atomic.compare_and_set current_snapshot before after) then update_snapshot f
 ;;
 
-let reverse_snapshot snap =
-  { tool_events = List.rev snap.tool_events
-  ; annotations = List.rev snap.annotations
-  }
-;;
+let reverse_snapshot snap = { tool_events = List.rev snap.tool_events }
 
 let code_address_to_json address =
   `Assoc
@@ -453,27 +341,10 @@ let tool_event_to_json (e : tool_event) =
     ]
 ;;
 
-let annotation_to_json (a : annotation_request) =
-  `Assoc
-    [ ("attribution", file_attribution_to_json a.attribution)
-    ; ("line_start", `Int a.line_start)
-    ; ("line_end", `Int a.line_end)
-    ; ("keeper_id", `String a.keeper_id)
-    ; ("kind", `String (annotation_kind_to_string a.kind))
-    ; ("content", `String a.content)
-    ; ("references", annotation_references_to_json a.references)
-    ]
-;;
-
 let snapshot_to_json (snap : snapshot) =
   `Assoc
     [ ("tool_events", `List (List.map tool_event_to_json snap.tool_events))
-    ; ("annotations", `List (List.map annotation_to_json snap.annotations))
-    ; ( "summary"
-      , `Assoc
-          [ ("tool_event_count", `Int (List.length snap.tool_events))
-          ; ("annotation_count", `Int (List.length snap.annotations))
-          ] )
+    ; ("summary", `Assoc [ ("tool_event_count", `Int (List.length snap.tool_events)) ])
     ]
 ;;
 
@@ -481,17 +352,11 @@ let peek_snapshot () = Atomic.get current_snapshot |> reverse_snapshot
 
 (* Emit wrappers: accumulate into snapshot + forward to registered sink. *)
 let emit_tool_event event =
-  update_snapshot (fun snap -> { snap with tool_events = event :: snap.tool_events });
+  update_snapshot (fun snap -> { tool_events = event :: snap.tool_events });
   Atomic.get tool_event_sink event
-;;
-
-let emit_annotation_request request =
-  update_snapshot (fun snap -> { snap with annotations = request :: snap.annotations });
-  Atomic.get annotation_sink request
 ;;
 
 let reset_for_testing () =
   Atomic.set tool_event_sink noop_tool_event_sink;
-  Atomic.set annotation_sink noop_annotation_sink;
   Atomic.set current_snapshot empty_snapshot
 ;;

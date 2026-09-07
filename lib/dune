@@ -61,6 +61,8 @@
   ; Tool_args / Tool_result live in a (wrapped false) leaf and are referenced
   ; unqualified here, so the dependency has to be spelled out.
   masc.tool_types
+  masc.browser_lane
+  masc.slack_lane
   masc.tool_metrics_store
   masc.crypto_rng
   masc.time_codec
@@ -87,6 +89,7 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_registry
+  masc.keeper_tool_name
   masc.keeper_checkpoint_ref
   masc.keeper_contract
   masc.keeper_approval
@@ -135,12 +138,14 @@
   domain-name
   ca-certs
   pbrt
+  masc.monotonic_deadline
   mtime
   mtime.clock
   mtime.clock.os
   uuidm
   zstd
   dune-build-info
+  masc.build_version
   time_compat
   fs_compat
   dated_jsonl
@@ -158,6 +163,7 @@
   masc_eio_context
   masc_cancel_safe
   masc_backend
+  masc.keeper_tool_call_index
   masc_process
   masc.masc_exec
   masc.masc_exec_bash_parser

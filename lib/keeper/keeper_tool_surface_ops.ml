@@ -108,9 +108,6 @@ let annotate_keeper_json ~runtime_class json =
   | `Assoc fields ->
       `Assoc (("runtime_class", `String runtime_class) :: fields)
   | other -> other
-let attach_assoc_field key value = function
-  | `Assoc fields -> `Assoc ((key, value) :: fields)
-  | other -> other
 
 let prepare_keeper_up_identity ctx args =
   let name = String.trim (get_string args "name" "") in

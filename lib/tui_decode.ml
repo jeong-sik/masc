@@ -233,6 +233,7 @@ type fusion_run = {
   fur_preset : string;
   fur_topology : Fusion_types.fusion_topology;
   fur_started_at : float;
+  fur_finished_at : float option;
   fur_status : fusion_run_status;
   fur_stage : fusion_run_stage;
   fur_decision : string option;
@@ -1526,11 +1527,17 @@ let int_field_or json key ~default =
   | _ -> required_int_field json key
 
 let required_display_field json key =
+  (* A bare epoch reaches us here when the server is too old to carry the ISO
+     twin. Render it as a date at the one place a display value is formatted,
+     so no pane shows a raw Unix epoch. *)
   match member key json with
   | `String value -> Ok value
-  | `Int value -> Ok (string_of_int value)
-  | `Intlit value -> Ok value
-  | `Float value -> Ok (Printf.sprintf "%.0f" value)
+  | `Int value -> Ok (Time_codec.rfc3339_of_unix (Float.of_int value))
+  | `Intlit value -> (
+      match float_of_string_opt value with
+      | Some epoch -> Ok (Time_codec.rfc3339_of_unix epoch)
+      | None -> Ok value)
+  | `Float value -> Ok (Time_codec.rfc3339_of_unix value)
   | `Null -> missing_field key
   | bad -> field_type_error key "a scalar display value" bad
 
@@ -2263,6 +2270,7 @@ type memory_alert = {
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
+  mkh_updated_at : float option;
   mkh_facts : int;
   mkh_observed_facts : int;
   mkh_derived_facts : int;
@@ -4362,6 +4370,7 @@ let decode_memory_keeper_health json =
       "memory keeper health"
       [ "keeper_id"
       ; "revision"
+      ; "updated_at"
       ; "facts"
       ; "observed_facts"
       ; "derived_facts"
@@ -4386,6 +4395,7 @@ let decode_memory_keeper_health json =
       json
   in
   let* mkh_keeper_id = required_string_field json "keeper_id" in
+  let* mkh_updated_at = required_nullable_float_field json "updated_at" in
   let* mkh_revision = required_int_field json "revision" in
   let* mkh_facts = required_int_field json "facts" in
   let* mkh_observed_facts = required_int_field json "observed_facts" in
@@ -4402,6 +4412,12 @@ let decode_memory_keeper_health json =
   let* mkh_added = required_int_field json "added" in
   let* mkh_removed = required_int_field json "removed" in
   let* mkh_snapshot_present = required_bool_field json "snapshot_present" in
+  let* () =
+    if Option.is_some mkh_updated_at = mkh_snapshot_present
+       && Option.fold ~none:true ~some:(fun ts -> Float.is_finite ts && ts >= 0.) mkh_updated_at
+    then Ok ()
+    else Error "memory updated_at must describe a readable snapshot"
+  in
   let* mkh_librarian_lane_busy = required_int_field json "librarian_lane_busy" in
   let* mkh_librarian_failures = required_int_field json "librarian_failures" in
   let* vision_reasons_json =
@@ -4488,6 +4504,7 @@ let decode_memory_keeper_health json =
   Ok
     { mkh_keeper_id
     ; mkh_revision
+    ; mkh_updated_at
     ; mkh_facts
     ; mkh_observed_facts
     ; mkh_derived_facts
@@ -4525,7 +4542,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v3"
+    if String.equal schema "keeper.memory_os.current_health.v4"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
@@ -5682,6 +5699,7 @@ let decode_fusion_run json =
     | None -> Error (Printf.sprintf "unknown fusion topology %S" topology)
   in
   let* fur_started_at = require_float_field json "started_at" in
+  let* fur_finished_at = required_nullable_float_field json "finished_at" in
   let* status = required_string_field json "status" in
   let* fur_status =
     match status with
@@ -5692,6 +5710,12 @@ let decode_fusion_run json =
         let* frs_error = required_string_field json "error" in
         Ok (Fusion_failed { frs_failure_code; frs_error })
     | other -> Error (Printf.sprintf "unknown fusion run status %S" other)
+  in
+  let* () =
+    match fur_status, fur_finished_at with
+    | Fusion_running, None -> Ok ()
+    | (Fusion_completed | Fusion_failed _), Some ts when Float.is_finite ts && ts >= 0. -> Ok ()
+    | _ -> Error "Fusion finish timestamp disagrees with run status"
   in
   let* stage = required_string_field json "stage" in
   let* progress = required_member json "progress" in
@@ -5715,6 +5739,7 @@ let decode_fusion_run json =
     ; fur_preset
     ; fur_topology
     ; fur_started_at
+    ; fur_finished_at
     ; fur_status
     ; fur_stage
     ; fur_decision
@@ -6931,9 +6956,16 @@ type runtime_prompt_asset = {
   pra_file_exists : bool;
 }
 
+type held_back_override = {
+  hbo_key : string;
+  hbo_bytes : int;
+  hbo_contract_revision : string;
+}
+
 type prompts_snapshot = {
   ps_rows : prompt_row list;
   ps_runtime_assets : runtime_prompt_asset list;
+  ps_held_back : held_back_override list;
 }
 
 let prompt_rows_for_operator ~show_fragments snapshot =
@@ -7004,6 +7036,13 @@ let decode_runtime_prompt_asset json =
   Ok { pra_path; pra_file_path; pra_value; pra_file_exists }
 ;;
 
+let decode_held_back_override json =
+  let* hbo_key = required_string_field json "key" in
+  let* hbo_bytes = required_int_field json "bytes" in
+  let* hbo_contract_revision = required_string_field json "contract_revision" in
+  Ok { hbo_key; hbo_bytes; hbo_contract_revision }
+;;
+
 let decode_prompts json =
   let* rows_json = required_list_field json "prompts" in
   let* reversed =
@@ -7028,9 +7067,26 @@ let decode_prompts json =
          Ok (asset :: acc))
       (Ok []) runtime_assets_json
   in
+  (* Absent is empty, not an error: a server that predates the field and a
+     server with nothing held back say the same thing to a reader. *)
+  let* held_back_json =
+    match member "held_back" json with
+    | `Null -> Ok []
+    | `List entries -> Ok entries
+    | value -> field_type_error "held_back" "a list" value
+  in
+  let* reversed_held_back =
+    List.fold_left
+      (fun result entry_json ->
+         let* acc = result in
+         let* entry = decode_held_back_override entry_json in
+         Ok (entry :: acc))
+      (Ok []) held_back_json
+  in
   Ok
     { ps_rows = List.rev reversed
     ; ps_runtime_assets = List.rev reversed_runtime_assets
+    ; ps_held_back = List.rev reversed_held_back
     }
 ;;
 
@@ -7058,8 +7114,16 @@ type presets_snapshot =
 (* What a preset holds, from /api/v1/presets/show. Sizes rather than bodies:
    the pane is for deciding whether to apply, and a 4 KB prompt does not fit
    in it. The bodies are on the wire for a caller that wants them. *)
+type preset_settings_match =
+  | Preset_settings_match
+  | Preset_settings_differ
+  | Preset_settings_unavailable of string
+
 type preset_detail =
   { pd_name : string
+  ; pd_directory : string
+  ; pd_settings_match : preset_settings_match
+  ; pd_prompt_files : (string * string option * prompt_source) list
   ; pd_overrides : (string * int) list  (** prompt key, bytes *)
   ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
   ; pd_assignments : (string * string) list  (** keeper, runtime id *)
@@ -7157,6 +7221,22 @@ let decode_preset_manifest json =
 let decode_preset_detail json =
   let* preset = required_object_field json "preset" in
   let* pd_name = required_string_field preset "name" in
+  let* pd_directory = required_string_field json "directory" in
+  let* matching = required_object_field json "saved_settings" in
+  let* match_status = required_string_field matching "status" in
+  let* pd_settings_match = match match_status with
+    | "matches" -> Ok Preset_settings_match
+    | "differs" -> Ok Preset_settings_differ
+    | "unavailable" -> let* reason = required_string_field matching "reason" in Ok (Preset_settings_unavailable reason)
+    | value -> Error ("Unknown preset match status: " ^ value) in
+  let* files = required_list_field json "prompt_files" in
+  let* pd_prompt_files = decode_list "prompt_files" (fun item ->
+    let* key = required_string_field item "key" in
+    let* path = required_nullable_string_field item "path" in
+    let* source = required_string_field item "source" in
+    let* source = match source with "override" -> Ok Prompt_override | "file" -> Ok Prompt_file
+      | "missing" -> Ok Prompt_missing | value -> Error ("Unknown prompt source: " ^ value) in
+    Ok (key, path, source)) files in
   let pairs key name_field size_of =
     match Yojson.Safe.Util.member key preset with
     | `List items ->
@@ -7199,7 +7279,7 @@ let decode_preset_detail json =
         items
     | _ -> []
   in
-  Ok { pd_name; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
+  Ok { pd_name; pd_directory; pd_settings_match; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
 ;;
 
 let decode_name_reason_list json key ~name_key ~reason_key =

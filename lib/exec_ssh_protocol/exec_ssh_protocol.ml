@@ -39,6 +39,7 @@ type probe =
   { name : string
   ; version : string
   ; capabilities : string list
+  ; release : string option
   }
 
 let newest = V3
@@ -434,10 +435,14 @@ let parse_trailer (tail : string) : (trailer, string) result =
 let render_probe (p : probe) : string =
   Yojson.Safe.to_string
     (`Assoc
-      [ "name", `String p.name
-      ; "version", `String p.version
-      ; "capabilities", `List (List.map (fun c -> `String c) p.capabilities)
-      ])
+      ([ "name", `String p.name
+       ; "version", `String p.version
+       ; "capabilities", `List (List.map (fun c -> `String c) p.capabilities)
+       ]
+       @
+       match p.release with
+       | None -> []
+       | Some release -> [ "release", `String release ]))
 
 let parse_probe (s : string) : (probe, string) result =
   let what = "probe" in
@@ -448,5 +453,10 @@ let parse_probe (s : string) : (probe, string) result =
   let* capabilities =
     member ~what "capabilities" fields >>= expect_string_list ~what "capabilities"
   in
-  Ok { name; version; capabilities }
+  let release =
+    match List.assoc_opt "release" fields with
+    | Some (`String release) when release <> "" -> Some release
+    | Some _ | None -> None
+  in
+  Ok { name; version; capabilities; release }
 

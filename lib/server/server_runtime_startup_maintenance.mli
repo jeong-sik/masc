@@ -46,8 +46,13 @@ val prune_shared_jsonl_stores :
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 
 val startup_sweep_microvm_guests : Mcp_server.server_state -> unit
-(** Remove microvm guests whose owning server is gone. Runs at boot, before
-    this process owns any guest, so every candidate belongs to an earlier
-    server -- and one still running keeps its own pid alive, which is what
-    stops a second server from collecting a first one's guests. Failure is
-    logged: a leaked guest costs memory, a refused boot costs the fleet. *)
+(** Collect abandoned guests with the runtime lifecycle lock. Failure is
+    logged without failing server readiness. *)
+
+val start_microvm_guest_maintenance :
+  sw:Eio.Switch.t -> sweep:(unit -> unit) -> unit
+(** Fork a switch-owned startup sweep outside the Keeper readiness barrier.
+    Logs start, completion, failure, and cancellation; shutdown cancels the
+    maintenance fiber. The runtime's protected lifecycle section completes
+    before cancellation takes effect; each CLI command retains its timeout.
+    [sweep] owns per-backend outcome observations. *)

@@ -51,10 +51,19 @@ open Alcotest
    keeper_spawn_read brings the surface comfortably below the 80,000 ceiling
    (#29595), leaving 834 bytes of deliberate headroom under the ratchet.
 
+   2026-09-07: 85,000. Targeted CI run 34095215290 measured 84,699 bytes
+   across 99 tools at c2b0243b84372bae88403e29cffde8f1209fa511. The restored
+   keeper_analyze_image reader contributes 1,146 bytes, making stored images
+   readable by text-only Keepers. The preceding surface was therefore
+   83,553 bytes, already over the old ceiling; its Browser, file and Slack
+   tools also had not been recorded in the name inventory below. This
+   ceiling acknowledges that shipped surface and the reader, with 301 bytes
+   of headroom over the measured result.
+
    The figure is a reading, not a constant. What the ceiling holds is the
    slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
    the numbers here say where it came from. *)
-let ceiling_bytes = 80_000
+let ceiling_bytes = 85_000
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -101,13 +110,19 @@ let measured () =
 
    A tool added or removed still fails here, and now says which one. *)
 let all_surface_golden_names =
-  [ "Edit"
+  [ "BrowserGoto"
+  ; "BrowserRead"
+  ; "BrowserSession"
+  ; "BrowserTabs"
+  ; "Edit"
   ; "Execute"
   ; "Grep"
   ; "Read"
   ; "WebFetch"
   ; "WebSearch"
   ; "Write"
+  (* Unread artifact handles need a model-callable vision reader. *)
+  ; "keeper_analyze_image"
   ; "keeper_artifact_read"
   ; "keeper_broadcast"
   ; "keeper_code_query"
@@ -174,6 +189,9 @@ let all_surface_golden_names =
   ; "masc_board_vote"
   ; "masc_config"
   ; "masc_dashboard"
+  ; "masc_file_delete"
+  ; "masc_file_list"
+  ; "masc_file_upload"
   ; "masc_fusion"
   ; "masc_fusion_status"
   ; "masc_gc"
@@ -197,6 +215,7 @@ let all_surface_golden_names =
   ; "masc_schedule_get"
   ; "masc_schedule_list"
   ; "masc_schedule_update"
+  ; "masc_slack_read"
   ; "masc_task_history"
   ; "masc_task_set_goal"
   ]

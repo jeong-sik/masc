@@ -8,14 +8,14 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config.
+Board, Planning, Fusion, Workspace, Config.
 Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
-Config reaches Resources with `s` and Tools with `t`, and Activity
+Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
 Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
 entries;
@@ -573,7 +573,7 @@ Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself
 ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
-non-default states as `memory:full` and `memory:off`. Neutral system rows that
+non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
 The folded tool row retains exact outcome counts and ends with
@@ -958,7 +958,7 @@ completion judge, `Task Review·7` is tasks waiting for an operator.
    show executing + verifying · order phase order, then P1→P5
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
- >   [dropped ] P1  Reduce all kidsnote service backlogs to 0
+ >   [dropped ] P1  Reduce all exampleorg service backlogs to 0
      [executi~] P1  Multi-Keeper real-world mission keeper-collab-e0-r7
   j/k:move  Enter:detail  r:refresh  Tab:next  | Port: 8935
 ```
@@ -1349,7 +1349,7 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 
 ### System Logs
 
-The log browser hangs off Activity under `l`; Esc returns there.
+Activity combines Events and Logs: `1` opens Events and `2` opens Logs from either view. `l` also opens Logs from Events; Esc returns there.
 
 The server's log ring, the same source the dashboard `logs` tab reads.
 
@@ -1511,6 +1511,20 @@ a clipped frame, and message editing is suppressed until the terminal grows.
 
 ## Troubleshooting
 
+**`masc` started a server instead of the TUI.** The handover looks for a
+`masc-tui` beside the running binary and then on `PATH`. An install lays both
+names down together; a source checkout builds `_build/default/bin/masc_tui.exe`,
+which matches neither, so the bare name serves — the same rule that keeps a
+container or a unit file from opening a TUI. Run the built path, or link both
+names into one directory on `PATH`; the README's source-checkout section spells
+out the two commands.
+
+**The TUI does not show a change that is already on `main`.** The TUI is its
+own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
+and does not touch it, so a server restart leaves the TUI on the binary it
+started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
+the TUI.
+
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,
 Planning, Fusion, and messaging do not. Check the port with `--port`.
@@ -1541,3 +1555,39 @@ keeper is in. The header's `N unread` counts the same rows.
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
 recorded in Recent Events.
+
+### Preset source and current settings
+
+Config Presets distinguishes the selected saved preset from a settings match. Its detail shows the server-resolved preset directory, whether the settings currently saved in the workspace match, and the actual Markdown path/current source for each overridden prompt. A selection alone does not apply a preset. A saved-settings match does not claim every Keeper has reloaded its instructions.
+
+Config Prompts labels whether the effective text comes from an override or the Markdown file. When an override is active, the displayed Markdown path identifies the base file, not the effective override storage.
+
+### Following a Fusion run
+
+Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+### Questions and Gate modes
+
+In Approvals, `a` opens the selected Ask in a dedicated answer reader. The header shows Ask and Question position plus answered count. Left/Right (or j/k) changes the question; PgUp/PgDn and the wheel scroll long prompts and choices. `[`/`]` changes the Ask, and Esc returns to Approvals. Choice digits apply only to the active question.
+
+`w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading.
+
+### Board navigation and Planning changes
+
+Board `s` stores the chosen order in `[tui].board_sort` in the resolved `runtime.toml`. `f` and `F` move to the next and previous Hearth; `H` opens a searchable chooser including all Hearths. IDs use subdued text, Hearths the information color, and authors the success color; votes retain their sign and replies remain an explicit count.
+
+Planning shows net changes in completed Goals, completed Tasks, and pending Goal reviews since the first successful Planning reading in this TUI session. The displayed baseline timestamp defines the window. These are changes in snapshot counts, not a durable completion history or operator-approval throughput.
+
+### Memory overview
+
+The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
+
+Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
+
+### Workspace activity
+
+On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
+
+Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.

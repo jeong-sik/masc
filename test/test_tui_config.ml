@@ -158,6 +158,28 @@ let coalesce_cases =
           (coalesce_of "[tui]\ncoalesce_queued_input = \"yes\"\n"))
   ]
 
+(* Whether ^Y also sends, [tui].voice_send_on_stop. Absence must read as None
+   so the caller's default (off) stands: unlike its neighbours this one sends
+   a message without the operator confirming it, and a file that never
+   mentions it is not that operator asking for it. *)
+let send_on_stop_of s = Config.voice_send_on_stop_of_doc (doc_of s)
+
+let voice_send_on_stop_cases =
+  [ Alcotest.test_case "reads [tui] voice_send_on_stop" `Quick (fun () ->
+        Alcotest.(check (option bool)) "true" (Some true)
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = true\n"))
+  ; Alcotest.test_case "false stays false" `Quick (fun () ->
+        Alcotest.(check (option bool)) "false" (Some false)
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = false\n"))
+  ; Alcotest.test_case "absent key -> None (caller keeps the draft)" `Quick
+      (fun () ->
+        Alcotest.(check (option bool)) "none" None
+          (send_on_stop_of "[tui]\ntheme = \"x\"\n"))
+  ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
+        Alcotest.(check (option bool)) "string" None
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = \"yes\"\n"))
+  ]
+
 (* The write side of [tui].theme. It is the only key here that changes while
    masc runs -- the rest are read once at boot -- and the writer spells it in
    the line editor's table-and-key form while [theme_of_doc] above reads the
@@ -268,13 +290,24 @@ let store_cases =
             check_opt "none" None (Config.theme ~base_path)))
   ]
 
+let board_sort_cases =
+  [ Alcotest.test_case "last Board order survives a new read" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+          (match Config.set_board_sort ~base_path "discussed" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          check_opt "stored order" (Some "discussed") (Config.board_sort ~base_path);
+          store_or_fail ~base_path (Some "gruvbox-dark");
+          check_opt "theme update keeps order" (Some "discussed") (Config.board_sort ~base_path))) ]
+
 let () =
   Alcotest.run "tui_config"
-    [ ("theme_of_doc", cases)
+    [ ("board_sort", board_sort_cases)
+    ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
     ; ("hints_visible_of_doc", hints_cases)
     ; ("coalesce_queued_input", coalesce_cases)
+    ; ("voice_send_on_stop", voice_send_on_stop_cases)
     ; ("theme_io", io_cases)
     ; ("text_with_theme", write_cases)
     ; ("set_theme", store_cases)

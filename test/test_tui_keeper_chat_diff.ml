@@ -517,7 +517,7 @@ let test_compact_projection_is_byte_unchanged () =
     projection Transcript.Compact [ activity ~execution_id:"exec-edit-1" () ]
   in
   check (list string) "compact rows"
-    projected.Transcript.rows
+    projected.Transcript.details
     (Chat_diff.rows ~mode:Transcript.Compact ~max_line_cells:96 indexed projected)
 ;;
 

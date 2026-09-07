@@ -53,6 +53,11 @@ let test_persist_register_complete () =
   let t = R.create ~path () in
   R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
+  let before_replay = Option.get (R.get t ~run_id:"r1") in
+  let after_replay = Option.get (R.get (R.replay path) ~run_id:"r1") in
+  check (option (float 0.0)) "completion timestamp survives replay"
+    before_replay.finished_at after_replay.finished_at;
+  check bool "terminal timestamp is recorded" true (Option.is_some before_replay.finished_at);
   let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
   check int "two events + trailing newline" 3 (List.length lines);
@@ -66,7 +71,7 @@ let test_persist_register_complete () =
   let event2 = parse (List.nth lines 1) in
   check string "event2 kind" "complete" (str event2 "event");
   check string "event2 id" "r1" (str event2 "id");
-  check string "event2 outcome" "succeeded" (str (object_ event2 "completion") "outcome")
+  check string "event2 outcome" "succeeded" (str (object_ (object_ event2 "completion") "result") "outcome")
 ;;
 
 let test_persist_failure_detail () =
@@ -78,7 +83,7 @@ let test_persist_failure_detail () =
   let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
   let event2 = parse (List.nth lines 1) in
-  let completion = object_ event2 "completion" in
+  let completion = object_ (object_ event2 "completion") "result" in
   check string "event2 failure" "judge failed: bad json" (str completion "reason");
   check string "event2 failure_code" "parse_error" (str completion "code");
   let replayed = R.replay path in
@@ -88,6 +93,40 @@ let test_persist_failure_detail () =
     check string "replayed failure_code" "parse_error" code
   | Some _ -> fail "expected replayed failed completion"
   | None -> fail "expected replayed run"
+;;
+
+(* A sink can publish a terminal observation before its continuation wake
+   fails. Recovery re-projects that completed run; its original timestamp
+   belongs to the persisted observation, not the later recovery attempt. *)
+let test_reprojection_preserves_first_completion_after_restart () =
+  let path = fresh_path "-reprojected-completion.jsonl" in
+  Fun.protect ~finally:(fun () -> remove_if_exists path) (fun () ->
+    Fs_compat.save_file path
+      (String.concat "\n"
+         [ {|{"event":"register","id":"recovered","started_at":10.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
+         ; {|{"event":"complete","id":"recovered","completion":{"result":{"outcome":"succeeded"},"finished_at":15.0}}|}
+         ; ""
+         ]);
+    let outcome = R.Succeeded_with_summary
+        { decision = R.decision_preview_of_string "publish"
+        ; summary = "The recovered evidence is available."
+        } in
+    let check_completion registry =
+      match R.get registry ~run_id:"recovered" with
+      | Some { R.finished_at = Some finished_at
+             ; status = R.Completed (R.Succeeded_with_summary { summary; _ }); _ } ->
+        check (float 0.0) "reprojection retains the first terminal time" 15.0 finished_at;
+        check string "outcome projection can still refresh"
+          "The recovered evidence is available." summary
+      | Some _ | None -> fail "reprojection lost the completed run"
+    in
+    let recovered = R.replay path in
+    R.mark_completed recovered ~run_id:"recovered" ~outcome;
+    check_completion recovered;
+    let restarted = R.replay path in
+    check_completion restarted;
+    R.mark_completed restarted ~run_id:"recovered" ~outcome;
+    check_completion (R.replay path))
 ;;
 
 let test_persist_success_summary () =
@@ -103,7 +142,7 @@ let test_persist_success_summary () =
          });
   let content = Fs_compat.load_file path in
   let event2 = parse (List.nth (String.split_on_char '\n' content) 1) in
-  let completion = object_ event2 "completion" in
+  let completion = object_ (object_ event2 "completion") "result" in
   check string "persisted decision" "recommend — ship" (str completion "decision");
   check string "persisted summary" "The panel reached consensus."
     (str completion "summary");
@@ -169,8 +208,8 @@ let test_replay_skips_malformed_lines () =
        [ {|{"event":"register","id":"r1","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
        ; {|not-json|}
        ; {|{"event":"register","id":42,"started_at":2.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
-       ; {|{"event":"complete","id":"r1","completion":{"outcome":"failed"}}|}
-       ; {|{"event":"complete","id":"r1","completion":{"outcome":"failed","reason":"bad result","code":"bad_result"}}|}
+       ; {|{"event":"complete","id":"r1","completion":{"result":{"outcome":"failed"},"finished_at":15.0}}|}
+       ; {|{"event":"complete","id":"r1","completion":{"result":{"outcome":"failed","reason":"bad result","code":"bad_result"},"finished_at":15.0}}|}
        ; ""
        ]);
   let t = R.replay path in
@@ -189,7 +228,7 @@ let test_replay_streams_and_compacts () =
     {|{"event":"register","id":"r-stream","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
   in
   let after =
-    {|{"event":"complete","id":"r-stream","completion":{"outcome":"succeeded"}}|}
+    {|{"event":"complete","id":"r-stream","completion":{"result":{"outcome":"succeeded"},"finished_at":15.0}}|}
   in
   let blank_padding = String.make 70000 '\n' in
   let content = String.concat "\n" [ before; blank_padding; after; "" ] in
@@ -237,7 +276,7 @@ let test_replay_preserves_unterminated_tail () =
     {|{"event":"register","id":"r-partial","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
   in
   let partial =
-    {|{"event":"complete","id":"r-partial","completion":{"outcome":"succeeded"}}|}
+    {|{"event":"complete","id":"r-partial","completion":{"result":{"outcome":"succeeded"},"finished_at":15.0}}|}
   in
   let content = String.concat "\n" [ complete; partial ] in
   Fs_compat.save_file
@@ -256,6 +295,8 @@ let () =
     [ ( "rfc-0266-phase-d"
       , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
+        ; test_case "reprojection preserves first completion after restart" `Quick
+            test_reprojection_preserves_first_completion_after_restart
         ; test_case "success summary survives replay" `Quick
             test_persist_success_summary
         ; test_case

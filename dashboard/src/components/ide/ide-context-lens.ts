@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import { navigate } from '../../router'
 import type { TabId } from '../../types'
@@ -98,7 +97,6 @@ export interface IdeContextLensModel {
 
 export interface IdeContextLensInput {
   readonly filePath: string
-  readonly annotations: ReadonlyArray<IdeAnnotation>
   readonly diffRows: ReadonlyArray<UnifiedDiffRow>
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly threads?: ReadonlyArray<AnchoredThread>
@@ -182,9 +180,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   const filePath = normalizeIdeContextFilePath(input.filePath)
   const matchesFilePath = (value: string): boolean =>
     filePath !== null && normalizeIdeContextFilePath(value) === filePath
-  const fileAnnotations = input.annotations.filter(annotation =>
-    matchesFilePath(annotation.file_path),
-  )
   const fileDiagnostics = (input.diagnostics ?? []).filter(diagnostic =>
     matchesFilePath(diagnostic.file_path),
   )
@@ -201,9 +196,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   const changedLineCount = changedRows.length
   const activeLines = new Set<number>()
 
-  for (const annotation of fileAnnotations) {
-    if (annotation.line_start >= 1) activeLines.add(annotation.line_start)
-  }
   for (const diagnostic of fileDiagnostics) {
     if (diagnostic.line >= 1) activeLines.add(diagnostic.line)
   }
@@ -224,7 +216,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
 
   const anchorCandidates = buildAnchors(
     filePath ?? input.filePath,
-    fileAnnotations,
     fileDiagnostics,
     fileThreads,
     changedRows,
@@ -233,7 +224,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
 
   const surfaces = SURFACE_ORDER.map(id => {
     const count = surfaceCount(id, {
-      annotations: fileAnnotations,
       diagnostics: fileDiagnostics,
       threads: fileThreads,
       changedLineCount,
@@ -351,7 +341,6 @@ function contextSurfaceAction(
 
 export function IdeContextLens({
   filePath,
-  annotations,
   diffRows,
   events,
   threads = [],
@@ -359,7 +348,7 @@ export function IdeContextLens({
   onAnchorActivate,
   onRouteLinkActivate,
 }: IdeContextLensProps) {
-  const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, diagnostics })
+  const model = deriveIdeContextLens({ filePath, diffRows, events, threads, diagnostics })
   const fileLabel = filePath.split('/').pop() || filePath || '(no file)'
   const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
   const activateRouteLink = onRouteLinkActivate ?? openIdeContextRouteLink
@@ -526,7 +515,6 @@ function contextAnchorTitle(anchor: IdeContextAnchor): string {
 function surfaceCount(
   id: IdeContextSurfaceId,
   state: {
-    readonly annotations: ReadonlyArray<IdeAnnotation>
     readonly diagnostics: ReadonlyArray<IdeContextDiagnostic>
     readonly threads: ReadonlyArray<AnchoredThread>
     readonly changedLineCount: number
@@ -534,21 +522,18 @@ function surfaceCount(
     readonly events: ReadonlyArray<RunActivityEvent>
   },
 ): number {
-  if (id === 'lsp') return state.annotations.length + state.diagnostics.length
+  if (id === 'lsp') return state.diagnostics.length
   if (id === 'line') return state.activeLineCount
   if (id === 'keeper') {
     const keepers = new Set(state.events.map(event => event.keeper_id))
-    for (const annotation of state.annotations) keepers.add(annotation.keeper_id)
     for (const thread of state.threads) keepers.add(thread.author_keeper_id)
     return keepers.size
   }
   if (id === 'goal') {
-    return state.annotations.filter(annotation => annotation.goal_id).length
-      + state.events.filter(event => event.context?.goal_id).length
+    return state.events.filter(event => event.context?.goal_id).length
   }
   if (id === 'task') {
-    return state.annotations.filter(annotation => annotation.task_id).length
-      + state.events.filter(event => event.context?.task_id).length
+    return state.events.filter(event => event.context?.task_id).length
   }
   if (id === 'board') {
     return state.threads.length
@@ -562,10 +547,7 @@ function surfaceCount(
     return state.events.filter(event => event.context?.pr_id).length
   }
   if (id === 'comment') {
-    return state.annotations.filter(annotation =>
-      annotation.kind === 'Comment' || annotation.kind === 'Question',
-    ).length
-      + state.threads.length
+    return state.threads.length
       + state.events.filter(event => event.context?.comment_id).length
   }
   if (id === 'log') {
@@ -586,7 +568,7 @@ function surfaceCount(
 
 function surfaceEvidence(id: IdeContextSurfaceId, count: number): string {
   if (count <= 0) return `${SURFACE_LABELS[id]} has no current anchor`
-  if (id === 'lsp') return `${count} LSP annotation or diagnostic anchor${plural(count)}`
+  if (id === 'lsp') return `${count} LSP diagnostic anchor${plural(count)}`
   if (id === 'line') return `${count} line-level anchor${plural(count)}`
   if (id === 'keeper') return `${count} keeper identity link${plural(count)}`
   if (id === 'goal') return `${count} goal reference${plural(count)}`
@@ -612,7 +594,6 @@ function anchorCountLabel(model: IdeContextLensModel): string {
 
 function buildAnchors(
   filePath: string,
-  annotations: ReadonlyArray<IdeAnnotation>,
   diagnostics: ReadonlyArray<IdeContextDiagnostic>,
   threads: ReadonlyArray<AnchoredThread>,
   changedRows: ReadonlyArray<UnifiedDiffRow>,
@@ -644,30 +625,6 @@ function buildAnchors(
         sourceId,
         telemetry: telemetryQuery !== undefined,
         telemetryQuery,
-      }),
-    })
-  }
-
-  for (const annotation of annotations.slice(0, 3)) {
-    const line = positiveLine(annotation.line_start)
-    const sourceId = `annotation-${annotation.id}`
-    anchors.push({
-      id: sourceId,
-      file_path: annotation.file_path,
-      surface: annotation.kind,
-      label: truncate(annotation.content || '(no content)', 48),
-      meta: annotationContextMeta(annotation),
-      line,
-      keeper_id: annotation.keeper_id,
-      route_links: routeLinksForContext({
-        filePath: annotation.file_path,
-        line,
-        surface: annotation.kind,
-        label: truncate(annotation.content || '(no content)', 48),
-        sourceId,
-        goalId: annotation.goal_id ?? undefined,
-        taskId: annotation.task_id ?? undefined,
-        keeperId: annotation.keeper_id,
       }),
     })
   }
@@ -907,15 +864,6 @@ function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs
     operationId ? `operation ${operationId}` : null,
     workerRunId ? `worker ${workerRunId}` : null,
     context?.file_path ?? null,
-  ])
-}
-
-function annotationContextMeta(annotation: IdeAnnotation): string {
-  return compactMeta([
-    annotation.goal_id ? `goal ${annotation.goal_id}` : null,
-    annotation.task_id ? `task ${annotation.task_id}` : null,
-    ...annotation.references.map(reference => `${reference.relation} ${reference.reference}`),
-    `keeper ${annotation.keeper_id}`,
   ])
 }
 

@@ -22,6 +22,7 @@ type t =
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
+  | Interrupt_keeper_turn of string
   | Steer_turn of string
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
@@ -35,6 +36,8 @@ type t =
   | View_image_missing_path
   | Attach_image of string
   | Attach_image_missing_path
+  | Attach_image_ref of string
+  | Attach_image_ref_missing_value
   | Preset_list
   | Preset_save of {
       name : string;
@@ -95,8 +98,8 @@ let catalog =
     ; summary = "open recorded file changes for this keeper"
     }
   ; { word = "interrupt"
-    ; args = ""
-    ; summary = "signal the streaming turn to stop"
+    ; args = "[keeper]"
+    ; summary = "signal a streaming turn to stop: this pane's, or the named keeper's"
     }
   ; { word = "steer"
     ; args = "<message>"
@@ -130,6 +133,10 @@ let catalog =
   ; { word = "attach"
     ; args = "<path>"
     ; summary = "stage an image to send with the next keeper message"
+    }
+  ; { word = "ref"
+    ; args = "<url|file_id>"
+    ; summary = "stage an image reference; the provider fetches it"
     }
   ; { word = "preset"
     ; args = "[save <name> [description] | restore <name>]"
@@ -243,7 +250,8 @@ let parse text =
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
-    | "interrupt", _ -> Interrupt_turn
+    | "interrupt", "" -> Interrupt_turn
+    | "interrupt", name -> Interrupt_keeper_turn name
     | "steer", "" -> Steer_missing_message
     | "steer", message ->
         Steer_turn
@@ -264,6 +272,8 @@ let parse text =
     | "image", path -> View_image path
     | "attach", "" -> Attach_image_missing_path
     | "attach", path -> Attach_image path
+    | "ref", "" -> Attach_image_ref_missing_value
+    | "ref", value -> Attach_image_ref value
     | "preset", "" -> Preset_list
     | "preset", rest -> (
         match split_word rest with

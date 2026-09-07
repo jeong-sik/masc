@@ -734,10 +734,18 @@ end
 let start ~sw ~env ~state =
   match Env_config_slack.app_token_opt () with
   | None ->
-    State.clear_startup_error ();
-    Log.Server.warn
-      "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
-       started"
+    (match Env_config_slack.connector_state () with
+     | Invalid_configuration detail ->
+       State.record_startup_error detail;
+       Log.Server.error "%s; Slack gateway not started" detail
+     | Disabled ->
+       State.clear_startup_error ();
+       Log.Server.info "Slack connector disabled by [slack] enabled=false"
+     | Enabled ->
+       State.clear_startup_error ();
+       Log.Server.warn
+         "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
+          started")
   | Some app_token ->
     (match resolved_trigger_policy () with
      | Error error ->

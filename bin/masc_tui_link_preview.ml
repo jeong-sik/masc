@@ -36,9 +36,22 @@ let cache_store preview =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
       Masc_tui_lru.set !preview_cache preview.url preview)
 
+(* Rendered half-block mosaics keyed by image URL, filled asynchronously after a
+   preview's image is downloaded and decoded off the render loop. Read by
+   [render_modal_card]; a miss simply draws no preview. *)
+let mosaic_cache_mu = Stdlib.Mutex.create ()
+let mosaic_cache : (string, string list) Hashtbl.t = Hashtbl.create 64
+
+let mosaic_lookup url =
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.find_opt mosaic_cache url)
+
+let mosaic_store url lines =
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.replace mosaic_cache url lines)
+
 let clear_cache () =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
-      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity)
+      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity);
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.clear mosaic_cache)
 
 let path_segments uri =
   Uri.path uri
@@ -287,8 +300,27 @@ let parse_og_html ~url ~body =
   let base = synthesize_preview url in
   let lhead = String.lowercase_ascii body in
   let meta key = meta_content ~head:body ~lhead key in
+  (* Collapse newlines/tabs and runs of spaces to single spaces so a multi-line
+     og:description (a GitHub PR body, say) stays one card row instead of
+     splitting the row and misaligning the banner beside it. ASCII-only, so
+     UTF-8 text passes through untouched. *)
+  let sanitize s =
+    let b = Buffer.create (String.length s) in
+    let prev_space = ref true in
+    String.iter
+      (fun c ->
+        let c = if c = '\n' || c = '\r' || c = '\t' then ' ' else c in
+        if c = ' ' then (
+          if not !prev_space then Buffer.add_char b ' ';
+          prev_space := true)
+        else (
+          Buffer.add_char b c;
+          prev_space := false))
+      s;
+    String.trim (Buffer.contents b)
+  in
   let non_empty = function
-    | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
+    | Some s when not (String.equal (sanitize s) "") -> Some (sanitize s)
     | _ -> None
   in
   let og_title = non_empty (meta "og:title") in
@@ -545,6 +577,16 @@ let render_modal_card ~width ~height:_ p =
   let add s = lines := s :: !lines in
   List.iter add card;
   add "";
+  (match p.image_url with
+   | Some img -> (
+       match mosaic_lookup img with
+       | Some (first :: _ as mosaic)
+         when Masc_tui_message_layout.display_width first + 2 <= inner_width ->
+           add "  preview";
+           List.iter (fun l -> add ("  " ^ l)) mosaic;
+           add ""
+       | _ -> ())
+   | None -> ());
   (match p.kind with
    | Image_direct { ext } ->
        add (Printf.sprintf "  \xf0\x9f\x96\xbc\xef\xb8\x8f  Direct Image: %s format" (String.uppercase_ascii ext));

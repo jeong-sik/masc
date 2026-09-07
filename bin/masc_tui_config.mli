@@ -50,6 +50,15 @@ val hints_visible : base_path:string -> bool option
 (** [tui].hints_visible: whether footers spell their key hints. [None]
     where the file, the table or the key is absent -- reads as "yes". *)
 
+val voice_send_on_stop_of_doc : Keeper_toml_loader.toml_doc -> bool option
+val voice_send_on_stop : base_path:string -> bool option
+(** [tui].voice_send_on_stop: whether ^Y ending a voice capture also sends what
+    was heard, instead of leaving it in the draft for the operator to send.
+    [None] where the file, the table or the key is absent — reads as "no",
+    unlike the toggles around it. They pick between two ways of showing the
+    same thing; this one sends a message without the operator confirming it,
+    and the draft is also where a spoken half-sentence waits for typing. *)
+
 val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val coalesce_queued_input : base_path:string -> bool option
 (** [tui].coalesce_queued_input: whether a new line joins the line already
@@ -59,3 +68,6 @@ val coalesce_queued_input : base_path:string -> bool option
     Only a next-turn line waiting for that same Keeper is joined. A steer
     keeps its own entry: it was created to replace one exact operation, and
     folding another line into it would move that causal parent. *)
+
+val board_sort : base_path:string -> string option
+val set_board_sort : base_path:string -> string -> (unit, string) result

@@ -14,6 +14,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module Tui_types = Masc_tui_types
+module Keeper_selection = Masc_tui_keeper_selection
 
 let position =
   testable
@@ -49,6 +50,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
   ; me_gate = None
   ; me_submitted_at = None
@@ -73,6 +75,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_turn_sequence = turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = text
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = memory_summary
   ; me_gate = None
   ; me_submitted_at = None
@@ -156,7 +159,7 @@ let test_oldest_at_reports_the_cursor () =
 ;;
 
 let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let loaded =
     [ chat_entry ~operation_seq:0 ~request_id:"turn-d" ~role:user ~text:"D"
         ~at:100. ()
@@ -192,7 +195,7 @@ let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
 ;;
 
 let test_same_request_exact_clock_normalizes_the_turn_sequence () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -252,7 +255,7 @@ let test_absolute_turn_sequence_breaks_equal_clock_ties () =
 ;;
 
 let test_journal_interleaves_request_and_reply_by_displayed_time () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -307,7 +310,7 @@ let test_scroll_anchor_distinguishes_duplicate_text_in_one_turn () =
 ;;
 
 let test_scroll_anchor_survives_session_user_persistence () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let session =
     chat_entry ~operation_seq:0 ~request_id:"same-turn" ~role:user
       ~text:"submitted locally" ~at:10. ()
@@ -347,7 +350,7 @@ let test_running_turn_does_not_escape_the_displayed_time_axis () =
   in
   let session =
     [ chat_entry ~turn_sequence:10 ~request_id:"running-10"
-        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
         ~text:"running at 100" ~at:100. () ]
   in
   let rows =
@@ -360,7 +363,7 @@ let test_running_turn_does_not_escape_the_displayed_time_axis () =
 ;;
 
 let test_uncommitted_live_turn_inserts_on_the_visible_clock_axis () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let messages =
     [ chat_entry ~request_id:"skewed" ~role:user ~text:"input at 100" ~at:100.
         ()
@@ -383,7 +386,7 @@ let test_uncommitted_live_turn_inserts_on_the_visible_clock_axis () =
 ;;
 
 let test_live_turn_uses_its_latest_committed_causal_frontier () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let messages =
     [ chat_entry ~request_id:"running" ~role:user ~text:"input" ~at:100. ()
     ; chat_entry ~request_id:"" ~role:Tui_types.Message_memory ~text:"journal"
@@ -404,7 +407,7 @@ let test_live_turn_uses_its_latest_committed_causal_frontier () =
 ;;
 
 let test_live_turn_follows_an_unknown_same_request_row () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -430,7 +433,7 @@ let test_live_turn_follows_an_unknown_same_request_row () =
 ;;
 
 let test_hidden_phase_keeps_its_timeline_projection () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     Tui_types.chat_timeline
       ~loaded:
@@ -471,7 +474,7 @@ let test_hidden_phase_keeps_its_timeline_projection () =
 ;;
 
 let test_unknown_phase_clock_inherits_the_causal_frontier () =
-  let user = Tui_types.Message_user (Tui_types.Sent_by_operator "you") in
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let rows =
     [ chat_entry ~operation_seq:0 ~request_id:"legacy" ~role:user ~text:"input"
         ~at:100. ()
@@ -535,7 +538,7 @@ let test_producer_append_keeps_a_structural_scroll_pin () =
 
   let moved_turn =
     chat_entry ~turn_sequence:20 ~operation_seq:0 ~request_id:"turn-20"
-      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
       ~text:"late-arriving input" ~at:50. ()
   in
   let moved =
@@ -681,6 +684,58 @@ let test_concurrent_turns_keep_request_owned_transcripts () =
           binding_name
           n)
     [ "settle_live_turn"; "apply_async_message" ]
+;;
+
+(* The pin is on the pane's own turn. A request in flight to another keeper
+   is drawn as an "(also sending to X ...)" row, and while that row was on
+   screen the switch was refused -- so the operator could read about a turn
+   and had no key that would take them to it (#33852). *)
+let test_a_request_to_another_keeper_does_not_pin_this_pane () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entry keeper_name =
+    let sent_request =
+      Keeper_chat.create_request ~keeper_name ~message:"hello" ()
+    in
+    ({ Tui_types.sent_request
+     ; submitted_at = 1.0
+     ; sent_at = 1.0
+     ; origin = Tui_types.Direct_submission
+     ; phase = Tui_types.Turn_streaming
+     ; log =
+         Tui_types.turn_log_create ~keeper_name
+           ~request_id:sent_request.request_id ~started_at:1.0
+     }
+      : Tui_types.inflight)
+  in
+  let has_target () =
+    match Tui_types.next_keeper_message_target state with
+    | Keeper_selection.No_alternative -> false
+    | Keeper_selection.Switch_to _ -> true
+  in
+  let roster_row name : Tui_types.keeper =
+    { k_name = name
+    ; k_trace_id = "trace-" ^ name
+    ; k_paused = false
+    ; k_current_task_id = None
+    ; k_total_turns = 0
+    ; k_total_tokens = 0
+    ; k_total_cost_usd = 0.0
+    ; k_last_turn_ts = ""
+    ; k_last_proactive_outcome = "never"
+    ; k_created_at = "2026-09-07T00:00:00Z"
+    ; k_updated_at = "2026-09-07T00:00:00Z"
+    }
+  in
+  state.keepers <- [ roster_row "alpha"; roster_row "beta" ];
+  state.msg_target_keeper_name <- Some "alpha";
+  check bool "with nothing in flight the pane can switch" true (has_target ());
+  state.msg_inflight <- [ entry "beta" ];
+  check bool "another keeper's request does not pin this pane" true
+    (has_target ());
+  state.msg_inflight <- [ entry "alpha" ];
+  check bool "this pane's own request pins it" false (has_target ())
 ;;
 
 let test_live_transcripts_are_kept_per_keeper () =
@@ -945,7 +1000,7 @@ let settled_log ~request_id deltas =
 
 let loaded_turn ~request_id =
   [ chat_entry ~request_id
-      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
       ~text:"asked" ~at:100. ()
   ; chat_entry ~request_id ~role:Tui_types.Message_thinking
       ~text:"2 reasoning steps, content withheld" ~at:101. ()
@@ -1168,8 +1223,8 @@ let test_the_scroll_pin_remembers_the_settled_logs_on_screen () =
    turns that ran in between, not below both. The live block still follows
    every committed row of its request. *)
 let test_a_settled_block_sits_before_its_requests_output_rows () =
-  let user_b = chat_entry ~request_id:"B" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you")) ~text:"uB" ~at:20. () in
-  let user_a = chat_entry ~request_id:"A" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you")) ~text:"uA" ~at:30. () in
+  let user_b = chat_entry ~request_id:"B" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None })) ~text:"uB" ~at:20. () in
+  let user_a = chat_entry ~request_id:"A" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None })) ~text:"uA" ~at:30. () in
   let err_b = chat_entry ~request_id:"B" ~role:Tui_types.Message_error ~text:"errB" ~at:50. () in
   let positioned = [ (user_b, Some 20.); (user_a, Some 30.); (err_b, Some 50.) ] in
   check int "settled B goes after uB, before uA and errB" 1
@@ -1371,7 +1426,7 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_history <-
     [ chat_entry ~request_id:request.request_id
-        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
         ~text:"queued input" ~at:42.0 () ];
   state.msg_inflight <-
     [ { Tui_types.sent_request = request
@@ -1479,18 +1534,18 @@ let test_the_header_names_only_unusual_modes () =
     (summary memory_summary folded compact);
   check string "full tools alone" "tools:full"
     (summary memory_summary hidden tools_full);
-  check string "memory off alone" "memory:off"
+  check string "journal off alone" "journal:off"
     (summary memory_hidden hidden compact);
-  check string "full memory alone" "memory:full"
+  check string "full journal alone" "journal:full"
     (summary memory_full hidden compact);
   check string "two of them" "reasoning:full tools:full"
     (summary memory_summary full tools_full);
   check string "all three, in a fixed order"
-    "memory:off reasoning:full tools:full"
+    "journal:off reasoning:full tools:full"
     (summary memory_hidden full tools_full);
   check int "at rest it now costs nothing" 0
     (String.length (summary memory_summary hidden compact));
-  check int "all three deviations still fit as one compact label" 36
+  check int "all three deviations still fit as one compact label" 37
     (String.length (summary memory_hidden full tools_full))
 ;;
 
@@ -1517,6 +1572,54 @@ let test_skill_usage_time_does_not_invent_never () =
     (Tui_types.skill_last_used_label (Some "2026-08-28T03:04:05Z"));
   check string "missing retained coverage is not lifetime absence"
     "time unavailable" (Tui_types.skill_last_used_label None)
+;;
+
+(* The header names a mode; the footer names the key that changes it. A reader
+   who presses a key and looks for what moved has to find the same word in
+   both places, and three of the four axes did. The journal's did not: the
+   header said "memory", the footer "journal", the help "memory detail" and
+   the rows "JOURNAL" -- one axis under three spellings across four files.
+
+   Reads the header's own output rather than a list written here, so an axis
+   added to [chat_visibility_summary] without a footer hint fails this. *)
+let test_every_header_mode_is_named_by_a_footer_key () =
+  let summary =
+    Tui_types.chat_visibility_summary ~memory:Tui_types.Memory_hidden
+      ~reasoning:Tui_types.Reasoning_full ~tools:Tui_types.Tools_full
+      ~origin:Masc_tui_message_layout.Origin_inline
+  in
+  let axis_of part =
+    match String.index_opt part ':' with
+    | Some at -> String.sub part 0 at
+    | None -> part
+  in
+  let axes =
+    String.split_on_char ' ' summary
+    |> List.filter (fun part -> String.trim part <> "")
+    |> List.map axis_of
+  in
+  let hints =
+    Masc_tui_footer.chat_hints ~enter_hint:"" ~scroll_hint:"" ~switch_hint:""
+      ~escape_hint:"" ~leave_hint:""
+  in
+  let names hint axis =
+    let axis_length = String.length axis in
+    let rec search from =
+      match String.index_from_opt hint from ':' with
+      | None -> false
+      | Some at ->
+          (at + 1 + axis_length <= String.length hint
+           && String.equal (String.sub hint (at + 1) axis_length) axis)
+          || search (at + 1)
+    in
+    search 0
+  in
+  check int "the header can name four modes" 4 (List.length axes);
+  List.iter
+    (fun axis ->
+      check bool ("the footer names the key for " ^ axis) true
+        (names hints axis))
+    axes
 ;;
 
 let test_chat_visibility_defaults_and_cycles () =
@@ -2241,11 +2344,19 @@ let test_the_sending_rows_show_an_age () =
       n
 ;;
 
+let test_image_headers_sanitize_untrusted_attachment_names () =
+  check int "raw image headers pass through terminal sanitization" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"draw_image" ~callee:"Keeper_chat.terminal_safe_text")
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
     [ ( "wiring"
-      , [ test_case "an interrupt receipt is bound to the exact request" `Quick
+      , [ test_case "image headers sanitize attachment names" `Quick
+            test_image_headers_sanitize_untrusted_attachment_names
+        ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
         ; test_case "Enter during a turn queues" `Quick
             test_enter_during_a_turn_queues
@@ -2255,6 +2366,8 @@ let () =
             test_steer_queues_then_interrupts_through_distinct_paths
         ; test_case "concurrent turns keep request-owned transcripts" `Quick
             test_concurrent_turns_keep_request_owned_transcripts
+        ; test_case "another keeper's request does not pin this pane" `Quick
+            test_a_request_to_another_keeper_does_not_pin_this_pane
         ; test_case "live transcripts are kept per Keeper" `Quick
             test_live_transcripts_are_kept_per_keeper
         ; test_case "a turn log folds each accepted delta once" `Quick
@@ -2309,6 +2422,8 @@ let () =
             test_chat_visibility_defaults_and_cycles
         ; test_case "the header names only unusual modes" `Quick
             test_the_header_names_only_unusual_modes
+        ; test_case "every header mode is named by a footer key" `Quick
+            test_every_header_mode_is_named_by_a_footer_key
         ; test_case "chat header resolves effective modes" `Quick
             test_chat_header_resolves_the_effective_modes
         ; test_case "Skill usage time stays honest" `Quick

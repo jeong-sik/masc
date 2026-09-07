@@ -251,6 +251,7 @@ let assert_exact_activation snapshot expected
 
 let with_bundle_tools
       ?(record_activations = true)
+      ?(agent_core = false)
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -323,6 +324,13 @@ let with_bundle_tools
            ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
            ~task_skills:[]
        in
+       let receipt_context = Keeper_context_core.agent_core_context_of_context ctx_snapshot in
+       let load_receipts =
+         match Keeper_tool_load_receipts.restore
+                 ~source:receipt_context ~target:receipt_context with
+         | Ok restored -> restored
+         | Error error -> fail (Keeper_tool_load_receipts.error_to_string error)
+       in
        let bundle =
          Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config
@@ -334,6 +342,7 @@ let with_bundle_tools
              { Masc.Keeper_tools_agent_core.offered = identity_tools ()
              ; agent_cell = ref None
              ; history = []
+             ; load_receipts
              }
            ~composition_plan_index
            ?skill_activation_context:
@@ -347,7 +356,7 @@ let with_bundle_tools
            skill_snapshot
            composition_plan_index
            capability_surface
-           bundle.tools))
+           (if agent_core then bundle.agent_core_tools else bundle.tools)))
 ;;
 
 let with_bundle f =
@@ -371,6 +380,50 @@ let test_the_bundle_is_the_model_visible_surface () =
   check bool "board Tool remains executable" true (List.mem "masc_board_list" names);
   check bool "Read is in the bundle, like every model-visible Tool" true
     (List.mem "Read" names)
+;;
+
+let check_stored_image_reader_is_callable_with_read_authority ~agent_core =
+  with_bundle_tools ~agent_core
+  @@ fun _config _meta _snapshot _plan_index surface tools ->
+  let name = "keeper_analyze_image" in
+  let tool =
+    match
+      List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools
+    with
+    | Some tool -> tool
+    | None -> fail "the stored-image reader is absent from the production bundle"
+  in
+  let input =
+    `Assoc [ "artifact", `String "image-handle"; "query", `String "Read the chart" ]
+  in
+  let descriptor =
+    match Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
+            ~tool_name:tool.schema.name ~input with
+    | Some (Ok (descriptor, prepared)) ->
+      check bool "artifact and query reach the reader unchanged" true (prepared = input);
+      descriptor
+    | Some (Error _) | None -> fail "the model-visible reader call does not resolve"
+  in
+  check bool "the model call reaches the existing vision handler" true
+    (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_analyze_image);
+  check bool "the reader is active in the frozen turn surface" true
+    (List.exists
+       (fun (capability : Keeper_capability_surface.tool_capability) ->
+          capability.descriptor.id = descriptor.id
+          && capability.availability = Keeper_capability_surface.Active)
+       (Keeper_capability_surface.tool_capabilities surface));
+  check (option bool) "image analysis retains read-only authority" (Some true)
+    (Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name:name ~input);
+  check bool "catalog requires read-state permission only" true
+    ((Tool_catalog.metadata name).required_permission = Masc_domain.CanReadState);
+  match Policy.verdict_for ~composition_plan_index:None ~tool_name:name ~input with
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } -> failf "stored-image reading asks for approval: %s" because
+;;
+
+let test_stored_image_reader_is_callable_with_read_authority () =
+  check_stored_image_reader_is_callable_with_read_authority ~agent_core:true;
+  check_stored_image_reader_is_callable_with_read_authority ~agent_core:false
 ;;
 
 (* The handler is the tool. Reading only its schema would let a tool that
@@ -816,6 +869,8 @@ let () =
             test_bundle_matches_expected_projection
         ; test_case "the bundle is the model-visible surface" `Quick
             test_the_bundle_is_the_model_visible_surface
+        ; test_case "stored-image reader is callable with read authority" `Quick
+            test_stored_image_reader_is_callable_with_read_authority
         ; test_case "tools list reads supplied capability surface" `Quick
             test_tools_list_reads_the_supplied_capability_surface
         ; test_case "the skill tool serves the body" `Quick

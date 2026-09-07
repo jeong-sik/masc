@@ -158,11 +158,20 @@ let content_string_of_tool_result ~content ~content_blocks =
   | None -> Utf8_sanitize.sanitize content
 ;;
 
-let input_content_part_of_block = function
-  | Text s ->
-    Some
-      (`Assoc [ "type", `String "input_text"; "text", `String (Utf8_sanitize.sanitize s) ])
-  | Image { media_type; data; source_type } ->
+let input_text_content_part text =
+  `Assoc [ "type", `String "input_text"; "text", `String (Utf8_sanitize.sanitize text) ]
+;;
+
+let input_image_content_part ~media_type ~data ~source_type =
+  (* The responses surface takes image_url OR file_id on input_image,
+     mutually exclusive; the docs' file_id names a Files API upload. Same
+     three-carrier mapping as the chat serializer. *)
+  match source_type with
+  | Url ->
+    `Assoc [ "type", `String "input_image"; "image_url", `String data ]
+  | File_id ->
+    `Assoc [ "type", `String "input_image"; "file_id", `String data ]
+  | Base64 ->
     let image_url =
       Api_common.base64_media_data_url
         ~backend:"openai_responses"
@@ -171,7 +180,13 @@ let input_content_part_of_block = function
         ~data
         source_type
     in
-    Some (`Assoc [ "type", `String "input_image"; "image_url", `String image_url ])
+    `Assoc [ "type", `String "input_image"; "image_url", `String image_url ]
+;;
+
+let input_content_part_of_block = function
+  | Text s -> Some (input_text_content_part s)
+  | Image { media_type; data; source_type } ->
+    Some (input_image_content_part ~media_type ~data ~source_type)
   | Document { media_type; data; source_type } ->
     let file_data =
       Api_common.base64_media_data_url
@@ -252,11 +267,54 @@ let assistant_output_item_of_block ?phase = function
   | Thinking _ | Text _ | ToolResult _ | Image _ | Document _ | Audio _ -> None
 ;;
 
+(* Responses function outputs accept an array of input_text/input_image/input_file,
+   not the full input-message union (in particular, not input_audio). Project
+   images natively and retain other structured blocks as their existing JSON
+   text representation. Nested image-bearing results use text boundaries because
+   the output union has no native nested tool_result part. Their identity and
+   error flag enclose the ordered child parts. The canonical checkpoint stays
+   unchanged.
+   https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_function_call_output_item_list_param.py *)
+let rec tool_output_has_image = function
+  | Image _ -> true
+  | ToolResult { content_blocks = Some blocks; _ } ->
+    List.exists tool_output_has_image blocks
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+  | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false
+;;
+
+let rec tool_output_parts = function
+  | Text text -> [ input_text_content_part text ]
+  | Image { media_type; data; source_type } ->
+    [ input_image_content_part ~media_type ~data ~source_type ]
+  | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ }
+    when List.exists tool_output_has_image blocks ->
+    let identity =
+      Yojson.Safe.to_string
+        (`Assoc [ "tool_use_id", `String tool_use_id
+                ; "is_error", `Bool (tool_result_outcome_is_error outcome) ])
+    in
+    input_text_content_part ("Begin nested tool result " ^ identity)
+    :: (List.concat_map tool_output_parts blocks
+        @ [ input_text_content_part ("End nested tool result " ^ identity) ])
+  | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+    | ToolResult _ | Document _ | Audio _) as block ->
+    [ input_text_content_part
+        (Yojson.Safe.to_string (Api_common.content_block_to_json block)) ]
+;;
+
+let function_call_output_content ~content ~content_blocks =
+  match content_blocks with
+  | Some blocks when List.exists tool_output_has_image blocks ->
+    `List (List.concat_map tool_output_parts blocks)
+  | Some _ | None -> `String (content_string_of_tool_result ~content ~content_blocks)
+;;
+
 let function_call_output_item ~tool_use_id ~content ~content_blocks =
   `Assoc
     [ "type", `String "function_call_output"
     ; "call_id", `String tool_use_id
-    ; "output", `String (content_string_of_tool_result ~content ~content_blocks)
+    ; "output", function_call_output_content ~content ~content_blocks
     ]
 ;;
 

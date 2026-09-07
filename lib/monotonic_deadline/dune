@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name monotonic_deadline)
+ (public_name masc.monotonic_deadline)
+ (modules monotonic_deadline)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib. + unused-value ratchet (warning 32)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries mtime mtime.clock mtime.clock.os))

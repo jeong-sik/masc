@@ -792,6 +792,62 @@ let test_post_turn_librarian_live_config_boundaries () =
         (Librarian_runtime.cadence_counter_entries ()))
 ;;
 
+(* A drain that exceeds its timeout must report [Librarian_drain_timed_out]
+   instead of blocking keeper termination forever inside [Eio.Cancel.protect],
+   where no outer cancellation can interrupt the join (issue #33576). *)
+let test_drain_reports_timeout_when_owner_never_exits () =
+  Lane.For_testing.reset ();
+  let result = ref None in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        @@ fun () ->
+      Lane.init ~sw;
+      Lane.For_testing.set_drain_timeout_sec 0.3;
+      let started, set_started = Eio.Promise.create () in
+      (* Keep the resolver: after the drain reports its timeout we release the
+         parked unit so [Eio.Switch.run] is not blocked by it at teardown. *)
+      let park, release_park = Eio.Promise.create () in
+      (match
+         Lane.submit ~base_path ~keeper_name:"hung-owner" (fun () ->
+             Eio.Promise.resolve set_started ();
+             Eio.Promise.await park)
+       with
+       | Lane.Submitted -> ()
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+       | Lane.Rejected_draining ->
+         Alcotest.fail "hung-owner unit was not submitted");
+      Eio.Promise.await started;
+      (* Mirror finish_lifecycle: the join runs inside Cancel.protect, so an
+         outer [with_timeout_exn] cannot cancel it (issue #33576). A regression
+         here therefore hangs until the test runner's own timeout kills it —
+         that is the failure mode this cap exists to remove. *)
+      Eio.Cancel.protect (fun () ->
+          result :=
+            Some
+              (Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+                   Lane.drain_and_join_librarian
+                     ~base_path
+                     ~keeper_name:"hung-owner")));
+      Eio.Promise.resolve release_park ()));
+  match !result with
+  | None -> Alcotest.fail "drain never returned"
+  | Some (Error (Lane.Librarian_drain_timed_out seconds)) ->
+    Alcotest.(check (float 1e-6)) "cap elapsed" 0.3 seconds
+  | Some (Error error) ->
+    Alcotest.failf
+      "expected drain timeout, got: %s"
+      (Lane.librarian_drain_error_to_string error)
+  | Some (Ok Lane.No_librarian_work) ->
+    Alcotest.fail "drain lost the hung owner entirely"
+  | Some (Ok Lane.Librarian_drained) ->
+    Alcotest.fail "hung owner was reported as drained"
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -830,6 +886,10 @@ let () =
             "drain reports parent cancellation"
             `Quick
             test_drain_reports_parent_cancellation
+        ; Alcotest.test_case
+            "drain reports timeout when owner never exits"
+            `Quick
+            test_drain_reports_timeout_when_owner_never_exits
         ; Alcotest.test_case
             "crash abort cancels without joining provider work"
             `Quick

@@ -27,7 +27,9 @@ STW; `stw_api_barrier` is the leader waiting for the others.
 domain it reports how many fiber runs happened, how much of the window
 they covered, how many ran 10/50/100 ms or longer without giving the
 scheduler back, and the longest ones with the operation the fiber resumed
-from, the one it suspended on (an empty reason is `Fiber.yield`), the GC
+from, the one it suspended on (an empty reason is `Fiber.yield`; a file
+operation names its file, `fs-compat-append-file chat.jsonl`, so a run
+between two of them is placed without further instrumentation), the GC
 time inside the run, and how many `masc.turn` spans were open on that
 domain. Each long run also prints the fiber's ancestry: the cancellation
 context it was forked in (kind and name when the switch was named) and the

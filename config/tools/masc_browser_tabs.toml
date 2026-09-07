@@ -1,0 +1,15 @@
+name = "masc_browser_tabs"
+description = """
+List the tabs of the connected browser lane. The "live" lane is the \
+operator's real Firefox/Zen through the browser-lane extension; it exists \
+only while that browser runs with the host connected. Returns \
+{tabs: [{id, index, windowId, active, title, url}]}. Use masc_browser_read \
+for one page's text."""
+additional_properties = false
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["live", "automation"]
+description = "Which browser lane to ask. Default: live."
+default = "live"

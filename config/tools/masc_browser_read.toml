@@ -1,0 +1,28 @@
+name = "masc_browser_read"
+description = """
+Read the visible text of one browser tab through the connected browser \
+lane. Without tabId, reads the active tab of the "live" lane. Returns \
+{text, tabId, chars} with a 50k character cap and a [TRUNCATED] marker. \
+Read-only: nothing is clicked, submitted or navigated."""
+additional_properties = false
+
+[[params]]
+name = "tabId"
+type = "integer"
+description = "Tab to read, as listed by masc_browser_tabs. Default: the active tab."
+minimum = 0
+
+[[params]]
+name = "maxChars"
+type = "integer"
+description = "Character cap for the returned text."
+minimum = 1
+maximum = 100000
+default = 50000
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["live", "automation"]
+description = "Which browser lane to ask. Default: live."
+default = "live"

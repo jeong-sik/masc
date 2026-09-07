@@ -1,0 +1,13 @@
+{
+  "component": "macOS arm64 Firefox native host",
+  "source_commit": "75157f4786c5ee268e08dfa4ea348364638f44aa",
+  "sha256": "a5587b8e6ac9f8d2177b00ddfc5014a310bcd86c1e71e449789a06472a9d0e62",
+  "sha256sums_matches": true,
+  "ci_run": 34086992976,
+  "ci_test_log": "native-host-ci-tests.log",
+  "local_test_log": "native-host-local-tests.log",
+  "ci_tests_passed": 9,
+  "local_tests_passed": 9,
+  "browser_reconnect_read_receipt": "live-api-fixed-host.json",
+  "boundary": "This host binary is newer than the server/TUI artifact."
+}

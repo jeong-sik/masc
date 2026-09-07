@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name slack_lane)
+ (public_name masc.slack_lane)
+ (libraries eio yojson unix))

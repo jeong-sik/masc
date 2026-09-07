@@ -1,0 +1,78 @@
+name: Browser Host Proof
+
+on:
+  pull_request:
+    paths:
+      - 'bin/masc_browser_host.ml'
+      - 'bin/dune'
+      - 'test/test_browser_native_host.py'
+      - '.github/workflows/browser-host-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-host-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-native-host:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Install native dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Pin dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-compact-protocol --with-bisect
+
+      - name: Install OCaml dependencies
+        run: opam install . --deps-only --with-test -y
+
+      - name: Build native host
+        run: opam exec -- dune build --release bin/masc_browser_host.exe
+
+      - name: Exercise native pipes directly
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          python3 test/test_browser_native_host.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/native-host-tests.log
+
+      - name: Package verified executable and identity
+        working-directory: proof
+        run: |
+          cp ../_build/default/bin/masc_browser_host.exe masc-browser-host-macos-arm64
+          git rev-parse HEAD > SOURCE_COMMIT
+          shasum -a 256 masc-browser-host-macos-arm64 > SHA256SUMS
+
+      - name: Upload native host proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-browser-host-proof-macos-arm64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: proof/
+          if-no-files-found: ignore

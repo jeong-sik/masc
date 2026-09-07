@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **The shim names the release it came from, and the server says when they
+  differ.** `masc-exec-shim --probe` now answers with a `release` field taken
+  from `dune-project` through a generated module, so no build step has to
+  remember to stamp it. On every probe the server compares that with its own
+  version and logs `remote_shim_outdated` when they differ, or when the shim is
+  old enough not to name itself; the lane keeps running, because the two sides
+  negotiate the protocol major and tolerate one release apart on purpose. The
+  `keeper_lane_status` tool reports `shim_release` beside `server_release`, so a
+  keeper can read it for its own lane. The repair is the existing
+  `masc-exec-ssh-bootstrap --shim`, which the warning names (RFC-0427 B-3).
+
+- **The observation stage actually runs in the box now.** The gate's
+  pre-judge observation (RFC-0422) dispatched the keeper's effect-built
+  shell IR unchanged: execution reads the dispatch target from the IR, so
+  the "observed" run was the real call with live network, and its exit
+  became the gate's evidence — an `observed_in_box` auto-allow granted a
+  real `gh pr create` (PR #33609) and a review comment before any operator
+  decision on 2026-09-06. `Shell_ir.with_sandbox` rewrites every stage of
+  the IR onto the box's target (a delegated masc-tool stage keeps its own),
+  and the observation stage dispatches the rewritten IR (#33638,
+  task-1375).
+- **The exec shim traces every request and names its build.** On 2026-09-06
+  an `observed_in_box` auto-allow ran with live network (a keeper opened PR
+  #33609 through the observation path), while the same shim binary framed by
+  hand boxed correctly — and no record said what the server had actually
+  framed. The shim now appends one line per request to the guest's
+  `/tmp/masc-shim-requests.log` (framed mode, the plan it got, argv0, build
+  id; best-effort, capped at 4 MiB), and the static build stamps its commit
+  sha into the probe version (`3.0.0+a1b2c3d4`), so two artifacts of one
+  protocol stop looking identical. RFC-0422 diagnosis, task-1375.
+
 ## [0.33.0] - 2026-09-06
 
 - **The release ships the exec shim.** Every tagged release now carries
@@ -2770,7 +2801,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   by a dedicated negative test (`test_jest_vitest_banner_
   required`).  Verifier runtime now covers dune + cargo + pytest
   + go test + jest + vitest, bringing JavaScript-ecosystem
-  runner output (Kidsnote FE repos, most npm projects) into the
+  runner output (ExampleOrg FE repos, most npm projects) into the
   same typed-marker surface the rest of the runtime consumes.
 
 ## [0.12.0] - 2026-04-20

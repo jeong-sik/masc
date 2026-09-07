@@ -40,11 +40,23 @@ min_length = 1
 # the handler, whose refusal carries the exact references this keeper does
 # carry. A schema-level gate answered those calls with a generic length
 # error that could not name the catalog (task-828).
+#
+# Optional since RFC-0411 §4.2. Omitted, the turn's frozen Skill list decides
+# which body is read — the same list a spelled-out revision is matched against,
+# so leaving it out reaches nothing new. Spelled out, it is still matched
+# exactly and refused on a mismatch: a revision the caller named is never
+# quietly replaced.
+#
+# It was required because the call was meant to pin what it read. That pin also
+# has to be typed, and nothing hands it to the caller outside this tool's own
+# Available list — of 292 tasks recorded on this workspace, 0 named a Skill,
+# and 126 of those were made through masc_add_task, which has carried a skills
+# parameter all along.
 [[params]]
 name = "content_revision"
 type = "string"
-required = true
-description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes: 64 lowercase hex characters, copied verbatim from the Task skill reference or this tool's Available list."
+required = false
+description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that identity; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
 
 [[params]]
 name = "file"

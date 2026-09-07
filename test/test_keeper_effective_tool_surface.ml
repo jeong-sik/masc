@@ -378,8 +378,22 @@ let test_projection_names_equal_turn_surface_authority () =
          |> Yojson.Safe.Util.to_list
          |> List.map Yojson.Safe.Util.to_string
        in
-       check (list string) "schema requires the canonical exact reference"
-         [ "identity"; "content_revision" ] required;
+       (* The identity is required; the revision is not. Requiring it meant the
+          caller had to type a 64-hex digest nothing outside this tool's own
+          Available list hands them, and 0 of 292 recorded Tasks ever named a
+          Skill. Omitted, the turn's frozen list decides — the same list a
+          spelled-out revision is matched against, so dropping it reaches
+          nothing new. RFC-0411 §4.2. *)
+       check (list string) "identity is required, the revision is not"
+         [ "identity" ] required;
+       check bool "the revision is still an accepted field" true
+         (input_schema
+          |> Yojson.Safe.Util.member "properties"
+          |> Yojson.Safe.Util.member "content_revision"
+          <> `Null);
+       (* A bare name is still not the input shape: source and package stay
+          inside [identity], which is what keeps two sources' same-named Skills
+          separable at all. *)
        check bool "name-only input is absent" true
          (input_schema
           |> Yojson.Safe.Util.member "properties"

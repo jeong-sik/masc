@@ -1205,7 +1205,7 @@ let skill_reference_and_resource_path input =
         (fun (field, value) -> if String.equal field "file" then Some value else None)
         fields
     in
-    (match Skill_reference.of_yojson reference_json with
+    (match Skill_reference.request_of_yojson reference_json with
      | Error _ -> Error Invalid_skill_reference
      | Ok reference ->
        (match resource_fields with
@@ -1299,13 +1299,43 @@ let make_instruction_skill_tool
              ~start_time
              (Skill_resource_path.error_to_string error)
          | Ok (asked, resource_path) ->
+           (* A pinned request is matched whole, as before: a revision the
+              caller spelled out is honoured or refused, never replaced. A
+              request that named the Skill and left the revision open is
+              resolved against this turn's frozen list — the same list the
+              pinned match searches, so nothing new is reachable by dropping
+              the revision.
+
+              Two carried Skills sharing an identity cannot be told apart by
+              name, so that ask is refused rather than answered with a guess;
+              the refusal carries the exact references, which is the one
+              contract that can still separate them. RFC-0411 §4.2, §4.3. *)
            (match
-              List.find_opt
-                (fun (skill : instruction_skill) ->
-                   Skill_reference.equal skill.reference asked)
-                instruction_skills
+              match asked with
+              | Skill_reference.Pinned reference ->
+                List.filter
+                  (fun (skill : instruction_skill) ->
+                     Skill_reference.equal skill.reference reference)
+                  instruction_skills
+              | Skill_reference.By_identity identity ->
+                List.filter
+                  (fun (skill : instruction_skill) ->
+                     Skill_reference.equal_identity
+                       skill.reference.identity
+                       identity)
+                  instruction_skills
             with
-            | Some skill ->
+            | _ :: _ :: _ ->
+              Tool_result.make_err
+                ~tool_name:name
+                ~class_:Tool_result.Workflow_rejection
+                ~start_time
+                (Printf.sprintf
+                   "this keeper carries more than one Skill under that name, so \
+                    the name alone cannot say which; call again with \
+                    content_revision. Carried: %s"
+                   (carried_references_text instruction_skills))
+            | [ skill ] ->
               let reference = skill.reference in
               let skill_tool_use_id =
                 Agent_core.Tool_contract.Invocation.tool_use_id invocation
@@ -1435,12 +1465,21 @@ let make_instruction_skill_tool
                  error and says so with the exact references it does carry,
                  rather than an empty
                  body the model would read as "this skill says nothing". *)
-              None ->
+              [] ->
               Tool_result.make_err ~tool_name:name
                 ~class_:Tool_result.Workflow_rejection ~start_time
                 (Printf.sprintf
-                   "no instruction Skill matches exact reference %s; this keeper carries: %s"
-                   (Skill_reference.to_yojson asked |> Yojson.Safe.to_string)
+                   "no instruction Skill matches %s; this keeper carries: %s"
+                   (match asked with
+                    | Skill_reference.Pinned reference ->
+                      Printf.sprintf
+                        "exact reference %s"
+                        (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+                    | Skill_reference.By_identity identity ->
+                      Printf.sprintf
+                        "identity %s"
+                        (Skill_reference.identity_to_yojson identity
+                         |> Yojson.Safe.to_string))
                    (carried_references_text instruction_skills))))))
 ;;
 

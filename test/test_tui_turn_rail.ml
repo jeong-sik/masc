@@ -86,9 +86,10 @@ let test_the_drawn_pieces_are_distinct () =
     List.filter (fun rail -> rail <> Layout.Rail_none) every_rail
     |> List.map Layout.turn_rail_glyph
   in
-  (* Five shapes, not six: both sidings meet the line the same way, and what
-     kind of siding it was is in the run leading up to it. *)
-  check int "five distinct glyphs" 5
+  (* Six shapes for seven drawn pieces: both sidings meet the line the same
+     way, and what kind of siding it was is in the run leading up to it. Every
+     other piece has its own. *)
+  check int "six distinct glyphs" 6
     (List.length (List.sort_uniq String.compare drawn));
   check string "nothing to hang draws a blank" " "
     (Layout.turn_rail_glyph Layout.Rail_none)

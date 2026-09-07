@@ -380,6 +380,44 @@ let test_serving_constraint_partial_group_fails_closed () =
   | Ok _ -> fail "partial serving-constraint declaration must fail closed"
 ;;
 
+(* keeper_analyze_image on glm-coding.glm-4.6v died on HTTP 400 code 1210
+   ("The max_tokens parameter is illegal. [1,32768]") at 2026-09-07T15:24:58Z:
+   the vision tool asked for 65536, the clamp landed on 40960, and 40960 is the
+   glm capabilities_base ceiling, not this model's. A runtime config always
+   carries its provider id, so it resolves through the provider-scoped lookup
+   with bare fallback off -- the path taken here -- and that path never read
+   the bare glm-4.6v row. The provider-scoped rows are what make the model's
+   own ceiling reachable from a runtime. *)
+let test_glm_vision_rows_reach_a_runtime_lookup () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision runtime rows"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun provider_label ->
+        match
+          Capabilities.for_provider_model_id
+            ~wire:(Some Llm_provider.Provider_kind.Glm)
+            ~allow_bare_fallback:false
+            ~provider_label
+            ~model_id:"glm-4.6v"
+        with
+        | Some caps ->
+          check
+            (option int)
+            (provider_label ^ " resolves glm-4.6v to its own output ceiling")
+            (Some 32_768)
+            caps.Capabilities.max_output_tokens;
+          check
+            bool
+            (provider_label ^ " keeps glm-4.6v image-capable")
+            true
+            caps.Capabilities.supports_image_input
+        | None -> fail (provider_label ^ " resolves no capabilities for glm-4.6v"))
+      [ "glm-coding"; "glm" ])
+;;
+
 let () =
   run
     "model catalog default"
@@ -429,6 +467,10 @@ let () =
             "subscription models admit their reasoning efforts"
             `Quick
             test_subscription_models_admit_their_reasoning_efforts
+        ; test_case
+            "glm vision rows reach a runtime lookup"
+            `Quick
+            test_glm_vision_rows_reach_a_runtime_lookup
         ] )
     ]
 ;;

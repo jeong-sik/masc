@@ -112,22 +112,6 @@ export const initialHubState: HubState = {
   invariantViolations: { ...ZERO_VIOLATIONS },
 }
 
-/** Returns the snapshot only when status is `'fresh'`. Stale/error/
- *  loading/idle collapse to `null`. Consumers that want stale data
- *  must `switch` on `status.kind` directly and show a staleness
- *  banner. */
-export function hubFreshSnapshot(status: HubFetchStatus): KeeperCompositeSnapshot | null {
-  switch (status.kind) {
-    case 'fresh':
-      return status.snapshot
-    case 'stale':
-    case 'idle':
-    case 'loading':
-    case 'error':
-      return null
-  }
-}
-
 export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KSM', key: 'phase' },
   { field: 'KTC', key: 'turn' },

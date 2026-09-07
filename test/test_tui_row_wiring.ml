@@ -271,7 +271,7 @@ let test_memory_surface_keeps_the_starvation_axes () =
   List.iter
     (fun field ->
       Alcotest.(check bool) ("memory_state reads " ^ field) true
-        (reads_in ~module_path:render_memory_module ~binding_name:"memory_state"
+        (reads_in ~module_path:"bin/masc_tui_types.ml" ~binding_name:"memory_state"
            ~fields:[ field ]
          > 0))
     [ "mkh_snapshot_present"
@@ -281,11 +281,11 @@ let test_memory_surface_keeps_the_starvation_axes () =
   Alcotest.(check bool) "the title names the starving count" true
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
-    (reads ~binding_name:"render_memory" ~fields:[ "mhs_total_source_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_source_facts" ] > 0);
   Alcotest.(check bool) "the title keeps derived facts separate" true
-    (reads ~binding_name:"render_memory" ~fields:[ "mhs_total_derived_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_derived_facts" ] > 0);
   Alcotest.(check bool) "the title exposes support retractions" true
-    (reads ~binding_name:"render_memory"
+    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body"
        ~fields:[ "mhs_total_support_invalidations" ]
      > 0);
   (* The source snapshot has four numbers and the row has one cell for them,

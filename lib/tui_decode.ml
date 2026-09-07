@@ -2263,6 +2263,7 @@ type memory_alert = {
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
+  mkh_updated_at : float option;
   mkh_facts : int;
   mkh_observed_facts : int;
   mkh_derived_facts : int;
@@ -4362,6 +4363,7 @@ let decode_memory_keeper_health json =
       "memory keeper health"
       [ "keeper_id"
       ; "revision"
+      ; "updated_at"
       ; "facts"
       ; "observed_facts"
       ; "derived_facts"
@@ -4386,6 +4388,7 @@ let decode_memory_keeper_health json =
       json
   in
   let* mkh_keeper_id = required_string_field json "keeper_id" in
+  let* mkh_updated_at = required_nullable_float_field json "updated_at" in
   let* mkh_revision = required_int_field json "revision" in
   let* mkh_facts = required_int_field json "facts" in
   let* mkh_observed_facts = required_int_field json "observed_facts" in
@@ -4402,6 +4405,12 @@ let decode_memory_keeper_health json =
   let* mkh_added = required_int_field json "added" in
   let* mkh_removed = required_int_field json "removed" in
   let* mkh_snapshot_present = required_bool_field json "snapshot_present" in
+  let* () =
+    if Option.is_some mkh_updated_at = mkh_snapshot_present
+       && Option.fold ~none:true ~some:(fun ts -> Float.is_finite ts && ts >= 0.) mkh_updated_at
+    then Ok ()
+    else Error "memory updated_at must describe a readable snapshot"
+  in
   let* mkh_librarian_lane_busy = required_int_field json "librarian_lane_busy" in
   let* mkh_librarian_failures = required_int_field json "librarian_failures" in
   let* vision_reasons_json =
@@ -4488,6 +4497,7 @@ let decode_memory_keeper_health json =
   Ok
     { mkh_keeper_id
     ; mkh_revision
+    ; mkh_updated_at
     ; mkh_facts
     ; mkh_observed_facts
     ; mkh_derived_facts
@@ -4525,7 +4535,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v3"
+    if String.equal schema "keeper.memory_os.current_health.v4"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in

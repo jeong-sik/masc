@@ -3639,6 +3639,52 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
     return interact
 
 
+def planning_resize_budget_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    # The surface strip and composer consume two rows. Exercise the old
+    # zero-goal case (19 surface rows) and the minimum supported surface (14).
+    for terminal_rows in (21, 16, 17, 20, 24, 16):
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=terminal_rows,
+            columns=120,
+            needle=b"MASC Planning",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        assert_planning_goal_selected(frame, b"plan-alpha-29424")
+        footer_row = frame_row_of(frame, b"j/k:move")
+        goal_row = frame_row_of(frame, b"plan-alpha-29424")
+        # Row addresses include the prepended surface strip; the footer sits
+        # immediately above the composer on the terminal's last row.
+        if not goal_row < footer_row < terminal_rows:
+            raise AssertionError(f"Planning overflowed its surface: {frame!r}")
+        selected = send_and_wait(
+            process, master_fd, output, b"j", b"plan-beta-29424"
+        )
+        assert_planning_goal_selected(selected, b"plan-beta-29424")
+        restored = send_and_wait(
+            process, master_fd, output, b"k", b"plan-alpha-29424"
+        )
+        assert_planning_goal_selected(restored, b"plan-alpha-29424")
+
+    send_and_wait(process, master_fd, output, b"f", b"show:active")
+    empty = send_and_wait(
+        process, master_fd, output, b"f", b"no goals in this filter"
+    )
+    if frame_row_of(empty, b"no goals in this filter") >= terminal_rows - 2:
+        raise AssertionError(f"Planning empty note overflowed: {empty!r}")
+    os.write(master_fd, b"q")
+
+
 def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -5644,7 +5690,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/dashboard/keeper-memory-health"] = (
         200,
         {
-            "schema": "keeper.memory_os.current_health.v3",
+            "schema": "keeper.memory_os.current_health.v4",
             "generated_at": 1787348000.0,
             "cadence_counter_entries": 0,
             "keepers": [
@@ -5659,6 +5705,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "added": 1,
                     "removed": 0,
                     "snapshot_present": True,
+                    "updated_at": 1700000000.0,
                     "librarian_lane_busy": 0,
                     "librarian_failures": 0,
                     "vision_ingest_errors": 0,
@@ -5782,10 +5829,10 @@ def memory_facts_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Memory")
-        # Enter is a no-op until the health snapshot lands, so wait for the
-        # loaded title tail before pressing it.
+        # Enter is a no-op until the health snapshot lands. The fixture has
+        # two ordinary facts and one source fact, shown in the overview total.
         wait_for_output(
-            process, master_fd, output, b"failed/no ordinary",
+            process, master_fd, output, b"Total 3 facts",
             start=0, timeout=5.0,
         )
         # The title is bold up to the reset, so needles start after it:
@@ -5800,14 +5847,10 @@ def memory_facts_interaction() -> Interaction:
             b"the deploy needs assets",
             start=0, timeout=5.0,
         )
-        # Badges are padded to ten cells and the age column sits between the
-        # badge and the text, so a needle is either the badge or the text.
+        # Badges use uppercase display labels. At this height the selected
+        # dropped row is visible; the source row is below the initial window.
         for needle in (
-            b"[blocker   ]",
-            b"port 8935 is already claimed",
-            b"[source    ]",
-            b"docs/config.md",
-            b"[dropped   ]",
+            b"[DROPPED   ]",
             b"docs/old.md",
             b"source_changed",
             b"(2 ord \xc2\xb7 1 src \xc2\xb7 1 drop)",
@@ -5821,13 +5864,26 @@ def memory_facts_interaction() -> Interaction:
         wait_for_output(
             process, master_fd, output, b"authored", start=0, timeout=5.0
         )
-        # The categories are the loaded ones, sorted: blocker first. The
-        # selected one carries the filled marker in the category strip.
-        send_and_wait(process, master_fd, output, b"c", b"\xe2\x97\x8f blocker")
-        send_and_wait(process, master_fd, output, b"c", b"\xe2\x97\x8f lesson")
-        # Esc closes the browser back to the health table, whose title tail
-        # is the only place this phrase appears.
-        send_and_wait(process, master_fd, output, b"\x1b", b"failed/no ordinary")
+        # Visit every category through its filter so each row is visible even
+        # when the selected detail panel leaves a short list viewport.
+        for category, badge, text in (
+            (b"blocker", b"[BLOCKER   ]", b"port 8935 is already claimed"),
+            (b"lesson", b"[LESSON    ]", b"the deploy needs assets"),
+            (b"source", b"[SOURCE    ]", b"docs/config.md"),
+            (b"dropped", b"[DROPPED   ]", b"docs/old.md"),
+        ):
+            filtered = send_and_wait(
+                process, master_fd, output, b"c", b"\xe2\x97\x8f " + category
+            )
+            plain = CSI_RE.sub(b"", filtered)
+            for expected in (badge, text):
+                if expected not in plain:
+                    raise AssertionError(
+                        f"Memory {category!r} filter omitted {expected!r}: {plain!r}"
+                    )
+        # The fact browser says Total: with a colon; the overview has this
+        # fleet total, so it also proves Esc returned to the health table.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Total 3 facts")
         os.write(master_fd, b"q")
 
     return interact
@@ -12214,6 +12270,12 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="Planning preserves selected goals and footer across resize",
+        interact=planning_resize_budget_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
         description="Planning selection identity",
         interact=planning_reorder_identity_interaction(planning_reorder_fixtures),
         http_fixtures=planning_reorder_fixtures,
@@ -12362,6 +12424,12 @@ def run_cli_base_path_regression(executable: str) -> None:
 
 
 def run_planning_review_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Planning preserves selected goals and footer across resize",
+        interact=planning_resize_budget_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
     verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
     run_terminal_scenario(
         executable,

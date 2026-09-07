@@ -57,6 +57,7 @@ export interface KeeperMemoryHealthVisionErrorReason {
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
+  updated_at: number | null
   facts: number
   observed_facts: number
   derived_facts: number
@@ -80,7 +81,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: string
+  schema: 'keeper.memory_os.current_health.v4'
   generated_at: number
   cadence_counter_entries: number
   keepers: KeeperMemoryHealthKeeperEntry[]
@@ -188,6 +189,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
     'revision',
+    'updated_at',
     'facts',
     'observed_facts',
     'derived_facts',
@@ -211,6 +213,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   ])) return null
   const keeper_id = nonEmptyString(raw.keeper_id)
   const revision = nonNegativeInteger(raw.revision)
+  const updated_at = raw.updated_at === null ? null : finiteNumber(raw.updated_at)
   const facts = nonNegativeInteger(raw.facts)
   const observed_facts = nonNegativeInteger(raw.observed_facts)
   const derived_facts = nonNegativeInteger(raw.derived_facts)
@@ -253,6 +256,9 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || added === null
     || removed === null
     || snapshot_present === null
+    || (raw.updated_at !== null && updated_at === null)
+    || (updated_at !== null && updated_at < 0)
+    || (updated_at !== null) !== snapshot_present
     || librarian_lane_busy === null
     || librarian_failures === null
     || vision_ingest_errors === null
@@ -276,6 +282,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   return {
     keeper_id,
     revision,
+    updated_at,
     facts,
     observed_facts,
     derived_facts,
@@ -308,7 +315,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v3') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v4') return null
   const generated_at = finiteNumber(raw.generated_at)
   const cadence_counter_entries = nonNegativeInteger(raw.cadence_counter_entries)
   const keepers = Array.isArray(raw.keepers)

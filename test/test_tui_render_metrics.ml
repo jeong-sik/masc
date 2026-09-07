@@ -35,6 +35,7 @@ let make_task ~id ~title ~status : Decode.task =
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
+  ; mkh_updated_at = Some 1700000000.
   ; mkh_facts = facts
   ; mkh_observed_facts = facts - 2
   ; mkh_derived_facts = 2

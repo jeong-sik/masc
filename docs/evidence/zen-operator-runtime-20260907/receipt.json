@@ -2,11 +2,11 @@
   "schema": "masc.zen_operator_runtime_evidence.v1",
   "measured_date_kst": "2026-09-07",
   "result": "passed",
-  "scope": "one production automation session and installed TUI on an owned local fixture; single loaded-host run, not a benchmark",
+  "scope": "one completed headless production automation/TUI run, not a benchmark; separately dated incomplete headed retry",
   "server": {
     "source_commit": "0799f02f796a647b4ef1fac57f54a064d7d3c6db",
     "executable_sha256": "7bb2bc118c0d56fe0f9c71e0920b60c16edcbd926dee36fab4c05423f16bd003",
-    "provenance": "self-observed installed server health; concurrent actor built/replaced the executable; CI provenance not established"
+    "provenance": "installed file changed during concurrent deployments; this probe records observed runtime identity, not established CI provenance"
   },
   "automation": {
     "headless": true,
@@ -155,6 +155,7 @@
       "owned_zen_process_terminated": true,
       "operator_zen_process_untouched": true
     },
-    "scope": "session open succeeded; navigation connection closed while runtime identity changed; no complete headed page or preview proof"
+    "scope": "session open succeeded; navigation connection closed while runtime identity changed; no complete headed page or preview proof",
+    "measured_date_kst": "2026-09-08"
   }
 }

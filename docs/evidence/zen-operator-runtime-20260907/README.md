@@ -2,7 +2,7 @@
 
 Production automation and the installed TUI read the owned
 `ZEN_OPERATOR_PROOF_20260907` page successfully. This was one **headless** Zen
-session on a loaded host, not a benchmark: session open took **52.0604 s**, text
+session in one production run, not a benchmark: session open took **52.0604 s**, text
 read **211.3 ms**, and capture **386.6 ms**. The owned session was closed.
 
 The image below is the **45,099-byte PNG decoded from the TUI's actual Kitty APC
@@ -16,13 +16,14 @@ this run did not separately measure termios restoration.
 
 The server reported source `0799f02f796a647b4ef1fac57f54a064d7d3c6db` and executable
 SHA-256 `7bb2bc118c0d56fe0f9c71e0920b60c16edcbd926dee36fab4c05423f16bd003`.
-A concurrent actor built/replaced that installed file: this is observed runtime
-identity, **not established CI provenance**. The installed TUI's verified SHA-256
+The installed file changed during concurrent deployments; this probe records
+observed runtime identity, **not established CI provenance**. The installed TUI's verified SHA-256
 is `a2324d99eca6971a6dd44ebc6a5aa3c8d869ae7f0ebcdb550c83dc2ae400b53f`;
 its source revision was not established by this probe.
 
 An earlier headed request returned HTTP 400, but its response body was not captured,
-so the cause is unknown. A subsequent headed retry opened a session in **40.0679 s**,
+so the cause is unknown. A subsequent headed retry on **2026-09-08 KST** opened
+a session in **40.0679 s**,
 then navigation lost its connection across a runtime replacement (`0799f02f796a` →
 `afcd210659c9`). Its API close also failed; the owned driver was reset and its Zen
 process terminated. This establishes no headed page or preview proof.

@@ -167,11 +167,30 @@ let test_browser_url_input_ownership () =
   check target "hidden URL does not capture another surface" None (resolved state)
 ;;
 
+let test_browser_reader_chrome_scope () =
+  let state = fresh_state () in
+  let module Lane = Tui_types.Browser_lane_view in
+  List.iter (fun app ->
+    state.Tui_types.browser_lane <- Some (Lane.create app);
+    state.Tui_types.view <- Tui_types.Connectors;
+    check bool "reader owns its context row" true
+      (Option.is_some (Tui_types.browser_lane_on_screen state));
+    state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+    check bool "retained browser does not hide Keeper chrome" true
+      (Option.is_none (Tui_types.browser_lane_on_screen state)))
+    [Lane.Browser; Lane.Slack];
+  state.Tui_types.view <- Tui_types.Connectors;
+  state.Tui_types.browser_lane <- None;
+  check bool "connector routing retains Keeper context" true
+    (Option.is_none (Tui_types.browser_lane_on_screen state))
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
-        [ test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
+        [ test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
+          test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
           test_case "nothing claims a plain surface" `Quick
             test_nothing_claims_a_plain_surface;
           test_case "the palette claims while it is open" `Quick

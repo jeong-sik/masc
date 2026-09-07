@@ -1011,6 +1011,10 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
+  match browser_lane_on_screen state with
+  | Some view ->
+      Theme.recede () ^ fit_width (Browser_lane_view.context_label view) cols ^ Ansi.reset
+  | None ->
   let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
@@ -1051,6 +1055,9 @@ let composer_line state ~cols =
   | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
+  match browser_lane_on_screen state with
+  | Some _ -> Frame_presenter.Hidden
+  | None ->
   let composer = Composer_projection.of_state state in
   match composer.Composer.focus with
   | Composer.Unfocused -> Frame_presenter.Hidden
@@ -18539,7 +18546,7 @@ let render (state : state) =
        state.palette_open || state.context_inspector_open || state.help_open
        || state.agenda_open || state.answering_open
      in
-     if modal || state.view = Acting then 0
+     if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state) then 0
      else if
        Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden
          ~cols:terminal_cols

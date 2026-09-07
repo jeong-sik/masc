@@ -4039,6 +4039,7 @@ let launch_browser_lane state ~mailbox operation =
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
 let open_browser_lane state ~mailbox app =
+  state.composer_focused <- false;
   state.view <- Connectors;
   state.browser_lane <- Some (Browser_lane_view.create app);
   state.search <- None;
@@ -9686,6 +9687,7 @@ let rearm_continuous_capture state ~mailbox ~keeper =
 
 let handle_composer_key state ~base_path ~mailbox key =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+     || Option.is_some (browser_lane_on_screen state)
   then false
   else
   let composer = Composer_projection.of_state state in
@@ -14072,6 +14074,10 @@ and is loaded on demand through keeper_skill.
                      paste.Masc_tui_paste.text))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
+       | Some (Pasted _) when Option.is_some (browser_lane_on_screen state) ->
+           (* The URL field above owns paste while open; a page reader has
+              no hidden Keeper composer or attachment destination. *)
+           ()
        | Some (Pasted paste)
          when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The

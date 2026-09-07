@@ -118,3 +118,9 @@ Paths refer to the host running geckodriver, not a remote Keeper's filesystem.
 The real Firefox scenario covers nested cross-origin frame input, top-level
 recovery, missing-frame rejection before mutation, alert/confirm/prompt outcomes,
 and multipart upload with server-side file-byte verification.
+
+A page may open a prompt during navigation. `open_tab` then returns its tabId
+with `navigation=blocked_by_dialog` and the requested URL, without claiming a
+completed page read. Inspect/answer that tab's dialog and read it again. If a tab
+scan is blocked, its error also identifies the exact tabId. Opening a new task
+tab can recover after the previously current tab was closed.

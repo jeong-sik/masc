@@ -1,9 +1,9 @@
 {
-  "lib/browser_webdriver.ml": "07d0b959d15c82a3138b7c7d627d2e020ff7068513889cf84e42171037012046",
-  "lib/browser_lane/browser_action.ml": "35c2eaf1987a0d93fdb06dd224ee5dd64f2c1f8f86da513b0edc2cb492de91c7",
+  "lib/browser_webdriver.ml": "a04562b78bc57718115f2f6913b86e8195a567720df2d0c21a6bceb943d40a85",
+  "lib/browser_lane/browser_action.ml": "580d65c052bc9499147adf1b4630d5ad391bc9869b9111fcc41772722776f7cd",
   "lib/browser_lane/browser_lane.ml": "7206901d38f03be0b27568d1e80b0d3745dea3ce9cbffc4745213c1afe308ae1",
   "lib/browser_page_script.ml": "02f048be62f09631821d4a820b577106b0f570b6907c9125583586751d5ce822",
-  "scripts/fixtures/firefox_controls_probe.ml": "6b408a4bb4ced3fa8b7751ba2766d4e0cf59d37a4f3cfb2def30ca0643a377d6",
-  "scripts/probe-firefox-controls.py": "8535cbd63ea2784eb8538a5464088f67397260fd3edb2bb4541ffc8de4649bcc",
-  "test/dune": "ac8d5b9eb17dee0396c2e444e79b625e31d27d952793d63425235dc9306b65a5"
+  "scripts/fixtures/firefox_controls_probe.ml": "55f129334a66423e5ec2eb321ed7fdf4935d0cf5d5ff64c77e0812ad00cb89a6",
+  "scripts/probe-firefox-controls.py": "80caa0a2560824df733d4854fd520dbd9f5b243a67e1105a4d602bb570ae6adc",
+  "test/dune": "ba48ad6c5765d9e38e32a2c1104a717c6b3ded2d727d714bfb6f8e50f52e9c6b"
 }

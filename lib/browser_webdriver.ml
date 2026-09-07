@@ -10,6 +10,12 @@ let string_field key json = match field key json with
 let error_message = function
   | Transport message | Protocol message -> message
   | Remote { code; message } -> code ^ ": " ^ message
+let error_at_tab tab_id error =
+  let context message = Printf.sprintf "tabId=%d: %s" tab_id message in
+  match error with
+  | Transport message -> Transport (context message)
+  | Protocol message -> Protocol (context message)
+  | Remote {code;message} -> Remote {code;message=context message}
 let decode_response ~status body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error detail -> Error (Protocol detail)
@@ -155,13 +161,27 @@ let execute_action t action =
   | Browser_lane.Action.Open_tab url ->
     let* () = absolute_http_url url in
     let* session = session t in
+    let* _ = match call t session `GET "/window" None with
+      | Error (Remote {code="no such window";_}) ->
+        let* handles = call t session `GET "/window/handles" None in
+        (match handles with
+         | `List (`String handle :: _) -> select t session handle
+         | _ -> Error (Protocol "no surviving browser window; reopen the session"))
+      | result -> result in
     let* created = perform_effect session `POST "/window/new" (Some (`Assoc ["type",`String "tab"])) in
     let* handle = string_field "handle" created in
     let id = tab_id t session handle in
-    let* _ = select t session handle in
-    let* _ = call t session `POST "/url" (Some (`Assoc ["url",`String url])) in
-    let* summary = page_summary t session in
-    Ok (`Assoc ["tabId",`Int id;"page",summary])
+    let navigate () =
+      let* _ = select t session handle in
+      let* _ = call t session `POST "/url" (Some (`Assoc ["url",`String url])) in
+      page_summary t session in
+    (match navigate () with
+     | Ok summary -> Ok (`Assoc ["tabId",`Int id;"page",summary])
+     | Error (Remote {code="unexpected alert open";_}) ->
+       (* The tab was created, and its document is waiting on a user prompt.
+          Retain the identity without claiming that navigation completed. *)
+       Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
+     | Error error -> Error (error_at_tab id error))
   | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
@@ -261,8 +281,9 @@ let execute_unlocked t = function
       let rec read acc = function
         | [] -> Ok (`List (List.rev acc))
         | `String handle :: rest ->
-          let* _ = select t session handle in
-          let* summary = page_summary t session in
+          let id = tab_id t session handle in
+          let* _ = select t session handle |> Result.map_error (error_at_tab id) in
+          let* summary = page_summary t session |> Result.map_error (error_at_tab id) in
           (match summary with
            | `Assoc fields ->
              let tab = `Assoc (("id", `Int (tab_id t session handle)) ::

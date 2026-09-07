@@ -41,6 +41,12 @@ PASS dismiss reaches the page as false
 PASS native action confirms its target tab
 PASS native action confirms its target tab
 PASS prompt input reaches the page
+PASS load-time dialog retains its new tab id
+PASS load-time prompt can be inspected by returned id
+PASS blocked tab scan reports its exact id
+PASS native action confirms its target tab
+PASS load-time dialog recovery leaves page readable
+PASS native action confirms its target tab
 PASS native action confirms its target tab
 PASS native action confirms its target tab
 PASS real multipart upload preserves file bytes

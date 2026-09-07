@@ -48,6 +48,14 @@ let test_session_generation () =
       (accept ~generation:7 (decode (response ())) view = view))
     [Open_session; Close_session; Goto "https://example.org/?q=한글"]
 
+let test_navigation_failure_recovery () =
+  let url = "https://example.org/?q=한글" in
+  let pending = { (switch_source Automation (create Browser)) with load = Loading (9, Goto url) } in
+  let failed = fail_action "navigation failed" pending in
+  expect "failed URL restored for editing" (failed.url_draft = Some url);
+  expect "failure is visible and retry is possible"
+    (failed.load = Failed "navigation failed" && not (busy failed))
+
 let test_failed_refresh () =
   let previous = loaded () in
   let refreshed = accept ~generation:2 (Error "Firefox disconnected")
@@ -83,6 +91,7 @@ let () =
      "stale response and provenance", test_stale_response;
      "session generation", test_session_generation;
      "failed refresh preserves evidence", test_failed_refresh;
+     "navigation failure preserves editable URL", test_navigation_failure_recovery;
      "source switch and Slack filter", test_source_switch;
      "malformed response", test_malformed_response;
      "empty tabs", test_empty_tabs]

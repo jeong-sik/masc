@@ -11652,7 +11652,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               when generation = current ->
                 (match result with
                  | Error detail ->
-                     state.browser_lane <- Some { view with load = Failed detail }
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
                  | Ok () ->
                      state.browser_lane <- Some
                        { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
@@ -14116,7 +14116,9 @@ and is loaded on demand through keeper_skill.
       in
       let quit_key =
         match key with
-        | Some k -> Render_schedule.Input_shortcut.is_quit ~message_mode k
+        | Some k ->
+            text_input_target state ~compact_viewport <> Some Text_browser_url
+            && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,

@@ -2645,6 +2645,12 @@ module Browser_lane_view = struct
   let switch_source source t =
     { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle; url_draft = None }
   let refresh t = { t with selected_tab = None; scroll = 0 }
+  let fail_action detail t =
+    let url_draft = match t.load with
+      | Loading (_, Goto url) -> Some url
+      | Loading _ | Idle | Failed _ -> t.url_draft
+    in
+    { t with load = Failed detail; url_draft }
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source);
@@ -2747,6 +2753,10 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
           |> List.concat_map (fun line ->
               if line = "" then [""] else
               Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
+
+let browser_lane_url_line ~cols draft =
+  let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
+  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
 type state = {
   mutable metrics_scroll: int;

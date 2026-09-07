@@ -53,8 +53,7 @@ find lib/ -name '*.ml' -type f -print0 2>/dev/null \
   | xargs -0 wc -l 2>/dev/null \
   | awk '$2 != "total" && $1 >= 1000 && $1 < 999999 { print }' \
   | sort -rn \
-  | head -20 \
-  | awk '{ printf "| %d | %s |\n", $1, $2 }'
+  | awk 'NR <= 20 { printf "| %d | %s |\n", $1, $2 }'
 
 printf '\n_Total >= 1000 LoC files: '
 find lib/ -name '*.ml' -type f -print0 2>/dev/null \

@@ -2,7 +2,8 @@
 """Build and run test suites with ocamlfind instead of dune.
 
 This is a bounded runner for static OCaml library sources, not a replacement
-for Dune rules, generated sources, preprocessing or virtual-library selection.
+for Dune rules or preprocessing. --generate explicitly enables the supported
+embedded_config recipe; other generated modules still require Dune.
 Wrapped units use their library namespace, and authored main modules and
 interfaces remain unchanged. Dependency analysis determines the compile order;
 its failure is reported as an unbuilt suite, never an invented test verdict.
@@ -58,6 +59,7 @@ class Plan:
     libraries: list[Library] = field(default_factory=list)
     packages: list[str] = field(default_factory=list)
     link_flags: list[str] = field(default_factory=list)
+    generated: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def strip_comments(text: str) -> str:
@@ -260,7 +262,8 @@ def needs_dune_reason(form: str) -> str | None:
 
 
 def read_suites(root: str) -> dict[str, Suite]:
-    text = strip_comments(open(os.path.join(root, "test/dune"), encoding="utf-8").read())
+    with open(os.path.join(root, "test/dune"), encoding="utf-8") as source:
+        text = strip_comments(source.read())
     for included in sorted(glob.glob(os.path.join(root, "test/stanzas/*.inc"))):
         text += "\n" + strip_comments(open(included, encoding="utf-8").read())
     out: dict[str, Suite] = {}
@@ -323,13 +326,55 @@ def read_package_metadata(text: str, name: str) -> PackageMetadata | None:
     return None
 
 
+@dataclass(frozen=True)
+class GenerationFailure:
+    reason: str
+
+
 class Resolver:
-    def __init__(self, libraries: dict[str, Library], root: str):
+    def __init__(self, libraries: dict[str, Library], root: str, generate: bool = False):
         self.libraries = libraries
         self.root = root
+        self.generate = generate
+        # A generator is evaluated at most once per owner during this run.
+        # Failures remain failures with their original diagnostic for every
+        # suite that reaches the same source, instead of rerunning the tool.
+        self._generation_results: dict[tuple[str, str], str | GenerationFailure] = {}
         self._findlib: dict[str, bool] = {}
         self.substitutions: dict[str, str] = {}
         self._metadata: dict[str, PackageMetadata | None] = {}
+
+    def generate_module(self, library: Library, module: str) -> str | GenerationFailure:
+        key = (library.name, module)
+        # One supported recipe, matching lib/embedded_config/dune. This is
+        # not a generic Dune action interpreter or a basename fallback.
+        supported = library.name == "embedded_config" and module_name(module) == "Embedded_config"
+        if not supported:
+            return GenerationFailure("source absent; no supported generator (requires Dune)")
+        if not self.generate:
+            return GenerationFailure("source absent; pass --generate for the embedded_config recipe")
+        if key not in self._generation_results:
+            config = os.path.join(self.root, "config")
+            if not os.path.isdir(config):
+                result = GenerationFailure(f"generator input directory absent: {config}")
+            else:
+                try:
+                    crunch = subprocess.run(
+                        ["ocaml-crunch", "-m", "plain", config],
+                        capture_output=True, text=True, check=False,
+                    )
+                    if crunch.returncode != 0:
+                        diagnostic = crunch.stderr.strip() or "no stderr"
+                        result = GenerationFailure(
+                            f"ocaml-crunch exited {crunch.returncode}: {diagnostic}")
+                    elif not crunch.stdout:
+                        result = GenerationFailure("ocaml-crunch succeeded but produced no source")
+                    else:
+                        result = crunch.stdout
+                except OSError as error:
+                    result = GenerationFailure(f"ocaml-crunch could not start: {error}")
+            self._generation_results[key] = result
+        return self._generation_results[key]
 
     def installed(self, name: str) -> bool:
         if name not in self._findlib:
@@ -395,6 +440,7 @@ class Resolver:
         complete: set[str] = set()
         visiting: set[str] = set()
         packages: list[str] = []
+        generated: dict[tuple[str, str], str] = {}
         blocker: str | None = None
 
         def visit(name: str) -> bool:
@@ -417,9 +463,18 @@ class Resolver:
                 blocker = f"{name} ({library.needs_dune})"
                 return False
             for module in library.modules:
-                if source_stem(self.root, library, module) is None:
-                    blocker = f"{name}.{module} (source absent; requires Dune)"
-                    return False
+                origin = source_stem(self.root, library, module)
+                missing_embedded_implementation = (
+                    library.name == "embedded_config"
+                    and module_name(module) == "Embedded_config"
+                    and (origin is None or not os.path.isfile(origin + ".ml"))
+                )
+                if origin is None or missing_embedded_implementation:
+                    result = self.generate_module(library, module)
+                    if isinstance(result, GenerationFailure):
+                        blocker = f"{name}.{module}: {result.reason}"
+                        return False
+                    generated[(library.name, module)] = result
             visiting.add(key)
             for dependency in library.deps:
                 if not visit(dependency):
@@ -436,7 +491,7 @@ class Resolver:
             resolved = self.resolve_packages(packages)
         except (OSError, StagingError) as error:
             return None, str(error)
-        plan = Plan(suite, libraries=ordered, packages=resolved)
+        plan = Plan(suite, libraries=ordered, packages=resolved, generated=generated)
         for library in ordered:
             for flag in library.c_library_flags:
                 plan.link_flags += ["-cclib", flag]
@@ -519,11 +574,16 @@ def stage_plan(plan: Plan, root: str, workdir: str) -> StagedPlan:
             unit = main + "__" + public if wrapped and public != main else public
             reserve(unit, library.name)
             origin = source_stem(root, library, module)
-            if origin is None:
+            generated = plan.generated.get((library.name, module))
+            if origin is None and generated is None:
                 raise StagingError(f"source absent: {library.directory}/{module}")
             for extension in (".mli", ".ml"):
-                if os.path.isfile(origin + extension):
-                    target = os.path.join(directory, unit + extension)
+                target = os.path.join(directory, unit + extension)
+                if extension == ".ml" and generated is not None:
+                    with open(os.path.join(workdir, target), "w", encoding="utf-8") as source:
+                        source.write(generated)
+                    sources.append(target)
+                elif origin is not None and os.path.isfile(origin + extension):
                     shutil.copyfile(origin + extension, os.path.join(workdir, target))
                     sources.append(target)
         stubs: list[str] = []
@@ -747,6 +807,10 @@ def main() -> int:
         metavar="DIR",
         help="build in DIR and leave it there, instead of a temporary directory",
     )
+    parser.add_argument(
+        "--generate", action="store_true",
+        help="run the supported ocaml-crunch embedded_config recipe into owned staging sources",
+    )
     args = parser.parse_args()
 
     root = subprocess.run(
@@ -758,7 +822,7 @@ def main() -> int:
     source_root = os.path.abspath(args.source_root or root)
 
     suites = read_suites(root)
-    resolver = Resolver(collect_libraries(root), root)
+    resolver = Resolver(collect_libraries(root), root, generate=args.generate)
 
     if args.all_matching:
         wanted = sorted(

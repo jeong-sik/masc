@@ -184,6 +184,142 @@ class NamespaceFixtures(unittest.TestCase):
         self.assertIn("Alpha.Util", result.summary + result.detail)
 
 
+class GeneratedSourceFixtures(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "checkout"
+        self.work = Path(self.tmp.name) / "work"
+        self.work.mkdir()
+        for name, body in {
+            "config/example.toml": "enabled = true\n",
+            "lib/embedded_config/dune": "(library (name embedded_config) (modules embedded_config) (wrapped false))",
+            "lib/wrapper/dune": "(library (name wrapper) (modules embedded_config))",
+            "lib/wrapper/embedded_config.ml": 'let owner = "wrapper"\n',
+            "test/dune": "(test (name test_generated) (libraries embedded_config wrapper))",
+            "test/test_generated.ml": "let () = ()\n",
+        }.items():
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body)
+        self.libraries = runner.collect_libraries(str(self.root))
+        self.generated = 'let read = function "example.toml" -> Some "enabled = true" | _ -> None\n'
+
+    def resolver(self, enabled=True):
+        return runner.Resolver(self.libraries, str(self.root), generate=enabled)
+
+    def stage(self, plan):
+        return runner.stage_plan(plan, str(self.root), str(self.work))
+
+    def test_generation_is_explicit_opt_in_and_does_not_write_checkout(self):
+        with patch.object(runner.subprocess, "run") as process:
+            plan, blocker = self.resolver(enabled=False).plan("test_generated", ["embedded_config"])
+        self.assertIsNone(plan)
+        self.assertIn("--generate", blocker)
+        process.assert_not_called()
+        self.assertFalse((self.root / "lib/embedded_config/embedded_config.ml").exists())
+
+    def test_generated_source_keeps_its_owner_next_to_same_basename(self):
+        resolver = self.resolver()
+        with patch.object(runner.subprocess, "run", return_value=
+                          subprocess.CompletedProcess([], 0, self.generated, "")) as process:
+            plan, blocker = resolver.plan("test_generated", ["embedded_config", "wrapper"])
+            repeated, repeated_blocker = resolver.plan("test_generated", ["embedded_config"])
+            unrelated, unrelated_blocker = resolver.plan("test_generated", ["wrapper"])
+        self.assertIsNone(blocker)
+        self.assertIsNone(repeated_blocker)
+        self.assertIsNone(unrelated_blocker)
+        process.assert_called_once_with(["ocaml-crunch", "-m", "plain", str(self.root / "config")],
+                                        capture_output=True, text=True, check=False)
+        self.assertEqual(plan.generated, {("embedded_config", "embedded_config"): self.generated})
+        self.assertEqual(repeated.generated, plan.generated)
+        self.assertEqual(unrelated.generated, {})
+        generated, wrapper, _ = self.stage(plan).groups
+        self.assertIsNone(generated.alias)
+        self.assertIsNone(generated.opened)
+        self.assertEqual((self.work / generated.directory / "Embedded_config.ml").read_text(), self.generated)
+        self.assertEqual((self.work / wrapper.directory / "Wrapper__Embedded_config.ml").read_text(),
+                         'let owner = "wrapper"\n')
+        self.assertIn("module Embedded_config = Wrapper__Embedded_config", (self.work / wrapper.alias).read_text())
+        self.assertFalse((self.root / "lib/embedded_config/embedded_config.ml").exists())
+
+    def test_other_owner_cannot_borrow_cached_generated_module(self):
+        resolver = self.resolver()
+        with patch.object(runner.subprocess, "run", return_value=
+                          subprocess.CompletedProcess([], 0, self.generated, "")) as process:
+            resolver.plan("test_generated", ["embedded_config"])
+            (self.root / "lib/wrapper/embedded_config.ml").unlink()
+            plan, blocker = resolver.plan("test_generated", ["wrapper"])
+        process.assert_called_once()
+        self.assertIsNone(plan)
+        self.assertIn("wrapper.embedded_config", blocker)
+        self.assertIn("no supported generator", blocker)
+
+    def test_generation_preserves_an_existing_interface(self):
+        interface = self.root / "lib/embedded_config/embedded_config.mli"
+        interface.write_text("val read : string -> string option\n")
+        with patch.object(runner.subprocess, "run", return_value=
+                          subprocess.CompletedProcess([], 0, self.generated, "")):
+            plan, blocker = self.resolver().plan("test_generated", ["embedded_config"])
+        self.assertIsNone(blocker)
+        group = self.stage(plan).groups[0]
+        self.assertEqual([Path(name).suffix for name in group.sources], [".mli", ".ml"])
+        self.assertEqual((self.work / group.directory / "Embedded_config.mli").read_bytes(), interface.read_bytes())
+
+    def test_authored_implementation_is_not_regenerated(self):
+        source = self.root / "lib/embedded_config/embedded_config.ml"
+        source.write_text('let read _ = Some "authored"\n')
+        with patch.object(runner.subprocess, "run") as process:
+            plan, blocker = self.resolver().plan("test_generated", ["embedded_config"])
+        process.assert_not_called()
+        self.assertIsNone(blocker)
+        self.assertEqual(plan.generated, {})
+        group = self.stage(plan).groups[0]
+        self.assertEqual((self.work / group.directory / "Embedded_config.ml").read_bytes(), source.read_bytes())
+
+    def test_generator_failure_keeps_exit_and_stderr_without_retries(self):
+        for status in (17, -9):
+            with self.subTest(status=status):
+                resolver = self.resolver()
+                with patch.object(runner.subprocess, "run", return_value=
+                                  subprocess.CompletedProcess([], status, "partial source", "invalid config\ninput failed")) as process:
+                    first = resolver.plan("test_generated", ["embedded_config"])
+                    second = resolver.plan("test_generated", ["embedded_config"])
+                process.assert_called_once()
+                self.assertIsNone(first[0])
+                self.assertEqual(first, second)
+                self.assertIn(f"exited {status}", first[1])
+                self.assertIn("invalid config\ninput failed", first[1])
+                self.assertFalse(list(self.work.iterdir()))
+
+    def test_missing_generator_and_empty_success_remain_distinct_failures(self):
+        for outcome, expected in ((FileNotFoundError("ocaml-crunch absent"), "could not start"),
+                                  (subprocess.CompletedProcess([], 0, "", ""), "produced no source")):
+            with self.subTest(expected=expected):
+                resolver = self.resolver()
+                options = {"side_effect": outcome} if isinstance(outcome, Exception) else {"return_value": outcome}
+                with patch.object(runner.subprocess, "run", **options) as process:
+                    plan, blocker = resolver.plan("test_generated", ["embedded_config"])
+                    self.assertEqual((plan, blocker), resolver.plan("test_generated", ["embedded_config"]))
+                process.assert_called_once()
+                self.assertIsNone(plan)
+                self.assertIn(expected, blocker)
+
+    def test_cli_generate_wires_only_the_supported_generator(self):
+        import io
+        def command_plan(command, **kwargs):
+            if command == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(command, 0, str(self.root), "")
+            self.assertEqual(command, ["ocaml-crunch", "-m", "plain", str(self.root / "config")])
+            return subprocess.CompletedProcess(command, 0, self.generated, "")
+        with patch.object(sys, "argv", [str(SCRIPT), "--list", "--generate", "test_generated"]), \
+             patch.object(runner.subprocess, "run", side_effect=command_plan), \
+             patch.object(sys, "stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(runner.main(), 0)
+        self.assertIn("1 buildable, 0 blocked", output.getvalue())
+        self.assertFalse((self.root / "lib/embedded_config/embedded_config.ml").exists())
+
+
 class FindlibFixtures(unittest.TestCase):
     def setUp(self):
         self.resolver = runner.Resolver({}, "/unused")

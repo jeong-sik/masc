@@ -7721,13 +7721,6 @@ let leave_board_detail state =
   state.board_scroll <- 0;
   state.board_detail <- Board_detail.clear state.board_detail
 
-let leave_missing_board_detail state =
-  match state.board_mode with
-  | Board_read post_id
-    when not (List.exists (fun post -> String.equal post.bp_id post_id) state.board_posts) ->
-      leave_board_detail state
-  | Board_list | Board_read _ | Board_compose -> ()
-
 let apply_board_hearths_load state = function
   | Ok census -> state.board_hearths <- census
   | Error _ ->
@@ -7739,8 +7732,10 @@ let apply_board_hearths_load state = function
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
-      state.board_list_error <- None;
-      leave_missing_board_detail state
+      (* A sorted/filtered page cannot establish that an exact-ID target
+         disappeared. Its own detail request owns loading and failure, even
+         when the recent page is empty or excludes this historical post. *)
+      state.board_list_error <- None
   | Error err ->
       remember_surface_error state ~surface:"board list"
         ~current_error:state.board_list_error

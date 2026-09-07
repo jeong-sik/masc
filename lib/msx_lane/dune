@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name msx_lane)
+ (public_name masc.msx_lane)
+ (libraries ocaml-msx.msx yojson))

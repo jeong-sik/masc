@@ -64,6 +64,53 @@ export interface DashboardFusionRunsResponse {
   runs: FusionRunRecord[]
   count: number
   generatedAt: string | null
+  replay: FusionReplay | null
+  historicalEvidence: FusionHistoricalEvidence[]
+}
+
+export type FusionReplay =
+  | { status: 'not_replayed' | 'absent' }
+  | { status: 'complete' | 'incomplete'; linesRead: number; malformedLines: number; droppedRunning: number }
+
+export interface FusionHistoricalEvidence {
+  runId: string
+  postId: string
+  title: string
+  createdAt: number
+}
+
+function nonnegativeNumber(value: unknown, field: string, integer = false): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
+      || (integer && !Number.isInteger(value))) throw new Error(`Invalid Fusion ${field}`)
+  return value
+}
+
+function parseFusionReplay(raw: unknown): FusionReplay | null {
+  if (raw === undefined) return null
+  if (!isRecord(raw)) throw new Error('Invalid Fusion replay observation')
+  switch (raw.status) {
+    case 'not_replayed': case 'absent': return { status: raw.status }
+    case 'complete': case 'incomplete': return {
+      status: raw.status,
+      linesRead: nonnegativeNumber(raw.lines_read, 'replay.lines_read', true),
+      malformedLines: nonnegativeNumber(raw.malformed_lines, 'replay.malformed_lines', true),
+      droppedRunning: nonnegativeNumber(raw.dropped_running, 'replay.dropped_running', true),
+    }
+    default: throw new Error('Unknown Fusion replay status')
+  }
+}
+
+function parseHistoricalEvidence(raw: unknown): FusionHistoricalEvidence[] {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) throw new Error('Invalid Fusion historical evidence list')
+  return raw.map(row => {
+    if (!isRecord(row) || typeof row.run_id !== 'string' || !row.run_id.trim()
+        || typeof row.post_id !== 'string' || !row.post_id.trim() || typeof row.title !== 'string') {
+      throw new Error('Fusion historical evidence requires exact run and Board post identities')
+    }
+    return { runId: row.run_id, postId: row.post_id, title: row.title,
+      createdAt: nonnegativeNumber(row.created_at, 'historical publication time') }
+  })
 }
 
 // The backend emits a closed three-label enum, so an unrecognized value can only
@@ -92,6 +139,8 @@ export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsRespon
     runs,
     count: asInt(root.count) ?? runs.length,
     generatedAt: asString(root.generated_at) ?? null,
+    replay: parseFusionReplay(root.replay),
+    historicalEvidence: parseHistoricalEvidence(root.historical_evidence),
   }
 }
 

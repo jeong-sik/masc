@@ -6223,8 +6223,24 @@ def memory_journal_timeline_interaction(
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        os.write(master_fd, b"\x0e\x06")
-        wait_for_terminal_input_consumed(_slave_fd)
+        # FIONREAD only observes the kernel queue: the TUI can read both
+        # toggles into its input buffer before dispatching either. Resizing
+        # at that point invalidates the old frame and correctly suppresses
+        # input until the new one is painted. Ctrl-T's emitted mouse mode
+        # acknowledges dispatch after the preceding keys, even when their
+        # changed header is hidden by this narrow notice. Restore tracking
+        # before widening; the journal assertion below still proves Ctrl-N.
+        read_available(master_fd, output)
+        tracking_ack_start = len(output)
+        os.write(master_fd, b"\x0e\x06\x14\x14")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"\x1b[?1006;1000h",
+            start=tracking_ack_start,
+            timeout=3.0,
+        )
         try:
             widened = resize_and_wait(
                 process,
@@ -6235,14 +6251,14 @@ def memory_journal_timeline_interaction(
                 needle=b"journal:full",
                 controls=(FULL_REDRAW,),
             )
-        except AssertionError as timed_out:
+        except AssertionError:
             # The raw byte dump this would otherwise carry runs to a hundred
             # kilobytes and is cut by the CI log before it says anything. The
             # screen is the part that answers what the toggles did.
             raise AssertionError(
                 "Widening back never showed journal:full. Screen:\n"
                 + screen_text(bytes(output)).decode("utf8", "replace")
-            ) from timed_out
+            ) from None
         if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "

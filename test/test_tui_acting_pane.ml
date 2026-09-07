@@ -775,6 +775,72 @@ let test_reused_chunks_keep_presentation_inputs_live () =
     (target_text (List.nth approved_view.Pane.targets 2));
   check int "viewport budget remains live" 6 (List.length approved_view.Pane.rows)
 
+(* Hidden content must remain reachable without paying its Unicode layout
+   allocation on every frame. Compare the same logical viewport with short
+   and long hidden text, outside fixture construction; avoid wall-clock bounds. *)
+let test_hidden_rows_do_not_allocate_text_layout () =
+  let count = 64 in
+  let long_text = String.concat "" (List.init 256 (fun _ -> "한🙂e\204\129")) in
+  let label long i =
+    Printf.sprintf "row-%03d%s" i (if long && i >= 2 then long_text else "")
+  in
+  let empty = { fixture with Pane.keepers = []; selected = None;
+    approvals = []; chunks = [] } in
+  let fleet long = { empty with Pane.keepers =
+    List.init count (fun i -> keeper (label long i)) } in
+  let focus long =
+    let events = List.init count (fun i ->
+      let at = 900. +. float_of_int i in
+      at, agent_core ~tool:(label long i) ~turn:5
+        ~tool_use_id:(string_of_int i) ~at ~correlation:"trace-sangsu" lane) in
+    { empty with Pane.selected = Some "sangsu";
+      chunks = chunks ["sangsu"] (entries events) }
+  in
+  let changes long = { empty with Pane.tab = Pane.Tab_changes;
+    selected = Some "sangsu";
+    changes = Pane.Changes_ready {
+      keeper = "sangsu";
+      files = List.init count (fun i -> file ~at:990. (label long i));
+      fetched_at = 990.; window_hours = 24.; calls = count;
+      over_budget = 0; malformed = 0 } } in
+  let measure rows input =
+    ignore (Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input));
+    let before = Gc.allocated_bytes () in
+    let result = Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input) in
+    let allocated = Gc.allocated_bytes () -. before in
+    result, allocated
+  in
+  List.iter (fun (name, rows, make) ->
+    let short = make false and long = make true in
+    let expected, short_bytes = measure rows short in
+    let actual, long_bytes = measure rows long in
+    check (list (list (pair string string))) (name ^ ": visible spans unchanged")
+      (List.map span_values expected.Pane.rows) (List.map span_values actual.Pane.rows);
+    check (list string) (name ^ ": visible targets unchanged")
+      (List.map target_text expected.targets) (List.map target_text actual.targets);
+    check int (name ^ ": all hidden rows still contribute to scroll range")
+      expected.scroll_max actual.scroll_max;
+    check bool (name ^ ": content beyond viewport remains reachable") true
+      (actual.scroll_max > 0);
+    (* A twofold allowance absorbs small bookkeeping differences. Formatting
+       the hidden long graphemes allocates far more than this, independently
+       of runner speed and without restricting the length of visible text. *)
+    check bool
+      (Printf.sprintf "%s: hidden text layout allocation bounded (short=%.0f long=%.0f)"
+         name short_bytes long_bytes)
+      true (long_bytes <= short_bytes *. 2.);
+    let last = Pane.lines ~rows ~cols ~scroll:actual.scroll_max long in
+    List.iter (fun row -> check int (name ^ ": revealed rows retain cell width") cols (width row))
+      last.Pane.rows;
+    match name with
+    | "fleet" -> check bool "last hidden keeper retains its full click target" true
+        (List.mem (Pane.Target_keeper (label true (count - 1))) last.targets)
+    | "changes" -> check bool "last hidden file retains its original index" true
+        (List.mem (Pane.Target_file (count - 1)) last.targets)
+    | _ -> check bool "last hidden tool becomes visible" true
+        (List.exists (fun row -> contains "row-063" (text row)) last.Pane.rows))
+    ["fleet", 5, fleet; "focus", 6, focus; "changes", 4, changes]
+
 let test_tokens_and_ages_are_compact () =
   check string "both sides summed" "74.2k tok" (Pane.tokens_text (Some 73_877, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
@@ -784,7 +850,10 @@ let test_tokens_and_ages_are_compact () =
 
 let () =
   run "tui acting pane"
-    [ ( "width"
+    [ ( "viewport allocation"
+      , [ test_case "hidden Unicode rows remain reachable without layout allocation" `Quick
+            test_hidden_rows_do_not_allocate_text_layout ] )
+    ; ( "width"
       , [ test_case "shown needs room and consent" `Quick test_shown_needs_room_and_consent
         ; test_case "toggle changes only a visible preference" `Quick
             test_toggle_changes_only_a_visible_preference

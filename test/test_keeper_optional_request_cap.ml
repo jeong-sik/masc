@@ -18,8 +18,8 @@ let start_context_refusal_server ~sw ~net =
   let callback _connection _request body =
     ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
     ignore (Atomic.fetch_and_add requests 1 : int);
-    Cohttp_eio.Server.respond_string ~status:`Bad_request
-      ~body:{|{"error":{"message":"fixture context refusal","type":"invalid_request_error","code":"context_length_exceeded"}}|} ()
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"id":"fixture-overflow","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|} ()
   in
   let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
     (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
@@ -92,11 +92,14 @@ streaming = false
    | Ok _ -> fail "expected exactly one projected runtime"
    | Error detail -> fail detail);
   let observations = ref [] in
+  let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
     Keeper_turn_driver.run_named
       ~system_prompt:"Optional cap fixture."
       ~runtime_id ~keeper_name:"optional-cap-proof" ~base_path
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
+      ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ error ->
+        attempt_errors := (runtime_id, error) :: !attempt_errors)
       ~on_request_wire_observation:(fun ~runtime_id:_ ~max_request_body_bytes ~body_bytes ~serialized ->
         observations := (max_request_body_bytes, body_bytes, Option.is_some serialized) :: !observations)
       ()
@@ -144,6 +147,9 @@ candidates = ["overflow.sample", "fixture.sample"]
    | Ok _ -> () | Error detail -> fail detail);
   (match run ~runtime_id:"optional_recovery" "recover" with
    | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+  (match !attempt_errors with
+   | ("overflow.sample", Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) :: _ -> ()
+   | _ -> fail "the real peer response must produce a typed context overflow");
   check int "uncapped context refusal is attempted once, without an invented shrink seed" 1
     (Atomic.get refused_requests);
   check int "the next uncapped candidate completes the same lane turn" 3

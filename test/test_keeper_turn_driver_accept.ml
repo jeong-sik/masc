@@ -2219,7 +2219,7 @@ let () =
             `Quick
             test_session_conflict_exhaustion_preserves_typed_terminal_reason;
           Alcotest.test_case
-            "dispatch rejects runtime without serialized-request cap"
+            "dispatch accepts runtime without serialized-request cap"
             `Quick
             test_dispatch_accepts_runtime_without_serialized_request_cap;
           Alcotest.test_case

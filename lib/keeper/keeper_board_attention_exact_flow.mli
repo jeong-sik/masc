@@ -85,6 +85,8 @@ type cli_tail_error =
   | No_cli_slots
   | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
 
+val cli_tail_error_to_string : cli_tail_error -> string
+
 val cli_slots : prepared -> string list
 (** The lane's declared official-client tail, in declaration order. Empty when
     the lane declares none. *)

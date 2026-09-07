@@ -2473,6 +2473,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
             update_stage := `Before_profile_publication;
             let result =
               Turn_up_update.For_testing.update_keeper_with_apply_profile
+                ~observe:(fun stage -> update_stage := `Publication_stage stage)
                 ~apply_profile:(fun ~base_path ~keeper_name command ->
                   update_stage := `Applying_owner_profile;
                   let result =
@@ -2518,6 +2519,16 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
            | `Waiting_to_start -> "waiting_to_start"
            | `Observing_revision -> "observing_revision"
            | `Before_profile_publication -> "before_profile_publication"
+           | `Publication_stage Turn_up_update.For_testing.Preflight_completed ->
+             "preflight_completed"
+           | `Publication_stage (Turn_up_update.For_testing.Publication stage) ->
+             (match stage with
+              | Turn_up_config_persistence.For_testing.Manifest_lock_acquired ->
+                "manifest_lock_acquired"
+              | Runtime_lock_acquired -> "runtime_lock_acquired"
+              | Snapshot_read -> "snapshot_read"
+              | Manifest_write_completed -> "manifest_write_completed"
+              | Publish_entered -> "publish_entered")
            | `Applying_owner_profile -> "applying_owner_profile"
            | `After_owner_profile -> "after_owner_profile"
            | `Returned -> "returned"

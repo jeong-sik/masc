@@ -110,6 +110,25 @@ val persist :
   (outcome receipt, error) result
 
 module For_testing : sig
+  type publication_stage =
+    | Manifest_lock_acquired
+    | Runtime_lock_acquired
+    | Snapshot_read
+    | Manifest_write_completed
+    | Publish_entered
+
+  (** Uses the production persistence core. [observe] belongs to this call
+      and must only record the stage without yielding or raising. *)
+  val persist_with_publication_observed :
+    observe:(publication_stage -> unit) ->
+    expected_revision:config_revision ->
+    config:Workspace.config ->
+    parsed:Keeper_turn_up_args.parsed_args ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    publish:(Runtime.keeper_assignment_transaction -> outcome -> 'a publication) ->
+    unit ->
+    ('a receipt, error) result
+
   val persist_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
     expected_revision:config_revision ->

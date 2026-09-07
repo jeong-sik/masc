@@ -460,7 +460,15 @@ let strict_write_result = function
           (Fs_compat.atomic_replace_failure_to_string failure)
       ]
 
-let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
+type publication_stage =
+  | Manifest_lock_acquired
+  | Runtime_lock_acquired
+  | Snapshot_read
+  | Manifest_write_completed
+  | Publish_entered
+
+let persist_with_publication_using ?(observe = fun _ -> ())
+    ~with_lock ~restore_snapshot ~restore_runtime
     ~read_revision
     ~expected_revision ~(config : Workspace.config)
     ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
@@ -472,6 +480,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
   in
   let transaction () =
     match with_lock path (fun () ->
+    observe Manifest_lock_acquired;
     match
       Runtime.with_keeper_assignment_transaction
         ~runtime_config_path:
@@ -479,11 +488,13 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              ~base_path:config.base_path)
         ~keeper_name:meta.name
         (fun runtime_transaction ->
+      observe Runtime_lock_acquired;
       let ( let* ) = Result.bind in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
       let* snapshot =
         read_snapshot_unlocked path |> Result.map_error (fun error -> Io_error error)
       in
+      observe Snapshot_read;
       let observed_manifest = revision_of_snapshot snapshot in
       let observed : config_revision =
         { manifest = observed_manifest
@@ -510,6 +521,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
            else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
         |> strict_write_result
       in
+      observe Manifest_write_completed;
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
         let runtime_restore =
@@ -565,7 +577,10 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
        | Ok revision ->
          let outcome = { path; created; revision } in
          let publication =
-           match publish runtime_transaction outcome with
+           match
+             observe Publish_entered;
+             publish runtime_transaction outcome
+           with
            | decision -> Ok decision
            | exception (Eio.Cancel.Cancelled _ as exn) ->
              let backtrace = Printexc.get_raw_backtrace () in
@@ -642,6 +657,20 @@ let persist ~expected_revision ~config ~parsed ~meta () =
     ~publish:(fun _runtime_transaction outcome -> Commit outcome) ()
 
 module For_testing = struct
+  type nonrec publication_stage = publication_stage =
+    | Manifest_lock_acquired
+    | Runtime_lock_acquired
+    | Snapshot_read
+    | Manifest_write_completed
+    | Publish_entered
+
+  let persist_with_publication_observed ~observe =
+    persist_with_publication_using ~observe
+      ~with_lock:with_manifest_lock
+      ~restore_snapshot:restore_snapshot_unlocked
+      ~restore_runtime:Runtime.restore_keeper_assignment_transaction
+      ~read_revision:revision_of_path_unlocked
+
   let persist_with_release_failure ~release_failure ~expected_revision ~config
       ~parsed ~meta () =
     let with_lock path f =

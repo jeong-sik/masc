@@ -1,0 +1,21 @@
+{
+  "method": "authorized absence acknowledgement API plus independent GET",
+  "operation_id": "shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7",
+  "keeper_name": "new-keeper",
+  "previous_revision": 4,
+  "revision": 5,
+  "phase": "operator_absence_acknowledged",
+  "acknowledged_at": "2026-09-07T08:27:04Z",
+  "actor": "dashboard",
+  "backlog_version": 4459,
+  "checks": {
+    "revision_advanced_once": true,
+    "prior_revision_preserved": true,
+    "prior_updated_at_preserved": true,
+    "finalization_preserved": true,
+    "cleanup_intent_preserved": true,
+    "owned_task_ids_preserved": true,
+    "prior_sha256_recorded": true
+  },
+  "limit": "No server restart was performed; future startup behavior is covered by source tests, not a live restart."
+}

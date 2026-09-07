@@ -20,7 +20,7 @@
 | 8 | Provider 연결 장애 | 51 | tested-code-fix |
 | 9 | 일반 문장의 @check·lint를 ID 오류로 기록 | 362 | code-fix |
 | 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
-| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | acknowledgement-stack |
+| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | live-acknowledged |
 | 12 | Board candidate ledger schema 불일치 | 12 | retention-merged-tested |
 | 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-merged |
 | 14 | Dashboard build-stamp 누락 | 5 | distribution-stack |
@@ -84,7 +84,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 반복 루프는 미해결. #33950의 작업별 기록·checkpoint 복원 기반은72deb19a38에서6/6 PASS. bdc8852ccc는 관련 파일 동일·충돌 해소 후 필수 검사 진행 중. Context-only 상태 유실을 막는 #33953은 별도 검증 중이다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.
+- 조치: 08:03Z Execute count959로 반복 문제 미해결. #33950 기반6/6 PASS·필수 검사 PASS 후 이 세션이cf63fd467d로 병합. Context-only 저장 유실 수정 #33953도21/21·필수 검사 PASS 후8685db2478로 병합했다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -118,7 +118,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: ACK 도메인은 ad2af057c9에서103/103 PASS 후 외부가 cdae490f8774로 병합. HTTP는21500fe6d6에서34/34 PASS; 최종81c9f393967e는 ACK 파일 동일·필수 검사 PASS 후 외부가8ac44f2af180으로 병합. 실제 ACK는 미실행.
+- 조치: 도메인103/103·HTTP34/34 PASS와 외부 병합 후, 운영6db68b4bea에서 이 세션이08:27:04Z 부재 ACK를 적용했다. 재조회 revision4→5·operator_absence_acknowledged, 이전 종료 증거·정리 의도 보존 확인. 새 서버 시작에서의 재발 여부는 미측정.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 설치 resolver3d3695a1f3에서17/17·Web39/39 PASS. 외부가 관련 파일 동일한8a67c07c99를c328dbe8로 병합했다. Release34098251245의 Linux x64/ARM64 실제 설치·자산 응답·손상 거부 PASS, x64 패키지642개 파일 해시도 독립 확인. macOS는 진행 중이며 운영 설치는 미실행.
+- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: #33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 및 필수 검사 PASS 후 이 세션이d5e0685b38로 병합. 원본 시각과 큐 체류 시간을 구분하는 #33938도6a13f6a84a로 외부 병합; exact827803의6개 suite는34099718437에서 검증 중. 전체 FIFO 소비·현재 배포·장기 연속성은 미검증.
+- 조치: #33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 PASS 후 이 세션이d5e0685b38로 병합. #33938은 외부6a13f6a84a 병합 후 exact827803에서6개 suite PASS(156개 번호 있는 테스트와 queue·terminal-matrix 실행). 전체 FIFO 소비·장기 연속성은 미검증.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -393,3 +393,18 @@ ACK의 exact ad2af057c9 [34095886814](https://github.com/jeong-sik/masc/actions/
 Release34098251245의 Linux x64와 ARM64는 checkout 밖에서 설치 서버를 실행해 정확한 commit·index와 참조 자산3개를 확인하고, index 손상·receipt 누락 시503을 확인했다. 다운로드한 x64 artifact10009693579도 binary·receipt·dashboard642개 파일의 해시/크기를 독립 검증했다. [패키지 검증](release-linux-x64-verification.json). macOS는 아직 실제 성공이 확인되지 않았다. 이 검증용3d 바이너리는 운영 서버에 설치하지 않았다.
 
 CLI 도메인 failover #33913은 외부 최종 head cfc1f173d8의 필수 검사 SUCCESS 후d16c83de17로 병합됐다. 기존63개 대상 검증은15b554f7a8의 결과이며 최종 head 전체 테스트로 재표기하지 않는다.
+
+
+### 08:31Z 실제 ACK·대시보드 복구와 코드 병합
+
+운영6db68b4bea에서 GET preview를 새로 읽고, 부재 ACK endpoint에 정확한 revision4/backlog4459로 요청했다. 서버가 모든 권위 있는 guard를 통과시킨 뒤08:27:04Z acknowledged를 반환했다. 독립 GET은 revision5의 operator_absence_acknowledged를 반환하며 이전 finalization·cleanup_intent·owned_task_ids·revision·updated_at을 보존한다. 기존 dashboard Admin 자격증명의 actor는dashboard이며 사람이 직접 API를 누른 것으로 표시하지 않는다. [실제 ACK 증거](absence-ack-live-proof.json). 재시작은 수행하지 않았다.
+
+[#33950](https://github.com/jeong-sik/masc/pull/33950)은 충돌을 해결한bdc8852ccc에서 필수 검사 모두 통과 후 이 세션이08:28:23Z cf63fd467d로 병합했다. 기반6개 동작 검증은 코드가 동일한72deb19a38의 결과다. [#33953](https://github.com/jeong-sik/masc/pull/33953)은 e19fd32c2c의21/21 동작 테스트와 필수 검사 모두 PASS 후 이 세션이08:30:51Z 8685db2478로 병합했다. 둘 다 운영6db 바이너리에 포함됐다는 증거는 없고, 원래 반복 문제의 caller 연결은 아직 남아 있다. [반복 실측 후속](repetition-live-followup.json)의08:03:36Z Execute count959도 실패한 독립 작업959개라는 뜻이 아니다.
+
+#33938 exact827803의 [34099718437](https://github.com/jeong-sik/masc/actions/runs/34099718437)은 health6·reaction28·bootstrap85·runtime TOML37=156개 번호 있는 테스트와 별도 queue 실행, terminal reason matrix147200건 mismatch0을 통과했다. 대시보드 UI 동작이나 실제 queue residence를 새로 측정한 결과는 아니다.
+
+Release34098251245의 macOS 실제 job도 SUCCESS이며 공개 release job은 SKIPPED다. [3개 플랫폼 설치 검증](installed-release-ci-proof.json). 별도로 운영 서버의 source commit6db68b4bea와 정확히 같은 [Dashboard artifact34100510195](https://github.com/jeong-sik/masc/actions/runs/34100510195)를 빌드하고, archive/index/642파일을 검증해 백업 후08:29:52Z 적용했다. HTTP index SHA a0d3037ff9d3e0e6d8b09219d54aeb9691ebee1fe2a75d076946a30f14de48c6과 health dashboard_surface.ok를 확인했다. [적용 영수증](dashboard-6db-deployment-receipt.json). 바이너리 설치·재시작은 없었으며 운영은 여전히 checkout 자산을 참조한다.
+
+실제 브라우저에서도08:30:43Z MASC Overview가 렌더됐고 실행 중 Keeper13/19가 표시됐다. 캡처 구간 page error0·HTTP4xx/5xx0을 관측했다. [화면](dashboard-6db-dashboard.png) · [브라우저 관측](dashboard-6db-browser-proof.json). 전체 런타임은 warning이며 probe와 paused Keeper 항목이 남아 있어 대시보드 자산 정상화와 fleet 전체 정상화를 구별한다.
+
+ACK 이후08:32:41Z까지5분37초의 로그에서 해당 new-keeper shutdown recovery 오류0건을 확인했다. [후속 로그 관측](absence-ack-post-apply-observation.json). 같은 프로세스의 짧은 구간이며 재시작 성공 증거로 확대하지 않는다.

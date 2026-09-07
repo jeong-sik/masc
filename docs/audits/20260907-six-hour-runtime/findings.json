@@ -167,7 +167,7 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "반복 루프는 미해결. #33950의 작업별 기록·checkpoint 복원 기반은72deb19a38에서6/6 PASS. bdc8852ccc는 관련 파일 동일·충돌 해소 후 필수 검사 진행 중. Context-only 상태 유실을 막는 #33953은 별도 검증 중이다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.",
+    "action": "08:03Z Execute count959로 반복 문제 미해결. #33950 기반6/6 PASS·필수 검사 PASS 후 이 세션이cf63fd467d로 병합. Context-only 저장 유실 수정 #33953도21/21·필수 검사 PASS 후8685db2478로 병합했다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.",
     "status": "scope-design-required",
     "first": {
       "seq": 25984123,
@@ -275,8 +275,8 @@
     "count": 6,
     "note": "",
     "source": "lib/keeper/keeper_shutdown_finalize.ml",
-    "action": "ACK 도메인은 ad2af057c9에서103/103 PASS 후 외부가 cdae490f8774로 병합. HTTP는21500fe6d6에서34/34 PASS; 최종81c9f393967e는 ACK 파일 동일·필수 검사 PASS 후 외부가8ac44f2af180으로 병합. 실제 ACK는 미실행.",
-    "status": "acknowledgement-stack",
+    "action": "도메인103/103·HTTP34/34 PASS와 외부 병합 후, 운영6db68b4bea에서 이 세션이08:27:04Z 부재 ACK를 적용했다. 재조회 revision4→5·operator_absence_acknowledged, 이전 종료 증거·정리 의도 보존 확인. 새 서버 시작에서의 재발 여부는 미측정.",
+    "status": "live-acknowledged",
     "first": {
       "seq": 26080010,
       "ts": "2026-09-06T23:26:03Z",
@@ -356,7 +356,7 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "설치 resolver3d3695a1f3에서17/17·Web39/39 PASS. 외부가 관련 파일 동일한8a67c07c99를c328dbe8로 병합했다. Release34098251245의 Linux x64/ARM64 실제 설치·자산 응답·손상 거부 PASS, x64 패키지642개 파일 해시도 독립 확인. macOS는 진행 중이며 운영 설치는 미실행.",
+    "action": "설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다.",
     "status": "distribution-stack",
     "first": {
       "seq": 26156709,
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "#33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 및 필수 검사 PASS 후 이 세션이d5e0685b38로 병합. 원본 시각과 큐 체류 시간을 구분하는 #33938도6a13f6a84a로 외부 병합; exact827803의6개 suite는34099718437에서 검증 중. 전체 FIFO 소비·현재 배포·장기 연속성은 미검증.",
+    "action": "#33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 PASS 후 이 세션이d5e0685b38로 병합. #33938은 외부6a13f6a84a 병합 후 exact827803에서6개 suite PASS(156개 번호 있는 테스트와 queue·terminal-matrix 실행). 전체 FIFO 소비·장기 연속성은 미검증.",
     "status": "batch-drain-observed"
   }
 ]

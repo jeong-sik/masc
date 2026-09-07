@@ -494,3 +494,17 @@ raw429의 실패 소유권은 unknown이고 Retry-After는 존재할 때 보존�
 [OpenAI 공식 GPT-5.5 안내](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.5)의 API/model parameters는 추론·도구·여러 턴 용도로 Responses를 안내한다. 운영의 openai provider는 openai-compatible-http이고 registry의 Chat Completions 경로를 사용한다. Responses를 명시적으로 선택하는 설정 표현을 보강하고 있으며, 추론을 끄거나 권한복구 완료로 표시하지 않는다.
 
 [독립 native 연결 소스 검토](native-continuation-source-review.json)는 전체 snapshot캐시로 인한 B 덮어쓰기/충돌, 늦은 provider callback의 실행 소유권, CAS commit불확실성에서의 중복 관측, historical baseline재주입에 따른 false yield를 확인했다. 각각 scope한정 projection, 정확한 physical attempt소유권, pre/post재조회 확인, attempt시작baseline고정으로 다뤄야 한다. 이번 결과를 native 구현 완료나 운영에서 네 가지 모두 재현한 증거로 사용하지 않는다.
+
+
+## 14:25Z 스키마 수정 병합과 후보 접근 오류
+
+[#34075 스키마 증거](schema-description-96061-ci-summary.json):96061의독립 codec 실행34131894565는46/46 PASS이며 필수 검사34131560210도전부PASS다. 14:25:25Z57f5a74ea6으로병합을독립확인했다. 기존넓은실행109/112 실패는보존하고새수정이그경로를사용하지않음을소스로구분한다. 운영요청성공은아직미검증이다.
+
+[#34087](https://github.com/jeong-sik/masc/pull/34087)은후보의권한오류가다른선언후보까지막는문제를수정한다. actualHTTP401/403은ApiAuth/Authorization으로전달되지만기존FSM에서는재시도대상이아니었다. namedKeeper lane에서이두typed오류만다음후보로보내며caller거부·effectattempted/unknown·후보소진·HTTP400종결을유지한다. a0e412d45b의parser3개·독립소스리뷰PASS, remote34132833533은진행중이며운영권한복구완료로표시하지않는다.
+
+Responses는다른세션의#34055가이미catalog행으로표현하므로새protocol추가안은게시하지않았다. 해당PR9c98에root원격검사를실행했으며최초34132427456은존재하지않는test_runtime_toml을root가선택한harness오류로테스트전실패했다. 실제있는catalog/header2개로바꾼34132861473은진행중, ci34132430603은SUCCESS다. 현재테스트는실제TOML→binding→HTTP경로증명이약해별도검증stack을추가하고있다.
+
+정확한[gpt-5.5 공식모델페이지](https://developers.openai.com/api/docs/models/gpt-5.5)는context1,050,000과effort none/low/medium/high/xhigh를명시한다. 다른오류400/429가그context수락을증명하는것은아니다. scoped행이none/xhigh를빠뜨리고bare행이minimal을허용하는불일치도함께고친다. 사용자설정을none으로낮추는변경은하지않는다.
+
+
+권한 failover의 a0e412 원격 실행은 [93/93 PASS](candidate-access-a0e412-ci-summary.json)(driver62/lane18/quota13)로 완료됐다. 신규3개 시나리오도 실제 실행했다. 필수 @check는 이 관측에서 진행 중이다. 기존 Responses PR9c98의 올바른 대상 실행은 [71/71 PASS](openai-responses-9c98-ci-summary.json)(catalog14/header57)이며, 별도 CI workflow도 SUCCESS다. 이 결과는 아직 추가 중인 전체 runtime HTTP 시나리오를 포함하지 않는다.

@@ -192,8 +192,9 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next post"
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
-      ; b Search "f" "hearth"
-          ~help:"narrow to one sub-board, busiest first; again for the next"
+      ; b Search "f / F" "next / previous hearth"
+          ~help:"move forward or backward through all hearths"
+      ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
@@ -219,9 +220,10 @@ let for_surface = function
           ~help:"only when the blocked row is safely rearmable"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "w" "Workspace Gate mode"
+          ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
       ; b Act "e" "external Gate lane"
-          ~help:"cycle manual / auto_judge / always_allow for calls into \
-                 attached outside services"
+          ~help:"choose how calls into outside services are reviewed; Enter applies"
       ]
       @ listing_meta
   | Planning ->

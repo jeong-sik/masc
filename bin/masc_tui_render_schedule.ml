@@ -407,17 +407,17 @@ module Table = Masc_tui_table
    [memory_cells] is this screen's description of its columns; {!Masc_tui_table}
    draws both the header and the rows from it, so the two cannot drift. *)
 
-let memory_state_width = 10
+let memory_state_width = 2
 let memory_minimum_name_width = 16
 let memory_maximum_name_width = 26
-let memory_revision_width = 6
+let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
 let memory_delta_width = 6
 
 type memory_columns = {
-  mcol_show_revision : bool;
+  mcol_show_updated : bool;
   mcol_show_source : bool;
   mcol_name : int;
 }
@@ -425,7 +425,7 @@ type memory_columns = {
 type memory_row_values = {
   mrow_state : string;
   mrow_name : string;
-  mrow_revision : string;
+  mrow_updated : string;
   mrow_facts : string;
   mrow_size : string;
   mrow_source : string;
@@ -437,7 +437,7 @@ type memory_row_values = {
 let memory_no_values =
   { mrow_state = ""
   ; mrow_name = ""
-  ; mrow_revision = ""
+  ; mrow_updated = ""
   ; mrow_facts = ""
   ; mrow_size = ""
   ; mrow_source = ""
@@ -447,9 +447,9 @@ let memory_no_values =
 let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
     columns values =
   let revision =
-    if columns.mcol_show_revision then
-      [ Table.cell ~align:Table.Right ~header:"REV"
-          ~width:memory_revision_width values.mrow_revision
+    if columns.mcol_show_updated then
+      [ Table.cell ~align:Table.Right ~header:"UPDATED"
+          ~width:memory_updated_width values.mrow_updated
       ]
     else []
   in
@@ -460,7 +460,7 @@ let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
       ]
     else []
   in
-  [ Table.cell ~style:state_style ~header:"STATE" ~width:memory_state_width
+  [ Table.cell ~style:state_style ~header:"ST" ~width:memory_state_width
       values.mrow_state
   ; Table.cell ~header:"KEEPER" ~width:columns.mcol_name values.mrow_name
   ]
@@ -490,7 +490,7 @@ let memory_columns_used_width columns =
    16, and the same keeper read worse on the wider terminal. *)
 let memory_columns_minimum_inner_width ~show_revision ~show_source =
   memory_columns_used_width
-    { mcol_show_revision = show_revision
+    { mcol_show_updated = show_revision
     ; mcol_show_source = show_source
     ; mcol_name = memory_maximum_name_width
     }
@@ -506,7 +506,7 @@ let allocate_memory_columns ~inner_width =
     >= memory_columns_minimum_inner_width ~show_revision:true ~show_source:true
   in
   let base =
-    { mcol_show_revision = show_revision
+    { mcol_show_updated = show_revision
     ; mcol_show_source = show_source
     ; mcol_name = memory_minimum_name_width
     }

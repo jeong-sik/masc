@@ -621,7 +621,7 @@ let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
 let memory_probe =
   { Schedule.mrow_state = "S"
   ; mrow_name = "N"
-  ; mrow_revision = "R"
+  ; mrow_updated = "R"
   ; mrow_facts = "F"
   ; mrow_size = "Z"
   ; mrow_source = "U"
@@ -633,7 +633,7 @@ let memory_probe =
 let memory_overflowing =
   { Schedule.mrow_state = "read-error-and-then-some"
   ; mrow_name = "pinewood-pr-jira-checker-and-a-longer-tail"
-  ; mrow_revision = "1234567890"
+  ; mrow_updated = "1234567890"
   ; mrow_facts = "9876543"
   ; mrow_size = "1234567.8 MB"
   ; mrow_source = "r32 i8 1.5 KB with more than the cell holds"
@@ -697,10 +697,10 @@ let test_memory_header_and_row_share_their_offsets () =
     let columns = Schedule.allocate_memory_columns ~inner_width in
     let header = Schedule.memory_header_row columns in
     let row = Schedule.memory_row columns memory_probe in
-    check_left_cell "STATE" "S" ~header ~row ~inner_width;
+    check_left_cell "ST" "S" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "N" ~header ~row ~inner_width;
-    if columns.Schedule.mcol_show_revision then
-      check_right_cell "REV" "R" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_updated then
+      check_right_cell "UPDATED" "R" ~header ~row ~inner_width;
     check_right_cell "FACTS" "F" ~header ~row ~inner_width;
     check_right_cell "SIZE" "Z" ~header ~row ~inner_width;
     if columns.Schedule.mcol_show_source then
@@ -733,7 +733,7 @@ let test_memory_empty_readings_still_hold_their_cells () =
   let blank =
     { Schedule.mrow_state = ""
     ; mrow_name = ""
-    ; mrow_revision = ""
+    ; mrow_updated = ""
     ; mrow_facts = ""
     ; mrow_size = ""
     ; mrow_source = ""
@@ -748,12 +748,12 @@ let test_memory_empty_readings_still_hold_their_cells () =
 let test_memory_columns_drop_from_the_right () =
   let narrow = Schedule.allocate_memory_columns ~inner_width:50 in
   check bool "no source when narrow" false narrow.Schedule.mcol_show_source;
-  check bool "no revision when narrow" false narrow.Schedule.mcol_show_revision;
+  check bool "no revision when narrow" false narrow.Schedule.mcol_show_updated;
   check bool "the name still has cells" true (narrow.Schedule.mcol_name > 0);
   (* Wide enough for the revision beside a keeper name at its widest, which is
      what a returning column now waits for. *)
   let medium = Schedule.allocate_memory_columns ~inner_width:80 in
-  check bool "revision returns first" true medium.Schedule.mcol_show_revision;
+  check bool "revision returns first" true medium.Schedule.mcol_show_updated;
   check bool "source is still out" false medium.Schedule.mcol_show_source;
   let wide = Schedule.allocate_memory_columns ~inner_width:120 in
   check bool "source returns when wide" true wide.Schedule.mcol_show_source
@@ -1166,7 +1166,7 @@ let test_fusion_columns_hold_their_offsets () =
     in
     check_left_cell "STARTED" "A" ~header ~row ~inner_width;
     check_right_cell "AGE" "B" ~header ~row ~inner_width;
-    check_left_cell "STATE" "C" ~header ~row ~inner_width;
+    check_left_cell "ST" "C" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
     if columns.fcol_show_preset then
       check_left_cell "PRESET" "E" ~header ~row ~inner_width;

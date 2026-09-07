@@ -1733,6 +1733,14 @@ let board_sort_label = function
   | Board_updated -> "updated"
   | Board_discussed -> "discussed"
 
+let board_sort_of_string = function
+  | "hot" -> Some Board_hot
+  | "trending" -> Some Board_trending
+  | "recent" -> Some Board_recent
+  | "updated" -> Some Board_updated
+  | "discussed" -> Some Board_discussed
+  | _ -> None
+
 let board_sort_explanation = function
   | Board_hot -> "net votes first; newer breaks ties"
   | Board_trending -> "net votes / √age-hours"
@@ -2594,12 +2602,55 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
+let memory_state (k : Tui_decode.memory_keeper_health) =
+  if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
+  then Memory_read_error
+  else if
+    (not k.mkh_snapshot_present)
+    && k.mkh_librarian_failures > 0
+    && not k.mkh_source_snapshot_present
+  then Memory_starving
+  else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
+  then Memory_source_only
+  else if not k.mkh_snapshot_present
+  then Memory_no_current
+  else if k.mkh_librarian_failures > 0
+  then Memory_degraded
+  else if
+    List.exists
+      (fun alert ->
+        match Tui_decode.memory_alert_severity alert.Tui_decode.ma_code with
+        | `Warn -> true
+        | `Error -> false)
+      k.mkh_alerts
+  then Memory_warning
+  else Memory_ordinary
+
+let memory_state_label = function
+  | Memory_ordinary -> "ok"
+  | Memory_warning -> "warning"
+  | Memory_degraded -> "degraded"
+  | Memory_no_current -> "no-current"
+  | Memory_source_only -> "source-only"
+  | Memory_starving -> "STARVING"
+  | Memory_read_error -> "read-error"
+
 type memory_overview_sort =
   | Mem_overview_facts
   | Mem_overview_size
   | Mem_overview_delta
   | Mem_overview_state
   | Mem_overview_name
+  | Mem_overview_updated
 
 let memory_overview_sort_label = function
   | Mem_overview_facts -> "Facts (Most)"
@@ -2607,13 +2658,15 @@ let memory_overview_sort_label = function
   | Mem_overview_delta -> "Delta (Recent changes)"
   | Mem_overview_state -> "State (Attention first)"
   | Mem_overview_name -> "Name (A-Z)"
+  | Mem_overview_updated -> "Updated (Newest first)"
 
 let next_memory_overview_sort = function
   | Mem_overview_facts -> Mem_overview_size
   | Mem_overview_size -> Mem_overview_delta
   | Mem_overview_delta -> Mem_overview_state
   | Mem_overview_state -> Mem_overview_name
-  | Mem_overview_name -> Mem_overview_facts
+  | Mem_overview_name -> Mem_overview_updated
+  | Mem_overview_updated -> Mem_overview_facts
 
 type metrics_section =
   | Section_fleet
@@ -3222,6 +3275,7 @@ type state = {
   mutable ask_answer_mode: ask_answer_mode;
   mutable ask_cursor: int;
   mutable ask_question_cursor: int;
+  mutable ask_question_scroll: int;
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
@@ -3346,6 +3400,7 @@ type state = {
      arm time and a press on a different row re-arms for that row. *)
   mutable board_vote_armed: (string * bool) option;
   mutable planning: planning_snapshot option;
+  mutable planning_baseline: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: int;
@@ -4238,6 +4293,48 @@ let workspace_activity_rows (state : state) =
 
 let workspace_activity_page_rows ~surface_rows = max 1 (surface_rows - 12)
 
+(* The frame, Enter and a completed refresh share the same visible selection,
+   including when the latest reading contains fewer rows. *)
+let workspace_activity_selection state =
+  let rows = workspace_activity_rows state in
+  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  (rows, cursor, List.nth_opt rows cursor)
+
+let apply_workspace_activity_read state request result =
+  state.workspace_activity <-
+    Masc_tui_fetched.complete ~equal:String.equal state.workspace_activity
+      request result;
+  let _, cursor, _ = workspace_activity_selection state in
+  state.workspace_activity_cursor <- cursor
+
+let enter_keeper_code_file state ~keeper ~path =
+  state.code_scope <- Code_scope_keeper keeper;
+  let parent = Filename.dirname path in
+  state.code_dir <- (if String.equal parent "." then "" else parent);
+  state.code_cursor <- 0;
+  state.code_entries <- [];
+  state.code_entries_error <- None;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_cursor <- 0;
+  state.code_file_scroll <- 0;
+  state.code_file_hscroll <- 0;
+  state.code_file_max_width <- 0;
+  state.code_target_line <- None;
+  state.code_lsp_note <- None;
+  state.code_history <- Masc_tui_fetched.clear state.code_history;
+  state.code_history_open <- false;
+  state.code_history_scroll <- 0;
+  state.code_diff <- Masc_tui_fetched.clear state.code_diff;
+  state.code_diff_open <- false;
+  state.code_diff_scroll <- 0;
+  state.code_memos <- [];
+  state.code_notes_open <- false;
+  state.code_notes_scroll <- 0;
+  state.code_blame <- Masc_tui_fetched.clear state.code_blame;
+  state.code_focus_file <- Right_pane;
+  state.followed_from <- Some (state.view, None);
+  state.view <- Code
+
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
   | Some snapshot ->
@@ -4506,6 +4603,7 @@ let create_state
   ask_answer_mode = Ask_browsing;
   ask_cursor = 0;
   ask_question_cursor = 0;
+  ask_question_scroll = 0;
   ask_draft = None;
   ask_text_entry = None;
   pending_ask_submit = None;
@@ -4555,6 +4653,7 @@ let create_state
   board_post_error = None;
   board_vote_armed = None;
   planning = None;
+  planning_baseline = None;
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = 0;
@@ -5250,6 +5349,103 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
+let memory_overview_query (state : state) =
+    match state.search with
+    | Some q -> String.lowercase_ascii (String.trim q)
+    | None ->
+        if String.length (String.trim state.search_last) > 0 then
+          String.lowercase_ascii (String.trim state.search_last)
+        else ""
+
+
+let visible_memory_keepers (state : state) =
+  let open Tui_decode in
+  let raw_keepers =
+    match state.memory_health with
+    | None -> []
+    | Some s -> s.mhs_keepers
+  in
+  let sorted_keepers =
+    match state.memory_overview_sort with
+    | Mem_overview_facts ->
+        List.sort
+          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+            if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_size ->
+        List.sort
+          (fun a b ->
+            if a.mkh_snapshot_bytes <> b.mkh_snapshot_bytes then
+              Stdlib.compare b.mkh_snapshot_bytes a.mkh_snapshot_bytes
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_delta ->
+        List.sort
+          (fun a b ->
+            let da = a.mkh_added + a.mkh_removed in
+            let db = b.mkh_added + b.mkh_removed in
+            if da <> db then Stdlib.compare db da
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_state ->
+        List.sort
+          (fun a b ->
+            let sa = memory_state a in
+            let sb = memory_state b in
+            if sa <> sb then Stdlib.compare sb sa
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_updated ->
+        List.sort (fun a b ->
+            let by_time = Stdlib.compare b.mkh_updated_at a.mkh_updated_at in
+            if by_time <> 0 then by_time else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_name ->
+        List.sort
+          (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+  in
+  let query = memory_overview_query state in
+    if query = "" then sorted_keepers
+    else
+      List.filter
+        (fun k ->
+          palette_contains ~needle:query k.mkh_keeper_id
+          || palette_contains ~needle:query (memory_state_label (memory_state k)))
+        sorted_keepers
+
+
+
+let selected_memory_keeper (state : state) =
+  let rows = visible_memory_keepers state in
+  List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
+
+let memory_overview_scrolled ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let count = List.length keepers in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context_rows =
+    match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
+    | None -> 0
+    | Some keeper ->
+        (* Divider, snapshot, facts, source, Librarian and Vision, then the
+           selected keeper's read errors and server alerts. *)
+        6 + List.length keeper.mkh_alerts
+        + (if Option.is_some keeper.mkh_read_error then 1 else 0)
+        + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+  in
+  { sc_count = count
+  ; sc_chrome =
+      Masc_tui_frame.chrome_rows
+      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
+      + 7 + context_rows
+      + (if memory_overview_query state <> "" then 1 else 0)
+      + (if Option.is_some state.memory_health_error then 2 else 0)
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
+
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
    category, and hiding them under a category filter would read as the store
@@ -5526,13 +5722,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        (* Fleet rows plus the detail panel of the row the cursor names. The
-           panel is one scroll unit: its own height follows the render, and
-           search only needs to land on rows that exist. *)
-        listing ~error:state.memory_health_error
-          (match state.memory_health with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
+        Some (memory_overview_scrolled state)
   | Changes ->
       Some
         { sc_count =
@@ -5653,7 +5843,7 @@ let visible_surface_ring_index (state : state) (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
-    | Connectors when Option.is_some (browser_lane_on_screen state) -> Runtime
+    | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
     | Changes | Connectors | Schedules -> Keepers Keeper_list
     | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
@@ -5813,10 +6003,9 @@ let surface_row_texts (state : state) : surface -> string list option = function
                   rows))
       else
         Option.map
-          (fun s ->
+          (fun _ ->
             List.map (fun k -> k.Tui_decode.mkh_keeper_id)
-              s.Tui_decode.mhs_keepers
-            @ [ "memory detail" ])
+              (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->
@@ -6048,12 +6237,25 @@ let keeper_message_support_status_rows state ~status_rows =
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
+type gate_lane = Workspace_gate | External_gate
+
+let gate_lane_label = function
+  | Workspace_gate -> "Workspace"
+  | External_gate -> "Outside services"
+
+let gate_mode_label = function
+  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
+
 type palette_action =
   | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
+  | Palette_board_hearth of string option
   | Palette_board_post of string
   (* (question, symbol): a language-server question about a name on the
      Code pane's cursor line — the K/D candidates ride the palette as
@@ -6135,6 +6337,12 @@ let lsp_question_prefixes =
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
+  @ List.concat_map (fun lane ->
+      List.map (fun mode ->
+        ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
+         Palette_gate_mode (lane, mode)))
+        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
+      [Workspace_gate; External_gate]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
@@ -6160,6 +6368,10 @@ let palette_entries (state : state) =
   @ List.map
       (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
       state.tasks
+  @ [ "hearth all", Palette_board_hearth None ]
+  @ List.map (fun (name, count) ->
+      (Printf.sprintf "hearth %s (%d posts)" name count, Palette_board_hearth (Some name)))
+      state.board_hearths
   @ List.map
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))

@@ -135,7 +135,7 @@ val keeper_columns_used_width : keeper_columns -> int
 (** {1 Memory fleet columns} *)
 
 type memory_columns = {
-  mcol_show_revision : bool;
+  mcol_show_updated : bool;
   mcol_show_source : bool;
   mcol_name : int;
 }
@@ -144,7 +144,7 @@ type memory_columns = {
 type memory_row_values = {
   mrow_state : string;
   mrow_name : string;
-  mrow_revision : string;
+  mrow_updated : string;
   mrow_facts : string;
   mrow_size : string;
   mrow_source : string;

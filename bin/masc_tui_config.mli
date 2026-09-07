@@ -68,3 +68,6 @@ val coalesce_queued_input : base_path:string -> bool option
     Only a next-turn line waiting for that same Keeper is joined. A steer
     keeps its own entry: it was created to replace one exact operation, and
     folding another line into it would move that causal parent. *)
+
+val board_sort : base_path:string -> string option
+val set_board_sort : base_path:string -> string -> (unit, string) result

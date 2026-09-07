@@ -33,11 +33,22 @@ let check message condition = if not condition then failwith message else Printf
 let () = Eio_main.run (fun _ ->
   let driver = Driver.create ~request in
   let run verb = Driver.execute driver verb in
-  Fun.protect ~finally:(fun () -> ignore (Driver.close driver)) (fun () ->
-    ignore (success (run (Browser_lane.Session_open {headless=Some true})));
+  let close () = match Driver.close driver with
+    | Ok () -> ()
+    | Error error -> failwith ("fixture cleanup failed: " ^ Driver.error_message error) in
+  let open_session () =
+    let response = success (run (Browser_lane.Session_open {headless=Some true})) in
+    check "probe owns a newly opened session"
+      (member "opened" response = `Bool true && member "reused" response = `Bool false) in
+  Fun.protect ~finally:close (fun () ->
+    open_session ();
     let open_tab suffix = success (run (Browser_lane.Page_act (Browser_action.Open_tab (fixture_url ^ suffix)))) |> member "tabId" |> integer in
     let first = open_tab "/first" in
-    let act id interaction = success (run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=id;interaction}))) in
+    let act id interaction =
+      let response = success (run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=id;interaction}))) in
+      let confirmation = match interaction with Browser_action.Close_tab -> "closed" | _ -> "performed" in
+      check "native action confirms its target tab"
+        (member "tabId" response = `Int id && member confirmation response = `Bool true) in
     let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id})) in
     let observation = elements first in
     check "element observation names its tab" (integer (member "tabId" observation)=first);
@@ -47,38 +58,42 @@ let () = Eio_main.run (fun _ ->
     check "password values are absent" (member "value" (control "password") = `Null);
     let options = member "options" (control "country") |> Yojson.Safe.Util.to_list in
     check "opaque option values are observable" (List.exists (fun item -> member "value" item = `String "opaque-02") options);
-    ignore (act first (Browser_action.Fill {selector=selector "name";text="한글 Firefox 🙂"}));
-    ignore (act first (Browser_action.Select {selector=selector "country";value="opaque-02"}));
-    ignore (act first (Browser_action.Click (selector "submit")));
+    act first (Browser_action.Fill {selector=selector "name";text="한글 Firefox 🙂"});
+    act first (Browser_action.Select {selector=selector "country";value="opaque-02"});
+    act first (Browser_action.Click (selector "submit"));
     let read id = success (run (Browser_lane.Page_read {tab_id=Some id;max_chars=None})) in
     let text = member "text" (read first) |> string in
     check "native fill select and click changed page" (String.starts_with ~prefix:"Firefox fixture" text && String.contains text '1');
     let current = elements first |> member "elements" |> Yojson.Safe.Util.to_list in
     check "live DOM value reflects native fill" (List.exists (fun item -> member "value" item = `String "한글 Firefox 🙂") current);
-    ignore (act first (Browser_action.Press {selector=selector "name";key=Browser_action.Enter}));
+    act first (Browser_action.Press {selector=selector "name";key=Browser_action.Enter});
     let second = open_tab "/second" in
-    ignore (act first (Browser_action.Click (selector "submit")));
+    act first (Browser_action.Click (selector "submit"));
     check "second tab remains independently readable" (member "url" (read second) = `String (fixture_url ^ "/second"));
     let rejected = run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;interaction=Browser_action.Click "input"})) in
     check "ambiguous selector rejected before effect" (match rejected with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
-    ignore (act first (Browser_action.Scroll {x=0;y=400}));
-    ignore (success (run (Browser_lane.Page_goto {url=fixture_url ^ "/next";tab_id=Some second})));
-    ignore (act second Browser_action.Back);
+    act first (Browser_action.Scroll {x=0;y=400});
+    let navigated = success (run (Browser_lane.Page_goto {url=fixture_url ^ "/next";tab_id=Some second})) in
+    check "targeted navigation reaches the requested URL"
+      (member "url" navigated = `String (fixture_url ^ "/next"));
+    act second Browser_action.Back;
     check "native back returns to previous URL" (member "url" (read second) = `String (fixture_url ^ "/second"));
-    ignore (act second Browser_action.Forward);
+    act second Browser_action.Forward;
     check "native forward restores URL" (member "url" (read second) = `String (fixture_url ^ "/next"));
-    ignore (act second Browser_action.Reload);
-    ignore (act first (Browser_action.Scroll {x=0;y=(-400)}));
-    ignore (read first);
+    act second Browser_action.Reload;
+    act first (Browser_action.Scroll {x=0;y=(-400)});
+    check "screenshot target is the first fixture page"
+      (member "url" (read first) = `String (fixture_url ^ "/first"));
     (* Capture the resulting real Firefox viewport using the same native transport. *)
     let id = match !remote_session with Some id -> id | None -> failwith "missing owned session" in
     (match request ~method_:`GET ~path:("/session/" ^ id ^ "/screenshot") ~body:None with
      | Ok (`String png) -> let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in output_string oc png;close_out oc
      | _ -> failwith "screenshot failed");
-    ignore (act first Browser_action.Close_tab);
+    act first Browser_action.Close_tab;
     check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
-    ignore (success (run Browser_lane.Session_close));
-    ignore (success (run (Browser_lane.Session_open {headless=Some true})));
+    let closed = success (run Browser_lane.Session_close) in
+    check "session close is confirmed" (member "closed" closed = `Bool true);
+    open_session ();
     let fresh = open_tab "/fresh" in
     check "reopened sessions never reuse tab IDs" (fresh > second);
     check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false)))

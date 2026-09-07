@@ -8659,13 +8659,15 @@ let chat_rows_with_timeline_ats messages =
    live turn and once through [keeper_message_layout_entries]. The filter
    walks every committed row on every key, and its answer depends only on the
    row list -- replaced, not mutated, when the conversation changes -- and the
-   two visibility readings, so those three are the key. Same scoping as
+   memory, reasoning, and tool visibility readings. Full tool detail restores
+   the raw Gate lifecycle, so its toggle also invalidates this reading. Same scoping as
    [chat_timeline_ats_memo] above: a frame with different rows or a toggled
    visibility replaces the slot, and nothing is kept stale. *)
 type visible_timeline_memo = {
   vtm_messages : msg_entry list;
   vtm_memory : memory_visibility;
   vtm_reasoning : reasoning_visibility;
+  vtm_tools : tool_visibility;
   vtm_timeline : (msg_entry * float option) list;
 }
 
@@ -8681,7 +8683,8 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
   | Some memo
     when memo.vtm_messages == messages
          && memo.vtm_memory = state.msg_memory_visibility
-         && memo.vtm_reasoning = state.msg_reasoning_visibility ->
+         && memo.vtm_reasoning = state.msg_reasoning_visibility
+         && memo.vtm_tools = state.msg_tool_visibility ->
       memo.vtm_timeline
   | Some _ | None ->
       let timeline =
@@ -8694,15 +8697,14 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
           || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
         |> Masc_tui_types.fold_memory_summary_runs
              ~visibility:state.msg_memory_visibility
-        (* After the filters, so a hidden lane between two Gate rows does not
-           split their run and draw the same approval twice. *)
-        |> Masc_tui_types.fold_gate_runs
+        |> Masc_tui_types.project_gate_history ~visibility:state.msg_tool_visibility
       in
       visible_timeline_memo :=
         Some
           { vtm_messages = messages;
             vtm_memory = state.msg_memory_visibility;
             vtm_reasoning = state.msg_reasoning_visibility;
+            vtm_tools = state.msg_tool_visibility;
             vtm_timeline = timeline;
           };
       timeline

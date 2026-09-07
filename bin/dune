@@ -162,11 +162,14 @@
   yojson))
 
 ;; Generate the Board identity-field mirror from the production TOML loader.
+;; Tool_name.Board_name, the closed board vocabulary this generator
+;; enumerates, is an unwrapped module of the dispatch library.
 (executable
  (name gen_board_tool_registry)
  (modules gen_board_tool_registry)
  (libraries
   masc.masc_tool_surface
+  masc.masc_tool_dispatch
   masc.tool_types
   masc_types))
 

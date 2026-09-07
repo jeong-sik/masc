@@ -15,6 +15,7 @@ val run_named_with_masc_tools :
   runtime_id:string ->
   ?keeper_name:string ->
   goal:string ->
+  ?goal_blocks:Agent_core.Types.content_block list ->
   base_path:string ->
   system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
@@ -43,4 +44,9 @@ val run_named_with_masc_tools :
     lane ownership in runtime manifests and metrics; the default retains
     compatibility for non-Keeper callers. [on_runtime_attempt_error] forwards
     the typed per-candidate observation from {!Keeper_turn_driver.run_named}
-    without changing its terminal result. *)
+    without changing its terminal result.
+
+    [goal_blocks] replaces the [goal] string as the turn input when present
+    (same contract as {!Keeper_turn_driver.run_named}): the caller puts the
+    prompt itself in a [Text] block first, then any media blocks. *)
+

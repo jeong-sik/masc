@@ -27,3 +27,17 @@ let remaining_seconds t =
 ;;
 
 let passed t = Int64.compare (Int64.sub t.at_ns (Mtime_clock.elapsed_ns ())) 0L <= 0
+
+(* The other half of the same question. A deadline answers "is it time yet";
+   a stopwatch answers "how long has this taken", which is what a budget
+   check and the line that reports it both want. Reading a deadline's
+   remaining time cannot answer the second: it clamps at zero, so a run that
+   overran its budget reports the budget rather than what it took. *)
+type stopwatch = { started_ns : int64 }
+
+let start () = { started_ns = Mtime_clock.elapsed_ns () }
+
+let elapsed_seconds t =
+  Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) t.started_ns)
+  /. ns_per_second
+;;

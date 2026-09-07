@@ -2172,10 +2172,19 @@ type runtime_probe_snapshot = {
 (* One decoder-owned resolved runtime row shared by the Keeper picker and the
    Runtime surface. [ro_is_default] comes from the document's top-level
    [default_runtime], not the row's independent binding flag. *)
+type runtime_context_source =
+  | Runtime_context_override
+  | Runtime_context_capability
+  | Runtime_context_clamped
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
   ro_model : string;
+  ro_effective_max_context : int;
+  ro_max_context_source : runtime_context_source;
+  ro_max_output_tokens : int option;
+  ro_is_local : bool;
   ro_dispatchable : bool;
   ro_blocked_reason : string option;
   ro_is_default : bool;
@@ -3982,10 +3991,37 @@ let decode_runtime_probe_snapshot json =
     ; rps_limitations
     }
 
+let runtime_context_source_label = function
+  | Runtime_context_override -> "override"
+  | Runtime_context_capability -> "capability"
+  | Runtime_context_clamped -> "override_clamped_by_capability"
+
+let decode_runtime_context_source = function
+  | "override" -> Ok Runtime_context_override
+  | "capability" -> Ok Runtime_context_capability
+  | "override_clamped_by_capability" -> Ok Runtime_context_clamped
+  | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
+
+let runtime_probe_for_id snapshot ~runtime_id =
+  Option.bind snapshot.rss_probe (fun probe ->
+    List.find_opt (fun row -> String.equal row.rpp_runtime_id runtime_id)
+      probe.rps_providers)
+
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
   let* ro_model = required_string_field json "model" in
+  let* ro_effective_max_context = required_int_field json "effective_max_context" in
+  let* context_source = required_string_field json "max_context_source" in
+  let* ro_max_context_source = decode_runtime_context_source context_source in
+  let* ro_max_output_tokens = required_nullable_int_field json "max_output_tokens" in
+  let* ro_is_local = required_bool_field json "is_local" in
+  let* () =
+    if ro_effective_max_context <= 0
+       || Option.fold ~none:false ~some:(fun n -> n <= 0) ro_max_output_tokens
+    then Error "runtime context/output token limits must be positive"
+    else Ok ()
+  in
   let* _binding_is_default = required_bool_field json "is_default" in
   let* ro_dispatchable = required_bool_field json "keeper_dispatchable" in
   let* ro_blocked_reason =
@@ -4005,6 +4041,10 @@ let decode_runtime_option ~default_id json =
     { ro_id
     ; ro_provider
     ; ro_model
+    ; ro_effective_max_context
+    ; ro_max_context_source
+    ; ro_max_output_tokens
+    ; ro_is_local
     ; ro_dispatchable
     ; ro_blocked_reason
     ; ro_is_default
@@ -4133,6 +4173,10 @@ let decode_runtime_resolved_snapshot json =
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
                 && String.equal default.ro_model listed.ro_model
+                && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
+                && default.ro_max_context_source = listed.ro_max_context_source
+                && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
+                && Bool.equal default.ro_is_local listed.ro_is_local
                 && Bool.equal default.ro_dispatchable listed.ro_dispatchable
                 && Option.equal String.equal default.ro_blocked_reason
                      listed.ro_blocked_reason -> Ok ()

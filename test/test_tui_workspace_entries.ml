@@ -121,6 +121,56 @@ let test_activity_file_starts_without_old_overlays () =
   Alcotest.(check bool) "returns to activity" true
     (state.followed_from = Some (Repositories, None))
 
+(* The Code pane fetches a directory listing per scope, and until #33946 the
+   reply named only the directory. Two scopes can hold the same relative
+   directory -- "lib" under one keeper's bundle and under another's -- so a
+   reply that arrived after the operator switched scope was accepted as the
+   new scope's rows.
+
+   The listing now travels under the same key its history already used. What
+   the key has to answer is this: a shared path is not a shared request. *)
+let test_a_shared_path_is_not_a_shared_request () =
+  let check name expected left right =
+    Alcotest.(check bool) name expected (code_scope_path_equal left right)
+  in
+  check "the same path under two keepers is two requests" false
+    (Code_scope_keeper "alpha", "lib") (Code_scope_keeper "beta", "lib");
+  check "a keeper's bundle is not the project tree" false
+    (Code_scope_keeper "alpha", "lib") (Code_scope_project, "lib");
+  check "a repository is not a keeper of the same name" false
+    (Code_scope_repo "masc", "lib") (Code_scope_keeper "masc", "lib");
+  check "two directories under one scope are two requests" false
+    (Code_scope_project, "lib") (Code_scope_project, "bin");
+  check "both halves agreeing is the same request" true
+    (Code_scope_keeper "alpha", "lib") (Code_scope_keeper "alpha", "lib");
+  check "the project root agrees with itself" true
+    (Code_scope_project, "") (Code_scope_project, "")
+;;
+
+(* The key is what [Masc_tui_fetched] discriminates on, so the pane that
+   already uses it must drop a reply from the scope just left. Driven through
+   the module rather than asserted about the equality alone: the equality
+   being right says nothing about the pane consulting it. *)
+let test_a_reply_from_the_scope_just_left_is_dropped () =
+  let equal = code_scope_path_equal in
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let pending, from_alpha =
+    start_read ~equal state.code_history (Code_scope_keeper "alpha", "lib/x.ml")
+  in
+  state.code_history <- pending;
+  let switched, _ =
+    start_read ~equal pending (Code_scope_keeper "beta", "lib/x.ml")
+  in
+  state.code_history <- switched;
+  state.code_history <-
+    Fetched.complete ~equal state.code_history from_alpha
+      (Ok { chl_entries = []; chl_activity_note = "alpha" });
+  Alcotest.(check bool) "the pane is still waiting on beta" true
+    (match Fetched.current state.code_history with
+     | Some ((Code_scope_keeper "beta", "lib/x.ml"), Fetched.Loading) -> true
+     | Some _ | None -> false)
+;;
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
@@ -133,6 +183,12 @@ let () =
             test_activity_refresh_reconciles_visible_selection
         ; Alcotest.test_case "failed file cannot retain old overlays" `Quick
             test_activity_file_starts_without_old_overlays
+        ] )
+    ; ( "scope"
+      , [ Alcotest.test_case "a shared path is not a shared request" `Quick
+            test_a_shared_path_is_not_a_shared_request
+        ; Alcotest.test_case "a reply from the scope just left is dropped" `Quick
+            test_a_reply_from_the_scope_just_left_is_dropped
         ] )
     ]
 ;;

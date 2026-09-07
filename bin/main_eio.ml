@@ -2157,7 +2157,7 @@ let keeper_github_cmd =
     [ login; status; logout ]
 
 let build_commit_cmd_exit () =
-  match (Build_identity.current ()).binary_commit with
+  match Build_identity.embedded_commit with
   | Some commit ->
       print_endline commit;
       0

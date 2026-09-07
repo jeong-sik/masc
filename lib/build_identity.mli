@@ -92,18 +92,21 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 (** PPX-generated deserializer. *)
 
 val embedded_commit : string option
-(** This executable's build-time commit, resolved at module initialization.
+(** This executable's build-time commit from its embedded stamp.
     Never falls back to the surrounding checkout or a deployment receipt.
     Reading this value performs no filesystem or executable-hash work. *)
 
 val embedded_commit_age_seconds : now:float -> int option
-(** Age of the embedded commit from its timestamp resolved at initialization.
+(** Age of the embedded commit from the timestamp embedded for that exact commit.
     Pure: the caller supplies the current time. Unknown timestamps remain
     [None]; known ages use the same rounding and clamping as {!current}.
     Does not probe the repository, validate provenance, or hash the executable. *)
 
 val current : unit -> t
-(** Snapshot of the running build identity with current uptime. *)
+(** Snapshot of the running build identity with current uptime. The first call
+    observes and caches the surrounding repository; informational CLI flags do
+    not call this function. Concurrent first callers publish one complete
+    immutable repository observation without holding a lock across process I/O. *)
 
 val runtime_instance_id : string
 (** Immutable process identity minted at initialization. Reading this value

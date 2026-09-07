@@ -48,11 +48,17 @@ let select_assets_root
          | [] -> Some (Filename.concat cwd "assets")))
 ;;
 
-let installed_selection () =
-  match Build_identity.launch_source_root_state () with
-  | Build_identity.Unbound -> Installed_dashboard.current ()
+let select_installed_authority ~launch_source_root_state ~installed =
+  match launch_source_root_state with
+  | Build_identity.Unbound -> installed
   | Build_identity.Bound_valid _ | Build_identity.Bound_invalid _ ->
     Installed_dashboard.Not_installed
+;;
+
+let installed_selection () =
+  select_installed_authority
+    ~launch_source_root_state:(Build_identity.launch_source_root_state ())
+    ~installed:(Installed_dashboard.current ())
 ;;
 
 let assets_root () =
@@ -573,6 +579,7 @@ let is_safe_asset_relative_path rel =
     segments
 
 module For_testing = struct
+  let select_installed_authority = select_installed_authority
   let surface_recovery = surface_recovery
   let surface_recovery_json = surface_recovery_json
   let select_assets_root = select_assets_root

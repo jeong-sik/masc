@@ -53,7 +53,11 @@ read verifies the retained root/binary identity, receipt digest, and requested
 asset size/digest; unavailable and unmanifested files return 503 and 404
 respectively. A changed selected binding never falls back to `MASC_ASSETS_DIR`,
 process cwd, or an inferred repository. An explicit source-provenance launch
-retains its existing source binding authority and validation.
+retains its existing source binding authority and validation: both valid and invalid
+source bindings take precedence over installed selection. The no-fallback installed
+rule applies when source authority is `Unbound`. Startup checks the retained
+receipt/root/binary once around the full asset scan, avoiding repeated full-receipt
+reads for every asset; individual requests retain their before/after guards.
 
 `dashboard_surface.installed_release` carries installed receipt/source/binary
 identity or a typed unavailable error. This is distribution evidence, independent

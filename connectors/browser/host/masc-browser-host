@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec "/opt/homebrew/bin/node" "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feat/browser-lane/connectors/browser/host/masc-browser-host.js"

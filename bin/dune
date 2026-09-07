@@ -2,6 +2,13 @@
 ;; Uses h2-eio for unlimited SSE streams per connection (no browser 6-conn limit)
 
 (executable
+ (name masc_browser_host)
+ (modules masc_browser_host)
+ (public_name masc-browser-host)
+ (package masc)
+ (libraries masc.config masc_core eio eio_main cohttp cohttp-eio yojson uri))
+
+(executable
  (name main_eio)
  (modules main_eio)
  (public_name masc)

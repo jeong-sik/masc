@@ -645,7 +645,7 @@ let refusal_class_report = function
   | Some Agent_core.Types.Unknown -> "unknown"
 
 let evaluate_expectation ~name expectation = function
-  | Ok output -> (
+  | Ok (output : Agent_core.Types.tool_output) -> (
       match expectation with
       | Expect_success | Expect_success_or_refusal -> Ok ()
       | Expect_no_audio ->

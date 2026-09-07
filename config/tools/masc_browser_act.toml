@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Interact with automation Firefox; live refuses actions. Discover selectors with BrowserRead mode=elements. Existing-tab actions require its returned tabId; open_tab returns a new tabId. Actions may submit forms or change external state. Read the page after acting; a failed/timed-out action may already have taken effect, so observe before retrying."""
+Interact with automation Firefox using selectors from BrowserRead mode=elements. Existing-tab actions require tabId; open_tab returns one. Actions may submit forms or change external state. Read after acting, including after failure or timeout, before retrying."""
 additional_properties = false
 
 [[params]]

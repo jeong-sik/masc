@@ -5036,6 +5036,6 @@
  (deps test_shim_builder_bootstrap.py ../scripts/remote-ssh/build-shim.sh)
  (action (run python3 %{dep:test_shim_builder_bootstrap.py})))
 
-(rule
- (alias runtest)
+(alias
+ (name runtest)
  (deps (alias runtest-test_shim_builder_bootstrap)))

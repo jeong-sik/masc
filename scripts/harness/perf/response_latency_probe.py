@@ -88,7 +88,8 @@ def main():
                                       if isinstance(diagnostics, dict) else None)
                 status = parsed.get('status')
                 row['payload_status'] = status if isinstance(status, str) else None
-                if row['payload_status'] == 'initializing' or row['cache_state'] == 'initializing':
+                if (row['payload_status'] in ('initializing', 'warming')
+                        or row['cache_state'] in ('initializing', 'warming')):
                     row['valid'] = False
                 row['stale'] = (row['cache_state'] in ('stale', 'expired', 'error')
                                  or row['payload_status'] in ('stale', 'error', 'degraded'))

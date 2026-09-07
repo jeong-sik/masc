@@ -14,7 +14,10 @@
    [MASC_OTEL_ENABLED] follows the same truthy/falsy vocabulary as every other
    MASC bool flag (case-insensitive true/1/yes/on vs false/0/no/off) and a
    malformed value warns rather than silently enabling. *)
-let enabled = Env_config_core.get_bool ~default:false "MASC_OTEL_ENABLED"
+let enabled =
+  Env_config_core.get_bool
+    ~default:Masc_network_defaults.otel_default_enabled
+    "MASC_OTEL_ENABLED"
 
 (* Same reader as [enabled] above. These two used [Sys.getenv_opt], which
    skips the boot-time config overrides, so MASC_OTEL_ENABLED could be

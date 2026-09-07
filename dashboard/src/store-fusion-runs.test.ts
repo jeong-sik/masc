@@ -51,6 +51,7 @@ import {
   fusionBoardLoading,
   fusionBoardPosts,
   fusionRuns,
+  fusionRunObservation,
   fusionRunsError,
   fusionRunsLoading,
   loadFusionRunEvidence,
@@ -63,6 +64,7 @@ beforeEach(() => {
   fusionBoardError.value = null
   fusionBoardLoading.value = false
   fusionRuns.value = []
+  fusionRunObservation.value = null
   fusionRunsError.value = null
   fusionRunsLoading.value = false
   vi.clearAllMocks()
@@ -73,6 +75,7 @@ afterEach(() => {
   fusionBoardError.value = null
   fusionBoardLoading.value = false
   fusionRuns.value = []
+  fusionRunObservation.value = null
   fusionRunsError.value = null
   fusionRunsLoading.value = false
 })
@@ -184,6 +187,8 @@ describe('refreshFusionRuns', () => {
   it('hydrates fusion run registry rows and clears a prior error', async () => {
     fusionRunsError.value = 'previous registry error'
     fusionApiMocks.fetchFusionRuns.mockResolvedValue({
+      replay: { status: 'complete', linesRead: 68, malformedLines: 34, droppedRunning: 0 },
+      historicalEvidence: [{ runId: 'old-run', postId: 'old-post', title: 'Preserved', createdAt: 100 }],
       generatedAt: '2026-07-06T04:10:00Z',
       count: 1,
       runs: [
@@ -203,10 +208,15 @@ describe('refreshFusionRuns', () => {
     expect(fusionRunsError.value).toBeNull()
     expect(fusionRuns.value).toHaveLength(1)
     expect(fusionRuns.value[0]?.runId).toBe('fus-ok')
+    expect(fusionRunObservation.value?.replay).toMatchObject({ malformedLines: 34 })
+    expect(fusionRunObservation.value?.historicalEvidence[0]?.postId).toBe('old-post')
     expect(fusionRunsLoading.value).toBe(false)
   })
 
   it('surfaces registry refresh failure without dropping cached rows', async () => {
+    fusionRunObservation.value = { replay: { status: 'absent' }, historicalEvidence: [
+      { runId: 'old-run', postId: 'old-post', title: 'Preserved', createdAt: 100 },
+    ] }
     fusionRuns.value = [
       {
         runId: 'fus-cached',
@@ -226,6 +236,7 @@ describe('refreshFusionRuns', () => {
     expect(fusionRunsError.value).toBe('HTTP 503 registry unavailable')
     expect(fusionRuns.value).toHaveLength(1)
     expect(fusionRuns.value[0]?.runId).toBe('fus-cached')
+    expect(fusionRunObservation.value?.historicalEvidence[0]?.postId).toBe('old-post')
     expect(fusionRunsLoading.value).toBe(false)
   })
 })

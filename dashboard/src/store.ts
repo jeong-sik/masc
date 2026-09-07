@@ -2,7 +2,7 @@
 // SSE events and API responses update these signals;
 // subscribing components re-render automatically.
 
-import { signal, computed, type ReadonlySignal } from '@preact/signals'
+import { signal, computed, batch, type ReadonlySignal } from '@preact/signals'
 import type {
   Agent,
   Task,
@@ -336,7 +336,7 @@ export const goalsLoading = signal(false)
 
 // --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
 
-import type { FusionRunRecord } from './api/dashboard-fusion'
+import type { FusionRunRecord, DashboardFusionRunsResponse } from './api/dashboard-fusion'
 
 // In-progress + recently completed fusion deliberations from the in-memory
 // registry endpoint. Distinct from `boardPosts` (the board-derived detail the
@@ -346,6 +346,7 @@ export const fusionBoardPosts = signal<BoardPost[]>([])
 export const fusionBoardLoading = signal(false)
 export const fusionBoardError = signal<string | null>(null)
 export const fusionRuns = signal<FusionRunRecord[]>([])
+export const fusionRunObservation = signal<Pick<DashboardFusionRunsResponse, 'replay' | 'historicalEvidence'> | null>(null)
 export const fusionRunsLoading = signal(false)
 export const fusionRunsError = signal<string | null>(null)
 
@@ -1563,7 +1564,10 @@ export async function refreshFusionRuns(): Promise<void> {
   try {
     const { fetchFusionRuns } = await import('./api/dashboard-fusion')
     const data = await fetchFusionRuns()
-    fusionRuns.value = data.runs
+    batch(() => {
+      fusionRuns.value = data.runs
+      fusionRunObservation.value = { replay: data.replay, historicalEvidence: data.historicalEvidence }
+    })
   } catch (err) {
     console.warn('[Fusion] runs fetch error:', err)
     fusionRunsError.value = errorMessageOr(err, 'Fusion run registry load failed')

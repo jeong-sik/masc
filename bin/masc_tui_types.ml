@@ -3118,6 +3118,8 @@ type state = {
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* One event-derived projection; live presentation inputs are never cached. *)
+  mutable acting_chunk_projection: Masc_tui_acting.chunk_projection option;
   (* The selected keeper's recorded file changes, keyed by keeper name, for
      the pane's Changes tab. Refetched when the feed shows that keeper
      complete a tool call and on the operator cadence. *)
@@ -3165,6 +3167,14 @@ type state = {
      the last frame the server handed it and when it last asked. *)
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
+  (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
+     inventory to plug into the shared machine. It is an overlay on the MSX
+     screen -- while [msx_menu_open] the keyboard drives the picker, not the
+     game, so its keys never reach the emulator. [msx_carts] is the inventory
+     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+  mutable msx_menu_open: bool;
+  mutable msx_carts: string list;
+  mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -4708,6 +4718,7 @@ let create_state
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
@@ -4726,6 +4737,9 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
+  msx_menu_open = false;
+  msx_carts = [];
+  msx_menu_index = 0;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

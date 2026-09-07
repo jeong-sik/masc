@@ -1250,9 +1250,10 @@ let time_now_output_schema =
     ~required:[ "now_iso"; "now_unix" ]
 ;;
 
-(* Producer: Keeper_tool_lane_status.json_of_report. [lane], [endpoint] and
+(* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and
    [operator_action] are null when unknown; [probe] and [last_dispatch] are
-   the typed report's variants spelled out. *)
+   the typed report's variants spelled out. Docker adds [note]; an unattached
+   remote lane adds [unreachable]. Both are successful status observations. *)
 let lane_status_output_schema =
   object_output_schema
     ~properties:
@@ -1262,6 +1263,8 @@ let lane_status_output_schema =
       ; "probe", `Assoc [ "type", `List [ `String "object"; `String "null" ] ]
       ; "last_dispatch", `Assoc [ "type", `List [ `String "object"; `String "null" ] ]
       ; "operator_action", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "note", `Assoc [ "type", `String "string" ]
+      ; "unreachable", `Assoc [ "type", `String "string" ]
       ]
     ~required:[ "profile"; "lane"; "endpoint"; "operator_action" ]
 ;;

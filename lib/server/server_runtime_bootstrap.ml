@@ -476,7 +476,7 @@ let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
   Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
-  Dashboard_snapshot.register_dashboard_tools_http_json Server_dashboard_http_runtime_info.dashboard_tools_http_json;
+  Dashboard_snapshot.register_dashboard_tools_http_result Server_dashboard_http_runtime_info.dashboard_tools_http_result;
   Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in

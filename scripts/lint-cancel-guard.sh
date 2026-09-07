@@ -23,12 +23,31 @@ VIOLATIONS=0
 # It ratchets down, never up. Removing an exemption means lowering this, which
 # is the direction the guard wants; adding one means saying so in a diff.
 EXEMPTIONS=0
-EXEMPTION_BUDGET=23
+EXEMPTION_BUDGET=18
 while IFS= read -r file; do
   echo "$file" | grep -qE "/(${NO_EIO_DIRS})/" 2>/dev/null && continue
   while IFS=: read -r lineno line; do
     start=$((lineno > 3 ? lineno - 3 : 1))
     context=$(sed -n "${start},${lineno}p" "$file")
+    # A handler that binds the exception and re-raises that same value cannot
+    # absorb Cancelled, whatever else it does on the way. Two shapes qualify
+    # and both appear here: `with exn -> ... raise exn`, and the capture form
+    # where the handler stores `(exn, bt)` and a nearby arm ends with
+    # `Printexc.raise_with_backtrace exn bt`. Only `with exn` can do this --
+    # `with _` binds nothing and has no value to re-raise.
+    #
+    # Eight lines of lookahead. The five sites this recognised when it was
+    # written sit 2, 2, 3, 5 and 7 lines from their handler; a re-raise
+    # further away still asks for a marker, which is the safe direction.
+    #
+    # This replaced five cancel-guard-ok markers. An exempt line is exempt
+    # whatever it does; these are safe *because* of what they do, so deleting
+    # the raise now fails the guard instead of passing on an old promise.
+    if echo "$line" | grep -qE 'with[[:space:]]+exn[[:space:]]+->' \
+      && sed -n "${lineno},$((lineno + 8))p" "$file" \
+        | grep -qE '\braise[[:space:]]+exn\b|raise_with_backtrace[[:space:]]+exn\b'; then
+      continue
+    fi
     if sed -n "${lineno}p" "$file" | grep -q 'cancel-guard-ok'; then
       # The marker has to say why. Four lines carried it bare, and each one had
       # its reason in the comment above rather than where the next reader of the

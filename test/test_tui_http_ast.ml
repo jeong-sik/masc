@@ -589,6 +589,55 @@ let test_footer_uses_embedded_identity_without_provenance_io () =
        ~binding_name:"embedded_commit_age_seconds" ~callees:[ "age_seconds" ])
 ;;
 
+(* The frame metric must include event projection work. Check the Build
+   callback boundary and effect order, so moving preparation before the
+   timer cannot manufacture an apparent rendering improvement. *)
+let test_recent_projection_is_prepared_inside_frame_build () =
+  let open Parsetree in
+  let build_steps = ref [] in
+  let steps_in body =
+    let steps = ref [] in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr = (fun self expression ->
+          (match expression.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+             (match Ast_grep.longident_to_string txt with
+              | "acting_pane_chunk_projection" -> steps := "prepare" :: !steps
+              | "render" -> steps := "render" :: !steps
+              | _ -> ())
+           | Pexp_setfield (_, field, _)
+             when Ast_grep.longident_leaf field.txt = "acting_chunk_projection" ->
+             steps := "store" :: !steps
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+      }
+    in
+    iter.expr iter body;
+    List.rev !steps
+  in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr = (fun self expression ->
+        (match expression.pexp_desc with
+         | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+           when Ast_grep.longident_to_string txt = "Masc_tui_frame_timing.time_tagged" ->
+           (match List.filter_map (function Asttypes.Nolabel, arg -> Some arg | _ -> None) args with
+            | [{ pexp_desc = Pexp_construct (phase, None); _ }; callback]
+              when Ast_grep.longident_to_string phase.txt = "Masc_tui_frame_timing.Build" ->
+              (match Ast_grep.unit_lambda_body callback with
+               | Some body -> build_steps := steps_in body :: !build_steps
+               | None -> fail "Build timing must enclose its work in a callback")
+            | _ -> ())
+         | _ -> ());
+        Ast_iterator.default_iterator.expr self expression)
+    }
+  in
+  iter.structure iter (Ast_grep.parse_implementation_or_fail "bin/masc_tui.ml");
+  check (list (list string)) "prepare and store happen before render inside Build"
+    [["prepare"; "store"; "render"]] (List.rev !build_steps)
+;;
+
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
   let render_path = "bin/masc_tui_render.ml" in
@@ -1616,10 +1665,26 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
        ~callee:"Render_schedule.project_board_read_scroll");
-  check int "board renderer consumes normalized body and comment offsets" 3
+  (* Position labels also read these offsets. Their number of reads does
+     not change the contract: body, comments, labels, and returned scroll
+     must all consume the same normalized projection. *)
+  let board_scroll_fields = [ "normalized_scroll"; "body_offset"; "comment_offset" ] in
+  List.iter
+    (fun field ->
+      check bool ("board renderer consumes projected " ^ field) true
+        (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+           ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+           ~fields:[ field ] > 0))
+    board_scroll_fields;
+  check int "board offsets all come from the shared scroll projection" 0
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render_path ~binding_name:"board_read_pane" ~record:"scroll"
+       ~fields:board_scroll_fields);
+  check int "board rendering never bypasses normalization with raw scroll" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
-       ~fields:[ "normalized_scroll"; "body_offset"; "comment_offset" ]);
+       ~module_path:render_path ~binding_name:"board_read_pane"
+       ~callees:[ "Render_schedule.project_board_read_scroll" ]
+       ~fields:[ "board_scroll" ]);
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
      knows only that the size changed, the loop's own ioctl already read the
      new one and must keep it for the frame it is about to draw. What a
@@ -2414,6 +2479,10 @@ let () =
         test_case
           "footer uses embedded identity without provenance IO"
           `Quick test_footer_uses_embedded_identity_without_provenance_io;
+        test_case
+          "Recent projection is prepared inside frame Build"
+          `Quick
+          test_recent_projection_is_prepared_inside_frame_build;
         test_case
           "user message background has one render snapshot"
           `Quick

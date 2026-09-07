@@ -140,6 +140,15 @@ val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
     identity, runtime / workspace commits, system clock
     skew, etc). *)
 
+val dashboard_tools_http_result :
+  ?keeper:string ->
+  ?timing:Server_timing.t ->
+  Workspace.config ->
+  Dashboard_snapshot.tools_result
+(** The final decorated tools response with producer-owned readiness. Its
+    classification travels with the returned cache payload, so a concurrent
+    fill cannot promote an already-returned warming response. *)
+
 val dashboard_tools_http_json :
   ?keeper:string ->
   ?timing:Server_timing.t ->

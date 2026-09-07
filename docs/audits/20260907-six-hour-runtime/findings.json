@@ -32,7 +32,7 @@
     "count": 617,
     "note": "",
     "source": "lib/keeper/keeper_runtime_attempt.ml",
-    "action": "실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 14:05Z 현재 운영 바이너리에 이 병합은 없으며 최근1시간 GLM429 diagnostic87건이 남아 있다. 운영 fallback 성공은 미검증.",
+    "action": "실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 14:55Z 운영0799f02f79에 포함됨을 확인했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 재기동 후에도 실제 rate-limit 오류는 남아 있으며 특정 fallback 성공·장기 연속성은 미검증이다.",
     "status": "investigate",
     "first": {
       "seq": 25985072,
@@ -356,7 +356,7 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다. 09:35Z 외부 바이너리 변경 후 다시 stale/unbound이며 실행·디스크 바이너리 hash도 불일치했다.",
+    "action": "설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 설치 smoke PASS. 08:29Z 같은 소스의dashboard 자산 복구와실제브라우저표시는관측했다. 이후외부바이너리·자산변경으로14:55Z stale/unbound, 최종15:01Z health에서는missing이다. 실행바이너리0799f02f79와일치하는설치릴리스자산연결은미완료다.",
     "status": "distribution-stack",
     "first": {
       "seq": 26156709,

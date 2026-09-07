@@ -1384,6 +1384,34 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
             ; malformed = snapshot.fcs_malformed
             })
 
+let acting_pane_columns (state : state) ~terminal_cols =
+  let modal =
+    state.palette_open || state.context_inspector_open || state.help_open
+    || state.agenda_open || state.answering_open
+  in
+  if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
+  then 0
+  else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
+  then Masc_tui_acting_pane.pane_cols
+  else 0
+
+let recent_chunk_projection (state : state) =
+  let traces =
+    List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id) state.keepers
+  in
+  Masc_tui_acting.refresh_projection
+    ~previous:state.acting_chunk_projection ~traces state.acting
+
+(* Pure preparation shared with the loop. Terminal dimensions are the raw
+   cached measurement, before the surface strip and composer reserve rows. *)
+let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
+  let rows = surface_body_rows state ~terminal_rows:(max 1 (terminal_rows - 1)) in
+  if acting_pane_columns state ~terminal_cols = 0
+     || Render_schedule.Viewport.requires_compact_frame ~rows
+     || state.acting_pane_tab = Masc_tui_acting_pane.Tab_changes
+  then None
+  else Some (recent_chunk_projection state)
+
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
   let keepers =
@@ -1407,7 +1435,6 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
         ; mark_tone
         ; health = reading_of_health
-        ; trace_id = keeper.k_trace_id
         })
       state.keepers
   in
@@ -1417,6 +1444,15 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_opening -> Pane.Feed_opening
     | Observer_live { events; _ } -> Pane.Feed_live events
     | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+  in
+  (* This input is built only when the pane is visible. Changes does not
+     consume event chunks, so retain the previous projection without folding. *)
+  let chunks = match state.acting_pane_tab with
+    | Pane.Tab_changes -> []
+    | Pane.Tab_fleet ->
+      (* The loop normally prepared this projection. Direct render callers
+         still get current chunks on a miss, without changing their state. *)
+      Masc_tui_acting.projection_chunks (recent_chunk_projection state)
   in
   { Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
@@ -1441,7 +1477,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
               ; approval_tool = item.ap_delegated_tool
               })
         (Masc_tui_types.approval_items state)
-  ; entries = state.acting
+  ; chunks
   ; changes = acting_pane_changes state
   }
 
@@ -1594,14 +1630,19 @@ let surface_chrome (state : state) ~terminal_rows ~cols ~surface_key ~title
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key ~rows:terminal_rows ~cols buf
 
-let connection_status_badge : Masc_tui_types.connection_status -> string =
-  function
-  | Connected as status ->
-      (Theme.ok ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
-  | (Degraded | Connecting | Reconnecting | Booting) as status ->
-      (Theme.warn ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
-  | Disconnected as status ->
-      (Theme.bad ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+let connection_status_badge (status : Masc_tui_types.connection_status) =
+  (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
+     can fail while the independent Recent event feed remains live. *)
+  let style, label =
+    match status with
+    | Connected -> Theme.ok (), "connected"
+    | Degraded -> Theme.warn (), "partial"
+    | Connecting -> Theme.warn (), "loading..."
+    | Reconnecting -> Theme.warn (), "refreshing..."
+    | Booting -> Theme.warn (), "server booting..."
+    | Disconnected -> Theme.bad (), "refresh failed"
+  in
+  "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
 ;;
 
 (* Every surface header ends with this, so a workspace the server does not
@@ -15267,6 +15308,44 @@ let render_code (state : state) =
                 ^ Terminal_text.single_line note ^ Ansi.reset
             | None -> base
           in
+          (* What the memo on the cursor's line says. The gutter already
+             marks which rows carry one (RFC-0429 §3.1); a mark alone makes
+             the reader open the list to learn what it marks. This rides the
+             title for the same reason blame's status does: the margin is one
+             cell wide and has no pane to speak in.
+
+             Only where the body is the thing on screen. The overlays replace
+             it, so under them the cursor's line is not drawn and the rider
+             would caption a row nobody can see.
+
+             No width arithmetic here: framed_line fits the title to the pane,
+             which is the truncation §3.1 asks for. *)
+          let with_note =
+            if notes_showing || diff_showing || history_showing then with_note
+            else
+              let line = state.code_file_cursor + 1 in
+              match
+                List.find_opt
+                  (fun found -> Masc_tui_memo.line_of found = line)
+                  state.code_memos
+              with
+              | None -> with_note
+              | Some (Masc_tui_memo.Memo_at (_, memo)) ->
+                  let kind =
+                    match Ide_memo.kind_word memo.Ide_memo.kind with
+                    | None -> ""
+                    | Some word -> " (" ^ word ^ ")"
+                  in
+                  with_note ^ "  "
+                  ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  ^ "memo "
+                  ^ Terminal_text.single_line memo.Ide_memo.author
+                  ^ kind ^ Ansi.reset ^ " "
+                  ^ Terminal_text.single_line memo.Ide_memo.text
+              | Some (Masc_tui_memo.Broken_at (_, why)) ->
+                  with_note ^ "  " ^ Theme.bad () ^ "memo unreadable: "
+                  ^ Terminal_text.single_line why ^ Ansi.reset
+          in
           (* A blame that did not come back has no pane of its own to say so
              in -- the margin is beside the code, not instead of it -- so the
              refusal rides the title the way a language-server answer does.
@@ -18963,16 +19042,7 @@ let render (state : state) =
      screen, so neither reserves the columns. *)
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-     let modal =
-       state.palette_open || state.context_inspector_open || state.help_open
-       || state.agenda_open || state.answering_open
-     in
-     if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state) then 0
-     else if
-       Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden
-         ~cols:terminal_cols
-     then Masc_tui_acting_pane.pane_cols
-     else 0);
+     acting_pane_columns state ~terminal_cols);
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)

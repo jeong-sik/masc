@@ -1021,37 +1021,41 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 // headerless) but must still be in this set so the generic SurfaceLead does not
 // reintroduce a title (board regressed that way in #22021).
 //
-// Surfaces that still rely on the generic SurfaceLead for their title: keepers, code.
+// Which header a surface renders. Every tab is listed because a
+// Record<TabId, _> is incomplete until it is, and the compiler says so; the
+// Set this replaced could not. That gap double-rendered a title three times:
+// monitoring, command and lab carried it out of their SurfaceHeader adoption,
+// and board regressed a duplicate title in #22021 while rendering no header
+// of its own (#22086).
 //
-// WORKAROUND: this allow-list is the exact N-of-M pattern surface-header.ts set
-// out to delete (a list the compiler cannot keep in sync with reality). Root fix:
-// drop SurfaceLead/SURFACE_OWN_LEAD_IDS entirely and give every surface its own
-// header. Removal target: #34094. Corrected here so live surfaces stop
-// double-rendering.
-const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
-  'overview',
-  'approvals',
-  'schedule',
-  'fusion',
-  'workspace',
-  'logs',
-  'cockpit',
-  'settings',
-  'connectors',
-  // Each renders the shared SurfaceHeader in its own body; without these the generic
-  // SurfaceLead stacked a duplicate title above each (monitoring/command/lab
-  // carried that gap from their SurfaceHeader adoption).
-  'monitoring',
-  'command',
-  'lab',
-  // board renders no header of its own (#22086); listed here only to suppress
-  // the generic SurfaceLead (which regressed a duplicate Board title in #22021).
-  'board',
-])
+// 'own'     the surface renders the shared SurfaceHeader in its own body
+// 'generic' the surface has no header, so SurfaceLead supplies the title
+//
+// Three are still 'generic'. Giving them their own header and deleting
+// SurfaceLead with the last of them is #34094; until then the classification
+// is at least complete.
+const SURFACE_LEAD_SOURCE: Record<TabId, 'own' | 'generic'> = {
+  cockpit: 'own',
+  overview: 'own',
+  monitoring: 'own',
+  keepers: 'generic',
+  registry: 'generic',
+  board: 'own',
+  schedule: 'own',
+  fusion: 'own',
+  command: 'own',
+  connectors: 'own',
+  workspace: 'own',
+  lab: 'own',
+  code: 'generic',
+  logs: 'own',
+  settings: 'own',
+  approvals: 'own',
+}
 
 export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
   if (isKeeperDetailDashboardRoute(routeState)) return false
-  return !SURFACE_OWN_LEAD_IDS.has(routeState.tab)
+  return SURFACE_LEAD_SOURCE[routeState.tab] === 'generic'
 }
 
 function SurfaceLead() {

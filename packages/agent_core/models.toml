@@ -2561,6 +2561,10 @@ capabilities_base = "openai_chat"
 id_prefix = "gpt-5.6-luna"
 base = "openai_chat_extended"
 provider_name = "openai-responses"
+# 2026-09-07 라이브 실측(15:11Z): "Unsupported parameter: 'temperature' is not
+# supported with this model" — reasoning 모델이 sampling 필드를 거부한다.
+# deepseek 계열 행과 같은 방어.
+ignored_sampling_parameters = ["temperature", "top_p"]
 thinking_control_format = "reasoning_effort"
 accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
 supports_reasoning = true
@@ -2632,6 +2636,10 @@ cache_read_multiplier = 0.1
 id_prefix = "gpt-6-astra"
 base = "openai_chat_extended"
 provider_name = "openai-responses"
+# 2026-09-07 라이브 실측(15:11Z): "Unsupported parameter: 'temperature' is not
+# supported with this model" — reasoning 모델이 sampling 필드를 거부한다.
+# deepseek 계열 행과 같은 방어.
+ignored_sampling_parameters = ["temperature", "top_p"]
 thinking_control_format = "reasoning_effort"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 supports_reasoning = true
@@ -3306,6 +3314,52 @@ supports_seed = true
 
 [[models]]
 id_prefix = "glm-4.6v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm"
 base = "glm"
 max_context_tokens = 128000
 max_output_tokens = 32768

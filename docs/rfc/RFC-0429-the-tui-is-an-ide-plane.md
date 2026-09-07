@@ -129,7 +129,9 @@ TUI 에는 이미 IDE 의 조각이 있다. Workspace 에서 저장소를 열고
 
 1. **한 줄 미리보기 투영.** `Tui_decode.preview_line : string -> string` 을 추가한다. 줄바꿈(`\n`, `\r\n`)은 `⏎` (U+23CE, 1칸) 로, 탭은 한 칸 공백으로, 나머지 제어 문자는 지금처럼 `sanitize_terminal_text` 로 보낸다. `change_row_summary` 와 승인 목록의 `Edit` 인자 줄이 이 투영을 쓴다. 단위 테스트는 `"a\nb"` → `"a⏎b"`, 폭이 입력 줄 수와 무관하게 1칸씩만 늘어남을 고정한다.
 2. **후보 팔레트.** `K`/`D`/`R` 에 이름이 여럿일 때 여는 팔레트는 후보만 담는 닫힌 모드다 (`Palette_choice of { question; candidates }`). 도착지 목록과 섞이지 않고, 필터는 후보 안에서만 돈다. 제목은 `hover · 4 names on line 11` 처럼 질문과 줄을 적는다.
-3. **메모는 여백.** `m` 은 본문을 유지하고 왼쪽 gutter 한 칸에 메모가 있는 줄을 `┃` 로 표시한다. 커서가 그 줄에 오면 메모 본문이 제목줄 아래 한 줄(길면 잘라서)에 나온다. 전체 목록은 지금처럼 두 번째 `m` 으로 연다. blame 이 이미 이 모양(여백 + 제목줄)으로 그려지므로 같은 배치 코드를 쓴다.
+3. **메모는 여백.** (구현됨, 두 곳이 설계와 다르다.) 여백 표시는 `m` 을 기다리지 않는다 — 메모는 파일을 읽을 때 그 행들에서 같이 읽히므로 파일이 열리는 순간 켜진다. 글리프는 `┃` 가 아니라 `●` 이고, 같은 여백에서 Keeper 가 바꾼 줄이 `·` 를 쓰기 때문에 둘을 갈라야 했다. 커서가 메모 줄에 오면 메모가 제목줄에 탄다 — 아래 한 줄이 아니라 blame·언어서버 답과 같은 자리다. 행을 하나 넣었다 뺐다 하면 커서를 움직일 때마다 본문이 한 줄씩 튀고, 이 절이 지시한 "blame 과 같은 배치 코드"가 곧 제목줄이다. 길이는 프레임의 `fit_width` 가 자른다.
+
+   원래 문장: `m` 은 본문을 유지하고 왼쪽 gutter 한 칸에 메모가 있는 줄을 `┃` 로 표시한다. 커서가 그 줄에 오면 메모 본문이 제목줄 아래 한 줄(길면 잘라서)에 나온다. 전체 목록은 지금처럼 두 번째 `m` 으로 연다. blame 이 이미 이 모양(여백 + 제목줄)으로 그려지므로 같은 배치 코드를 쓴다.
 
 ### 3.2 S2 — 언어 서버를 서버가 띄울 수 있는 모든 언어로
 
@@ -193,9 +195,13 @@ Ghostty 는 Kitty graphics 프로토콜을 지원하고 TUI 에는 `/image` 가 
 | 단계 | 통과 조건 |
 |---|---|
 | S0 | 세 번 재현에서 네 시각이 모두 로그에 있고, 어느 구간이 10초를 먹는지 한 문장으로 말할 수 있다 — **끝남.** 한 문장은 §3.0 맨 위에 있다. 네 시각 대신 TUI 를 뺀 대조군(`masc-http-probe`)으로 갈랐다: 같은 클라이언트가 밖에서 16 ms 에 받는 1.5 MB 를 TUI 는 2508 ms 로 적는다 |
-| S1 | `test_tui_decode` 에 `preview_line` 4케이스. Changes 목록 프레임에 `\x0A` 가 없다 (PTY 시나리오 1개). 팔레트 후보 모드에 task/post 가 없다 (`test_tui_palette`). 메모 여백 golden 1장 |
-| S2 | `test_lsp_process_manager`: 모든 variant 가 확장자·표지·명령을 갖는다 (변경 시 exhaustive match 로 컴파일 실패). runtime.toml 파서: 모르는 언어 키 거부, 아는 키는 명령 교체. 이 호스트에서 `.py` hover 가 pyright 로 답한다 (curl 1회, 기록) |
-| S3 | golden 12장 바이트 일치. 채팅 PTY 시나리오에서 mermaid 펜스가 상자로 그려진다 |
+| S1 | `test_tui_decode` 에 `preview_line` 4케이스 — **끝남**. 팔레트 후보 모드에 task/post 가 없다 (`test_tui_palette_matching` 의 "a choice lists the names and nothing else") — **끝남**. Changes 목록 프레임에 `\x0A` 가 없다 (PTY 시나리오 1개) — **끝남** (`changes-newline`). 메모 여백 1장 — **끝남** (`code-memo` 에 두 단언) |
+| S2 | `test_lsp_process_manager`: 모든 variant 가 확장자·표지·명령을 갖는다 — **끝남**. runtime.toml 파서: 모르는 언어 키 거부, 아는 키는 명령 교체 (`test_runtime_config_validity` 의 `test_lsp_servers_*` 5케이스) — **끝남**. 이 호스트에서 `.py` hover 가 pyright 로 답한다 — **끝남**, §6 에 기록 |
+| S3 | golden 바이트 일치 — **끝남**, 12장을 물었고 `test_tui_mermaid` 가 26케이스로 답한다. 채팅 PTY 시나리오에서 mermaid 펜스가 상자로 그려진다 — **끝남** (`mermaid-chat`) |
+
+S3 의 두 조건은 서로를 대신하지 못한다. golden 은 렌더러가 무엇을 내놓는지 고정하고, 펜스가 렌더러까지 가는지는 못 본다. 채팅 본문은 `Masc_tui_render` 의 `chat_markdown` → `Masc_tui_markdown` 을 지나며, 그 모듈은 `Markdown` 이라는 로컬 alias 로 불린다. 언어가 `mermaid` 로 갈라지지 않으면 펜스는 평문 코드 경로로 떨어져 자기 소스를 찍는다 — golden 은 전부 초록인 채로. `mermaid-chat` 은 그 분기를 끄면 실패한다(확인함).
+
+S1 의 `\x0A` 조건도 자기 레인을 따로 쓴다. 처음에는 기존 Changes 시나리오 안에 단언을 넣었는데, 그 시나리오가 사는 기본 키보드 레인이 앞쪽 시나리오의 종료 단계에서 멈춘다(#34125). 단언은 돌지도 않은 채 초록으로 보였고, `Tui_decode.preview_line` 을 망가뜨려도 통과했다. 별도 레인(`changes-newline`)으로 옮기고서야 물었다 — 망가뜨리면 `let b = 2\x0A` 가 WHAT 열에 그대로 찍힌 걸 보고 실패한다.
 
 CI 비용: 단계마다 pr-check 1회 + 해당 suite 만 지정한 targeted run 1회.
 
@@ -219,4 +225,5 @@ S0 은 이 표의 통과 조건을 다르게 채웠다. 네 시각을 한 요청
 | termaid | https://github.com/fasouto/termaid — Python, MIT, 의존성 없음, 18종, grid barycenter + A* 라우팅 | 2026-09-05T17:16Z | Medium | §3.3 의 배치 방식 선택에 참고. 채택하지 않음 |
 | 터미널 mermaid 의 흐름 | https://cursor.com/changelog/cli-feb-18-2026 — Cursor CLI 가 mermaid 를 ASCII 로 그림 | 2026-09-05T17:16Z | Medium | 텍스트 렌더러가 통용되는 방향임을 보임 |
 | 이 호스트의 언어 서버 | `command -v` 결과 §1.6 | 2026-09-05T17:12Z | High | Python 기본 명령을 pyright 로 바꾸는 근거 |
+| `.py` hover 가 pyright 로 답한다 | `GET /api/v1/lsp/question?question=hover&path=features/elevenlabs-convai-mcp/src/elevenlabs_convai_mcp/session_manager.py&line=164&symbol=get_session_manager` → `{"ok":true,"data":{"kind":"hover","text":"(function) def get_session_manager() -> SessionManager\n\nGet or create global session manager."}}` | 2026-09-07T15:0xZ | High | S2 의 마지막 통과 조건. 같은 질문을 masc 자신의 `.py` 에 던지면 거절된다 — "no pyproject.toml or setup.py or setup.cfg above it" — 이 저장소가 Python 프로젝트가 아니기 때문이고, §3.2 의 프로젝트 표지 규칙이 의도대로 도는 모습이다 |
 | TUI stall 실측 | §1.2 표, scratchpad `measure/07-hover … 11-later` | 2026-09-05T17:11Z–17:19Z | High | 서버 아닌 TUI 쪽 결함으로 판정 |

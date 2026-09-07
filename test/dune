@@ -3769,6 +3769,46 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-code-memo)))
 
+; RFC-0429 §4 asks a chat PTY scenario to show the mermaid drawing reaching
+; the screen. test_tui_mermaid pins what the renderer produces; this pins that
+; the fence is routed to it at all, which a golden cannot see.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-mermaid-chat)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   mermaid-chat)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-mermaid-chat)))
+
+; RFC-0429 §1.3/§4: the WHAT column projects a recorded newline to one cell.
+; Its own lane because the default keyboard regression stops before the
+; Changes surface, so an assertion added there would never run.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-changes-newline)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   changes-newline)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-changes-newline)))
+
 (rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
@@ -4753,6 +4793,17 @@
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
+(rule
+ (alias runtest-test_shim_execution_receipts)
+ (enabled_if (= %{system} linux))
+ (deps test_shim_execution_receipts.py ../bin/masc_exec_shim.exe)
+ (action
+  (run python3 %{dep:test_shim_execution_receipts.py} %{dep:../bin/masc_exec_shim.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_shim_execution_receipts)))
+
 (test
  (name test_exec_shim_observe)
  (modules test_exec_shim_observe)
@@ -4790,6 +4841,11 @@
  (name test_keeper_tool_execute_observe)
  (modules test_keeper_tool_execute_observe)
  (libraries masc_test_deps))
+
+(test
+ (name test_keeper_execute_shim_evidence)
+ (modules test_keeper_execute_shim_evidence)
+ (libraries masc_test_deps exec_ssh_protocol eio_main))
 
 (test
  (name test_keeper_github_login_lane)

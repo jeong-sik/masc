@@ -681,6 +681,26 @@ let chunks ~traces entries =
   Hashtbl.fold (fun _ keeper_chunks acc -> keeper_chunks @ acc) chunks []
   |> List.stable_sort (fun a b -> Float.compare b.ck_at a.ck_at)
 
+type chunk_projection = {
+  source_entries : entry list;
+  source_traces : (string * string) list;
+  projected_chunks : chunk list;
+}
+
+let refresh_projection ~previous ~traces entries =
+  let same_trace (keeper, trace) (other_keeper, other_trace) =
+    String.equal keeper other_keeper && String.equal trace other_trace
+  in
+  match previous with
+  | Some projection
+    when projection.source_entries == entries
+      && List.equal same_trace projection.source_traces traces -> projection
+  | _ ->
+    { source_entries = entries; source_traces = traces;
+      projected_chunks = chunks ~traces entries }
+
+let projection_chunks projection = projection.projected_chunks
+
 let chunk_rows ~traces entries =
   let chunks, plains = fold_chunks ~traces entries in
   let chunk_rows =

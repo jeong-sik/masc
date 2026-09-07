@@ -134,6 +134,7 @@ let default_config = Runtime_agent_context.default_config
 type run_result = {
   response : Agent_core.Types.api_response;
   checkpoint : Agent_core.Checkpoint.t option;
+  cooperative_boundary : Agent_core.Agent.Advanced.tool_boundary option;
   session_id : string;
   session_resumed : bool option;
   turns : int;
@@ -1356,6 +1357,7 @@ let run_blocks_internal
         {
           response;
           checkpoint;
+          cooperative_boundary = None;
           session_id;
           session_resumed = None;
           turns;
@@ -1388,6 +1390,9 @@ let run_blocks_internal
       Ok
         { response
         ; checkpoint
+        ; cooperative_boundary =
+            Some { Agent_core.Agent.Advanced.turn = yielded.turn
+                 ; checkpoint_stage = yielded.checkpoint_stage }
         ; session_id
         ; session_resumed = None
         ; turns = yielded.turn
@@ -1422,6 +1427,7 @@ let run_blocks_internal
       Ok
         { response = partial_response
         ; checkpoint
+        ; cooperative_boundary = None
         ; session_id
         ; session_resumed = None
         ; turns

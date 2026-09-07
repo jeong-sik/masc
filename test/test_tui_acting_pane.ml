@@ -51,7 +51,10 @@ let entries events =
   |> List.sort (fun a b -> Float.compare b.Acting.ae_at a.Acting.ae_at)
 
 let keeper ?(mark = "\xe2\x97\x8f") ?(tone = Pane.Ok) ?(health = None) name : Pane.keeper =
-  { Pane.name; mark; mark_tone = tone; health; trace_id = "trace-" ^ name }
+  { Pane.name; mark; mark_tone = tone; health }
+
+let chunks names values =
+  Acting.chunks ~traces:(List.map (fun name -> name, "trace-" ^ name) names) values
 
 let lane = "agent_core-glm-coding.glm-5.3"
 
@@ -59,20 +62,8 @@ let lane = "agent_core-glm-coding.glm-5.3"
    turn earlier. polisher is waiting on an approval. quiet-one never acted.
    The full list is eight rows: four fleet rows, the rule, and sangsu's
    three focus rows (its header, Read, Execute). *)
-let fixture : Pane.input =
-  { Pane.now
-  ; tab = Pane.Tab_fleet
-  ; feed = Pane.Feed_live 1_234
-  ; keepers =
-      [ keeper "quiet-one" ~tone:Pane.Dim
-      ; keeper "sangsu"
-      ; keeper "rondo"
-      ; keeper "polisher"
-      ]
-  ; selected = Some "sangsu"
-  ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
-  ; entries =
-      entries
+let fixture_entries =
+  entries
         [ (900., settled ~at:900. "rondo")
         ; ( 905.
           , Observer.Keeper_tool_call
@@ -102,6 +93,20 @@ let fixture : Pane.input =
           , agent_core ~tool:"Execute" ~turn:5 ~tool_use_id:"b" ~at:990.
               ~correlation:"trace-sangsu" lane )
         ]
+
+let fixture : Pane.input =
+  { Pane.now
+  ; tab = Pane.Tab_fleet
+  ; feed = Pane.Feed_live 1_234
+  ; keepers =
+      [ keeper "quiet-one" ~tone:Pane.Dim
+      ; keeper "sangsu"
+      ; keeper "rondo"
+      ; keeper "polisher"
+      ]
+  ; selected = Some "sangsu"
+  ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
+  ; chunks = chunks [ "quiet-one"; "sangsu"; "rondo"; "polisher" ] fixture_entries
   ; changes = Pane.Changes_absent
   }
 
@@ -230,8 +235,8 @@ let dead_fixture : Pane.input =
       :: keeper "mute"
       :: fixture.Pane.keepers
   ; selected = Some "goner"
-  ; entries =
-      fixture.Pane.entries
+  ; chunks = chunks [ "goner"; "bare"; "mute"; "quiet-one"; "sangsu"; "rondo"; "polisher" ]
+      (fixture_entries
       @ entries
           [ ( 995.
             , agent_core ~kind:Observer.Turn_started ~turn:7 ~at:995.
@@ -253,7 +258,7 @@ let dead_fixture : Pane.input =
                 ; tc_tool_calls = Some 2
                 ; tc_at = 908.
                 } )
-          ]
+          ])
   }
 
 let dead_drawn = Pane.lines ~rows ~cols ~scroll:0 dead_fixture
@@ -317,7 +322,7 @@ let test_event_age_uses_local_receipt_not_producer_time () =
   let input =
     { fixture with
       Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; entries = entries
+    ; chunks = chunks [ "sangsu" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:3 ~at:100.
             ~correlation:"trace-sangsu" lane ]
     }
@@ -339,7 +344,7 @@ let test_settled_unknown_call_total_stays_unknown () =
   let input =
     { fixture with
       Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; entries = entries [ 990., event ]
+    ; chunks = chunks [ "sangsu" ] @@ entries [ 990., event ]
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
@@ -351,7 +356,7 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
   let input =
     { fixture with
       Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; entries = entries
+    ; chunks = chunks [ "sangsu" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
             ~correlation:"trace-sangsu" lane
         ; 980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
@@ -465,7 +470,7 @@ let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
     Pane.keepers = [ keeper "quiet"; keeper name; keeper "second"; keeper "approval" ];
     selected = Some name;
     approvals = [ { Pane.approval_keeper = "approval"; approval_tool = "검토🙂" } ];
-    entries = entries
+    chunks = chunks [ name; "quiet"; "second"; "approval" ] @@ entries
       [ 990., agent_core ~tool:"Read한🙂" ~turn:5 ~tool_use_id:"unicode"
           ~at:990. ~correlation:("trace-" ^ name) lane;
         980., settled ~at:980. "second" ] } in
@@ -586,7 +591,7 @@ let test_event_and_count_labels_fit_the_existing_width () =
     { fixture with
       Pane.keepers = [ keeper "sixteen-charname" ]; selected = Some "sixteen-charname";
       approvals = [];
-      entries = entries
+      chunks = chunks [ "sixteen-charname" ] @@ entries
         [ 987.6, agent_core ~tool:"network_read" ~turn:3 ~tool_use_id:"width"
             ~at:987.6 ~correlation:"trace-sixteen-charname" lane ]
     }
@@ -738,6 +743,38 @@ let test_state_text_reads_each_case () =
   check string "no chunk means no observed events" "  no events"
     (plain (Pane.keeper_state_text ~now ~health:None ~approval:None None))
 
+let test_reused_chunks_keep_presentation_inputs_live () =
+  let traces = [ "sangsu", "trace-sangsu"; "rondo", "trace-rondo" ] in
+  let projection = Acting.refresh_projection ~previous:None ~traces fixture_entries in
+  let reused = Acting.refresh_projection ~previous:(Some projection)
+    ~traces:(List.map Fun.id traces) fixture_entries in
+  check bool "event projection is reused" true (projection == reused);
+  let input = { fixture with Pane.chunks = Acting.projection_chunks reused } in
+  let row_for name view = List.combine view.Pane.rows view.Pane.targets
+    |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
+    |> fst |> text in
+  let initial = Pane.lines ~rows ~cols ~scroll:0 input in
+  check bool "initial event age" true (contains "evt 10.0s" (row_for "sangsu" initial));
+  let changed = { input with Pane.now = now +. 20.; selected = Some "rondo";
+    keepers = List.map (fun (keeper : Pane.keeper) ->
+      if keeper.name = "sangsu" then { keeper with health = Some Masc.Tui_decode.Health_offline }
+      else keeper) input.keepers } in
+  let later = Pane.lines ~rows ~cols ~scroll:0 changed in
+  check bool "age advances independently of chunks" true (contains "evt 30.0s" (row_for "sangsu" later));
+  check bool "new health changes unresolved record display" true
+    (contains "unfinished" (row_for "sangsu" later));
+  let later_text = List.map text later.Pane.rows in
+  check bool "new selection changes focus keeper" true
+    (contains "settled" (List.nth later_text (last_index_of_in later_text "rondo")));
+  let pending = { changed with approvals =
+    [ { Pane.approval_keeper = "sangsu"; approval_tool = "Write" } ] } in
+  let approved_view = Pane.lines ~rows:6 ~cols ~scroll:0 pending in
+  check bool "new approval is visible and takes ordering priority" true
+    (contains "approval" (row_for "sangsu" approved_view));
+  check string "click target follows newly prioritized keeper" "keeper:sangsu"
+    (target_text (List.nth approved_view.Pane.targets 2));
+  check int "viewport budget remains live" 6 (List.length approved_view.Pane.rows)
+
 let test_tokens_and_ages_are_compact () =
   check string "both sides summed" "74.2k tok" (Pane.tokens_text (Some 73_877, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
@@ -822,6 +859,8 @@ let () =
         ] )
     ; ( "text"
       , [ test_case "state text reads each case" `Quick test_state_text_reads_each_case
+        ; test_case "reused chunks keep presentation inputs live" `Quick
+            test_reused_chunks_keep_presentation_inputs_live
         ; test_case "tokens and ages are compact" `Quick test_tokens_and_ages_are_compact
         ] )
     ]

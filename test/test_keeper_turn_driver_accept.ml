@@ -60,6 +60,7 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     trace_ref = None;
     run_validation = None;
     runtime_observation = None;
+    cooperative_boundary = None;
     stop_reason = Runtime_agent.Completed;
   }
 

@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-09-07T14:51:09.664474+00:00",
+  "partial_offline_validation": [
+    {
+      "runtime_id": "openai-responses.gpt-6-astra",
+      "exit_code": 2,
+      "not_subscription_reported": true
+    },
+    {
+      "runtime_id": "openai-responses.gpt-5.6-luna",
+      "exit_code": 2,
+      "not_subscription_reported": true
+    }
+  ],
+  "network_call_performed_by_probe": false,
+  "limits": [
+    "runtime-probe validates references/materialization but not init_default_degraded catalog membership.",
+    "Exit2 is expected for a valid HTTP binding, not a full startup success."
+  ],
+  "root_config_mutation_performed": false
+}

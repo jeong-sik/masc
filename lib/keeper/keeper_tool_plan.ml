@@ -13,6 +13,17 @@ module Node_id = struct
   let compare = String.compare
 end
 
+(* The composable subset supports an explicit nullable type pair. Normalize
+   only a known non-null type plus null; other unions remain unsupported.
+   Contract validation, value validation and pointer traversal share this
+   interpretation so an accepted status schema remains usable downstream. *)
+let nullable_schema_type = function
+  | `List [ `String "null"; (`String ("boolean" | "integer" | "number" | "string" | "array" | "object") as kind) ]
+  | `List [ (`String ("boolean" | "integer" | "number" | "string" | "array" | "object") as kind); `String "null" ] ->
+    Some kind
+  | _ -> None
+;;
+
 module Json_pointer = struct
   type t = string list
 
@@ -177,7 +188,14 @@ module Json_pointer = struct
       | segment :: rest ->
         (match schema with
          | `Assoc fields ->
-           (match List.assoc_opt "type" fields with
+           (match
+              Option.map
+                (fun kind ->
+                   match nullable_schema_type kind with
+                   | Some non_null_kind -> non_null_kind
+                   | None -> kind)
+                (List.assoc_opt "type" fields)
+            with
             | Some (`String "object") ->
               (match unique_schema_property segment fields with
                | Ok schema -> descend schema rest
@@ -480,7 +498,12 @@ let rec validate_schema_contract ~path schema =
               with
               | Some (keyword, _) -> Error (Unsupported_schema_keyword { path; keyword })
               | None -> validate_schema_keywords ~path ~schema_type fields))
-        | Some value -> Error (Unsupported_contract_type { path; value })))
+        | Some value ->
+          (match nullable_schema_type value with
+           | Some kind ->
+             validate_schema_contract ~path
+               (`Assoc (("type", kind) :: List.remove_assoc "type" fields))
+           | None -> Error (Unsupported_contract_type { path; value }))))
   | schema -> Error (Expected_schema_object { path; schema })
 
 and validate_schema_keywords ~path ~schema_type fields =
@@ -560,7 +583,14 @@ let rec validate_schema_value ~path schema value =
         | Integer_type | Number_type -> Ok ()
         | actual -> Error (Type_mismatch { path; expected = Number_type; actual }))
      | Some (`String "boolean") -> validate_schema_scalar ~path Boolean_type value
-     | Some unsupported -> Error (Unsupported_schema_type unsupported)
+     | Some unsupported ->
+       (match nullable_schema_type unsupported, value with
+        | Some _, `Null -> Ok ()
+        | Some kind, _ ->
+          validate_schema_value ~path
+            (`Assoc (("type", kind) :: List.remove_assoc "type" schema_fields))
+            value
+        | None, _ -> Error (Unsupported_schema_type unsupported))
      | None -> Error (Unsupported_schema_type `Null))
   | unsupported -> Error (Unsupported_schema_type unsupported)
 

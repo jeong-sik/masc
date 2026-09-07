@@ -337,6 +337,7 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
       ; trace_ref = None
       ; run_validation = None
       ; runtime_observation = Some runtime_observation
+      ; cooperative_boundary = None
       ; stop_reason
       }
 ;;

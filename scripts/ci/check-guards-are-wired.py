@@ -28,7 +28,7 @@ import sys
 
 SKIP_DIRS = {".git", "_build", "node_modules", ".worktrees", "_opam", "dist"}
 SCRIPT_SUFFIXES = (".sh", ".py")
-GUARD_NAME = re.compile(r"(lint|check|guard|ratchet)")
+GUARD_NAME = re.compile(r"(lint|check|guard|ratchet|audit)")
 
 # One guard per wiring mechanism, and where its name is written. A mechanism
 # the seed loses shows up here as the file that names it no longer naming it,
@@ -84,12 +84,18 @@ def read(path: str) -> str:
 
 
 def is_seed(directory: str, name: str) -> bool:
-    """A file that can name a script and have it run."""
+    """A file that can name a script and have it run.
+
+    Not Makefile or mk/*.mk, though they were until 2026-09-07:
+    `rg 'make ' .github/workflows/*.yml` returns nothing, so no workflow
+    invokes make and a target naming a guard does not run it. Counting them
+    as reached hid seven guards, three of them gates #32511 dropped.
+    """
     if os.sep + ".github" in directory + os.sep:
         return True
-    if name in ("dune", "dune-project", "Makefile"):
+    if name in ("dune", "dune-project"):
         return True
-    return name.endswith((".yml", ".yaml", ".mk", ".inc"))
+    return name.endswith((".yml", ".yaml", ".inc"))
 
 
 def main() -> int:

@@ -272,6 +272,21 @@ let handle_tool_execute_typed
         let timeout_budget = typed_input_timeout_budget input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
+        (* This collector belongs to exactly this tool execution. Both an
+           Observe attempt and later authorized stages append their own
+           response, without consulting endpoint-wide latest status. *)
+        let shim_receipts = Atomic.make [] in
+        let on_receipt receipt =
+          Lockfree_atomic.update shim_receipts (fun receipts -> receipt :: receipts)
+        in
+        let shim_receipt_fields () =
+          let receipts = List.rev (Atomic.get shim_receipts) in
+          [ "shim_execution_evidence", `Assoc
+              [ "status", `String (match receipts with [] -> "not_observed" | _ :: _ -> "recorded")
+              ; "receipts", `List
+                  (List.map Keeper_sandbox_remote.execution_observation_to_yojson receipts)
+              ] ]
+        in
         let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
@@ -294,6 +309,7 @@ let handle_tool_execute_typed
                    ~actual:Remote_ssh)
           | Runtime binding ->
             guest_sandbox_target
+              ~on_receipt
               ~capture_dir:(Keeper_execute_output_files.capture_directory
                 ~base_path:config.base_path)
               ~binding
@@ -312,6 +328,7 @@ let handle_tool_execute_typed
                shim synthesizes its own minimal environment. *)
             (match
                Keeper_sandbox_shell_ir_target.ssh_target
+                 ~on_receipt
                  ~base_path:config.base_path
                  ~meta
                  ~timeout_sec
@@ -388,7 +405,8 @@ let handle_tool_execute_typed
         let dispatch_sandbox = dispatch_bundle.sandbox in
         let sandbox_extra_fields = dispatch_bundle.fields in
         let base_host_env = dispatch_bundle.base_host_env in
-        let dispatched_model_location_fields =
+        let dispatched_model_location_fields () =
+          shim_receipt_fields () @
           (* [Host] is unreachable on this lane: every profile a keeper may
              declare builds a guest or SSH target, and the builder that made
              a host one went with the [Local] profile. The arm stays because
@@ -435,7 +453,7 @@ let handle_tool_execute_typed
         | Error (text, code) ->
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd; "code", `String code ]
-            @ dispatched_model_location_fields
+            @ dispatched_model_location_fields ()
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
@@ -454,9 +472,9 @@ let handle_tool_execute_typed
             s
           |> Exec_policy.truncate_for_log
         in
-        let typed_context_fields =
+        let typed_context_fields () =
           [ "typed", `Bool true; "cmd", `String cmd_for_log ]
-          @ dispatched_model_location_fields
+          @ dispatched_model_location_fields ()
         in
         let typed_error_json
               ?(class_ = Tool_result.Runtime_failure)
@@ -467,7 +485,7 @@ let handle_tool_execute_typed
             ~class_
             ~effect_disposition:Tool_result.Proven_pre_effect
             (error_json
-               ~fields:(typed_context_fields @ extra_fields)
+               ~fields:(typed_context_fields () @ extra_fields)
                msg)
         in
         let sandbox_profile_label =
@@ -544,7 +562,7 @@ let handle_tool_execute_typed
              ~approval_id
              ~reason
              ~audit_receipts
-             ~context:(`Assoc (typed_context_fields @ observation_fields))
+             ~context:(`Assoc (typed_context_fields () @ observation_fields))
              ()
            |> Keeper_gate_deferred_payload.to_execution
          | Keeper_gate.Unavailable reason ->
@@ -953,7 +971,7 @@ let handle_tool_execute_typed
                           ; "output", `String output
                           ; "execution_time_ms", `Int elapsed_ms
                           ]
-                          @ dispatched_model_location_fields)
+                          @ dispatched_model_location_fields ())
                        "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
              | Ok publication ->
                let output_fields = publication.Keeper_execute_output_files.fields in
@@ -965,6 +983,7 @@ let handle_tool_execute_typed
                    ([ "ok", `Bool succeeded
                     ; "status", status_json
                     ]
+                    @ dispatched_model_location_fields ()
                     @ escaped_shell_fields
                     @ timeout_fields
                     @ output_fields
@@ -972,8 +991,7 @@ let handle_tool_execute_typed
                       ; "execution_time_ms", `Int elapsed_ms
                       ]
                     @ failure_error_fields
-                    @ sandbox_extra_fields
-                    @ dispatched_model_location_fields)
+                    @ sandbox_extra_fields)
                in
                (* A process that ran and exited nonzero (or died to a
                   signal) is an observed tool result the model reads and
@@ -1013,7 +1031,7 @@ let handle_tool_execute_typed
                             ; "output", `String output
                             ; "execution_time_ms", `Int elapsed_ms
                             ]
-                            @ dispatched_model_location_fields)
+                            @ dispatched_model_location_fields ())
                          "Execute completed, but its result manifest could not be persisted.")))
         )))))
 

@@ -155,14 +155,31 @@ type lane_report =
 
 val report : t -> lane_report
 
+type receipt_unavailable =
+  | Request_not_sent
+  | Transport_unavailable
+  | Peer_receipt_missing
+  | Invalid_receipt of string
+
+type execution_observation =
+  | Execution_observed of Exec_ssh_protocol.execution_receipt * Exec_ssh_protocol.trailer
+  | Execution_unavailable of receipt_unavailable
+
+val execution_observation_to_yojson : execution_observation -> Yojson.Safe.t
+
 val runner :
-  ?mode:Exec_ssh_protocol.mode -> timeout_sec:float -> t -> Masc_exec.Sandbox_target.runner
+  ?mode:Exec_ssh_protocol.mode ->
+  ?on_receipt:(execution_observation -> unit) ->
+  timeout_sec:float -> t -> Masc_exec.Sandbox_target.runner
 (** Construct a Shell IR runner. [mode] is the box the request asks the shim
     to build, {!Exec_ssh_protocol.Effect} when omitted; a caller passes
     [Observe] or [Guest_local] only for an endpoint {!observe_supported}
     answered yes for. The local wall-clock budget includes the
     endpoint connect timeout and a bounded drain grace in addition to the
-    remote payload timeout. *)
+    remote payload timeout.
+
+    [on_receipt] receives only this runner call's response evidence. The caller
+    owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
 
 module For_testing : sig
   val clear_preflight_cache : unit -> unit

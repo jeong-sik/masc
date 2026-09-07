@@ -100,6 +100,41 @@ let test_details_absent_session_is_null () =
       Alcotest.failf "absent auth_error_code must be `Null, got %s"
         (Yojson.Safe.to_string other)
 
+let test_non_tool_bodies_skip_actor_resolution () =
+  let open Alcotest in
+  Eio_main.run @@ fun _env ->
+  let headers = Httpun.Headers.of_list [ ("authorization", "Basic invalid") ] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  let labels = [ ("outcome", "error"); ("err_kind", "unauthorized") ] in
+  let fallback_count () =
+    Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels ()
+  in
+  let before = fallback_count () in
+  List.iter
+    (fun body ->
+      let result =
+        Server_mcp_transport_http.body_with_canonical_http_actor
+          ~base_path:(Filename.get_temp_dir_name ()) ~auth_token:None request body
+      in
+      check bool "unmodified body is reused" true (result == body))
+    [ {|{ "jsonrpc": "2.0", "method": "ping", "id": 1 }|};
+      {|{"jsonrpc":"2.0","method":"tools/list","id":2}|};
+      {|{"jsonrpc":"2.0","method":"initialize","id":3}|};
+      {|{"jsonrpc":"2.0","method":"notifications/initialized"}|};
+      {|{"jsonrpc":"2.0","method":42,"id":4}|};
+      "invalid json" ];
+  check (float 0.0) "no actor-resolution fallback for non-tool bodies"
+    before (fallback_count ());
+  (* Positive control: the same credential reaches the real resolver for a
+     tools/call notification too; lack of an id must not skip injection. *)
+  ignore
+    (Server_mcp_transport_http.body_with_canonical_http_actor
+       ~base_path:(Filename.get_temp_dir_name ()) ~auth_token:None request
+       {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_status","arguments":{}}}|});
+  check (float 0.0) "tool call still resolves actor"
+    (before +. 1.0) (fallback_count ())
+
 let () =
   Alcotest.run "mcp_auth_reject_observability"
     [
@@ -113,5 +148,7 @@ let () =
             test_details_payload_shape;
           Alcotest.test_case "absent session/code fold to null" `Quick
             test_details_absent_session_is_null;
+          Alcotest.test_case "non-tool bodies skip actor resolution" `Quick
+            test_non_tool_bodies_skip_actor_resolution;
         ] );
     ]

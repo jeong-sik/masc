@@ -73,7 +73,7 @@ let test_plain_listing_footer_shape () =
      hints between its own keys and the shared meta tail. That order is the
      shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "B / S:Browser / Slack Lane  j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)

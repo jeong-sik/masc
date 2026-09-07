@@ -16676,7 +16676,7 @@ let runtime_config_status_lines state ~cols =
           @ Masc_tui_runtime_config_view.detail_lines reading.rcv_metadata
   in
   List.concat_map (fun (tone, text) ->
-    Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+    Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
       (Terminal_text.single_line text)
     |> List.map (fun text -> tone, text)) lines
 

@@ -108,7 +108,7 @@ let read_cursors ~path : (string * string) list =
   | Error _ -> []
   | Ok content ->
     (match Yojson.Safe.from_string content with
-     | exception _ -> []
+     | exception Yojson.Json_error _ -> []
      | `Assoc fields ->
        List.filter_map
          (fun (channel_id, value) ->

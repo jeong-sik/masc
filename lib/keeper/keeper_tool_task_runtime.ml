@@ -1092,6 +1092,23 @@ let handle_keeper_task_tool_with_outcome
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
+    (* Preserve the optional handoff note independently of the result summary.
+       A present note, including an empty string, is never replaced. *)
+    let notes =
+      match Json_field.string args "notes" with
+      | Json_field.Found text -> Ok [ "notes", `String text ]
+      | Json_field.Field_absent -> Ok []
+      | Json_field.Wrong_shape { expected; got } ->
+        Error (Printf.sprintf "notes must be %s, got %s" expected got)
+    in
+    (match notes with
+    | Error message ->
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:(Keeper_tool_outcome.Error { reason = message })
+           message)
+    | Ok notes ->
     if task_id = ""
     then
       Keeper_tool_execution.failure
@@ -1154,13 +1171,12 @@ let handle_keeper_task_tool_with_outcome
         [
           "task_id", `String task_id;
           "action", `String action;
-          "notes", `String result_text;
           ( "handoff_context",
             `Assoc
               [ "summary", `String result_text
               ; "evidence_refs", Json_util.json_string_list evidence_refs
               ] );
-        ]
+        ] @ notes
       in
       let transition_result =
         Task.Tool.handle_transition
@@ -1194,7 +1210,7 @@ let handle_keeper_task_tool_with_outcome
       | Tool_result.Deferred { metadata; _ } ->
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
-        Keeper_tool_execution.failure ~class_ payload)))
+        Keeper_tool_execution.failure ~class_ payload))))
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

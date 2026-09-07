@@ -1665,10 +1665,26 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
        ~callee:"Render_schedule.project_board_read_scroll");
-  check int "board renderer consumes normalized body and comment offsets" 3
+  (* Position labels also read these offsets. Their number of reads does
+     not change the contract: body, comments, labels, and returned scroll
+     must all consume the same normalized projection. *)
+  let board_scroll_fields = [ "normalized_scroll"; "body_offset"; "comment_offset" ] in
+  List.iter
+    (fun field ->
+      check bool ("board renderer consumes projected " ^ field) true
+        (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+           ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+           ~fields:[ field ] > 0))
+    board_scroll_fields;
+  check int "board offsets all come from the shared scroll projection" 0
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render_path ~binding_name:"board_read_pane" ~record:"scroll"
+       ~fields:board_scroll_fields);
+  check int "board rendering never bypasses normalization with raw scroll" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
-       ~fields:[ "normalized_scroll"; "body_offset"; "comment_offset" ]);
+       ~module_path:render_path ~binding_name:"board_read_pane"
+       ~callees:[ "Render_schedule.project_board_read_scroll" ]
+       ~fields:[ "board_scroll" ]);
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
      knows only that the size changed, the loop's own ioctl already read the
      new one and must keep it for the frame it is about to draw. What a

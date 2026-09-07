@@ -24,7 +24,10 @@ let persist ~keeper_name json =
         | _ -> Error "invalid screenshot dimensions" in
       let* handle = Keeper_vision_tool.store_artifact
           ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name) bytes in
-      Ok (`Assoc ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
+      let client_id = match json with
+        | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt "clientId" fields)
+        | _ -> `Null in
+      Ok (`Assoc ["clientId", client_id; "artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;
         "bytes", `Int (String.length bytes); "scope", `String "viewport"])

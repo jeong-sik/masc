@@ -2357,7 +2357,7 @@ let test_execution_parameterized_payload_reuses_decorated_bytes () =
   check bool "bytes decode to the decorated JSON" true
     (Yojson.Safe.equal first.json (Yojson.Safe.from_string first.raw_json));
   check string "ETag identifies the exact response bytes"
-    (Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
+    (Lib.Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
   let open Yojson.Safe.Util in
   check string "actor metadata is part of cached body" "alice"
     (first.json |> member "query" |> member "actor" |> to_string);

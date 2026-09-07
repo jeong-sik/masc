@@ -126,45 +126,41 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
          ~timeout_sec:45.0)
 ;;
 
-type read_format = Text | Image
-let read_format args =
-  match args with
-  | `Assoc fields ->
-    (match List.assoc_opt "format" fields with
-     | None | Some (`String "text") -> Ok Text
-     | Some (`String "image") -> Ok Image
-     | _ -> Error "format must be text or image")
-  | _ -> Error "browser read arguments must be an object"
-
-let handle_read ~tool_name ~start_time args : Tool_result.result =
-  match read_format args with
+let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
+  let unknown_argument = match args with
+    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"clientId"])) fields
+    | _ -> false in
+  if unknown_argument then make_workflow_err ~tool_name ~start_time "unknown browser read argument"
+  else
+  match tool_request args with
   | Error error -> make_workflow_err ~tool_name ~start_time error
-  | Ok Image ->
-    let input = match args with
-      | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"; "clientId"]) fields)
-      | other -> other in
-    (match Result.bind (Browser_surface.parse_capture_request input) Browser_surface.capture with
-     | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
-     | Error error -> make_workflow_err ~tool_name ~start_time error)
-  | Ok Text ->
-    (match tool_request args with
-     | Error error -> make_workflow_err ~tool_name ~start_time error
-     | Ok request ->
-       match Browser_surface.resolved_target request with
-       | Error error -> make_workflow_err ~tool_name ~start_time error
-       | Ok target ->
-         let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
-         let verb = match get_string args "mode" "text" with
-           | "text" -> Ok (Browser_lane.Page_read { tab_id=request.tab_id; max_chars=Some max_chars })
-           | "elements" -> Ok (Browser_lane.Page_elements { tab_id=request.tab_id })
-           | _ -> Error "mode must be text or elements" in
-         match verb with
-         | Error error -> make_workflow_err ~tool_name ~start_time error
-         | Ok verb -> answer_to_result ~tool_name ~start_time
-           (Browser_lane.issue_for ~target
-              ~verb
-              ~timeout_sec:default_timeout_sec |> add_client target))
-
+  | Ok request ->
+    let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
+    match get_string args "mode" "text" with
+    | "screenshot" ->
+      (match keeper_name, get_int_opt args "tabId" with
+       | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
+       | _, None -> make_workflow_err ~tool_name ~start_time "screenshot requires an observed tabId"
+       | Some keeper_name, Some tab_id ->
+         let result = Result.bind
+             (Ok {request with tab_id=Some tab_id})
+             Browser_surface.capture in
+         let result = Result.bind result (Browser_screenshot.persist ~keeper_name) in
+         match result with
+         | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+         | Error detail -> make_workflow_err ~tool_name ~start_time detail)
+    | mode ->
+      let verb = match mode with
+        | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
+        | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
+        | _ -> Error "mode must be text, elements or screenshot" in
+      match verb with
+      | Error detail -> make_workflow_err ~tool_name ~start_time detail
+      | Ok verb ->
+        (match Browser_surface.resolved_target request with
+         | Error error -> selection_error ~tool_name ~start_time request error
+         | Ok target -> answer_to_result ~tool_name ~start_time
+           (Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec |> add_client target))
 ;;
 
 let handle_act_with_phase ~tool_name ~start_time args =

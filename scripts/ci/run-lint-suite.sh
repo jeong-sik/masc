@@ -160,6 +160,39 @@ blocking_lints() {
   run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
   run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh
   run_lint "TLA variant sync" bash scripts/ci/check-tla-variant-sync.sh
+  # Two of the twenty-two audit-* scripts the name pattern used to skip. Both
+  # green on main and both proven to fail: an orphan .cfg under specs/ trips
+  # the first, an OCaml constructor the TLA set does not carry trips the
+  # second. --check-cross-spec is opt-in and nothing was opting in, so the
+  # three cross-spec sets it compares were compared nowhere.
+  # #32511 replaced the nine-job lane with one manual job. One step it deleted
+  # was "Meta bug-class gates (SSOT, SIL, STR, BND)", nine guards run together
+  # (#9516 #9517 #9519 #9521). Of those nine: two scripts no longer exist,
+  # check_model_prefix_inheritance is above, check_exact_field_decoder_preflight
+  # is red (#34018), and these five are green. Each was proven to fail by
+  # injection -- a spawn_config_of_key reference, a try ignore (, a docs/spec
+  # page naming a missing file, a Mirrors: pointing nowhere, and for the env
+  # floor by having been red until #34056.
+  run_lint "SSOT spawn drift" bash scripts/ci/check-ssot-spawn-drift.sh
+  run_lint "Silent failure patterns" \
+    bash scripts/ci/check-silent-failure-patterns.sh
+  run_lint "Spec Mirrors: references resolve" bash scripts/check-spec-truth.sh
+  run_lint "docs/spec names files that exist" \
+    python3 scripts/ci/check-spec-file-refs.py
+  # --self-test only, which is what the deleted step ran too: the real check
+  # shells out to `dune describe` and this job has no OCaml toolchain. It runs
+  # in the dune build @check job instead, where the switch is already built.
+  run_lint "Env-read config floor self-test" \
+    python3 scripts/ci/check_env_reads_below_config.py --self-test
+
+  # Both were red on main until today, which is the proof they can fail:
+  # audit-path-ssot for one expanduser site (#34080), audit-odoc-refs for two
+  # references its own field pattern could not resolve (#34081).
+  run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
+  run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
+  run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh
+  run_lint "TLA annotation drift" \
+    bash scripts/audit-tla-annotation-drift.sh --check-cross-spec
   run_lint "Model prefix inheritance" python3 scripts/ci/check_model_prefix_inheritance.py
   run_lint "Every check script is reached" \
     python3 scripts/ci/check-guards-are-wired.py

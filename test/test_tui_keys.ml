@@ -729,6 +729,7 @@ let test_browser_lanes_highlight_config () =
     (visible_surface_ring_index state Connectors);
   List.iter (fun app ->
     List.iter (fun source ->
+      show_browser_lane state app;
       state.browser_lane <- Some
         (Browser_lane_view.switch_source source (Browser_lane_view.create app));
       let index = visible_surface_ring_index state Connectors in

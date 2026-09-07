@@ -25,23 +25,45 @@ module Message_layout = Masc_tui_message_layout
    continuation row, and as the suffix of a folded run that also resumed. *)
 let continuation_wording = "턴 이어서 진행"
 
+(* What happened, then what it happened to.
+
+   The subject used to lead, and the tool name used to lead the subject. Of
+   12,592 Gate rows across the fleet 10,026 name tool_execute, so nearly every
+   row opened with the same cells and the phase -- the only part that differs
+   -- sat at the far right, which is where the pane cuts. On a body of 56
+   cells five different phases all read as one row.
+
+   The tool name now appears only where the summary does not. A summary that
+   is there already names the call: "github/create_pull_request", "discord
+   1467…: …", the shell command itself. Where there is none -- 8,986 of those
+   12,592 rows -- the tool name is what the row has, and it says it. *)
+let news_of_phase : approval_lifecycle_phase -> string = function
+  | Approval_requested -> "판정 중 · 이 호출은 미뤄짐"
+  | Approval_resolved_approved -> "승인됨 · 적용 예정"
+  | Approval_resolved_rejected -> "승인 거절"
+  | Approval_replay_applied -> "미뤘던 호출 적용됨"
+  | Approval_replay_applied_with_warning -> "적용됨 · 경고 있음"
+  | Approval_replay_failed -> "적용 실패"
+  | Approval_replay_indeterminate -> "적용 여부 불명 · 대상을 직접 확인하세요"
+  | Approval_continuation_recorded -> continuation_wording
+;;
+
+let subject_of ~tool ~summary =
+  match summary with
+  | Some summary when String.trim summary <> "" -> String.trim summary
+  | Some _ | None -> (
+    match tool with None -> "외부 효과" | Some name -> name)
+;;
+
+(* [news] is written out rather than joined by the caller so a folded run that
+   also resumed says both things before the subject, on the same rule as
+   everything else here. *)
+let line ~news ~tool ~summary =
+  String.concat " · " (news @ [ subject_of ~tool ~summary ])
+;;
+
 let lifecycle_line ~(phase : approval_lifecycle_phase) ~tool ~summary =
-  let subject =
-    let tool = match tool with None -> "외부 효과" | Some name -> name in
-    match summary with
-    | Some summary when String.trim summary <> "" -> tool ^ " · " ^ summary
-    | Some _ | None -> tool
-  in
-  match phase with
-  | Approval_requested -> subject ^ " · 판정 중 · 이 호출은 미뤄짐"
-  | Approval_resolved_approved -> subject ^ " · 승인됨 · 적용 예정"
-  | Approval_resolved_rejected -> subject ^ " · 승인 거절"
-  | Approval_replay_applied -> subject ^ " · 미뤘던 호출 적용됨"
-  | Approval_replay_applied_with_warning -> subject ^ " · 적용됨 · 경고 있음"
-  | Approval_replay_failed -> subject ^ " · 적용 실패"
-  | Approval_replay_indeterminate ->
-    subject ^ " · 적용 여부 불명 · 대상을 직접 확인하세요"
-  | Approval_continuation_recorded -> subject ^ " · " ^ continuation_wording
+  line ~news:[ news_of_phase phase ] ~tool ~summary
 ;;
 
 (* One approval's steps as one line.
@@ -118,7 +140,10 @@ let fold_line ~phases ~tool ~summary =
     Some (lifecycle_line ~phase:Approval_continuation_recorded ~tool ~summary)
   | Some (_, phase), false -> Some (lifecycle_line ~phase ~tool ~summary)
   | Some (_, phase), true ->
-    Some (lifecycle_line ~phase ~tool ~summary ^ " · " ^ continuation_wording)
+    (* Both in front. Appended after the subject, the second one landed back
+       in the column the pane cuts -- the position this module just moved the
+       first one out of. *)
+    Some (line ~news:[ news_of_phase phase; continuation_wording ] ~tool ~summary)
 ;;
 
 (* A Gate row's text carries the argument of the call it gated, and nothing

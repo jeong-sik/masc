@@ -154,11 +154,17 @@ val request_streaming :
   url:string ->
   ?headers:(string * string) list ->
   ?body:string ->
+  ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
   (stream_outcome, string) result
 (** [request_streaming t ~clock ~idle_timeout_sec ~method_ ~url ~on_chunk ()]
     issues one request and calls [on_chunk] with each body chunk as it arrives.
+
+    [on_response], when supplied, runs once after response headers arrive and
+    before any body chunk is delivered, including for non-success statuses.
+    It lets a streaming protocol establish response identity before consuming
+    data. Exceptions propagate through the normal connection cleanup path.
 
     The connection lifecycle matches {!request}: parked on success, closed on
     error, released under cancellation.

@@ -13,14 +13,10 @@
 #   green -- run on untouched main and passed, so wiring it costs nothing now
 #   (unmarked) -- not run
 #
-scripts/check-agent-core-boundary.sh  # green
 scripts/check-boundary-guard-mli-pairs.sh  # green
 scripts/check-boundary-guard.sh
 scripts/check-checkpoint-installation-legacy-purge.sh
 scripts/check-dashboard-nav-event-parity.sh
-scripts/check-execute-async-surface.sh  # green
-scripts/check-feature-flag-consistency.sh  # green
-scripts/check-hitl-exact-flow-boundary.sh  # green
 scripts/check-keeper-runtime-setting-registry.sh  # red
 scripts/check-ollama-model-context.py
 scripts/check-opam-lock-covers-deps.sh
@@ -29,18 +25,12 @@ scripts/check-pr-sync.sh
 scripts/check-release-train-guard.sh
 scripts/check-sandbox-dune-version.sh
 scripts/check-toml-syntax.sh
-scripts/check-turn-records-envelope-parity.sh  # green
-scripts/ci/check-determinism-contract.sh  # green
-scripts/ci/check-drain-loop-yields.sh  # green
 scripts/ci/check-env-snapshot-default-drift.py  # red
-scripts/ci/check-log-severity-anti-patterns.sh  # green
 scripts/ci/check-spec-file-refs.py
 scripts/ci/check-tla-harness-coverage.sh
-scripts/ci/check-tla-variant-sync.sh  # green
 scripts/ci/check-yaml-syntax.py
 scripts/ci/check_env_reads_below_config.py  # red
 scripts/ci/check_exact_field_decoder_preflight.py  # red
-scripts/ci/check_model_prefix_inheritance.py  # green
 scripts/lib/worktree-cleanup-guards.sh
 scripts/ocaml-boundary-ratchet.sh
 scripts/tla-bug-model-ratchet.sh

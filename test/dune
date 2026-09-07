@@ -4753,6 +4753,17 @@
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
+(rule
+ (alias runtest-test_shim_execution_receipts)
+ (enabled_if (= %{system} linux))
+ (deps test_shim_execution_receipts.py ../bin/masc_exec_shim.exe)
+ (action
+  (run python3 %{dep:test_shim_execution_receipts.py} %{dep:../bin/masc_exec_shim.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_shim_execution_receipts)))
+
 (test
  (name test_exec_shim_observe)
  (modules test_exec_shim_observe)

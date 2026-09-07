@@ -1,0 +1,18 @@
+PASS single-shot hex transfer exceeds real capture retention
+PASS old transport fails explicitly instead of corrupting bytes
+PASS exact staged bytes at size 0
+PASS authorized transfer accepted at size 0
+PASS every subprocess chunk fits capture head
+PASS unclaimed probe snapshot is removed
+PASS exact staged bytes at size 3145745
+PASS authorized transfer accepted at size 3145745
+PASS every subprocess chunk fits capture head
+PASS unclaimed probe snapshot is removed
+PASS exact staged bytes at size 16777216
+PASS authorized transfer accepted at size 16777216
+PASS every subprocess chunk fits capture head
+PASS unclaimed probe snapshot is removed
+PASS 16 MiB plus one byte is refused without browser continuation
+od: cannot skip past end of input
+PASS skip past EOF remains a source error
+PASS missing source is refused

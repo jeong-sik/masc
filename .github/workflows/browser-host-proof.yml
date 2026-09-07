@@ -12,6 +12,11 @@ on:
       - 'scripts/fixtures/firefox_download_artifact_probe.ml'
       - 'lib/browser_page_script.ml'
       - 'lib/browser_screenshot.*'
+      - 'lib/keeper/keeper_browser_upload.*'
+      - 'lib/core/exec_buffer.*'
+      - 'lib/core/common.*'
+      - 'lib/process/process_eio.ml'
+      - 'scripts/probe-browser-upload-bytes.py'
       - 'scripts/probe-firefox-controls.py'
       - 'scripts/fixtures/firefox_controls_probe.ml'
       - 'test/test_browser_native_host.py'
@@ -78,6 +83,9 @@ jobs:
           if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
             brew install --cask firefox
           fi
+
+      - name: Verify bounded upload byte transfer
+        run: opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes
 
       - name: Build native Firefox scenario
         run: opam exec -- dune build --release test/firefox_controls_probe.exe

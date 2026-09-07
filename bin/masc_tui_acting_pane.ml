@@ -187,12 +187,20 @@ let current_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
-(* A settled turn's count is the one its settle confirmed. Ledger rows
-   carry no turn number and keep landing on the newest chunk after the turn
-   ended, so counting them put a running total where a per-turn count
-   belonged -- a settled row read 2449 calls for a turn of one call (live
-   capture 2026-09-06). Before a settle the ledger is all there is, so the
-   open turn still counts its list. *)
+(* A settled turn's count is the one its settle confirmed -- the server's
+   own count of the whole turn, where the list is only what this feed saw,
+   and the feed can open mid-turn or drop the oldest rows.
+
+   This started as a workaround for something else: ledger rows carried no
+   turn number, landed on whatever chunk was newest, and a settled row read
+   2449 calls for a turn of one call (live capture 2026-09-06). Reading the
+   settle's number hid that. The rows now state their turn and are keyed on
+   it ([Acting.ck_session_turn]), so the list is no longer a running total
+   and this is a preference between two honest counts rather than a way
+   around a wrong one.
+
+   Before a settle there is no confirmed count, so the open turn counts its
+   list. *)
 let chunk_call_count (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then Option.value ~default:0 chunk.Acting.ck_calls
   else

@@ -73,6 +73,7 @@ let fixture : Pane.input =
         ; ( 905.
           , Observer.Keeper_tool_call
               { Observer.kt_keeper = "rondo"
+              ; kt_turn = None
               ; kt_tool = "keeper_artifact_read"
               ; kt_duration_ms = Some 5.
               ; kt_disposition = Some "completed"

@@ -80,7 +80,7 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
   List.iter (fun verb -> match Lane.issue_for ~target:(target client.client_id) ~verb ~timeout_sec:0.1 with
     | Lane.Refused _ -> () | _ -> fail "live session/navigation must be refused")
-    [Lane.Page_goto {url="https://example.org"}; Lane.Session_open {headless=None}];
+    [Lane.Page_goto {url="https://example.org";tab_id=None}; Lane.Session_open {headless=None}];
   Lane.install_automation_executor None;
   check bool "automation still needs its native executor" true
     (Lane.issue ~lane_name:"automation" ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Lane_absent))

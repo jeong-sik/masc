@@ -12,6 +12,7 @@
     gate learned the hard way (#33638). *)
 
 open Time_compat
+module Action = Browser_action
 
 type interaction = Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
@@ -23,7 +24,9 @@ type verb =
   | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
-  | Page_goto of { url : string }
+  | Page_goto of { url : string; tab_id : int option }
+  | Page_elements of { tab_id : int option }
+  | Page_act of Browser_action.t
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
@@ -33,6 +36,8 @@ let verb_to_string = function
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
   | Page_goto _ -> "page.goto"
+  | Page_elements _ -> "page.elements"
+  | Page_act _ -> "page.act"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -68,8 +73,14 @@ let verb_json = function
         , `Assoc (Option.map (fun v -> ("headless", `Bool v)) headless |> Option.to_list) )
       ]
   | Session_close -> `Assoc [ ("verb", `String "session.close"); ("args", `Assoc []) ]
-  | Page_goto { url } ->
-    `Assoc [ ("verb", `String "page.goto"); ("args", `Assoc [ ("url", `String url) ]) ]
+  | Page_goto { url; tab_id } ->
+    `Assoc ["verb", `String "page.goto"; "args", `Assoc
+      (["url", `String url] @ Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
+  | Page_elements { tab_id } ->
+    `Assoc ["verb", `String "page.elements"; "args", `Assoc
+      (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
+  | Page_act action ->
+    `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
 ;;
 
 (* Two different questions, two different classifications, both exhaustive
@@ -81,13 +92,13 @@ let verb_json = function
      Readers and explicit-tab interactions are supported. Session ownership
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_capture _ -> true
-  | Page_interact _ | Session_open _ | Session_close | Page_goto _ -> false
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ -> true
+  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 let verb_allowed_on_live = function
-  | Tabs_list | Page_read _ | Page_capture _ | Page_interact _ -> true
-  | Session_open _ | Session_close | Page_goto _ -> false
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_interact _ -> true
+  | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;
 
 type issued = { id : string; verb_json : Yojson.Safe.t }
@@ -97,6 +108,7 @@ type answer =
   | Lane_absent
   | Timed_out
   | Refused of string
+  | Rejected_before_effect of string
 
 (* The public source stays live/automation. Native-process identity owns each
    live command queue; browser-local tab IDs never select a different client. *)

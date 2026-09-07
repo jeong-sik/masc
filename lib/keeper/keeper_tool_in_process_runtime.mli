@@ -161,6 +161,8 @@ val handle_browser_interact_with_outcome : args:Yojson.Safe.t -> Keeper_tool_exe
 
 val handle_browser_goto_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
 
+val handle_browser_act_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 val handle_library_read_with_outcome

@@ -333,6 +333,7 @@ let make_tool_bundle_for_descriptors_with_policy
                   handle in the caller's hands if the call then fails, which
                   is the same shape of loss Execute has. *)
                | Keeper_tool_descriptor.Tool_execute
+               | Keeper_tool_descriptor.Tool_browser_act
                | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
                (* A failed webmcp call may have already executed the page's
                   tool — the bridge cannot prove otherwise — which is the

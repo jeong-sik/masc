@@ -71,7 +71,14 @@ open Alcotest
    The figure is a reading, not a constant. What the ceiling holds is the
    slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
    the numbers here say where it came from. *)
-let ceiling_bytes = 88_000
+(* Firefox controls: the production TOML loader measured BrowserAct at 1,628
+   bytes, BrowserRead mode growth at 202, and BrowserGoto shrinkage at 18.
+   Preserve the MSX tool surface ceiling's headroom: 88,000 + 1,628 + 202 - 18. *)
+(* Main adds BrowserInteract: production TOML rendering is 1,394 bytes,
+   or 1,388 with its public name, plus one list separator. BrowserGoto
+   guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
+(* Explicit native client selection adds 1004 measured browser schema bytes. *)
+let ceiling_bytes = 92_238
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -118,7 +125,8 @@ let measured () =
 
    A tool added or removed still fails here, and now says which one. *)
 let all_surface_golden_names =
-  [ "BrowserGoto"
+  [ "BrowserAct"
+  ; "BrowserGoto"
   ; "BrowserInteract"
   ; "BrowserRead"
   ; "BrowserSession"

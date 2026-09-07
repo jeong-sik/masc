@@ -25,6 +25,13 @@ description = "Which browser lane to ask. Default: live."
 default = "live"
 
 [[params]]
+name = "mode"
+type = "string"
+enum = ["text", "elements"]
+default = "text"
+description = "text reads the page; elements returns up to 200 visible controls with observed CSS selectors, labels and truncation."
+
+[[params]]
 name = "format"
 type = "string"
 enum = ["text", "image"]

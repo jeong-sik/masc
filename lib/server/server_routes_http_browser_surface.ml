@@ -32,7 +32,7 @@ let goto = function
        let uri = Uri.of_string url in
        (match Uri.scheme uri, Uri.host uri with
         | Some ("http" | "https"), Some host when host <> "" ->
-          Browser_lane.issue ~lane_name:"automation" ~verb:(Browser_lane.Page_goto {url}) ~timeout_sec:60.
+          Browser_lane.issue ~lane_name:"automation" ~verb:(Browser_lane.Page_goto { url; tab_id = None }) ~timeout_sec:60.
           |> Browser_surface.decode_answer
         | _ -> Error "url must be an absolute HTTP(S) URL")
      | _ -> Error "url is required")

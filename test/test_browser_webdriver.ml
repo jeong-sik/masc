@@ -19,7 +19,7 @@ let test_session_lifecycle () =
     let open_session () = Driver.execute driver (Lane.Session_open {headless=Some true}) in
     ignore (open_session ()); ignore (open_session ());
     check int "reopening keeps owned session" 1 (List.length !calls);
-    (match Driver.execute driver (Lane.Page_goto {url="https://example.org"}) with
+    (match Driver.execute driver (Lane.Page_goto {url="https://example.org";tab_id=None}) with
      | Lane.Refused _ -> () | _ -> fail "browser exit must be visible");
     ignore (open_session ());
     check int "session can recover after Firefox exits" 3 (List.length !calls);

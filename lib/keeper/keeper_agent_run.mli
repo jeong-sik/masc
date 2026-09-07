@@ -64,6 +64,10 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val direct_repetition_boundary :
+    execution:Keeper_repetition_scope.Execution.t ->
+    tool_calls:Keeper_agent_result.tool_call_detail list ->
+    (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)
     -> (Agent_core.Types.sse_event -> unit) option
@@ -233,6 +237,7 @@ val run_turn
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t
+  -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t

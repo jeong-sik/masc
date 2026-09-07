@@ -154,6 +154,99 @@ let test_restore_does_not_replace_runtime_evidence () =
     (Agent_core.Context.get_scoped target Agent_core.Context.Session "keeper_repetition_scopes"
      = Some corrupt)
 
+let operation value =
+  Keeper_chat_operation.Operation_id.of_string value |> require "operation"
+
+let test_direct_retry_without_provider_checkpoint () =
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  let execution = S.Execution.direct_operation (operation "direct-a") in
+  let prepare target = S.Execution.prepare execution ~source ~target |> require "attempt" in
+  check int "fresh direct operation excludes prior session calls" 0 (List.length (prepare target));
+  S.Execution.observe execution ~target call;
+  S.Execution.observe execution ~target call;
+  (* The provider returned no checkpoint. Its observations still belong to
+     this admitted operation when the direct cascade starts another attempt. *)
+  let retry_target = Agent_core.Context.create_sync () in
+  let prior_calls = prepare retry_target in
+  check int "same admitted operation retains two observations" 2 (List.length prior_calls);
+  S.Execution.observe execution ~target:retry_target call;
+  check bool "existing detector catches third call across attempts" true
+    (Option.is_some
+       (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call
+          ~threshold:3 (call :: prior_calls)));
+  let restored = S.load retry_target |> require "projected checkpoint" |> checkpoint_restore in
+  check int "tool-boundary checkpoint contains all three observations" 3
+    (count restored (id "direct-a"));
+  let next_source = Agent_core.Context.create_sync () in
+  S.save next_source restored;
+  let next_target = Agent_core.Context.create_sync () in
+  let next = S.Execution.direct_operation (operation "direct-b") in
+  let next_calls = S.Execution.prepare next ~source:next_source ~target:next_target
+    |> require "new direct operation" in
+  check int "B does not inherit A's repeats" 0 (List.length next_calls);
+  S.Execution.observe next ~target:next_target call;
+  let next_snapshot = S.load next_target |> require "B projection" in
+  check int "A evidence is preserved" 3 (count next_snapshot (id "direct-a"));
+  check int "B evidence belongs only to B" 1 (count next_snapshot (id "direct-b"))
+
+let test_direct_observation_failure_is_latched () =
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  let execution = S.Execution.direct_operation (operation "direct-invalid") in
+  ignore (S.Execution.prepare execution ~source ~target |> require "prepare");
+  S.Execution.observe execution ~target call;
+  let valid = S.load target |> require "valid projection" |> S.to_json in
+  S.Execution.observe execution ~target { call with input_fingerprint = Some "invalid" };
+  check bool "failure is visible to provider boundary" true
+    (Option.is_some (S.Execution.failure execution));
+  S.Execution.observe execution ~target call;
+  check bool "later callback does not hide failure" true
+    (Option.is_some (S.Execution.failure execution));
+  check bool "valid checkpoint observations remain intact" true
+    (valid = (S.load target |> require "retained projection" |> S.to_json));
+  let retry_target = Agent_core.Context.create_sync () in
+  check bool "provider retry cannot reset failed observation state" true
+    (Result.is_error (S.Execution.prepare execution ~source ~target:retry_target))
+
+let test_direct_prepare_preserves_conflicting_target () =
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  let other = S.admit S.empty (S.Fresh (id "other-direct")) |> require "other scope" in
+  S.save target other;
+  let execution = S.Execution.direct_operation (operation "direct-target") in
+  (match S.Execution.prepare execution ~source ~target with
+   | Error S.Restore_target_conflict -> ()
+   | _ -> fail "unrelated runtime context was replaced");
+  check bool "conflicting target is unchanged" true
+    (S.to_json other = (S.load target |> require "target" |> S.to_json))
+
+let test_failed_scope_stops_official_provider_preparation () =
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  let execution = S.Execution.direct_operation (operation "direct-host-failure") in
+  ignore (S.Execution.prepare execution ~source ~target |> require "prepare");
+  S.Execution.observe execution ~target { call with output_fingerprint = Some "invalid" };
+  let inner_called = ref false and projected = ref false in
+  let hooks =
+    { Agent_core.Hooks.empty with
+      before_turn_params = Some
+        (Masc.Keeper_run_tools_hooks.guard_repetition_before_turn_params
+           (Some execution)
+           (fun _ -> inner_called := true; Agent_core.Hooks.Continue)) }
+  in
+  let result = Masc.Keeper_official_client_host.prepare_turn
+      ~runtime_label:"scope-test" ~keeper_name:"scope-owner" ~turn_count:1
+      ~system_prompt:"system" ~tools:[] ~initial_messages:[]
+      ~model_input_projection:(Some (fun messages -> projected := true; Ok messages))
+      ~hooks:(Some hooks) ~configured_reasoning_effort:None
+  in
+  (match result with
+   | Error (Agent_core.Error.Internal _) -> ()
+   | _ -> fail "official provider preparation did not propagate scope hook failure");
+  check bool "failed scope does not enter later preparation hook" false !inner_called;
+  check bool "failed scope does not project a provider request" false !projected
+
 let () =
   run "keeper repetition scope checkpoint"
     [ "scope", [ test_case "A B checkpoint restart A" `Quick test_a_b_restart_a
@@ -161,4 +254,8 @@ let () =
                ; test_case "unknown Resume and record" `Quick test_unknown_resume_and_record
                ; test_case "valid observations before save" `Quick test_observations_are_valid_before_save
                ; test_case "invalid checkpoint preserves target" `Quick test_invalid_snapshot_does_not_clear_target
-               ; test_case "restore cannot replace runtime evidence" `Quick test_restore_does_not_replace_runtime_evidence ] ]
+               ; test_case "restore cannot replace runtime evidence" `Quick test_restore_does_not_replace_runtime_evidence
+               ; test_case "direct retry without checkpoint then new operation" `Quick test_direct_retry_without_provider_checkpoint
+               ; test_case "direct observation failure survives retry" `Quick test_direct_observation_failure_is_latched
+               ; test_case "direct preparation retains conflicting target" `Quick test_direct_prepare_preserves_conflicting_target
+               ; test_case "failed scope stops actual official preparation" `Quick test_failed_scope_stops_official_provider_preparation ] ]

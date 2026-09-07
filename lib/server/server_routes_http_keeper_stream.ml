@@ -1072,6 +1072,7 @@ let execute_keeper_stream_tool_streaming
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
+      ~operation_id
       ~admission_token
       state
       ~agent_name
@@ -1098,6 +1099,7 @@ let execute_keeper_stream_tool_streaming
       in
       let dispatched =
         Keeper_tool_surface.dispatch_keeper_msg_stream_admitted
+          ~operation_id
           ~admission_token
           ~on_text_delta
           ?on_event
@@ -1980,9 +1982,10 @@ let process_single_turn ~user_row_origin ~submission
             ~start_time
             detail
         in
-        let admission_token =
+        let operation_id, admission_token =
           match submission with
-          | Owner_operation { admission_token; _ } -> admission_token
+          | Owner_operation { operation_id; admission_token; _ } ->
+            operation_id, admission_token
         in
         let payload_identity =
           let direct_target =
@@ -2030,7 +2033,7 @@ let process_single_turn ~user_row_origin ~submission
                 ~on_tool_result_ready
                 ~approval_gate
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
-                ~admission_token
+                ~operation_id ~admission_token
             in
             match result with `Ran result -> Ok (`Ran result)
           with

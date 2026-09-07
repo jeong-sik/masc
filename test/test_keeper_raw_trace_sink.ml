@@ -523,6 +523,7 @@ let test_traced_turn_yields_result_level_fields () =
       trace_ref;
       run_validation;
       runtime_observation = None;
+      cooperative_boundary = None;
       stop_reason = Runtime_agent.Completed;
     }
   in

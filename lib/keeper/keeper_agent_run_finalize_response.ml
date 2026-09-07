@@ -280,6 +280,7 @@ let finalize
       ; prompt_metrics
       ; ctx_composition
       ; runtime_observation = result.runtime_observation
+      ; cooperative_boundary = result.cooperative_boundary
       ; turn_count = result.turns
       ; final_agent_core_turn_ordinal
       ; usage

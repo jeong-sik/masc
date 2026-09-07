@@ -45,6 +45,10 @@ type run_result =
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option
   ; checkpoint : Agent_core.Checkpoint.t option
+  ; cooperative_boundary : Agent_core.Agent.Advanced.tool_boundary option
+      (** Exact SDK yield witness retained through finalization. This can be
+          present when [checkpoint] is absent (for example a stale save no-op);
+          it does not claim that finalization published checkpoint bytes. *)
   ; trace_ref : Agent_core.Raw_trace.run_ref option
   ; run_validation : Agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason

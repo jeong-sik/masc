@@ -356,6 +356,8 @@ let for_surface = function
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
           ~help:"read Firefox tabs and page text; select live / automation inside Browser"
+      ; b Act "Ctrl-O" "Browser screenshot"
+          ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
@@ -827,6 +829,7 @@ let footer_hints_browser_lane =
     [ b Navigate "l / a" "live / automation"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
+    ; b Act "Ctrl-O" "screenshot"
     ; b Act "g" "URL"
     ; b Act "o / x" "open / close session"
     ; b Act "r" "refresh"

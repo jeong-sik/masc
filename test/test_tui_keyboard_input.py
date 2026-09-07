@@ -12732,6 +12732,104 @@ def run_project_changes_regression(executable: str) -> None:
     )
 
 
+def run_browser_screenshot_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    requests: list[dict[str, object]] = []
+    png = [""]
+    requested, release = threading.Event(), threading.Event()
+
+    def prepare(base: str) -> None:
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        tab_id = request.get("tabId", 2)
+        title = "first" if tab_id == 1 else "second"
+        return 200, {"ok": True, "data": {
+            "source": request["lane"], "elapsed_ms": 12.5,
+            "tabs": [{"id": n, "title": name, "url": "https://example.org/", "active": n == 2}
+                     for n, name in [(1, "first"), (2, "second")]],
+            "page": {"tabId": tab_id, "title": title, "url": "https://example.org/",
+                     "text": title + " page body", "chars": 16, "truncated": False}}}
+
+    def screenshot(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        requests.append(request)
+        if len(requests) == 2:
+            requested.set()
+            if not release.wait(timeout=10):
+                return 504, {"ok": False, "error": "fixture timeout"}
+        if len(requests) == 4:
+            return 404, {"ok": False, "error": "selected Firefox tab closed"}
+        return 200, {"ok": True, "data": {
+            "source": request["lane"], "tabId": request["tabId"], "title": "selected Firefox tab",
+            "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        palette_go(process, master_fd, output, b"go Browser Lane", b"second page body")
+
+        def capture() -> None:
+            read_available(master_fd, output)
+            start = len(output)
+            os.write(master_fd, b"\x0f")
+            wait_for_output(process, master_fd, output, b"a=T", start=start, timeout=3.0)
+            if b"f=100" not in bytes(output[start:]):
+                raise AssertionError("screenshot did not use the PNG image viewer")
+
+        capture()
+        if requests != [{"lane": "live", "tabId": 2}]:
+            raise AssertionError(f"screenshot did not bind the selected live tab: {requests!r}")
+        send_and_wait(process, master_fd, output, b"j", b"second page body")
+        send_and_wait(process, master_fd, output, b"a", b"second page body")
+        send_and_wait(process, master_fd, output, b"g", b"Ctrl-U:clear")
+        draft = b"https://example.org/?q=draft"
+        send_and_wait(process, master_fd, output, b"\x1b[200~" + draft + b"\x1b[201~", draft)
+        os.write(master_fd, b"\x0f")
+        if not wait_for_fixture_event(process, master_fd, output, requested, timeout=3.0):
+            raise AssertionError("screenshot request never reached the fixture")
+        send_and_wait(process, master_fd, output, b"x", draft + b"x")
+        # Enter intentionally does not change this busy frame. Observe its
+        # state after a real resize, rather than requiring unchanged rows to
+        # be emitted again by the differential frame presenter.
+        os.write(master_fd, b"\r")
+        wait_for_terminal_input_consumed(_slave_fd)
+        drain_until_quiet(process, master_fd, output)
+        retained = resize_and_wait(process, master_fd, output,
+            rows=31, columns=101, needle=draft + b"x", controls=(FULL_REDRAW,))
+        if b"Enter after completion" not in CSI_RE.sub(b"", retained):
+            raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
+        read_available(master_fd, output)
+        cancelled_from = len(output)
+        release.set()
+        wait_for_output(process, master_fd, output, b"Read 12.5 ms", start=cancelled_from, timeout=3.0)
+        if b"a=T" in bytes(output[cancelled_from:]):
+            raise AssertionError("cancelled screenshot interrupted the URL draft")
+        # A cancelled preview still settles its operation, so another capture works.
+        capture()
+        restored = send_and_wait(process, master_fd, output, b" ", draft + b"x")
+        if draft + b"x " in CSI_RE.sub(b"", restored).split(b"\xe2\x96\x8f")[0]:
+            raise AssertionError("image dismissal typed into the retained URL draft")
+        send_and_wait(process, master_fd, output, b"\x1b", b"second page body")
+        send_and_wait(process, master_fd, output, b"]", b"first page body")
+        send_and_wait(process, master_fd, output, b"\x0f", b"selected Firefox tab closed")
+        if requests[-1] != {"lane": "automation", "tabId": 1}:
+            raise AssertionError("closed-tab screenshot silently changed target")
+        send_and_wait(process, master_fd, output, b"r", b"second page body")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        os.write(master_fd, b"q")
+
+    try:
+        run_terminal_scenario(executable, description="Browser screenshot ownership and URL preservation",
+            interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
+            preload_input=GRAPHICS_SUPPORTED_REPLY)
+    finally:
+        release.set()
+
+
 def run_config_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
     initial = {
@@ -13285,6 +13383,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "project-changes":
         run_project_changes_regression(os.path.abspath(sys.argv[1]))
         print("tui project Git changes regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
+        run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
+        print("tui Browser screenshot regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))

@@ -20,6 +20,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
+| `Ctrl-O` | Preview a PNG screenshot of the selected tab; any key returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
@@ -39,9 +40,14 @@ Requests use the authenticated TUI HTTP client. Reading allows 45 seconds for
 the tab-list and page-read phases; automation startup and navigation allow 65.
 Requests run in switch-owned Eio daemon fibers and return through the TUI mailbox.
 
-See [setup and Keeper usage](../design/browser-lane-examples.md). The separate
-[Slack API connector](../design/slack-integration.md) reads collected messages;
-it does not represent browser state.
+`Ctrl-O` captures the explicitly selected tab through the authenticated screenshot
+endpoint. The preview keeps the source, tab, text position, and URL draft; any new
+input cancels a pending preview. A closed tab produces a visible failure rather
+than capturing a different active tab. Use `r` to rediscover available tabs.
+The image is not staged or sent to a Keeper. PNG preview uses the terminal's
+existing image support; unsupported terminals receive an explanation in Browser.
+
+See [setup and Keeper usage](../design/browser-lane-examples.md).
 
 ## Verification
 

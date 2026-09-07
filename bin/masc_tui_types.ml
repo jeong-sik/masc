@@ -2743,7 +2743,11 @@ module Browser_lane_view = struct
     tabs : tab list; page : page option; source : source;
     elapsed_ms : float;
   }
-  type operation = Read | Open_session | Close_session | Goto of string
+  type screenshot = {
+    source : source; tab_id : int; title : string; url : string;
+    data : string; elapsed_ms : float;
+  }
+  type operation = Read | Open_session | Close_session | Goto of string | Screenshot of int
   type load = Idle | Loading of int * operation | Failed of string
   type t = {
     source : source; selected_tab : int option; scroll : int;
@@ -2770,7 +2774,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Open_session | Close_session | Goto _)), _ -> Operating
+    | Loading (_, (Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2834,13 +2838,42 @@ module Browser_lane_view = struct
       | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
           Error "page tab is absent from returned tabs"
       | _ -> Ok { tabs; page; source; elapsed_ms }
+  let decode_screenshot json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* value = field "data" json in
+      let* source = get parse_source "source" value in
+      let* tab_id = get integer "tabId" value in
+      let* title = get string "title" value in
+      let* url = get string "url" value in
+      let* mime = get string "mimeType" value in
+      let* data = get string "data" value in
+      let* elapsed_ms = get milliseconds "elapsed_ms" value in
+      if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
+      else Ok { source; tab_id; title; url; data; elapsed_ms }
+
+  (* Settle the browser operation even when a later key cancelled opening the
+     image. The caller separately checks image intent before drawing. *)
+  let accept_screenshot ~generation (result : (screenshot, string) result) t =
+    match t.load with
+    | Loading (current, Screenshot requested_tab) when current = generation ->
+        (match result with
+         | Ok screenshot when screenshot.source = t.source
+                              && screenshot.tab_id = requested_tab
+                              && t.selected_tab = Some requested_tab ->
+             { t with load = Idle }, Some screenshot
+         | Ok _ -> { t with load = Failed "screenshot source or tab mismatch" }, None
+         | Error detail -> { t with load = Failed detail }, None)
+    | Loading _ | Idle | Failed _ -> t, None
+
   let accept ~generation (result : (reading, string) result) t =
     match t.load with
     | Loading (current, Read) when current = generation ->
         (match result with
          | Ok reading when reading.source = t.source ->
              { t with reading = Some reading; load = Idle;
-               selected_tab = Option.map (fun page -> page.tab_id) reading.page }
+               selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source mismatch" }
          | Error detail -> { t with load = Failed detail })
     | Loading _ | Idle | Failed _ -> t

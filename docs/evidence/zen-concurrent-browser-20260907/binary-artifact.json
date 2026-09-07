@@ -1,0 +1,10 @@
+{
+  "source": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
+  "run": 34126133709,
+  "artifact": 10021176681,
+  "sha256": {
+    "masc-macos-arm64": "3fe98ff8b1a742ebfc6dc19ed4c66e58d0b6c7d9f977d69e6dd71bf3958e5a5b",
+    "masc-tui-macos-arm64": "13558430a836a90344bcd00d668a0a7e6a082e025edda71772e6b160a16a8e98",
+    "masc-browser-host-macos-arm64": "4a0ffdfc03e1bc2ad6f73dc4f4bea84ecb051d1255588093e47cb33b05d453f5"
+  }
+}

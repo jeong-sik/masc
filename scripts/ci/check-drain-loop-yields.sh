@@ -71,9 +71,20 @@ ok=0
 
 drain_files=$(rg -l "${DRAIN_RE}" lib/ 2>/dev/null || true)
 
-if [ -z "$drain_files" ]; then
-  echo "check-drain-loop-yields: no non-blocking drains found in lib/"
-  exit 0
+# The report below is "ok (N/N)", where N is whatever the pattern found. That
+# reads the same at fifteen files and at eleven, so a rename on one of the
+# three alternatives in DRAIN_RE shrinks the scope by four and still says ok.
+# Renaming Runtime_event_bus alone does exactly that. So the count has a floor
+# and a drop is a failure: lower it here in the same change that removes a
+# drain caller, and the removal stays visible.
+DRAIN_FLOOR=15
+drain_count=$(printf '%s\n' "$drain_files" | grep -c . || true)
+if [ "$drain_count" -lt "$DRAIN_FLOOR" ]; then
+  echo "check-drain-loop-yields: scope shrank: ${drain_count} < ${DRAIN_FLOOR}" >&2
+  echo "  ${DRAIN_RE}" >&2
+  echo "  Either a drain caller went away -- lower DRAIN_FLOOR in this script" >&2
+  echo "  and say which -- or the pattern stopped naming files it used to." >&2
+  exit 1
 fi
 
 while IFS= read -r file; do

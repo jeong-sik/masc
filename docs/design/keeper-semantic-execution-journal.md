@@ -15,7 +15,8 @@ A producer supplies a typed `Keeper_execution_scope_id.t`: Direct keeps its
 validated request ID; Auto keeps its admission UUID. The canonical JSON of that
 typed identity is the `semantic_executions.scope_key`, so equal scalar text from
 different origins cannot collide. One SQLite transaction writes the identity,
-an initialized empty frame containing only that scope, the exact source
+the original canonical producer input and its digest, an initialized empty
+frame containing only that scope, the exact source
 memberships, and the Preparing phase. Retrying the same identity returns the recorded invocation;
 it never clears observations or invents a replacement scope.
 
@@ -75,7 +76,7 @@ hash or checkpoint-presence escape hatch authorizes replay of Interrupted execut
 
 ## Evidence and remaining integration
 
-The 23 SQLite tests cover atomic and uncertain commits, exact CAS, independent
+The 29 SQLite tests cover atomic and uncertain commits, exact CAS, independent
 work during waits, rechecks across queue generations, same-scope checkpoint
 resumption after another operation completes, immutable terminal records,
 validated migration, read-only old-schema inspection, and corrupt-evidence
@@ -108,3 +109,33 @@ No fixed turn budget, retry-count limit, or waiting-operation-wide lock is added
 Scan cost over terminal journal history and full scheduler recovery latency have
 not been measured. An authoritative database integrity failure remains an
 explicit storage failure; it is never replaced with a fabricated empty journal.
+
+
+## Admitted input lifetime
+
+The request/delivery ledger releases its input when a chat request becomes
+terminal. An invocation waiting for a child may still need that input, and its
+source queue may already have been acknowledged. Semantic admission therefore
+retains the producer's original input independently, canonically hashed in the
+same transaction as identity, frame and source membership. Reusing an identity
+with different input is a conflict even after settlement.
+
+The payload remains available through Preparing, Ready, Running, Suspended and
+Recovering. Only explicit semantic settlement releases it, retaining the digest
+and terminal facts. A present JSON-null payload is encoded separately from a
+released input. Missing active input, a stale digest or duplicate JSON fields
+are invalid evidence; none authorizes a fresh empty invocation.
+
+The producer still owns the input codec and continuation descriptor. This store
+does not infer instructions from the transcript or a source hash and does not
+copy an old checkpoint over the latest shared Keeper conversation. Direct
+admission must eventually use the actual claimed input after any queued edit,
+in the same transaction as claim. This unit deliberately does not activate a
+partial native lifecycle: admission, suspension, child acceptance and terminal
+publication must be connected together.
+
+Six additional SQLite scenarios cover edited Direct input surviving request
+delivery and independent Auto completion, canonical idempotency/conflict,
+restart and terminal release, invalid admission, JSON-null presence and corrupt
+input preservation. Defined cases are not a remote execution claim. Payload
+serialization cost in the per-record journal has not been measured.

@@ -2306,12 +2306,15 @@ let sandbox_image_cmd =
     ; `P
         "This builds the other one: bash, ripgrep and git on a Debian base, \
          which is what a turn needs to read, search and edit a repository. The \
-         recipe is embedded in this binary and reaches docker on stdin, so no \
-         checkout and no registry is involved."
+         recipe is embedded in this binary and goes straight to the runtime's \
+         build command, so no checkout and no registry is involved."
     ; `P
-        "It is not polyglot on purpose. A Keeper that has to build a project \
-         needs that project's toolchain, named in its TOML with sandbox_image; \
-         the container is read-only, so a turn cannot install what is missing."
+        "It carries gh and python3 because MASC itself asks the guest for \
+         them: it mounts a GitHub CLI config there, and its own \
+         repository-checkout probe runs python3. A Keeper that has to build a \
+         project needs that project's toolchain instead, named in its TOML \
+         with sandbox_image; the container is read-only, so a turn cannot \
+         install what is missing."
     ]
   in
   let print_only =

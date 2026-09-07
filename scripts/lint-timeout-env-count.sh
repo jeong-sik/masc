@@ -47,7 +47,7 @@ DASHBOARD_COUNT=$(sed -n '/^module Dashboard/,/^end$/p' "$TARGET" \
 
 # Baseline as of 2026-05-28 (17 env vars).
 # Each bump requires an RFC reference in the comment below.
-DASHBOARD_BASELINE=17
+DASHBOARD_BASELINE=15
 # RFC-0138 Phase 4: 13 Dashboard env vars + 4 full_health/orchestrator
 
 echo "Dashboard env var count: $DASHBOARD_COUNT (baseline: $DASHBOARD_BASELINE)"

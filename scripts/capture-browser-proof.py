@@ -65,7 +65,13 @@ def main():
     parser.add_argument("--cols", type=int, default=150)
     parser.add_argument("--rows", type=int, default=42)
     args = parser.parse_args()
-    args.base_path = args.base_path.expanduser().resolve()
+    # Not expanduser: which directory "~" names for the masc root is
+    # lib/config_dir_resolver's answer (RFC-0121), and a second one here can
+    # disagree with the server this is capturing from. A shell expands a bare
+    # tilde before argv, so one that survives to here was quoted -- say so
+    # rather than interpret it.
+    require("~" not in str(args.base_path), "base_path_tilde_not_expanded")
+    args.base_path = args.base_path.resolve()
     args.repo = args.repo.expanduser().resolve()
     args.executable = args.executable.expanduser().resolve()
     require(1 <= args.api_port <= 65535, "invalid_api_port")

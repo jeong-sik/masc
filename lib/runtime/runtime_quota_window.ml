@@ -14,11 +14,9 @@ type scope =
   | Credential_file of string
 
 (* Two facts, not one duration. [Until] is the provider's own reset time.
-   [Observed] is a hard-quota rejection that stated no reset -- both metered
-   providers this fleet reaches answer that way (2026-09-06: ollama.com and
-   api.z.ai each return 429 with no Retry-After), so without it the window
-   never records and every lane re-dispatches into an exhausted account all
-   day. It claims no end time; the next success on the scope clears it. *)
+   [Observed] is a hard-quota rejection that stated no reset. It claims no end
+   time; the next success on the scope clears it. Coarse 429 evidence does not
+   establish this credential ownership and uses candidate backpressure. *)
 type window =
   | Until of float
   | Observed

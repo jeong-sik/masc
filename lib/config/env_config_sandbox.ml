@@ -63,6 +63,16 @@ module Runtime = struct
     get_string ~default:Keeper_sandbox_image.default_tag
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
 
+  (* Every path that starts a container asks the same question: the Keeper
+     declared an image, or it did not. Six of them answered it inline and one
+     of the six trimmed the answer while the other five handed the surrounding
+     whitespace to the runtime as part of the tag. One reading of a Keeper's
+     declaration lives here so the next path to ask gets the same answer. *)
+  let image_declared_or_default declared =
+    match Option.map String.trim declared with
+    | Some image when not (String.equal image "") -> image
+    | Some _ | None -> docker_image ()
+
   (* container's guest resolver points at the gateway, and the gateway
      refuses DNS from inside the guest even though the same port answers
      from the host. Without a nameserver the guest routes fine and resolves

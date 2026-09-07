@@ -6,6 +6,7 @@ module Projection = Keeper_recovery_projection
 module Checkpoint = Keeper_checkpoint_store
 module J = Yojson.Safe.Util
 
+let fixture_evidence = ref None
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready () |> Result.get_ok
 
@@ -516,7 +517,20 @@ let test_one_worker_reads_pages_and_submits () =
       string
       "canonical source bytes and Tool identity remain untouched"
       canonical
-      (Fs_compat.load_file path))
+      (Fs_compat.load_file path);
+    fixture_evidence
+    := Some
+         (`Assoc
+             [ ( "scope"
+               , `String "actual local HTTP fixture; scripted peer, no external model" )
+             ; "canonical_sha256", `String (digest canonical)
+             ; "http_requests", `Int (List.length !requests)
+             ; ( "handler_page_receipts"
+               , `List (List.map Worker.read_receipt_to_yojson submitted.reads) )
+             ; "proposal_receipt", Worker.proposal_receipt_to_yojson submitted.receipt
+             ; "application", `String "not performed"
+             ; "partial_restart", `String "not performed"
+             ]))
 ;;
 
 let test_proposal_cannot_publish_against_changed_source () =
@@ -671,5 +685,9 @@ let () =
             `Quick
             test_published_proposal_survives_observer_failure
         ] )
-    ]
+    ];
+  Option.iter
+    (fun json ->
+       Printf.printf "RECOVERY_WORKER_HTTP_EVIDENCE %s\n%!" (Yojson.Safe.to_string json))
+    !fixture_evidence
 ;;

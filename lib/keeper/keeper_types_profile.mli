@@ -102,6 +102,16 @@ val load_keeper_profile_defaults_result_for_base_path :
   string ->
   (keeper_profile_defaults, keeper_toml_load_error) result
 
+(** One projection's immutable declaration reads. Every file is parsed once;
+    capture a new snapshot for each projection so edits, additions, removals,
+    and parse/instruction errors are observed without a freshness interval. *)
+type keeper_profile_snapshot
+val read_keeper_profile_snapshot : base_path:string -> keeper_profile_snapshot
+val snapshot_configured_keeper_names : keeper_profile_snapshot -> string list
+val snapshot_profile_defaults :
+  keeper_profile_snapshot -> string ->
+  (keeper_profile_defaults, keeper_toml_load_error) result
+
 type declarative_manifest_snapshot =
   | Declarative_manifest_missing
   | Declarative_manifest_present of

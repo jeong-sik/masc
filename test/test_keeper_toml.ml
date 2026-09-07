@@ -1640,6 +1640,81 @@ let test_health_json_build_exposes_runtime_binary_identity () =
 (* Test suite                                                        *)
 (* ================================================================ *)
 
+let snapshot_defaults_exn snapshot name =
+  match KTP.snapshot_profile_defaults snapshot name with
+  | Ok defaults -> defaults
+  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
+
+let test_projection_profile_snapshot_freshness () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let a = Filename.concat keepers_dir "snapshot-a.toml" in
+  let b = Filename.concat keepers_dir "snapshot-b.toml" in
+  let declaration enabled = Printf.sprintf
+      "[keeper]\ninstructions = \"Answer the question.\"\nautoboot_enabled = %b\n" enabled in
+  write_file a (declaration true);
+  let before = KTP.read_keeper_profile_snapshot ~base_path in
+  write_file a (declaration false);
+  write_file b (declaration true);
+  check (option bool) "same projection keeps its captured declaration" (Some true)
+    (snapshot_defaults_exn before "snapshot-a").autoboot_enabled;
+  check (list string) "same projection does not discover later additions" ["snapshot-a"]
+    (KTP.snapshot_configured_keeper_names before);
+  let after = KTP.read_keeper_profile_snapshot ~base_path in
+  check (option bool) "next projection observes edit immediately" (Some false)
+    (snapshot_defaults_exn after "snapshot-a").autoboot_enabled;
+  check (list string) "next projection observes added file" ["snapshot-a"; "snapshot-b"]
+    (KTP.snapshot_configured_keeper_names after);
+  Sys.remove a;
+  let removed = KTP.read_keeper_profile_snapshot ~base_path in
+  check (list string) "next projection observes deletion" ["snapshot-b"]
+    (KTP.snapshot_configured_keeper_names removed);
+  check (option bool) "deleted declaration gets ordinary missing defaults" None
+    (snapshot_defaults_exn removed "snapshot-a").autoboot_enabled
+
+let test_projection_profile_snapshot_error_parity () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  write_file (Filename.concat keepers_dir "malformed.toml") "[keeper]\ngoal = [\n";
+  write_file (Filename.concat keepers_dir "uninstructed.toml") "[keeper]\nautoboot_enabled = true\n";
+  let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
+  List.iter (fun name ->
+    match KTP.snapshot_profile_defaults snapshot name,
+          KTP.load_keeper_profile_defaults_result_for_base_path ~base_path name with
+    | Error captured, Error live -> check bool "same error kind/path/detail" true (captured = live)
+    | _ -> fail "snapshot must preserve malformed and missing-instruction errors")
+    ["malformed"; "uninstructed"];
+  check (list string) "invalid declarations remain configured" ["malformed"; "uninstructed"]
+    (KTP.snapshot_configured_keeper_names snapshot)
+
+let test_projection_profile_snapshot_filename_identity () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  write_file (Filename.concat keepers_dir "file-key.toml")
+    "[keeper]\nname = \"declared-key\"\ninstructions = \"Answer the question.\"\nautoboot_enabled = false\n";
+  let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
+  check (list string) "discovery uses declared name" ["declared-key"]
+    (KTP.snapshot_configured_keeper_names snapshot);
+  List.iter (fun name ->
+    let captured = snapshot_defaults_exn snapshot name in
+    match KTP.load_keeper_profile_defaults_result_for_base_path ~base_path name with
+    | Ok live -> check bool "lookup still uses the filename" true (captured = live)
+    | Error error -> fail (KTP.keeper_toml_load_error_to_string error))
+    ["file-key"; "declared-key"]
+
+let test_projection_profile_snapshot_fleet_wiring () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "snapshot-fleet.toml" in
+  write_file path "[keeper]\ninstructions = \"Answer the question.\"\nautoboot_enabled = true\n";
+  let config = Masc.Workspace.default_config base_path in
+  let profile_snapshot = KTP.read_keeper_profile_snapshot ~base_path in
+  Sys.remove path;
+  let captured = Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan
+      ~profile_snapshot config in
+  check (list string) "fleet uses captured lookup without reopening removed file"
+    ["snapshot-fleet"] captured.bootable_names;
+  let next = KTP.read_keeper_profile_snapshot ~base_path in
+  let refreshed = Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan
+      ~profile_snapshot:next config in
+  check (list string) "next fleet projection sees removal" [] refreshed.bootable_names
+
 let () =
   run "Keeper TOML Loader"
     [
@@ -1786,6 +1861,10 @@ let () =
         ] );
       ( "discovery",
         [
+          test_case "fleet projection shares captured declarations" `Quick test_projection_profile_snapshot_fleet_wiring;
+          test_case "projection snapshot sees changes on next capture" `Quick test_projection_profile_snapshot_freshness;
+          test_case "projection snapshot preserves profile errors" `Quick test_projection_profile_snapshot_error_parity;
+          test_case "projection snapshot preserves filename lookup" `Quick test_projection_profile_snapshot_filename_identity;
           test_case "empty dir" `Quick test_discover_empty_dir;
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;

@@ -64,7 +64,7 @@ let ok label = function
 
 (* Every direct A.apply_judgment_and_deliver call in this file targets a
    candidate the test just persisted, so Candidate_absent here is a fixture
-   bug, not the case under test — test_settle_one_completed_terminalizes_a_
+   bug, not the case under test — test_settle_completed_snapshot_terminalizes_a_
    partition_whose_candidate_was_retired below drives the actually-missing
    path through the finalizer it exists to cover. *)
 let delivered label = function
@@ -404,7 +404,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
      Alcotest.(check string) "selected opaque slot" third.slot_id observed.slot_id;
      Alcotest.(check (float 0.0)) "completion observes post-execution time" 9.0 completed_at
    | _ -> Alcotest.fail "callback chain did not persist Completed");
-  (match ok "owner settlement" (W.settle_one_completed ~base_path ~keeper_name:"alpha") with
+  (match ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
@@ -414,11 +414,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
   | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
 ;;
 
-(* The owner slot rations admission into the Keeper, and only a Relevant
-   verdict admits anything. A Not_relevant completion writes one consumed
-   record and enqueues nothing, so holding the slot for it puts every relevant
-   verdict behind however many irrelevant ones precede it in created_at order
-   (#26863: 48 relevant behind 459 discards, worst at position 202). *)
+(* Non-relevant judgments settle without queue delivery. *)
 let test_discards_do_not_hold_the_owner_delivery_slot () =
   with_temp_base "board-attention-worker-discard-drain" @@ fun base_path ->
   let discarded =
@@ -457,7 +453,7 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     admitted.candidate_id
     second;
   (match
-     ok "owner settlement" (W.settle_one_completed ~base_path ~keeper_name:"alpha")
+     ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
    with
    | W.Partition_settled { candidate_id; _ } ->
      Alcotest.(check string)
@@ -483,91 +479,164 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     [ discarded; admitted ]
 ;;
 
-let test_discard_settlement_is_bounded_and_continues () =
-  with_temp_base "board-attention-worker-discard-bound" @@ fun base_path ->
-  let discard_count = W.max_completed_settlements_per_owner_turn () + 1 in
-  let discarded =
-    List.init discard_count (fun index ->
-      record
-        ~base_path
-        (candidate
-           ~id:(Printf.sprintf "candidate-discard-%02d" index)
-           ~recorded_at:(float_of_int (index + 1))
-           ()))
+let complete_next ~base_path decision =
+  let selected = ref None in
+  let execute ~before_dispatch ~before_advance:_ prepared =
+    let attempt = provenance ("snapshot-" ^ A.(prepared.candidate_id)) in
+    let result = judgment attempt decision in
+    ok "bind snapshot judgment" (before_dispatch attempt);
+    selected := Some (prepared, result);
+    Ok result
   in
-  let admitted =
-    record
-      ~base_path
-      (candidate
-         ~id:"candidate-admitted-after-bound"
-         ~recorded_at:(float_of_int (discard_count + 1))
-         ())
+  ignore
+    (ok "complete snapshot member"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute));
+  match !selected with
+  | Some selected -> selected
+  | None -> Alcotest.fail "fixture did not execute a judgment"
+;;
+
+let delivered_ids ~base_path =
+  Event_queue_persistence.load ~base_path ~keeper_name:"alpha"
+  |> Event_queue.to_list
+  |> List.filter_map (fun (source : Event_queue.stimulus) ->
+    match source.payload with
+    | Event_queue.Board_attention attention -> Some attention.candidate_id
+    | _ -> None)
+;;
+
+let test_completed_snapshot_delivers_all_relevant_in_order () =
+  with_temp_base "board-completed-snapshot" @@ fun base_path ->
+  let decisions =
+    J.Relevant :: List.init 12 (fun _ -> J.Not_relevant) @ [ J.Relevant; J.Relevant ]
   in
-  let judge_next decision expected_candidate_id =
-    let execute ~before_dispatch ~before_advance prepared =
-      let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
-      ok "bind" (before_dispatch attempt);
-      ignore before_advance;
-      Ok (judgment attempt decision)
-    in
-    match
-      ok
-        "judge next pending"
-        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
-    with
-    | W.Judgment_completed { candidate_id; _ } ->
-      Alcotest.(check string) "judged candidate order" expected_candidate_id candidate_id
-    | W.Idle
-    | W.Contended _
-    | W.Rescan_later _
-    | W.Candidate_already_consumed _
-    | W.Partition_blocked _ -> Alcotest.fail "fixture did not complete a judgment"
+  let candidates =
+    List.mapi
+      (fun index _ ->
+        record ~base_path
+          (candidate ~id:(Printf.sprintf "snapshot-%02d" index)
+             ~recorded_at:(float_of_int (index + 1)) ()))
+      decisions
   in
+  List.iter (fun decision -> ignore (complete_next ~base_path decision)) decisions;
+  ignore (ok "settle all ready judgments"
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+  let expected =
+    List.filter_map
+      (fun ((candidate : A.candidate), decision) ->
+        if decision = J.Relevant then Some candidate.candidate_id else None)
+      (List.combine candidates decisions)
+  in
+  Alcotest.(check (list string)) "every relevant judgment delivered FIFO"
+    expected (delivered_ids ~base_path);
   List.iter
-    (fun (candidate : A.candidate) ->
-       judge_next J.Not_relevant candidate.candidate_id)
-    discarded;
-  judge_next J.Relevant admitted.candidate_id;
-  (match
-     ok
-       "bounded owner settlement"
-       (W.settle_one_completed ~base_path ~keeper_name:"alpha")
-   with
-   | W.Partition_settled { candidate_id; continuation_wake = Some _ } ->
-     (* Candidate ids are content hashes derived by [candidate], not the
-        human-readable seed passed as [~id]; compare against the recorded
-        candidate at the bound boundary. *)
-     let last_discarded_before_bound =
-       List.nth discarded (W.max_completed_settlements_per_owner_turn () - 1)
-     in
-     Alcotest.(check string)
-       "first owner turn stops at the discard bound"
-       last_discarded_before_bound.candidate_id
-       candidate_id
-   | W.Partition_settled { continuation_wake = None; _ } ->
-     Alcotest.fail "bounded discard settlement did not request continuation"
-   | W.No_completed_partition -> Alcotest.fail "bounded discard fixture had no completion");
-  Alcotest.(check int)
-    "the first owner turn does not cross the settlement bound"
-    0
-    (relevant_delivery_count ~base_path ~candidate_id:admitted.candidate_id);
-  (match
-     ok
-       "continued owner settlement"
-       (W.settle_one_completed ~base_path ~keeper_name:"alpha")
-   with
-   | W.Partition_settled { candidate_id; continuation_wake = None } ->
-     Alcotest.(check string)
-       "continuation reaches the relevant verdict"
-       admitted.candidate_id
-       candidate_id
-   | W.Partition_settled { continuation_wake = Some _; _ } ->
-     Alcotest.fail "continued settlement left unexpected completed work"
-   | W.No_completed_partition -> Alcotest.fail "continuation lost completed work");
-  Alcotest.(check int)
-    "the relevant verdict reaches the Keeper on continuation"
-    1
-    (relevant_delivery_count ~base_path ~candidate_id:admitted.candidate_id)
+    (fun (partition : P.t) ->
+      match partition.state with
+      | P.Settled _ -> ()
+      | _ -> Alcotest.fail "snapshot member not settled")
+    (ok "reload partitions" (P.load ~base_path ~keeper_name:"alpha"));
+  (match ok "repeat settlement"
+     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+   | W.No_completed_partition -> ()
+   | _ -> Alcotest.fail "settled snapshot was offered again");
+  Alcotest.(check (list string)) "repeat does not duplicate delivery"
+    expected (delivered_ids ~base_path)
+;;
+
+let test_completed_snapshot_failure_preserves_remainder_and_replays () =
+  with_temp_base "board-completed-failure" @@ fun base_path ->
+  let make index =
+    record ~base_path
+      (candidate ~id:(Printf.sprintf "failure-%d" index)
+         ~recorded_at:(float_of_int index) ())
+  in
+  let first = make 1 and failing = make 2 and last = make 3 in
+  let _, first_judgment = complete_next ~base_path J.Relevant in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  (* Recreate a crash after durable delivery but before partition settlement. *)
+  ignore (delivered "first delivered before crash"
+    (A.apply_judgment_and_deliver ~base_path ~keeper_name:"alpha"
+       ~candidate_id:first.candidate_id ~judgment:first_judgment));
+  let conflicting_signal =
+    Masc.Keeper_world_observation_board_signal.board_stimulus_of_board_signal
+      { failing.signal with title = "conflicting durable payload" }
+  in
+  let conflict : Event_queue.stimulus =
+    { post_id = failing.signal.post_id; urgency = Event_queue.Normal
+    ; arrived_at = failing.recorded_at
+    ; payload = Event_queue.Board_attention
+        { candidate_id = failing.candidate_id; signal = conflicting_signal }
+    }
+  in
+  ok "persist conflicting identity"
+    (Event_queue_persistence.update_result ~base_path ~keeper_name:"alpha"
+       (fun queue -> Event_queue.enqueue queue conflict));
+  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "delivery conflict falsely settled the snapshot");
+  let candidates = ok "reload failed candidates"
+    (A.load_candidates ~base_path ~keeper_name:"alpha") in
+  let status id =
+    (List.find (fun (c : A.candidate) -> String.equal c.candidate_id id) candidates).status
+  in
+  (match status first.candidate_id, status failing.candidate_id, status last.candidate_id with
+   | A.Consumed _, A.Judged { last_delivery_failure = Some _; _ }, A.Pending _ -> ()
+   | _ -> Alcotest.fail "failure did not preserve its evidence and untouched remainder");
+  List.iter
+    (fun (partition : P.t) ->
+      match String.equal partition.candidate_id first.candidate_id, partition.state with
+      | true, P.Settled _ | false, P.Completed _ -> ()
+      | _ -> Alcotest.fail "partial snapshot committed the wrong partitions")
+    (ok "reload partial settlement" (P.load ~base_path ~keeper_name:"alpha"));
+  ok "remove conflicting test fixture"
+    (Event_queue_persistence.update_result ~base_path ~keeper_name:"alpha"
+       (fun queue ->
+         Event_queue.to_list queue
+         |> List.filter (fun source -> source <> conflict)
+         |> List.fold_left Event_queue.enqueue Event_queue.empty));
+  ignore (ok "resume preserved remainder"
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+  Alcotest.(check (list string)) "crash replay and retry deliver once in order"
+    [ first.candidate_id; failing.candidate_id; last.candidate_id ]
+    (delivered_ids ~base_path)
+;;
+
+let test_completed_snapshot_yields_and_defers_new_completions () =
+  Eio_main.run @@ fun _ ->
+  with_temp_base "board-completed-growing" @@ fun base_path ->
+  let first = record ~base_path (candidate ~id:"captured-first" ~recorded_at:1.0 ()) in
+  let second = record ~base_path (candidate ~id:"captured-second" ~recorded_at:2.0 ()) in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  Eio.Switch.run @@ fun sw ->
+  let added, resolve_added = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    (* Wait for a durable boundary, not a timer or an assumed fork order. *)
+    let rec await_first () =
+      if relevant_delivery_count ~base_path ~candidate_id:first.candidate_id = 0
+      then (Eio.Fiber.yield (); await_first ())
+    in
+    await_first ();
+    Alcotest.(check int) "other fiber runs between captured members" 0
+      (relevant_delivery_count ~base_path ~candidate_id:second.candidate_id);
+    let new_candidate =
+      record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
+    in
+    ignore (complete_next ~base_path J.Relevant);
+    Eio.Promise.resolve resolve_added new_candidate);
+  (match ok "drain captured snapshot"
+     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+   | W.Partition_settled { continuation_wake = Some _; _ } -> ()
+   | _ -> Alcotest.fail "new completion did not retain a continuation wake");
+  let new_candidate = Eio.Promise.await added in
+  Alcotest.(check (list string)) "new completion is outside captured snapshot"
+    [ first.candidate_id; second.candidate_id ] (delivered_ids ~base_path);
+  ignore (ok "drain next snapshot"
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+  Alcotest.(check (list string)) "next owner boundary delivers new completion"
+    [ first.candidate_id; second.candidate_id; new_candidate.candidate_id ]
+    (delivered_ids ~base_path)
 ;;
 
 let test_setup_error_stops_before_claim_without_hot_retry () =
@@ -1599,7 +1668,7 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
   (match (load_one_partition ~base_path).state with
    | P.Completed _ -> ()
    | _ -> Alcotest.fail "crash fixture did not retain Completed partition");
-  (match ok "settle crash-replayed completion" (W.settle_one_completed ~base_path ~keeper_name:"alpha") with
+  (match ok "settle crash-replayed completion" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
    | W.Partition_settled { candidate_id; continuation_wake = None }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ ->
@@ -1913,7 +1982,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match
      ok
        "owner settlement"
-       (W.settle_one_completed ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -2443,7 +2512,7 @@ let test_undrained_outcomes_are_not_routine () =
 ;;
 
 (* task-336 sibling defect (masc, 2026-08-16): before this fix,
-   settle_one_completed's Error propagated all the way up whenever the
+   settle_completed_snapshot's Error propagated all the way up whenever the
    candidate a Completed item named had been retired — the whole per-keeper
    candidate store moved aside as one directory, per
    scripts/check-runtime-deployment-preflight.sh, with no tombstone left for
@@ -2471,7 +2540,7 @@ let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_r
      when String.equal candidate_id persisted.candidate_id -> ()
    | _ -> Alcotest.fail "fixture did not reach Blocked");
   (* Same retire simulation as
-     test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired:
+     test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired:
      move the whole per-keeper candidate ledger aside; the partition journal
      still names the candidate. *)
   let ledger_path =
@@ -2496,7 +2565,7 @@ let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_r
     (W.For_testing.reconcile_quarantines ~now:11.0 ~base_path ~keeper_name:"alpha")
 ;;
 
-let test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired
+let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
   ()
   =
   with_temp_base "board-attention-worker-candidate-retired" @@ fun base_path ->
@@ -2510,11 +2579,7 @@ let test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retir
   let execute ~before_dispatch ~before_advance _prepared =
     ok "bind" (before_dispatch attempt);
     ignore before_advance;
-    (* Relevant, not Not_relevant: an ordinary Relevant completion is an
-       admission (settles_without_admitting returns false), which stops the
-       owner-turn settlement batch. If the retired candidate's lost verdict
-       leaked into that discard decision, a batch could incorrectly hold open
-       on a partition nothing was, or ever will be, delivered for. *)
+    (* A missing relevant candidate still has no deliverable obligation. *)
     Ok (judgment attempt J.Relevant)
   in
   (match
@@ -2550,7 +2615,7 @@ let test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retir
   (match
      ok
        "first settlement attempt"
-       (W.settle_one_completed ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -2564,7 +2629,7 @@ let test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retir
   match
     ok
       "second settlement attempt"
-      (W.settle_one_completed ~base_path ~keeper_name:"alpha")
+      (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
   with
   | W.No_completed_partition -> ()
   | W.Partition_settled _ ->
@@ -2701,13 +2766,18 @@ let () =
             `Quick
             test_undrained_outcomes_are_not_routine
         ; Alcotest.test_case
+            "completed snapshot delivers every relevant judgment FIFO"
+            `Quick test_completed_snapshot_delivers_all_relevant_in_order
+        ; Alcotest.test_case
+            "completed snapshot preserves failure and replays without duplication"
+            `Quick test_completed_snapshot_failure_preserves_remainder_and_replays
+        ; Alcotest.test_case
+            "completed snapshot yields and defers concurrent completion"
+            `Quick test_completed_snapshot_yields_and_defers_new_completions
+        ; Alcotest.test_case
             "discards do not hold the owner delivery slot"
             `Quick
             test_discards_do_not_hold_the_owner_delivery_slot
-        ; Alcotest.test_case
-            "discard settlement is bounded and continues"
-            `Quick
-            test_discard_settlement_is_bounded_and_continues
         ; Alcotest.test_case
             "drain outcome labels stay distinct"
             `Quick
@@ -2717,9 +2787,9 @@ let () =
             `Quick
             test_drain_outcome_carries_the_work_it_did
         ; Alcotest.test_case
-            "settle_one_completed terminalizes a partition whose candidate was retired"
+            "settle_completed_snapshot terminalizes a partition whose candidate was retired"
             `Quick
-            test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired
+            test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
         ; Alcotest.test_case
             "reconcile_quarantines settles a blocked partition whose candidate was retired"
             `Quick

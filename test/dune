@@ -4654,6 +4654,11 @@
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
 (test
+ (name test_shim_clock)
+ (modules test_shim_clock)
+ (libraries alcotest shim_clock unix))
+
+(test
  (name test_keeper_sandbox_ssh)
  (modules test_keeper_sandbox_ssh)
  (libraries masc_test_deps exec_ssh_protocol))
@@ -4667,6 +4672,8 @@
  (name test_browser_lane)
  (modules test_browser_lane)
  (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
+
+(include stanzas/test_browser_native_host.inc)
 
 (test
  (name test_shell_ir_with_sandbox)

@@ -8,6 +8,8 @@ for the WebDriver endpoint configuration.
 The live extension bridges typed `tabs.list` and `page.read` commands through
 native messaging. Its host polls `/browser-lane/poll` and returns results to
 `/browser-lane/result`; these transport endpoints require the lane token.
+They accept only `live`. Automation requires the configured in-process
+WebDriver executor and reports `Lane_absent` when it is not installed.
 Session management and navigation are refused on the live lane.
 
 Keeper browser tools use the same source state. They reject backend failures,

@@ -2655,6 +2655,20 @@ module Browser_lane_view = struct
       | Loading _ | Idle | Failed _ -> t.url_draft
     in
     { t with load = Failed detail; url_draft }
+  type read_status = Unread | Reading | Operating | Read_ok | Read_failed
+  let read_status t =
+    match t.load, t.reading with
+    | Idle, None -> Unread
+    | Idle, Some _ -> Read_ok
+    | Loading (_, Read), _ -> Reading
+    | Loading (_, (Open_session | Close_session | Goto _)), _ -> Operating
+    | Failed _, _ -> Read_failed
+  let read_status_label = function
+    | Unread -> "HTTP unread"
+    | Reading -> "HTTP reading"
+    | Operating -> "HTTP action"
+    | Read_ok -> "HTTP read ok"
+    | Read_failed -> "HTTP failed"
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
   let should_refresh_on_tick t =
     match t.app, t.source, t.url_draft, t.load with
@@ -5551,6 +5565,7 @@ let visible_surface_ring_index (state : state) (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
+    | Connectors when Option.is_some (browser_lane_on_screen state) -> Runtime
     | Changes | Connectors | Schedules -> Keepers Keeper_list
     | Lanes -> Runtime
     | Clients -> Runtime

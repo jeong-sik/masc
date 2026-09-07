@@ -23,7 +23,9 @@ preserved; voice can be started again after returning to the composer.
 | `o` / `x` | Open / close the automation Firefox session while automation is selected |
 | Esc / Left | Return to connector routing |
 
-The title identifies the source. Successful reads show server latency, matching
+The Runtime navigation family and title identify the operator reader. The title
+shows the source and the latest Browser HTTP request status; the global coordinator
+connection and workspace warnings remain labeled separately on the read-status row. Successful reads show server latency, matching
 tab count, selected tab, page URL, character count and truncation. A failed or
 pending refresh labels retained content as a previous read. Source switches clear
 that content; generation-stamped replies prevent an earlier request from
@@ -48,7 +50,7 @@ See the [Eio fiber reference](https://ocaml.org/p/eio/1.0/doc/eio/Eio/Fiber/inde
 
 `test/test_tui_browser_lane.ml` exercises tab selection, strict schema decoding,
 late responses, source identity, failed-refresh retention and empty Slack tabs.
-For this change its eleven state scenarios were executed using the OCaml interpreter
+For this change its twelve state scenarios were executed using the OCaml interpreter
 with the production pure module extracted verbatim. All changed OCaml files
 passed parser checks. Multiline projection, URL input ownership and Unicode URL
 viewport tests are committed for CI; they were not executed locally. These checks do not establish full executable typechecking,

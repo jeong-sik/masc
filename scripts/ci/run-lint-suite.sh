@@ -192,6 +192,11 @@ blocking_lints() {
   # guard's: keeper meta carries the fields, and keeper_meta_store reads them.
   run_lint "Exact-field decoders have a preflight" \
     python3 scripts/ci/check_exact_field_decoder_preflight.py
+  # Named only by a comment in the root dune until now, and red the whole
+  # time: half of it asserted a nine-job lane #32511 deleted. That half is
+  # gone; what runs here is the half the root dune's comment claims.
+  run_lint "Root dune warning mask" \
+    bash scripts/ci/check-ocaml-compile-authority.sh
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
   # The two ratchets that survived #33313, which deleted eighteen nobody ran.

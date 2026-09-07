@@ -2064,7 +2064,7 @@ let decide_from_selected_mode ?observe request = function
                   ; "classification", Keeper_gate_readonly.classification_to_yojson classification
                   ]
                   @ (match request_turn_id request with
-                     | Some turn_id -> [ "turn_id", `String turn_id ]
+                     | Some turn_id -> [ "turn_id", `Int turn_id ]
                      | None -> [])))
             "Git effects require execution evidence");
        decide_after_observation request ~observe)

@@ -579,6 +579,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Unix.putenv Env_config_core.base_path_env_key base_path;
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
+  Server_slack_connector_config.configure ~config_root;
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_agent_core_model_catalog_env () in
   let (_ : string option) = configure_agent_core_model_catalog_overlay ~config_root () in

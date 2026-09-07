@@ -137,11 +137,14 @@ let status_json ?(audit_limit = 10) () =
      ([send_message] returns [Missing_token]). A connector that cannot answer
      is not available, so both are part of the verdict. *)
   let credential_error =
-    if not app_present then "SLACK_APP_TOKEN is unset or empty"
-    else if not bot_present then
-      "SLACK_BOT_TOKEN is unset or empty: inbound connects but every outbound \
-       chat.postMessage fails"
-    else ""
+    match Env_config_slack.unavailable_reason () with
+    | Some reason -> reason
+    | None ->
+      if not app_present then "SLACK_APP_TOKEN is unset or empty"
+      else if not bot_present then
+        "SLACK_BOT_TOKEN is unset or empty: inbound connects but every outbound \
+         chat.postMessage fails"
+      else ""
   in
   let available =
     app_present && bot_present && startup_ok && binding_store_read_ok

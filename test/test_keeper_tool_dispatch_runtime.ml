@@ -7130,6 +7130,7 @@ let probe tool_name args =
 let composable_output_probes =
   [ probe "Execute" (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
   ; probe "keeper_time_now" (`Assoc [])
+  ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
     ; prepare =
         (fun ~config ~meta:_ ->
@@ -7282,6 +7283,39 @@ let validate_probe_output ~tool_name ~data =
          (Yojson.Safe.to_string data)
      | Error _ ->
        failf "%s output validation failed before reaching the schema" tool_name)
+
+let test_lane_status_observations_remain_composable () =
+  let module Profile = Masc.Keeper_types_profile_sandbox in
+  with_exec_fixture
+    ~always_allow:true
+    "lane-status-composable-observations"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       List.iter
+         (fun (sandbox_profile, observation_field) ->
+            let meta = { meta with sandbox_profile } in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config ~meta ~publication_recovery ~ctx_work
+                ~name:"keeper_lane_status" ~input:(`Assoc []) ()
+            in
+            check string "status observation completes without a guest"
+              "success" (outcome_label result.KTE.disposition);
+            match result.KTE.data with
+            | None -> fail "lane status lost its structured observation"
+            | Some data ->
+              check string "the selected profile reaches the producer"
+                (Profile.sandbox_profile_to_string sandbox_profile)
+                Yojson.Safe.Util.(data |> member "profile" |> to_string);
+              (match Yojson.Safe.Util.member observation_field data with
+               | `String detail ->
+                 check bool "the profile-specific observation is present"
+                   true (String.length detail > 0)
+               | _ -> fail "lane status lost its profile-specific observation");
+              validate_probe_output ~tool_name:"keeper_lane_status" ~data)
+         [ Profile.Docker, "note"
+         ; Profile.Micro_vm, "unreachable"
+         ; Profile.Remote_ssh, "unreachable"
+         ])
 
 let test_composable_outputs_satisfy_declared_schema () =
   with_exec_fixture
@@ -7536,6 +7570,8 @@ let () =
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
     ("composable_output_contract", [
+      test_case "lane observations remain composable without a guest" `Quick
+        test_lane_status_observations_remain_composable;
       test_case "every composable tool has an output probe" `Quick
         test_every_composable_tool_has_an_output_probe;
       test_case "real producer output satisfies its declared schema" `Quick

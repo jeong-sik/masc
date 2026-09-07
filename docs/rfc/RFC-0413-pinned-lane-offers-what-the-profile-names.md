@@ -77,7 +77,7 @@ Keeper 별로 고정 레인 요청 수와, 그 Keeper 가 받은 전체 도구 �
 | edgar.a.poe | 182 | 150 → 151 | 63.9% |
 | rondo | 189 | 138 → 139 | 49.6% |
 | sangsu | 180 | 138 → 139 | 34.3% |
-| kidsnote-pr-jira-checker | 38 | 99 → 137 | 17.2% |
+| exampleorg-pr-jira-checker | 38 | 99 → 137 | 17.2% |
 | analyst | 38 | 122 → 138 | 8.2% |
 
 합 1,176 요청. 이 초안이 앞서 실었던 lane-smith 98.1% / code-reviewer 71.7% 와
@@ -132,7 +132,7 @@ Keeper 별, 여드레 기준:
 
 | keeper | 런타임 | 받는 도구 | wire KB | 여드레 미호출 KB | % | 사흘 기준 % |
 |---|---|---|---|---|---|---|
-| kidsnote-pr-jira-checker | claude_code | 99 → 137 | 6,340 | 4,583 | 72.3 | 72.3 |
+| exampleorg-pr-jira-checker | claude_code | 99 → 137 | 6,340 | 4,583 | 72.3 | 72.3 |
 | lane-smith | antigravity | 138 → 139 | 36,043 | 13,517 | 37.5 | 58.3 |
 | analyst | antigravity | 122 → 138 | 4,629 | 1,623 | 35.1 | 43.1 |
 | edgar.a.poe | antigravity | 150 → 151 | 26,616 | 8,876 | 33.3 | 46.9 |
@@ -143,7 +143,7 @@ Keeper 별, 여드레 기준:
 "받는 도구" 가 두 값인 것은 창 안에서 배열이 한 번씩 바뀌었기 때문이다. 무엇이
 바뀌었는지는 §4.3 에 적었다.
 
-kidsnote-pr-jira-checker 의 71.5%는 다른 여섯과 같은 값이 아니다. 이 Keeper 는
+exampleorg-pr-jira-checker 의 71.5%는 다른 여섯과 같은 값이 아니다. 이 Keeper 는
 08-28..08-31 에 `tool_call` 행을 하나도 남기지 않았다(돌지 않았다). 여드레와 사흘
 값이 같은 것이 그 증거다. 사흘짜리 근거를 여드레 이름표로 쓴 값이다.
 
@@ -355,7 +355,7 @@ Adding a tool, or editing a descriptor, is enough." 즉 `turn_count` 는 세션�
 | rondo | 189 | 1 | `+keeper_task_cancel` | 09-03T18:00:51Z |
 | sangsu | 180 | 1 | `+keeper_task_cancel` | 09-03T18:00:44Z |
 | analyst | 38 | 1 | `+github_*` 16개 | 09-03T05:23:42Z |
-| kidsnote-pr-jira-checker | 38 | 1 | `+atlassian_*`·`+slack_*` 38개 | 09-03T05:23:49Z |
+| exampleorg-pr-jira-checker | 38 | 1 | `+atlassian_*`·`+slack_*` 38개 | 09-03T05:23:49Z |
 
 **1,176 요청에 변화 7회, 0.6%.** 배열이 어떤 형태로 같은지를 더 엄격히 보는
 독립 측정(이름이 아니라 배열 전체 비교)은 12회, 1.0% 를 냈다. 어느 쪽이든 1% 아래다.
@@ -702,7 +702,7 @@ claim 시점에 지문과 "새로 시작/재개" 둘 중 무엇이었는지를 �
 **여섯 선언은 붙임 이름과 내장 이름을 모두 담아야 한다** —— 한쪽만 적으면 다른
 계열이 통째로 빠진다(§5.1). 세션 여섯 개가 한 번 새로 시작한다.
 
-**2단계.** kidsnote-pr-jira-checker 의 커넥터 선언. **이 Keeper 한 명 기준, 여드레
+**2단계.** exampleorg-pr-jira-checker 의 커넥터 선언. **이 Keeper 한 명 기준, 여드레
 창**으로 slack 은 받은 12개 중 11개 33.9 KB, atlassian 은 31개 중 25개 44.0 KB 가
 미호출이다(§2.3 의 표는 일곱 전체가 안 부른 것이라 값이 다르다). 뒤로 미루는 이유는
 하나다 —— 여드레 기록 중 나흘이 비어 있어(§2.2) 근거가 가장 얇고, 유일한
@@ -795,7 +795,7 @@ lane-smith 실제 표면의 34.9%인 48,002 바이트가 보이지 않는다. �
    자르지 않는 집합이라 방향은 안전하다.
 5. **13~33% 라는 창 민감도의 정확한 근거.** Keeper 별로 사흘 미호출 집합 중 그
    앞 나흘에 불린 것: analyst 9/72, code-reviewer 6/33, edgar.a.poe 20/81,
-   lane-smith 28/85, rondo 17/71, sangsu 15/69. kidsnote-pr-jira-checker 는
+   lane-smith 28/85, rondo 17/71, sangsu 15/69. exampleorg-pr-jira-checker 는
    앞선 기록이 없어 0/92 다. 앞선 초안의 edgar.a.poe 18, sangsu 12 는 재현되지
    않아 바꿔 적는다. 여드레보다 긴 창에서 이 비율이 어디로 수렴하는지는 모른다.
 6. **레인을 이름의 부재로 갈랐다.** 배열에 `keeper_tool_search` 가 없으면 고정

@@ -927,6 +927,12 @@ let on_event t (evt : Agent_core.Types.sse_event) =
     then invalidate_current_scope t
     else invalidate_index t index
   | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.RedactedThinkingSnapshot _ } ->
+    if
+      quarantine_incompatible_tool_delta t ~index ~delta_kind:"redacted-thinking-snapshot"
+    then invalidate_current_scope t
+    else invalidate_index t index
+  | Agent_core.Types.ContentBlockDelta
       { index; delta = Agent_core.Types.ThinkingSignatureDelta _ } ->
     if
       quarantine_incompatible_tool_delta t ~index ~delta_kind:"thinking-signature"

@@ -153,7 +153,7 @@ rg -n "masc\.telemetry_coverage_gap" dashboard/src/ --type-add 'ts:*.ts' -t ts
 repo 내부 consumer 는 §6.3 으로 잡힌다. repo 밖 consumer (별도 서비스, 외부 대시보드) 는 다음 명령으로 후보 식별.
 
 ```bash
-gh search code "masc.telemetry_coverage_gap" --owner jeong-sik --owner kidsnote
+gh search code "masc.telemetry_coverage_gap" --owner jeong-sik --owner exampleorg
 ```
 
 후보가 있으면 PR-4 머지 전 owner 에게 공지. 후보 0 일 경우 외부 reader 없음으로 간주.

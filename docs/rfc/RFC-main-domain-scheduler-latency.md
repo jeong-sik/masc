@@ -750,7 +750,7 @@ keeper 쪽 긴 실행은 전부 `turn:provider` 안이고 여전히 `append-file
 
 | 재개 → 중단 | 실행 | 최대 | 라벨 |
 |---|---|---|---|
-| `fs-compat-append-file trace-*.jsonl → fs-compat-load-file disabled.json` | 5 | 222 ms | keeper 다섯(code-reviewer·geek-scout·jazz-developer·kidsnote-pr-jira-checker·critic) |
+| `fs-compat-append-file trace-*.jsonl → fs-compat-load-file disabled.json` | 5 | 222 ms | keeper 다섯(code-reviewer·geek-scout·jazz-developer·exampleorg-pr-jira-checker·critic) |
 | `fs-compat-load-file runtime.toml → switch` | 13 | 35 ms | — |
 | `fs-compat-load-file schedules.json → openat` | 6 | 35 ms | — |
 | `fs-compat-load-file masc-tui.json → switch` | 9 | 35 ms | — |

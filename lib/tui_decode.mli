@@ -777,6 +777,7 @@ type memory_alert = {
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
+  mkh_updated_at : float option;
   mkh_facts : int;
   mkh_observed_facts : int;
   mkh_derived_facts : int;

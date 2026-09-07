@@ -57,7 +57,7 @@ let fold entries = describe (Types.fold_gate_runs (rows entries))
 
 let test_one_approval_is_one_row () =
   check (list string) "the whole run says where the effect ended up"
-    [ "Execute · 미뤘던 호출 적용됨 · 턴 이어서 진행" ]
+    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute" ]
     (fold
        [ step Approval_requested
        ; step Approval_resolved_approved
@@ -70,7 +70,7 @@ let test_the_summary_names_the_deferred_call () =
      line says what was gated even though the request row itself is gone. *)
   let summary = Some "git reflog --date=iso | head -30" in
   check (list string) "the folded line keeps the call's own words"
-    [ "tool_execute · git reflog --date=iso | head -30 · 미뤘던 호출 적용됨" ]
+    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30" ]
     (fold
        [ step ~tool:"tool_execute" ~summary Approval_requested
        ; step ~tool:"tool_execute" ~summary Approval_resolved_approved
@@ -82,7 +82,7 @@ let test_a_correction_supersedes_the_row_it_corrects () =
      canonical phase. Ranking by severity kept showing the phase the
      correction exists to overturn. *)
   check (list string) "the canonical phase is the one drawn"
-    [ "Execute · 미뤘던 호출 적용됨" ]
+    [ "미뤘던 호출 적용됨 · Execute" ]
     (fold
        [ step Approval_resolved_approved
        ; step Approval_replay_failed
@@ -91,7 +91,7 @@ let test_a_correction_supersedes_the_row_it_corrects () =
 
 let test_a_replay_outranks_the_resolution_before_it () =
   check (list string) "the outcome, not how the Gate answered"
-    [ "Execute · 적용 여부 불명 · 대상을 직접 확인하세요" ]
+    [ "적용 여부 불명 · 대상을 직접 확인하세요 · Execute" ]
     (fold
        [ step Approval_requested
        ; step Approval_resolved_approved
@@ -103,7 +103,7 @@ let test_a_problem_outranks_a_later_step () =
      has to see that the effect never landed. The turn did carry on, so that
      stays on the line -- it just does not get to be the whole line. *)
   check (list string) "the failure is the outcome, not the newest step"
-    [ "Execute · 적용 실패 · 턴 이어서 진행" ]
+    [ "적용 실패 · 턴 이어서 진행 · Execute" ]
     (fold
        [ step Approval_resolved_approved
        ; step Approval_replay_failed
@@ -112,9 +112,9 @@ let test_a_problem_outranks_a_later_step () =
 
 let test_a_waiting_request_keeps_its_own_row () =
   check (list string) "a request still waiting is not folded away"
-    [ "Execute · 판정 중 · 이 호출은 미뤄짐"
+    [ "판정 중 · 이 호출은 미뤄짐 · Execute"
     ; "말"
-    ; "Execute · 미뤘던 호출 적용됨"
+    ; "미뤘던 호출 적용됨 · Execute"
     ]
     (fold
        [ step Approval_requested
@@ -125,7 +125,7 @@ let test_a_waiting_request_keeps_its_own_row () =
 
 let test_two_approvals_stay_two_rows () =
   check (list string) "back to back approvals do not merge"
-    [ "Execute · 미뤘던 호출 적용됨"; "Write · 승인 거절" ]
+    [ "미뤘던 호출 적용됨 · Execute"; "승인 거절 · Write" ]
     (fold
        [ step ~approval:"appr_1" Approval_resolved_approved
        ; step ~approval:"appr_1" Approval_replay_applied
@@ -140,7 +140,7 @@ let test_rows_that_are_not_gate_rows_are_untouched () =
    draws it as its whole line rather than folding to nothing. *)
 let test_a_run_of_only_continuations_still_draws () =
   check (list string) "the continuation is the line"
-    [ "Execute · 턴 이어서 진행" ]
+    [ "턴 이어서 진행 · Execute" ]
     (fold [ step Approval_continuation_recorded ])
 
 (* Cells, not bytes: a Korean status word is one cell wide per glyph and three

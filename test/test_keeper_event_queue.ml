@@ -1578,32 +1578,40 @@ let () =
           |> Yojson.Safe.to_string
         in
         write_file path malformed;
-        (* The reader fails open: a snapshot this binary cannot decode starts
-           an empty queue instead of stopping the keeper. What it must never do
-           is present the malformed rows as state, and it must leave the file
-           alone so the evidence survives for the operator. *)
-        ignore expected_detail;
-        (match
-           Keeper_event_queue_persistence.load_state_result
-             ~base_path
-             ~keeper_name
-         with
+        (* Present undecodable evidence must never be promoted to an empty
+           authority, even when a later enqueue would otherwise succeed. *)
+        (match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
          | Error detail ->
-           Alcotest.failf
-             "malformed payload must fail open, got an error: %s (%s)"
-             label
-             detail
-         | Ok state ->
-           Alcotest.(check int)
-             (label ^ " starts from an empty queue")
-             0
-             (Keeper_event_queue.length
-                (Keeper_event_queue_state.pending state)));
+             Option.iter (fun expected ->
+               Alcotest.(check bool) (label ^ " exact rejection detail") true
+                 (String_util.contains_substring detail expected)) expected_detail
+         | Ok _ -> Alcotest.fail (label ^ " malformed snapshot accepted"));
+        (match Keeper_event_queue_persistence.validate_state_read_only_result
+                 ~base_path ~keeper_name with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail (label ^ " malformed read-only state accepted"));
+        let transform_called = ref false in
+        let published = ref false in
+        (match Keeper_event_queue_persistence.update_result
+                 ~base_path ~keeper_name
+                 ~after_commit:(fun () -> published := true)
+                 (fun _ -> transform_called := true; empty) with
+         | Error _ -> ()
+         | Ok () -> Alcotest.fail (label ^ " malformed snapshot overwritten"));
+        Alcotest.(check bool) (label ^ " mutation did not begin") false !transform_called;
+        Alcotest.(check bool) (label ^ " live state not published") false !published;
         Alcotest.(check string)
           (label ^ " evidence is not rewritten")
           malformed
           (read_file path))
   in
+  assert_strict_persisted_rejected
+    ~label:"unsupported-schema"
+    ~rewrite:(function
+      | `Assoc fields -> `Assoc (("schema", `String "unsupported-schema")
+                                :: List.remove_assoc "schema" fields)
+      | _ -> Alcotest.fail "snapshot was not an object")
+    ~expected_detail:(Some "schema");
   assert_strict_persisted_rejected
     ~label:"missing-terminal"
     ~rewrite:(remove_payload_field ~kind:"fusion_completed" ~field:"terminal")
@@ -1718,6 +1726,8 @@ let () =
         ~base_path
         ~keeper_name:runnable_keeper
         (enqueue empty runnable_pending);
+      let runnable_snapshot = snapshot_path ~base_path ~keeper_name:runnable_keeper in
+      let before_observation = read_file runnable_snapshot in
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in
@@ -1737,6 +1747,15 @@ let () =
           ~base_path
           ~owner_lifecycle
       in
+      Alcotest.(check string) "age observation leaves durable snapshot bytes unchanged"
+        before_observation (read_file runnable_snapshot);
+      let residence = match json_field "queue_residence" json with
+        | Some value -> value | None -> Alcotest.fail "queue residence missing" in
+      Alcotest.(check string) "first admission was not recorded" "first_admission_not_recorded"
+        (string_field "reason" residence);
+      Alcotest.(check bool) "residence is explicitly unknown, never source age" true
+        (json_field "oldest_age_seconds" residence = Some `Null
+         && string_field "status" residence = "unknown");
       Alcotest.(check string) "summary status" "degraded" (string_field "status" json);
       Alcotest.(check int)
         "keeper_count excludes snapshotless runtime dirs"
@@ -1745,9 +1764,9 @@ let () =
       Alcotest.(check int) "pending_count" 3 (int_field "pending_count" json);
       Alcotest.(check int) "total_count" 3 (int_field "total_count" json);
       Alcotest.(check (float 0.001))
-        "oldest_age_seconds"
+        "oldest_source_age_seconds"
         25.0
-        (float_field "oldest_age_seconds" json);
+        (float_field "oldest_source_age_seconds" json);
       Alcotest.(check int)
         "runnable backlog count excludes paused owner"
         1
@@ -1755,7 +1774,7 @@ let () =
       Alcotest.(check (float 0.001))
         "runnable oldest age excludes paused owner"
         25.0
-        (float_field "runnable_oldest_age_seconds" json);
+        (float_field "runnable_oldest_source_age_seconds" json);
       Alcotest.(check int)
         "paused/dead backlog count"
         2
@@ -1767,7 +1786,7 @@ let () =
       Alcotest.(check (float 0.001))
         "paused/dead oldest age"
         20.0
-        (float_field "paused_dead_oldest_age_seconds" json);
+        (float_field "paused_dead_oldest_source_age_seconds" json);
       Alcotest.(check bool)
         "paused/dead work requires explicit operator action"
         true
@@ -1797,7 +1816,7 @@ let () =
       Alcotest.(check (float 0.001))
         "runnable keeper oldest age"
         25.0
-        (float_field "oldest_age_seconds" runnable_summary);
+        (float_field "oldest_source_age_seconds" runnable_summary);
       let retained_disabled_json =
         Keeper_event_queue_persistence.fleet_summary_json
           ~now:30.0
@@ -1957,8 +1976,8 @@ let () =
         false
         (bool_field "operator_action_required" json));
 
-  (* --- durable fleet summary: fail-open recovery from an unreadable primary
-     must remain visible even when the recovered orphan queue is empty. --- *)
+  (* --- durable fleet summary: unreadable primary evidence remains visible,
+     and unavailable counts must not be presented as a known empty queue. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary-corrupt-orphan" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
@@ -2010,6 +2029,35 @@ let () =
     | Ok meta -> meta
     | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
   in
+
+  (* One unreadable owner cannot register an empty projection or prevent a
+     healthy sibling owner from registering and durably accepting work. *)
+  let base_path = temp_dir "keeper-event-queue-owner-isolation" in
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_registry.For_testing.clear (); rm_rf base_path)
+    (fun () ->
+      Masc.Keeper_registry.For_testing.clear ();
+      let bad = "undecodable-owner" and healthy = "healthy-owner" in
+      let path = snapshot_path ~base_path ~keeper_name:bad in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      let bytes = {|{"schema":"unsupported-schema","pending":[{"evidence":"retain"}]}|} in
+      write_file path bytes;
+      (match Masc.Keeper_registry.register_offline_if_admitted ~base_path bad
+               (meta_for_keeper bad "trace-undecodable-owner") with
+       | Error (Masc.Keeper_registry.Registration_event_queue_unavailable _) -> ()
+       | Error _ -> Alcotest.fail "unexpected registration failure"
+       | Ok _ -> Alcotest.fail "undecodable owner registered as empty");
+      (match Masc.Keeper_registry.register_offline_if_admitted ~base_path healthy
+               (meta_for_keeper healthy "trace-healthy-owner") with
+       | Ok _ -> ()
+       | Error _ -> Alcotest.fail "healthy sibling registration was blocked");
+      (match Masc.Keeper_registry_event_queue.enqueue_durable_result
+               ~base_path healthy board_stim with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check int) "healthy owner durably accepts work" 1
+        (length (registry_snapshot ~base_path healthy));
+      Alcotest.(check string) "other owner evidence survives" bytes (read_file path));
 
   (* --- registry identity barrier: [base] and [base/.masc] must address one
      live atomic and the same durable owner. Two registrations followed by one

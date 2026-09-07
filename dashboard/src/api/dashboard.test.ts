@@ -1350,11 +1350,11 @@ describe('fetchDashboardTools', () => {
       waiting_keeper_count: 1,
       row_count: 1,
       keepers: [{
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         state: 'waiting',
         waiting_count: 1,
         waiting_on: [{
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           source: 'event_queue_pending',
           waiting_on: 'schedule_due',
           next_action: 'keeper_consume_event',
@@ -1369,10 +1369,10 @@ describe('fetchDashboardTools', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchKeeperWaitingInventory('kidsnote')
+    const result = await fetchKeeperWaitingInventory('exampleorg')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/kidsnote/waiting-inventory')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/exampleorg/waiting-inventory')
     expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
   })
 
@@ -1561,10 +1561,10 @@ describe('fetchDashboardFullHealth', () => {
         last_error_age_sec: null,
       },
       keeper_event_queue: {
-        schema: 'masc.keeper_event_queue.fleet_summary.v4',
-        status: 'degraded',
-        operator_action_required: true,
-        status_reasons: ['runnable_backlog', 'runnable_backlog_stale'],
+        schema: 'masc.keeper_event_queue.fleet_summary.v5',
+        status: 'warning',
+        operator_action_required: false,
+        status_reasons: ['runnable_backlog=18'],
         backlog_clean: false,
         storage_integrity: {
           status: 'ok',
@@ -1574,12 +1574,12 @@ describe('fetchDashboardFullHealth', () => {
           operator_action_required: false,
         },
         work_liveness: {
-          status: 'degraded',
-          state: 'stalled',
+          status: 'warning',
+          state: 'backlogged',
           runnable_backlog_count: 18,
-          runnable_oldest_age_seconds: 3360,
-          stale_after_seconds: 300,
-          operator_action_required: true,
+          runnable_oldest_source_age_seconds: 3360,
+          queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
+          operator_action_required: false,
         },
       },
     }
@@ -1621,15 +1621,29 @@ describe('fetchDashboardFullHealth', () => {
       last_error_age_sec: null,
     })
     expect(result.keeper_event_queue).toMatchObject({
-      status: 'degraded',
+      status: 'warning',
       backlog_clean: false,
       storage_integrity: { status: 'ok', counts_complete: true },
       work_liveness: {
-        status: 'degraded',
-        state: 'stalled',
+        status: 'warning',
+        state: 'backlogged',
         runnable_backlog_count: 18,
+        runnable_oldest_source_age_seconds: 3360,
+        queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
       },
     })
+  })
+
+  it('does not interpret a numeric residence with unknown status as evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper_event_queue: { status: 'warning', work_liveness: {
+        state: 'backlogged', runnable_backlog_count: 1, runnable_oldest_source_age_seconds: 6000,
+        queue_residence: { status: 'unknown', oldest_age_seconds: 6000, reason: 'first_admission_not_recorded' },
+      } },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await fetchDashboardFullHealth()
+    expect(result.keeper_event_queue?.work_liveness?.runnable_oldest_source_age_seconds).toBe(6000)
+    expect(result.keeper_event_queue?.work_liveness?.queue_residence).toBeNull()
   })
 
   it('preserves the backend blocked queue liveness state', async () => {
@@ -1644,8 +1658,8 @@ describe('fetchDashboardFullHealth', () => {
             status: 'warning',
             state: 'blocked',
             runnable_backlog_count: 0,
-            runnable_oldest_age_seconds: null,
-            stale_after_seconds: 300,
+            runnable_oldest_source_age_seconds: null,
+            queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
             operator_action_required: false,
           },
         },
@@ -2248,7 +2262,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'manual',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -2257,7 +2271,7 @@ describe('fetchDashboardGate', () => {
         keeper_modes_state: { state: 'ready' },
         keeper_exact_lanes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             lane_id: 'hitl_auto_judge',
             slot_id: 'glm-coding.glm-5-turbo',
             updated_by: 'vincent',
@@ -2273,7 +2287,7 @@ describe('fetchDashboardGate', () => {
 
     expect(result.keeper_modes).toEqual([
       {
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         mode: 'manual',
         updated_by: 'vincent',
         updated_at: '2026-08-27T05:00:00Z',
@@ -2315,7 +2329,7 @@ describe('fetchDashboardGate', () => {
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
         keeper_exact_lanes: [{
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
@@ -2343,7 +2357,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'manual',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -2369,7 +2383,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'ask_nicely',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',

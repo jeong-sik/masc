@@ -83,9 +83,11 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     Failure classes (RFC-0189):
     - [Workflow_rejection]: invalid or rejected URL — caller-input
       violation (blocked destinations included).
-    - [Dependency_unavailable]:    rate-limit hit + transport-layer failure;
-                            both retry-friendly.
-    - [Runtime_failure]:    upstream HTTP non-2xx or missing status. *)
+    - [Dependency_unavailable]: transport failure or upstream HTTP non-2xx.
+      HTTP failures retain [upstream_http_status] in metadata and provide
+      status-specific guidance. This does not establish retryability or
+      authorize access to the resource. HTTP failures are not cached.
+    - [Runtime_failure]: missing status or an unsupported response format. *)
 
 type fetch_response =
   { http_status : int option

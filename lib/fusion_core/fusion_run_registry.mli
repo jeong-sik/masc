@@ -84,7 +84,8 @@ val register_running
 
 val mark_completed : t -> run_id:string -> outcome:outcome -> unit
 (** Complete a registered run. An unknown [run_id] is logged and is not written
-    to the append-only log. *)
+    to the append-only log. Re-projecting a completed run preserves its first
+    [finished_at], including after replay, while updating its outcome. *)
 
 val mark_progress : t -> run_id:string -> progress:progress -> unit
 (** Update the live stage only while the exact run remains [Running]. Unknown

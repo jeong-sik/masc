@@ -9,6 +9,5 @@ jade-heron
 masc-improver
 rondo
 sojin
-kidsnote
 idealist
 issue_king

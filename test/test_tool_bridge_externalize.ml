@@ -356,17 +356,17 @@ let test_to_agent_core_dependency_failure_carries_no_replay_hint () =
      | Some Agent_core.Types.Transient -> ()
      | _ -> Alcotest.fail "expected transient diagnostic class")
 
-(* Every class has exactly one sentence, and it reaches the model as the last
-   line of the failure content. The sentences are pinned here because they are
-   the whole point: a Keeper that sees [dependency_unavailable] and reads that
-   other arguments fail the same way stops probing; one that sees
-   [policy_rejection] corrects the named field once. *)
+(* Each class supplies model-facing guidance from the real prompt asset.
+   Dependency classification alone cannot establish retryability or whether
+   the upstream accepted the resource/authentication in this request. *)
 let expected_next_moves =
   [ ( Tool_result.Dependency_unavailable
     , "dependency_unavailable"
-    , "The dependency this tool needs did not answer. Your arguments were not \
-       judged, so the same call with other arguments fails the same way. Do \
-       other work or end the turn; it can answer on a later turn." )
+    , "An external dependency could not fulfill this call. Read the failure \
+       details: the cause may be transport, authentication, resource \
+       availability, or a remote service response. This class alone does not \
+       establish retryability. Use the stated cause to choose the next action; \
+       do not assume that changing arguments or waiting will resolve it." )
   ; ( Tool_result.Policy_rejection
     , "policy_rejection"
     , "Rejected before running. The message above names the field or \

@@ -19,7 +19,7 @@
     "over_24h": 5
   },
   "longest_runs": [
-    { "task": "task-096", "hours": 96.1, "from": "2026-07-30T13:22Z", "to": "2026-08-03T13:30Z", "completed_by": "keeper-kidsnote-agent" },
+    { "task": "task-096", "hours": 96.1, "from": "2026-07-30T13:22Z", "to": "2026-08-03T13:30Z", "completed_by": "keeper-exampleorg-agent" },
     { "task": "task-049", "hours": 74.9, "from": "2026-07-30T00:20Z", "to": "2026-08-02T03:15Z", "completed_by": "keeper-executor-agent" },
     { "task": "task-053", "hours": 74.4, "from": "2026-07-30T00:52Z", "to": "2026-08-02T03:15Z", "completed_by": "keeper-executor-agent" },
     { "task": "task-069", "hours": 73.5, "from": "2026-07-30T01:44Z", "to": "2026-08-02T03:15Z", "completed_by": "keeper-executor-agent" },

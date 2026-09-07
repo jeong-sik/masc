@@ -1254,7 +1254,8 @@ let try_cli_slots
     let prompt = cli_prompt ~context_bundle:prepared.context_bundle in
     let prompt_sha = Digestif.SHA256.(digest_string prompt |> to_hex) in
     let quarantine_cause_of_failure = function
-      | Keeper_lane_cli_oneshot.Invalid_json_output _ -> Exact_domain_invalid_output
+      | Keeper_lane_cli_oneshot.Invalid_json_output _
+      | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> Exact_domain_invalid_output
       | Keeper_lane_cli_oneshot.Not_an_official_client _
       | Keeper_lane_cli_oneshot.Execution_failed _ -> Exact_flow_execution_failed
     in

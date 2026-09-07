@@ -269,11 +269,16 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
       in
+      let scrolled =
+        if state.view = Memory && Option.is_none state.memory_facts_keeper then
+          memory_overview_scrolled ~cursor state
+        else scrolled
+      in
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the
@@ -7823,6 +7828,8 @@ let apply_planning_load state = function
         Planning_selection.reconcile ~current_ids
           ~next_ids:(goal_ids planning) ~current
       in
+      if Option.is_none state.planning_baseline then
+        state.planning_baseline <- Some planning;
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -11814,8 +11821,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         launch_runtime_surface_load state ~mailbox ~force:true
       end
   | Workspace_activity_loaded (request, result) ->
-      state.workspace_activity <- Masc_tui_fetched.complete ~equal:String.equal
-        state.workspace_activity request result
+      apply_workspace_activity_read state request result
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -12414,6 +12420,12 @@ let main () =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
+  (match Masc_tui_config.board_sort ~base_path with
+   | None -> ()
+   | Some value ->
+       (match board_sort_of_string value with
+        | Some sort -> state.board_sort <- sort
+        | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
   (match Masc_tui_config.theme ~base_path with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
@@ -15091,6 +15103,15 @@ and is loaded on demand through keeper_skill.
                      (match index_of 0 state.tasks with
                       | Some index -> state.task_cursor <- index
                       | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
+                     state.board_hearth <- hearth;
+                     state.board_cursor <- 0;
+                     state.board_mode <- Board_list;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_http_refresh state ~host:server_peer_host ~port:state.port
+                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_board_post post_id) ->
                      goto_surface state ~mailbox:async_messages Board;
                      let rec find i = function
@@ -15530,21 +15551,14 @@ and is loaded on demand through keeper_skill.
              (state.workspace_activity_cursor + delta))
        | Some ("\r" | "\n" | "right")
          when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           (match List.nth_opt (workspace_activity_rows state) state.workspace_activity_cursor with
-            | None -> ()
-            | Some (change, path) ->
-                state.code_scope <- Code_scope_keeper change.Tui_decode.fc_keeper;
-                state.code_dir <- "";
-                state.code_cursor <- 0;
-                state.code_entries <- [];
-                state.code_entries_error <- None;
-                state.code_file <- Masc_tui_fetched.clear state.code_file;
-                state.code_focus_file <- Right_pane;
-                state.followed_from <- Some (state.view, None);
-                state.view <- Code;
-                Option.iter (fun repo_id -> launch_code_file_load state ~mailbox:async_messages
-                    ~path:(Playground_paths.bundle_relative_repo_path ~repo_id path))
-                  state.workspace_activity_repo)
+           let _, _, selected = workspace_activity_selection state in
+           (match state.workspace_activity_repo, selected with
+            | Some repo_id, Some (change, relative_path) ->
+                let path = Playground_paths.bundle_relative_repo_path ~repo_id relative_path in
+                enter_keeper_code_file state ~keeper:change.Tui_decode.fc_keeper ~path;
+                launch_code_entries_load state ~mailbox:async_messages;
+                launch_code_file_load state ~mailbox:async_messages ~path
+            | None, _ | _, None -> ())
        | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "/"
@@ -16202,6 +16216,11 @@ and is loaded on demand through keeper_skill.
               with
               | index :: _ -> index
               | [] -> 0)
+       | Some "H" when state.view = Board && state.board_mode <> Board_compose ->
+           state.palette_open <- true;
+           state.palette_mode <- Palette_jump;
+           state.palette_query <- "hearth ";
+           state.palette_cursor <- 0
        | Some ":" ->
            state.palette_open <- true;
            state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -18278,10 +18297,9 @@ and is loaded on demand through keeper_skill.
                        keeper's facts themselves. *)
                     match state.memory_health with
                     | None -> ()
-                    | Some snapshot -> (
+                    | Some _ -> (
                         match
-                          List.nth_opt snapshot.Masc.Tui_decode.mhs_keepers
-                            state.memory_health_cursor
+                          selected_memory_keeper state
                         with
                         | None -> ()
                         | Some keeper ->
@@ -18389,8 +18407,8 @@ and is loaded on demand through keeper_skill.
               [fetch_board] -- so this refetches rather than filtering the
               page in hand. *)
            state.board_hearth <-
-             Board_hearth.next ~current:state.board_hearth
-               ~census:state.board_hearths;
+             (if key = Some "F" then Board_hearth.previous else Board_hearth.next)
+               ~current:state.board_hearth ~census:state.board_hearths;
            state.board_cursor <- 0;
            state.board_mode <- Board_list;
            add_event state "system"
@@ -19165,6 +19183,9 @@ and is loaded on demand through keeper_skill.
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
                      state.board_sort <- next_board_sort state.board_sort;
+                     (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
+                      | Ok () -> ()
+                      | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
                      add_event state "system"
                        ("Board order: "
                         ^ board_sort_label state.board_sort);

@@ -154,6 +154,13 @@ let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
   }
 ;;
 
+let canonical_checkpoint_sink ~replay_prefix_projection sink
+    (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection snapshot.checkpoint with
+  | Error error -> Error (Keeper_replay_prefix.restore_error_to_string error)
+  | Ok checkpoint -> sink { snapshot with checkpoint }
+;;
+
 let project_provider_attempt_result ~replay_prefix_projection provider_result =
   let turn_result =
     match provider_result with
@@ -749,16 +756,36 @@ let project_input_for_attempt
          | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
          | None -> stripped_initial
        in
+       let replay_projection =
+         match goal_blocks with
+         | Some canonical_blocks when canonical_blocks <> goal_with_note ->
+           (* Agent_input.append_user_input appends this exact sanitized User
+              message after the seed history. Record the boundary now, before
+              the provider can append answers, tools or injected context. *)
+           let input_message blocks =
+             Agent_core.Types.user_msg_blocks
+               (List.map
+                  (function
+                    | Agent_core.Types.Text text ->
+                      Agent_core.Types.Text (Llm_provider.Utf8_sanitize.sanitize text)
+                    | block -> block)
+                  blocks)
+           in
+           Keeper_replay_prefix.media_degraded_with_current_input
+             ~canonical_prefix:initial_messages ~dispatch_prefix
+             ~canonical_input:(input_message canonical_blocks)
+             ~dispatch_input:(input_message goal_with_note)
+         | Some _ | None ->
+           Keeper_replay_prefix.media_degraded
+             ~canonical_prefix:initial_messages ~dispatch_prefix
+       in
        { attempt_goal_blocks =
            (match goal_blocks, goal_with_note with
             | None, [] -> None
             | _ -> Some goal_with_note)
        ; attempt_initial_messages = stripped_initial
        ; attempt_agent_core_checkpoint = stripped_checkpoint
-       ; attempt_replay_prefix_projection =
-           Keeper_replay_prefix.media_degraded
-             ~canonical_prefix:initial_messages
-             ~dispatch_prefix
+       ; attempt_replay_prefix_projection = replay_projection
        })
 
 type attempt_inference_policy =
@@ -1572,7 +1599,10 @@ let run_named
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
-            ; checkpoint_sink
+            ; checkpoint_sink =
+                Option.map
+                  (canonical_checkpoint_sink ~replay_prefix_projection)
+                  checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector
             ; context
@@ -1624,6 +1654,7 @@ module For_testing = struct
   ;;
 
   let project_provider_attempt_result = project_provider_attempt_result
+  let canonical_checkpoint_sink = canonical_checkpoint_sink
   let provider_result outcomes = outcomes.provider_result
   let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt

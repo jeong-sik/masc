@@ -10,8 +10,14 @@ type failure =
       { runtime_id : string
       ; detail : string
       }
+  | Invalid_domain_output of
+      { runtime_id : string
+      ; detail : string
+      }
 
 let failure_to_string = function
+  | Invalid_domain_output { runtime_id; detail } ->
+    Printf.sprintf "cli lane slot %s answered invalid domain output: %s" runtime_id detail
   | Not_an_official_client { runtime_id } ->
     Printf.sprintf "cli lane slot %s is not an official-client runtime" runtime_id
   | Execution_failed { runtime_id; detail } ->
@@ -81,14 +87,21 @@ let order_slots slots =
     slots
 ;;
 
-let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt () =
-  let rec loop failures slots =
+let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
+  let rec reject failures rest failure =
+    on_failure failure;
+    loop (failure :: failures) rest
+  and loop failures slots =
     match order_slots slots with
     | [] -> Error (List.rev failures)
     | runtime_id :: rest ->
       (match run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with
-       | Ok value -> Ok (runtime_id, value)
-       | Error failure -> loop (failure :: failures) rest)
+       | Ok value ->
+         (match validate value with
+          | Ok accepted -> Ok (runtime_id, accepted)
+          | Error detail ->
+            reject failures rest (Invalid_domain_output { runtime_id; detail }))
+       | Error failure -> reject failures rest failure)
   in
   loop [] cli_slots
 ;;

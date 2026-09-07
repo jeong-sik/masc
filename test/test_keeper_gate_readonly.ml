@@ -710,7 +710,7 @@ let test_auto_judge_allows_a_clean_observe_run () =
         incr asked;
         Keeper_gate.Observed_result
           { run = Keeper_types_profile_sandbox.Observe
-          ; result = { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout = "1\n"; stderr = "" }
+          ; result = { output_files = None; Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout = "1\n"; stderr = "" }
           })
       (boxed_request base_path)
   with
@@ -744,7 +744,7 @@ let test_git_observation_returns_without_judge_queueing () =
             incr asked;
             Keeper_gate.Observed_result
               { run = Keeper_types_profile_sandbox.Observe
-              ; result = { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout; stderr = "" }
+              ; result = { output_files = None; Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout; stderr = "" }
               })
           (gate_request ~sandbox_profile:microvm base_path argv)
       in

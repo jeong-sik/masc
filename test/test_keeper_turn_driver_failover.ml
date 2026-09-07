@@ -1113,18 +1113,116 @@ let test_image_fallback_checkpoint_keeps_canonical_prefix () =
          ~initial_messages:text.Driver.attempt_initial_messages
          ~goal_blocks:(Option.value text.Driver.attempt_goal_blocks ~default:[]));
     let suffix = [ message [ Agent_core.Types.Text "answer" ] ] in
+    let current_input = Agent_core.Types.user_msg_blocks
+        (Option.get text.Driver.attempt_goal_blocks) in
     (match Masc.Keeper_replay_prefix.restore_messages
              text.Driver.attempt_replay_prefix_projection
-             (dispatch_checkpoint.messages @ suffix) with
+             (dispatch_checkpoint.messages @ [ current_input ] @ suffix) with
      | Error error -> Alcotest.fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
      | Ok restored ->
        Alcotest.(check bool) "persisted prefix keeps the original image"
-         true (restored = history @ suffix));
+         true (restored = history @ [ Agent_core.Types.user_msg_blocks [ image ] ] @ suffix));
     let vision = project "lanevision.vision_model" in
     Alcotest.(check bool) "a later vision candidate gets the original checkpoint"
       true (vision.Driver.attempt_agent_core_checkpoint = Some checkpoint);
     Alcotest.(check bool) "a later vision candidate gets the original goal"
       true (vision.Driver.attempt_goal_blocks = Some [ image ]))
+
+let test_current_image_checkpoint_survives_text_fallback () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id = match Runtime.get_runtime_by_id id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" id in
+    let image = Agent_core.Types.image_block ~media_type:"image/png"
+        ~data:(Base64.encode_string "original current-goal pixels") () in
+    let canonical_blocks = [ Agent_core.Types.Text "inspect this"; image ] in
+    let history = [ message [ Agent_core.Types.Text "previous turn" ] ] in
+    let checkpoint =
+      { (checkpoint_with_session_id "current-image-checkpoint") with messages = history } in
+    (* Only the semantic-reader boundary is substituted. The driver captures
+       the exact current-input boundary and restores the emitted checkpoint. *)
+    let project_images ~mode:_ blocks =
+      { Masc.Keeper_vision_ingest.blocks =
+          List.map (function
+            | Agent_core.Types.Image _ -> Agent_core.Types.Text "[image reading: blue circle]"
+            | block -> block) blocks
+      ; delegated_images = image_count_in_blocks blocks } in
+    let text_view = Driver.For_testing.project_input_for_attempt
+        ~project_images ~keeper_name:"current-image-checkpoint"
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks:(Some canonical_blocks) ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint)
+        ~runtime_id:"primary.text_model" (runtime "primary.text_model") in
+    let projected_input = Agent_core.Types.user_msg_blocks
+        (Option.get text_view.Driver.attempt_goal_blocks) in
+    let canonical_input = Agent_core.Types.user_msg_blocks canonical_blocks in
+    let dispatch_prefix =
+      (Option.get text_view.Driver.attempt_agent_core_checkpoint).messages in
+    let suffix =
+      [ message [ Agent_core.Types.ToolUse
+          { id = "status-call"; name = "status"; input = `Assoc [] } ]
+      ; message ~role:Agent_core.Types.Tool
+          [ Agent_core.Types.ToolResult
+              { tool_use_id = "status-call"; content = "unchanged tool answer"
+              ; outcome = Agent_core.Types.Tool_succeeded; json = None
+              ; content_blocks = None } ]
+      ; message ~role:Agent_core.Types.User [ Agent_core.Types.Text "injected context" ]
+      ; message [ Agent_core.Types.Text "The circle is blue." ] ] in
+    let provider_checkpoint =
+      { checkpoint with messages = dispatch_prefix @ [ projected_input ] @ suffix } in
+    let provider_result =
+      { (completed_run_result ()) with checkpoint = Some provider_checkpoint } in
+    let projection = text_view.Driver.attempt_replay_prefix_projection in
+    let restored =
+      match Driver.For_testing.project_provider_attempt_result
+              ~replay_prefix_projection:projection (Ok provider_result)
+            |> Driver.For_testing.turn_result with
+      | Ok { Runtime_agent.checkpoint = Some checkpoint; _ } -> checkpoint
+      | Ok _ -> Alcotest.fail "successful text fallback lost its checkpoint"
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+    Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
+      true (restored.messages = history @ [ canonical_input ] @ suffix);
+    let persisted = ref [] in
+    let sink = Driver.For_testing.canonical_checkpoint_sink
+        ~replay_prefix_projection:projection
+        (fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
+          persisted := snapshot.checkpoint :: !persisted; Ok ()) in
+    let snapshot checkpoint =
+      { Agent_core.Agent.stage = Agent_core.Agent.After_tool_results_appended
+      ; turn = 1; timestamp = 1.; checkpoint } in
+    (match sink (snapshot provider_checkpoint) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    Alcotest.(check bool) "mutation-boundary sink also stores canonical current input"
+      true ((List.hd !persisted).messages = restored.messages);
+    (match sink (snapshot restored) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    Alcotest.(check bool) "already-canonical checkpoints remain identical"
+      true ((List.hd !persisted).messages = restored.messages);
+    let bad_inputs =
+      [ suffix
+      ; message ~role:Agent_core.Types.User [ Agent_core.Types.Text "different input" ]
+        :: projected_input :: suffix
+      ; { projected_input with role = Agent_core.Types.Assistant } :: suffix
+      ; { projected_input with metadata = [ "unexpected", `Bool true ] } :: suffix ] in
+    List.iter (fun bad_suffix ->
+      match sink (snapshot { provider_checkpoint with messages = dispatch_prefix @ bad_suffix }) with
+      | Error _ -> ()
+      | Ok () -> Alcotest.fail "mismatched current input reached checkpoint persistence") bad_inputs;
+    Alcotest.(check int) "invalid boundaries never call the persistence sink" 2 (List.length !persisted);
+    let reloaded =
+      match Agent_core.Checkpoint.of_json (Agent_core.Checkpoint.to_json restored) with
+      | Ok checkpoint -> checkpoint
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+    let native_view = Driver.For_testing.project_input_for_attempt
+        ~project_images ~keeper_name:"current-image-checkpoint"
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ])
+        ~initial_messages:reloaded.messages ~agent_core_checkpoint:(Some reloaded)
+        ~runtime_id:"lanevision.vision_model" (runtime "lanevision.vision_model") in
+    Alcotest.(check bool) "fresh native turn recovers the persisted canonical image blocks"
+      true (native_view.Driver.attempt_initial_messages = history @ [ canonical_input ] @ suffix);
+    Alcotest.(check bool) "native checkpoint replay retains original current-input bytes"
+      true (native_view.Driver.attempt_agent_core_checkpoint = Some reloaded))
 
 (* Drives a two-candidate deferred lane through [run_named] on an image turn
    and records, per dispatched candidate, whether the history the provider
@@ -2855,6 +2953,10 @@ let () =
             "image fallback restores canonical checkpoint and later vision input"
             `Quick
             test_image_fallback_checkpoint_keeps_canonical_prefix;
+          Alcotest.test_case
+            "text fallback preserves the current input at both checkpoint boundaries"
+            `Quick
+            test_current_image_checkpoint_survives_text_fallback;
           Alcotest.test_case
             "deferred lane vision then text projects per candidate"
             `Quick

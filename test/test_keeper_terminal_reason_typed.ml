@@ -1411,31 +1411,36 @@ let () =
       ; "read_error_count", `Int 0
       ; "transition_outbox_count", `Int 0
       ; "runnable_backlog_count", `Int count
-      ; "runnable_oldest_age_seconds", oldest_age
+      ; "runnable_oldest_source_age_seconds", oldest_age
       ; "recoverable_backlog_count", `Int 0
       ; "retained_disabled_backlog_count", `Int 0
       ; "paused_dead_backlog_count", `Int 0
       ; "shutdown_fenced_backlog_count", `Int 0
       ]
   in
-  let stalled =
+  let old_source =
     Health_fleet.keeper_event_queue_health_dimensions
-      ~stale_after_sec:300.0
-      (queue ~count:2 ~oldest_age:(`Float 600.0))
+      (queue ~count:2 ~oldest_age:(`Float 6000.0))
   in
   check
-    "healthy storage remains distinct from stalled work"
-    (String.equal (string_member "status" (member "storage_integrity" stalled)) "ok"
-     && String.equal (string_member "state" (member "work_liveness" stalled)) "stalled");
-  check
-    "stalled runnable work degrades queue status"
-    (String.equal (string_member "status" stalled) "degraded");
-  check
-    "runnable backlog is never backlog-clean"
-    (member "backlog_clean" stalled = `Bool false);
+    "old source with healthy storage is backlogged, not a measured stall"
+    (String.equal (string_member "status" (member "storage_integrity" old_source)) "ok"
+     && String.equal (string_member "state" (member "work_liveness" old_source)) "backlogged");
+  check "old source retains warning and exact pending count"
+    (String.equal (string_member "status" old_source) "warning"
+     && member "runnable_backlog_count" (member "work_liveness" old_source) = `Int 2);
+  let residence = member "queue_residence" (member "work_liveness" old_source) in
+  check "source age is not silently used as queue residence"
+    (member "oldest_age_seconds" residence = `Null
+     && string_member "status" residence = "unknown"
+     && string_member "reason" residence = "first_admission_not_recorded"
+     && member "runnable_oldest_source_age_seconds" (member "work_liveness" old_source) = `Float 6000.0);
+  check "old source alone does not demand operator intervention"
+    (member "operator_action_required" old_source = `Bool false);
+  check "runnable backlog is never backlog-clean"
+    (member "backlog_clean" old_source = `Bool false);
   let fresh_backlog =
     Health_fleet.keeper_event_queue_health_dimensions
-      ~stale_after_sec:300.0
       (queue ~count:1 ~oldest_age:(`Float 5.0))
   in
   check
@@ -1455,7 +1460,6 @@ let () =
   in
   let recoverable =
     Health_fleet.keeper_event_queue_health_dimensions
-      ~stale_after_sec:300.0
       recoverable
   in
   check
@@ -1485,7 +1489,6 @@ let () =
   in
   let projection_pending =
     Health_fleet.keeper_event_queue_health_dimensions
-      ~stale_after_sec:300.0
       projection_pending
   in
   check
@@ -1493,18 +1496,16 @@ let () =
     (member "backlog_clean" projection_pending = `Bool false);
   let immediate_backlog =
     Health_fleet.keeper_event_queue_health_dimensions
-      ~stale_after_sec:0.0
       (queue ~count:1 ~oldest_age:(`Float 0.0))
   in
   check
-    "zero-second threshold degrades runnable backlog immediately"
-    (String.equal (string_member "status" immediate_backlog) "degraded");
+    "new source is still pending work"
+    (String.equal (string_member "status" immediate_backlog) "warning");
   check
-    "zero-second threshold requires operator action immediately"
-    (member "operator_action_required" immediate_backlog = `Bool true);
+    "new source does not demand operator action solely by age"
+    (member "operator_action_required" immediate_backlog = `Bool false);
   let unavailable =
     Health_fleet.keeper_event_queue_health_dimensions
-      ~stale_after_sec:300.0
       (`Assoc
          [ "status", `String "unavailable"
          ; "counts_complete", `Bool false
@@ -1513,7 +1514,9 @@ let () =
   in
   check
     "unavailable queue never claims backlog clean"
-    (member "backlog_clean" unavailable = `Bool false)
+    (member "backlog_clean" unavailable = `Bool false);
+  check "unavailable queue explains unknown residence"
+    (string_member "reason" (member "queue_residence" unavailable) = "queue_observation_incomplete")
 ;;
 
 (* The shape reported on 2026-08-29: a turn routed to two lane candidates, the

@@ -778,9 +778,27 @@ let inspect_producer_relative_artifact ?artifact_read ~base_path ~worker ~refere
     match artifact_read with
     | Some read -> (
         match read ~worker ~relative:relative_path with
-        | Ok (content, bytes, truncated) ->
-            Evidence_artifact { reference; content; bytes; truncated }
-        | Error reason -> Evidence_artifact_unreadable { reference; reason })
+        | Error reason -> Evidence_artifact_unreadable { reference; reason }
+        | Ok (content, bytes, truncated) -> (
+            (* An artifact is text evidence, and the direct host read holds
+               that line with [scan_utf8]; an injected reader hands back bytes
+               from another lane (a guest [cat]), so the same scan holds the
+               line here too: every reader answers under one boundary, and a
+               truncated read may stop mid-character the way the direct
+               prefix can. *)
+            match scan_utf8 content with
+            | Utf8_valid ->
+              Evidence_artifact { reference; content; bytes; truncated }
+            | Utf8_incomplete_at index when truncated ->
+              Evidence_artifact
+                { reference
+                ; content = String.sub content 0 index
+                ; bytes
+                ; truncated = true
+                }
+            | Utf8_incomplete_at _ | Utf8_invalid ->
+              Evidence_artifact_unreadable
+                { reference; reason = Evidence_invalid_utf8 }))
     | None -> (
     let project_root = project_root_of_base_path base_path in
     let ownership_root =

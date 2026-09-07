@@ -2965,6 +2965,40 @@ let test_injected_artifact_read_answers_the_snapshot () =
         "read_error"
         (List.nth items 1 |> member "reason" |> member "code" |> to_string))
 
+(* An injected reader answers under the same text line the direct read
+   holds: binary bytes are typed invalid_utf8, and a truncated read may stop
+   mid-character exactly where the direct prefix can. *)
+let test_an_injected_reader_answers_under_the_text_line () =
+  with_temp_dir (fun base_path ->
+      let artifact_read =
+        Some
+          (fun ~worker ~relative ->
+             ignore worker;
+             if String.equal relative "logo.png" then
+               Ok ("\xff\xd8\xff\xe0garbage", 12, false)
+             else if String.equal relative "cut.txt" then Ok ("abc\xe2\x82", 5, true)
+             else Error (VS.Evidence_read_error "backend: not found"))
+      in
+      let json =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:logo.png"; "artifact:cut.txt" ]
+      in
+      let open Yojson.Safe.Util in
+      let items = json |> to_list in
+      Alcotest.(check string) "binary bytes are refused, typed"
+        "artifact_unreadable"
+        (List.nth items 0 |> member "kind" |> to_string);
+      Alcotest.(check string) "with the text-line reason"
+        "invalid_utf8"
+        (List.nth items 0 |> member "reason" |> member "code" |> to_string);
+      Alcotest.(check string) "a truncated multibyte cut keeps the whole characters"
+        "abc" (List.nth items 1 |> member "content" |> to_string);
+      Alcotest.(check bool) "and stays marked truncated"
+        true (List.nth items 1 |> member "truncated" |> to_bool))
+
 let test_artifact_reference_size_uses_the_injected_reader () =
   with_temp_dir (fun base_path ->
       let artifact_read =
@@ -3338,5 +3372,7 @@ let () =
         test_artifact_reference_size_uses_the_injected_reader;
       Alcotest.test_case "the reader routes by where the tree lives" `Quick
         test_reader_routes_by_where_the_tree_lives;
+      Alcotest.test_case "an injected reader answers under the text line" `Quick
+        test_an_injected_reader_answers_under_the_text_line;
     ];
   ]

@@ -59,3 +59,42 @@ outside this tool's contract.
 Interactions are ordered writes under the same tool permission policy as
 `BrowserGoto`; live interaction uses the operator's logged-in tab. Session
 creation, closure, and direct URL navigation remain automation-only.
+
+## Live browser connection identity
+
+Every native host process creates a fresh UUID and asks its extension for
+`browser.info` before polling. Zen reports a Firefox engine name, so the host
+uses the explicit `zen.version` field for Zen identity and keeps the engine
+version separately. Browser identity is observed, not guessed from a manifest
+location or a configured label.
+
+`GET /api/v1/dashboard/browser-lane/clients` (read-state permission) returns
+`{ok:true,data:{clients:[{clientId,browser,version,engineVersion}]}}` for live
+connections whose poll lease is current. Browser reads, screenshots, and
+interactions accept `clientId`. With no ID, only one connected live client can
+be selected; multiple connections return `ambiguous_browser_clients`. An
+explicit missing/retired ID returns `client_not_connected`; it never selects a
+replacement. Automation requests omit `clientId` and return it as null.
+
+Tab IDs belong to their selected client. The operator read resolves that client
+once before listing tabs and keeps it for the subsequent page request. Successful
+read and screenshot replies include `clientId`; Keeper BrowserTabs returns an
+object containing `tabs` and `clientId`, and BrowserRead/Interact also preserve
+the selected identity. Carry that ID into subsequent operations.
+
+Native transport requires `x-lane: live`, the lane token, and all four identity
+headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and
+`x-browser-engine-version`. Missing identity headers are rejected. Each client
+has its own queue and pending response owners. An HTTP result from a different
+client cannot settle another client's command. Native EOF attempts a bounded
+`POST /browser-lane/disconnect`; after a crash without cleanup the existing
+120-second poll lease detects loss. Closed/expired clients release queued
+payloads; only their retired IDs remain until server restart. Retired native
+hosts exit on registration rejection so the extension can reconnect with a
+fresh process identity. The lane token remains the transport authorization;
+client UUIDs provide routing identity, not a separate credential.
+
+BrowserTabs resolution failures include the current typed `clients` inventory and
+a retry instruction in both structured error data and the model-facing message.
+An ambiguous or stale selection dispatches no browser command; the Keeper must
+choose a returned `clientId` and retry explicitly.

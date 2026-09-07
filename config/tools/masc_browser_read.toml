@@ -30,3 +30,8 @@ type = "string"
 enum = ["text", "elements", "screenshot"]
 default = "text"
 description = "text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."

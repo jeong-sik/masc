@@ -40,7 +40,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let root = Sys.getenv "MASC_PROBE_DOWNLOAD_ROOT" in
   let driver = Driver.create ~request
       ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
-        ~publish:publish_download) in
+        ~publish:publish_download) () in
   let run verb = Driver.execute driver verb in
   let close () = match Driver.close driver with
     | Ok () -> ()

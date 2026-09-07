@@ -28,7 +28,7 @@ let test_upgrade_eof_isolated_from_server () =
       let driver = Driver.create ~request
           ~start_downloads:(Masc.Browser_bidi_downloads.start ~sw ~env
             ~root:(Filename.get_temp_dir_name ())
-            ~publish:(fun _ -> fail "EOF setup must not publish an artifact")) in
+            ~publish:(fun _ -> fail "EOF setup must not publish an artifact")) () in
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2. (fun () ->
         (match Driver.execute driver (Browser_lane.Session_open {headless=None}) with
          | Browser_lane.Refused detail ->

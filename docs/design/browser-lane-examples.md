@@ -30,6 +30,8 @@ geckodriver --host 127.0.0.1 --port 4444
 ```toml
 [browser]
 webdriver_url = "http://127.0.0.1:4444"
+# Optional: an absolute path to the installed Zen executable/app bundle.
+# binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 
 자세한 연결 계약은 [native Firefox](native-firefox-lane.md)에 있다.

@@ -1,11 +1,11 @@
 (* Browser policy and session ownership run in OCaml. geckodriver is the
    Firefox vendor's WebDriver remote end, configured in runtime.toml. *)
-let configured_endpoint () =
+let configured_browser () =
   let resolution = Config_dir_resolver.resolve () in
   let path = Filename.concat resolution.Config_dir_resolver.config_root.path
       Config_dir_resolver.runtime_toml_filename in
   match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Browser_configuration.Disabled
   | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
   | _ ->
     match Safe_ops.read_file_safe path with
@@ -13,18 +13,7 @@ let configured_endpoint () =
     | Ok text ->
       match Otoml.Parser.from_string_result text with
       | Error detail -> Error detail
-      | Ok toml ->
-        match Field_resolution.resolve_string toml ["browser"; "webdriver_url"] with
-        | Field_resolution.Missing -> Ok None
-        | Field_resolution.Type_mismatch { expected; message } -> Error (expected ^ ": " ^ message)
-        | Field_resolution.Present endpoint ->
-          let uri = Uri.of_string endpoint in
-          match Uri.scheme uri, Uri.host uri, Uri.userinfo uri, Uri.path uri,
-                Uri.query uri, Uri.fragment uri with
-          | Some "http", Some ("127.0.0.1" | "localhost" | "::1"), None,
-            ("" | "/"), [], None ->
-            Ok (Some (Uri.to_string (Uri.with_path uri "")))
-          | _ -> Error "browser.webdriver_url must be a loopback HTTP origin"
+      | Ok toml -> Browser_configuration.parse toml
 
 let request ~pool ~clock ~endpoint ~method_ ~path ~body =
   match Masc_http_client.Pool.request pool ~clock ~timeout_seconds:60.
@@ -51,17 +40,17 @@ let close_with_fresh_pool ~env ~endpoint driver =
     (fun () -> Eio.Promise.await result)
 
 let start ~sw ~env =
-  match configured_endpoint () with
+  match configured_browser () with
   | Error detail -> Log.Server.error "browser-lane: %s" detail
-  | Ok None -> Log.Server.info "browser-lane: native Firefox has no browser.webdriver_url"
-  | Ok (Some endpoint) ->
+  | Ok Browser_configuration.Disabled -> Log.Server.info "browser-lane: automation has no browser.webdriver_url"
+  | Ok (Browser_configuration.Webdriver { endpoint; binary }) ->
     let pool = Masc_http_client.Pool.create ~sw ~env () in
     let clock = Eio.Stdenv.clock env in
     let root = Filename.concat
         (Config_dir_resolver.masc_root ~base_path:(Config_dir_resolver.base_path_or_cwd ())) "browser-downloads" in
-    let driver = Browser_webdriver.create
+    let driver = Browser_webdriver.create ?binary
       ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
-        ~publish:(Browser_download_artifact.publish ~base_path:(Config_dir_resolver.base_path_or_cwd ()))) ~request:(request ~pool ~clock ~endpoint) in
+        ~publish:(Browser_download_artifact.publish ~base_path:(Config_dir_resolver.base_path_or_cwd ()))) ~request:(request ~pool ~clock ~endpoint) () in
     Browser_lane.install_automation_executor (Some (Browser_webdriver.execute driver));
     Eio.Switch.on_release sw (fun () ->
       Browser_lane.install_automation_executor None;
@@ -69,4 +58,4 @@ let start ~sw ~env =
       | Ok () -> ()
       | Error error -> Log.Server.warn "browser-lane: close failed: %s"
           (Browser_webdriver.error_message error));
-    Log.Server.info "browser-lane: native Firefox WebDriver configured at %s" endpoint
+    Log.Server.info "browser-lane: Gecko WebDriver configured at %s" endpoint

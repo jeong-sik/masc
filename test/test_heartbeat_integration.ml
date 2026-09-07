@@ -2395,13 +2395,15 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               (publication_recovery_registry env root_sw config)
         }
       in
-      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      (* Keep the original lane idle through the bounded cancellation scenario.
+         [proactive.enabled = false] alone still permits its initial autonomous
+         turn; an elapsed sleep does not prove that turn has released its slot. *)
+      (match Masc.Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx meta with
        | Masc.Keeper_keepalive.Keepalive_started _ -> ()
        | outcome ->
          failf
            "cancelled-update fixture failed to start: %s"
            (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
-      Eio.Time.sleep clock 0.05;
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let release_librarian, resolve_release_librarian = Eio.Promise.create () in
       (match
@@ -2421,6 +2423,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
            "cancelled-update Librarian fixture was not submitted: %s"
            (memory_lane_outcome_name other));
       Eio.Promise.await librarian_started;
+      check bool "original lane has no admitted turn before the swap" true
+        (Option.is_none
+           (owner_turn_in_flight_exn ~base_path:config.base_path ~keeper_name:name));
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
@@ -2457,13 +2462,14 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
-            ignore
-              (Turn_up_update.update_keeper
-                 ~expected_config_revision:(config_revision_exn config name)
-                 ctx
-                 parsed
-                 meta);
-            `Returned
+            let result =
+              Turn_up_update.update_keeper
+                ~expected_config_revision:(config_revision_exn config name)
+                ctx
+                parsed
+                meta
+            in
+            `Returned result
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
         in
@@ -2478,7 +2484,12 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           with
           | Some _ -> ()
           | None ->
-            Eio.Fiber.yield ();
+            (match Eio.Promise.peek update_done with
+             | Some (`Returned result) ->
+               failf "update returned before its lane swap fence: %s"
+                 (Tool_result.message result)
+             | Some `Cancelled -> fail "update was cancelled before the test cancelled it"
+             | None -> Eio.Fiber.yield ());
             await_lane_swap_fence ()
         in
         await_lane_swap_fence ());
@@ -2486,7 +2497,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       Eio.Promise.resolve resolve_release_librarian ();
       (match Eio.Promise.await update_done with
        | `Cancelled -> ()
-       | `Returned -> fail "keeper update returned after its caller was cancelled");
+       | `Returned result ->
+         failf "keeper update returned after its caller was cancelled: %s"
+           (Tool_result.message result));
       check bool
         "cancelled update rolls back its temporary shutdown fence"
         true

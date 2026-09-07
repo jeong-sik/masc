@@ -244,18 +244,25 @@ let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
   }
 ;;
 
-let hitl_resolution_stimulus ~approval_id ~arrived_at : Q.stimulus =
-  let resolution : Q.hitl_resolution =
-    { approval_id
-    ; decision = Q.Hitl_approved
-    ; channel = Keeper_continuation_channel.unrouted "test"
-    }
+let approve_grant_exn ~base_path ~keeper_name ~request =
+  let approval_id =
+    match
+      Keeper_approval_queue.submit_pending
+        ~keeper_name ~tool_name:"external-effect"
+        ~input:(`Assoc [ "request", `String request ])
+        ~call_summary:None ~base_path ()
+    with
+    | Ok submission -> submission.approval_id
+    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
   in
-  { Q.post_id = Q.hitl_resolution_post_id resolution
-  ; urgency = Q.Immediate
-  ; arrived_at
-  ; payload = Q.Hitl_resolved resolution
-  }
+  (match
+     Keeper_approval_queue.resolve_with_policy
+       ~base_path ~id:approval_id
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.resolve_error_to_string error));
+  approval_id
 ;;
 
 let connector_event_ids_of_queue queue =
@@ -355,13 +362,39 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
 
 let test_one_intake_admits_only_one_hitl_resolution () =
   with_ctx "hitl-exact-replay-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
-    let first =
-      hitl_resolution_stimulus ~approval_id:"appr-first" ~arrived_at:1.0
+    (* Intake reconciles approved wakes against the authoritative Gate store.
+       Exercise the real submit/resolve path, including its durable enqueue. *)
+    (match
+       Keeper_owner_registry.install_from_store
+         ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config
+     with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+    (match Keeper_owner_registry.create_meta ~base_path meta with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "HITL fixture metadata disappeared"
+     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+    (match Keeper_approval_queue.install_persistence ~base_path with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+    let first_id = approve_grant_exn ~base_path ~keeper_name ~request:"first" in
+    let second_id = approve_grant_exn ~base_path ~keeper_name ~request:"second" in
+    let first, second =
+      match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+      | Ok queue ->
+        (match Q.to_list queue with
+         | [ first; second ] ->
+           let approval_id (source : Q.stimulus) =
+             match source.payload with
+             | Q.Hitl_resolved resolution -> resolution.approval_id
+             | _ -> fail "resolution enqueued a non-HITL source"
+           in
+           check (list string) "both real grants are queued in resolution order"
+             [ first_id; second_id ] [ approval_id first; approval_id second ];
+           first, second
+         | _ -> fail "two approvals must produce two durable wakes")
+      | Error detail -> fail detail
     in
-    let second =
-      hitl_resolution_stimulus ~approval_id:"appr-second" ~arrived_at:2.0
-    in
-    List.iter (enqueue_exn ~base_path keeper_name) [ first; second ];
     let intake =
       Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
         ~ctx

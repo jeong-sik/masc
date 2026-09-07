@@ -4759,5 +4759,5 @@
 (test
  (name test_installed_dashboard)
  (modules test_installed_dashboard)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ptime masc.time_codec))
 

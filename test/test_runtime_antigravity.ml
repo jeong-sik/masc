@@ -66,6 +66,8 @@ let fixture_script
     ?(require_resume = false)
     ?required_home
     ?(sleep_s = 0.0)
+    ?capture_prompt
+    ?(close_stdin = false)
     ?line_delay_s
     ?after_first_line_delay_s
     ?stdout_holder_s
@@ -100,7 +102,11 @@ let fixture_script
         output
         "test -z \"${XDG_CACHE_HOME+x}\" && test -z \"${XDG_CONFIG_HOME+x}\" && test -z \"${XDG_DATA_HOME+x}\" || exit 95\n")
     required_home;
-  output_string output "cat >/dev/null\n";
+  if close_stdin then output_string output "exec 0<&-\nexit 62\n"
+  else output_string output
+    (match capture_prompt with
+     | None -> "cat >/dev/null\n"
+     | Some path -> "cat >" ^ shell_quote path ^ "\n");
   if sleep_s > 0.0 then output_string output (Printf.sprintf "sleep %.3f\n" sleep_s);
   List.iteri
     (fun index line ->
@@ -131,13 +137,15 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?require_resume ?required_home ?sleep_s ?line_delay_s
+let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_stdin ?line_delay_s
     ?after_first_line_delay_s ?stdout_holder_s ?exit_delay_s ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
       ?required_home
       ?sleep_s
+      ?capture_prompt
+      ?close_stdin
       ?line_delay_s
       ?after_first_line_delay_s
       ?stdout_holder_s
@@ -152,6 +160,8 @@ let run_fixture
     ?conversation_mode
     ?home_dir
     ?on_conversation_ready
+    ?on_prompt_sent
+    ?on_spawned
     ?on_stream_event
     ?(timeout_s = 2.0)
     ?admission_timeout_s
@@ -173,6 +183,8 @@ let run_fixture
       ?conversation_mode
       ?home_dir
       ?on_conversation_ready
+      ?on_prompt_sent
+      ?on_spawned
       ?on_stream_event
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
@@ -348,12 +360,47 @@ let test_successful_official_client_turn () =
 
 let test_large_prompt_streams_over_stdin () =
   let prompt = String.make 1_100_000 'x' in
-  with_fixture [ init (); result () ] (fun path ->
-    match run_fixture ~prompt path with
-    | Error error -> fail (Runtime_antigravity.error_to_string error)
-    | Ok turn ->
-      check string "response" "MASC_ANTIGRAVITY_OK\n" turn.text;
-      check int "turn count" 1 turn.num_turns)
+  let captured = Filename.temp_file "antigravity-prompt-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
+    let sent = ref 0 in
+    with_fixture ~capture_prompt:captured [ init (); result () ] (fun path ->
+      match run_fixture ~prompt ~on_prompt_sent:(fun () -> incr sent) path with
+      | Error error -> fail (Runtime_antigravity.error_to_string error)
+      | Ok turn ->
+        check string "response" "MASC_ANTIGRAVITY_OK\n" turn.text;
+        check int "turn count" 1 turn.num_turns;
+        check int "one complete prompt transmission" 1 !sent;
+        check string "client received exact complete prompt" prompt
+          (In_channel.with_open_bin captured In_channel.input_all)))
+;;
+
+let test_incomplete_prompt_is_not_reported () =
+  let sent = ref 0 in
+  let spawned = ref 0 in
+  let missing = Filename.temp_file "missing-antigravity-" ".sh" in
+  Sys.remove missing;
+  (match run_fixture ~on_prompt_sent:(fun () -> incr sent) missing with
+   | Error (Runtime_antigravity.Spawn_failed _) -> ()
+   | _ -> fail "missing CLI did not fail at spawn");
+  check int "spawn failure does not report transmission" 0 !sent;
+  with_fixture ~close_stdin:true [] (fun path ->
+    (* Larger than the pipe buffer: the child closes stdin without consuming
+       it, so a successful spawn cannot imply a complete prompt write. *)
+    let result = run_fixture ~prompt:(String.make 1_100_000 'x')
+      ~on_spawned:(fun () -> incr spawned)
+      ~on_prompt_sent:(fun () -> incr sent) path in
+    check int "write failure occurs after real spawn" 1 !spawned;
+    check bool "incomplete input does not complete a turn" true (Result.is_error result);
+    check int "partial write does not report transmission" 0 !sent)
+;;
+
+let test_transmitted_prompt_survives_provider_rejection () =
+  let sent = ref 0 in
+  with_fixture [ init (); result ~status:"ERROR" ~error:"fixture rejected" () ]
+    (fun path ->
+      let result = run_fixture ~on_prompt_sent:(fun () -> incr sent) path in
+      check bool "provider rejection remains a failure" true (Result.is_error result);
+      check int "transmission is retained despite provider rejection" 1 !sent)
 ;;
 
 let test_child_environment_is_allowlisted () =
@@ -884,6 +931,10 @@ let () =
             "large prompt uses stdin"
             `Quick
             test_large_prompt_streams_over_stdin
+        ; test_case "incomplete prompt is not reported as transmitted" `Quick
+            test_incomplete_prompt_is_not_reported
+        ; test_case "transmission survives provider rejection" `Quick
+            test_transmitted_prompt_survives_provider_rejection
         ; test_case
             "resume mismatch"
             `Quick

@@ -280,7 +280,7 @@ base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_computer_use = true
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
 
 [[models]]
 id_prefix = "gpt-5.4-mini"
@@ -2513,16 +2513,29 @@ capabilities_base = "openai_chat"
 # /v1/models 에 나오지만 프로젝트 게이트로 호출 거부. gpt-5.5 는 이 날 접근이
 # 사라졌다. 모델들이 chat/completions 에서 function tools+reasoning_effort 를
 # 함께 거부하므로(라이브 400) 두 행 모두 responses 표면으로.
+# 2026-09-07 probe on /v1/responses, this key, once access opened. All three
+# gpt-5.6 rows and gpt-6-astra answer the same way:
+#
+#   effort minimal            400  "'minimal' is not supported with the
+#                                   '<model>' model" -- the message names it
+#   effort none               200 on gpt-5.6-*, 400 on gpt-6-astra
+#   effort low|medium|high|xhigh|max   200
+#   ~950K-token input         200; larger answers 429 on the org's
+#                             tokens-per-minute limit, not on length
+#
+# So the ladder is measured, and the ceiling is the published 1.05M with this
+# account meeting its rate limit first. 272000 and low|medium|high were the
+# conservative values these rows started at.
 [[models]]
 id_prefix = "gpt-5.6-luna"
 base = "openai_chat_extended"
 provider_name = "openai-responses"
 thinking_control_format = "reasoning_effort"
-accepted_reasoning_efforts = ["low", "medium", "high"]
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = false
-max_context_tokens = 272000
+max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_tools = true
 supports_tool_choice = false
@@ -2535,16 +2548,65 @@ output_per_million = 1.2
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
+# gpt-5.6-sol and -terra, callable on this key since 2026-09-07 (both answer
+# 200 on /v1/responses; the same probe as the luna row above gives all three
+# the same effort ladder). Prices from developers.openai.com/api/docs/pricing,
+# read the same day: sol $4/$20, terra $2/$12. Cached-input rates are a tenth
+# of input on both, which is what the multipliers below already say.
+[[models]]
+id_prefix = "gpt-5.6-sol"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.6-terra"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 [[models]]
 id_prefix = "gpt-6-astra"
 base = "openai_chat_extended"
 provider_name = "openai-responses"
 thinking_control_format = "reasoning_effort"
-accepted_reasoning_efforts = ["low", "medium", "high"]
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = false
-max_context_tokens = 272000
+max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_tools = true
 supports_tool_choice = false

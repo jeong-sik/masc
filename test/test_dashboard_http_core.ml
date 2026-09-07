@@ -2296,6 +2296,205 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
       check (option string) "execution actor canonicalized to token owner"
         (Some "codex") actor
 
+let with_execution_payload_env f =
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "true" @@ fun () ->
+  with_env "MASC_DASHBOARD_FIXTURE" "execution_smoke" @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_prefix "execution:";
+  Eio_guard.protect
+    ~finally:(fun () -> Dashboard_cache.invalidate_prefix "execution:")
+    (fun () ->
+      let state =
+        Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+      in
+      f ~env ~sw ~state)
+
+let execution_payload ~state ~sw ~clock req =
+  match
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+      ~state ~sw ~clock req
+  with
+  | Server_dashboard_http_execution_surfaces.Execution_payload payload -> payload
+  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+    failf "expected cached execution bytes, received JSON: %s"
+      (Yojson.Safe.to_string json)
+
+let execution_payload_key (payload : Dashboard_cache.cached_payload) =
+  Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
+
+let test_execution_default_response_remains_json () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_cache
+    (`Assoc [ "default_marker", `String "last-success" ]) @@ fun () ->
+  match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+      ~state ~sw ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/dashboard/execution") with
+  | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+    fail "the default light route must return its cached-surface JSON"
+  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+    let open Yojson.Safe.Util in
+    check string "default snapshot retained" "last-success"
+      (json |> member "default_marker" |> to_string);
+    check bool "default-light query retained" true
+      (json |> member "query" |> member "default_light_request" |> to_bool)
+
+let test_execution_parameterized_payload_reuses_decorated_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let config = Lib.Mcp_server.workspace_config state in
+  let req =
+    request_with_headers "/api/v1/dashboard/execution"
+      [ "x-masc-agent", "alice" ]
+  in
+  let first = execution_payload ~state ~sw ~clock req in
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "repeat request retains serialized string" true
+    (first.raw_json == second.raw_json);
+  check bool "repeat request retains decorated JSON" true
+    (first.json == second.json);
+  check string "repeat request retains ETag" first.etag second.etag;
+  check bool "bytes decode to the decorated JSON" true
+    (Yojson.Safe.equal first.json (Yojson.Safe.from_string first.raw_json));
+  check string "ETag identifies the exact response bytes"
+    (Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
+  let open Yojson.Safe.Util in
+  check string "actor metadata is part of cached body" "alice"
+    (first.json |> member "query" |> member "actor" |> to_string);
+  check string "workspace metadata is part of cached body" config.workspace_path
+    (first.json |> member "retention" |> member "workspace_path" |> to_string);
+  let json =
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_json
+      ~state ~sw ~clock req
+  in
+  check bool "JSON accessor shares the same decorated snapshot" true
+    (json == first.json)
+
+let test_execution_parameterized_payload_separates_request_queries () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let absent = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1") in
+  let empty = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&fixture=") in
+  let explicit = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&fixture=execution_smoke") in
+  let light = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?fixture=execution_smoke") in
+  let forced = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&force=1") in
+  let alice = execution_payload ~state ~sw ~clock
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        [ "x-masc-agent", "alice" ]) in
+  let bob = execution_payload ~state ~sw ~clock
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        [ "x-masc-agent", "bob" ]) in
+  let payloads = [ absent; empty; explicit; light; forced; alice; bob ] in
+  let keys = List.map execution_payload_key payloads in
+  check int "every distinct query owns its response bytes"
+    (List.length payloads) (List.length (List.sort_uniq String.compare keys));
+  let open Yojson.Safe.Util in
+  check bool "absent fixture stays null" true
+    (absent.json |> member "query" |> member "fixture" = `Null);
+  check string "empty fixture stays explicitly empty" ""
+    (empty.json |> member "query" |> member "fixture" |> to_string);
+  check bool "full query preserved" true
+    (explicit.json |> member "query" |> member "full" |> to_bool);
+  check bool "light query preserved" true
+    (light.json |> member "query" |> member "light" |> to_bool);
+  check bool "parameterized force query preserved" true
+    (forced.json |> member "query" |> member "force" |> to_bool);
+  check string "second actor does not inherit first actor metadata" "bob"
+    (bob.json |> member "query" |> member "actor" |> to_string)
+
+let test_execution_parameterized_payload_separates_workspace_scope () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/execution?full=1" in
+  let first_config = Lib.Mcp_server.workspace_config state in
+  let first = execution_payload ~state ~sw ~clock req in
+  let second_config =
+    { first_config with workspace_path = Filename.concat first_config.base_path "other-workspace" }
+  in
+  (match Lib.Mcp_server.set_workspace_config state second_config with
+   | Ok () -> ()
+   | Error error -> fail (Lib.Mcp_server.workspace_switch_error_to_string error));
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "same base with a different active workspace has another key" true
+    (execution_payload_key first <> execution_payload_key second);
+  check string "active workspace metadata is current" second_config.workspace_path
+    Yojson.Safe.Util.(second.json |> member "retention" |> member "workspace_path" |> to_string);
+  let other_base = test_dir () in
+  Eio_guard.protect ~finally:(fun () -> cleanup_dir other_base) @@ fun () ->
+  let other_state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:other_base () in
+  let other = execution_payload ~state:other_state ~sw ~clock req in
+  check bool "a different runtime base cannot reuse prior workspace bytes" true
+    (execution_payload_key second <> execution_payload_key other);
+  check string "runtime base metadata is current" other_base
+    Yojson.Safe.Util.(other.json |> member "retention" |> member "workspace_root" |> to_string)
+
+let test_execution_parameterized_payload_changes_after_invalidation () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/execution?full=1" in
+  let first = execution_payload ~state ~sw ~clock req in
+  let generation payload =
+    Yojson.Safe.Util.(payload.Dashboard_cache.json
+      |> member "execution_publication_generation" |> to_int)
+  in
+  let first_generation = generation first in
+  Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "publication generation advances" true
+    (generation second > first_generation);
+  check bool "invalidated bytes are not reused" true (first.raw_json != second.raw_json);
+  check bool "new generation has a new cache key" true
+    (execution_payload_key first <> execution_payload_key second);
+  check bool "old key was evicted" true
+    (Option.is_none (Dashboard_cache.peek_payload (execution_payload_key first)));
+  check int "the retained prior response is not restamped" first_generation
+    (generation first)
+
+let test_execution_parameterized_timeout_keeps_request_metadata () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let config = Lib.Mcp_server.workspace_config state in
+  let req = request_with_headers "/api/v1/dashboard/execution?full=1"
+      [ "x-masc-agent", "timeout-observer" ] in
+  let key = execution_payload_key (execution_payload ~state ~sw ~clock req) in
+  Dashboard_cache.invalidate key;
+  (* Drive the existing no-stale timeout circuit through its public compute
+     boundary. Raising its typed timeout keeps this scenario deterministic. *)
+  for _attempt = 1 to 3 do
+    let timeout = Dashboard_cache.get_or_compute_with_timeout key
+        ~ttl:120.0 ~clock ~timeout_sec:0.01
+        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+    check bool "timeout does not publish a successful payload" true
+      (Dashboard_cache.is_timeout_envelope timeout)
+  done;
+  let json =
+    match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+        ~state ~sw ~clock req with
+    | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+    | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+      fail "a circuit timeout must remain an uncached JSON response"
+  in
+  let open Yojson.Safe.Util in
+  check bool "response retains the timeout envelope" true
+    (Dashboard_cache.is_timeout_envelope json);
+  check string "timeout kind is preserved" "circuit_open"
+    (json |> member "timeout_kind" |> to_string);
+  check string "timeout query actor is decorated" "timeout-observer"
+    (json |> member "query" |> member "actor" |> to_string);
+  check bool "timeout full query is decorated" true
+    (json |> member "query" |> member "full" |> to_bool);
+  check string "timeout workspace is decorated" config.workspace_path
+    (json |> member "retention" |> member "workspace_path" |> to_string);
+  check string "timeout cache key is decorated" key
+    (json |> member "cache" |> member "request_cache_key" |> to_string);
+  check bool "timeout was not cached as success" true
+    (Option.is_none (Dashboard_cache.peek_payload key))
+
 let test_dashboard_execution_force_refresh_bypasses_default_cache () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
@@ -2312,11 +2511,14 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
     seed
   @@ fun () ->
   let json =
-    Server_dashboard_http_execution_surfaces.dashboard_execution_http_json
+    match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
       ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
-      (request "/api/v1/dashboard/execution?force=1")
+      (request "/api/v1/dashboard/execution?force=1") with
+    | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+    | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+      fail "default force refresh must return its JSON response"
   in
   let open Yojson.Safe.Util in
   check bool "force query surfaced" true
@@ -4630,6 +4832,18 @@ let () =
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
             test_execution_actor_for_request_canonicalizes_token_owner;
+          test_case "execution default response remains JSON" `Quick
+            test_execution_default_response_remains_json;
+          test_case "execution parameterized response reuses decorated bytes" `Quick
+            test_execution_parameterized_payload_reuses_decorated_bytes;
+          test_case "execution parameterized responses separate queries" `Quick
+            test_execution_parameterized_payload_separates_request_queries;
+          test_case "execution parameterized responses separate workspace scopes" `Quick
+            test_execution_parameterized_payload_separates_workspace_scope;
+          test_case "execution parameterized response follows invalidation" `Quick
+            test_execution_parameterized_payload_changes_after_invalidation;
+          test_case "execution parameterized timeout keeps request metadata" `Quick
+            test_execution_parameterized_timeout_keeps_request_metadata;
           test_case "execution force refresh bypasses default cache" `Quick
             test_dashboard_execution_force_refresh_bypasses_default_cache;
           test_case "execution trust default route uses cached surface" `Quick

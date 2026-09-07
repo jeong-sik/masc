@@ -1,5 +1,7 @@
-(** Durable semantic lifetime of one autonomous invocation. Queue membership
-    and checkpoint payloads are projections; this record owns continuation. *)
+(** Durable semantic lifetime of one producer-identified invocation. Direct
+    request IDs and autonomous UUIDs retain their distinct scope constructors.
+    Queue membership and checkpoint payloads are projections; this record owns
+    continuation, independently of chat request delivery status. *)
 type source_member = private
   { post_id : string
   ; admitted_revision : int64
@@ -35,7 +37,7 @@ type phase =
   | Settled of terminal
 
 type t = private
-  { id : Uuidm.t
+  { id : Keeper_execution_scope_id.t
   ; revision : int64
   ; sources : source_member list
   ; current_sources : source_member list
@@ -63,7 +65,7 @@ val error_to_string : error -> string
 val phase_name : phase -> string
 val is_terminal : t -> bool
 val scope : t -> Keeper_execution_scope_id.t
-val create : id:Uuidm.t -> sources:source_member list -> now:float -> (t, error) result
+val create : id:Keeper_execution_scope_id.t -> sources:source_member list -> now:float -> (t, error) result
 val apply : now:float -> action -> t -> (t, error) result
 (** Recheck_sources carries a complete, caller-verified projection of the
     original batch's current queue entries and their durable scope bindings.

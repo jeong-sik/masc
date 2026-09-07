@@ -1,19 +1,22 @@
-# Autonomous execution journal and recovery boundary
+# Semantic execution journal and recovery boundary
 
-The owner journal is the semantic authority for an autonomous invocation. Queue
+The owner journal is the semantic authority for a producer-identified invocation. Queue
 entries are delivery projections; checkpoint files are payload snapshots. Neither
 queue emptiness nor checkpoint presence proves that an invocation is new or done.
 
 This change implements the journal domain, storage, and restart classification.
-It does **not** yet connect autonomous admission, automatic rechecks, provider
+It does **not** yet connect Direct/Auto admission, automatic rechecks, provider
 session ownership, or effect reconciliation to the heartbeat runner. Those are
 required before claiming that the runtime repetition problem is fixed.
 
 ## Identity and atomic admission
 
-A producer supplies an autonomous UUID. One SQLite transaction writes that UUID,
-an initialized empty repetition frame, the exact source memberships, and the
-Preparing phase. Retrying the same identity returns the recorded invocation;
+A producer supplies a typed `Keeper_execution_scope_id.t`: Direct keeps its
+validated request ID; Auto keeps its admission UUID. The canonical JSON of that
+typed identity is the `semantic_executions.scope_key`, so equal scalar text from
+different origins cannot collide. One SQLite transaction writes the identity,
+an initialized empty frame containing only that scope, the exact source
+memberships, and the Preparing phase. Retrying the same identity returns the recorded invocation;
 it never clears observations or invents a replacement scope.
 
 Operation IDs and immutable repetition snapshots live below both the journal and
@@ -70,16 +73,24 @@ hash or checkpoint-presence escape hatch authorizes replay of Interrupted execut
 
 ## Evidence and remaining integration
 
-The 20 SQLite tests cover atomic and uncertain commits, exact CAS, independent
+The 22 SQLite tests cover atomic and uncertain commits, exact CAS, independent
 work during waits, rechecks across queue generations, same-scope checkpoint
 resumption after another operation completes, immutable terminal records,
 validated migration, read-only old-schema inspection, and corrupt-evidence
-retention. They exercise the journal API, not a full provider turn.
+retention. Two additional scenarios distinguish Direct/Auto IDs with identical
+text and resume Direct's frame after independent Auto completion. These tests
+exercise the journal API, not a full provider turn or an actual child lifecycle.
 
-The heartbeat integration still must:
+Direct request delivery and semantic execution have separate lifetimes. This
+unit leaves `claim_next` and chat terminal rows unchanged. It does not infer a
+semantic wait from a turn outcome: Gate may park a call while the turn continues.
+Actual integration must persist an explicit child acceptance and parent binding.
+
+The runtime integration still must:
 
 1. Choose runnable work fairly instead of repeatedly selecting the first waiting row.
-2. Persist journal admission before queue projection and model dispatch.
+2. Persist journal admission before queue projection and model dispatch; Direct
+   claim and semantic admission must share the owner transaction.
 3. Validate current bound sources and checkpoint bytes before the corresponding recheck.
 4. Keep observations durable before another provider request; account for in-flight effects.
 5. Associate official sessions and child/HITL requests with explicit execution identity.

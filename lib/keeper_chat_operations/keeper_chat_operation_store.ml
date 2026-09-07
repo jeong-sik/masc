@@ -1,7 +1,9 @@
 module Operation = Keeper_chat_operation
 module Reducer = Keeper_chat_operation_reducer
 module Id = Operation.Operation_id
-module Autonomous = Keeper_autonomous_execution
+module Semantic = Keeper_semantic_execution
+
+let scope_key id = Yojson.Safe.to_string (Keeper_execution_scope_id.to_json id)
 
 type t =
   { db : Sqlite3.db
@@ -41,7 +43,7 @@ let path_for_keeper ~keepers_runtime_dir ~keeper_name =
 
 type outstanding_snapshot =
   | Missing_store
-  | Stored_operations of { chat_operations : Operation.t list; autonomous_executions : Autonomous.t list }
+  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list }
 let database_schema = "masc.keeper_chat_operations.v2"
 let database_application_id = 0x4d4b4f50L
 let database_user_version = 2L
@@ -54,23 +56,23 @@ let metadata_table_sql =
   "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v2'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
 ;;
 
-let autonomous_table_sql =
-  "CREATE TABLE autonomous_executions (execution_id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK (revision >= 0), phase TEXT NOT NULL CHECK (phase IN ('preparing', 'ready', 'running', 'suspended', 'recovering', 'settled')), record_json TEXT NOT NULL) STRICT"
+let semantic_table_sql =
+  "CREATE TABLE semantic_executions (scope_key TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK (revision >= 0), phase TEXT NOT NULL CHECK (phase IN ('preparing', 'ready', 'running', 'suspended', 'recovering', 'settled')), record_json TEXT NOT NULL) STRICT"
 ;;
-let autonomous_running_index_sql =
-  "CREATE UNIQUE INDEX autonomous_single_running ON autonomous_executions(phase) WHERE phase = 'running'"
+let semantic_running_index_sql =
+  "CREATE UNIQUE INDEX semantic_single_running ON semantic_executions(phase) WHERE phase = 'running'"
 ;;
-let autonomous_terminal_update_sql =
-  "CREATE TRIGGER autonomous_terminal_update_immutable BEFORE UPDATE ON autonomous_executions WHEN OLD.phase = 'settled' BEGIN SELECT RAISE(ABORT, 'terminal autonomous execution is immutable'); END"
+let semantic_terminal_update_sql =
+  "CREATE TRIGGER semantic_terminal_update_immutable BEFORE UPDATE ON semantic_executions WHEN OLD.phase = 'settled' BEGIN SELECT RAISE(ABORT, 'terminal semantic execution is immutable'); END"
 ;;
-let autonomous_terminal_delete_sql =
-  "CREATE TRIGGER autonomous_terminal_delete_immutable BEFORE DELETE ON autonomous_executions WHEN OLD.phase = 'settled' BEGIN SELECT RAISE(ABORT, 'terminal autonomous execution is immutable'); END"
+let semantic_terminal_delete_sql =
+  "CREATE TRIGGER semantic_terminal_delete_immutable BEFORE DELETE ON semantic_executions WHEN OLD.phase = 'settled' BEGIN SELECT RAISE(ABORT, 'terminal semantic execution is immutable'); END"
 ;;
-let autonomous_schema_objects =
-  [ "index", "autonomous_single_running", autonomous_running_index_sql
-  ; "table", "autonomous_executions", autonomous_table_sql
-  ; "trigger", "autonomous_terminal_delete_immutable", autonomous_terminal_delete_sql
-  ; "trigger", "autonomous_terminal_update_immutable", autonomous_terminal_update_sql ]
+let semantic_schema_objects =
+  [ "index", "semantic_single_running", semantic_running_index_sql
+  ; "table", "semantic_executions", semantic_table_sql
+  ; "trigger", "semantic_terminal_delete_immutable", semantic_terminal_delete_sql
+  ; "trigger", "semantic_terminal_update_immutable", semantic_terminal_update_sql ]
 ;;
 
 let failure_kind_database_values =
@@ -114,11 +116,11 @@ let legacy_schema_objects =
 let expected_schema_objects =
   (List.map (fun (kind, name, sql) ->
      kind, name, (if name = "metadata" then metadata_table_sql else sql)) legacy_schema_objects
-   @ autonomous_schema_objects)
+   @ semantic_schema_objects)
   |> List.sort (fun (left_kind, left_name, _) (right_kind, right_name, _) ->
        compare (left_kind, left_name) (right_kind, right_name))
 ;;
-let table_column_counts = [ "metadata", 3; "operations", 13; "autonomous_executions", 4 ]
+let table_column_counts = [ "metadata", 3; "operations", 13; "semantic_executions", 4 ]
 
 type commit_fault =
   | Fail_before_commit
@@ -545,14 +547,14 @@ let read_schema_objects db =
        loop [])
 ;;
 
-let initialize_autonomous_schema db =
+let initialize_semantic_schema db =
   List.fold_left (fun result (_, name, sql) ->
     let* () = result in exec db ~operation:("create " ^ name) sql)
     (Ok ())
-    [ "table", "autonomous_executions", autonomous_table_sql
-    ; "index", "autonomous_single_running", autonomous_running_index_sql
-    ; "trigger", "autonomous_terminal_update_immutable", autonomous_terminal_update_sql
-    ; "trigger", "autonomous_terminal_delete_immutable", autonomous_terminal_delete_sql ]
+    [ "table", "semantic_executions", semantic_table_sql
+    ; "index", "semantic_single_running", semantic_running_index_sql
+    ; "trigger", "semantic_terminal_update_immutable", semantic_terminal_update_sql
+    ; "trigger", "semantic_terminal_delete_immutable", semantic_terminal_delete_sql ]
 ;;
 
 let initialize_schema db =
@@ -562,7 +564,7 @@ let initialize_schema db =
   let* () = exec db ~operation:"create single running index" operations_single_running_index_sql in
   let* () = exec db ~operation:"create terminal update trigger" terminal_update_trigger_sql in
   let* () = exec db ~operation:"create terminal delete trigger" terminal_delete_trigger_sql in
-  let* () = initialize_autonomous_schema db in
+  let* () = initialize_semantic_schema db in
   let* () =
     exec
       db
@@ -606,10 +608,11 @@ let upgrade_validated_v1_unlocked db =
     let* () = if integrity = "ok" then Ok () else Error (Integrity_error integrity) in
     let* () = with_statement db ~operation:"validate every v1 operation"
       ("SELECT " ^ select_columns ^ " FROM operations") (fun stmt ->
-        let rec loop () = match Sqlite3.step stmt with
-          | Sqlite3.Rc.DONE -> Ok ()
-          | Sqlite3.Rc.ROW -> let* _ = decode_operation stmt in loop ()
-          | rc -> Error (Store_unavailable (sqlite_error db "validate v1 operation" rc))
+        let rec loop () =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok ()
+          else if rc = Sqlite3.Rc.ROW then let* _ = decode_operation stmt in loop ()
+          else Error (Store_unavailable (sqlite_error db "validate v1 operation" rc))
         in loop ()) in
     let* next_sequence = single_int64 db ~operation:"preserve v1 sequence" "SELECT next_sequence FROM metadata WHERE singleton = 1" in
     let* max_sequence = single_int64 db ~operation:"validate v1 sequence" "SELECT COALESCE(MAX(sequence), -1) FROM operations" in
@@ -620,7 +623,7 @@ let upgrade_validated_v1_unlocked db =
       "INSERT INTO metadata(singleton, schema, next_sequence) VALUES (1, 'masc.keeper_chat_operations.v2', ?)"
       (fun stmt -> let* () = bind_int64 db stmt ~operation:"bind preserved sequence" 1 next_sequence in
         expect_done db stmt ~operation:"write preserved sequence") in
-    let* () = initialize_autonomous_schema db in
+    let* () = initialize_semantic_schema db in
     let* () = exec db ~operation:"advance operation schema version" "PRAGMA user_version=2" in
     validate_schema db
 ;;
@@ -705,28 +708,29 @@ let close store =
   else Ok ()
 ;;
 
-let decode_autonomous stmt =
-  let* json = json_of_stored "autonomous execution" (Sqlite3.column_text stmt 3) in
-  let* execution = Autonomous.of_json json
-    |> Result.map_error (fun error -> Integrity_error (Autonomous.error_to_string error)) in
-  if Uuidm.to_string execution.id <> Sqlite3.column_text stmt 0
+let decode_semantic stmt =
+  let* json = json_of_stored "semantic execution" (Sqlite3.column_text stmt 3) in
+  let* execution = Semantic.of_json json
+    |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
+  if scope_key execution.id <> Sqlite3.column_text stmt 0
      || execution.revision <> Sqlite3.column_int64 stmt 1
-     || Autonomous.phase_name execution.phase <> Sqlite3.column_text stmt 2 then
-    Error (Integrity_error "autonomous execution index and record disagree")
+     || Semantic.phase_name execution.phase <> Sqlite3.column_text stmt 2 then
+    Error (Integrity_error "semantic execution index and record disagree")
   else Ok execution
 ;;
-let autonomous_rows db ~active_only =
-  with_statement db ~operation:"read autonomous executions"
-    "SELECT execution_id, revision, phase, record_json FROM autonomous_executions ORDER BY execution_id"
+let semantic_rows db ~active_only =
+  with_statement db ~operation:"read semantic executions"
+    "SELECT scope_key, revision, phase, record_json FROM semantic_executions ORDER BY scope_key"
     (fun stmt ->
-      let rec loop acc = match Sqlite3.step stmt with
-        | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-        | Sqlite3.Rc.ROW ->
-            let* execution = decode_autonomous stmt in
+      let rec loop acc =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else if rc = Sqlite3.Rc.ROW then
+            let* execution = decode_semantic stmt in
             (* The denormalized phase is not authority before validation:
                a damaged index must not hide an outstanding operation. *)
-            loop (if active_only && Autonomous.is_terminal execution then acc else execution :: acc)
-        | rc -> Error (Store_unavailable (sqlite_error db "read autonomous executions" rc))
+            loop (if active_only && Semantic.is_terminal execution then acc else execution :: acc)
+        else Error (Store_unavailable (sqlite_error db "read semantic executions" rc))
       in loop [])
 ;;
 
@@ -756,12 +760,12 @@ let inspect_outstanding ~path =
             else Error (Store_unavailable (sqlite_error db "inspect durable operations" rc))
           in read [])
     in
-    (* An exactly validated v1 schema cannot contain autonomous records.
+    (* An exactly validated v1 schema cannot contain semantic records.
        Ownerless stores remain inspectable without a write or migration. *)
-    let* autonomous_executions =
-      if chat_only then Ok [] else autonomous_rows db ~active_only:true in
+    let* semantic_executions =
+      if chat_only then Ok [] else semantic_rows db ~active_only:true in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
-    Ok (Stored_operations { chat_operations = outstanding; autonomous_executions })
+    Ok (Stored_operations { chat_operations = outstanding; semantic_executions })
   in
   let inspect_existing () =
     match Sqlite3.db_open ~mode:`READONLY path with
@@ -1206,143 +1210,144 @@ let fail_running store ~now ~operation_id ~kind ~detail ~outcome_ref =
        bind_text store.db stmt ~operation:"bind failed operation" 5 (Id.to_string operation_id))
 ;;
 
-type autonomous_error =
-  | Autonomous_store_error of error
-  | Unknown_execution of Uuidm.t
-  | Admission_conflict of Uuidm.t
-  | Execution_changed of Autonomous.t
-  | Sources_owned of Uuidm.t list
-  | Execution_slot_busy of Uuidm.t
-  | Invalid_execution of Autonomous.error
+type semantic_error =
+  | Semantic_store_error of error
+  | Unknown_execution of Keeper_execution_scope_id.t
+  | Admission_conflict of Keeper_execution_scope_id.t
+  | Execution_changed of Semantic.t
+  | Sources_owned of Keeper_execution_scope_id.t list
+  | Execution_slot_busy of Keeper_execution_scope_id.t
+  | Invalid_execution of Semantic.error
 
-type autonomous_admission = Autonomous_created of Autonomous.t | Autonomous_existing of Autonomous.t
+type semantic_admission = Semantic_created of Semantic.t | Semantic_existing of Semantic.t
 
-let autonomous_error_to_string = function
-  | Autonomous_store_error error -> error_to_string error
-  | Unknown_execution id -> "unknown autonomous execution: " ^ Uuidm.to_string id
-  | Admission_conflict id -> "autonomous admission conflict: " ^ Uuidm.to_string id
-  | Execution_changed current -> "autonomous execution changed: " ^ Uuidm.to_string current.id
-  | Sources_owned ids -> "selected sources already belong to: " ^ String.concat ", " (List.map Uuidm.to_string ids)
-  | Execution_slot_busy id -> "autonomous execution slot is held by: " ^ Uuidm.to_string id
-  | Invalid_execution error -> Autonomous.error_to_string error
+let semantic_error_to_string = function
+  | Semantic_store_error error -> error_to_string error
+  | Unknown_execution id -> "unknown semantic execution: " ^ scope_key id
+  | Admission_conflict id -> "semantic admission conflict: " ^ scope_key id
+  | Execution_changed current -> "semantic execution changed: " ^ scope_key current.id
+  | Sources_owned ids -> "selected sources already belong to: " ^ String.concat ", " (List.map scope_key ids)
+  | Execution_slot_busy id -> "semantic execution slot is held by: " ^ scope_key id
+  | Invalid_execution error -> Semantic.error_to_string error
 ;;
-let autonomous_store_result result = Result.map_error (fun error -> Autonomous_store_error error) result
+let semantic_store_result result = Result.map_error (fun error -> Semantic_store_error error) result
 
-let autonomous_get_with_db db id =
-  with_statement db ~operation:"lookup autonomous execution"
-    "SELECT execution_id, revision, phase, record_json FROM autonomous_executions WHERE execution_id = ?"
+let semantic_get_with_db db id =
+  with_statement db ~operation:"lookup semantic execution"
+    "SELECT scope_key, revision, phase, record_json FROM semantic_executions WHERE scope_key = ?"
     (fun stmt ->
-      let* () = bind_text db stmt ~operation:"bind autonomous identity" 1 (Uuidm.to_string id) in
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.DONE -> Ok None
-      | Sqlite3.Rc.ROW ->
-          let* current = decode_autonomous stmt in
-          let* () = expect_done db stmt ~operation:"complete autonomous lookup" in
+      let* () = bind_text db stmt ~operation:"bind semantic identity" 1 (scope_key id) in
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
+          let* current = decode_semantic stmt in
+          let* () = expect_done db stmt ~operation:"complete semantic lookup" in
           Ok (Some current)
-      | rc -> Error (Store_unavailable (sqlite_error db "lookup autonomous execution" rc)))
+      else Error (Store_unavailable (sqlite_error db "lookup semantic execution" rc)))
 ;;
-let autonomous_get store id =
-  let* () = ensure_open store |> autonomous_store_result in
-  autonomous_get_with_db store.db id |> autonomous_store_result
+let semantic_get store id =
+  let* () = ensure_open store |> semantic_store_result in
+  semantic_get_with_db store.db id |> semantic_store_result
 ;;
-let autonomous_outstanding store =
-  let* () = ensure_open store |> autonomous_store_result in
-  autonomous_rows store.db ~active_only:true |> autonomous_store_result
+let semantic_outstanding store =
+  let* () = ensure_open store |> semantic_store_result in
+  semantic_rows store.db ~active_only:true |> semantic_store_result
 ;;
-let with_autonomous_transaction store f =
-  let* () = ensure_open store |> autonomous_store_result in
-  let* () = exec store.db ~operation:"begin autonomous operation transaction" "BEGIN IMMEDIATE" |> autonomous_store_result in
+let with_semantic_transaction store f =
+  let* () = ensure_open store |> semantic_store_result in
+  let* () = exec store.db ~operation:"begin semantic operation transaction" "BEGIN IMMEDIATE" |> semantic_store_result in
   match f () with
   | Error _ as error -> rollback store.db; error
   | Ok value ->
-      (match commit store.db |> autonomous_store_result with
+      (match commit store.db |> semantic_store_result with
        | Ok () -> Ok value
        | Error _ as error -> rollback store.db; error)
 ;;
-let autonomous_canonical execution = canonical_json "autonomous execution" (Autonomous.to_json execution)
+let semantic_canonical execution = canonical_json "semantic execution" (Semantic.to_json execution)
 
-let insert_autonomous db execution =
-  let* bytes = autonomous_canonical execution in
-  with_statement db ~operation:"persist autonomous admission"
-    "INSERT INTO autonomous_executions(execution_id, revision, phase, record_json) VALUES (?, ?, ?, ?)"
+let insert_semantic db execution =
+  let* bytes = semantic_canonical execution in
+  with_statement db ~operation:"persist semantic admission"
+    "INSERT INTO semantic_executions(scope_key, revision, phase, record_json) VALUES (?, ?, ?, ?)"
     (fun stmt ->
-      let* () = bind_text db stmt ~operation:"bind execution identity" 1 (Uuidm.to_string execution.id) in
+      let* () = bind_text db stmt ~operation:"bind execution identity" 1 (scope_key execution.id) in
       let* () = bind_int64 db stmt ~operation:"bind execution revision" 2 execution.revision in
-      let* () = bind_text db stmt ~operation:"bind execution phase" 3 (Autonomous.phase_name execution.phase) in
+      let* () = bind_text db stmt ~operation:"bind execution phase" 3 (Semantic.phase_name execution.phase) in
       let* () = bind_text db stmt ~operation:"bind initialized frame and membership" 4 bytes in
-      expect_done db stmt ~operation:"persist autonomous admission")
+      expect_done db stmt ~operation:"persist semantic admission")
 ;;
-let update_autonomous db ~expected next =
-  let* expected_bytes = autonomous_canonical expected in
-  let* bytes = autonomous_canonical next in
-  with_statement db ~operation:"CAS autonomous execution"
-    "UPDATE autonomous_executions SET revision = ?, phase = ?, record_json = ? WHERE execution_id = ? AND revision = ? AND record_json = ?"
+let update_semantic db ~expected next =
+  let* expected_bytes = semantic_canonical expected in
+  let* bytes = semantic_canonical next in
+  with_statement db ~operation:"CAS semantic execution"
+    "UPDATE semantic_executions SET revision = ?, phase = ?, record_json = ? WHERE scope_key = ? AND revision = ? AND record_json = ?"
     (fun stmt ->
       let* () = bind_int64 db stmt ~operation:"bind next revision" 1 next.revision in
-      let* () = bind_text db stmt ~operation:"bind next phase" 2 (Autonomous.phase_name next.phase) in
+      let* () = bind_text db stmt ~operation:"bind next phase" 2 (Semantic.phase_name next.phase) in
       let* () = bind_text db stmt ~operation:"bind next execution record" 3 bytes in
-      let* () = bind_text db stmt ~operation:"bind expected identity" 4 (Uuidm.to_string expected.id) in
+      let* () = bind_text db stmt ~operation:"bind expected identity" 4 (scope_key expected.id) in
       let* () = bind_int64 db stmt ~operation:"bind expected revision" 5 expected.revision in
       let* () = bind_text db stmt ~operation:"bind expected exact record" 6 expected_bytes in
-      let* () = expect_done db stmt ~operation:"CAS autonomous execution" in
-      if Sqlite3.changes db = 1 then Ok () else Error (Integrity_error "autonomous CAS did not update its exact record"))
+      let* () = expect_done db stmt ~operation:"CAS semantic execution" in
+      if Sqlite3.changes db = 1 then Ok () else Error (Integrity_error "semantic CAS did not update its exact record"))
 ;;
-let same_source (left : Autonomous.source_member) (right : Autonomous.source_member) =
+let same_source (left : Semantic.source_member) (right : Semantic.source_member) =
   left.post_id = right.post_id && left.admitted_revision = right.admitted_revision
   && left.source_sha256 = right.source_sha256
 ;;
-let autonomous_prepare store ~id ~sources ~now =
-  let* candidate = Autonomous.create ~id ~sources ~now |> Result.map_error (fun error -> Invalid_execution error) in
-  with_autonomous_transaction store (fun () ->
-    let* existing = autonomous_get_with_db store.db id |> autonomous_store_result in
+let semantic_prepare store ~id ~sources ~now =
+  let* candidate = Semantic.create ~id ~sources ~now |> Result.map_error (fun error -> Invalid_execution error) in
+  with_semantic_transaction store (fun () ->
+    let* existing = semantic_get_with_db store.db id |> semantic_store_result in
     match existing with
-    | Some current when Autonomous.same_admission current candidate -> Ok (Autonomous_existing current)
+    | Some current when Semantic.same_admission current candidate -> Ok (Semantic_existing current)
     | Some _ -> Error (Admission_conflict id)
     | None ->
-        let* outstanding = autonomous_rows store.db ~active_only:true |> autonomous_store_result in
-        let owners = List.filter (fun (execution : Autonomous.t) ->
+        let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
+        let owners = List.filter (fun (execution : Semantic.t) ->
           List.exists (fun selected -> List.exists (same_source selected)
             (execution.sources @ execution.current_sources)) sources) outstanding in
-        if owners <> [] then Error (Sources_owned (List.map (fun (execution : Autonomous.t) -> execution.id) owners))
+        if owners <> [] then Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners))
         else
-          let* () = insert_autonomous store.db candidate |> autonomous_store_result in
-          Ok (Autonomous_created candidate))
+          let* () = insert_semantic store.db candidate |> semantic_store_result in
+          Ok (Semantic_created candidate))
 ;;
-let autonomous_apply store ~expected ~now action =
-  with_autonomous_transaction store (fun () ->
-    let* current = autonomous_get_with_db store.db expected.Autonomous.id |> autonomous_store_result in
+let semantic_apply store ~expected ~now action =
+  with_semantic_transaction store (fun () ->
+    let* current = semantic_get_with_db store.db expected.Semantic.id |> semantic_store_result in
     let* current = match current with None -> Error (Unknown_execution expected.id) | Some current -> Ok current in
-    let* expected_bytes = autonomous_canonical expected |> autonomous_store_result in
-    let* current_bytes = autonomous_canonical current |> autonomous_store_result in
+    let* expected_bytes = semantic_canonical expected |> semantic_store_result in
+    let* current_bytes = semantic_canonical current |> semantic_store_result in
     if expected_bytes <> current_bytes then Error (Execution_changed current)
     else
-      let* next = Autonomous.apply ~now action current |> Result.map_error (fun error -> Invalid_execution error) in
-      let* () = match current.phase, next.phase with
-        | (Autonomous.Preparing | Autonomous.Ready | Autonomous.Suspended _ | Autonomous.Recovering _ | Autonomous.Settled _), Autonomous.Running ->
-            let* outstanding = autonomous_rows store.db ~active_only:true |> autonomous_store_result in
-            (match List.find_opt (fun (execution : Autonomous.t) -> execution.phase = Autonomous.Running) outstanding with
+      let* next = Semantic.apply ~now action current |> Result.map_error (fun error -> Invalid_execution error) in
+      let* () = match next.phase with
+        | Semantic.Running ->
+            if current.phase = Semantic.Running then Ok () else
+            let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
+            (match List.find_opt (fun (execution : Semantic.t) -> execution.phase = Semantic.Running) outstanding with
              | Some running -> Error (Execution_slot_busy running.id)
              | None -> Ok ())
-        | _ -> Ok () in
+        | Semantic.Preparing | Semantic.Ready | Semantic.Suspended _ | Semantic.Recovering _ | Semantic.Settled _ -> Ok () in
       let* () =
         if next == current then Ok ()
-        else update_autonomous store.db ~expected:current next |> autonomous_store_result in
+        else update_semantic store.db ~expected:current next |> semantic_store_result in
       Ok next)
 ;;
 
-let reconcile_autonomous_running_with_db db ~now =
-  let* executions = autonomous_rows db ~active_only:true in
-  List.fold_left (fun result (execution : Autonomous.t) ->
+let reconcile_semantic_running_with_db db ~now =
+  let* executions = semantic_rows db ~active_only:true in
+  List.fold_left (fun result (execution : Semantic.t) ->
     let* count = result in
     match execution.phase with
-    | Autonomous.Running ->
-        let* next = Autonomous.apply ~now
-          (Autonomous.Require_reconciliation "process restarted during autonomous execution") execution
-          |> Result.map_error (fun error -> Integrity_error (Autonomous.error_to_string error)) in
-        let* () = update_autonomous db ~expected:execution next in
+    | Semantic.Running ->
+        let* next = Semantic.apply ~now
+          (Semantic.Require_reconciliation "process restarted during semantic execution") execution
+          |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
+        let* () = update_semantic db ~expected:execution next in
         Ok (count + 1)
-    | Autonomous.Preparing | Autonomous.Ready | Autonomous.Suspended _
-    | Autonomous.Recovering _ | Autonomous.Settled _ -> Ok count) (Ok 0) executions
+    | Semantic.Preparing | Semantic.Ready | Semantic.Suspended _
+    | Semantic.Recovering _ | Semantic.Settled _ -> Ok count) (Ok 0) executions
 ;;
 
 let settle_running_after_restart store ~now =
@@ -1352,7 +1357,7 @@ let settle_running_after_restart store ~now =
     |> Result.map_error (fun detail -> Invalid_input detail)
   in
   with_transaction store (fun () ->
-    let* _reconciled = reconcile_autonomous_running_with_db store.db ~now in
+    let* _reconciled = reconcile_semantic_running_with_db store.db ~now in
     with_statement
       store.db
       ~operation:"settle interrupted operations"

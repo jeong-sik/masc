@@ -47,7 +47,7 @@ type phase =
   | Settled of terminal
 
 type t =
-  { id : Uuidm.t
+  { id : Keeper_execution_scope_id.t
   ; revision : int64
   ; sources : source_member list
   ; current_sources : source_member list
@@ -68,15 +68,17 @@ type action =
   | Settle of terminal
 
 let error_to_string = function
-  | Invalid_record detail -> "invalid autonomous execution: " ^ detail
-  | Invalid_transition detail -> "invalid autonomous execution transition: " ^ detail
-  | Revision_exhausted -> "autonomous execution revision exhausted"
+  | Invalid_record detail -> "invalid semantic execution: " ^ detail
+  | Invalid_transition detail -> "invalid semantic execution transition: " ^ detail
+  | Revision_exhausted -> "semantic execution revision exhausted"
 
 let phase_name = function
   | Preparing -> "preparing" | Ready -> "ready" | Running -> "running"
   | Recovering _ -> "recovering" | Suspended _ -> "suspended" | Settled _ -> "settled"
-let is_terminal execution = match execution.phase with Settled _ -> true | _ -> false
-let scope execution = Scope_id.autonomous_admission execution.id
+let is_terminal execution = match execution.phase with
+  | Settled _ -> true
+  | Preparing | Ready | Running | Recovering _ | Suspended _ -> false
+let scope execution = execution.id
 let valid_time value = Float.is_finite value && value >= 0.
 let valid_terminal = function Failed detail -> String.trim detail <> "" | Completed | Cancelled -> true
 
@@ -93,12 +95,12 @@ let create ~id ~sources ~now =
   if not (valid_time now) then Error (Invalid_record "invalid admission time")
   else
     let* () = validate_sources sources in
-    let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh (Scope_id.autonomous_admission id))
+    let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
     Ok { id; revision = 0L; sources; current_sources = sources; frame; phase = Preparing; created_at = now; updated_at = now }
 
 let same_admission left right =
-  Uuidm.equal left.id right.id && left.sources = right.sources
+  Scope_id.equal left.id right.id && left.sources = right.sources
 
 let projected_sources current projections =
   let rec loop originals previous projections =
@@ -127,33 +129,69 @@ let recovery_origin = function
 let apply ~now action current =
   if not (valid_time now) then Error (Invalid_transition "invalid transition time")
   else
-    let* phase, frame, current_sources = match current.phase, action with
-      | Preparing, Confirm_sources -> Ok (Ready, current.frame, current.current_sources)
-      | Ready, Begin_execution -> Ok (Running, current.frame, current.current_sources)
-      | (Preparing | Recovering { origin = Unconfirmed_sources; _ }), Recheck_sources projections ->
-          let* sources = projected_sources current projections in
-          Ok (Preparing, current.frame, sources)
-      | (Ready | Recovering { origin = Confirmed_undispatched; _ }), Recheck_sources projections ->
-          let* sources = projected_sources current projections in
-          Ok (Ready, current.frame, sources)
-      | (Suspended expected | Recovering { origin = Checkpointed expected; _ }),
-          Resume_checkpoint checkpoint
-          when Keeper_checkpoint_ref.equal expected checkpoint ->
-          (* The accepted checkpoint owns continuation. Its original attention
-             rows may already have been ACKed and need not be recreated. *)
-          Ok (Running, current.frame, current.current_sources)
-      | Running, Record_observation observation ->
-          Snapshot.record current.frame ~scope:(scope current) observation
-          |> Result.map (fun frame -> Running, frame, current.current_sources)
-          |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error))
-      | Running, Suspend checkpoint -> Ok (Suspended checkpoint, current.frame, current.current_sources)
-      | phase, Require_reconciliation diagnostic when String.trim diagnostic <> "" ->
-          (match recovery_origin phase with
-           | Some origin -> Ok (Recovering {origin; diagnostic}, current.frame, current.current_sources)
-           | None -> Error (Invalid_transition "terminal execution cannot enter recovery"))
-      | (Preparing | Ready | Suspended _ | Recovering _), Settle (Cancelled | Failed _ as terminal)
-      | Running, Settle terminal when valid_terminal terminal -> Ok (Settled terminal, current.frame, current.current_sources)
-      | _ -> Error (Invalid_transition ("action is not admitted in " ^ phase_name current.phase)) in
+    let unchanged phase = Ok (phase, current.frame, current.current_sources) in
+    let reject () = Error (Invalid_transition ("action is not admitted in " ^ phase_name current.phase)) in
+    let* phase, frame, current_sources = match action with
+      | Confirm_sources ->
+          (match current.phase with
+           | Preparing -> unchanged Ready
+           | Ready | Running | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Begin_execution ->
+          (match current.phase with
+           | Ready -> unchanged Running
+           | Preparing | Running | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Recheck_sources projections ->
+          let recheck phase =
+            let* sources = projected_sources current projections in
+            Ok (phase, current.frame, sources) in
+          (match current.phase with
+           | Preparing -> recheck Preparing
+           | Ready -> recheck Ready
+           | Recovering recovery ->
+               (match recovery.origin with
+                | Unconfirmed_sources -> recheck Preparing
+                | Confirmed_undispatched -> recheck Ready
+                | Checkpointed _ | Interrupted_execution -> reject ())
+           | Running | Suspended _ | Settled _ -> reject ())
+      | Resume_checkpoint checkpoint ->
+          let resume expected =
+            if Keeper_checkpoint_ref.equal expected checkpoint then unchanged Running
+            else reject () in
+          (* The accepted checkpoint owns continuation, even after attention ACK. *)
+          (match current.phase with
+           | Suspended expected -> resume expected
+           | Recovering recovery ->
+               (match recovery.origin with
+                | Checkpointed expected -> resume expected
+                | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution -> reject ())
+           | Preparing | Ready | Running | Settled _ -> reject ())
+      | Record_observation observation ->
+          (match current.phase with
+           | Running ->
+               Snapshot.record current.frame ~scope:(scope current) observation
+               |> Result.map (fun frame -> Running, frame, current.current_sources)
+               |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error))
+           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Suspend checkpoint ->
+          (match current.phase with
+           | Running -> unchanged (Suspended checkpoint)
+           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Require_reconciliation diagnostic ->
+          if String.trim diagnostic = "" then reject ()
+          else (match recovery_origin current.phase with
+            | Some origin -> unchanged (Recovering {origin; diagnostic})
+            | None -> reject ())
+      | Settle terminal ->
+          if not (valid_terminal terminal) then reject ()
+          else (match terminal with
+            | Completed ->
+                (match current.phase with
+                 | Running -> unchanged (Settled terminal)
+                 | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+            | Cancelled | Failed _ ->
+                (match current.phase with
+                 | Preparing | Ready | Running | Recovering _ | Suspended _ -> unchanged (Settled terminal)
+                 | Settled _ -> reject ())) in
     if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
     then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
@@ -190,8 +228,8 @@ let phase_json = function
   | Settled terminal -> `Assoc ["kind", `String "settled"; "terminal", terminal_json terminal]
 
 let to_json execution =
-  `Assoc [ "schema", `String "masc.keeper_autonomous_execution.v1"
-         ; "id", `String (Uuidm.to_string execution.id)
+  `Assoc [ "schema", `String "masc.keeper_semantic_execution.v1"
+         ; "id", Scope_id.to_json execution.id
          ; "revision", `Intlit (Int64.to_string execution.revision)
          ; "sources", `List (List.map source_to_json execution.sources)
          ; "current_sources", `List (List.map source_to_json execution.current_sources)
@@ -288,10 +326,8 @@ let of_json json =
   let decode () =
     let* fields = exact ["schema";"id";"revision";"sources";"current_sources";"frame";"phase";"created_at";"updated_at"] json in
     let* schema = string "schema" fields in
-    let* () = if schema = "masc.keeper_autonomous_execution.v1" then Ok () else Error "unsupported execution schema" in
-    let* raw_id = string "id" fields in
-    let* id = match Uuidm.of_string raw_id with
-      | Some id when Uuidm.to_string id = raw_id -> Ok id | _ -> Error "noncanonical execution UUID" in
+    let* () = if schema = "masc.keeper_semantic_execution.v1" then Ok () else Error "unsupported execution schema" in
+    let* id = Scope_id.of_json (field "id" fields) in
     let* revision = int64 "revision" fields in
     let* () = if revision < 0L then Error "negative execution revision" else Ok () in
     let* sources = match field "sources" fields with `List rows -> decode_list source_of_json rows | _ -> Error "sources must be a list" in
@@ -306,24 +342,25 @@ let of_json json =
               && current.checkpoint_retentions >= initial.checkpoint_retentions) sources current_sources
       then Ok () else Error "current source projections do not preserve original admissions" in
     let* frame = Snapshot.of_json (field "frame" fields) |> Result.map_error Snapshot.error_to_string in
-    let expected = Scope_id.autonomous_admission id in
+    let expected = id in
     let* () = match Snapshot.active frame, Snapshot.scope_ids frame with
       | Some active, [only] when Scope_id.equal active expected && Scope_id.equal only expected -> Ok ()
       | _ -> Error "execution frame must contain only its admitted scope" in
     let* phase = phase_of_json (field "phase" fields) in
     let* observations = Snapshot.observations frame ~scope:expected
       |> Result.map_error Snapshot.error_to_string in
-    let* () = match phase with
-      | Preparing when observations = [] -> Ok ()
-      | Ready when revision >= 1L && observations = [] -> Ok ()
-      | Running when revision >= 2L -> Ok ()
-      | Suspended _ when revision >= 3L -> Ok ()
-      | Recovering {origin = (Unconfirmed_sources | Confirmed_undispatched); _ }
-          when revision >= 1L && observations = [] -> Ok ()
-      | Recovering {origin = (Checkpointed _ | Interrupted_execution); _ }
-          when revision >= 2L -> Ok ()
-      | Settled _ when revision >= 1L -> Ok ()
-      | _ -> Error "execution phase, revision and initial frame are incoherent" in
+    let coherent = match phase with
+      | Preparing -> observations = []
+      | Ready -> revision >= 1L && observations = []
+      | Running -> revision >= 2L
+      | Suspended _ -> revision >= 3L
+      | Recovering recovery ->
+          (match recovery.origin with
+           | Unconfirmed_sources | Confirmed_undispatched -> revision >= 1L && observations = []
+           | Checkpointed _ | Interrupted_execution -> revision >= 2L)
+      | Settled _ -> revision >= 1L in
+    let* () = if coherent then Ok ()
+      else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
     Ok { id; revision; sources; current_sources; frame; phase; created_at; updated_at }

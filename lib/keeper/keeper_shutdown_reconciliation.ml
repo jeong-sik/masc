@@ -9,7 +9,7 @@ type error =
   | Outstanding_recorded_tasks of string list
   | Outstanding_tasks of string list
   | Outstanding_chat_operations of Keeper_chat_operation.Operation_id.t list
-  | Outstanding_autonomous_executions of Uuidm.t list
+  | Outstanding_semantic_executions of Keeper_execution_scope_id.t list
   | Chat_operations_unavailable of Keeper_chat_operation_store.error
   | Backlog_unavailable of string
   | Backlog_revision_conflict of { expected : int; actual : int }
@@ -30,8 +30,8 @@ let error_to_string = function
   | Outstanding_tasks ids -> "outstanding Keeper tasks: " ^ String.concat "," ids
   | Outstanding_chat_operations ids -> "outstanding Keeper chat operations: " ^
       String.concat "," (List.map Keeper_chat_operation.Operation_id.to_string ids)
-  | Outstanding_autonomous_executions ids -> "outstanding Keeper autonomous executions: " ^
-      String.concat "," (List.map Uuidm.to_string ids)
+  | Outstanding_semantic_executions ids -> "outstanding Keeper semantic executions: " ^
+      String.concat "," (List.map (fun id -> Yojson.Safe.to_string (Keeper_execution_scope_id.to_json id)) ids)
   | Chat_operations_unavailable error -> Keeper_chat_operation_store.error_to_string error
   | Backlog_unavailable detail -> "authoritative backlog unavailable: " ^ detail
   | Backlog_revision_conflict { expected; actual } ->
@@ -145,13 +145,13 @@ let acknowledge_absent_owner_observing ~on_guards_acquired ~config ~keeper_name 
                 |> Result.map_error (fun error -> Chat_operations_unavailable error) in
               let* () = match chat_operations with
                 | Keeper_chat_operation_store.Missing_store -> Ok ()
-                | Keeper_chat_operation_store.Stored_operations { chat_operations; autonomous_executions } ->
+                | Keeper_chat_operation_store.Stored_operations { chat_operations; semantic_executions } ->
                   if chat_operations <> [] then
                     Error (Outstanding_chat_operations (List.map
                       (fun (op : Keeper_chat_operation.t) -> op.operation_id) chat_operations))
-                  else if autonomous_executions <> [] then
-                    Error (Outstanding_autonomous_executions (List.map
-                      (fun (execution : Keeper_autonomous_execution.t) -> execution.id) autonomous_executions))
+                  else if semantic_executions <> [] then
+                    Error (Outstanding_semantic_executions (List.map
+                      (fun (execution : Keeper_semantic_execution.t) -> execution.id) semantic_executions))
                   else Ok () in
               let* backlog = Workspace_backlog.read_backlog_r config
                 |> Result.map_error (fun detail -> Backlog_unavailable detail) in

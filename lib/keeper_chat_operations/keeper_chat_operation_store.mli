@@ -1,7 +1,7 @@
 (** Sole-writer SQLite storage for Keeper chat operations. *)
 
 module Operation = Keeper_chat_operation
-module Autonomous = Keeper_autonomous_execution
+module Semantic = Keeper_semantic_execution
 
 type t
 
@@ -30,12 +30,12 @@ val path_for_keeper : keepers_runtime_dir:string -> keeper_name:string -> string
 
 type outstanding_snapshot =
   | Missing_store
-  | Stored_operations of { chat_operations : Operation.t list; autonomous_executions : Autonomous.t list }
+  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list }
 
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
 (** Read-only schema/integrity checked snapshot of queued and running operations.
     Exactly validated v1 chat-only stores are readable without migration; v2
-    inspection also includes every nonterminal autonomous execution.
+    inspection also includes every nonterminal semantic execution.
     Never creates, initializes, or recovers a store. Missing files remain distinct
     from a validated empty queue. Callers authorizing lifecycle changes must
     exclude the sole writer and its creation for the whole enclosing commit. *)
@@ -110,31 +110,33 @@ module For_testing : sig
   val table_column_counts : (string * int) list
 end
 
-(** Autonomous semantic records share the Owner's SQLite journal. Suspended or
+(** Semantic execution records share the Owner's SQLite journal. Suspended or
     recovering records reserve only their own sources, never the running slot. *)
-type autonomous_error =
-  | Autonomous_store_error of error
-  | Unknown_execution of Uuidm.t
-  | Admission_conflict of Uuidm.t
-  | Execution_changed of Autonomous.t
-  | Sources_owned of Uuidm.t list
-  | Execution_slot_busy of Uuidm.t
-  | Invalid_execution of Autonomous.error
+type semantic_error =
+  | Semantic_store_error of error
+  | Unknown_execution of Keeper_execution_scope_id.t
+  | Admission_conflict of Keeper_execution_scope_id.t
+  | Execution_changed of Semantic.t
+  | Sources_owned of Keeper_execution_scope_id.t list
+  | Execution_slot_busy of Keeper_execution_scope_id.t
+  | Invalid_execution of Semantic.error
 
-type autonomous_admission = Autonomous_created of Autonomous.t | Autonomous_existing of Autonomous.t
-val autonomous_error_to_string : autonomous_error -> string
-val autonomous_get : t -> Uuidm.t -> (Autonomous.t option, autonomous_error) result
-val autonomous_outstanding : t -> (Autonomous.t list, autonomous_error) result
-val autonomous_prepare :
-  t -> id:Uuidm.t -> sources:Autonomous.source_member list -> now:float ->
-  (autonomous_admission, autonomous_error) result
-(** Commits identity, initialized empty repetition frame, source membership and
+type semantic_admission = Semantic_created of Semantic.t | Semantic_existing of Semantic.t
+val semantic_error_to_string : semantic_error -> string
+val semantic_get : t -> Keeper_execution_scope_id.t -> (Semantic.t option, semantic_error) result
+val semantic_outstanding : t -> (Semantic.t list, semantic_error) result
+val semantic_prepare :
+  t -> id:Keeper_execution_scope_id.t -> sources:Semantic.source_member list -> now:float ->
+  (semantic_admission, semantic_error) result
+(** The identity is Direct_operation or Autonomous_admission without aliases.
+    The canonical typed JSON key includes both origin and scalar. Commits the
+    identity, initialized empty repetition frame, source membership and
     Preparing phase together. Reusing identity never clears recorded evidence.
     An uncertain commit is an error; reload by that identity before deciding a
     retry. Different outstanding operations may coexist with disjoint sources. *)
-val autonomous_apply :
-  t -> expected:Autonomous.t -> now:float -> Autonomous.action ->
-  (Autonomous.t, autonomous_error) result
+val semantic_apply :
+  t -> expected:Semantic.t -> now:float -> Semantic.action ->
+  (Semantic.t, semantic_error) result
 (** Exact-record CAS; terminal records are immutable. Only Running occupies the
-    single autonomous execution slot. Startup moves interrupted Running records
+    single semantic execution slot. Startup moves interrupted Running records
     to Recovering without clearing frames, allowing unrelated work to proceed. *)

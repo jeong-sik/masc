@@ -46,7 +46,7 @@ let test_session_generation () =
     let view = { (create ()) with load = Loading (7, operation) } in
     expect "read cannot settle session or navigation operation"
       (accept ~generation:7 (decode (response ())) view = view))
-    [Open_session; Close_session; Goto "https://example.org/?q=한글"]
+    [Open_session; Close_session; Goto "https://example.org/?q=한글"; Screenshot 2]
 
 let test_navigation_failure_recovery () =
   let url = "https://example.org/?q=한글" in
@@ -102,9 +102,36 @@ let test_empty_tabs () =
     "tabs", `List []; "page", `Null]])) in
   expect "empty tab set is distinct from failure" (reading.tabs = [] && reading.page = None)
 
+let screenshot_response ?(source="live") ?(tab_id=2) ?(mime="image/png") () =
+  `Assoc ["ok", `Bool true; "data", `Assoc [
+    "source", `String source; "tabId", `Int tab_id; "title", `String "second";
+    "url", `String "https://example.org/"; "mimeType", `String mime;
+    "data", `String "UE5H"; "elapsed_ms", `Float 13.]]
+
+let test_screenshot_ownership_and_draft () =
+  let pending = { (loaded ()) with scroll = 3; url_draft = Some "https://example.org/?q=한글";
+      load = Loading (8, Screenshot 2) } in
+  let settled, screenshot = accept_screenshot ~generation:8 (decode_screenshot (screenshot_response ())) pending in
+  expect "matching screenshot settles busy state" (not (busy settled) && Option.is_some screenshot);
+  expect "screenshot never replaces source, selection or draft"
+    (settled.reading = pending.reading && settled.selected_tab = pending.selected_tab
+     && settled.scroll = 3 && settled.url_draft = pending.url_draft);
+  expect "late screenshot cannot settle another operation"
+    (accept_screenshot ~generation:7 (decode_screenshot (screenshot_response ())) pending = (pending, None));
+  List.iter (fun response ->
+    let failed, preview = accept_screenshot ~generation:8 (decode_screenshot response) pending in
+    expect "wrong screenshot ownership is visible, no overlay" (match failed.load with Failed _ -> preview = None | _ -> false);
+    expect "failure retains source and draft" (failed.reading = pending.reading && failed.url_draft = pending.url_draft))
+    [screenshot_response ~source:"automation" (); screenshot_response ~tab_id:1 ()];
+  let failed, preview = accept_screenshot ~generation:8 (Error "selected tab closed") pending in
+  expect "closed tab failure does not fall back to active tab"
+    (failed.selected_tab = Some 2 && failed.load = Failed "selected tab closed" && preview = None);
+  expect "non-PNG payload rejected" (Result.is_error (decode_screenshot (screenshot_response ~mime:"image/jpeg" ())))
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["read and tab selection", test_read_and_selection;
+    ["screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
+     "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;
      "stale response and provenance", test_stale_response;
      "session generation", test_session_generation;

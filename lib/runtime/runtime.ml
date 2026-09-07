@@ -1189,7 +1189,9 @@ let degrade_loaded_for_missing_catalog
   let unavailable_assignments =
     List.filter_map
       (fun (keeper_name, runtime_id) ->
-         if is_missing runtime_id then Some { keeper_name; runtime_id } else None)
+         if is_missing runtime_id && Option.is_none (find_declared_lane lanes runtime_id)
+         then Some { keeper_name; runtime_id }
+         else None)
       assignments
   in
   let default_drop =

@@ -3531,6 +3531,7 @@ endpoint = %S
 [models.good]
 api-name = "good"
 max-context = 8192
+temperature = 0.25
 streaming = false
 [models.missing]
 api-name = "missing"
@@ -3573,11 +3574,17 @@ max-request-body-bytes = 65536
         Keeper_turn_driver.run_named ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
           ~keeper_name:keeper ~base_path ~system_prompt:"Answer the fixture task."
           ~goal:"Return the fixture answer." ~agent_core_tools:[] ~sw ~net:env#net () in
+      let assignment_projection keeper =
+        let projection = Server_dashboard_runtime_resolved_json.build
+            ~generated_at_iso:"2026-09-07T00:00:00Z"
+            ~config:(Workspace.default_config base_path) in
+        Yojson.Safe.Util.(projection |> member "assignments" |> to_list)
+        |> List.find (fun row ->
+          Yojson.Safe.Util.(row |> member "keeper" |> to_string) = keeper) in
       (match Runtime.resolve_assignment "fixture.missing" with
        | `Unavailable missing -> check string "catalog identity is typed" "missing" missing.model_id
        | `Missing | `Lane _ -> fail "configured unavailable runtime became unknown or active");
-      let projection = Server_dashboard_runtime_resolved_json.assignment_json
-          (Runtime.get_default_runtime ()) "affected" in
+      let projection = assignment_projection "affected" in
       check string "Dashboard exposes the unavailable state" "unavailable"
         Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
       check string "Dashboard preserves the requested ID" "fixture.missing"
@@ -3600,13 +3607,42 @@ max-request-body-bytes = 65536
         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error)) ["healthy"; "default-rider"];
       check int "healthy and default Keeper both reach the real HTTP provider" 2
         (Exact_output_fixture.post_count server);
+      let shadowed_lane_toml = runtime_toml ^
+        "\n[runtime.lanes.\"fixture.missing\"]\ncandidates = [\"fixture.good\"]\n" in
+      (with_temp_runtime_toml shadowed_lane_toml @@ fun shadow_path ->
+        (match Runtime.init_default_degraded_report ~config_path:shadow_path with
+         | Ok (Runtime.Initialized_degraded report) ->
+             check (list string) "healthy declared lane is not an unavailable assignment" []
+               (List.map (fun (a : Runtime.unavailable_runtime_assignment) -> a.keeper_name)
+                  report.unavailable_assignments)
+         | Ok Runtime.Initialized -> fail "shadowed missing binding still needs a catalog report"
+         | Error error -> fail (Runtime.strict_init_error_to_string error));
+        (match Keeper_unified_turn_pre_dispatch.build_runtime_execution
+            ~meta:affected_meta ~runtime_id:"fixture.missing" with
+         | Ok execution ->
+             check string "pre-dispatch keeps the requested lane ID" "fixture.missing"
+               execution.runtime_id;
+             check (float 0.000001) "pre-dispatch uses the lane candidate temperature" 0.25
+               execution.temperature
+         | Error error -> fail (Agent_core.Error.to_string error));
+        let projection = assignment_projection "affected" in
+        check string "Dashboard resolves the healthy shadowing lane" "lane"
+          Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
+        (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "healthy lane reaches the actual HTTP provider" 3
+          (Exact_output_fixture.post_count server);
+        let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+        check string "declared lane serves its healthy candidate" "good"
+          Yojson.Safe.Util.(body |> member "model" |> to_string);
+        check (float 0.000001) "actual provider sees the candidate temperature" 0.25
+          Yojson.Safe.Util.(body |> member "temperature" |> to_float));
       with_model_catalog_content (catalog ^ catalog_row "missing") @@ fun () ->
       (match init () with Runtime.Initialized -> () | Runtime.Initialized_degraded _ -> fail "restored row stayed unavailable");
       check (option string) "recovery did not rewrite the assignment" (Some "fixture.missing")
         (Runtime.runtime_id_for_keeper "affected");
       (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-      check int "same assigned Keeper now reaches provider" 3 (Exact_output_fixture.post_count server);
-      let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+      check int "same assigned Keeper now reaches provider" 4 (Exact_output_fixture.post_count server);
+      let body = List.nth (Exact_output_fixture.request_bodies server) 3 |> Yojson.Safe.from_string in
       check string "restored route used its own model, not default" "missing"
         Yojson.Safe.Util.(body |> member "model" |> to_string))
 

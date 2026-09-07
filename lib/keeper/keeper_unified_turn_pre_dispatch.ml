@@ -80,6 +80,18 @@ let build_runtime_execution
           ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
     | (`Lane _ | `Missing) as assignment -> Ok assignment
   in
+  let* entry_runtime_id, remaining_context_ids =
+    match assignment with
+    | `Missing -> Ok (runtime_id, [])
+    | `Lane lane ->
+      (match Runtime_lane.ordered_candidates lane with
+       | first :: rest -> Ok (first, rest)
+       | [] ->
+         Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+           { field = "runtime_id"
+           ; detail = Printf.sprintf "Runtime lane %s has no candidates" runtime_id
+           })))
+  in
   let log_pre_dispatch_error ~site detail =
     Log.Keeper.error
       "%s: pre_dispatch: %s failed for runtime_id=%s: %s"
@@ -91,7 +103,7 @@ let build_runtime_execution
   match
     Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
       ~requested_override:meta.max_context_override
-      ~runtime_id
+      ~runtime_id:entry_runtime_id
   with
   | Error error ->
     let detail =
@@ -109,44 +121,41 @@ let build_runtime_execution
        serving candidate can overflow is the minimum across the lane's
        candidates — and a minimum is order-independent, so when the
        sticky reorder runs stops mattering. A runtime outside any lane
-       keeps its own resolution. The lane is re-resolved here instead of
-       threaded from the driver: both read the same
-       [Runtime.resolve_assignment] SSOT, and a deferred lane hint's
-       entry point maps back to that same lane. A candidate without a
+       keeps its own resolution. A lane's entry resolution belongs to its
+       first candidate, because its ID is a routing label and can shadow a
+       runtime binding. The lane is resolved once through the same
+       [Runtime.resolve_assignment] SSOT used by the driver. A candidate without a
        resolvable context window is excluded from the minimum with a
        warning — it would serve a prompt shaped without its window
        either way, which is exactly the pre-#28765 behavior. *)
     let max_context_resolution =
-      match assignment with
-      | `Missing -> entry_resolution
-      | `Lane lane ->
-        List.fold_left
-          (fun (smallest : Keeper_context_runtime.max_context_resolution)
-            candidate_id ->
-            if String.equal candidate_id runtime_id
-            then smallest
-            else (
-              match
-                Keeper_context_runtime
-                .resolve_max_context_resolution_for_runtime_id
-                  ~requested_override:meta.max_context_override
-                  ~runtime_id:candidate_id
-              with
-              | Error error ->
-                Log.Keeper.warn
-                  "%s: pre_dispatch: lane candidate %s has no resolvable \
-                   context window (%s); it does not bound the turn budget"
-                  meta.name
-                  candidate_id
-                  (Keeper_context_runtime.max_context_resolution_error_to_string
-                     error);
-                smallest
-              | Ok resolution ->
-                if resolution.effective_budget < smallest.effective_budget
-                then resolution
-                else smallest))
-          entry_resolution
-          (Runtime_lane.ordered_candidates lane)
+      List.fold_left
+        (fun (smallest : Keeper_context_runtime.max_context_resolution)
+          candidate_id ->
+          if String.equal candidate_id entry_runtime_id
+          then smallest
+          else (
+            match
+              Keeper_context_runtime
+              .resolve_max_context_resolution_for_runtime_id
+                ~requested_override:meta.max_context_override
+                ~runtime_id:candidate_id
+            with
+            | Error error ->
+              Log.Keeper.warn
+                "%s: pre_dispatch: lane candidate %s has no resolvable \
+                 context window (%s); it does not bound the turn budget"
+                meta.name
+                candidate_id
+                (Keeper_context_runtime.max_context_resolution_error_to_string
+                   error);
+              smallest
+            | Ok resolution ->
+              if resolution.effective_budget < smallest.effective_budget
+              then resolution
+              else smallest))
+        entry_resolution
+        remaining_context_ids
     in
     if max_context_resolution.effective_budget < entry_resolution.effective_budget
     then
@@ -164,7 +173,7 @@ let build_runtime_execution
     in
     let temperature =
       Runtime_inference.resolve_temperature
-        ~runtime_id
+        ~runtime_id:entry_runtime_id
         ~fallback:Keeper_config.keeper_unified_temperature
     in
     Ok

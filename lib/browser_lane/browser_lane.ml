@@ -21,6 +21,7 @@ type interaction = Click of string | Fill of { selector : string; text : string 
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
+  | Page_downloads of { tab_id : int }
   | Page_capture of { tab_id : int }
   | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
@@ -33,6 +34,7 @@ type verb =
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"
+  | Page_downloads _ -> "page.downloads"
   | Page_capture _ -> "page.capture"
   | Page_interact _ -> "page.interact"
   | Session_open _ -> "session.open"
@@ -65,6 +67,8 @@ let verb_json = function
              ]
              |> List.filter_map Fun.id) )
       ]
+  | Page_downloads {tab_id} ->
+    `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_capture { tab_id } ->
     `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
   | Page_interact { tab_id; expected_url; action } ->
@@ -101,12 +105,12 @@ let verb_json = function
      Readers and explicit-tab interactions are supported. Session ownership
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ | Page_downloads _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 let verb_allowed_on_live = function
-  | Page_context _ -> false
+  | Page_context _ | Page_downloads _ -> false
   | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_interact _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;

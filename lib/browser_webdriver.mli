@@ -3,7 +3,7 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type t
-val create : ?binary:string -> request:request -> unit -> t
+val create : ?binary:string -> start_downloads:Browser_downloads.start -> request:request -> unit -> t
 (** [binary] is forwarded verbatim to moz:firefoxOptions.binary. Missing means
     geckodriver discovers its default Firefox; an invalid explicit path fails. *)
 val execute : t -> Browser_lane.verb -> Browser_lane.answer

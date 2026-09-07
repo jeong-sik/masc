@@ -6,6 +6,7 @@ let endpoint = Sys.getenv "MASC_PROBE_DRIVER_URL"
 let fixture_url = Sys.getenv "MASC_PROBE_FIXTURE_URL"
 let remote_session = ref None
 let request ~method_ ~path ~body =
+  Eio_unix.run_in_systhread (fun () ->
   let method_name = match method_ with `GET -> "GET" | `POST -> "POST" | `DELETE -> "DELETE" | `PUT -> "PUT" | `PATCH -> "PATCH" | `HEAD -> "HEAD" in
   let args = ["curl";"--silent";"--show-error";"--max-time";"45";"--request";method_name;
     "--header";"Content-Type: application/json";"--write-out";"\n%{http_code}";endpoint ^ path]
@@ -21,7 +22,7 @@ let request ~method_ ~path ~body =
      | `POST,"/session",Ok (`Assoc fields) -> (match List.assoc_opt "sessionId" fields with Some (`String id) -> remote_session := Some id | _ -> ())
      | _ -> ());
     result
-  | _ -> Error (Driver.Transport "curl failed")
+  | _ -> Error (Driver.Transport "curl failed"))
 let member = Yojson.Safe.Util.member
 let integer json = Yojson.Safe.Util.to_int json
 let string json = Yojson.Safe.Util.to_string json
@@ -35,8 +36,11 @@ let contains text expected =
     && (String.sub text i (String.length expected) = expected || search (i + 1)) in
   search 0
 let check message condition = if not condition then failwith message else Printf.printf "PASS %s\n%!" message
-let () = Eio_main.run (fun _ ->
-  let driver = Driver.create ~request () in
+let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let root = Sys.getenv "MASC_PROBE_DOWNLOAD_ROOT" in
+  let driver = Driver.create ~request
+      ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
+        ~publish:publish_download) () in
   let run verb = Driver.execute driver verb in
   let close () = match Driver.close driver with
     | Ok () -> ()
@@ -113,6 +117,21 @@ let () = Eio_main.run (fun _ ->
     check "nested fill executed" (member "performed" (frame_act (Browser_action.Fill {selector="#nested-input";text="프레임 입력"})) = `Bool true);
     check "nested click executed" (member "performed" (frame_act (Browser_action.Click "#nested-apply")) = `Bool true);
     check "nested frame contains submitted input" (contains (context first frame_path (`Text 1000) |> member "text" |> string) "프레임 입력");
+    (* A BrowserInteract call must not inherit the previous BrowserAct frame. *)
+    let interact action expected_url = run (Browser_lane.Page_interact
+      {tab_id=first;expected_url;action}) in
+    let mixed = success (interact (Browser_lane.Fill
+      {selector=selector "name";text="Mixed browser controls"}) (Some (fixture_url ^ "/first"))) in
+    check "BrowserInteract resets native frame context and names its tab"
+      (member "tabId" mixed = `Int first);
+    let rejected = interact (Browser_lane.Fill
+      {selector=selector "name";text="unexpected overwrite"}) (Some (fixture_url ^ "/wrong")) in
+    check "BrowserInteract rejects stale URL before overwriting input"
+      (match rejected with Browser_lane.Refused _ -> true | _ -> false);
+    let submitted = success (interact (Browser_lane.Click (selector "submit")) None) in
+    check "BrowserInteract returns the observed task tab" (member "tabId" submitted = `Int first);
+    check "native and DOM interactions share the correct page without stale overwrite"
+      (contains (member "text" (read first) |> string) "Mixed browser controls");
     check "top-level read resets the frame context" (contains (member "text" (read first) |> string) "Firefox fixture");
     (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=["#missing"];interaction=Browser_action.Click "button"})) with
      | Browser_lane.Rejected_before_effect _ -> check "missing frame rejected before effect" true
@@ -158,6 +177,41 @@ let () = Eio_main.run (fun _ ->
      | Error error -> failwith (Driver.error_message error));
     act upload (Browser_action.Click "#send-upload");
     check "real multipart upload preserves file bytes" (contains (member "text" (read upload) |> string) "Upload verified");
+    let downloads_tab = open_tab "/downloads" in
+    let download_rows () = success (run (Browser_lane.Page_downloads {tab_id=downloads_tab})) |> member "downloads" |> Yojson.Safe.Util.to_list in
+    let await_downloads count =
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 20. (fun () ->
+        let rec wait () =
+          let rows = download_rows () in
+          if List.length rows = count && List.for_all (fun row -> member "status" row = `String "completed") rows then rows
+          else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.05; wait ()) in wait ()) in
+    act downloads_tab (Browser_action.Click "#download-link");
+    check "download 1 reached terminal completion" (List.length (await_downloads 1) = 1);
+    act downloads_tab (Browser_action.Click "#download-link");
+    check "download 2 reached terminal completion" (List.length (await_downloads 2) = 2);
+    act downloads_tab (Browser_action.Click "#download-attribute");
+    check "download 3 reached terminal completion" (List.length (await_downloads 3) = 3);
+    let frame_download_receipt = success (run (Browser_lane.Page_act (Browser_action.On_tab {
+      tab_id=downloads_tab;frame_path=["#download-frame"];interaction=Browser_action.Click "#frame-download"}))) in
+    check "frame download click confirms its tab and effect"
+      (member "tabId" frame_download_receipt = `Int downloads_tab && member "performed" frame_download_receipt = `Bool true);
+    let rows = await_downloads 4 in
+    check "distinct UUIDs correlate identical URLs and null navigation" (List.length (List.sort_uniq String.compare
+      (List.map (fun row -> member "downloadId" row |> string) rows)) = 4);
+    check "iframe downloads belong to their observed top-level tab" (List.length rows = 4);
+    check "another tab cannot see these downloads"
+      (success (run (Browser_lane.Page_downloads {tab_id=second})) |> member "downloads" = `List []);
+    List.iter (fun row ->
+      let path = member "path" row |> string in
+      let bytes = In_channel.with_open_bin path In_channel.input_all in
+      check "completed native download contains exact binary bytes"
+        (bytes = String.init 40960 (fun i -> Char.chr (i mod 256)));
+      check "download publication returned metadata" (member "artifact" row <> `Null)) rows;
+    let evidence = success (run (Browser_lane.Page_downloads {tab_id=downloads_tab})) in
+    Out_channel.with_open_bin (Sys.getenv "MASC_PROBE_DOWNLOAD_RESULT") (fun oc ->
+      output_string oc (Yojson.Safe.pretty_to_string evidence));
+    act downloads_tab Browser_action.Close_tab;
+    check "completed downloads remain readable after their tab closes" (List.length (download_rows ()) = 4);
     act upload Browser_action.Close_tab;
     check "closing one tab retains session-owned files" (List.for_all Sys.file_exists !staged_paths);
     act first Browser_action.Close_tab;
@@ -169,4 +223,4 @@ let () = Eio_main.run (fun _ ->
     open_session ();
     let fresh = open_tab "/fresh" in
     check "reopened sessions never reuse tab IDs" (fresh > second);
-    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false)))
+    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false))))

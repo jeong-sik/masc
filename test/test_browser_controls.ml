@@ -2,6 +2,10 @@ open Alcotest
 module Driver = Masc.Browser_webdriver
 module Lane = Browser_lane
 module Action = Browser_lane.Action
+let start_downloads ~session_id:_ ~websocket_url:_ =
+  Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+    check=(fun () -> Ok ());close=(fun () -> ())}
+
 let make_meta () =
   match Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "browser-upload"]) with
   | Ok meta -> {meta with Masc.Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Docker}
@@ -37,7 +41,7 @@ let fixture ?(failure=(fun _ -> None)) f = Eio_main.run (fun env ->
     | None ->
     match method_,path with
     | `DELETE,"/session/s" -> Ok `Null
-    | `POST,"/session" -> Ok (`Assoc ["sessionId",`String "s"])
+    | `POST,"/session" -> Ok (`Assoc ["sessionId",`String "s";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/s"]])
     | `GET,"/session/s/window/handles" -> Ok (`List [`String "a";`String "b"])
     | `GET,"/session/s/window" -> Ok (`String !current)
     | `POST,"/session/s/window" ->
@@ -54,7 +58,7 @@ let fixture ?(failure=(fun _ -> None)) f = Eio_main.run (fun env ->
     | `POST,_ -> Ok `Null
     | `DELETE,"/session/s/window" -> Ok (`List [`String "a"])
     | _ -> fail ("unexpected request " ^ path) in
-  let driver = Driver.create ~request () in
+  let driver = Driver.create ~start_downloads ~request () in
   ignore (ok (Driver.execute driver (Lane.Session_open {headless=None})));
   ignore (ok (Driver.execute driver Lane.Tabs_list));
   calls := [];

@@ -6,8 +6,9 @@ state and select options. Password and file input values are omitted. The list
 is capped at 200 controls and reports truncation; this is a DOM observation, not
 a screenshot or a complete accessibility tree.
 
-BrowserAct operates automation Firefox. It defaults to `lane=automation`; the
-live extension remains read-only in this increment. BrowserSession opens an
+BrowserAct operates automation Firefox and defaults to `lane=automation`.
+BrowserInteract also supports explicit-tab click, fill and scroll on the live
+extension; see [Browser Lane examples](browser-lane-examples.md). BrowserSession opens an
 isolated Firefox profile. BrowserAct `open_tab` creates a task's tab and returns
 its id. Use that id for subsequent actions and reads, and close that tab when
 finished. Session close shuts down the shared browser, so callers must not close
@@ -50,7 +51,10 @@ Firefox is driven through Mozilla's [geckodriver](https://firefox-source-docs.mo
 
 Validation lives in `test_browser_controls`, `test_browser_webdriver`,
 `test_browser_lane`, and the tool registry tests. CI build/test results and live
-Firefox measurements must be recorded independently. Shadow root targeting and download workflows are separate capability increments.
+Firefox measurements must be recorded independently. Shadow root targeting is a
+separate capability increment. Download completion
+observation and durable artifact reading are supported through native BiDi; see
+[Firefox downloads](firefox-downloads.md).
 Iframe, dialog and upload behavior is described below.
 
 ## Screenshot to Vision

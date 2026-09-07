@@ -2,7 +2,9 @@
 
 MASC owns automation sessions in OCaml/Eio and speaks the W3C WebDriver
 protocol directly to Mozilla geckodriver. Firefox is the stock browser.
-The `live` lane remains the operator's read-only WebExtension connection.
+The `live` lane is the operator's WebExtension connection; it supports reads,
+capture and explicit-tab BrowserInteract click/fill/scroll. BrowserAct and
+session lifecycle operations belong to automation.
 
 Set the existing workspace `runtime.toml`:
 

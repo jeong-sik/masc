@@ -45,7 +45,7 @@ TUI에서는 `:` → `go Browser Lane`, `l` / `a`로 source를 선택한다.
 
 ```json
 BrowserTabs {"lane":"live"}
-BrowserRead {"lane":"live","tabId":73,"maxChars":12000}
+BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"maxChars":12000}
 ```
 
 위 `73`은 예시이며 실제 첫 호출이 반환한 id를 사용한다. 읽은 URL과
@@ -98,15 +98,19 @@ keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 
 바이트를 넣지는 않는다. 스크린샷 저장에는 in-process Keeper 실행 문맥이 필요하다.
 일반 도구 호출자의 표시 이름을 Keeper 소유권으로 간주하지 않는다.
 
+`live`는 `BrowserTabs`에서 받은 `clientId`와 `tabId`를 한 쌍으로 유지한다.
+Firefox와 Zen이 동시에 연결된 경우 읽기·캡처·조작마다 해당 `clientId`를
+전달한다. 아래 예제의 `clientId`는 실제 관측한 연결 UUID로 채운다.
+
 ## 화면과 상호작용
 
-선택한 탭의 화면을 보려면 `BrowserRead`에 `format=image`를 지정한다.
-Keeper는 반환된 `artifact`를 `analyze_image`에 전달한다. TUI에서는
+선택한 탭의 화면을 보려면 `BrowserRead`에 `mode=screenshot`를 지정한다.
+Keeper는 반환된 `artifact`를 `keeper_analyze_image`에 전달한다. TUI에서는
 `Ctrl-O`로 같은 탭의 PNG를 미리 본다. 캡처 범위는 현재 viewport다.
 
 ```json
-BrowserRead {"lane":"live","tabId":73,"format":"image"}
-BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
+BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"mode":"screenshot"}
+BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"scroll","x":0,"y":640}
 ```
 
 페이지에서 확인한 CSS selector가 있을 때 click 또는 fill을 사용한다.
@@ -114,12 +118,12 @@ BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
 읽은 URL을 전달하며, 페이지가 바뀌었으면 동작을 거부한다.
 
 ```json
-BrowserInteract {"lane":"live","tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
-BrowserInteract {"lane":"live","tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
+BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
+BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
 ```
 
-텍스트나 이미지에서 selector를 추측하지 않는다. 현재 도구는 자동으로
-DOM 요소 목록이나 좌표 기반 클릭 대상을 제공하지 않는다. fill은
+텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로
+현재 DOM 컨트롤과 selector를 관측한다. 좌표 기반 클릭은 지원하지 않는다. fill은
 input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
 페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
 
@@ -140,13 +144,20 @@ input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는
 | 클릭·입력·스크롤 (`BrowserInteract`) | 지원 | 지원 |
 | 네이티브 키·선택·히스토리 (`BrowserAct`) | 미지원 | 지원 |
 | 중첩 iframe·JavaScript 대화상자·파일 업로드 | 미지원 | 지원 |
-| shadow root 대상 지정·다운로드 | 미지원 | 미지원 |
+| 다운로드 완료 관측·artifact 읽기 | 미지원 | 지원 |
+| shadow root 대상 지정 | 미지원 | 미지원 |
 
 텍스트 모드는 URL, 제목, 전체 문자 수(`chars`)와 잘림 여부(`truncated`)를
 반환하며 기본 한도는 50,000 code points다. 컨트롤 관측은 최대 200개이며
 비밀번호와 파일 입력 값은 제외한다. 전체 접근성 트리나 접힌 영역의 내용까지
 포함하지 않는다. 캡처는 전체 페이지를 이어 붙인 이미지가 아니며, 캡처 전후
 URL 변경은 검출하지만 같은 URL에서의 화면 변경까지 보장하지 않는다.
+
+다운로드 링크를 클릭한 뒤 `BrowserRead`에 `lane=automation`, 관측한 `tabId`,
+`mode=downloads`를 전달하면 완료 상태와 artifact 참조를 읽는다. 반환된
+`artifact.arguments`로 `keeper_artifact_read`를 호출하고 `next_offset`부터
+`eof=true`까지 이어 읽는다. 바이너리 페이지는 `encoding`을 확인한다.
+자세한 수명과 실패 계약은 [Firefox downloads](firefox-downloads.md)를 참고한다.
 
 동작별 필드와 검증 범위는 [Firefox interaction support](firefox-controls.md)를
 참고한다. CI 통과, 배포된 실행 파일, 실제 Keeper/Vision 모델의 성공은 각각

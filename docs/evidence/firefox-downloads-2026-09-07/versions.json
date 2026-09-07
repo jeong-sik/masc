@@ -1,0 +1,4 @@
+{
+  "firefox": "Mozilla Firefox 155.0.1",
+  "geckodriver": "geckodriver 0.37.1 (300705c65d1b 2026-07-17 09:25 +0000)\n\nThe source code of this program is available from\ntesting/geckodriver in https://hg.mozilla.org/mozilla-central.\n\nThis program is subject to the terms of the Mozilla Public License 2.0.\nYou can obtain a copy of the license at https://mozilla.org/MPL/2.0/."
+}

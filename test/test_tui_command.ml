@@ -28,6 +28,7 @@ let describe = function
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
+  | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
   | Command.Steer_turn message -> "steer:" ^ message
   | Command.Steer_missing_message -> "steer-missing-message"
   | Command.Set_thinking mode ->
@@ -120,6 +121,7 @@ let test_pane_commands_parse_by_word () =
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
+    ; "interrupt:sangsu"
     ; "steer:answer the correction\nwith this context"
     ; "steer-missing-message"
     ; "thinking:cycle"
@@ -164,6 +166,7 @@ let test_pane_commands_parse_by_word () =
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/interrupt"
+       ; "/interrupt sangsu"
        ; "/steer answer the correction\nwith this context"
        ; "/steer"
        ; "/thinking"

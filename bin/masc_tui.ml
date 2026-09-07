@@ -7272,6 +7272,22 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           notice ~role:Message_local
             "an interrupt is already outstanding for this turn"
       | None -> notice ~role:Message_local "no turn is streaming in this pane")
+  | Masc_tui_command.Interrupt_keeper_turn name -> (
+      Buffer.clear state.msg_input;
+      (* The pane's own turn is [Interrupt_turn]'s business. This arm is for
+         the turn the pane only tells the operator about -- the "(also
+         sending to X ...)" row -- which nothing else could reach: every
+         other way in reads [msg_live], and the key that would put that
+         keeper on screen is refused while any request is in flight, which
+         is exactly when one is running (#33852).
+
+         Matched by the name the row prints, so what the operator types is
+         what they just read. *)
+      match Masc_tui_types.inflight_for_keeper state name with
+      | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
+      | None ->
+          notice ~role:Message_local
+            (Printf.sprintf "no turn of %S is in flight from this pane" name))
   | Masc_tui_command.Steer_missing_message ->
       notice ~role:Message_error "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
@@ -9728,7 +9744,9 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
          | Masc_tui_command.Set_embeds _
-        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Steer_turn _
+        | Masc_tui_command.Interrupt_turn
+        | Masc_tui_command.Interrupt_keeper_turn _
+        | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory

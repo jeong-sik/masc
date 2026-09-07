@@ -85,9 +85,9 @@ let () = Eio_main.run (fun _ ->
     check "screenshot target is the first fixture page"
       (member "url" (read first) = `String (fixture_url ^ "/first"));
     (* Capture the resulting real Firefox viewport using the same native transport. *)
-    let screenshot = success (run (Browser_lane.Page_screenshot {tab_id=first})) in
+    let screenshot = success (run (Browser_lane.Page_capture {tab_id=first})) in
     check "native screenshot carries the selected tab" (member "tabId" screenshot = `Int first);
-    let png = member "base64" screenshot |> string in
+    let png = member "data" screenshot |> string in
     let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in
     output_string oc png; close_out oc;
     act first Browser_action.Close_tab;

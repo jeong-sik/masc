@@ -49,6 +49,26 @@ val cli_name : t -> string
 (** The executable this backend drives. A backend whose CLI is absent is
     refused rather than substituted, so the name reaches the refusal. *)
 
+(** How a runtime takes a build recipe.
+
+    Each of these keeps its own image store, so an image built into Docker's
+    is invisible here — which is what makes "build it first" an instruction
+    that has to name the runtime. Read off each CLI rather than assumed from
+    a family resemblance. *)
+type recipe_delivery =
+  | On_stdin
+      (** [build -t <tag> -]: Docker's grammar, recipe on stdin, no context. *)
+  | In_a_context_directory
+      (** [build -t <tag> -f <file> <dir>]. [container build --help] states
+          "USAGE: container build [<options>] [<context-dir>]" and offers
+          [-f <path>]; it has no [-], so the recipe must be a file on disk. *)
+  | Builds_no_images
+      (** [msb --help] (0.6.16) lists pull, load, save and image under Images
+          and no build at all. An image reaches it as a tar. *)
+
+val recipe_delivery : t -> recipe_delivery
+(** How this backend's CLI takes a build recipe. *)
+
 val default_for_host : unit -> t option
 (** The backend to assume when a keeper declares [Micro_vm] without naming
     one. [Some Apple_container] on macOS, where that runtime is the platform

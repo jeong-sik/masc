@@ -1103,9 +1103,22 @@ let tools_display_lines (state : state) =
   in
   let usage_matrix_lines =
     lazy begin
+    let error_lines =
+      match state.skills_catalog_error with
+      | None -> []
+      | Some error ->
+          [ Theme.bad (), " Skill catalog read failed: " ^ Terminal_text.single_line error ]
+          @ (match state.skills_catalog with
+             | None -> []
+             | Some _ -> [ Theme.warn (), " Previous catalog reading; refresh failed" ])
+    in
+    let reading_lines =
     match state.skills_catalog with
     | None ->
-        [ Ansi.dim, " Skill Usage — loading workspace catalog…" ]
+        [ Ansi.dim,
+          (match state.skills_catalog_error with
+           | None -> " Skill Usage — loading workspace catalog…"
+           | Some _ -> " Skill Usage — unavailable (no catalog reading)") ]
     | Some { Masc.Tui_decode.sc_state; _ }
       when sc_state <> Masc.Tui_decode.Skills_ready ->
         [ Ansi.dim,
@@ -1113,7 +1126,7 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line
                (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
     | Some
-        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; _ }
+        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; sc_usage_coverage; _ }
       ->
         let used =
           List.filter
@@ -1121,26 +1134,34 @@ let tools_display_lines (state : state) =
                surface.scs_usage <> [])
             sc_surfaces
         in
-        (* A skill no keeper has reached yet was drawn nowhere: the pane
-           listed only the used ones, so a skill that loaded correctly and has
-           never been invoked read exactly like one that failed to load. The
-           catalog total says how many there are to account for. *)
-        let never_used = List.length sc_surfaces - List.length used in
+        let unobserved = List.length sc_surfaces - List.length used in
+        let coverage_lines =
+          match sc_usage_coverage with
+          | None -> [ Theme.warn (), "   Activation ledger coverage: unavailable" ]
+          | Some coverage ->
+              ( Ansi.dim,
+                Printf.sprintf "   Activation ledgers loaded: %d; unavailable: %d"
+                  coverage.suc_ledgers_loaded
+                  (List.length coverage.suc_unavailable) )
+              :: List.map
+                   (fun detail -> Theme.warn (), "   Unavailable: " ^ Terminal_text.single_line detail)
+                   coverage.suc_unavailable
+        in
         let heading =
           skill_source_lines ~config:sc_config ~sources:sc_sources
           @ [ Ansi.bold,
-            Printf.sprintf " Skill Usage — %d of %d loaded skill%s used by a keeper%s"
-              (List.length used)
-              (List.length sc_surfaces)
-              (if List.length sc_surfaces = 1 then "" else "s")
-              (if never_used <= 0 then ""
-               else Printf.sprintf "; %d never invoked" never_used)
+            Printf.sprintf " Skill Usage — %d of %d catalog Skills observed; %d without retained invocation"
+              (List.length used) (List.length sc_surfaces) unobserved
+          ; Ansi.dim, "   Scope: exact Skill revisions in current Keeper sessions"
+          ; Ansi.dim, "   No retained invocation does not establish never used."
+          ]
+          @ coverage_lines
+          @ [ Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
           (* One skill's keepers do not fit beside its name -- there can be
              several, joined -- so the rows put them on the line below. The
              header said the two sat side by side and named the second column
              over the first one's trailing spaces; it now stands where each
              reading stands. *)
-          ; Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
           ; Ansi.dim,
             Tool_table.skill_usage_keeper_indent
             ^ "KEEPER  inv/delivered/actions \xc2\xb7 last used" ]
@@ -1228,6 +1249,8 @@ let tools_display_lines (state : state) =
                  rejections
         in
         heading @ rows @ rejection_rows
+    in
+    error_lines @ reading_lines
     end
   in
   (* One section at a time. These used to be concatenated, and the first of
@@ -1253,9 +1276,9 @@ let tools_display_lines (state : state) =
         ; Ansi.dim, "   Missing means not retained here; it does not prove never used."
         ]
     | Masc_tui_types.Tools_usage ->
-        [ Theme.info (), " What this answers — which Skills were actually used by each Keeper?"
-        ; Ansi.dim, "   Retained invocation/delivery/action totals and last-use time."
-        ; Ansi.dim, "   Skills with no retained use are omitted."
+        [ Theme.info (), " What this answers — which Skill invocations were retained for each Keeper?"
+        ; Ansi.dim, "   Current-session activation ledgers: invocation/delivery/action totals and last-use time."
+        ; Ansi.dim, "   Unobserved Skills are omitted; unavailable ledgers are reported below."
         ]
     | Masc_tui_types.Tools_catalog ->
         [ Theme.info (), " What this answers — which tools are registered anywhere in MASC?"

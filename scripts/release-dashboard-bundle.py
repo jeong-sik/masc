@@ -206,7 +206,7 @@ def transaction_dir(prefix):
 def rollback(prefix):
     journal = transaction_dir(prefix)
     if not journal.exists():
-        return
+        fail("install transaction missing; rollback cannot be confirmed")
     previous = journal / "previous"
     destination = prefix / "masc"
     if previous.is_symlink() or previous.exists():
@@ -223,8 +223,11 @@ def commit(prefix):
     journal = transaction_dir(prefix)
     if not journal.is_dir():
         fail("install transaction missing")
-    shutil.rmtree(journal)
+    # Publication must be durable while the undo record still exists.
+    # Cleanup is deliberately last: a cleanup failure must never be reported
+    # as a successful rollback after the previous binary has been removed.
     fsync_dir(prefix)
+    shutil.rmtree(journal)
 
 
 def install(binary, archive, prefix, asset):

@@ -104,6 +104,23 @@ class Distribution(unittest.TestCase):
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
+    def test_commit_sync_failure_preserves_undo_for_installer_rollback(self):
+        previous = self.old()
+        self.install()
+        with patch.object(bundle, "fsync_dir", side_effect=OSError("injected commit sync")):
+            with self.assertRaisesRegex(OSError, "commit sync"):
+                bundle.commit(self.prefix)
+        self.assertTrue((self.prefix / bundle.TRANSACTION / "previous").exists())
+        bundle.rollback(self.prefix)
+        self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+
+    def test_missing_undo_never_claims_successful_rollback(self):
+        self.old()
+        self.install()
+        bundle.commit(self.prefix)
+        with self.assertRaisesRegex(ValueError, "rollback cannot be confirmed"):
+            bundle.rollback(self.prefix)
+
     def test_wrong_binary_does_not_replace_old_install(self):
         previous = self.old()
         self.binary.write_text(self.binary.read_text() + "# changed bytes\n")

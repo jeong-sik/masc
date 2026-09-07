@@ -354,20 +354,25 @@ base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_computer_use = true
-# developers.openai.com/api/docs/models, read 2026-09-07: sol, terra and
-# luna each take none|low|medium|high|xhigh|max. The list above was
-# inherited from the 2026-06-29 gpt-5.1 reference and was wrong at both
-# ends -- it carried "minimal", which these rows do not take, and omitted
-# "max", which they do.
+# Probed on /v1/responses 2026-09-07: gpt-5.6-sol answers 200 for none, low,
+# medium, high, xhigh and max, and 400 for minimal -- "'minimal' is not
+# supported with the 'gpt-5.6-sol' model". The list this replaces was
+# inherited from the 2026-06-29 gpt-5.1 reference and was wrong at both ends:
+# it carried the one value the wire refuses and omitted one it takes.
 accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
 
 [[models]]
-# gpt-6-astra. developers.openai.com/api/docs/models, read 2026-09-07:
-# 1.05M in / 128K out, effort low|medium|high|xhigh|max -- no "none"
-# and no "minimal", which is where it differs from the gpt-5.6 rows above.
-# Not probed: no key in this workspace has access yet (403 "does not have
-# access to model gpt-6-astra" on all three, 2026-09-07), so this row is the
-# published contract and nothing more.
+# gpt-6-astra. Probed on /v1/responses 2026-09-07 once access opened:
+#
+#   effort none     400  "'none' is not supported with the 'gpt-6-astra' model"
+#   effort minimal  400  same shape
+#   effort low|medium|high|xhigh|max  200
+#   ~950K-token input  200; larger answers 429 on the org's tokens-per-minute
+#   limit, not on length, so the ceiling is the published 1.05M and the
+#   account meets its rate limit first.
+#
+# The refusals name the two values that separate this row from the gpt-5.6
+# rows above, which take "none".
 id_prefix = "gpt-6-astra"
 base = "openai_chat"
 chat_output_budget_field = "max_completion_tokens"

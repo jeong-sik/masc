@@ -450,9 +450,10 @@ let test_openai_responses_row_targets_the_responses_path () =
    "none". Neither takes "minimal", which the gpt-5.6 row carried from the
    2026-06-29 gpt-5.1 reference, and both take "max", which it omitted.
 
-   No key in this workspace can reach either family yet -- all three answer
-   403 -- so these are the published contract and are pinned here rather than
-   probed. When access opens, a probe replaces this. *)
+   Probed on /v1/responses the same day, once access opened: both families
+   answer 400 for "minimal" and astra also refuses "none", each naming the
+   model in the message. The rest answer 200. So these lists are measured,
+   not quoted. *)
 let test_the_newer_openai_families_match_the_published_contract () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"newer openai families"

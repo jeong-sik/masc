@@ -1,0 +1,9 @@
+{
+  "lib/browser_webdriver.ml": "07d0b959d15c82a3138b7c7d627d2e020ff7068513889cf84e42171037012046",
+  "lib/browser_lane/browser_action.ml": "35c2eaf1987a0d93fdb06dd224ee5dd64f2c1f8f86da513b0edc2cb492de91c7",
+  "lib/browser_lane/browser_lane.ml": "7206901d38f03be0b27568d1e80b0d3745dea3ce9cbffc4745213c1afe308ae1",
+  "lib/browser_page_script.ml": "02f048be62f09631821d4a820b577106b0f570b6907c9125583586751d5ce822",
+  "scripts/fixtures/firefox_controls_probe.ml": "6b408a4bb4ced3fa8b7751ba2766d4e0cf59d37a4f3cfb2def30ca0643a377d6",
+  "scripts/probe-firefox-controls.py": "8535cbd63ea2784eb8538a5464088f67397260fd3edb2bb4541ffc8de4649bcc",
+  "test/dune": "ac8d5b9eb17dee0396c2e444e79b625e31d27d952793d63425235dc9306b65a5"
+}

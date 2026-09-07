@@ -376,6 +376,45 @@ let test_serving_constraint_partial_group_fails_closed () =
   | Ok _ -> fail "partial serving-constraint declaration must fail closed"
 ;;
 
+
+(* /v1/chat/completions refuses function tools together with a
+   reasoning_effort for the gpt-5.x reasoning family -- "Please use
+   /v1/responses instead" -- and OpenAI's own answer is that path. The wire is
+   chosen from request_path alone (provider_http_codec.ml: OpenAI_compat with
+   request_path_targets_responses_api -> Openai_responses), so the row's path
+   is the whole mechanism and is worth pinning: a row that keeps the chat path
+   sends every tool-carrying turn into that 400. Measured 2026-09-07, two
+   keepers at 291 and 292 consecutive failures on it. *)
+let test_openai_responses_row_targets_the_responses_path () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"openai responses wire"
+  in
+  let row id =
+    match
+      List.find_opt
+        (fun (e : Model_catalog.provider_entry) -> String.equal e.id id)
+        (Model_catalog.provider_entries catalog)
+    with
+    | Some entry -> entry
+    | None -> failf "%s names no provider row" id
+  in
+  let responses = row "openai-responses" in
+  check string "the responses row targets /v1/responses" "/v1/responses"
+    responses.request_path;
+  check
+    bool
+    "and that path is what selects the Responses codec"
+    true
+    (Llm_provider.Provider_config.request_path_targets_responses_api
+       responses.request_path);
+  (* The chat row stays: a lane that sends no reasoning_effort is fine there,
+     and both rows draw on the same key. *)
+  let chat = row "openai" in
+  check string "the chat row is unchanged" "/v1/chat/completions" chat.request_path;
+  check string "both rows read one credential" chat.api_key_env responses.api_key_env
+;;
+
+
 let () =
   run
     "model catalog default"
@@ -425,6 +464,10 @@ let () =
             "subscription models admit their reasoning efforts"
             `Quick
             test_subscription_models_admit_their_reasoning_efforts
+        ; test_case
+            "the openai-responses row targets the responses path"
+            `Quick
+            test_openai_responses_row_targets_the_responses_path
         ] )
     ]
 ;;

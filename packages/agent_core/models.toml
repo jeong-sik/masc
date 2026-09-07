@@ -2552,6 +2552,28 @@ request_path = "/v1/chat/completions"
 api_key_env = "OPENAI_API_KEY"
 capabilities_base = "openai_chat"
 
+# The same account on the Responses wire. /v1/chat/completions refuses a
+# request that carries function tools together with a reasoning_effort:
+#
+#   "Function tools with reasoning_effort are not supported for gpt-5.5 in
+#    /v1/chat/completions. Please use /v1/responses instead"
+#
+# That is the whole gpt-5.x reasoning family, and OpenAI's own answer is this
+# path. Verified 2026-09-07 against a live lane: every turn died in the route
+# stage, two keepers at 291 and 292 consecutive failures, and the same models
+# answer on /v1/responses.
+#
+# Keeping both rows rather than moving the one: a lane that sends no
+# reasoning_effort is fine on chat-completions, and the [[models]] rows
+# already choose their provider by name.
+[[providers]]
+id = "openai-responses"
+kind = "openai_compat"
+base_url = "https://api.openai.com"
+request_path = "/v1/responses"
+api_key_env = "OPENAI_API_KEY"
+capabilities_base = "openai_chat"
+
 [[providers]]
 id = "gemini"
 kind = "gemini"

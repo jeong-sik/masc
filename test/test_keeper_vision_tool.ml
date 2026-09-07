@@ -776,6 +776,142 @@ let test_retryable_provider_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
+(* 2026-09-07: glm-coding.glm-4.6v answered HTTP 400 (max_tokens out of its
+   range) and the walk stopped there, never reaching the local runtime behind
+   it that takes the same pixels. A 400 is one binding's verdict, so the walk
+   must advance -- and without the transient backoff, which is for outages. *)
+let test_candidate_policy_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let policy_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "candidate_policy_error"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_policy =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 400
+               ; body = "{\"error\":{\"code\":\"1210\",\"message\":\"max_tokens illegal\"}}"
+               ; retry_after_header = None
+               })
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert_metric_increment
+        "vision_candidate candidate_policy_error"
+        before_policy
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
+
+(* When every candidate answers 400 the walk still ends as a policy rejection
+   carrying the last verdict, so a keeper learns the field, not "no runtime". *)
+let test_policy_error_on_every_candidate_is_reported () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-exhausted" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 400; body = "field refused"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "policy_rejection");
+      assert (String_util.contains_substring (assoc_string "detail" json) "field refused")))
+
+(* Mixed order: a 400 the walk moved past, then a 500 on the last candidate.
+   The outcome is the last candidate's -- what ended the walk -- and the 400
+   verdict lives on the candidate counter, not in the tool result. *)
+let test_policy_error_then_transient_reports_the_last_candidate () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-then-transient" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 400; body = "field refused"; retry_after_header = None })
+        else
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 500; body = "down"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable");
+      assert (String_util.contains_substring (assoc_string "detail" json) "down")))
+
 let test_capacity_failover_preserves_image_and_declared_caps () =
   let errors =
     [ Llm_provider.Http_client.request_body_too_large_error
@@ -1542,6 +1678,9 @@ let () =
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
   test_retryable_provider_error_tries_next_runtime ();
+  test_candidate_policy_error_tries_next_runtime ();
+  test_policy_error_on_every_candidate_is_reported ();
+  test_policy_error_then_transient_reports_the_last_candidate ();
   test_capacity_failover_preserves_image_and_declared_caps ();
   test_capacity_exhaustion_retains_size_failure ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();

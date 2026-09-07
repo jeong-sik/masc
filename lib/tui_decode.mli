@@ -637,10 +637,19 @@ type runtime_probe_snapshot = {
 (** One runtime row shared by the Keeper picker and Runtime surface.
     [ro_is_default] is derived from the document's top-level
     [default_runtime], not the row's independent binding flag. *)
+type runtime_context_source =
+  | Runtime_context_override
+  | Runtime_context_capability
+  | Runtime_context_clamped
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
   ro_model : string;
+  ro_effective_max_context : int;
+  ro_max_context_source : runtime_context_source;
+  ro_max_output_tokens : int option;
+  ro_is_local : bool;
   ro_dispatchable : bool;
   ro_blocked_reason : string option;
   ro_is_default : bool;
@@ -2674,3 +2683,6 @@ type skill_evidence =
   }
 
 val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
+
+val runtime_context_source_label : runtime_context_source -> string
+val runtime_probe_for_id : runtime_surface_snapshot -> runtime_id:string -> runtime_provider_probe option

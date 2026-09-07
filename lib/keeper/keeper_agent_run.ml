@@ -1029,10 +1029,9 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      (* [messages] already carries the bounded transmission view: the provider
-         attempt applies it, because its budget is the target's declared
-         request-body cap and that is only resolved per runtime
-         ([Keeper_turn_driver_try_provider.budgeted_model_input_projection]).
+      (* [messages] carries the current provider attempt's transmission view.
+         An explicit request-body cap enables bounded_model_input_projection;
+         without that caller policy the full prepared history reaches here.
          The source projection appends only a bounded typed Gate replay
          reference; exact replay bytes remain in the artifact store. The
          provenance check below compares against the list as received, so its

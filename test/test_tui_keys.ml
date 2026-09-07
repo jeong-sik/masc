@@ -446,6 +446,15 @@ let test_planning_footer_carries_filter_and_sort () =
     "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
+let test_board_footer_names_reversible_hearth_navigation () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface Board)
+  in
+  check Alcotest.bool "both hearth directions" true (List.mem "f / F" keys);
+  check Alcotest.bool "direct hearth chooser" true (List.mem "H" keys)
+
 let test_board_and_planning_explain_their_order () =
   check str "hot formula" "net votes first; newer breaks ties"
     (board_sort_explanation Board_hot);
@@ -1394,6 +1403,8 @@ let () =
             `Quick test_every_detail_surface_steps_through_its_list
         ; Alcotest.test_case "Planning carries filter and sort" `Quick
             test_planning_footer_carries_filter_and_sort
+        ; Alcotest.test_case "Board names both hearth directions and chooser"
+            `Quick test_board_footer_names_reversible_hearth_navigation
         ; Alcotest.test_case "Board and Planning explain order" `Quick
             test_board_and_planning_explain_their_order
         ; Alcotest.test_case "Task Review is a Planning child" `Quick

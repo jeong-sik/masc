@@ -3527,6 +3527,50 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
     return interact
 
 
+def planning_resize_budget_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    # The terminal margin and composer consume two rows. Exercise the old
+    # zero-goal case (19 surface rows) and the minimum supported surface (14).
+    for terminal_rows in (21, 16, 17, 20, 24, 16):
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=terminal_rows,
+            columns=120,
+            needle=b"MASC Planning",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        assert_planning_goal_selected(frame, b"plan-alpha-29424")
+        footer_row = frame_row_of(frame, b"j/k:move")
+        goal_row = frame_row_of(frame, b"plan-alpha-29424")
+        if not goal_row < footer_row <= terminal_rows - 2:
+            raise AssertionError(f"Planning overflowed its surface: {frame!r}")
+        selected = send_and_wait(
+            process, master_fd, output, b"j", b"plan-beta-29424"
+        )
+        assert_planning_goal_selected(selected, b"plan-beta-29424")
+        restored = send_and_wait(
+            process, master_fd, output, b"k", b"plan-alpha-29424"
+        )
+        assert_planning_goal_selected(restored, b"plan-alpha-29424")
+
+    send_and_wait(process, master_fd, output, b"f", b"show:active")
+    empty = send_and_wait(
+        process, master_fd, output, b"f", b"no goals in this filter"
+    )
+    if frame_row_of(empty, b"no goals in this filter") >= terminal_rows - 2:
+        raise AssertionError(f"Planning empty note overflowed: {empty!r}")
+    os.write(master_fd, b"q")
+
+
 def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -12229,6 +12273,12 @@ def run_cli_base_path_regression(executable: str) -> None:
 
 
 def run_planning_review_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Planning preserves selected goals and footer across resize",
+        interact=planning_resize_budget_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
     verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
     run_terminal_scenario(
         executable,

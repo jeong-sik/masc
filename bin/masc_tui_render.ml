@@ -3583,7 +3583,7 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  Sort [s]: %s · saved for next start · H:choose hearth"
+    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -4067,17 +4067,6 @@ let planning_phase_label phase = Goal_phase.to_string phase
    [complet~] with sixty columns of space to its right -- the mark that says
    "there was more" on a value nothing was cut from. Taken from the phase list
    so a new phase widens the column instead of losing its last letter. *)
-(* Rows the Planning list spends above its goals, and the row it holds below
-   them for the selected goal's verdict. Both were bare numbers at the two
-   places that read them, and both went up by two when the list gained the
-   column names it never had. Still tallied rather than counted: the counted
-   form needs the rows below the list to be certain, and being one short is
-   silent -- the frame drops its last row, which is the footer. #32928 carries
-   that change for the three surfaces where the tail is already established. *)
-(* One more than it was: the JUDGE legend sits under the column header. *)
-let planning_list_chrome_rows = 17
-let planning_list_verdict_rows = 2
-
 let planning_phase_column =
   List.fold_left
     (fun widest phase ->
@@ -4276,6 +4265,12 @@ let render_planning_list (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let tail = Buffer.create 256 in
+  box_bottom tail cols;
+  Buffer.add_string tail
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints state.view));
+  let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
   let now = Unix.localtime now_unix in
@@ -4315,7 +4310,7 @@ let render_planning_list (state : state) =
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
-       for _ = 1 to rows - boxed_surface_chrome_rows - 1 do
+       for _ = 1 to rows - count_frame_lines buf - tail_rows do
          box_empty buf cols
        done
    | Some p ->
@@ -4399,8 +4394,15 @@ let render_planning_list (state : state) =
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
           read straight off, and every one of them changes what to do next. *)
-       box_line_styled buf cols ~style:Ansi.dim
-         ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
+       (* Reserve the divider, a goal (or empty note), and the selected
+          verdict before spending a row on the legend. At the minimum
+          height the headers and summary stay in place and a goal remains
+          visible; taller frames get the legend back. *)
+       let selection_rows = if count = 0 then 0 else 1 in
+       let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
+       if count_frame_lines buf + 1 + rows_after_legend <= rows then
+         box_line_styled buf cols ~style:Ansi.dim
+           ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
        box_divider buf cols;
 
        if count = 0 then begin
@@ -4412,12 +4414,14 @@ let render_planning_list (state : state) =
            | _ -> "  no goals in this filter (f to change)"
          in
          box_line buf cols (Ansi.dim ^ empty_note ^ Ansi.reset);
-         for _ = 1 to rows - planning_list_chrome_rows do
+         for _ = 1 to rows - count_frame_lines buf - tail_rows do
            box_empty buf cols
          done
        end else begin
          (* One row is reserved below the list for the selected goal's verdict. *)
-         let content_height = rows - planning_list_chrome_rows - planning_list_verdict_rows in
+         let content_height =
+           rows - count_frame_lines buf - selection_rows - tail_rows
+         in
          let scroll_offset =
            if state.planning_cursor >= content_height then
              state.planning_cursor - content_height + 1
@@ -4524,11 +4528,7 @@ let render_planning_list (state : state) =
                (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset)
        end);
 
-  box_bottom buf cols;
-
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+  Buffer.add_buffer buf tail;
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf

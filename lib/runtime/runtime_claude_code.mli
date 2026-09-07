@@ -250,6 +250,10 @@ val run_turn :
   ?session_mode:session_mode ->
   ?admitted_subscription:subscription ->
   ?on_spawned:(unit -> unit) ->
+  ?on_prompt_sent:(unit -> unit) ->
+  (* Called after the complete turn-input message is written to the CLI.
+      This is transport evidence, not provider acceptance. Never called for
+      preparation, spawn, handshake, or incomplete input-write failures. *)
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

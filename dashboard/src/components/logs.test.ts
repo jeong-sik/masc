@@ -514,6 +514,56 @@ describe('LogViewer Code links', () => {
     )
   })
 
+  it('shows the selected tool log execution evidence without inferring it from the message', async () => {
+    const diffClassification = {
+      kind: 'needs_observation',
+      reason: { kind: 'git_command_requires_execution', command: 'diff' },
+    }
+    const configClassification = {
+      kind: 'needs_observation',
+      reason: { kind: 'git_configuration_override' },
+    }
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
+      entry({
+        seq: 1,
+        category: 'tool',
+        message: 'Git effects require execution evidence',
+        details: { operation: 'tool_execute', classification: diffClassification },
+      }),
+      entry({
+        seq: 2,
+        category: 'tool',
+        message: 'Git effects require execution evidence',
+        details: { operation: 'tool_execute', classification: configClassification },
+      }),
+      entry({
+        seq: 3,
+        category: 'tool',
+        message: 'Git effects require execution evidence',
+        details: { tool_name: 'tool_execute', result: { ok: true } },
+      }),
+    ]))
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="logs-row"]')).toHaveLength(3))
+    expect(container.textContent).not.toContain('실행 확인 근거')
+
+    for (const [seq, classification] of [[1, diffClassification], [2, configClassification]] as const) {
+      const row = container.querySelector(`[data-log-seq="${seq}"]`) as HTMLElement
+      fireEvent.click(row.querySelector('.v2-logs-line') as Element)
+      await waitFor(() => expect(row.querySelector('.lg-detail')?.textContent).toContain('실행 확인 근거'))
+      const evidence = row.querySelector('.lg-code')?.textContent
+      expect(evidence).toBe(JSON.stringify(classification, null, 1))
+      expect(container.querySelectorAll('.lg-detail')).toHaveLength(1)
+    }
+
+    const unclassifiedRow = container.querySelector('[data-log-seq="3"]') as HTMLElement
+    fireEvent.click(unclassifiedRow.querySelector('.v2-logs-line') as Element)
+    await waitFor(() => expect(unclassifiedRow.querySelector('.lg-detail')).not.toBeNull())
+    expect(container.textContent).not.toContain('실행 확인 근거')
+    expect(unclassifiedRow.querySelector('.lg-code')?.textContent).toBe('{\n "ok": true\n}')
+  })
+
   it('kind chip clicks yield the same rows as the server category filter', async () => {
     // The chips are the only classification control (the category dropdown is
     // gone). Each kind is a projection of the producer's typed category, so a

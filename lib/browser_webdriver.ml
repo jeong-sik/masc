@@ -101,6 +101,14 @@ let execute_unlocked t = function
       else script t session
         "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
         [`Int cap])
+  | Browser_lane.Page_interact { tab_id; expected_url; action } ->
+    let* session = session t in
+    with_tab t session (Some tab_id) (fun () ->
+      let* result = script t session Browser_interaction.script
+        [Browser_lane.interaction_args ~tab_id ~expected_url action] in
+      match result with
+      | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
+      | _ -> Error (Protocol "invalid interaction response"))
   | Browser_lane.Page_capture { tab_id } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->

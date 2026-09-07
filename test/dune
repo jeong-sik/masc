@@ -4778,3 +4778,5 @@
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
  (libraries alcotest masc masc_tui_types))
+
+(include stanzas/test_browser_interaction.inc)

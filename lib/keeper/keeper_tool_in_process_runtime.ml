@@ -492,6 +492,11 @@ let handle_browser_session_with_outcome ~args =
     (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
 ;;
 
+let handle_browser_interact_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_interact ~tool_name:"masc_browser_interact" ~start_time:0.0 args)
+;;
+
 let handle_browser_goto_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)

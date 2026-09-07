@@ -11,5 +11,6 @@ val browser_tabs : Masc_domain.tool_schema
 val browser_read : Masc_domain.tool_schema
 val browser_session : Masc_domain.tool_schema
 val browser_goto : Masc_domain.tool_schema
+val browser_interact : Masc_domain.tool_schema
 
 val slack_read : Masc_domain.tool_schema

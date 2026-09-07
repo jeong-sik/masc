@@ -6,6 +6,7 @@
  (wrapped false)
  (modules
   process_eio
+  process_output_capture
   posix_spawn_process_mgr
   spawn_handle
   spawn_registry
@@ -21,6 +22,7 @@
   (:standard -w +4 -w +33 -w +37))
  (libraries
   masc_core
+  fs_compat
   masc_log
   time_compat
   masc.monotonic_deadline

@@ -99,7 +99,7 @@ let with_dispatch_override f =
     Some
       (fun () ->
         Ok
-          { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0
+          { output_files = None; Masc_exec.Exec_dispatch.status = Unix.WEXITED 0
           ; stdout = "ok"
           ; stderr = ""
           });

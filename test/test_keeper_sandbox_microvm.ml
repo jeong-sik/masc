@@ -1136,7 +1136,7 @@ let test_startup_sweep_serializes_inventory_with_boot () =
       Unix.WEXITED 0, ""
     | argv -> Alcotest.failf "unexpected sweep command: %s" (String.concat " " argv)
   in
-  Masc.Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
+  Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
     ~sweep:(fun () ->
       ignore (Turn.sweep_abandoned_microvm_guests
         ~base_path:sweep_base_path
@@ -1215,7 +1215,7 @@ let test_startup_maintenance_is_owned_by_its_switch () =
   let cancelled = ref false in
   (try
      Eio.Switch.run @@ fun sw ->
-     Masc.Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
+     Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
        ~sweep:(fun () ->
          Eio.Promise.resolve started_r ();
          try Eio.Fiber.await_cancel () with

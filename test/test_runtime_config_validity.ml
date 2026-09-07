@@ -140,7 +140,7 @@ let ollama_cloud_seed_cases =
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m3"
     ; api_name = "minimax-m3"
-    ; context = 524288
+    ; context = 512000
     ; tools = true
     ; thinking = true
     ; vision = true
@@ -1009,6 +1009,44 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    (* Shared seed model descriptions must resolve these windows from their
+       provider binding, including both MiniMax aliases. Operator overrides
+       remain covered separately by the below-cap and above-cap scenarios. *)
+    List.iter
+      (fun runtime_id ->
+        match find_runtime runtimes runtime_id with
+        | None -> failf "expected catalog-derived seed runtime: %s" runtime_id
+        | Some runtime ->
+          check (option int) (runtime_id ^ " has no duplicated seed override")
+            None runtime.model.max_context;
+          let catalog_context =
+            match Llm_provider.Provider_config.capabilities_for_config_model
+                (agent_core_provider_config runtime) with
+            | Some caps -> caps.max_context_tokens
+            | None -> failf "missing provider catalog entry: %s" runtime_id
+          in
+          check bool (runtime_id ^ " has a positive catalog context") true
+            (match catalog_context with Some n -> n > 0 | None -> false);
+          check (option (pair int string)) (runtime_id ^ " uses its provider catalog")
+            (Option.map (fun n -> n, "capability") catalog_context)
+            (Runtime.resolve_max_context_of_runtime runtime
+             |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source)))
+      [ "deepseek.deepseek-v4-flash"
+      ; "ollama_cloud.deepseek-v4-flash"
+      ; "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+      ; "ollama_cloud.ollama-cloud-glm-5-2"
+      ; "ollama_cloud.minimax-m3"
+      ; "ollama_cloud.ollama-cloud-minimax-m3"
+      ];
+    List.iter
+      (fun runtime_id ->
+        match find_runtime runtimes runtime_id with
+        | None -> failf "expected MiniMax binding: %s" runtime_id
+        | Some runtime ->
+          check (option int) (runtime_id ^ " preserves the provider-stated window")
+            (Some 512000)
+            (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst))
+      [ "ollama_cloud.minimax-m3"; "ollama_cloud.ollama-cloud-minimax-m3" ];
     let clamped =
       List.filter_map
         (fun (rt : Runtime.t) ->

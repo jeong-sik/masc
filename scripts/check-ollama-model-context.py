@@ -1,29 +1,12 @@
 #!/usr/bin/env python3
-"""Compare each ollama_cloud model's configured max-context against what the
-provider states, and report every disagreement.
+"""Compare explicit Ollama Cloud context overrides with provider metadata.
 
-Not a CI gate. It needs OLLAMA_CLOUD_API_KEY and reaches ollama.com, so it
-cannot run on a pull request; make it an operator step when a model is added
-or a context value is edited.
+Requires OLLAMA_CLOUD_API_KEY and network access. This does not resolve MASC's
+provider-scoped AGENT_CORE catalog: a binding without a max-context override
+is reported as not measured, not as an undersized runtime window.
 
-Why it exists: [models.*].max-context is hand-typed against release notes,
-and 5 of 23 bindings had drifted when this was first run on 2026-09-07.
-
-  ollama-cloud-deepseek-v4-pro   524288 vs 1048576   half the window unused
-  minimax-m3                     524288 vs  512000   over by 12,288
-  ollama-cloud-minimax-m3        524288 vs  512000   over by 12,288
-  deepseek-v4-flash             1000000 vs 1048576   decimal round number
-  ollama-cloud-glm-5-2          1000000 vs 1048576   decimal round number
-
-Two shapes produced those. 524288 is 512x1024, written where the provider
-means a decimal 512,000 -- and it is also the common default for
-max-request-body-bytes right beside it, so it reads as intentional. 1000000
-is a decimal round-off of 1048576.
-
-The two directions are not equally bad. Under-stating wastes window: a lane's
-turn budget is the minimum across its candidates, so one low row pulls its
-whole lane down (keeper_unified_turn_pre_dispatch.ml). Over-stating builds a
-turn the provider then rejects. Both are reported; over-stating is marked.
+Exit 0 means all explicit values were compared and agreed, 1 means a stated
+value disagreed, and 2 means some effective values could not be measured.
 """
 
 import json
@@ -74,7 +57,7 @@ def main() -> int:
         print(f"{path} declares no ollama_cloud bindings", file=sys.stderr)
         return 2
 
-    over, under, unreachable = [], [], []
+    over, under, unreachable, catalog_derived = [], [], [], []
     for name in sorted(bindings):
         entry = models.get(name, {})
         configured = entry.get("max-context")
@@ -82,27 +65,29 @@ def main() -> int:
         if stated is None:
             unreachable.append(name)
         elif configured is None:
-            under.append((name, configured, stated))
+            catalog_derived.append((name, stated))
         elif configured > stated:
             over.append((name, configured, stated))
         elif configured < stated:
             under.append((name, configured, stated))
 
     print(f"{len(bindings)} ollama_cloud bindings in {path}")
-    for label, rows in (("OVER (provider will reject)", over),
-                        ("under (window unused)", under)):
+    for label, rows in (("override above provider statement", over),
+                        ("override below provider statement", under)):
         for name, configured, stated in rows:
             print(f"  {label}: {name} configured={configured} stated={stated}")
+    for name, stated in catalog_derived:
+        print(f"  catalog-derived: {name} effective_context=not_measured stated={stated}")
     for name in unreachable:
         print(f"  unreachable: {name}")
 
     disagreements = len(over) + len(under)
-    if disagreements == 0 and not unreachable:
-        print("every binding agrees with the provider")
-    # Unreachable is not a disagreement: a probe that did not answer says
-    # nothing about the value, and failing on it would turn a network blip
-    # into a wrong verdict.
-    return 1 if disagreements else 0
+    if disagreements:
+        return 1
+    if unreachable or catalog_derived:
+        return 2
+    print("every explicit context override agrees with the provider statement")
+    return 0
 
 
 if __name__ == "__main__":

@@ -4746,3 +4746,8 @@
 (include stanzas/test_browser_surface.inc)
 
 (include stanzas/test_execute_file_artifact.inc)
+
+(test
+ (name test_installed_dashboard)
+ (modules test_installed_dashboard)
+ (libraries masc_test_deps))

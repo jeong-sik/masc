@@ -37,25 +37,35 @@ the verified helper; a new install refuses to overwrite that unfinished transact
 Companion binaries and user config seeding retain their existing installer behavior;
 the transaction covers the server binary/dashboard pair.
 
-## Current runtime boundary
+## Runtime authority
 
-This first unit ships and installs the pair and prints start commands containing
-`MASC_ASSETS_DIR=<installed-release>/assets`. Install smoke uses that explicit setting,
-starts the actual installed binary outside the checkout, and verifies served index
-and referenced asset digests, embedded commit, executable path, and dashboard health.
+Before server fibers start, `Installed_dashboard` selects the canonical executable
+path captured by `Build_identity`. A binary in `.masc-releases/<receipt-sha256>/`
+selects installed authority even when its receipt is missing or invalid. The
+receipt SHA must match its directory, its source commit must match the embedded
+binary commit, and its binary and every declared asset must match their SHA-256.
+Strict parsing rejects unknown or duplicate fields, unsafe paths, and missing
+index/stamp entries. Owned exact reads reject symlinked files or parent components.
 
-It does **not** add implicit installed-receipt discovery to the server. Bare
-`masc start` or a TUI launch without that explicit setting still uses the current
-unbound asset resolver. That resolver and its cwd/repository inference must be
-replaced in a following unit. This change alone does not close the original runtime
-recurrence.
+The selected release root is frozen for the process lifetime. Replacing the
+installer's `masc` pointer does not redirect an already running process. Each asset
+read verifies the retained root/binary identity, receipt digest, and requested
+asset size/digest; unavailable and unmanifested files return 503 and 404
+respectively. A changed selected binding never falls back to `MASC_ASSETS_DIR`,
+process cwd, or an inferred repository. An explicit source-provenance launch
+retains its existing source binding authority and validation.
 
-Installed release metadata is not the run-local source snapshot contract. Do not
-invent source-root device/inode values to pass `Build_identity`: installed assets
-need their own typed binding, validated against the running binary at startup and
-kept stable across later pointer replacements. Missing or mismatched receipts must
-remain explicit failures; a source checkout or a touched timestamp is not a fallback
-proof.
+`dashboard_surface.installed_release` carries installed receipt/source/binary
+identity or a typed unavailable error. This is distribution evidence, independent
+of `Build_identity`'s run-local source-root inode provenance. No checkout inode,
+build input tree, or source-build timestamp is invented. Freshness for a verified
+installed release means the receipt matches the executable and served bytes;
+installation does not touch `.build-stamp` to pass an mtime comparison. Unbound
+developer binaries keep their existing asset resolver and mtime diagnostics.
+
+`masc start` and the TUI's server child both enter this initialization path. The
+installer's printed explicit asset setting is redundant for this installed format;
+install smoke removes that environment variable to exercise automatic discovery.
 
 ## Verification
 
@@ -66,3 +76,12 @@ failure, wrong binary/source commit, and hostile tar entries using a test execut
 It does not compile OCaml or build a dashboard. Release CI's `install-smoke.sh`
 performs the corresponding checks with the actual release binary and production
 bundle. The existing OCaml installer fixture also stages the new release artifacts.
+
+`test_installed_dashboard` covers process-stable pointer selection, missing/changed
+receipts, unsafe paths and duplicate fields, binary commit/hash/replacement,
+symlinked/corrupt assets, and unmanifested requests. Actual-binary install smoke
+starts outside the checkout without an assets override, checks served bytes and
+installed evidence, then verifies HTTP 503/unavailable on index corruption and
+receipt removal despite a conflicting cwd asset directory. These OCaml/runtime
+checks require CI; parser checks and Python fixtures are not execution evidence
+for the server. No live deployment or browser UI proof is implied by this change.

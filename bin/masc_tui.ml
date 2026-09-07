@@ -15497,6 +15497,10 @@ and is loaded on demand through keeper_skill.
                 let edit url_draft = state.browser_lane <- Some { view with url_draft } in
                 (match key with
                  | "esc" -> edit None
+                 | "\r" | "\n" | "enter" when Browser_lane_view.busy view ->
+                     (* A screenshot owns the pending operation. Retain the
+                        URL until Enter can actually launch its navigation. *)
+                     ()
                  | "\r" | "\n" | "enter" ->
                      let url = String.trim draft in
                      if url = "" then

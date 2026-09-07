@@ -13590,6 +13590,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.url_draft with
+      | Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None -> Masc_tui_keys.footer_hints_browser_lane)
     ~body:(fun ~budget c ->

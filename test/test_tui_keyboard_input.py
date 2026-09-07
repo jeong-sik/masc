@@ -12706,6 +12706,9 @@ def run_browser_screenshot_regression(executable: str) -> None:
         if not wait_for_fixture_event(process, master_fd, output, requested, timeout=3.0):
             raise AssertionError("screenshot request never reached the fixture")
         send_and_wait(process, master_fd, output, b"x", draft + b"x")
+        retained = send_and_wait(process, master_fd, output, b"\r", draft + b"x")
+        if b"Enter after completion" not in CSI_RE.sub(b"", retained):
+            raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
         read_available(master_fd, output)
         cancelled_from = len(output)
         release.set()

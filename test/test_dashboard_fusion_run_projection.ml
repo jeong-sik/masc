@@ -305,19 +305,19 @@ let test_detail_uses_exact_typed_board_origin () =
 
 let test_replay_failure_keeps_historical_evidence_readable () =
   with_board @@ fun () ->
-  let path = Filename.temp_file "fusion-replay-visibility" ".jsonl" in
-  Fun.protect ~finally:(fun () -> Sys.remove path) @@ fun () ->
-  let initial = Fusion_run_registry.create ~path () in
+  let replay_path = Filename.temp_file "fusion-replay-visibility" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove replay_path) @@ fun () ->
+  let initial = Fusion_run_registry.create ~path:replay_path () in
   let lost_id = "lost-observation" in
   Fusion_run_registry.register_running initial ~run_id:lost_id ~keeper:"caller"
     ~preset:"test" ~topology:Fusion_types.Simple ~started_at:10.;
-  let channel = open_out_gen [Open_append; Open_binary] 0o600 path in
+  let channel = open_out_gen [Open_append; Open_binary] 0o600 replay_path in
   output_string channel
     {|{"event":"complete","id":"lost-observation","completion":null}
 |};
   close_out channel;
-  let before = Fs_compat.load_file path in
-  let registry = Fusion_run_registry.replay path in
+  let before = Fs_compat.load_file replay_path in
+  let registry = Fusion_run_registry.replay replay_path in
   let origin : Board.post_origin =
     { turn_ref = None; source = Some "fusion"; fusion_run_id = Some lost_id } in
   let post = match Board_dispatch.create_post ~author:"caller"
@@ -367,7 +367,7 @@ let test_replay_failure_keeps_historical_evidence_readable () =
   (match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
    | Ok actual -> check string "original result remains readable" post.body actual.body
    | Error error -> fail (Board.show_board_error error));
-  check string "diagnostic read preserves malformed source" before (Fs_compat.load_file path);
+  check string "diagnostic read preserves malformed source" before (Fs_compat.load_file replay_path);
   Fusion_run_registry.register_running registry ~run_id:lost_id ~keeper:"caller"
     ~preset:"test" ~topology:Fusion_types.Simple ~started_at:20.;
   let retained = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response

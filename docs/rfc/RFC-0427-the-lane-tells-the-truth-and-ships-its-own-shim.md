@@ -210,6 +210,27 @@ capabilities)와 첫 디스패치 여부를 가진다. 여기에 마지막 디�
 | 09-05 하루 | 7,697 | 414 (5.4%) | 1,382 | 87 | 20 | 64 | 16:20Z 부터 전 레인에 상자 |
 | 09-05 16:20Z ~ 09-06 05:40Z | 7,829 | 113 (1.4%) | 1,613 | 95 | 20 | 35 | A-1 은 09-06 04:54Z 재시작부터 라이브(그 뒤 cwd 오류 1건은 엔드포인트가 답한 것) |
 
+### B 갈래: shim 이 릴리즈의 일부가 된 뒤
+
+2026-09-06 15:14Z 에 호스트의 게스트 shim 과 rondo-remote 테스트베드
+(`sbx-sshd-probe` 컨테이너의 `/usr/local/bin`) 를 main 에서 빌드한 shim 으로 바꿨다.
+probe 응답은 `{"version":"3.0.0+4eca0168","capabilities":["observe"],"release":"0.33.0"}`.
+그 전에 설치돼 있던 것은 릴리즈를 적기 전 빌드였다.
+
+| 지표 | 교체 전 (09-06 하루) | 교체·재시작 이후 (15:16Z~15:41Z) |
+|---|---|---|
+| `remote_shim_outdated` | 107 (엔드포인트마다 약 80초 간격) | 0 |
+| `remote_shim_version_skew` | 0 | 0 |
+| `microvm_shim_missing` | 0 | 0 |
+| `microvm_shim_hash_mismatch` | 0 | 0 |
+| sidecar 검증 성공 | 93 (옛 해시) | 8 (새 해시) |
+| authorized tool_execute | — | 46, 레인 실패 0 |
+
+§2 가 B 에 건 기준은 `remote_shim_version_skew` 0, `microvm_shim_missing` 0,
+운영자 복사 절차 삭제였다. 앞의 둘은 위 표이고, 세 번째는 B-2 가 설치기로 옮기면서
+런북에서 없앴다. `remote_shim_outdated` 는 B-3 이 새로 만든 신호이고, 그것이 가리킨
+수리를 그대로 했더니 0 이 됐다.
+
 ## 6. 하지 않는 것
 
 - 표(RFC-0404)와 셸 IR(RFC-0421)에 텍스트 규칙을 더 얹는 일. 상자의 판정이 근거가

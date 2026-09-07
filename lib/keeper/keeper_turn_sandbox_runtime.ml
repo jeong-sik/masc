@@ -52,7 +52,12 @@ let sweep_abandoned_microvm_guests
       try
         Ok (Keeper_sandbox_microvm.sweep_abandoned_guests
           ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
-      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* cancel-guard-ok: re-raised below after unlocking, including cancellation. *)
+      (* cancel-guard-ok: this catch carries the exception out of the lock and
+         the [Error] arm below re-raises it with its backtrace, so
+         [Eio.Cancel.Cancelled] propagates rather than being absorbed. It is
+         caught here only because [use_rw ~protect:true] poisons the mutex for
+         every later boot and teardown if the body raises. *)
+      with exn -> Error (exn, Printexc.get_raw_backtrace ()))
   with
   | Ok outcomes -> outcomes
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace

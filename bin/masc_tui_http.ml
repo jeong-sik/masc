@@ -60,6 +60,7 @@ let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_frame_path = "/api/v1/msx/frame"
+let msx_press_path = "/api/v1/msx/press"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -295,6 +296,26 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
+   the new frame number on success, or an error string; the caller re-fetches
+   the frame to see the result. Auth rides [post_json]'s operator bearer. *)
+let post_msx_press ~(host : string) ~(port : int) ~(keys : string list) :
+    (int, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("keys", `List (List.map (fun k -> `String k) keys)) ])
+  in
+  match post_json ~host ~port ~path:msx_press_path ~body with
+  | Error e -> Error e
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> ( try Ok (member "frame" json |> to_int) with _ -> Ok 0)
+    | _ -> (
+      match member "message" json with `String m -> Error m | _ -> Error "press refused"))
+;;
+
 
 let post_keeper_chat ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :

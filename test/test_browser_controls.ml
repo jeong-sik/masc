@@ -54,7 +54,7 @@ let fixture ?(failure=(fun _ -> None)) f = Eio_main.run (fun env ->
     | `POST,_ -> Ok `Null
     | `DELETE,"/session/s/window" -> Ok (`List [`String "a"])
     | _ -> fail ("unexpected request " ^ path) in
-  let driver = Driver.create ~request in
+  let driver = Driver.create ~request () in
   ignore (ok (Driver.execute driver (Lane.Session_open {headless=None})));
   ignore (ok (Driver.execute driver Lane.Tabs_list));
   calls := [];

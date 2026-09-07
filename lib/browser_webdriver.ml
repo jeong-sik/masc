@@ -1,7 +1,8 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type session = { id : string; mutable handles : (string * int) list; uploads : Browser_lane.Upload_lease.owner }
-type t = { request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
+type t = { request : request; binary : string option; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
+
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -29,7 +30,7 @@ let decode_response ~status body =
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code; message })
-let create ~request = { request; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
+let create ?binary ~request () = { request; binary; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
@@ -211,7 +212,9 @@ let execute_unlocked t = function
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
          ["browserName", `String "firefox";
           "unhandledPromptBehavior", `String "ignore";
-          "moz:firefoxOptions", `Assoc ["args", `List args]]]] in
+          "moz:firefoxOptions", `Assoc (("args", `List args) ::
+            (Option.map (fun path -> "binary", `String path) t.binary |> Option.to_list))]]] in
+
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
        t.session <- Some { id; handles = []; uploads = Browser_lane.Upload_lease.create_owner () };

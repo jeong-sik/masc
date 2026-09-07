@@ -9992,12 +9992,19 @@ let render_keeper_message (state : state) =
            mine;
          List.iter
            (fun entry ->
+             (* The row names the way to stop it. Esc and /interrupt both
+                read [msg_live], which is this pane's turn and not this one,
+                and the key that would put that keeper on screen is refused
+                while any request is in flight -- so an operator reading
+                this row had no key at all (#33852). *)
              box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-               (Printf.sprintf "  (also sending to %s: %s%s)"
+               (Printf.sprintf "  (also sending to %s: %s%s -- /interrupt %s)"
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
-                  (sending_age entry)))
+                  (sending_age entry)
+                  (Keeper_chat.terminal_safe_text
+                     entry.sent_request.keeper_name)))
            others);
     (match state.msg_loaded_error with
      | Some detail ->
@@ -15722,16 +15729,37 @@ let render_prompt_registry (state : state) =
     | Masc_tui_fetched.Ready snapshot -> List.length snapshot.Tui_decode.ps_rows
     | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> 0
   in
+  (* Overrides the registry declined to restore. A held-back key still draws
+     from its file, so without this it renders exactly like a prompt nobody
+     ever customized -- which is how an operator loses an override without
+     learning they lost it. *)
+  let held_back =
+    match prompts with
+    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_held_back
+    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+    | Masc_tui_fetched.Failed _ -> []
+  in
+  let held_back_for key =
+    List.find_opt
+      (fun (entry : Tui_decode.held_back_override) ->
+        String.equal entry.Tui_decode.hbo_key key)
+      held_back
+  in
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt prompt_rows cursor in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d/%d개 · %s%s  %s  %s"
+    (Printf.sprintf "%s  %s%d/%d개 · %s%s%s  %s  %s"
        (screen_title " MASC 프롬프트")
        Ansi.dim total all_prompt_count
        (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
        Ansi.reset
+       (match held_back with
+        | [] -> ""
+        | entries ->
+          Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+            (List.length entries) Ansi.reset)
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
@@ -15760,10 +15788,14 @@ let render_prompt_registry (state : state) =
       if index >= first && index < first + list_height then begin
         incr drawn;
         let mark =
-          match row.Tui_decode.pr_source with
-          | Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
-          | Tui_decode.Prompt_file -> " "
-          | Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
+          (* Held back outranks the source, which reads [Prompt_file] for
+             exactly these rows: the file is what a turn gets, and saying so
+             is what hides the override the reader still has on disk. *)
+          match held_back_for row.Tui_decode.pr_key, row.Tui_decode.pr_source with
+          | Some _, _ -> (Theme.bad ()) ^ "\xe2\x8a\x98" ^ Ansi.reset
+          | None, Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
+          | None, Tui_decode.Prompt_file -> " "
+          | None, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
         in
         let category =
           match row.Tui_decode.pr_category with
@@ -15820,6 +15852,18 @@ let render_prompt_registry (state : state) =
             (Terminal_text.single_line row.pr_key)
             (Terminal_text.single_line source)
             (Terminal_text.single_line row.pr_file_path));
+       (* Two facts an operator needs and cannot get anywhere else: the
+          override is still on disk, and re-saving it is what puts it back in
+          force. Without the second line the mark says something is wrong and
+          leaves the reader with no move. *)
+       (match held_back_for row.Tui_decode.pr_key with
+        | None -> ()
+        | Some entry ->
+          box_line buf cols
+            (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
+               (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
+          box_line_styled buf cols ~style:(Theme.recede ())
+            "  이 프롬프트의 원본이 바뀌어 핀이 어긋났습니다 \xc2\xb7 같은 키를 다시 저장하면 현재 원본에 다시 물립니다");
        let input_contract =
          if String.equal row.pr_category "librarian" then
            "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"

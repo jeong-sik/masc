@@ -12770,6 +12770,92 @@ def run_theme_scheme_regression(executable: str) -> None:
     )
 
 
+def held_back_prompts_http_fixtures() -> HttpFixtures:
+    """One prompt whose override the registry declined to restore.
+
+    The registry keeps a rejected override on disk and reports it under
+    `held_back`. The row itself still reads from its file, so without a mark
+    of its own it renders exactly like a prompt nobody ever customized -- and
+    an operator loses an override without learning they lost it.
+    """
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/prompts"] = (
+        200,
+        {
+            "prompts": [
+                {
+                    "key": "keeper",
+                    "category": "keeper",
+                    "operator_surface": "primary",
+                    "description": "the keeper turn prompt",
+                    "effective": "You are a keeper.",
+                    "file_path": "config/prompts/keeper.md",
+                    "source": "file",
+                    "template_variables": [],
+                }
+            ],
+            "held_back": [
+                {
+                    "key": "keeper",
+                    "bytes": 1240,
+                    "contract_revision": "01e7760f",
+                }
+            ],
+        },
+    )
+    return fixtures
+
+
+def run_held_back_override_regression(executable: str) -> None:
+    """A held-back override is visible on the prompts screen.
+
+    Before this the screen drew the row from its file with a blank mark, the
+    same as an untouched prompt. The wire had carried `held_back` the whole
+    time and the TUI snapshot dropped the field.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Config")
+        for _ in range(8):
+            if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the prompts pane")
+
+        screen = CSI_RE.sub(b"", bytes(output))
+        if "적용 안 된 오버라이드 1개".encode() not in screen:
+            raise AssertionError(
+                "the header does not count the held-back override, so a reader "
+                "cannot see it without landing on the row"
+            )
+        if "\u2298".encode() not in screen:
+            raise AssertionError("the held-back row carries no mark of its own")
+        if "다시 저장하면".encode() not in screen:
+            raise AssertionError(
+                "the screen says the override is not applied and does not say "
+                "how to put it back"
+            )
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="a held-back override is visible",
+        interact=interact,
+        http_fixtures=held_back_prompts_http_fixtures(),
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -12790,6 +12876,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":
+        run_held_back_override_regression(os.path.abspath(sys.argv[1]))
+        print("tui held-back override regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
         run_theme_scheme_regression(os.path.abspath(sys.argv[1]))

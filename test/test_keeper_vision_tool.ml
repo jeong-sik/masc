@@ -1235,6 +1235,7 @@ default = "gravity.vision"
 protocol = "antigravity-cli"
 command = "antigravity"
 is-non-interactive = true
+timeout-s = 30.0
 [providers.gravity.credentials]
 type = "file"
 path = %S

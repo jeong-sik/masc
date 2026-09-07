@@ -526,6 +526,7 @@ let run
             ~goal:(Yojson.Safe.to_string manifest)
             ~tools
             ~agent_core_tools:tools
+            ~tool_requirement:Keeper_required_tools.Required
             ~cache_system_prompt:true
             ?raw_trace
             ?event_bus

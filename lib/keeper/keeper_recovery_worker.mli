@@ -87,6 +87,8 @@ type outcome =
     application or completion of the original Keeper request. *)
 
 (** [runtime_id] is an explicit configured runtime/lane resolved by run_named.
+    Tools are required on each materialized candidate through the existing
+    driver's typed requirement; a known unsupported candidate is not called.
     The existing Keeper Owner must own worker lifecycle and join any previous
     worker before reclaim. Requirement bindings are owner-authored, with every
     required reference mapped to nonempty source positions. The model cannot

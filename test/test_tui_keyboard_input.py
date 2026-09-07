@@ -11704,10 +11704,23 @@ def run_acting_call_evidence_regression(executable: str) -> None:
     binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
 
     def emit_frame(phase: str, output: bytearray) -> None:
+        captured = bytes(output)
+        end = captured.rfind(FRAME_END)
+        if end < 0:
+            raise AssertionError("Acting evidence has no completed terminal frame")
+        end += len(FRAME_END)
+        redraw = captured.rfind(FULL_REDRAW, 0, end)
+        start = captured.rfind(FRAME_START, 0, redraw) if redraw >= 0 else -1
+        if start < 0:
+            raise AssertionError("Acting evidence has no complete redraw origin")
+        # A full redraw replaces every row; only its frame and later complete
+        # deltas are needed to reproduce this exact screen. Session history
+        # made the second evidence record exceed Dune's output allowance.
+        current_frame = captured[start:end]
         print("ACTING_PTY_EVIDENCE " + json.dumps({
             "phase": phase, "fixture": "synthetic exact-event inspector",
             "binary_sha256": binary_sha256, "rows": 35, "columns": 140,
-            "encoding": "base64", "pty": base64.b64encode(output).decode(),
+            "encoding": "base64", "pty": base64.b64encode(current_frame).decode(),
         }), flush=True)
 
     def frame(value):

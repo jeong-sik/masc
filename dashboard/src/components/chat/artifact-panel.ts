@@ -56,7 +56,11 @@ function artifactIcon(kind: ArtifactKind): string {
   }
 }
 
-function attachmentToArtifact(att: KeeperConversationAttachment, entryId: string, turnIndex: number, index: number): ArtifactItem {
+function attachmentToArtifact(att: KeeperConversationAttachment, entryId: string, turnIndex: number, index: number): ArtifactItem | null {
+  // The artifact panel lists previewable/downloadable bytes; a reference
+  // attachment (#33728) holds none, so it yields no artifact row rather than
+  // an empty one.
+  if (att.kind) return null
   return {
     id: `${entryId}-att-${index}`,
     entryId,
@@ -170,7 +174,10 @@ export function extractArtifactGroups(entries: KeeperConversationEntry[]): Artif
   const groups: ArtifactGroup[] = []
   entries.forEach((entry, turnIndex) => {
     const items: ArtifactItem[] = []
-    entry.attachments?.forEach((att, i) => { items.push(attachmentToArtifact(att, entry.id, turnIndex, i)) })
+    entry.attachments?.forEach((att, i) => {
+      const artifact = attachmentToArtifact(att, entry.id, turnIndex, i)
+      if (artifact) items.push(artifact)
+    })
     entry.blocks?.forEach((block, i) => { items.push(...blockToArtifacts(block, entry.id, turnIndex, i)) })
     if (items.length === 0) return
     groups.push({

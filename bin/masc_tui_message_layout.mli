@@ -53,6 +53,11 @@ type turn_rail =
       (** What the turn did to get there -- reasoning, tool calls, a skill.
           Drawn as a branch off the trunk, because a turn's work is
           subordinate to the turn and was reading as a sibling of it. *)
+  | Rail_stands
+      (** A turn of one row that did work: it opens and closes on that line,
+          so it branches off nothing. Apart from {!Rail_does} because a run of
+          them is a run of turns, and drawn as a branch they read as one
+          turn's several branches -- the boundary between them disappeared. *)
   | Rail_closes  (** The last row of a turn that has finished. *)
   | Rail_joins of siding
       (** Belongs to no turn and landed while one was running. It joins the
@@ -416,6 +421,13 @@ val split_aligned_role_label :
     is content: a renderer that reverses the whole label paints empty cells as
     though they were the badge. The mark is empty for a label
     narrow enough that {!align_role_label} dropped it. *)
+
+val fit_speaker :
+  ?column:int -> speaker:string -> surface:string option -> unit -> string
+(** The label for a row someone else put here. Names the speaker, and adds the
+    surface they came in by only when both fit the column: cut as one string
+    the pair keeps the surface and loses the name, and an arrival's siding
+    already says the row came from outside. *)
 
 val align_role_label : ?column:int -> style:style -> string -> string
 (** Left-align a role label in [column] cells, defaulting to

@@ -169,6 +169,7 @@ type attachment_note =
   ; att_bytes : int
   ; att_width : int option
   ; att_height : int option
+  ; att_image : Masc_tui_image_preview.preview
   }
 (** A file the row carries, named but not held: the bytes stay in the store.
     The pane's job is to say one is there, which it could not do while this
@@ -211,15 +212,15 @@ type decoded =
   ; dropped : int
       (** Rows the decoder could not read. Reported rather than inferred from
           the list's length: folding tool blocks shortens the list for reasons
-          that are not losses. *)
+          that are not losses, and so does an entry that was read and draws
+          nothing -- an autonomous wake that produced neither speech nor work
+          is not a row anyone lost. *)
   }
 
-val addressed_label : speaker -> Surface.t option -> string
-(** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
-    row is ["you"], the way it always read. A named author is drawn, and a
-    surface that is not an operator's own is appended — ["<keeper> · agent"],
-    ["<operator> · slack"] — so a fleet broadcast and a direct message do not
-    look alike. *)
+val addressed_label_parts : speaker -> Surface.t option -> string * string option
+(** The speaker and the surface they came in by, apart. The speaker column
+    cannot hold both, and cutting them as one string keeps the surface and
+    loses the name; whoever knows the column decides which to draw. *)
 
 (** One page of rows older than a cursor, from
     [GET /keepers/<name>/chat/history/page?before=<ts>].

@@ -144,7 +144,7 @@ let open_leaf parent_fd leaf =
          "capability exact read parent"
          parent_fd
          (fun raw_parent_fd ->
-            Eio_unix.run_in_systhread (fun () ->
+            Eio_unix.run_in_systhread ~label:"fs-compat-exact-open" (fun () ->
               openat_nofollow_ro_nonblock raw_parent_fd leaf)))
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Missing
@@ -154,7 +154,7 @@ let open_leaf parent_fd leaf =
 let fstat operation fd =
   try
     Ok
-      (Eio_unix.run_in_systhread (fun () ->
+      (Eio_unix.run_in_systhread ~label:"fs-compat-exact-fstat" (fun () ->
          Unix.LargeFile.fstat fd))
   with
   | exn -> Error (error_of_exception operation exn)
@@ -167,7 +167,7 @@ type exact_read =
 let read_exact_and_eof fd bytes =
   try
     Ok
-      (Eio_unix.run_in_systhread (fun () ->
+      (Eio_unix.run_in_systhread ~label:"fs-compat-exact-read" (fun () ->
          let expected = Bytes.length bytes in
          let rec fill offset =
            if offset = expected then

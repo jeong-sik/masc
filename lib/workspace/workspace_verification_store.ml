@@ -16,6 +16,19 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
+type artifact_payload =
+  | Text_payload of string * int * bool
+      (** [(content, bytes, truncated)] — [bytes] may exceed the content
+          length when the read was capped. *)
+  | Binary_payload of
+      { data : string  (** the raw bytes as read; the store persists them as the evidence body *)
+      ; bytes : int  (** the byte count, measured on the original *)
+      ; sha256 : string
+      ; format : string  (** derived from the reference's extension; "unknown" when bare *)
+      }
+
+type artifact_read_result = (artifact_payload, evidence_read_failure) result
+
 type submitted_evidence_item =
   | Evidence_note of string
   | Evidence_artifact of
@@ -28,6 +41,15 @@ type submitted_evidence_item =
   | Evidence_artifact_unreadable of
       { reference : string
       ; reason : evidence_read_failure
+      }
+  | Evidence_artifact_binary of
+      { reference : string
+      ; bytes : int
+      ; sha256 : string
+      ; format : string
+      ; body : string option
+      (* base_path-relative path of the persisted bytes; [None] when the
+         caller gave no request to file the body under (RFC-0436 §4.2). *)
       }
 
 type evidence_access_failure =
@@ -111,6 +133,17 @@ let submitted_evidence_item_to_yojson = function
       ; "reference", `String reference
       ; "reason", evidence_read_failure_to_yojson reason
       ]
+  | Evidence_artifact_binary { reference; bytes; sha256; format; body } ->
+    `Assoc
+      ([ "kind", `String "artifact_binary"
+       ; "reference", `String reference
+       ; "bytes", `Int bytes
+       ; "sha256", `String sha256
+       ; "format", `String format
+       ]
+      @ (match body with
+         | Some path -> [ ("body", `String path) ]
+         | None -> []))
 
 let request_header_to_yojson request =
   `Assoc
@@ -228,6 +261,17 @@ let submitted_evidence_item_transport_to_yojson = function
       ; "reference", `String reference
       ; "reason", `String (evidence_read_failure_code reason)
       ]
+  | Evidence_artifact_binary { reference; bytes; sha256; format; body } ->
+    `Assoc
+      ([ "kind", `String "artifact_binary"
+       ; "reference", `String reference
+       ; "bytes", `Int bytes
+       ; "sha256", `String sha256
+       ; "format", `String format
+       ]
+      @ (match body with
+         | Some path -> [ ("body", `String path) ]
+         | None -> []))
 ;;
 
 (* The per-item cap above bounds one artifact. Nothing bounded their sum, so a
@@ -266,10 +310,11 @@ let submitted_evidence_item_withheld_to_yojson = function
                bytes
                evidence_transport_max_bytes) )
       ]
-  | (Evidence_note _ | Evidence_invalid_reference | Evidence_artifact_unreadable _) as
-    item ->
+  | (Evidence_note _ | Evidence_invalid_reference | Evidence_artifact_unreadable _
+    | Evidence_artifact_binary _) as item ->
     (* Only a full-content artifact can be withheld for the aggregate budget;
-       the rest carry no content to withhold. *)
+       the rest carry no content to withhold. A binary item is already
+       payload-free on the wire -- its bytes live in the evidence body. *)
     submitted_evidence_item_transport_to_yojson item
 ;;
 
@@ -301,7 +346,8 @@ let carried_artifact_indices items =
            , ( Evidence_note _
              | Evidence_artifact _
              | Evidence_invalid_reference
-             | Evidence_artifact_unreadable _ ) ) -> None)
+             | Evidence_artifact_unreadable _
+             | Evidence_artifact_binary _ ) ) -> None)
   in
   let sorted =
     List.stable_sort
@@ -335,7 +381,8 @@ let submitted_evidence_items_transport_to_yojson items =
       | Evidence_note _
       | Evidence_artifact _
       | Evidence_invalid_reference
-      | Evidence_artifact_unreadable _ -> submitted_evidence_item_transport_to_yojson item)
+      | Evidence_artifact_unreadable _
+      | Evidence_artifact_binary _ -> submitted_evidence_item_transport_to_yojson item)
     items
 ;;
 
@@ -375,6 +422,17 @@ let submitted_evidence_item_metadata_to_yojson = function
       ; "reference", `String reference
       ; "reason", `String (evidence_read_failure_code reason)
       ]
+  | Evidence_artifact_binary { reference; bytes; sha256; format; body } ->
+    `Assoc
+      ([ "kind", `String "artifact_binary"
+       ; "reference", `String reference
+       ; "bytes", `Int bytes
+       ; "sha256", `String sha256
+       ; "format", `String format
+       ]
+      @ (match body with
+         | Some path -> [ ("body", `String path) ]
+         | None -> []))
 ;;
 
 let submitted_evidence_access_metadata_to_yojson = function
@@ -481,6 +539,38 @@ let submitted_evidence_item_of_yojson = function
         | _, _, _ ->
           Error
             "submitted evidence unreadable item has unexpected fields")
+     | Some (`String "artifact_binary") ->
+       let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence binary artifact"
+           ~allowed:[ "kind"; "reference"; "bytes"; "sha256"; "format"; "body" ]
+           fields
+       in
+       let* reference = string_field "reference" in
+       let* bytes =
+         match List.assoc_opt "bytes" fields with
+         | Some (`Int value) when value >= 0 -> Ok value
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence binary artifact bytes must be a non-negative integer, got %s"
+                (Json_util.excerpt value))
+         | None -> Error "submitted evidence binary artifact is missing bytes"
+       in
+       let* sha256 = string_field "sha256" in
+       let* format = string_field "format" in
+       let* body =
+         match List.assoc_opt "body" fields with
+         | Some (`String path) -> Ok (Some path)
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence binary artifact body must be a string, got %s"
+                (Json_util.excerpt value))
+         | None -> Ok None
+       in
+       Ok (Evidence_artifact_binary { reference; bytes; sha256; format; body })
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown submitted evidence snapshot kind %S" kind)
      | Some value ->
@@ -760,10 +850,69 @@ let valid_producer_relative_path path =
    judge's call, and [verification.lookup.producer_tree] already tells it to
    make that call. *)
 
-let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
+(* The reader is injected because where an artifact lives depends on the
+   producer's sandbox profile, and that policy sits above this library: a
+   Docker keeper's files sit on the host playground this code can reach, while
+   a microvm/remote-ssh keeper's files sit inside the guest's work volume,
+   which only the sandbox backend can read. Without a reader the direct host
+   read stands (tests, host-profile keepers); with one, every artifact read --
+   snapshot and size pre-check alike -- goes through it, so the two can never
+   disagree about where a file is. *)
+(* Where a binary artifact's bytes are filed (RFC-0436 §4.2): the
+   verification-owned evidence directory, one file per item index. The path
+   recorded on the item is spelled relative to the workspace's masc
+   directory so the judge's side resolves it under any base_path. Returns
+   [None] when no request id was given -- the hash still stands, the body
+   is simply not filed. *)
+let persist_binary_body ~base_path ?request_id ?index data =
+  match (request_id, index) with
+  | Some request_id, Some index ->
+    let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+    let dir = Filename.concat (Filename.concat masc_dir "evidence") request_id in
+    Fs_compat.mkdir_p dir;
+    let file = Printf.sprintf "%d.bin" index in
+    Fs_compat.save_file (Filename.concat dir file) data;
+    Some (Filename.concat (Filename.concat "evidence" request_id) file)
+  | _ -> None
+
+let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
+    ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
   then Evidence_invalid_reference
   else
+    match artifact_read with
+    | Some read -> (
+        match read ~worker ~relative:relative_path with
+        | Error reason -> Evidence_artifact_unreadable { reference; reason }
+        | Ok (Binary_payload { data; bytes; sha256; format }) ->
+            (* Bytes that are not text are evidence too: the snapshot keeps
+               the hash and the size, and the bytes are filed as the body
+               (RFC-0436 §4.1). *)
+            let body =
+              persist_binary_body ~base_path ?request_id ?index data
+            in
+            Evidence_artifact_binary { reference; bytes; sha256; format; body }
+        | Ok (Text_payload (content, bytes, truncated)) -> (
+            (* An artifact is text evidence, and the direct host read holds
+               that line with [scan_utf8]; an injected reader hands back bytes
+               from another lane (a guest [cat]), so the same scan holds the
+               line here too: every reader answers under one boundary, and a
+               truncated read may stop mid-character the way the direct
+               prefix can. *)
+            match scan_utf8 content with
+            | Utf8_valid ->
+              Evidence_artifact { reference; content; bytes; truncated }
+            | Utf8_incomplete_at at when truncated ->
+              Evidence_artifact
+                { reference
+                ; content = String.sub content 0 at
+                ; bytes
+                ; truncated = true
+                }
+            | Utf8_incomplete_at _ | Utf8_invalid ->
+              Evidence_artifact_unreadable
+                { reference; reason = Evidence_invalid_utf8 }))
+    | None -> (
     let project_root = project_root_of_base_path base_path in
     let ownership_root =
       Keeper_sandbox_config.host_root_abs_of_agent
@@ -782,12 +931,16 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     | Error (Evidence_symbolic_link as reason)
     | Error (Evidence_changed_during_read as reason)
     | Error (Evidence_read_error _ as reason) ->
-      Evidence_artifact_unreadable { reference; reason }
+      Evidence_artifact_unreadable { reference; reason } )
 
-let snapshot_submitted_evidence_item ~base_path ~worker reference =
+let snapshot_submitted_evidence_item ?artifact_read ?request_id ?index ~base_path
+    ~worker reference =
   match classify_evidence_reference reference with
   | Artifact_reference relative_path ->
     inspect_producer_relative_artifact
+      ?artifact_read
+      ?request_id
+      ?index
       ~base_path
       ~worker
       ~reference
@@ -805,12 +958,19 @@ let snapshot_submitted_evidence_item ~base_path ~worker reference =
    business: the snapshot layer reports those as typed unreadable reasons, and
    duplicating that taxonomy here would drift. [None] means "no artifact
    reference / not measurable here", which callers treat as pass-through. *)
-let artifact_reference_size ~base_path ~worker reference =
+let artifact_reference_size ?artifact_read ~base_path ~worker reference =
   match classify_evidence_reference reference with
   | Artifact_reference relative_path ->
     if not (valid_producer_relative_path relative_path)
     then None
     else
+      (match artifact_read with
+       | Some read -> (
+           match read ~worker ~relative:relative_path with
+           | Ok (Text_payload (_content, bytes, _truncated)) -> Some bytes
+           | Ok (Binary_payload { bytes; _ }) -> Some bytes
+           | Error _ -> None)
+       | None ->
       let project_root = project_root_of_base_path base_path in
       let ownership_root =
         Keeper_sandbox_config.host_root_abs_of_agent
@@ -826,14 +986,21 @@ let artifact_reference_size ~base_path ~worker reference =
            target
        with
        | Ok (Some prefix) -> Some prefix.file_size
-       | Ok None | Error _ -> None)
+       | Ok None | Error _ -> None))
   | Note_reference _ | Unresolvable_reference -> None
 
-let snapshot_submitted_evidence_json ~base_path ~worker references =
+let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~worker
+    references =
   `List
-    (List.map
-       (fun reference ->
-         snapshot_submitted_evidence_item ~base_path ~worker reference
+    (List.mapi
+       (fun index reference ->
+         snapshot_submitted_evidence_item
+           ?artifact_read
+           ?request_id
+           ~index
+           ~base_path
+           ~worker
+           reference
          |> submitted_evidence_item_to_yojson)
        references)
 
@@ -858,6 +1025,12 @@ let submitted_evidence_identity_line (item : Yojson.Safe.t) =
          "%s (unreadable: %s)"
          reference
          (evidence_read_failure_code reason))
+  | Ok (Evidence_artifact_binary { reference; sha256; _ }) ->
+    Ok
+      (Printf.sprintf
+         "%s (binary: %s)"
+         reference
+         (String.sub sha256 0 (min 12 (String.length sha256))))
 ;;
 
 let submitted_evidence_identity_lines (json : Yojson.Safe.t) =
@@ -891,6 +1064,7 @@ let truncated_snapshot_items (json : Yojson.Safe.t) : (string * int) list =
          | Ok (Evidence_note _) -> None
          | Ok Evidence_invalid_reference -> None
          | Ok (Evidence_artifact_unreadable _) -> None
+         | Ok (Evidence_artifact_binary _) -> None
          | Error _ -> None)
       items
   | _ -> []

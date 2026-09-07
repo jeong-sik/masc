@@ -308,6 +308,10 @@ let save_file_atomic_strict_staged path content =
   Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
+let write_file_atomic_strict_staged path ~write =
+  Atomic_write.write_file_atomic_strict_staged path ~write
+;;
+
 let save_file_atomic_strict path content =
   Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
@@ -320,6 +324,14 @@ module Atomic_replace_for_testing = struct
       ~save_file:save_file_blocking
       path
       content
+  ;;
+
+  let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
+    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+      ?sync_file
+      ~sync_parent
+      path
+      ~write
   ;;
 end
 
@@ -972,7 +984,7 @@ let load_owned_regular_file_with_snapshot ~ownership_root path =
       load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
              ~ownership_root
              path)
@@ -1026,7 +1038,7 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
         ~ownership_root ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
        in
@@ -1082,7 +1094,7 @@ let load_owned_regular_file_range
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
        in
@@ -1121,7 +1133,7 @@ let file_size (path : string) : int option =
       try Some (Unix.stat path).st_size with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1132,7 +1144,7 @@ let file_mtime (path : string) : float option =
       try Some (Unix.stat path).st_mtime with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1191,14 +1203,14 @@ let remove_tree (path : string) : unit =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> remove_tree_unix path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
 ;;
 
 let realpath_lenient (path : string) : string =
@@ -1267,28 +1279,52 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
     a malformed log from either path uses the same orchestrate system. *)
+(* One row, with the row number the warning prints. A caller that walks rows
+   itself - to stop before the end of a window - parses through this so the
+   warning it prints is the same one, in the same shape, as the whole-list
+   parse below. *)
+let parse_jsonl_line ~(source : string) ~(line_no : int) (line : string)
+  : Yojson.Safe.t option
+  =
+  match Yojson.Safe.from_string line with
+  | json -> Some json
+  | exception Yojson.Json_error msg ->
+    Stdlib.Printf.eprintf
+      "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+      source
+      line_no
+      msg;
+    None
+;;
+
+(* Blank lines do not take a number, matching what [cat -n] shows for the
+   printed JSONL rows. A caller that needs those numbers without parsing
+   uses this. *)
+let number_jsonl_lines (lines : string list) : (int * string) list =
+  let line_no = ref 0 in
+  List.filter_map
+    (fun line ->
+       let trimmed = String.trim line in
+       if String.equal trimmed ""
+       then None
+       else begin
+         incr line_no;
+         Some (!line_no, trimmed)
+       end)
+    lines
+;;
+
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
-  let line_no = ref 0 in
   let parsed =
     List.filter_map
-      (fun line ->
-         let trimmed = String.trim line in
-         if String.equal trimmed ""
-         then None
-         else (
-           incr line_no;
-           match Yojson.Safe.from_string trimmed with
-           | json -> Some json
-           | exception Yojson.Json_error msg ->
-             incr malformed;
-             Stdlib.Printf.eprintf
-               "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-               source
-               !line_no
-               msg;
-             None))
-      lines
+      (fun (line_no, trimmed) ->
+         match parse_jsonl_line ~source ~line_no trimmed with
+         | Some json -> Some json
+         | None ->
+           incr malformed;
+           None)
+      (number_jsonl_lines lines)
   in
   parsed, !malformed
 ;;

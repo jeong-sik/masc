@@ -27,10 +27,19 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
   }
 ;;
 
+(* Nothing in the language forces a variant into a list, and every check below
+   walks this one. The match makes adding a piece a compile error here, where
+   the list to extend is in view. *)
 let every_rail =
+  let _covers_them_all : Layout.turn_rail -> unit = function
+    | Layout.Rail_opens | Layout.Rail_says | Layout.Rail_does
+    | Layout.Rail_stands | Layout.Rail_closes | Layout.Rail_joins _
+    | Layout.Rail_none -> ()
+  in
   [ Layout.Rail_opens
   ; Layout.Rail_says
   ; Layout.Rail_does
+  ; Layout.Rail_stands
   ; Layout.Rail_closes
   ; Layout.Rail_joins Layout.Siding_journal
   ; Layout.Rail_joins Layout.Siding_arrival
@@ -77,9 +86,10 @@ let test_the_drawn_pieces_are_distinct () =
     List.filter (fun rail -> rail <> Layout.Rail_none) every_rail
     |> List.map Layout.turn_rail_glyph
   in
-  (* Five shapes, not six: both sidings meet the line the same way, and what
-     kind of siding it was is in the run leading up to it. *)
-  check int "five distinct glyphs" 5
+  (* Six shapes for seven drawn pieces: both sidings meet the line the same
+     way, and what kind of siding it was is in the run leading up to it. Every
+     other piece has its own. *)
+  check int "six distinct glyphs" 6
     (List.length (List.sort_uniq String.compare drawn));
   check string "nothing to hang draws a blank" " "
     (Layout.turn_rail_glyph Layout.Rail_none)
@@ -356,6 +366,18 @@ let test_a_lone_row_keeps_work_and_drops_speech () =
      = Layout.Rail_none)
 ;;
 
+(* A run of one-row turns is a run of turns. Drawn with the branch a running
+   turn uses, four consecutive autonomous wakes read as one turn's four
+   branches -- the boundary between them was gone. *)
+let test_a_turn_of_one_row_does_not_draw_a_running_turns_branch () =
+  check bool "the lone turn's piece is its own" false
+    (Layout.turn_rail_glyph Layout.Rail_stands
+     = Layout.turn_rail_glyph Layout.Rail_does);
+  check bool "and it is not the blank a lone utterance draws" false
+    (Layout.turn_rail_glyph Layout.Rail_stands
+     = Layout.turn_rail_glyph Layout.Rail_none)
+;;
+
 let () =
   run "tui turn rail"
     [ ( "glyphs"
@@ -368,6 +390,8 @@ let () =
             test_work_and_speech_split_the_same_way_for_every_style
         ; test_case "a lone row keeps work and drops speech" `Quick
             test_a_lone_row_keeps_work_and_drops_speech
+        ; test_case "a turn of one row does not draw a running turn's branch"
+            `Quick test_a_turn_of_one_row_does_not_draw_a_running_turns_branch
         ] )
     ; ( "geometry"
       , [ test_case "the rail costs the same whatever it draws" `Quick

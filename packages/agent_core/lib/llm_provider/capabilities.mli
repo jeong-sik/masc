@@ -41,6 +41,10 @@ type assistant_tool_content_format = Capability_vocab.assistant_tool_content_for
   | Assistant_tool_content_null
   | Assistant_tool_content_empty_string
 
+type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
+  | Chat_max_tokens
+  | Chat_max_completion_tokens
+
 type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
@@ -107,6 +111,11 @@ type capabilities =
   ; supports_named_tool_choice : bool
   ; supports_parallel_tool_calls : bool
   ; assistant_tool_content_format : assistant_tool_content_format
+  ; chat_output_budget_field : chat_output_budget_field
+    (** Which Chat Completions field carries the output-token budget — classic
+        [max_tokens] or the reasoning-era [max_completion_tokens] OpenAI's
+        gpt-5 family requires. Field name only; the #2517 omit/clamp receipt
+        policy is unchanged. *)
   ; (* Thinking / reasoning *)
     supports_reasoning : bool
   ; supports_extended_thinking : bool

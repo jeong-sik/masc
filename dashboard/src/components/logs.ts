@@ -627,6 +627,7 @@ function renderLogKindGrid(
         row('latency', d(details, 'latency_ms') ?? d(details, 'duration_ms') ?? d(details, 'dur')),
         row('namespace', d(details, 'namespace') ?? d(details, 'ns')),
       )}
+      ${codeBlock('실행 확인 근거', details.classification)}
       ${codeBlock('args', details.tool_args ?? details.args ?? details.input)}
       ${codeBlock('result', details.result ?? details.output)}
     `

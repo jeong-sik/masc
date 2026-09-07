@@ -29,6 +29,15 @@ let web_fetch_schema : tool_schema = Tool_schemas_misc_toml.web_fetch
 
 let web_schemas = [ web_search_schema; web_fetch_schema ]
 
+let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
+let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
+
+let browser_session_schema : tool_schema = Tool_schemas_misc_toml.browser_session
+let browser_goto_schema : tool_schema = Tool_schemas_misc_toml.browser_goto
+
+let browser_lane_schemas =
+  [ browser_tabs_schema; browser_read_schema; browser_session_schema; browser_goto_schema ]
+
 (* [schemas] is the public misc schema set, now read from
    config/tools/masc_*.toml. Operator control and web runtime schemas use the
    dedicated projections above. *)
@@ -93,6 +102,10 @@ type misc_operation =
   | Misc_tool_help
   | Misc_web_fetch
   | Misc_web_search
+  | Misc_browser_tabs
+  | Misc_browser_read
+  | Misc_browser_session
+  | Misc_browser_goto
 [@@deriving enumerate]
 
 let misc_operations = all_of_misc_operation
@@ -108,6 +121,10 @@ let misc_tool_name = function
   | Misc_tool_help -> "masc_tool_help"
   | Misc_web_fetch -> "masc_web_fetch"
   | Misc_web_search -> "masc_web_search"
+  | Misc_browser_tabs -> "masc_browser_tabs"
+  | Misc_browser_read -> "masc_browser_read"
+  | Misc_browser_session -> "masc_browser_session"
+  | Misc_browser_goto -> "masc_browser_goto"
 ;;
 
 let misc_operation_of_tool_name value =
@@ -122,7 +139,12 @@ let misc_operation_of_tool_name value =
    missing refuses the boot rather than registering a partial surface. *)
 let misc_registered_schema operation : tool_schema option =
   match operation with
-  | Misc_web_fetch | Misc_web_search -> None
+  | Misc_web_fetch
+  | Misc_web_search
+  | Misc_browser_tabs
+  | Misc_browser_read
+  | Misc_browser_session
+  | Misc_browser_goto -> None
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

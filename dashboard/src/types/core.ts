@@ -757,16 +757,37 @@ export interface KeeperConversationDetails {
   rawPayload?: unknown
 }
 
-export interface KeeperConversationAttachment {
-  id: string
-  type: 'image' | 'file'
-  name: string
-  size: number
-  mimeType: string
-  data: string
-  /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
-  dims?: string
-}
+/** An image reference the provider resolves itself (#33728): an external
+ *  http(s) URL or a Files-API id minted by a keeper upload tool. The server
+ *  never fetches either; the wire form is `{type:'image', url}` /
+ *  `{type:'image', file_id}`. */
+export type KeeperImageReference =
+  | { kind: 'url'; url: string }
+  | { kind: 'file_id'; fileId: string }
+
+export type KeeperConversationAttachment =
+  | {
+      /** Bytes this client already holds, as a data URL. */
+      kind?: undefined
+      id: string
+      type: 'image' | 'file'
+      name: string
+      size: number
+      mimeType: string
+      data: string
+      /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
+      dims?: string
+    }
+  | (KeeperImageReference & {
+      /** Discriminated by [kind]; [name] is the display label. */
+      id: string
+      name: string
+      mimeType?: string
+    })
+
+/** The byte-backed arm of the attachment union — what history decode and the
+ *  wire [attachments] array always produce. */
+export type KeeperByteAttachment = Extract<KeeperConversationAttachment, { kind?: undefined }>
 
 export type KeeperUserInputMediaKind = 'image' | 'document' | 'audio'
 
@@ -779,6 +800,8 @@ export type KeeperUserInputBlock =
       mimeType: string
       size: number
     }
+  | { type: 'image'; url: string; mimeType?: string }
+  | { type: 'image'; fileId: string; mimeType?: string }
 
 // RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
 // `audioUrl` is the absolute/relative URL the dashboard uses for playback;
@@ -838,6 +861,10 @@ export type ChatAttachBlock = {
   sizeBytes?: number
   id?: string
   kind?: string
+  /** When set, this attach chip is an image reference (#33728) the provider
+   *  fetches, not bytes this client holds; [src] then carries the url verbatim
+   *  for display and the queue rebuilds the attachment from this field. */
+  ref?: KeeperImageReference
 }
 
 export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string; src?: string }

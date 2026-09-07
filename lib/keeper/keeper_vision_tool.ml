@@ -120,10 +120,10 @@ let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
 let store_artifact ~dir bytes =
-  Eio_guard.run_in_systhread (fun () -> Store.store ~dir bytes)
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () -> Store.store ~dir bytes)
 
 let load_artifact ~dir handle =
-  Eio_guard.run_in_systhread (fun () -> Store.load ~dir handle)
+  Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter

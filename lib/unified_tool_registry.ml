@@ -78,7 +78,13 @@ let tag_of_runtime_handler
   | Tool_masc_schedule_dispatch -> Mod_schedule
   | Tool_keeper_spawn_dispatch -> Mod_spawn
   | Tool_keeper_code_query_dispatch -> Mod_code_query
-  | Tool_masc_misc_dispatch | Tool_web_search | Tool_web_fetch -> Mod_misc
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto -> Mod_misc
   | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
   | Tool_masc_library_dispatch -> Mod_library
   | Tool_board_dispatch -> Mod_inline

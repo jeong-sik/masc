@@ -99,6 +99,7 @@ type attachment_note =
   ; att_bytes : int
   ; att_width : int option
   ; att_height : int option
+  ; att_image : Masc_tui_image_preview.preview
   }
 
 type row =
@@ -223,10 +224,9 @@ let float_field fields name =
    and [1356818756755525815] are the same string for the first eleven digits.
    Cutting the head is what tells them apart.
 
-   {!Masc_tui_message_layout.fit_middle} cuts the label again at the speaker
-   column, keeping a third of the head and two thirds of the tail. The tail
-   there is whatever the label ends with, which for {!addressed_label} is the
-   surface rather than the speaker. *)
+   Cutting it here is safe because the surface half is now weighed whole:
+   {!Masc_tui_message_layout.fit_speaker} keeps the pair or keeps the speaker,
+   so what this shortens is either drawn as it is or not drawn. *)
 let channel_reference_cells = 8
 
 let short_channel reference =
@@ -242,10 +242,8 @@ let connector_label name channel =
   (* A room name is left whole. The label is fitted to the speaker column
      further down, and cutting again here would only cut it shorter. *)
   | Some (Surface.Channel_name room) -> Some (name ^ " #" ^ String.trim room)
-  (* An id is cut here as well, so the label reaching the column already has
-     an ellipsis in it and the column's own cut adds a second. What a label
-     should keep when it does not fit -- the speaker or the surface -- is
-     #33699. *)
+  (* An id is shortened here so that the pair has a chance of fitting at all;
+     see the note above on why one cut is all it gets. *)
   | Some (Surface.Channel_id reference) ->
       Some (name ^ " " ^ short_channel (String.trim reference))
 
@@ -300,19 +298,25 @@ let surface_of_json : Yojson.Safe.t -> Surface.t option = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let addressed_label speaker surface =
+(* Who and where, apart. The speaker column is narrower than the two joined,
+   and joined they were cut as one string: [fit_middle] keeps a third of the
+   head and two thirds of the tail, and the tail of "<who> · <where>" is the
+   where. One live pane had twelve broadcast rows from an agent named
+   [codex-mcp-client], every one drawn as "…p-…roadcast" -- two ellipses, and
+   neither half of the name left. *)
+let addressed_label_parts speaker surface =
   let name =
     match speaker with
     | Operator -> "you"
     | Named name -> name
-    (* Named by its id where there is one: an unresolved author is still a
-       particular author, and two of them in a channel are two people. *)
-    | Unresolved { id = Some id } -> short_channel id
+    (* Whole. An unresolved author is still a particular author, and the
+       column's own fit keeps two thirds of the tail -- which is the half that
+       tells two ids apart. Shortened here as well, the row was cut twice and
+       kept neither end. *)
+    | Unresolved { id = Some id } -> id
     | Unresolved { id = None } -> "someone"
   in
-  match Option.bind surface surface_label with
-  | None -> name
-  | Some surface -> name ^ " \xc2\xb7 " ^ surface
+  (name, Option.bind surface surface_label)
 ;;
 
 (* What one server row is, before consecutive tool rows are folded. Parsed once
@@ -349,6 +353,19 @@ let bool_field_opt fields name =
 (* The transcript carries an exact operation key for direct turns and a
    [turn_ref] for autonomous turns. Keep whichever authority the producer
    supplied; timestamps and row adjacency are not turn identity. *)
+(* An autonomous turn records which turn it is inside the [autonomous_turn]
+   marker and nowhere else. Measured on one live pane: of 598 chat rows, 198
+   were autonomous, and every one of them carried a marker id while none
+   carried a [turn_ref] or a delivery key. Read from those two places alone,
+   every autonomous row belonged to no turn -- so the pane could not bracket a
+   turn's work, could not fold a repeated speaker, and could not tell two
+   turns apart. 108 of those rows carried a trace, which is where the tool
+   calls are. *)
+let autonomous_turn_id_of_fields fields =
+  match List.assoc_opt "autonomous_turn" fields with
+  | Some (`Assoc marker) -> string_field marker "turn_id"
+  | Some _ | None -> None
+
 let turn_id_of_fields fields =
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
@@ -361,7 +378,10 @@ let turn_id_of_fields fields =
             request_id
       in
       Some (Delivery_identity.Request_id.to_string request_id)
-  | Ok None | Error _ -> string_field fields "turn_ref"
+  | Ok None | Error _ -> (
+      match string_field fields "turn_ref" with
+      | Some _ as turn_ref -> turn_ref
+      | None -> autonomous_turn_id_of_fields fields)
 
 (* The operation a direct turn ran as, and nothing else: an autonomous turn's
    [turn_ref] and the other delivery keys are turn identity ([turn_id]) but
@@ -457,6 +477,9 @@ let attachment_notes_of fields =
                          Option.value (int_field item "size") ~default:0
                      ; att_width = int_field item "width"
                      ; att_height = int_field item "height"
+                     ; att_image = Masc_tui_image_preview.persisted_attachment
+                         ~name ~mime:(Option.value (string_field item "mime_type") ~default:"")
+                         ~data:(string_field item "data")
                      })
           | _ -> None)
         items
@@ -1115,10 +1138,17 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           }
       ]
 
-(* Annotated rather than inferred: an inferred parameter widens to an open
+(* [None] is an entry this reader could not make sense of; [Some rows] is one
+   it read, and those rows are empty when the entry is real and draws nothing.
+   The two were one empty list, and [rows_of_json] counted every empty one as
+   dropped -- so once #33692 stopped drawing a wake that produced nothing,
+   every such turn was reported to the operator as a row that could not be
+   read.
+
+   Annotated rather than inferred: an inferred parameter widens to an open
    variant and accepts tags Yojson does not have, which leaves the match below
    exhaustive over nothing. yojson 3 has no `Tuple or `Variant. *)
-let parse_row (entry : Yojson.Safe.t) : parsed list =
+let parse_row (entry : Yojson.Safe.t) : parsed list option =
   match entry with
   | `Assoc fields -> (
       let at = Option.value ~default:0.0 (float_field fields "ts") in
@@ -1161,17 +1191,18 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
             | None | Some `Null -> None
             | Some json -> surface_of_json json
           in
-          [ Utterance
-              { at
-              ; structural_id = structural_id_of_fields fields "utterance"
-              ; turn_sequence
-              ; turn_id
-              ; operation_id
-              ; kind = Addressed_to_keeper { speaker; surface }
-              ; text = content
-              ; attachments = attachment_notes_of fields
-              }
-          ]
+          Some
+            [ Utterance
+                { at
+                ; structural_id = structural_id_of_fields fields "utterance"
+                ; turn_sequence
+                ; turn_id
+                ; operation_id
+                ; kind = Addressed_to_keeper { speaker; surface }
+                ; text = content
+                ; attachments = attachment_notes_of fields
+                }
+            ]
       | Some "assistant" -> (
           match string_field fields "kind" with
           | Some "transport_failure" ->
@@ -1187,7 +1218,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                     | Some _ | None -> None)
                 | Some _ | None -> None
               in
-              [ Utterance
+              Some
+                [ Utterance
                   { at
                   ; structural_id = structural_id_of_fields fields "failure"
                   ; turn_sequence
@@ -1299,7 +1331,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                       }
                   ]
               in
-              fusion_rows @ skill_rows @ trace_rows @ said)
+              Some (fusion_rows @ skill_rows @ trace_rows @ said))
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
              Keeper speech. A row that carries the typed lifecycle is read as
@@ -1344,9 +1376,12 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               None
           in
           (match kind with
-           | None -> []
+           (* A lifecycle this reader does not know is an entry it could not
+              read, not an entry with nothing in it. *)
+           | None -> None
            | Some kind ->
-             [ Utterance
+             Some
+               [ Utterance
                  { at
                  ; structural_id = structural_id_of_fields fields "system"
                  ; turn_sequence
@@ -1363,7 +1398,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
              makes. *)
           match string_field fields "tool_call_name" with
           | Some tool_name ->
-              [ Tool_call
+              Some
+                [ Tool_call
                   { at
                   ; structural_id = structural_id_of_fields fields "tool"
                   ; turn_sequence
@@ -1375,9 +1411,9 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   ; args = content
                   }
               ]
-          | None -> [])
-      | Some _ | None -> [])
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
+          | None -> None)
+      | Some _ | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 
 (* Fold consecutive tool calls into one block, the way a live turn draws its
    calls, and keep every other row where it was. Order is the server's: it
@@ -1492,9 +1528,13 @@ let rows_of_json (payload : Yojson.Safe.t) =
   match payload with
   | `List entries ->
       let parsed = List.map parse_row entries in
-      let dropped = List.length (List.filter (fun rows -> rows = []) parsed) in
+      (* What the operator is told could not be read. An entry that was read
+         and draws nothing -- a wake that produced neither speech nor work --
+         is not one of them. *)
+      let dropped = List.length (List.filter Option.is_none parsed) in
       let rows =
-        fold_tool_blocks (List.concat parsed) |> annotate_recovered_interruptions
+        fold_tool_blocks (List.concat (List.filter_map Fun.id parsed))
+        |> annotate_recovered_interruptions
       in
       Ok { rows; dropped }
   | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->

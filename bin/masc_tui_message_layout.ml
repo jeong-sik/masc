@@ -54,6 +54,7 @@ type turn_rail =
   | Rail_opens
   | Rail_says
   | Rail_does
+  | Rail_stands
   | Rail_closes
   | Rail_joins of siding
       (** Belongs to no turn and arrived while one was running. It joins the
@@ -719,7 +720,12 @@ let speaker_mark : style -> string = function
   | User -> "\xe2\x96\xb6"      (* the operator sends *)
   | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
   | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
-  | Status -> "?"
+  (* The Keeper's own mark, unfilled: this row is the pane's note about a
+     turn rather than the Keeper speaking in it. It used to be a question
+     mark, which is the one thing in this alphabet that is not a shape -- and
+     it stayed a question on a row that had already settled, so a gate that
+     finished still read as one nobody had answered. *)
+  | Status -> "\xe2\x97\x8b"
   (* The same mark the composer prompt draws, because that is where this row
      came from: the pane answering what was typed at it. *)
   | Local -> "\xe2\x80\xba"
@@ -763,6 +769,7 @@ let turn_rail_glyph : turn_rail -> string = function
   | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
   | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
   | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
+  | Rail_stands -> "\xe2\x95\xb6"  (* work that is the whole turn *)
   | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
   | Rail_joins _ -> "\xe2\x94\xa4"  (* something from outside meets the line *)
   | Rail_none -> " "
@@ -796,7 +803,8 @@ let turn_rail_gutter (piece : turn_rail) =
   let lead =
     match piece with
     | Rail_joins siding -> siding_lead siding
-    | Rail_opens | Rail_says | Rail_does | Rail_closes | Rail_none ->
+    | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes
+    | Rail_none ->
         String.make siding_lead_cells ' '
   in
   let drawn = lead ^ turn_rail_glyph piece in
@@ -815,6 +823,33 @@ let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
   let column = max 1 column in
   let cells = display_width (speaker_mark style) + 1 in
   if column - cells < 1 then 0 else cells
+
+(* The widest mark any speaker draws, so a fit that must leave room for one
+   does not have to know which. Conservative by construction: reserving the
+   widest costs a row its surface one cell early and can never take a cell the
+   mark needed. Reads {!all_styles}, so a wider mark is accounted for the day
+   one arrives. *)
+let widest_speaker_mark_cells =
+  List.fold_left
+    (fun widest style -> max widest (display_width (speaker_mark style)))
+    0 all_styles
+
+(* The speaker column names the speaker. Where the row also carries the surface
+   it came in by and the pair fits, it says both; where it does not, the
+   surface goes.
+
+   Joined and cut as one string the row kept the wrong half: {!fit_middle}
+   favours the tail, and the tail of "<who> · <where>" is the where. One live
+   pane had twelve broadcast rows from an agent named [codex-mcp-client], each
+   drawn as "…p-…roadcast". An arrival draws its siding either way, so the row
+   still says it came from outside; who came through is what it cannot spare. *)
+let fit_speaker ?(column = chat_role_label_column) ~speaker ~surface () =
+  match surface with
+  | None -> speaker
+  | Some surface ->
+      let inner = max 1 (column - widest_speaker_mark_cells - 1) in
+      let joined = speaker ^ " \xc2\xb7 " ^ surface in
+      if display_width joined <= inner then joined else speaker
 
 let align_role_label ?(column = chat_role_label_column) ~style label =
   let column = max 1 column in
@@ -1157,9 +1192,23 @@ let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
   | Origin_row -> None
   | Origin_inline | Origin_bare ->
+      (* Drawn when it moved. A clock's job is to say when a thing happened,
+         and a value identical to the one on the row above says nothing while
+         taking the cells the eye lands on first -- two speakers a second
+         apart both read 10:52. The column is held either way, so nothing
+         shifts when a minute repeats, and a continuation whose clock did move
+         still shows the new time: that gap is what a reader checks here. *)
       let clock =
         match origin with
-        | Origin_inline -> pad_clock (short_clock entry.timestamp) ^ " "
+        | Origin_inline ->
+            let now = short_clock entry.timestamp in
+            let unchanged =
+              match previous with
+              | None -> false
+              | Some previous ->
+                  String.equal (short_clock previous.timestamp) now
+            in
+            pad_clock (if unchanged then "" else now) ^ " "
         | Origin_row | Origin_bare -> ""
       in
       (* The margin is taken from the body, so it cannot be wider than what
@@ -1232,10 +1281,11 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            the same second has nothing new to say, and [fit_width] measures the
            cells a label actually occupies where [String.make] would count its
            bytes. *)
-        (* The clock stays. A continuation says the same speaker is still
-           talking, not that time stopped: the gap between two things one
-           Keeper said is exactly what a reader checks here, and blanking the
-           whole margin took it away along with the name.
+        (* The clock stays, on the same terms as everywhere else: it is
+           drawn when it moved. A continuation says the same speaker is still
+           talking, not that time stopped, and the gap between two things one
+           Keeper said is exactly what a reader checks here -- blanking the
+           whole margin took that away along with the name.
 
            The name is what goes, since repeating it says nothing, and the mark
            drops to the quietest glyph so a row that continues reads as lower
@@ -1297,6 +1347,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           | Rail_says -> Rail_says
           | Rail_opens -> if index = 0 then Rail_opens else Rail_says
           | Rail_does -> if index = 0 then Rail_does else Rail_says
+          (* A wrapped body still belongs to the one row that is the turn, so
+             the rows under it continue the line the stub started rather than
+             each standing alone. *)
+          | Rail_stands -> if index = 0 then Rail_stands else Rail_says
           | Rail_closes -> if index = last then Rail_closes else Rail_says
           (* Only the first row joins. A wrapped arrival keeps its body under
              the join without drawing a second one, and it never picks up the

@@ -28,6 +28,13 @@ type assistant_tool_content_format =
   | Assistant_tool_content_null
   | Assistant_tool_content_empty_string
 
+(** Which Chat Completions field carries the output-token budget — the classic
+    [max_tokens] or the reasoning-era [max_completion_tokens] OpenAI's gpt-5
+    family requires. Defaults to {!Chat_max_tokens}. *)
+type chat_output_budget_field =
+  | Chat_max_tokens
+  | Chat_max_completion_tokens
+
 type reasoning_output_format =
   | No_reasoning_output_format
   | Split_reasoning_fields
@@ -132,6 +139,12 @@ val assistant_tool_content_format_values : string list
 val assistant_tool_content_format_of_string
   :  string
   -> assistant_tool_content_format option
+
+val chat_output_budget_field_values : string list
+
+val chat_output_budget_field_of_string
+  :  string
+  -> chat_output_budget_field option
 
 val reasoning_output_format_values : string list
 val reasoning_output_format_of_string : string -> reasoning_output_format option

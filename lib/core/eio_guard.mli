@@ -44,8 +44,12 @@ val with_mutex : Eio.Mutex.t -> (unit -> 'a) -> 'a
 val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 
 (** Run [f] in a system thread from an Eio fiber, directly from a non-Eio
-    execution context. *)
-val run_in_systhread : (unit -> 'a) -> 'a
+    execution context.
+
+    [label] reaches the runtime-events ring as the fiber's suspend reason, so
+    a trace can say which call a long run sat between. It is required: an
+    unlabelled call reads as "systhread", which does not identify anything. *)
+val run_in_systhread : label:string -> (unit -> 'a) -> 'a
 
 (** Eio-aware replacement for [Fun.protect].
 

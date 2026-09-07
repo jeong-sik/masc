@@ -1210,11 +1210,13 @@ let test_compact_and_full_keep_the_same_typed_facts () =
     | None -> Alcotest.fail "a folded three-call block heads with its inventory"
   in
   let trouble = List.hd compact.details in
-  check bool "the inventory row reads as one activity summary" true
-    (String.starts_with ~prefix:"✗ Tools 3" inventory);
-  (* How much is behind the fold is the count at the head of the same line:
-     the hidden rows are one row per call. The row used to say it twice. *)
-  check bool "the inventory row does not repeat its own count" false
+  (* The mark opens the row and the names follow it; the row does not spell
+     the TOOLS label the transcript already draws beside it. *)
+  check bool "the inventory row opens with the block's mark and a name" true
+    (String.starts_with ~prefix:"✗ read_file 1" inventory);
+  check bool "the inventory row does not spell its own label" false
+    (contains ~needle:"Tools" inventory);
+  check bool "the inventory row claims no fold" false
     (contains ~needle:"folded" inventory);
   check bool "the inventory row keeps what returned" true
     (contains ~needle:"1 returned" inventory);

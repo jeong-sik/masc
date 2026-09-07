@@ -72,6 +72,17 @@ module For_testing : sig
       which have no key to name. Pure, so the scope rule is checkable without a
       backlog or an Eio runtime. *)
 
+  val make_retry_scheduler
+    :  sw:Eio.Switch.t
+    -> wait:(unit -> unit)
+    -> dispatch:(scan_scope -> unit)
+    -> scan_scope
+    -> bool
+  (** The production retry scheduler with a caller-controlled interval and
+      dispatch sink. [true] means new work entered the pending batch; repeated
+      keys return [false]. A whole-backlog request shares the batch and timer
+      with named retries. The switch owns the timer and its cancellation. *)
+
   (** RFC-0417 §4.1: what the system lane does with one Task, read off its
       status. A completion claim is reviewed; a cancel claim is handed to the
       operator without a prompt and recorded as

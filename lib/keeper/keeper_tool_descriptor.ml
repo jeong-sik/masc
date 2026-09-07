@@ -128,6 +128,10 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -250,6 +254,10 @@ let runtime_handler_to_string = function
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_web_search -> "tool_web_search"
   | Tool_web_fetch -> "tool_web_fetch"
+  | Tool_browser_tabs -> "tool_browser_tabs"
+  | Tool_browser_read -> "tool_browser_read"
+  | Tool_browser_session -> "tool_browser_session"
+  | Tool_browser_goto -> "tool_browser_goto"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
@@ -460,6 +468,10 @@ let descriptor
       | Tool_masc_misc_dispatch
       | Tool_web_search
       | Tool_web_fetch
+      | Tool_browser_tabs
+      | Tool_browser_read
+      | Tool_browser_session
+      | Tool_browser_goto
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
@@ -791,6 +803,80 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_web_fetch
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_tabs"
+      ~public_name:"BrowserTabs"
+      ~internal_name:Tool_schemas_misc.browser_tabs_schema.name
+      ~description:Tool_schemas_misc.browser_tabs_schema.description
+      ~input_schema:Tool_schemas_misc.browser_tabs_schema.input_schema
+      (* Concurrent: one lane queue hop; the wait is bounded by the tool's
+         own timeout. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_tabs
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_read"
+      ~public_name:"BrowserRead"
+      ~internal_name:Tool_schemas_misc.browser_read_schema.name
+      ~description:Tool_schemas_misc.browser_read_schema.description
+      ~input_schema:Tool_schemas_misc.browser_read_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_read
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_session"
+      ~public_name:"BrowserSession"
+      ~internal_name:Tool_schemas_misc.browser_session_schema.name
+      ~description:Tool_schemas_misc.browser_session_schema.description
+      ~input_schema:Tool_schemas_misc.browser_session_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_session
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_goto"
+      ~public_name:"BrowserGoto"
+      ~internal_name:Tool_schemas_misc.browser_goto_schema.name
+      ~description:Tool_schemas_misc.browser_goto_schema.description
+      ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
+      (* A navigation reaches the web from the automation profile; the live
+         lane refuses navigation verbs at the state layer. Serial: the
+         automation lane is one browser, and Concurrent here demands a
+         statically read-only tool this is not. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_goto
       ~input_translation:(Identity Validate_once_before_translation)
       ()
   ]

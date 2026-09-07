@@ -397,6 +397,13 @@ let install () =
           ~runtime_id:evaluator_runtime
           ~base_path
           ~goal:prompt
+          (* This reviewer carries its whole instruction in the goal; the
+             review prose lives in config/prompts/verification.md and reaches
+             [prompt]. Empty was the old default, so this is what has been
+             running. It also means an official-client runtime in the
+             verifier_exact slots would be refused at the host (#33862) --
+             today's slots are API providers, so nothing reaches that. *)
+          ~system_prompt:""
           ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~dispatch
           ~provider_config_transform:apply_review_verdict_output_contract

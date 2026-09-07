@@ -250,6 +250,16 @@ let test_parse_og_far_into_body () =
   check (option string) "og found far into body" (Some "Deep OG Title") p.title;
   check bool "has_metadata true" true p.has_metadata
 
+let test_parse_collapses_newlines () =
+  (* A real og:description (a PR body) can be multi-line; it must collapse to one
+     line, or it splits the card row and misaligns the banner. *)
+  let body =
+    "<head><meta property=\"og:description\" content=\"Line one.\nLine two.\tTabbed   spaced\"></head>"
+  in
+  let p = parse_og_html ~url:"https://example.com/multi" ~body in
+  check (option string) "newlines/tabs/space-runs collapsed"
+    (Some "Line one. Line two. Tabbed spaced") p.description
+
 let () =
   run "tui link preview"
     [ ( "synthesizer"
@@ -282,5 +292,6 @@ let () =
         ; test_case "keeps kind" `Quick test_parse_keeps_kind
         ; test_case "single quote and name attr" `Quick test_parse_single_quote_and_name_attr
         ; test_case "og far into body (no head cap)" `Quick test_parse_og_far_into_body
+        ; test_case "collapses newlines" `Quick test_parse_collapses_newlines
         ] )
     ]

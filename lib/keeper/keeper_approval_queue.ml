@@ -814,7 +814,7 @@ let compact_unlocked ~write_snapshot ~base_path ~pending_map ~delivery_map =
   | Ok outcome ->
     let path = pending_log_path ~base_path in
     let emptied =
-      Eio_guard.run_in_systhread (fun () ->
+      Eio_guard.run_in_systhread ~label:"approval-queue-read" (fun () ->
         match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
         | Error error -> Error error
         | Ok snapshot ->
@@ -890,7 +890,7 @@ let persist_delta_unlocked
                 rows)
          in
          match
-           Eio_guard.run_in_systhread (fun () ->
+           Eio_guard.run_in_systhread ~label:"approval-queue-append" (fun () ->
              Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
                path
                ~expected:durable.log_cursor

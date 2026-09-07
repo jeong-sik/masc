@@ -30,6 +30,8 @@ let global =
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+  ; b Meta "&"
+      "the MSX screen: the emulator core over the whole terminal (esc: back)"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \
@@ -345,7 +347,9 @@ let for_surface = function
       ]
       @ listing_meta
   | Connectors ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "B / S" "Browser / Slack Lane"
+          ~help:"read Firefox tabs and page text; switch live / automation inside the lane"
+      ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
@@ -805,3 +809,15 @@ let help_sections ?current () =
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
     :: List.map (fun (_, section) -> section) rest
+
+let footer_hints_browser_lane =
+  hints_of_bindings
+    [ b Navigate "B / S" "Browser / Slack"
+    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "[ / ]" "tab"
+    ; b Navigate "j/k" "text"
+    ; b Act "g" "URL"
+    ; b Act "o / x" "open / close session"
+    ; b Act "r" "refresh"
+    ; b Navigate "Esc" "connectors"
+    ]

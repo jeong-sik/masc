@@ -404,8 +404,16 @@ let test_manifest_mismatch_names_direction_and_remedy () =
         | _ -> failwith "expected exactly one failure on the tools manifest"
       in
       let has needle = mentions_substring ~needle msg in
-      check bool "names the build as the fault" true (has "half-built");
-      check bool "states the remedy" true (has "rebuild");
+      (* Two faults produce this, and the message must name both. A
+         half-built binary is one. A source tree whose manifest was not
+         updated alongside the asset is the other, and the one that
+         actually happens -- #33472 and #33639 on 2026-09-06 each added a
+         tool TOML without its manifest line. An operator told only to
+         rebuild cannot fix that one. *)
+      check bool "names the half-built binary" true (has "half-built");
+      check bool "names the stale manifest" true (has "missing a line");
+      check bool "states the rebuild remedy" true (has "rebuild");
+      check bool "states the edit remedy" true (has "edit");
       check bool "names the embedded-but-unlisted asset" true
         (has "masc_unlisted.toml");
       check bool "shows the empty direction explicitly" true (has "(none)");

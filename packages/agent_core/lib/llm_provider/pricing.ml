@@ -154,6 +154,7 @@ let[@warning "-32"] test_catalog_entry
   ; supports_named_tool_choice = None
   ; supports_parallel_tool_calls = None
   ; assistant_tool_content_format = None
+  ; chat_output_budget_field = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
   ; supports_reasoning_budget = None

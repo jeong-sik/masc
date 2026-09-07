@@ -27,6 +27,7 @@ let entry ?gate role text =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = text
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
   ; me_gate = gate
   ; me_submitted_at = None

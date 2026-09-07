@@ -8596,8 +8596,12 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
 
    A lone row of speech draws nothing. One thing said is not a hierarchy, and
    marking it would put a rail on nearly every row of ordinary chatter, which
-   is where a reader stops seeing it at all. A lone row of work is a different
-   case and keeps its branch.
+   is where a reader stops seeing it at all.
+
+   A lone row of work draws its own stub rather than the branch a running turn
+   uses. Drawn as that branch, a run of them read as one turn's several
+   branches: four consecutive autonomous wakes came out as four twigs off a
+   trunk that was not there, and the boundary between the turns disappeared.
 
    The split between speech and work is the fact the pane was missing.
    Reasoning, tool calls and skills are what a turn did to arrive at what it
@@ -8641,7 +8645,7 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
      common autonomous turn became a single tool block with nothing marking it
      as work at all. *)
   | Turn_alone ->
-      Message_layout.rail_for_style ~work:Message_layout.Rail_does
+      Message_layout.rail_for_style ~work:Message_layout.Rail_stands
         ~speech:Message_layout.Rail_none style
   | Turn_opens -> Message_layout.Rail_opens
   | Turn_closes -> Message_layout.Rail_closes
@@ -8651,17 +8655,33 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name
     ~chat_cols ~start_index visible_entries =
+  (* Bound before the labels because one of them is fitted to it: a row from
+     someone else names them, and adds the surface they came in by only when
+     the column holds both. *)
+  let role_label_column =
+    Message_layout.chat_role_label_width ~pane_cells:chat_cols
+  in
   (* Derived once for the width and again per row, so the badge the pane
      measures is the badge it draws. *)
   let base_role_label_of (message : Masc_tui_types.msg_entry) =
     match message.me_role with
-    | Message_user (Sent_by_other name) -> name
-    | Message_user (Sent_by_operator label) ->
+    | Message_user (Sent_by_other { speaker; surface }) ->
+        Message_layout.fit_speaker ~column:role_label_column ~speaker ~surface
+          ()
+    | Message_user (Sent_by_operator { surface }) ->
         (* Pending input is not a transcript row. Once it enters a turn this
            label can say YOU without a second queue lookup or a transient
-           QUEUED identity that later changes underneath it. *)
-        if String.equal label "you" then "YOU"
-        else label
+           QUEUED identity that later changes underneath it.
+
+           Fitted the same way as the arm above, because the pair is measured
+           against the same column: the surface joins the badge when both fit
+           and goes when they do not. It used to be joined before it got here
+           and the badge asked whether the whole string was still "you", which
+           only a row from the dashboard ever was -- so a line the operator
+           wrote through a connector was cut as one string and drew
+           "yo…dcast". *)
+        Message_layout.fit_speaker ~column:role_label_column ~speaker:"YOU"
+          ~surface ()
     | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_autonomous -> Keeper_chat.terminal_safe_text message.me_keeper_name
     | Message_status -> "STATUS"
@@ -8696,9 +8716,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
-  in
-  let role_label_column =
-    Message_layout.chat_role_label_width ~pane_cells:chat_cols
   in
   let layout_entries =
     (* The position distinguishes rows whose durable timestamp and request
@@ -8786,8 +8803,13 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                  and a neutral system row with no projection remains whole. *)
               | Memory_full | Memory_hidden -> message.me_text
               | Memory_summary -> (
+                  (* A summarised row is a cut row, so it says which key
+                     uncuts it. What that key does is the footer's line,
+                     which is on screen whenever this row is: spelling
+                     "journal detail" here again cost twenty-five cells on
+                     every journal row of the pane. *)
                   match message.me_memory_summary with
-                  | Some summary -> summary ^ " · Ctrl-N: journal detail"
+                  | Some summary -> summary ^ " · Ctrl-N"
                   | None -> message.me_text))
           (* Only a gated row: a Gate step's text ends in the argument the
              call asked for, while a status row without one is a sentence the
@@ -9970,12 +9992,19 @@ let render_keeper_message (state : state) =
            mine;
          List.iter
            (fun entry ->
+             (* The row names the way to stop it. Esc and /interrupt both
+                read [msg_live], which is this pane's turn and not this one,
+                and the key that would put that keeper on screen is refused
+                while any request is in flight -- so an operator reading
+                this row had no key at all (#33852). *)
              box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-               (Printf.sprintf "  (also sending to %s: %s%s)"
+               (Printf.sprintf "  (also sending to %s: %s%s -- /interrupt %s)"
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
-                  (sending_age entry)))
+                  (sending_age entry)
+                  (Keeper_chat.terminal_safe_text
+                     entry.sent_request.keeper_name)))
            others);
     (match state.msg_loaded_error with
      | Some detail ->
@@ -13320,7 +13349,81 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
+let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let room = max 0 (max 1 (body_rows - 5) - 6) in
+  max 0 (List.length (browser_lane_page_lines ~cols view) - room)
+
+let render_browser_lane (state : state) (view : Browser_lane_view.t) =
+  let open Browser_lane_view in
+  let terminal_rows, cols = get_terminal_size () in
+  let label = match view.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
+  let title = Printf.sprintf "%s  %s  %s"
+      (screen_title (" MASC " ^ label)) (source_name view.source)
+      (connection_badge state) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+    ~hints:(match view.url_draft with
+      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
+      | None -> Masc_tui_keys.footer_hints_browser_lane)
+    ~body:(fun ~budget c ->
+      let status, style = match view.load with
+        | Loading (_, Read) -> "Reading Firefox…", Theme.info ()
+        | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
+        | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
+        | Loading (_, Goto _) -> "Navigating automation Firefox…", Theme.info ()
+        | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | Idle -> (match view.reading with
+            | None -> "Not read yet", Theme.recede ()
+            | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
+                reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
+      in
+      c.push_styled ~style ("  " ^ status);
+      c.push_styled ~style:(Theme.info ())
+        (match view.url_draft with
+         | Some draft -> browser_lane_url_line ~cols draft
+         | None -> match view.source with
+             | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
+             | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");
+      let tabs, page = match view.reading with
+        | None -> [], None
+        | Some reading -> reading.tabs, reading.page
+      in
+      let tab_count = List.length tabs in
+      let index =
+        let rec find i = function
+          | [] -> 0
+          | (tab : tab) :: rest -> if Some tab.id = view.selected_tab then i else find (i + 1) rest
+        in find 0 tabs
+      in
+      let selected = List.nth_opt tabs index in
+      c.push_styled ~style:(Theme.info ())
+        (match selected with
+         | None -> "  No matching tabs • Open a page in the selected Firefox session"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
+             (index + 1) tab_count (Terminal_text.single_line tab.title)
+             (if tab.active then " (active)" else ""));
+      c.push_styled ~style:(Theme.recede ())
+        (match page with
+         | None -> "  No page content"
+         | Some page -> Printf.sprintf "  %s • %d chars%s%s"
+             (Terminal_text.single_line page.url) page.chars
+             (if page.truncated then " • truncated" else "")
+             (match view.load with Idle -> "" | Loading _ | Failed _ -> " • previous read"));
+      c.push_divider ();
+      let lines = browser_lane_page_lines ~cols view in
+      let room = max 0 (budget - 6) in
+      let max_scroll = max 0 (List.length lines - room) in
+      let scroll = min max_scroll view.scroll in
+      lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)
+      |> List.iter (fun line -> c.push_styled ~style:Ansi.reset ("  " ^ line));
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Esc:connectors"
+           (if lines = [] then 0 else scroll + 1) (List.length lines)))
+
 let render_connectors (state : state) =
+  match state.browser_lane with
+  | Some view -> render_browser_lane state view
+  | None ->
   let terminal_rows, cols = get_terminal_size () in
   let connectors =
     match state.connectors with
@@ -13346,7 +13449,7 @@ let render_connectors (state : state) =
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"j/k:scroll  b:bind  u:unbind  Tab:next  q:quit  r:refresh"
+    ~hints:"B:Browser Lane  S:Slack Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"
@@ -15700,16 +15803,37 @@ let render_prompt_registry (state : state) =
     | Masc_tui_fetched.Ready snapshot -> List.length snapshot.Tui_decode.ps_rows
     | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> 0
   in
+  (* Overrides the registry declined to restore. A held-back key still draws
+     from its file, so without this it renders exactly like a prompt nobody
+     ever customized -- which is how an operator loses an override without
+     learning they lost it. *)
+  let held_back =
+    match prompts with
+    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_held_back
+    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+    | Masc_tui_fetched.Failed _ -> []
+  in
+  let held_back_for key =
+    List.find_opt
+      (fun (entry : Tui_decode.held_back_override) ->
+        String.equal entry.Tui_decode.hbo_key key)
+      held_back
+  in
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt prompt_rows cursor in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d/%d개 · %s%s  %s  %s"
+    (Printf.sprintf "%s  %s%d/%d개 · %s%s%s  %s  %s"
        (screen_title " MASC 프롬프트")
        Ansi.dim total all_prompt_count
        (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
        Ansi.reset
+       (match held_back with
+        | [] -> ""
+        | entries ->
+          Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+            (List.length entries) Ansi.reset)
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
@@ -15738,10 +15862,14 @@ let render_prompt_registry (state : state) =
       if index >= first && index < first + list_height then begin
         incr drawn;
         let mark =
-          match row.Tui_decode.pr_source with
-          | Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
-          | Tui_decode.Prompt_file -> " "
-          | Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
+          (* Held back outranks the source, which reads [Prompt_file] for
+             exactly these rows: the file is what a turn gets, and saying so
+             is what hides the override the reader still has on disk. *)
+          match held_back_for row.Tui_decode.pr_key, row.Tui_decode.pr_source with
+          | Some _, _ -> (Theme.bad ()) ^ "\xe2\x8a\x98" ^ Ansi.reset
+          | None, Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
+          | None, Tui_decode.Prompt_file -> " "
+          | None, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
         in
         let category =
           match row.Tui_decode.pr_category with
@@ -15798,6 +15926,18 @@ let render_prompt_registry (state : state) =
             (Terminal_text.single_line row.pr_key)
             (Terminal_text.single_line source)
             (Terminal_text.single_line row.pr_file_path));
+       (* Two facts an operator needs and cannot get anywhere else: the
+          override is still on disk, and re-saving it is what puts it back in
+          force. Without the second line the mark says something is wrong and
+          leaves the reader with no move. *)
+       (match held_back_for row.Tui_decode.pr_key with
+        | None -> ()
+        | Some entry ->
+          box_line buf cols
+            (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
+               (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
+          box_line_styled buf cols ~style:(Theme.recede ())
+            "  이 프롬프트의 원본이 바뀌어 핀이 어긋났습니다 \xc2\xb7 같은 키를 다시 저장하면 현재 원본에 다시 물립니다");
        let input_contract =
          if String.equal row.pr_category "librarian" then
            "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"

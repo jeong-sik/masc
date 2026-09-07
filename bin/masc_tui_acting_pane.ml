@@ -187,12 +187,20 @@ let current_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
-(* A settled turn's count is the one its settle confirmed. Ledger rows
-   carry no turn number and keep landing on the newest chunk after the turn
-   ended, so counting them put a running total where a per-turn count
-   belonged -- a settled row read 2449 calls for a turn of one call (live
-   capture 2026-09-06). Before a settle the ledger is all there is, so the
-   open turn still counts its list. *)
+(* A settled turn's count is the one its settle confirmed -- the server's
+   own count of the whole turn, where the list is only what this feed saw,
+   and the feed can open mid-turn or drop the oldest rows.
+
+   This started as a workaround for something else: ledger rows carried no
+   turn number, landed on whatever chunk was newest, and a settled row read
+   2449 calls for a turn of one call (live capture 2026-09-06). Reading the
+   settle's number hid that. The rows now state their turn and are keyed on
+   it ([Acting.ck_session_turn]), so the list is no longer a running total
+   and this is a preference between two honest counts rather than a way
+   around a wrong one.
+
+   Before a settle there is no confirmed count, so the open turn counts its
+   list. *)
 let chunk_call_count (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then Option.value ~default:0 chunk.Acting.ck_calls
   else
@@ -212,9 +220,10 @@ let keeper_can_finish = function
 let unfinished_glyph = "!"
 
 (* Vocabulary: the word "running" names the keeper's process phase and
-   nothing else. An in-flight turn is "in turn" here, on the fleet row, on
-   the focus header, and on the last call's duration — one word per fact, so
-   a reader who learned either surface can read both. *)
+   nothing else. An in-flight turn is "in turn" on the fleet row and on the
+   focus header — one word per fact, and once per block: the calls under
+   the header name what they were doing and since when, not the state the
+   header above them already states. *)
 let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
@@ -394,10 +403,11 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
-    | None when is_last && not chunk.Acting.ck_settled && can_finish ->
-        { text = "in turn" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Ok }
+    (* The header states the turn's state; the call's line states what it
+       was doing and since when, so the state word does not repeat under
+       its own header. The age is elapsed, so it says [ago]. *)
     | None when is_last && not chunk.Acting.ck_settled ->
-        { text = "unfinished" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Warn }
+        { text = age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
     | None -> { text = ""; tone = Dim }
   in
   let glyph =
@@ -422,10 +432,15 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
    unsettled chunk still carries the agent session's numbering, which the
    viewer does not trust: a session restart renumbers from zero, so the
    same turn once drew as 1740 on the header and 3084 on the summary
-   (live capture 2026-09-06). Only a settled chunk names its turn. *)
+   (live capture 2026-09-06). A settle that carried no number settles the
+   chunk without naming it, and [turn_text] would draw that as [turn ?] --
+   a question the row cannot answer and the reader cannot act on (live
+   capture 2026-09-06). Only a number the settle confirmed becomes a
+   name. *)
 let turn_name (chunk : Acting.chunk) =
-  if chunk.Acting.ck_settled then Some (Acting.turn_text chunk.Acting.ck_turn)
-  else None
+  match chunk.Acting.ck_turn with
+  | Some _ when chunk.Acting.ck_settled -> Some (Acting.turn_text chunk.Acting.ck_turn)
+  | _ -> None
 
 let turn_summary_line ~cols ~now (chunk : Acting.chunk) =
   let named =
@@ -505,26 +520,9 @@ let focus_lines ~cols input chunks name =
               tool_line ~cols ~now:input.now ~can_finish current tool ~is_last:(index = count - 1))
             tools
         in
-        let calls =
-          if calls = [] && not current.Acting.ck_settled then
-            [ (if can_finish then
-                 [ { text = running_glyph ^ " "; tone = Ok }
-                 ; { text =
-                       "in turn" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                   ; tone = Ok
-                   }
-                 ]
-               else
-                 [ { text = unfinished_glyph ^ " "; tone = Warn }
-                 ; { text =
-                       "unfinished" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                   ; tone = Warn
-                   }
-                 ])
-              |> fit_line ~cols |> with_border
-            ]
-          else calls
-        in
+        (* A call-less open turn draws no body row: the header already
+           states the state and the age, and a row under it would repeat
+           both. *)
         calls @ List.map (turn_summary_line ~cols ~now:input.now) earlier
   in
   List.map (fun line -> (line, Target_none)) ((header :: approval_line) @ body)

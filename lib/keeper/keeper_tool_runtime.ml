@@ -106,6 +106,10 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -177,6 +181,10 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -378,6 +386,14 @@ let handle_in_process ctx descriptor args =
          ?gate_grant:ctx.gate_grant
          ~args
          ())
+  | Tool_browser_tabs ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~args)
+  | Tool_browser_read ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~args)
+  | Tool_browser_session ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_session_with_outcome ~args)
+  | Tool_browser_goto ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_goto_with_outcome ~args)
   | Tool_masc_control_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_control_with_outcome

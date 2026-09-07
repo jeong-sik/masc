@@ -20,6 +20,20 @@ val set_switch : Eio.Switch.t -> unit
 (** Set the global Eio switch (server root_sw). Written once at server
     bootstrap; survives until process exit. *)
 
+type snapshot
+(** Opaque capture of every global this module owns — net, both clocks,
+    the root-switch binding, and net_initialized — taken by
+    [snapshot_state] and replayed by [restore_state]. A test harness
+    snapshots before a test and restores in a [finally] so a test that
+    installs a global (e.g. [set_switch] from a cross-domain fixture)
+    cannot leak the binding into later tests; the 2026-09-06
+    heartbeat_integration red (#33569) was exactly such a leak. *)
+
+val snapshot_state : unit -> snapshot
+
+val restore_state : snapshot -> unit
+(** Restore a [snapshot_state] capture. Also used by [with_test_env]. *)
+
 val get_root_switch_opt : unit -> Eio.Switch.t option
 (** Get the server root switch without consulting the fiber-local
     turn-scoped binding. Use only for work that must survive a single

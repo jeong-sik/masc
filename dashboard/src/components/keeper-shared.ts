@@ -257,6 +257,15 @@ function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[
       })
       const count = generatedCounts.get(baseId) ?? 0
       generatedCounts.set(baseId, count + 1)
+      // A reference chip rebuilds as its carrier form (#33728); only the
+      // byte-backed chips go through the data-URL reconstruction.
+      if (b.ref) {
+        const attachment: KeeperConversationAttachment =
+          b.ref.kind === 'url'
+            ? { kind: 'url', id: b.id ?? baseId, name: b.name, url: b.ref.url, mimeType: b.mimeType }
+            : { kind: 'file_id', id: b.id ?? baseId, name: b.name, fileId: b.ref.fileId, mimeType: b.mimeType }
+        return attachment
+      }
       return {
         id: b.id ?? (count === 0 ? baseId : `${baseId}-${count + 1}`),
         type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
@@ -265,7 +274,7 @@ function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[
         mimeType: b.mimeType ?? 'application/octet-stream',
         data: b.data ?? b.src ?? '',
         dims: b.dims,
-      }
+      } satisfies KeeperConversationAttachment
     })
 }
 

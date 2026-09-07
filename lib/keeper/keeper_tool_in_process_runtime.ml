@@ -454,6 +454,28 @@ let handle_memory_retract_with_outcome
     ~args
 ;;
 
+(* Browser lane readers (docs/design/browser-lane.md): one queue hop, no
+   gate — the verb set is closed and read-only at the state layer. *)
+let handle_browser_tabs_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
+;;
+
+let handle_browser_read_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.0 args)
+;;
+
+let handle_browser_session_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
+;;
+
+let handle_browser_goto_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
+;;
+
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_library.handle_search

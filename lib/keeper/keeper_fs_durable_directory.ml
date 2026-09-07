@@ -356,7 +356,7 @@ let prepare_owned ~follow ~before_prepare ~before_directory_fsync owned =
   (* Directory observation, creation, and fsync may all block on a slow
      filesystem. Keep the complete cold-path transaction in one systhread
      handoff so a single Keeper lane cannot stop the Eio scheduler domain. *)
-  Eio_guard.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"durable-dir-visible-preparations" (fun () ->
     match visible_preparations ~follow [] owned with
     | Error error -> Error (Directory_chain_failed error)
     | Ok pending ->
@@ -482,7 +482,7 @@ let validate_current_lease keys target =
          |> Option.map (fun token -> { key = target; token })
        in
        let observation =
-         try Ok (Eio_guard.run_in_systhread (fun () ->
+         try Ok (Eio_guard.run_in_systhread ~label:"durable-dir-cached-chain" (fun () ->
            observe_cached_owned_chain cache keys)) with
          | exn -> Error (Operation_failed (exn, Printexc.get_raw_backtrace ()))
        in
@@ -531,7 +531,7 @@ let rec ensure_with
     after_validation ();
     match
       capture_operation (fun () ->
-        Eio_guard.run_in_systhread (fun () ->
+        Eio_guard.run_in_systhread ~label:"durable-dir-ensure-root" (fun () ->
           match ensure_root ~follow root with
           | Ok () -> Ok ()
           | Error error -> Error (Directory_chain_failed error)))

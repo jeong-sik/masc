@@ -1597,6 +1597,66 @@ let test_normal_inline_margin_bytes_stay_stable () =
         (Layout.display_width second.Layout.gutter)
   | _ -> failwith "expected two rows"
 
+(* A clock is drawn when it moved. Two speakers a second apart both printed
+   10:52 on the live pane, spending the cells the eye lands on first to repeat
+   a value it already had. The column is still charged, so the marks and names
+   after it stay in one line whether or not the digits are there. *)
+let test_a_repeated_minute_leaves_its_column_blank () =
+  let entries =
+    [ entry ~timestamp:"10:52:03" Layout.User "you" "tui-..aaaaaaaa" "first"
+    ; entry ~timestamp:"10:52:41" Layout.Inbound "client" "tui-..cccccccc"
+        "second"
+    ; entry ~timestamp:"10:53:01" Layout.Keeper "keeper" "tui-..dddddddd"
+        "third"
+    ]
+  in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40 ~height:20
+      entries
+  with
+  | [ first; second; third ] ->
+      check string "the minute is drawn once" (no_rail ^ "10:52 you")
+        first.Layout.gutter;
+      check string "the repeat leaves the column blank"
+        (no_rail ^ "      client")
+        second.Layout.gutter;
+      check string "a moved clock comes back" (no_rail ^ "10:53 keeper")
+        third.Layout.gutter;
+      check int "the blank costs the same cells as the digits"
+        (Layout.display_width first.Layout.gutter
+        - Layout.display_width "you")
+        (Layout.display_width second.Layout.gutter
+        - Layout.display_width "client")
+  | _ -> failwith "expected three rows"
+
+(* The same rule reaches a continuation, where both repeats now go: the source
+   because the speaker has not changed, the clock because the minute has not.
+   The width is the first row's either way, so the bodies keep their wrap. *)
+let test_a_continuation_inside_one_minute_drops_both_repeats () =
+  let role = Layout.align_role_label ~style:Layout.Keeper "keeper.one" in
+  let entries =
+    [ entry ~timestamp:"12:34:56" Layout.Keeper role "tui-..bbbbbbbb" "first"
+    ; entry ~timestamp:"12:34:58" Layout.Keeper role "tui-..bbbbbbbb" "second"
+    ]
+  in
+  let inner_width = Frame.inner_width ~cols:40 in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width ~height:20
+      entries
+  with
+  | [ first; second ] ->
+      check string "the turn opens with its own clock"
+        (no_rail ^ "12:34 " ^ Layout.speaker_mark Layout.Keeper ^ " ke\xe2\x80\xa6r.one")
+        first.Layout.gutter;
+      check string "the continuation says neither thing twice"
+        (no_rail ^ "      " ^ Layout.continued_mark Layout.Keeper
+       ^ String.make 9 ' ')
+        second.Layout.gutter;
+      check int "and keeps the first gutter width"
+        (Layout.display_width first.Layout.gutter)
+        (Layout.display_width second.Layout.gutter)
+  | _ -> failwith "expected two rows"
+
 (* A timestamp that is not [HH:MM:SS] is left alone rather than cut blind:
    the shortener is a normaliser, and the case where it does nothing is the
    one that would otherwise lose bytes silently. *)
@@ -1754,6 +1814,21 @@ let test_every_speaker_mark_is_distinct () =
   check int "no two speakers share a mark" (List.length marks)
     (List.length (List.sort_uniq String.compare marks))
 
+(* The alphabet is shapes. [Status] used to be a question mark -- the one mark
+   a keyboard can type -- and it read as punctuation rather than as a speaker,
+   and it stayed a question on rows that had already settled. Nothing here
+   pins which shape each speaker draws; it pins that every one of them is
+   drawn rather than typed. *)
+let test_every_speaker_mark_is_drawn_not_typed () =
+  List.iter
+    (fun style ->
+      let mark = Layout.speaker_mark style in
+      check bool
+        (Printf.sprintf "%S is outside ASCII" mark)
+        true
+        (String.exists (fun c -> Char.code c > 127) mark))
+    Layout.all_styles
+
 let test_skill_marks_keep_state_without_colour () =
   check (list string) "live used warning and failure keep distinct shapes"
     [ "\xe2\x97\x87"; "\xe2\x97\x86"; "\xe2\x96\xb3"; "\xe2\x9c\x97" ]
@@ -1824,7 +1899,11 @@ let test_a_continuation_survives_the_renderer_cut () =
   let entries =
     [ entry ~timestamp:"22:32:07" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
         "first"
-    ; entry ~timestamp:"22:32:41" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
+      (* A minute later than the first, so the continuation still has a clock
+         to carry through the cut. Inside one minute it would not -- see [a
+         repeated minute leaves its column blank] -- and the cut this test is
+         about would then be checked over an empty column. *)
+    ; entry ~timestamp:"22:33:41" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
         "second"
     ]
   in
@@ -1850,7 +1929,7 @@ let test_a_continuation_survives_the_renderer_cut () =
         ^ Layout.drop_cells rest (at - second.Layout.gutter_rail_cells)
       in
       check string "the renderer redraws the margin it was given" gutter redrawn;
-      check string "the clock reads once" "22:32"
+      check string "the clock reads once" "22:33"
         (Layout.take_cells (Layout.drop_cells redrawn Layout.turn_rail_cells) 5)
   | _ -> failwith "expected two rows"
 ;;
@@ -1973,6 +2052,80 @@ let test_scrolling_measures_the_mode_it_draws () =
             (List.length rows <= height))
         [ 0; 1; 5; bound; bound + 4 ])
     [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
+
+(* The column is narrower than a name and a surface together, and joined they
+   were cut as one string: the fit favours the tail, and the tail is the
+   surface. One live pane had twelve broadcast rows from an agent called
+   [codex-mcp-client] and drew every one as "…p-…roadcast" -- two ellipses,
+   with neither end of the name left. *)
+let occurrences ~needle text =
+  let needle_length = String.length needle in
+  let text_length = String.length text in
+  if needle_length = 0 then 0
+  else
+    let rec walk from found =
+      if from + needle_length > text_length then found
+      else if String.equal (String.sub text from needle_length) needle then
+        walk (from + needle_length) (found + 1)
+      else walk (from + 1) found
+    in
+    walk 0 0
+
+let wide_label_column = Layout.chat_role_label_width ~pane_cells:200
+
+let test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it () =
+  let column = wide_label_column in
+  check string "a name too wide to share keeps the column whole"
+    "codex-mcp-client"
+    (Layout.fit_speaker ~column ~speaker:"codex-mcp-client"
+       ~surface:(Some "broadcast") ());
+  check string "a pair that fits says both" "amp \xc2\xb7 agent"
+    (Layout.fit_speaker ~column ~speaker:"amp" ~surface:(Some "agent") ());
+  check string "no surface, nothing to weigh" "alder"
+    (Layout.fit_speaker ~column ~speaker:"alder" ~surface:None ())
+;;
+
+(* What the pane draws for that row: one cut at most, and the end that tells
+   two agents apart still on it. *)
+let test_the_badge_draws_a_broadcast_speaker_without_two_cuts () =
+  let column = wide_label_column in
+  let badge =
+    Layout.align_role_label ~column ~style:Layout.Inbound
+      (Layout.fit_speaker ~column ~speaker:"codex-mcp-client"
+         ~surface:(Some "broadcast") ())
+  in
+  check int "the badge cuts at most once" 1
+    (occurrences ~needle:"\xe2\x80\xa6" badge);
+  check int "and keeps the end that names the agent" 1
+    (occurrences ~needle:"p-client" badge)
+;;
+
+(* The operator's row is fitted by the same rule, because it is measured
+   against the same column. It reached this pane joined and the badge only
+   asked whether the whole string was still "you" -- true of a row typed at
+   the dashboard and of nothing else -- so a line written through a connector
+   was cut as one string and drew "yo\xe2\x80\xa6dcast": the speaker gone to
+   keep the tail of the surface. *)
+let test_the_operator_badge_keeps_who_it_is () =
+  let narrow = Layout.chat_role_label_width ~pane_cells:100 in
+  let badge column surface =
+    Layout.align_role_label ~column ~style:Layout.User
+      (Layout.fit_speaker ~column ~speaker:"YOU" ~surface ())
+  in
+  check int "a narrow column cuts the operator badge not at all" 0
+    (occurrences ~needle:"\xe2\x80\xa6" (badge narrow (Some "broadcast")));
+  check int "and keeps the speaker whole" 1
+    (occurrences ~needle:"YOU" (badge narrow (Some "broadcast")));
+  (* Where both fit, both are drawn: the operator row has no arrival siding,
+     so the surface is the only thing saying the line came in by a door. *)
+  (* Trimmed: what the badge pads out to is the column's business, and the
+     test above it already pins that. *)
+  check string "a column with room for both says both"
+    "\xe2\x96\xb6 YOU \xc2\xb7 agent"
+    (String.trim (badge wide_label_column (Some "agent")));
+  check string "a dashboard row still reads as it did" "\xe2\x96\xb6 YOU"
+    (String.trim (badge wide_label_column None))
+;;
 
 let () =
   run "tui_message_layout"
@@ -2111,6 +2264,10 @@ let () =
             test_a_narrow_inline_margin_keeps_the_source
         ; test_case "normal inline margin bytes stay stable" `Quick
             test_normal_inline_margin_bytes_stay_stable
+        ; test_case "a repeated minute leaves its column blank" `Quick
+            test_a_repeated_minute_leaves_its_column_blank
+        ; test_case "a continuation inside one minute drops both repeats"
+            `Quick test_a_continuation_inside_one_minute_drops_both_repeats
         ; test_case "a timestamp of another shape survives" `Quick
             test_a_timestamp_of_another_shape_survives
         ; test_case "wrapped rows indent under the first" `Quick
@@ -2123,6 +2280,14 @@ let () =
             test_a_continuation_does_not_borrow_the_reasoning_glyph
         ; test_case "every speaker mark is distinct" `Quick
             test_every_speaker_mark_is_distinct
+        ; test_case "every speaker mark is drawn not typed" `Quick
+            test_every_speaker_mark_is_drawn_not_typed
+        ; test_case "a speaker keeps the column when the surface cannot share it"
+            `Quick test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it
+        ; test_case "the badge draws a broadcast speaker without two cuts"
+            `Quick test_the_badge_draws_a_broadcast_speaker_without_two_cuts
+        ; test_case "the operator badge keeps who it is" `Quick
+            test_the_operator_badge_keeps_who_it_is
         ; test_case "Skill states keep shapes without colour" `Quick
             test_skill_marks_keep_state_without_colour
         ; test_case "alignment padding is kept apart from the name" `Quick

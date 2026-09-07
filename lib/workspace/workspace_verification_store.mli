@@ -27,6 +27,13 @@ type submitted_evidence_item =
       { reference : string
       ; reason : evidence_read_failure
       }
+  | Evidence_artifact_binary of
+      { reference : string
+      ; bytes : int
+      ; sha256 : string
+      ; format : string
+      ; body : string option
+      }
 
 type evidence_access_failure =
   | Completion_authority_identity_missing
@@ -116,7 +123,30 @@ val resolvable_reference_forms : string list
 (** The accepted forms, spelled for an error message that has to tell a caller
     what to write instead. *)
 
+type artifact_payload =
+  | Text_payload of string * int * bool
+  | Binary_payload of
+      { data : string; bytes : int; sha256 : string; format : string }
+
+type artifact_read_result = (artifact_payload, evidence_read_failure) result
+(** One artifact's read: text as [(content, bytes, truncated)] — [bytes] may
+    exceed the content length when the read was capped — or binary as raw
+    bytes with their hash and format (RFC-0436 §4.1). A reader that cannot
+    answer returns the typed failure instead. *)
+
+type utf8_scan =
+  | Utf8_valid
+  | Utf8_incomplete_at of int
+  | Utf8_invalid
+
+val scan_utf8 : string -> utf8_scan
+(** The text line every artifact read answers under. Exposed so an injected
+    reader classifies its bytes with the same scan the store applies, rather
+    than a second opinion ({#33816}, RFC-0436 §4.1). *)
+
 val snapshot_submitted_evidence_json :
+  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
+  ?request_id:string ->
   base_path:string ->
   worker:string ->
   string list ->
@@ -129,7 +159,11 @@ val snapshot_submitted_evidence_json :
     a payload-free typed invalid-reference item. *)
 
 val artifact_reference_size :
-  base_path:string -> worker:string -> string -> int option
+  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
+  base_path:string ->
+  worker:string ->
+  string ->
+  int option
 (** Real byte size of an artifact reference, measured on the same validated
     descriptor the snapshot reads, without materializing content. [None] for
     non-artifact references, invalid paths, and files that cannot be read —

@@ -4156,6 +4156,38 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
+def screen_rows(drawn: bytes) -> dict[int, bytes]:
+    """The screen the pane has painted, as row number to plain text.
+
+    A frame is a set of (row, text) pairs, not a picture, so no single frame
+    holds the whole screen: a row keeps whatever was written to it until
+    something writes it again. Replaying every absolute row address in
+    arrival order and keeping the last write to each row reconstructs what
+    is on screen. The pane never scrolls the terminal -- it addresses rows
+    absolutely -- so nothing moves a row's text to another row behind this."""
+    rows: dict[int, bytes] = {}
+    addresses = list(CURSOR_ROW_RE.finditer(drawn))
+    for index, address in enumerate(addresses):
+        end = (
+            addresses[index + 1].start()
+            if index + 1 < len(addresses)
+            else len(drawn)
+        )
+        rows[int(address.group(1))] = CSI_RE.sub(b"", drawn[address.end() : end])
+    return rows
+
+
+def screen_row_of(rows: dict[int, bytes], needle: bytes) -> int:
+    """The topmost row [needle] currently occupies, or -1 when it is gone."""
+    carrying = [row for row, text in rows.items() if needle in text]
+    return min(carrying) if carrying else -1
+
+
+def screen_text(drawn: bytes) -> bytes:
+    """The plain text of the screen, rows joined top to bottom."""
+    return b"\n".join(text for _, text in sorted(screen_rows(drawn).items()))
+
+
 BRACKETED_PASTE_ON = b"\x1b[?2004h"
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
@@ -5752,6 +5784,40 @@ def memory_journal_backfill_fixture() -> HttpResponse:
     return status, payload
 
 
+MEMORY_JOURNAL_REQUEST_TS = 1788273291.814646
+
+# The scenario runs a 30-row terminal and the chat pane is shorter than that,
+# so this many one-line messages make a transcript taller than the pane. Page-up
+# then has something to read back: without them the pane clamps the scroll to
+# nothing, says "back at the newest row", and the scroll-pin claim below has
+# nothing to measure (#33757).
+MEMORY_JOURNAL_FILLER_ROWS = 30
+
+# The filler sits an hour before the turn under test so that turn's own
+# civil-hour rail is drawn directly above it and stays on screen with it.
+# Filler in the same hour would put that rail at the top of the transcript,
+# where the pane's newest window no longer reaches it.
+SECONDS_PER_HOUR = 3600.0
+MEMORY_JOURNAL_OLDEST_TS = (
+    MEMORY_JOURNAL_REQUEST_TS - SECONDS_PER_HOUR - float(MEMORY_JOURNAL_FILLER_ROWS)
+)
+
+
+def memory_journal_filler_rows() -> list[dict[str, object]]:
+    """Older conversation, oldest first, one second apart."""
+    return [
+        {
+            "id": f"assistant:filler-{index}",
+            "role": "assistant",
+            "content": f"older conversation row {index}",
+            "ts": MEMORY_JOURNAL_OLDEST_TS + float(index),
+            "turn_ref": f"trace-filler#{index}",
+            "transcript_slot": {"kind": "terminal_assistant"},
+        }
+        for index in range(MEMORY_JOURNAL_FILLER_ROWS)
+    ]
+
+
 def memory_journal_chat_fixture() -> HttpResponse:
     # Both conversation rows belong to one direct turn, while the Journal
     # observation lands between their clocks. Keeping the turn physically
@@ -5759,12 +5825,13 @@ def memory_journal_chat_fixture() -> HttpResponse:
     # may label the rows, but the shared visible axis must remain monotonic.
     return (
         200,
-        [
+        memory_journal_filler_rows()
+        + [
             {
                 "id": "user:before-journal",
                 "role": "user",
                 "content": "direct turn before Librarian",
-                "ts": 1788273291.814646,
+                "ts": MEMORY_JOURNAL_REQUEST_TS,
                 "delivery_key": {
                     "kind": "operation",
                     "operation_id": "tui-direct-regression",
@@ -5836,52 +5903,62 @@ def autonomous_turn_history_interaction() -> Interaction:
 def memory_journal_timeline_interaction(
     memory: SequencedHttpResponse,
 ) -> Interaction:
-    def assert_monotonic_direct_turn(frame: bytes) -> None:
-        plain = CSI_RE.sub(b"", frame)
+    def assert_monotonic_direct_turn(drawn: bytes) -> None:
+        """Every claim here is about the screen, so it reads the screen.
+
+        The pane resends only the rows that changed, so the frame that
+        expands the Journal entry does not carry the request row above it or
+        the hour rail above that -- both were written once, when they first
+        appeared, and nothing has changed them since."""
+        rows = screen_rows(drawn)
+        plain = screen_text(drawn)
         hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1788273291.814646)
+            "%Y-%m-%d · %H:00", time.localtime(MEMORY_JOURNAL_REQUEST_TS)
         ).encode()
         styled_rail = re.compile(
             rb"\x1b\[[0-9;]*m\x1b\[1m"
             + "── ".encode()
             + re.escape(hour)
         )
-        if styled_rail.search(frame) is None:
+        if styled_rail.search(drawn) is None:
             raise AssertionError(
                 "Civil-hour rail was not drawn in semantic colour and bold "
-                f"weight for {hour!r}: {frame!r}"
+                f"weight for {hour!r}: {drawn!r}"
             )
         # The renderer groups by civil hour (checked above) and does not
         # also draw a per-message HH:MM:SS clock in the resting chat body
         # (no such formatting exists in bin/masc_tui_render.ml). The three
         # exact-second clock checks below are a fossil from a design that
         # predates hour-grouping; only content ordering still applies.
-        positions = [
-            plain.find(hour),
-            plain.find(b"direct turn before Librarian"),
-            plain.find(b"Librarian committed current memory revision 9"),
-            plain.find(b"direct turn after Librarian"),
-        ]
-        if any(position < 0 for position in positions) or positions != sorted(positions):
+        ordered = (
+            hour,
+            b"direct turn before Librarian",
+            b"Librarian committed current memory revision 9",
+            b"direct turn after Librarian",
+        )
+        positions = [screen_row_of(rows, needle) for needle in ordered]
+        if any(position < 0 for position in positions) or positions != sorted(
+            positions
+        ):
             raise AssertionError(
                 "The direct-turn request, Journal entry, and reply did not "
-                f"share one monotonic axis: {frame!r}"
+                f"share one monotonic axis: {dict(zip(ordered, positions))!r}"
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
             (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
-                raise AssertionError(f"Missing {label} label: {frame!r}")
+                raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
         # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
         # bold arrow/circle glyph checked above is what actually marks the
         # causal role; this only confirms the label itself still renders.
         for label in (b"YOU", b"alpha"):
-            if b"\x1b[2m" + label not in frame:
+            if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{frame!r}"
+                    f"{drawn!r}"
                 )
 
     def interact(
@@ -5934,10 +6011,16 @@ def memory_journal_timeline_interaction(
             b"Librarian committed current memory revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
-        assert_monotonic_direct_turn(resting)
-        if b"Ctrl-N: journal detail" not in plain_resting:
+        assert_monotonic_direct_turn(bytes(output))
+        if b"\xc2\xb7 Ctrl-N" not in plain_resting:
             raise AssertionError(
                 f"Journal summary did not expose its detail key: {resting!r}"
+            )
+        # What the key does is the footer's line, which is on screen with
+        # this row; saying it again per row is what the row stopped doing.
+        if b"Ctrl-N: journal detail" in plain_resting:
+            raise AssertionError(
+                f"Journal summary spelled the footer's own words: {resting!r}"
             )
         if re.search("\u25c8\\s+JOURNAL".encode(), plain_resting) is None:
             raise AssertionError(
@@ -5986,10 +6069,14 @@ def memory_journal_timeline_interaction(
             b"superseded by provider grouping",
         )
         plain_visible = CSI_RE.sub(b"", visible)
-        assert_monotonic_direct_turn(visible)
-        if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
+        assert_monotonic_direct_turn(bytes(output))
+        # Read off the screen, not this frame: expanding the entry rewrote
+        # the rows under its header, and the header itself did not change,
+        # so the pane had no reason to send it again.
+        if re.search("◈\\s+JOURNAL".encode(), screen_text(bytes(output))) is None:
             raise AssertionError(
-                f"Memory timeline did not draw its distinct Journal marker: {visible!r}"
+                "Memory timeline did not draw its distinct Journal marker: "
+                f"{screen_text(bytes(output))!r}"
             )
         if "\u250a".encode() not in plain_visible:
             raise AssertionError(
@@ -6026,18 +6113,22 @@ def memory_journal_timeline_interaction(
                     f"Memory timeline drew an unconsumed escape {escaped!r}: {visible!r}"
                 )
 
-        scrolled = send_and_wait(
-            process, master_fd, output, b"k", b"reading back 1 row(s)"
-        )
-        scrolled_frame = frame_containing(scrolled, b"reading back 1 row(s)")
-        anchor = b"Librarian committed current memory revision 9"
-        if anchor not in CSI_RE.sub(b"", scrolled_frame):
-            raise AssertionError(
-                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
-            )
-        anchor_row_before = frame_row_of(scrolled_frame, anchor)
-        status_row_before = frame_row_of(scrolled_frame, b"reading back 1 row(s)")
-        anchor_offset_before = anchor_row_before - status_row_before
+        # A wheel notch reads back, and it is the shallow way to do it: a
+        # page would carry the pinned row below off the newest window, and
+        # this block is about where that row sits, not about how far the
+        # pane can travel. A single row per press was the arrow key's old
+        # behaviour and is gone.
+        #
+        # The status row names its row count only while an older page
+        # exists, so the needle is the part that marks reading back in
+        # either wording.
+        reading_back = b"Ctrl-E returns to the newest"
+        # The producer's older journal rows have to land before the pane is
+        # read back, because a pane that is read back does not ask for them:
+        # the tick reloads the transcript only at the newest row, and the
+        # journal comes down that same load (bin/masc_tui.ml, the msg_scroll
+        # guard on launch_keeper_history_load). What the pin below is about
+        # is where the row sits once they are in.
         memory.responses.append(memory_journal_backfill_fixture())
         served_before_backfill = memory.served
         wait_for_fixture_served(
@@ -6050,26 +6141,38 @@ def memory_journal_timeline_interaction(
             timeout=5.0,
         )
         drain_until_quiet(process, master_fd, output)
+        scrolled = send_and_wait(
+            process, master_fd, output, b"\x1b[<64;5;5M", reading_back
+        )
+        scrolled_frame = frame_containing(scrolled, reading_back)
+        anchor = b"Librarian committed current memory revision 9"
+        if anchor not in CSI_RE.sub(b"", scrolled_frame):
+            raise AssertionError(
+                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
+            )
+        anchor_row_before = frame_row_of(scrolled_frame, anchor)
+        status_row_before = frame_row_of(scrolled_frame, reading_back)
+        anchor_offset_before = anchor_row_before - status_row_before
         refreshed_frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=31,
             columns=100,
-            needle=b"reading back 1 row(s)",
+            needle=reading_back,
             controls=(FULL_REDRAW,),
         )
         if anchor not in CSI_RE.sub(b"", refreshed_frame):
             raise AssertionError(
-                "A producer-side Journal backfill moved the structural scroll pin: "
+                "A redraw moved the pinned row out of the read-back window: "
                 f"{refreshed_frame!r}"
             )
         anchor_row_after = frame_row_of(refreshed_frame, anchor)
-        status_row_after = frame_row_of(refreshed_frame, b"reading back 1 row(s)")
+        status_row_after = frame_row_of(refreshed_frame, reading_back)
         anchor_offset_after = anchor_row_after - status_row_after
         if anchor_offset_after != anchor_offset_before:
             raise AssertionError(
-                "Journal prepend changed the pinned row's footer-relative slot: "
+                "A redraw changed the pinned row's footer-relative slot: "
                 f"before={anchor_offset_before} after={anchor_offset_after} "
                 f"frame={refreshed_frame!r}"
             )
@@ -6122,15 +6225,24 @@ def memory_journal_timeline_interaction(
         )
         os.write(master_fd, b"\x0e\x06")
         wait_for_terminal_input_consumed(_slave_fd)
-        widened = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=31,
-            columns=100,
-            needle=b"journal:full",
-            controls=(FULL_REDRAW,),
-        )
+        try:
+            widened = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=31,
+                columns=100,
+                needle=b"journal:full",
+                controls=(FULL_REDRAW,),
+            )
+        except AssertionError as timed_out:
+            # The raw byte dump this would otherwise carry runs to a hundred
+            # kilobytes and is cut by the CI log before it says anything. The
+            # screen is the part that answers what the toggles did.
+            raise AssertionError(
+                "Widening back never showed journal:full. Screen:\n"
+                + screen_text(bytes(output)).decode("utf8", "replace")
+            ) from timed_out
         if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
@@ -6953,28 +7065,10 @@ def viewport_gap_history_fixture() -> HttpResponse:
 
 
 def viewport_gap_history_page_fixture() -> HttpResponse:
-    # GET /chat/history/page?before=<ts> answers with an envelope, not a bare
-    # row list (masc_tui_keeper_chat_history.mli: the rows are the same shape
-    # as the transcript's but has_more/next_before ride alongside). The paged
-    # rows repeat the oversized reply so the viewport gap survives the
-    # round-trip instead of collapsing to a fallback transcript.
-    return (
-        200,
-        {
-            "messages": [
-                {
-                    "id": "oversized-keeper-reply",
-                    "role": "assistant",
-                    "content": "\n".join(
-                        f"line-{index:02d}" for index in range(24)
-                    ),
-                    "ts": 1787348491.3,
-                }
-            ],
-            "has_more": False,
-            "next_before": None,
-        },
-    )
+    # The only stored message is already in the initial history. The server
+    # answers strictly before its timestamp, so this page must be empty;
+    # repeating that message fabricates an older row and moves the scroll pin.
+    return (200, {"messages": [], "has_more": False, "next_before": None})
 
 
 LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
@@ -7210,17 +7304,15 @@ def viewport_gap_interaction(
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
-    # PgUp's paged fetch now hits the seeded /chat/history/page fixture.
-    # Because that page answers has_more=false, PgUp clamps the view at the
-    # conversation start (the footer reads "the start of this conversation")
-    # and PgDn redraws the head projection -- line-00 onward, not the
-    # line-23 live edge. Real paged rows survive the round-trip instead of a
-    # 503 fallback transcript, so the head row is asserted in the frame.
-    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-02")
+    # An exhausted older page leaves the transcript intact. PgDn must restore
+    # the oversized live-edge projection in this response, including its gap
+    # and newest row; previously emitted bytes cannot prove that transition.
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-23")
     newest_plain = CSI_RE.sub(b"", newest)
-    if b"line-00" not in newest_plain and b"line-00" not in bytes(output):
+    positions = [newest_plain.find(needle) for needle in (b"line-00", marker, b"line-23")]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
         raise AssertionError(
-            "PgDn did not return the exact oversized live-edge projection "
+            "PgDn did not restore the oversized live-edge projection "
             f"after one PgUp: {newest!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
@@ -11697,17 +11789,7 @@ def run_keyboard_regression(executable: str) -> None:
         },
         extra_args=("--reasoning", "full", "--tool-view", "full"),
     )
-    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
-    run_terminal_scenario(
-        executable,
-        description="Keeper Memory journal timeline",
-        interact=memory_journal_timeline_interaction(memory_journal_sequence),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
-            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
-        },
-        refresh=0.5,
-    )
+    run_memory_journal_regression(executable)
     run_terminal_scenario(
         executable,
         description="Keeper provider-input Context Inspector",
@@ -12606,6 +12688,27 @@ def run_code_memo_regression(executable: str) -> None:
     )
 
 
+def run_memory_journal_regression(executable: str) -> None:
+    memory_journal_sequence = SequencedHttpResponse([memory_journal_fixture()])
+    run_terminal_scenario(
+        executable,
+        description="Keeper Memory journal timeline",
+        interact=memory_journal_timeline_interaction(memory_journal_sequence),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
+            # Reading back asks for the page behind the oldest row it holds,
+            # matched independent of its timestamp. Without an answer the pane
+            # draws the load error instead of the reading-back status row,
+            # and the scroll-pin claim below has nothing to measure against.
+            "/api/v1/keepers/alpha/chat/history/page": (
+                200, {"messages": [], "has_more": False, "next_before": None}
+            ),
+            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
+        },
+        refresh=0.5,
+    )
+
+
 def run_board_json_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -12688,6 +12791,92 @@ def run_theme_scheme_regression(executable: str) -> None:
     )
 
 
+def held_back_prompts_http_fixtures() -> HttpFixtures:
+    """One prompt whose override the registry declined to restore.
+
+    The registry keeps a rejected override on disk and reports it under
+    `held_back`. The row itself still reads from its file, so without a mark
+    of its own it renders exactly like a prompt nobody ever customized -- and
+    an operator loses an override without learning they lost it.
+    """
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/prompts"] = (
+        200,
+        {
+            "prompts": [
+                {
+                    "key": "keeper",
+                    "category": "keeper",
+                    "operator_surface": "primary",
+                    "description": "the keeper turn prompt",
+                    "effective": "You are a keeper.",
+                    "file_path": "config/prompts/keeper.md",
+                    "source": "file",
+                    "template_variables": [],
+                }
+            ],
+            "held_back": [
+                {
+                    "key": "keeper",
+                    "bytes": 1240,
+                    "contract_revision": "01e7760f",
+                }
+            ],
+        },
+    )
+    return fixtures
+
+
+def run_held_back_override_regression(executable: str) -> None:
+    """A held-back override is visible on the prompts screen.
+
+    Before this the screen drew the row from its file with a blank mark, the
+    same as an untouched prompt. The wire had carried `held_back` the whole
+    time and the TUI snapshot dropped the field.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Config")
+        for _ in range(8):
+            if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the prompts pane")
+
+        screen = CSI_RE.sub(b"", bytes(output))
+        if "적용 안 된 오버라이드 1개".encode() not in screen:
+            raise AssertionError(
+                "the header does not count the held-back override, so a reader "
+                "cannot see it without landing on the row"
+            )
+        if "\u2298".encode() not in screen:
+            raise AssertionError("the held-back row carries no mark of its own")
+        if "다시 저장하면".encode() not in screen:
+            raise AssertionError(
+                "the screen says the override is not applied and does not say "
+                "how to put it back"
+            )
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="a held-back override is visible",
+        interact=interact,
+        http_fixtures=held_back_prompts_http_fixtures(),
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -12708,6 +12897,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":
+        run_held_back_override_regression(os.path.abspath(sys.argv[1]))
+        print("tui held-back override regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
         run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
@@ -12737,11 +12930,16 @@ def main() -> None:
         run_code_memo_regression(os.path.abspath(sys.argv[1]))
         print("tui Code memo regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "memory-journal":
+        run_memory_journal_regression(os.path.abspath(sys.argv[1]))
+        print("tui Memory journal regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo]"
+            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
+            "memory-journal]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

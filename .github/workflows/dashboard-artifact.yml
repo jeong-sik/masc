@@ -1,0 +1,105 @@
+name: Dashboard artifact
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-artifact-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Build and package dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: |
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Verify production bundle contract
+        working-directory: dashboard
+        run: pnpm exec vitest run --config vitest.config.ts src/dashboard-bundle-preload.test.ts
+
+      - name: Build dashboard
+        working-directory: dashboard
+        env:
+          NODE_ENV: production
+        run: pnpm build
+
+      - name: Package bundle and source receipt
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tarfile
+
+          source_commit = subprocess.check_output(
+              ['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if source_commit != os.environ['EXPECTED_SOURCE_COMMIT']:
+              raise SystemExit('checkout differs from requested source commit')
+          bundle = Path('assets/dashboard')
+          stamp = (bundle / '.build-stamp').read_text().strip()
+          datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+          if not (bundle / 'index.html').is_file():
+              raise SystemExit('dashboard index is missing')
+          dist = Path('dist')
+          dist.mkdir(exist_ok=True)
+          archive = dist / f'masc-dashboard-{source_commit}.tar.gz'
+          # Add the directory, never a shell glob: .build-stamp must travel
+          # with the exact HTML/JS bytes. Tar preserves its build-time mtime.
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(bundle, arcname='dashboard')
+          with tarfile.open(archive, 'r:gz') as packaged:
+              if 'dashboard/.build-stamp' not in packaged.getnames():
+                  raise SystemExit('packaged dashboard has no build stamp')
+          def sha256(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+          receipt = {
+              'schema': 'masc.dashboard-artifact.v1',
+              'source_commit': source_commit,
+              'source_tree': subprocess.check_output(
+                  ['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'built_at': stamp,
+              'archive': archive.name,
+              'archive_sha256': sha256(archive),
+              'index_sha256': sha256(bundle / 'index.html'),
+              'lock_sha256': sha256(Path('dashboard/pnpm-lock.yaml')),
+              'node_version': subprocess.check_output(['node', '--version'], text=True).strip(),
+              'pnpm_version': subprocess.check_output(['pnpm', '--version'], text=True).strip(),
+          }
+          (dist / 'dashboard-build-receipt.json').write_text(
+              json.dumps(receipt, indent=2) + '\n')
+          (dist / 'SHA256SUMS').write_text(
+              f'{receipt["archive_sha256"]}  {archive.name}\n')
+          PY
+
+      - name: Upload dashboard bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-dashboard-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error

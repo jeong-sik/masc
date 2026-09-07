@@ -102,6 +102,10 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_masc_misc_dispatch
   | Keeper_tool_descriptor.Tool_web_search
   | Keeper_tool_descriptor.Tool_web_fetch
+  | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_browser_read
+  | Keeper_tool_descriptor.Tool_browser_session
+  | Keeper_tool_descriptor.Tool_browser_goto
   | Keeper_tool_descriptor.Tool_masc_control_dispatch
   | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
   | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
@@ -296,6 +300,10 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_library_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+  | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_browser_read
+  | Keeper_tool_descriptor.Tool_browser_session
+  | Keeper_tool_descriptor.Tool_browser_goto
   | Keeper_tool_descriptor.Tool_analyze_image ->
       (* Unreachable through [classify], which asks [writes_files] first. Named
          so that adding a file-writing handler makes the compiler point here

@@ -1759,6 +1759,11 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
          Discord one. Off unless SLACK_APP_TOKEN is set; the start function
          logs a warning and skips otherwise, leaving the server unaffected. *)
       Server_slack_in_process_gateway.start ~sw ~env ~state;
+      (* slack-lane (task-1418): in-process collection fiber for bound
+         channels without app event subscriptions. Off unless
+         [slack] poll_enabled is set in runtime.toml; the start function
+         logs and skips otherwise, leaving the server unaffected. *)
+      Server_slack_poll_lane.start ~sw ~env ~state;
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

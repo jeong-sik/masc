@@ -16,6 +16,7 @@
   masc
   masc.agent_observation
   masc.browser_lane
+  masc.slack_lane
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC
   ;; a-language-server-the-keeper-can-ask §3.2).

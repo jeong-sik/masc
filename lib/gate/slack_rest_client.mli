@@ -173,3 +173,54 @@ val parse_users_info_response :
   status:int -> body:string -> (user_info_ok, error) result
 (** Classifies a [users.info] response. Non-2xx HTTP status is
     [Http_status]; 2xx Slack [ok=false] is [Slack_api]. *)
+
+(** One message from [conversations.history]. The fields the slack-lane poll
+    fiber filters on are typed; text carries the body as Slack rendered it. *)
+type history_message = {
+  ts : string;
+  user_id : string option;   (** Absent when the author is an app/bot. *)
+  bot_id : string option;    (** Present for app/bot authors. *)
+  subtype : string option;   (** Present for message_changed, joins, … *)
+  thread_ts : string option; (** Present when this is a thread reply. *)
+  text : string;
+}
+
+type conversations_history_ok = {
+  messages : history_message list;  (** Slack order: newest first. *)
+  has_more : bool;
+  next_cursor : string option;      (** [response_metadata.next_cursor]. *)
+}
+
+val conversations_history :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:string ->
+  ?oldest:string ->
+  ?limit:int ->
+  ?cursor:string ->
+  unit ->
+  (conversations_history_ok, error) result
+(** [conversations.history] for one channel after [oldest] (exclusive, a
+    message ts). Needs [channels:history] (public) or [groups:history]
+    (private) on the token; a missing scope surfaces as [Slack_api], not a
+    crash. One page per call — pagination belongs to the caller via
+    {!conversations_history_ok.next_cursor}. *)
+
+val build_conversations_history_request :
+  token:string ->
+  channel_id:string ->
+  ?oldest:string ->
+  ?limit:int ->
+  ?cursor:string ->
+  unit ->
+  string * (string * string) list * string
+(** Pure request builder for [conversations.history], exposed for unit
+    tests. *)
+
+val parse_conversations_history_response :
+  status:int -> body:string -> (conversations_history_ok, error) result
+(** Classifies a [conversations.history] response. Non-2xx HTTP status is
+    [Http_status]; 2xx Slack [ok=false] is [Slack_api]; a message entry
+    without [ts] is [Other] — Slack keys messages by [ts], so its absence is
+    a broken page, not a skippable entry. *)

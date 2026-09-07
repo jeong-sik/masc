@@ -57,6 +57,9 @@ shim_sources=(
   lib/exec_shim/exec_shim.mli
   lib/exec_shim/prctl_stub.c
   lib/exec_shim/observe_stub.c
+  lib/exec_shim/monotonic_stub.c
+  lib/exec_shim/shim_clock.ml
+  lib/exec_shim/shim_clock.mli
   lib/exec_shim/shim_build_id.mli
   bin/masc_exec_shim.ml
 )
@@ -129,9 +132,17 @@ cat > "$stage/src/dune" <<'EOF'
  (libraries yojson base64))
 
 (library
+ (name shim_clock)
+ (wrapped false)
+ (modules shim_clock)
+ (foreign_stubs
+  (language c)
+  (names monotonic_stub)))
+
+(library
  (name exec_shim)
  (modules exec_shim shim_build_id)
- (libraries exec_ssh_protocol unix)
+ (libraries exec_ssh_protocol shim_clock unix)
  (foreign_stubs
   (language c)
   (names prctl_stub observe_stub)))

@@ -100,12 +100,12 @@ keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 
 
 ## 화면과 상호작용
 
-선택한 탭의 화면을 보려면 `BrowserRead`에 `format=image`를 지정한다.
-Keeper는 반환된 `artifact`를 `analyze_image`에 전달한다. TUI에서는
+선택한 탭의 화면을 보려면 `BrowserRead`에 `mode=screenshot`를 지정한다.
+Keeper는 반환된 `artifact`를 `keeper_analyze_image`에 전달한다. TUI에서는
 `Ctrl-O`로 같은 탭의 PNG를 미리 본다. 캡처 범위는 현재 viewport다.
 
 ```json
-BrowserRead {"lane":"live","tabId":73,"format":"image"}
+BrowserRead {"lane":"live","tabId":73,"mode":"screenshot"}
 BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
 ```
 
@@ -118,8 +118,8 @@ BrowserInteract {"lane":"live","tabId":73,"action":"fill","selector":"#search","
 BrowserInteract {"lane":"live","tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
 ```
 
-텍스트나 이미지에서 selector를 추측하지 않는다. 현재 도구는 자동으로
-DOM 요소 목록이나 좌표 기반 클릭 대상을 제공하지 않는다. fill은
+텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로
+현재 DOM 컨트롤과 selector를 관측한다. 좌표 기반 클릭은 지원하지 않는다. fill은
 input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
 페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
 

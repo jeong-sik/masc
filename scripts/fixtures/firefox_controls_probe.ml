@@ -117,6 +117,21 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "nested fill executed" (member "performed" (frame_act (Browser_action.Fill {selector="#nested-input";text="프레임 입력"})) = `Bool true);
     check "nested click executed" (member "performed" (frame_act (Browser_action.Click "#nested-apply")) = `Bool true);
     check "nested frame contains submitted input" (contains (context first frame_path (`Text 1000) |> member "text" |> string) "프레임 입력");
+    (* A BrowserInteract call must not inherit the previous BrowserAct frame. *)
+    let interact action expected_url = run (Browser_lane.Page_interact
+      {tab_id=first;expected_url;action}) in
+    let mixed = success (interact (Browser_lane.Fill
+      {selector=selector "name";text="Mixed browser controls"}) (Some (fixture_url ^ "/first"))) in
+    check "BrowserInteract resets native frame context and names its tab"
+      (member "tabId" mixed = `Int first);
+    let rejected = interact (Browser_lane.Fill
+      {selector=selector "name";text="unexpected overwrite"}) (Some (fixture_url ^ "/wrong")) in
+    check "BrowserInteract rejects stale URL before overwriting input"
+      (match rejected with Browser_lane.Refused _ -> true | _ -> false);
+    let submitted = success (interact (Browser_lane.Click (selector "submit")) None) in
+    check "BrowserInteract returns the observed task tab" (member "tabId" submitted = `Int first);
+    check "native and DOM interactions share the correct page without stale overwrite"
+      (contains (member "text" (read first) |> string) "Mixed browser controls");
     check "top-level read resets the frame context" (contains (member "text" (read first) |> string) "Firefox fixture");
     (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=["#missing"];interaction=Browser_action.Click "button"})) with
      | Browser_lane.Rejected_before_effect _ -> check "missing frame rejected before effect" true

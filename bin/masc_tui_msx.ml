@@ -133,6 +133,7 @@ let consume ~write (state : Masc_tui_types.state) key =
         (* Release only after the frame the key was down for is drawn -- the
            pattern marks held keys, and drawing after the release would always
            show none. *)
+        (* See Msx.set_key: it was true a frame ago and the matrix is static. *)
         ignore (Msx.set_key m k ~pressed:false)
     | Some _ | None ->
         (* A key the matrix has no place for still advances one frame, so

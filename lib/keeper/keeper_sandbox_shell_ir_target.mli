@@ -65,6 +65,7 @@ val guest_target
   -> timeout_sec:float
   -> base_path:string
   -> ?capture_dir:string
+  -> ?on_receipt:(Keeper_sandbox_remote.execution_observation -> unit)
   -> unit
   -> (guest_dispatch, target_error) result
 
@@ -73,6 +74,7 @@ val ssh_target
   -> meta:Keeper_meta_contract.keeper_meta
   -> timeout_sec:float
   -> ?ssh_bin:string
+  -> ?on_receipt:(Keeper_sandbox_remote.execution_observation -> unit)
   -> unit
   -> (ssh_dispatch, target_error) result
 (** Resolve the keeper's endpoint and construct a fail-closed SSH target.

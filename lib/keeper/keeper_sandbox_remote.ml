@@ -602,7 +602,37 @@ let wire_major t =
        Exec_ssh_protocol.newest)
 ;;
 
-let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
+type receipt_unavailable =
+  | Request_not_sent
+  | Transport_unavailable
+  | Peer_receipt_missing
+  | Invalid_receipt of string
+
+type execution_observation =
+  | Execution_observed of Exec_ssh_protocol.execution_receipt * Exec_ssh_protocol.trailer
+  | Execution_unavailable of receipt_unavailable
+
+let execution_observation_to_yojson = function
+  | Execution_unavailable reason ->
+    let reason, detail = match reason with
+      | Request_not_sent -> "request_not_sent", []
+      | Transport_unavailable -> "transport_unavailable", []
+      | Peer_receipt_missing -> "peer_receipt_missing", []
+      | Invalid_receipt detail -> "invalid_receipt", ["detail", `String detail]
+    in
+    `Assoc (["status", `String "unavailable"; "reason", `String reason] @ detail)
+  | Execution_observed (receipt, outcome) ->
+    let optional_int = function None -> `Null | Some value -> `Int value in
+    `Assoc
+      ["status", `String "observed";
+       "receipt", Exec_ssh_protocol.execution_receipt_to_yojson receipt;
+       "outcome", `Assoc
+         ["exit", optional_int outcome.exit; "signal", optional_int outcome.signal;
+          "timed_out", `Bool outcome.timed_out;
+          "shim_error", `Bool (Option.is_some outcome.shim_error)]]
+;;
+
+let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
   (* A real remote exit/signal is [Ran]; a transport that failed before or
      instead of producing one is [Transport_failed]. Every arm below that
      used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
@@ -616,6 +646,8 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
       { output_files = None; reason; stdout; stderr = append_error prefix_stderr reason }
   in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
+    let observation = ref (Execution_unavailable Request_not_sent) in
+    let result =
     match wire_env t env with
     | Error error -> transport_failed error
     | Ok env ->
@@ -670,6 +702,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
                ~remote_root:t.remote_root ~keeper:t.keeper_name text
            in
            let budget = local_wall_budget t timeout_sec in
+           observation := Execution_unavailable Transport_unavailable;
            let status, stdout, raw_stderr =
              Process_eio.run_argv_with_stdin_held_open_and_status_split
                ~timeout_sec:budget
@@ -686,6 +719,15 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out
            in
            let settle record triple =
+             (match record with
+              | Payload_finished _ | Dispatch_failed { failure = Shim_refused; _ } ->
+                observation :=
+                  (match Exec_ssh_protocol.parse_trailer raw_stderr,
+                         Exec_ssh_protocol.parse_execution_receipt raw_stderr with
+                   | Ok outcome, Ok (Some receipt) -> Execution_observed (receipt, outcome)
+                   | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
+                   | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))
+              | Dispatch_failed _ -> ());
              Atomic.set t.shared.last_dispatch (Some record);
              triple
            in
@@ -753,6 +795,9 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
                    in
                    settle (failed Trailer_disagreement error)
                      (transport_failed ~stdout ~prefix_stderr:payload_stderr error))))))
+    in
+    Option.iter (fun notify -> notify !observation) on_receipt;
+    result
 ;;
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)

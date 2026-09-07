@@ -165,6 +165,15 @@ class NativeHost(unittest.TestCase):
         self.assertNotEqual(self.process.wait(timeout=25), 0)
         self.assertIn(b"native frame write timed out", self.process.stderr.read())
 
+    def test_eof_cancels_partial_frame_write(self):
+        self.server.commands.put({"id": "eof-during-write", "verb": "page.read", "args": {"padding": "x" * (512 * 1024)}})
+        # The header proves the write began. Leave the large payload unread
+        # and close the browser's sending pipe while stdout has backpressure.
+        length, = struct.unpack("<I", read_exact(self.process.stdout, 4))
+        self.assertGreater(length, 512 * 1024)
+        self.process.stdin.close()
+        self.assertEqual(self.process.wait(timeout=2), 0)
+
 
 class Destination(unittest.TestCase):
     def test_remote_and_credentialed_origins_rejected(self):

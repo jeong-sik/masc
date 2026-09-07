@@ -53,3 +53,11 @@ framed extension peer. It requires an already-built host:
 ```sh
 python3 test/test_browser_native_host.py /path/to/masc-browser-host
 ```
+
+The host marks its stdout pipe nonblocking before starting Eio. On the POSIX
+backend, a blocking descriptor can enter a blocking `writev` even after it was
+reported writable; a large native frame can then stop the entire domain,
+including the timeout and stdin EOF fibers. Nonblocking writes return control to
+Eio when the pipe fills, keeping both cancellation paths effective. The executable
+tests retain the unread-output timeout case and also close stdin during a partial
+frame write. See the [Eio POSIX I/O implementation](https://github.com/ocaml-multicore/eio/blob/main/lib_eio_posix/low_level.ml).

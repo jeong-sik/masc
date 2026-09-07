@@ -313,6 +313,13 @@ let () =
     else if Sys.big_endian then Error "native host requires a little-endian platform"
     else
       let* config = resolve_config ~base_path:!base_path ~server:!server ~token_file:!token_file in
+      (* Firefox owns the pipe's reader; this executable owns its writer.
+         POSIX readiness does not promise that a whole native frame fits:
+         a blocking writev can otherwise stop Eio's timer and stdin fibers
+         on macOS. Configure before Eio first queries/caches the FD mode. *)
+      let* () = match Unix.set_nonblock Unix.stdout with
+        | () -> Ok ()
+        | exception Unix.Unix_error _ -> Error "native stdout setup failed" in
       try Eio_main.run (fun env -> run env config)
       with Eio.Io _ -> Error "native messaging connection failed"
   in

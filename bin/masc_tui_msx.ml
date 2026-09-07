@@ -15,21 +15,45 @@ module Frame = Masc_tui_image_mosaic
 
 let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
-(* Nearest-neighbour shrink of the native frame onto the [pcols x prows] grid
-   the mosaic wants (two pixel rows per character cell). Hard edges, so no
-   filter. *)
+(* Box-average shrink of the native frame onto the [pcols x prows] grid the
+   mosaic wants (two pixel rows per character cell): each destination cell is
+   the mean of the source rectangle it covers.
+
+   This was nearest-neighbour, chosen for hard pixel-art edges. At the sizes
+   the screen actually runs it drops the art instead of sharpening it: a 150-
+   column terminal maps 1.7 source pixels per cell across and 2.4 down, so a
+   sample lands between the strokes of the MSX's 8x8 font and the glyph is
+   gone. Measured on a live pac-man.rom frame at 150x80: the source has 11% of
+   its pixels lit, nearest keeps 11% of the grid lit but not the same ones --
+   whole strokes vanish -- while the average keeps 23% and every stroke leaves
+   a mark. Averaging is also what makes a half-lit cell dim rather than
+   absent, which is the difference between a readable glyph and a gap. *)
 let mosaic_of ~pcols ~prows ~w ~h (rgb : string) =
   let grid = Bytes.create (pcols * prows * 3) in
+  let clamp_hi v hi = if v > hi then hi else v in
   for py = 0 to prows - 1 do
-    let y = min (h - 1) (py * h / prows) in
+    let y0 = py * h / prows in
+    let y1 = clamp_hi (max (y0 + 1) ((py + 1) * h / prows)) h in
     for px = 0 to pcols - 1 do
-      let x = min (w - 1) (px * w / pcols) in
-      let src = ((y * w) + x) * 3 in
+      let x0 = px * w / pcols in
+      let x1 = clamp_hi (max (x0 + 1) ((px + 1) * w / pcols)) w in
+      let r = ref 0 and g = ref 0 and b = ref 0 and n = ref 0 in
+      for y = y0 to y1 - 1 do
+        for x = x0 to x1 - 1 do
+          let src = ((y * w) + x) * 3 in
+          if src + 2 < String.length rgb then begin
+            r := !r + Char.code rgb.[src];
+            g := !g + Char.code rgb.[src + 1];
+            b := !b + Char.code rgb.[src + 2];
+            incr n
+          end
+        done
+      done;
       let dst = ((py * pcols) + px) * 3 in
-      if src + 2 < String.length rgb then begin
-        Bytes.set grid dst rgb.[src];
-        Bytes.set grid (dst + 1) rgb.[src + 1];
-        Bytes.set grid (dst + 2) rgb.[src + 2]
+      if !n > 0 then begin
+        Bytes.set grid dst (Char.chr (!r / !n));
+        Bytes.set grid (dst + 1) (Char.chr (!g / !n));
+        Bytes.set grid (dst + 2) (Char.chr (!b / !n))
       end
     done
   done;
@@ -48,8 +72,31 @@ let footer = " esc: back   (keeper plays; this is a live view)"
 let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let screen_rows = max 4 (rows - 2) in
-  let pcols = min cols 256 in
-  let prows = 2 * screen_rows in
+  (* Keep the machine's own shape. A terminal cell is about twice as tall as
+     it is wide and the half-block splits it in two, so one mosaic pixel is
+     roughly square and [pcols : prows] can carry the frame's own ratio
+     directly. Filling the terminal instead -- which is what taking every
+     available row did -- squashed a 256x192 frame to 0.6 of its height at
+     wide sizes, and squashing is what turns an 8x8 glyph into a smear. Fit
+     to whichever axis binds, and keep [prows] even because the mosaic pairs
+     rows. *)
+  let native_w = 256 and native_h = 192 in
+  let avail_rows = 2 * screen_rows in
+  let pcols, prows =
+    let by_width = min cols native_w in
+    let rows_at_width = by_width * native_h / native_w in
+    if rows_at_width <= avail_rows
+    then by_width, rows_at_width
+    else (
+      let pr = avail_rows in
+      pr * native_w / native_h, pr)
+  in
+  let prows = prows - (prows land 1) in
+  let prows = max 2 prows in
+  let pcols = max 1 pcols in
+  (* Centre what is narrower than the terminal; a frame pinned left reads as
+     a window that failed to fill rather than a screen with margins. *)
+  let left_pad = String.make (max 0 ((cols - pcols) / 2)) ' ' in
   let buf = Buffer.create (pcols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (title_of frame));
@@ -58,6 +105,7 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        List.iter
          (fun line ->
+           Buffer.add_string buf left_pad;
            Buffer.add_string buf line;
            Buffer.add_string buf "\027[0K\r\n")
          (Frame.render ~cols:pcols ~rows:prows

@@ -378,8 +378,50 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
+
+let test_keeper_runs_selection_survives_a_shorter_list () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let keeper name : Tui_decode.keeper =
+    { k_name = name; k_trace_id = name; k_paused = false; k_current_task_id = None
+    ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
+    ; k_last_turn_ts = ""; k_last_proactive_outcome = "never"
+    ; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z"
+    }
+  in
+  let run id keeper = `Assoc
+    [ "run_id", `String id; "keeper", `String keeper; "preset", `String "trio"
+    ; "topology", `String "simple"; "started_at", `Float 1.; "finished_at", `Float 2.
+    ; "status", `String "completed"; "stage", `String "completed"; "progress", `Null
+    ]
+  in
+  let load runs =
+    match Tui_decode.decode_fusion_snapshot (`Assoc
+      [ "generated_at", `String "2026-09-07T00:00:00Z"
+      ; "count", `Int (List.length runs); "runs", `List runs ]) with
+    | Ok snapshot -> state.fusion_runs <- Some snapshot
+    | Error detail -> Alcotest.fail detail
+  in
+  let selected () =
+    Option.map (fun (index, run) -> index, run.Tui_decode.fur_run_id)
+      (selected_keeper_run state)
+  in
+  state.keepers <- [keeper "alpha"; keeper "beta"];
+  load [run "alpha-1" "alpha"; run "alpha-2" "alpha"; run "beta-1" "beta"];
+  state.keeper_run_cursor <- 1;
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "selected alpha run"
+    (Some (1, "alpha-2")) (selected ());
+  state.keeper_cursor <- 1;
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "a shorter Keeper list remains selectable"
+    (Some (0, "beta-1")) (selected ());
+  state.keeper_cursor <- 0;
+  load [run "alpha-1" "alpha"];
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "a refreshed list remains selectable"
+    (Some (0, "alpha-1")) (selected ());
+  load [];
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "empty list has no action target"
+    None (selected ())
 
 let test_lanes_run_list_footer_names_the_drill_down () =
   check str "the standalone lane run list names open and back"
@@ -1419,6 +1461,8 @@ let () =
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
+        ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick
+            test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick
             test_lanes_run_list_footer_names_the_drill_down
         ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick

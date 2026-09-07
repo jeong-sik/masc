@@ -106,6 +106,9 @@ PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
 PARTIAL_FILES=()
+BUNDLE_HELPER=""
+BUNDLE_TRANSACTION_ACTIVE=0
+DASHBOARD_ASSETS_DIR=""
 
 provider_index_by_id() {
   local id="$1" i
@@ -836,6 +839,8 @@ require uname
 require chmod
 require mkdir
 require mktemp
+require python3
+PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$PREFIX")"
 
 # --- checksum helpers ---------------------------------------------------------
 has_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
@@ -898,6 +903,8 @@ PLATFORM_SUFFIX="${ASSET#masc-}"
 TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
+DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
+BUNDLE_HELPER_ASSET="masc-release-dashboard-bundle-$PLATFORM_SUFFIX.py"
 log "platform: $ASSET"
 
 
@@ -930,6 +937,10 @@ log "version: $VERSION"
 # --- 2b. fetch release checksums ----------------------------------------------
 CHECKSUMS_FILE="$(mktemp)"
 cleanup_install_temp_files() {
+  if [ "$BUNDLE_TRANSACTION_ACTIVE" -eq 1 ]; then
+    python3 "$BUNDLE_HELPER" rollback --prefix "$PREFIX" \
+      || printf '%s\n' "binary/dashboard rollback failed; inspect $PREFIX/.masc-install-transaction" >&2
+  fi
   rm -f "$CHECKSUMS_FILE"
   [ -z "${CATALOG_FILE:-}" ] || rm -f "$CATALOG_FILE"
   local partial
@@ -1137,27 +1148,40 @@ if [ "$GUEST_SHIM" -eq 1 ]; then
   install_guest_shim
 fi
 
-if [ "$SKIP_DL" -ne 1 ]; then
-  log "downloading $URL"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would download to $DEST"
-  else
-    mkdir -p "$PREFIX"
-    tmp="$DEST.partial"
-    PARTIAL_FILES+=("$tmp")
-    fetch_release_checksums
-    curl -fL \
-      --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
-      --retry "$MASC_INSTALL_CURL_RETRIES" \
-      --progress-bar \
-      -o "$tmp" \
-      "$URL" \
-      || die "download failed (asset missing for $VERSION?)"
-    verify_checksum "$tmp" "$ASSET"
-    chmod +x "$tmp"
-    mv "$tmp" "$DEST"
-    log "installed: $DEST"
+# Fetch and verify both halves before publishing the new runtime. The helper
+# installs an immutable release directory and one atomic executable pointer;
+# EXIT rolls it back if later seeding/wizard/smoke fails.
+fetch_bundle_asset() {
+  local asset="$1" target="$2"
+  fetch_release_checksums
+  curl -fL --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" --progress-bar \
+    -o "$target" "$RELEASE_BASE_URL/$VERSION/$asset" \
+    || die "download failed (asset missing for $VERSION?): $asset"
+  verify_checksum "$target" "$asset"
+}
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "[dry-run] would install verified binary/dashboard bundle at $PREFIX"
+else
+  mkdir -p "$PREFIX"
+  binary_input="$DEST"
+  if [ "$SKIP_DL" -ne 1 ]; then
+    binary_input="$(mktemp "$PREFIX/.masc-download.XXXXXX")"
+    PARTIAL_FILES+=("$binary_input")
+    fetch_bundle_asset "$ASSET" "$binary_input"
   fi
+  BUNDLE_HELPER="$(mktemp)"
+  bundle_archive="$(mktemp)"
+  PARTIAL_FILES+=("$BUNDLE_HELPER" "$bundle_archive")
+  fetch_bundle_asset "$BUNDLE_HELPER_ASSET" "$BUNDLE_HELPER"
+  fetch_bundle_asset "$DASHBOARD_ASSET" "$bundle_archive"
+  DASHBOARD_ASSETS_DIR="$(python3 "$BUNDLE_HELPER" install \
+    --binary "$binary_input" --archive "$bundle_archive" \
+    --prefix "$PREFIX" --binary-asset "$ASSET")" \
+    || die "binary/dashboard installation rejected"
+  BUNDLE_TRANSACTION_ACTIVE=1
+  log "installed verified binary/dashboard: $DEST"
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
@@ -1321,6 +1345,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
+BUNDLE_TRANSACTION_ACTIVE=0
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
 # do not default-disable Runtime_events. If the operator supplied an override,
@@ -1329,7 +1355,7 @@ runtime_events_start_env=""
 if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
   runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
 fi
-start_env="${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
   start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
 fi

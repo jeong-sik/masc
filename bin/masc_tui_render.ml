@@ -7958,22 +7958,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let run_lines =
       match state.fusion_runs with
-      | None -> [ Ansi.dim ^ "  (loading this Keeper's Fusion runs…)" ^ Ansi.reset ]
-      | Some snapshot ->
-          let runs =
-            List.filter
-              (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_keeper k.k_name)
-              snapshot.fus_runs
-          in
-          if runs = [] then [ Ansi.dim ^ "  (no retained Fusion runs for this Keeper)" ^ Ansi.reset ]
-          else
-            List.map
-              (fun (run : Tui_decode.fusion_run) ->
-                 Printf.sprintf "  %-12s %-16s %s"
-                   (Tui_decode.fusion_run_status_to_string run.fur_status)
-                   (Terminal_text.single_line run.fur_preset)
-                   (Terminal_text.single_line run.fur_run_id))
-              runs
+      | None -> ["  Loading Fusion runs..."]
+      | Some _ ->
+          let runs = selected_keeper_runs state in
+          "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
+          (if runs = [] then ["  No retained Fusion runs for this Keeper"]
+           else List.mapi (fun index (run : Tui_decode.fusion_run) ->
+             let tm = Unix.localtime run.fur_started_at in
+             Printf.sprintf "%s %04d-%02d-%02d %02d:%02d · %s · %s · %s"
+               (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
+                     (selected_keeper_run state) then ">" else " ")
+               (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+               tm.Unix.tm_hour tm.Unix.tm_min
+               (Tui_decode.fusion_run_status_to_string run.fur_status)
+               (Terminal_text.single_line run.fur_preset)
+               (Terminal_text.single_line run.fur_run_id)) runs)
     in
     let all_lines =
       match state.detail_tab with
@@ -8063,6 +8062,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let scroll =
       Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
         ~content_height state.detail_scroll
+      |> fun scroll ->
+        if state.detail_tab = Detail_runs then
+          Option.fold ~none:scroll
+            ~some:(fun (cursor, _) ->
+              Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
+                ~height:(max 1 content_height) scroll)
+            (selected_keeper_run state)
+        else scroll
     in
 
     for i = 0 to visible_lines - 1 do
@@ -11654,8 +11661,17 @@ let fusion_run_progress_text = function
   | Fusion_stage_failed -> "failed"
 
 let fusion_run_clock run =
-  Terminal_text.clock_timestamp
-    (Masc_domain.iso8601_of_unix_seconds run.fur_started_at)
+  let tm = Unix.localtime run.fur_started_at in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min
+
+let fusion_run_duration ~now run =
+  match run.fur_status, run.fur_finished_at with
+  | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
+  | (Fusion_completed | Fusion_failed _), Some finished ->
+      Message_layout.span_text (finished -. run.fur_started_at)
+  | (Fusion_completed | Fusion_failed _), None -> "not recorded"
 
 let fusion_run_age ~now run =
   Option.value ~default:"\xe2\x80\x94"
@@ -11745,15 +11761,15 @@ let render_fusion_list (state : state) =
   in
   (* The run id takes what the named columns leave, once the keeper column has
      been sized to the names it actually holds. *)
-  let run_width =
-    Render_schedule.fusion_run_width ~keeper_width
+  let columns =
+    Render_schedule.allocate_fusion_columns ~keeper_width
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Render_schedule.fusion_header_row ~keeper_width ~run_width);
+    ("  " ^ Render_schedule.fusion_header_row columns);
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -11797,7 +11813,7 @@ let render_fusion_list (state : state) =
             | Fusion_completed | Fusion_failed _ -> status
           in
           let line =
-            Render_schedule.fusion_row ~keeper_width ~run_width
+            Render_schedule.fusion_row columns
               ~state_style:(fusion_run_status_color run.fur_status)
               { Render_schedule.frow_time = fusion_run_clock run
               ; frow_age = fusion_run_age ~now:now_epoch run
@@ -11815,7 +11831,7 @@ let render_fusion_list (state : state) =
    | None -> box_empty buf cols
    | Some selected ->
        let style, summary = fusion_run_summary selected in
-       box_line_styled buf cols ~style ("  " ^ summary));
+       box_line_styled buf cols ~style ("  " ^ fusion_run_duration ~now:now_epoch selected ^ " · " ^ summary));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -12034,7 +12050,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
     ; ( Ansi.reset
-      , Printf.sprintf "  Actions: %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
+      , Printf.sprintf "  Actions: K Keeper · B Board · %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
           (Theme.info ()) Ansi.reset
           (Theme.info ()) Ansi.reset
           (Theme.info ()) Ansi.reset )
@@ -12056,8 +12072,14 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     ; ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ started_text
+    ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"
+    ; Ansi.reset, "  Duration: " ^ fusion_run_duration ~now run
     ]
+    @ (match detail.fud_evidence with
+       | None -> [Ansi.dim, "  Original question and Board link: awaiting evidence"]
+       | Some evidence ->
+           [ Theme.info (), "  Board: " ^ Link.reference Board_post evidence.fe_post_id
+           ; Ansi.bold, "  Original question: " ^ Terminal_text.single_line evidence.fe_question ])
     @
     match run.fur_status with
     | Fusion_running -> []
@@ -16810,9 +16832,24 @@ let render_surface (state : state) =
        | Board_list -> render_board_list state
        | Board_compose -> render_board_compose state
        | Board_read post_id ->
-           match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
-           | Some post -> render_board_read state post
-           | None -> render_board_list state)
+           match Board_detail.view_for state.board_detail ~post_id with
+           | Board_detail.Ready (post, _) -> render_board_read state post
+           | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+               (match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
+                | Some post -> render_board_read state post
+                | None ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    surface_chrome state ~terminal_rows ~cols ~surface_key:"board-read"
+                      ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~body:(fun ~budget:_ c ->
+                        match Board_detail.view_for state.board_detail ~post_id with
+                        | Board_detail.Failed detail ->
+                            c.push_styled ~style:(Theme.bad ())
+                              ("  Board post load failed: " ^ Terminal_text.single_line detail)
+                        | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
+                        | Board_detail.Loading -> c.push "  Loading Board post..."
+                        | Board_detail.Ready _ -> ())))
   | Planning ->
       (match state.planning_mode with
        | Planning_list -> render_planning_list state

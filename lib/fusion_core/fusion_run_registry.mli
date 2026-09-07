@@ -60,6 +60,7 @@ type run =
           배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 수 있는 자리는 여기뿐이다.
           topology 를 담지 않은 예전 replay 레코드는 스킵된다(레거시 폴백 없음). *)
   ; started_at : float
+  ; finished_at : float option
   ; status : run_status
   ; progress : progress option
       (** Process-local live observation. Replay drops running workers, so an

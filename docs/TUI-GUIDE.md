@@ -1574,6 +1574,12 @@ The overview shows fleet totals separately from the filtered Keeper list. `ST` u
 
 Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
 
+### Following a Fusion run
+
+Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
 ### Workspace activity
 
 On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.

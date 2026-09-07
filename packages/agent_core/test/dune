@@ -35,6 +35,11 @@
  (libraries agent_core_test_deps llm_provider))
 
 (executable
+ (name capability_resolution_dump)
+ (modules capability_resolution_dump)
+ (libraries agent_core_test_deps llm_provider))
+
+(executable
  (name test_wire_parse_dump)
  (modules test_wire_parse_dump)
  (libraries llm_provider unix))

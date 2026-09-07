@@ -151,9 +151,9 @@
 
 ;; Tool parity artifact generator (task-1363): reads config/tools/*.toml
 ;; through the production loader (Tool_definition_toml.load) and regenerates
-;; the test/golden/tool_parity_*.txt baselines. Manual-only via
-;; @regen_tool_parity_artifacts (tools/tool_parity_regen.inc); never a build
-;; dependency of anything.
+;; the test/golden/tool_parity_*.txt baselines. Manual-only via the
+;; @regen_tool_parity_artifacts alias rule below; never a build dependency
+;; of anything.
 (executable
  (name tool_parity_generator)
  (modules tool_parity_generator)

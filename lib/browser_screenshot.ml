@@ -11,6 +11,17 @@ let persist ~keeper_name json =
     | `Assoc fields -> (match List.assoc_opt "tabId" fields with
         | Some (`Int id) when id >= 0 -> Ok id | _ -> Error "screenshot missing tabId")
     | _ -> Error "screenshot must be an object" in
+  let* client_fields = match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "clientId" fields with
+       (* Direct pixel persistence may omit routing metadata. Never invent an identity. *)
+       | None -> Ok []
+       | Some `Null -> Ok ["clientId", `Null]
+       | Some (`String raw) ->
+         let* id = Browser_lane.client_id_of_string raw in
+         Ok ["clientId", `String (Browser_lane.client_id_to_string id)]
+       | Some _ -> Error "invalid screenshot clientId")
+    | _ -> Error "screenshot must be an object" in
   let max_bytes = Keeper_vision_tool.max_image_bytes () in
   if String.length encoded > ((max_bytes + 2) / 3) * 4 then Error "screenshot exceeds Vision image size limit"
   else
@@ -24,10 +35,7 @@ let persist ~keeper_name json =
         | _ -> Error "invalid screenshot dimensions" in
       let* handle = Keeper_vision_tool.store_artifact
           ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name) bytes in
-      let client_id = match json with
-        | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt "clientId" fields)
-        | _ -> `Null in
-      Ok (`Assoc ["clientId", client_id; "artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
+      Ok (`Assoc (client_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;
-        "bytes", `Int (String.length bytes); "scope", `String "viewport"])
+        "bytes", `Int (String.length bytes); "scope", `String "viewport"]))

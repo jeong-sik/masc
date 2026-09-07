@@ -49,11 +49,8 @@ default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
 # Vision read fleet (RFC-0414). When a keeper's assigned runtime cannot take an
 # image, analyze_image's eager read walks these first. gemma4-31b (Gemma 4,
 # strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
-# measured 5+ min per read under load, so it is deliberately not here. The fleet
-# default glm-5.3-flash is left out on purpose: its request-body ceiling is the
-# tight text-dispatch bound (below), too small for a base64 image. gemma4-31b
-# declares image input in [models.*] and carries an image-sized body ceiling in
-# its binding below.
+# measured 5+ min per read under load, so it is deliberately not here.
+# gemma4-31b declares image input and an explicit image payload limit below.
 media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
@@ -592,24 +589,14 @@ supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
 wizard-default = true
-# Keeper application working set, not the provider's 1M-token capability.
-# The exact final JSON body (system/tail + tools + lossless transcript) must
-# remain bounded so durable canonical history cannot become an n,n+1,... wire
-# replay. AGENT_CORE rejects an oversized serialized body locally before POST; the
-# Keeper turn policy owns any subsequent recovery decision.
-max-request-body-bytes = 524288
 
 [deepseek.deepseek-v4-pro]
-max-request-body-bytes = 524288
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 524288
 
 [glm-coding.glm-4-7-coding]
 wizard-default = true
-# GLM's smaller serving window gets a smaller explicit wire working set.
-max-request-body-bytes = 262144
 
 [models.glm-5-turbo]
 # Mirrors the AGENT_CORE catalog window. Was 203000, above the catalog's
@@ -638,28 +625,6 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
-# 262144 was inherited from [glm-coding.glm-4-7-coding], where it is justified
-# by that model's smaller serving window. This model's window is 200000 tokens
-# and the ceiling has to be read against that: measured on a live
-# 2026-08-14 request, 195,485 B carried 54,615 tokens, so 262144 B is about
-# 73,000 tokens — a third of what the model accepts.
-#
-# The keeper pays for the difference in memory. The window sizes history
-# against this ceiling, so on that same trace the keeper transmitted 14 of
-# 15,413 messages, roughly 7 turns of 7,650.
-#
-# Both candidate values have a recorded failure, and neither is safe by
-# arithmetic. 262144 latched analyst on 2026-07-29: its history serialized to
-# 355,286 B, every request was refused, and the turn could not compact its way
-# out. 524288 failed the next day when five keepers landed at 524,335 B — 47
-# bytes over — because the window fills toward whatever ceiling it is given and
-# the envelope is not part of what it measures. What made that catastrophic
-# rather than a retry was the recovery chain, fixed since in #27813.
-#
-# So this is not "524288 is the right size". It is: one value fails on
-# ordinary history, the other fails only on an envelope overshoot the retry
-# path now absorbs.
-max-request-body-bytes = 524288
 
 # GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
 # Mirrors the glm-5-turbo judge row it replaces at the head of each lane. The
@@ -684,9 +649,6 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-3]
-# Working-set ceiling mirrors the glm-5-turbo sibling (same 200000 window); see
-# that binding's note on why 524288 is the chosen value.
-max-request-body-bytes = 524288
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
 # 2026-08-28 swap (json_schema+strict probed live; quota independent of
@@ -710,10 +672,6 @@ supports-structured-output = true
 supports-response-format-json = true
 
 [kimi_coding.kimi-for-coding]
-# 128K-window anchor rule used across this file: max-context 262144 → 524288.
-# Larger than the model max-prompt-bytes (262144) because the body also
-# carries the tool schemas and JSON overhead.
-max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
 # the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and
@@ -789,7 +747,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-deepseek-v4-flash]
-max-request-body-bytes = 524288
 
 # Ollama Cloud's 2026-07-31 DeepSeek-V4-Flash build. It is a DIFFERENT model
 # from the untagged `deepseek-v4-flash` above, not a newer alias of it:
@@ -822,10 +779,8 @@ reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
-# No wizard-default: this adds a selectable lane and deliberately leaves
-# [runtime].default on ollama_cloud.deepseek-v4-flash.
+# No wizard-default: this binding is selectable without changing the fleet default.
 [ollama_cloud.ollama-cloud-deepseek-v4-flash-0731]
-max-request-body-bytes = 524288
 # 2026-08-25: this model collapses into single-token repetition and, with no
 # declared budget, runs the collapse to ollama.com's own 65536-token cap. Wire
 # capture for 2026-08-24..25 caught 11 such generations verbatim -- ~228,000
@@ -878,8 +833,7 @@ supports-multimodal-inputs = true
 [ollama_cloud.ollama-cloud-gemma4-31b]
 # media_failover vision reader (RFC-0414): the eager read serializes a base64
 # image, so this ceiling is sized for it (max image 10 MB -> ~13 MB base64, plus
-# the prompt). A positive value is also what makes the runtime keeper-dispatchable
-# at all, which media_failover requires.
+# the prompt). This is a caller payload limit for image requests.
 max-request-body-bytes = 20971520
 
 [models.ollama-cloud-glm-5-1]
@@ -936,10 +890,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-3]
-# Keeper working-set bound, mirrored from the deepseek-v4-flash sibling on this
-# same ollama_cloud wire. Without a positive value the runtime is admitted but
-# not keeper-dispatchable (boot WARN), so this GLM cannot be selected.
-max-request-body-bytes = 524288
 
 # Zhipu GLM-5.3 Flash. /api/show 2026-08-29:
 # caps=[completion,thinking,tools,vision], context_length=1048576,
@@ -966,9 +916,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-glm-5-3-flash]
-# Same working-set bound as the sibling ollama_cloud runtimes; a positive value
-# is what makes this the keeper-dispatchable fleet default (see [runtime].default).
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-gpt-oss-20b]
 api-name = "gpt-oss:20b"
@@ -1059,9 +1006,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k3]
-# Working-set bound mirrored from the sibling ollama_cloud runtimes so Moonshot
-# Kimi K3 is keeper-dispatchable rather than admitted-but-unusable.
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-minimax-m2-7]
 api-name = "minimax-m2.7"

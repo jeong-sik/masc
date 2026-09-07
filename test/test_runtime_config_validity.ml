@@ -1268,6 +1268,26 @@ let test_repo_runtime_toml_loads () =
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.ollama-cloud-glm-5-3-flash"
       default.Runtime.id;
+    check (option int) "default Keeper has no invented history byte limit"
+      None (agent_core_provider_config default).max_request_body_bytes;
+    check bool "uncapped fleet default remains dispatchable" true
+      (match Runtime.keeper_dispatch_readiness default with
+       | Runtime.Dispatchable -> true
+       | Runtime.Invalid_request_body_cap _ -> false);
+    let explicit_caps =
+      List.filter_map
+        (fun (runtime : Runtime.t) ->
+           match runtime.execution with
+           | Runtime_execution.Agent_core config ->
+             Option.map (fun cap -> runtime.id, cap) config.max_request_body_bytes
+           | Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ -> None)
+        runtimes
+    in
+    check (list (pair string int)) "only the explicit image payload cap is seeded"
+      [ "ollama_cloud.ollama-cloud-gemma4-31b", 20 * 1024 * 1024 ]
+      explicit_caps;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->

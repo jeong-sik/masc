@@ -10330,10 +10330,15 @@ def config_navigation_interaction() -> Interaction:
         for needle in (b"fixture-read-revision", b"Validation: valid", b"Keeper restart: required"):
             if needle not in status_plain:
                 raise AssertionError(f"Config status omitted {needle!r}: {status_plain!r}")
+        send_and_wait(
+            process, master_fd, output, b"r", b"fixture-reloaded-revision"
+        )
         # Source-only input must not open an editor or a hidden-source search.
         # If / stole focus, v would become search text instead of returning.
         send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
-        send_and_wait(process, master_fd, output, b"v", b"first-value = ")
+        reloaded_source = send_and_wait(process, master_fd, output, b"v", b"first-value = ")
+        if b"first-value = 9" not in CSI_RE.sub(b"", reloaded_source):
+            raise AssertionError("Config reload changed revision without its new source")
 
         next_field = send_and_wait(
             process, master_fd, output, b"j", b"second-value = "
@@ -12643,14 +12648,17 @@ def run_project_changes_regression(executable: str) -> None:
 
 def run_config_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
-    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
-        200,
-        {
-            **runtime_config_read_metadata(),
-            "path": "/workspace/config/runtime.toml",
-            "source_text": config_navigation_source(),
-        },
-    )
+    initial = {
+        **runtime_config_read_metadata(),
+        "path": "/workspace/config/runtime.toml",
+        "source_text": config_navigation_source(),
+    }
+    reloaded = {
+        **initial,
+        "source_revision": "fixture-reloaded-revision",
+        "source_text": config_navigation_source().replace("first-value = 1", "first-value = 9"),
+    }
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = SequencedHttpResponse([(200, initial), (200, reloaded)])
     run_terminal_scenario(
         executable,
         description="Config value navigation, paging, and model temperature",

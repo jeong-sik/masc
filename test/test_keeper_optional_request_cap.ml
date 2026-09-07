@@ -92,6 +92,7 @@ streaming = false
    | Ok _ -> fail "expected exactly one projected runtime"
    | Error detail -> fail detail);
   let observations = ref [] in
+  let model_input_windows = ref 0 in
   let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
     Keeper_turn_driver.run_named
@@ -100,6 +101,8 @@ streaming = false
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ error ->
         attempt_errors := (runtime_id, error) :: !attempt_errors)
+      ~on_model_input_window_observation:(fun ~measurement:_ _ ->
+        incr model_input_windows)
       ~on_request_wire_observation:(fun ~runtime_id:_ ~max_request_body_bytes ~body_bytes ~serialized ->
         observations := (max_request_body_bytes, body_bytes, Option.is_some serialized) :: !observations)
       ()
@@ -123,6 +126,8 @@ streaming = false
   let limit = String.length short_body - 1 in
   (match Runtime.save_config_text ~runtime_config_path:config_path (config_text (Some limit)) with
    | Ok _ -> () | Error detail -> fail detail);
+  observations := [];
+  model_input_windows := 0;
   (match run "short" with
    | Error (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
        { reason = Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes }; _ })) ->
@@ -130,10 +135,12 @@ streaming = false
      check int "explicit caller cap stays exact" limit limit_bytes
    | Error error -> failf "expected final byte admission, got %s" (Agent_core.Error.to_string error)
    | Ok _ -> fail "explicit exceeded byte cap reached provider");
+  check int "history admission succeeds once before final serialized-byte refusal" 1
+    !model_input_windows;
   check int "explicit exceeded cap performs no HTTP request" 2
     (Exact_output_fixture.post_count server);
-  check (option (triple (option int) int bool)) "refusal preserves exact cap and unavailable serialization"
-    (Some (Some limit, String.length short_body, false)) (List.nth_opt !observations 0);
+  check (list (triple (option int) int bool)) "one exact byte refusal, without stale admitted observations"
+    [Some limit, String.length short_body, false] !observations;
   let refused_url, refused_requests = start_context_refusal_server ~sw ~net:env#net in
   let recovery_config = config_text None ^ Printf.sprintf {|
 [providers.overflow]

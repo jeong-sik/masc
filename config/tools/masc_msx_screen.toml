@@ -1,0 +1,10 @@
+name = "masc_msx_screen"
+description = """
+Read the workspace MSX machine without moving time: frame count, display \
+mode, program counter, halted flag, the name table as text (meaningful \
+when the game uses a font), the 24x32 tile grid as hex pairs (GRAPHIC1/2/3 \
+and MULTICOLOR; '..' is tile 0), and the sprite table. Tile numbers mean \
+what the game says they mean; learn them by playing."""
+additional_properties = false
+
+defer_loading = true

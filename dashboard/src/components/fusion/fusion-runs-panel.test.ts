@@ -3,6 +3,24 @@ import { parseFusionRunsResponse } from '../../api/dashboard'
 import { fusionRunStatusText, fusionRunStatusTone } from './fusion-runs-panel'
 
 describe('parseFusionRunsResponse', () => {
+  it('keeps rejected replay rows and historical Board identities without inventing runs', () => {
+    const parsed = parseFusionRunsResponse({ runs: [], count: 0,
+      replay: { status: 'complete', lines_read: 68, malformed_lines: 34, dropped_running: 0 },
+      historical_evidence: [{ run_id: 'old-run', post_id: 'exact-post', title: 'Old evidence', created_at: 100 }],
+    })
+    expect(parsed.runs).toEqual([])
+    expect(parsed.replay).toEqual({ status: 'complete', linesRead: 68, malformedLines: 34, droppedRunning: 0 })
+    expect(parsed.historicalEvidence).toEqual([{ runId: 'old-run', postId: 'exact-post', title: 'Old evidence', createdAt: 100 }])
+    expect(parsed.historicalEvidence[0]).not.toHaveProperty('status')
+  })
+
+  it('rejects malformed replay and historical identity instead of dropping them', () => {
+    for (const fields of [
+      { replay: { status: 'guessed' } },
+      { replay: { status: 'complete', lines_read: 1, malformed_lines: -1, dropped_running: 0 } },
+      { historical_evidence: [{ run_id: 'r', post_id: '', title: 'x', created_at: 1 }] },
+    ]) expect(() => parseFusionRunsResponse({ runs: [], ...fields })).toThrow()
+  })
   it('maps snake_case rows to FusionRunRecord and falls back count to length', () => {
     const parsed = parseFusionRunsResponse({
       generated_at: '2026-06-20T01:00:00Z',

@@ -185,6 +185,20 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_act ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_slack_read ->
       Some (Tool_misc_slack_lane.handle_read ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_msx_load ->
+      Some
+        (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
+           ~base_path:ctx.config.base_path args)
+  | Some Tool_schemas_misc.Misc_msx_eject ->
+      Some (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_msx_screen ->
+      Some (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_msx_press ->
+      Some
+        (Tool_misc_msx_lane.handle_press ~tool_name:name ~start_time:start
+           ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_msx_step ->
+      Some (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -201,7 +215,14 @@ let is_read_only = function
      Browser_lane is this classification's source of truth. *)
   | Tool_schemas_misc.Misc_browser_tabs
   | Tool_schemas_misc.Misc_browser_read
-  | Tool_schemas_misc.Misc_slack_read -> true
+  | Tool_schemas_misc.Misc_slack_read
+  (* Reads the machine without moving its time. *)
+  | Tool_schemas_misc.Misc_msx_screen -> true
+  (* Loading, ejecting, pressing and stepping change the shared machine. *)
+  | Tool_schemas_misc.Misc_msx_load
+  | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_press
+  | Tool_schemas_misc.Misc_msx_step
   (* Starting and stopping the automation browser changes its lifecycle. *)
   | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask

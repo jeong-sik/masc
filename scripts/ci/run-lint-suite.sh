@@ -172,6 +172,18 @@ blocking_pr_lints() {
   # from inside the renderer and main sat red on a check nobody was checking.
   # Same shape as the cancel-guard lint above.
   run_lint "TUI renderer writes no state" bash scripts/ci/check-tui-render-purity.sh
+  # Three commits titled "security: remove tracked <secret>" -- #636, #3422,
+  # #6487 -- each deleted the file and left the blob served. On 2026-09-07
+  # the #636 blob still answered an unauthenticated GitHub blob request, and
+  # three of the four Claude tokens in it still authenticated, five months
+  # on. GitHub push protection caught the `sk-ant-` key in the task-362
+  # capture and let the `postgresql://user:pass@host` line in the same
+  # bundle through, because that shape is not one of its provider patterns.
+  # Budget is zero against an allowlist that pins fixture values by hash.
+  run_self_test_when_changed "Committed-credential self-test" \
+    scripts/ci/check-committed-secrets.py \
+    python3 scripts/ci/test_check_committed_secrets.py
+  run_lint "No committed credentials" python3 scripts/ci/check-committed-secrets.py
 }
 
 advisory_lints() {

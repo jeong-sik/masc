@@ -1261,7 +1261,11 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
             json))
 ;;
 
-let dashboard_execution_http_json ~state ~sw ~clock request =
+type execution_http_response =
+  | Execution_json of Yojson.Safe.t
+  | Execution_payload of Dashboard_cache.cached_payload
+
+let dashboard_execution_http_response ~state ~sw ~clock request =
   let config = (Mcp_server.workspace_config state) in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
@@ -1363,6 +1367,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
          ~config
          ~cache_key:execution_default_light_cache_key
          ~query
+    |> fun json -> Execution_json json
   | None, None, false ->
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
@@ -1381,29 +1386,45 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         json
     in
     let (_ : Yojson.Safe.t) = refresh_execution_default_light_http_body ~config in
-    response_json
+    Execution_json response_json
   | _ ->
-    (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
-         These are rare (test fixtures, actor-specific views, full mode). *)
+    (* Authenticated dashboards use this path too. Cache the complete response
+       so repeat reads retain its bytes instead of serializing the projection
+       again. Scope every input that contributes to the response metadata. *)
+    let generation = current_execution_publication_generation () in
     let cache_key =
-      Printf.sprintf
-        "execution:%s:%s:%s"
-        (Option.value ~default:"" actor)
-        (Option.value ~default:"" fixture)
-        (if full_mode then "full" else "light")
+      "execution:parameterized:"
+      ^ Yojson.Safe.to_string
+          (`List
+             [ `String config.base_path; `String config.workspace_path;
+               `String (Workspace.masc_root_dir config);
+               `Int generation; query ])
     in
     let compute_with_generation () =
-      let generation = current_execution_publication_generation () in
       compute ?actor ?fixture ~light ()
       |> with_execution_publication_generation ~generation
+      |> with_execution_metadata ~config ~cache_key ~query
     in
-    Dashboard_cache.get_or_compute_with_timeout
-      cache_key
-      ~ttl:deep_surface_cache_ttl_s
-      ~clock
-      ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-      compute_with_generation
-    |> with_execution_metadata ~config ~cache_key ~query
+    let payload =
+      Dashboard_cache.get_or_compute_payload_with_timeout
+        cache_key
+        ~ttl:deep_surface_cache_ttl_s
+        ~clock
+        ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
+        compute_with_generation
+    in
+    if Dashboard_cache.is_timeout_envelope payload.json then
+      (* Owner/waiter/circuit timeouts are generated outside [compute]. They
+         still need this request's metadata and must not become cached success. *)
+      Execution_json
+        (with_execution_metadata ~config ~cache_key ~query payload.json)
+    else Execution_payload payload
+;;
+
+let dashboard_execution_http_json ~state ~sw ~clock request =
+  match dashboard_execution_http_response ~state ~sw ~clock request with
+  | Execution_json json -> json
+  | Execution_payload payload -> payload.json
 ;;
 
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =

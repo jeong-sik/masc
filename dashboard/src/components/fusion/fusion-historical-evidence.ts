@@ -35,10 +35,11 @@ function HistoricalUsage({ post }: { post: BoardPost }) {
   // from a panel count or turning an absent dollar figure into zero.
   const usage = normalizeFusionUsage(meta)
   const cost = firstNumber(meta, ['cost_usd', 'costUsd', 'observed_cost_usd'])
-  return html`<dl data-testid="fusion-historical-usage">
-    <dt>입력 토큰 (관측)</dt><dd>${usage.inputTokens?.toLocaleString('en-US') ?? '미관측'}</dd>
-    <dt>출력 토큰 (관측)</dt><dd>${usage.outputTokens?.toLocaleString('en-US') ?? '미관측'}</dd>
-    <dt>비용 (관측)</dt><dd>${cost === null ? '미관측' : `$${cost.toFixed(4)}`}</dd>
+  return html`<dl class="fus-kpis" data-testid="fusion-historical-usage">
+    <div class="fus-kpi"><dt class="k">입력 토큰 (관측)</dt><dd class="v">${usage.inputTokens?.toLocaleString('en-US') ?? '미관측'}</dd></div>
+    <div class="fus-kpi"><dt class="k">출력 토큰 (관측)</dt><dd class="v">${usage.outputTokens?.toLocaleString('en-US') ?? '미관측'}</dd></div>
+    <div class="fus-kpi"><dt class="k">비용 (관측)</dt><dd class="v">${cost === null ? '미관측' : `$${cost.toFixed(4)}`}</dd></div>
+    <div class="fus-kpi"><dt class="k">증거 출처</dt><dd class="v">보드 원문</dd></div>
   </dl>`
 }
 
@@ -62,7 +63,7 @@ export function FusionHistoricalDetail({ evidence }: { evidence: FusionHistorica
 
   return html`<div class="fus-run-scroll" data-testid="fusion-historical-detail">
     <div class="fus-run-head">
-      <h1>${evidence.title}</h1>
+      <div class="fus-run-id-row"><h1 class="mono break-words">${evidence.title}</h1></div>
       <div class="mono">${evidence.runId}</div>
       <p>보드에 남은 원문입니다. 레지스트리에 실행 기록이 없어 성공·실패와 시작·완료 시각은 확인할 수 없습니다.</p>
       <p>보드 게시 시각 · <${TimeAgo} timestamp=${evidence.createdAt} mode="both" /></p>

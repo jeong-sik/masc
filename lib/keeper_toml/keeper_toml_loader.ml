@@ -394,11 +394,19 @@ let before_rename_failure ~path detail =
   }
 ;;
 
-let edit_keeper_toml_fields_strict_staged ~(path : string) fields =
+type edit_stage =
+  | Reread_started
+  | Reread_completed
+  | Render_completed
+  | Atomic_write of Fs_compat.Atomic_replace_for_testing.stage
+
+let edit_keeper_toml_fields_using ~observe ~write ~(path : string) fields =
+  observe Reread_started;
   match Safe_ops.read_file_safe path with
   | Error error ->
     Error (before_rename_failure ~path (Printf.sprintf "cannot read %s: %s" path error))
   | Ok content ->
+    observe Reread_completed;
     let updated =
       List.fold_left
         (fun result (key, edit) ->
@@ -419,7 +427,14 @@ let edit_keeper_toml_fields_strict_staged ~(path : string) fields =
     (match updated with
      | Error detail ->
        Error (before_rename_failure ~path detail)
-     | Ok content -> Fs_compat.save_file_atomic_strict_staged path content)
+     | Ok content ->
+       observe Render_completed;
+       write path content)
+;;
+
+let edit_keeper_toml_fields_strict_staged ~path fields =
+  edit_keeper_toml_fields_using ~observe:(fun _ -> ())
+    ~write:Fs_compat.save_file_atomic_strict_staged ~path fields
 ;;
 
 let create_keeper_toml_file_strict_staged ~(path : string) fields =
@@ -457,3 +472,18 @@ let create_keeper_toml_file_strict_staged ~(path : string) fields =
 (* Higher-level functions (profile_defaults_of_toml, load_keeper_toml,
    discover_keepers) live in Keeper_types_profile to avoid a circular
    dependency: this module must not reference Keeper_types_profile. *)
+
+module For_testing = struct
+  type nonrec edit_stage = edit_stage =
+    | Reread_started
+    | Reread_completed
+    | Render_completed
+    | Atomic_write of Fs_compat.Atomic_replace_for_testing.stage
+
+  let edit_keeper_toml_fields_observed ~observe ~path fields =
+    edit_keeper_toml_fields_using ~observe
+      ~write:
+        (Fs_compat.Atomic_replace_for_testing.save_file_atomic_observed
+           ~observe:(fun stage -> observe (Atomic_write stage)))
+      ~path fields
+end

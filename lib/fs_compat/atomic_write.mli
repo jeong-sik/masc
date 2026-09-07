@@ -76,6 +76,23 @@ val save_file_atomic_strict
   -> (unit, string) Result.t
 
 module Atomic_replace_for_testing : sig
+  type stage =
+    | Job_submitted
+    | Job_started
+    | Temporary_created
+    | Payload_written
+    | Payload_synced
+    | Target_renamed
+    | Parent_synced
+    | Job_returned
+
+  (** The observer is call-scoped and must not raise or perform Eio effects.
+      Most stages execute on the writer system thread; use atomic state. *)
+  val save_file_atomic_observed :
+    observe:(stage -> unit) ->
+    save_file:(string -> string -> unit) ->
+    string -> string -> (unit, atomic_replace_failure) Result.t
+
   val save_file_atomic_strict_staged
     :  ?sync_file:(string -> unit)
     -> sync_parent:(string -> unit)

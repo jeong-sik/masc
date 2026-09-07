@@ -62,3 +62,19 @@ val create_keeper_toml_file_strict_staged :
   path:string ->
   (string * toml_value) list ->
   (unit, Fs_compat.atomic_replace_failure) result
+
+module For_testing : sig
+  type edit_stage =
+    | Reread_started
+    | Reread_completed
+    | Render_completed
+    | Atomic_write of Fs_compat.Atomic_replace_for_testing.stage
+
+  (** Same reader, renderer and strict writer as the production entrypoint.
+      Atomic-write observations may run on its system thread. *)
+  val edit_keeper_toml_fields_observed :
+    observe:(edit_stage -> unit) ->
+    path:string ->
+    (string * toml_edit) list ->
+    (unit, Fs_compat.atomic_replace_failure) result
+end

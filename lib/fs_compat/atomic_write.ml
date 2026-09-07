@@ -2622,7 +2622,18 @@ let atomic_replace_failure_to_string failure =
     (Printexc.to_string failure.exception_)
 ;;
 
+type atomic_write_stage =
+  | Job_submitted
+  | Job_started
+  | Temporary_created
+  | Payload_written
+  | Payload_synced
+  | Target_renamed
+  | Parent_synced
+  | Job_returned
+
 let write_file_atomic_with_parent_sync
+  ?(observe = fun _ -> ())
   ~sync_file
   ~sync_parent
   ~(write_temp : string -> unit)
@@ -2634,9 +2645,11 @@ let write_file_atomic_with_parent_sync
   let failure ~backtrace exception_ =
     Error { path; stage = !stage; exception_; backtrace }
   in
-  blocking_syscalls
+  observe Job_submitted;
+  let result = blocking_syscalls
     ~label:("fs-compat-atomic-replace " ^ Stdlib.Filename.basename path)
     (fun () ->
+    observe Job_started;
     match
       try
         Ok
@@ -2655,11 +2668,16 @@ let write_file_atomic_with_parent_sync
     | Error _ as error -> error
     | Ok tmp ->
       (try
+         observe Temporary_created;
          write_temp tmp;
+         observe Payload_written;
          sync_file tmp;
+         observe Payload_synced;
          Stdlib.Sys.rename tmp path;
          stage := After_rename;
+         observe Target_renamed;
          sync_parent dir;
+         observe Parent_synced;
          Ok ()
        with
        | exception_ ->
@@ -2667,6 +2685,9 @@ let write_file_atomic_with_parent_sync
          (try Stdlib.Sys.remove tmp with
           | Sys_error _ -> ());
          failure ~backtrace exception_))
+  in
+  observe Job_returned;
+  result
 ;;
 
 let legacy_atomic_replace_result = function
@@ -2723,6 +2744,22 @@ let save_file_atomic_strict ~save_file path content =
 ;;
 
 module Atomic_replace_for_testing = struct
+  type stage = atomic_write_stage =
+    | Job_submitted
+    | Job_started
+    | Temporary_created
+    | Payload_written
+    | Payload_synced
+    | Target_renamed
+    | Parent_synced
+    | Job_returned
+
+  let save_file_atomic_observed ~observe ~save_file path content =
+    write_file_atomic_with_parent_sync ~observe
+      ~sync_file:fsync_path_strict ~sync_parent:fsync_path_strict
+      ~write_temp:(fun tmp -> save_file tmp content) path
+  ;;
+
   let save_file_atomic_strict_staged
       ?(sync_file = fsync_path_strict)
       ~sync_parent

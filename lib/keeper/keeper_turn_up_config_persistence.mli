@@ -114,11 +114,13 @@ module For_testing : sig
     | Manifest_lock_acquired
     | Runtime_lock_acquired
     | Snapshot_read
+    | Existing_manifest_edit of Keeper_toml_loader.For_testing.edit_stage
     | Manifest_write_completed
     | Publish_entered
 
   (** Uses the production persistence core. [observe] belongs to this call
-      and must only record the stage without yielding or raising. *)
+      and must only record the stage without yielding or raising. Nested atomic
+      write stages may run on a system thread; observer state must be atomic. *)
   val persist_with_publication_observed :
     observe:(publication_stage -> unit) ->
     expected_revision:config_revision ->

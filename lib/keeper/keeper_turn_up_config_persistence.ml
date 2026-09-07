@@ -464,10 +464,12 @@ type publication_stage =
   | Manifest_lock_acquired
   | Runtime_lock_acquired
   | Snapshot_read
+  | Existing_manifest_edit of Keeper_toml_loader.For_testing.edit_stage
   | Manifest_write_completed
   | Publish_entered
 
 let persist_with_publication_using ?(observe = fun _ -> ())
+    ?(edit_existing = Keeper_toml_loader.edit_keeper_toml_fields_strict_staged)
     ~with_lock ~restore_snapshot ~restore_runtime
     ~read_revision
     ~expected_revision ~(config : Workspace.config)
@@ -518,7 +520,7 @@ let persist_with_publication_using ?(observe = fun _ -> ())
            let edits = explicit_edits parsed in
            if edits = []
            then Ok ()
-           else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
+           else edit_existing ~path edits)
         |> strict_write_result
       in
       observe Manifest_write_completed;
@@ -661,11 +663,15 @@ module For_testing = struct
     | Manifest_lock_acquired
     | Runtime_lock_acquired
     | Snapshot_read
+    | Existing_manifest_edit of Keeper_toml_loader.For_testing.edit_stage
     | Manifest_write_completed
     | Publish_entered
 
   let persist_with_publication_observed ~observe =
     persist_with_publication_using ~observe
+      ~edit_existing:
+        (Keeper_toml_loader.For_testing.edit_keeper_toml_fields_observed
+           ~observe:(fun stage -> observe (Existing_manifest_edit stage)))
       ~with_lock:with_manifest_lock
       ~restore_snapshot:restore_snapshot_unlocked
       ~restore_runtime:Runtime.restore_keeper_assignment_transaction

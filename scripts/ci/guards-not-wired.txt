@@ -36,7 +36,10 @@ scripts/anti-fake-audit.sh  # report: the default scan scores each test file wit
 scripts/audit-sublib-cycle.py  # green, but needs dune: belongs in the build job
 scripts/check-keeper-event-queue-projection-boundary.sh  # green, but compiles a
 #   checker with ocamlc -I +compiler-libs: belongs in the build job
-scripts/check-ssot.sh  # red: R10-tui-projected-background, 2 > baseline 0
+scripts/check-ssot.sh  # red: R4-config-filename 1 > 0 and R6-home-masc-root 70 > 0.
+#   R2 and R10 were the other two and are fixed (#34199, #34198). R6's 70 are mostly
+#   evidence documents quoting a ~/.masc path, which is a scope question about the
+#   rule rather than 70 places hardcoding one.
 scripts/ml_line_cap_audit.sh  # report: no failing exit anywhere in it
 scripts/check-memory-leak.sh  # tool: builds and runs a server
 scripts/check_silent_failure.sh  # report by default; --strict, the only mode that

@@ -5,13 +5,7 @@
     operation is edited; [execution_digest] identifies the body that will
     actually execute. Terminal facts never retain the input body. *)
 
-module Operation_id : sig
-  type t
-
-  val of_string : string -> (t, string) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
+module Operation_id = Keeper_operation_id
 
 type failure_kind =
   | Interrupted_by_restart

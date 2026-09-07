@@ -13,7 +13,7 @@ let require_string json name =
   | _ -> Error (name ^ " must be a string")
 
 type t =
-  | Direct_operation of Keeper_chat_operation.Operation_id.t
+  | Direct_operation of Keeper_operation_id.t
   | Autonomous_admission of Uuidm.t
 
 let direct_operation value = Direct_operation value
@@ -22,8 +22,8 @@ let autonomous_admission value = Autonomous_admission value
 let compare a b =
   match a, b with
   | Direct_operation a, Direct_operation b ->
-      String.compare (Keeper_chat_operation.Operation_id.to_string a)
-        (Keeper_chat_operation.Operation_id.to_string b)
+      String.compare (Keeper_operation_id.to_string a)
+        (Keeper_operation_id.to_string b)
   | Autonomous_admission a, Autonomous_admission b -> Uuidm.compare a b
   | Direct_operation _, Autonomous_admission _ -> -1
   | Autonomous_admission _, Direct_operation _ -> 1
@@ -33,7 +33,7 @@ let equal a b = compare a b = 0
 let to_json = function
   | Direct_operation value ->
       `Assoc [ "kind", `String "direct_operation"
-             ; "id", `String (Keeper_chat_operation.Operation_id.to_string value) ]
+             ; "id", `String (Keeper_operation_id.to_string value) ]
   | Autonomous_admission value ->
       `Assoc [ "kind", `String "autonomous_admission"
              ; "id", `String (Uuidm.to_string value) ]
@@ -44,7 +44,7 @@ let of_json json =
   let* value = require_string json "id" in
   match kind with
   | "direct_operation" ->
-      Keeper_chat_operation.Operation_id.of_string value |> Result.map direct_operation
+      Keeper_operation_id.of_string value |> Result.map direct_operation
   | "autonomous_admission" ->
       (match Uuidm.of_string value with
        | Some id -> Ok (autonomous_admission id)

@@ -1,47 +1,20 @@
-(** Repetition evidence partitioned by durable invocation identity.
-    This module does not infer an invocation from prompt text, checkpoint
-    presence, task IDs, or provider attempts. Producers supply identity. *)
-type admission = Fresh of Keeper_execution_scope_id.t | Resume of Keeper_execution_scope_id.t
-type observation
-type t
-type error =
-  | Invalid_snapshot of string
-  | Invalid_observation of string
-  | Unknown_scope of Keeper_execution_scope_id.t
-  | Restore_target_conflict
-
-val error_to_string : error -> string
-val observation_of_call : Keeper_agent_result.tool_call_detail -> (observation, error) result
-(** Validates and canonicalizes hashes before creating a recordable value. *)
-val empty : t
-val active : t -> Keeper_execution_scope_id.t option
-val admit : t -> admission -> (t, error) result
-(** Fresh is idempotent for an existing identity: it never clears evidence.
-    Resume requires that exact scope to have been admitted. Admitting B keeps
-    A, including when the process later restores this checkpoint. *)
-val record : t -> scope:Keeper_execution_scope_id.t -> observation -> (t, error) result
-(** One newly observed execution, not replay-safe ingestion. The caller owns
-    callback delivery identity and serializes load/admit/record/save; individual
-    Context get/set locks do not make that sequence a transaction. *)
-val tool_calls : t -> scope:Keeper_execution_scope_id.t -> (Keeper_agent_result.tool_call_detail list, error) result
+(** Runtime context and tool-call adaptation for the shared pure repetition
+    snapshot. Producers supply invocation identity; no inference from history. *)
+val observation_of_call : Keeper_agent_result.tool_call_detail ->
+  (Keeper_repetition_snapshot.observation, Keeper_repetition_snapshot.error) result
+val tool_calls : Keeper_repetition_snapshot.t -> scope:Keeper_execution_scope_id.t ->
+  (Keeper_agent_result.tool_call_detail list, Keeper_repetition_snapshot.error) result
 (** Only repetition fields are restored, newest first. They are observations
     for the detector, not current-turn receipt or execution-outcome evidence. *)
-val to_json : t -> Yojson.Safe.t
-val of_json : Yojson.Safe.t -> (t, error) result
-val load : Agent_core.Context.t -> (t, error) result
-(** Missing key means no scopes have been recorded. Malformed present data is
-    an error, never empty state. A subsequent Resume of a missing scope fails. *)
-val save : Agent_core.Context.t -> t -> unit
-(** Stores the immutable projection in Context.Session. The caller must commit
-    the owning checkpoint before claiming crash durability. This function is
-    not a durable child-acceptance or cross-store transaction. *)
-
-val restore : source:Agent_core.Context.t -> target:Agent_core.Context.t -> (t, error) result
-(** Explicitly restore the checkpoint projection into a newly created runtime
-    context, or replay an identical projection. A different or malformed
-    existing target is an error and remains unchanged. An absent source cannot
-    clear a populated target. Callers serialize this operation. This does not
-    supply the separate official-client or durable child-parent stores. *)
+val load : Agent_core.Context.t ->
+  (Keeper_repetition_snapshot.t, Keeper_repetition_snapshot.error) result
+(** Missing key means no scopes recorded. Malformed present data is an error. *)
+val save : Agent_core.Context.t -> Keeper_repetition_snapshot.t -> unit
+(** Writes Context.Session only; the caller commits the owning durable store. *)
+val restore : source:Agent_core.Context.t -> target:Agent_core.Context.t ->
+  (Keeper_repetition_snapshot.t, Keeper_repetition_snapshot.error) result
+(** Restore into an absent key, or replay an equal projection. A different or
+    malformed existing target stays unchanged. This is not a durable commit. *)
 
 module Execution : sig
   type t
@@ -50,7 +23,7 @@ module Execution : sig
       Direct operations interrupted by process restart remain terminal under
       the owner store contract; this does not resurrect their execution. *)
   val prepare : t -> source:Agent_core.Context.t -> target:Agent_core.Context.t ->
-    (Keeper_agent_result.tool_call_detail list, error) result
+    (Keeper_agent_result.tool_call_detail list, Keeper_repetition_snapshot.error) result
   (** First attempt loads and admits the direct scope. Later attempts reuse
       its observations even if the previous provider returned no checkpoint.
       Returns only this scope's prior calls, excluding other work. *)
@@ -59,5 +32,5 @@ module Execution : sig
       validation failures explicitly; [failure] must stop later provider calls.
       The owner serializes prepare/observe and terminates old attempt callbacks
       before preparing a new attempt. Context projection alone is not disk I/O. *)
-  val failure : t -> error option
+  val failure : t -> Keeper_repetition_snapshot.error option
 end

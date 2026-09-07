@@ -484,7 +484,7 @@ let prepare_agent_setup
         ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
         ~target:shared_context
       |> Result.map_error (fun error ->
-           Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+           Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   in
   let acc =
     Keeper_run_tools_hook_accumulator.create ~meta

@@ -7,7 +7,8 @@
  (modules
   keeper_chat_operation
   keeper_chat_operation_reducer
-  keeper_chat_operation_store)
+  keeper_chat_operation_store
+  keeper_autonomous_execution)
  (flags
   (:standard -w +4 -w +33))
- (libraries digestif sqlite3 unix yojson))
+ (libraries masc.keeper_operation_identity masc.keeper_execution_scope masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix uuidm yojson))

@@ -350,7 +350,7 @@ let guard_repetition_before_turn_params repetition_execution hook event =
   | Some error ->
     Agent_core.Hooks.HookFailed
       { stage = Agent_core.Hooks.Before_turn_params
-      ; detail = Keeper_repetition_scope.error_to_string error
+      ; detail = Keeper_repetition_snapshot.error_to_string error
       }
   | None -> hook event
 ;;

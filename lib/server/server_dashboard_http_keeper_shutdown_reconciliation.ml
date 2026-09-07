@@ -61,7 +61,7 @@ let status_of_error = function
       | Revision_conflict _ | Supersession_phase_mismatch _
       | Supersession_intent_mismatch _ | Invalid_supersession_actor _)
   | Ineligible_operation | Outstanding_recorded_tasks _ | Outstanding_tasks _
-  | Outstanding_chat_operations _ | Backlog_revision_conflict _ | Owner_present
+  | Outstanding_chat_operations _ | Outstanding_autonomous_executions _ | Backlog_revision_conflict _ | Owner_present
   | Registry_lane_present | Path_present _ | Corrupt_sibling _ | Unfinished_sibling _
   | Admission_owned_by_other _ -> `Conflict
 ;;

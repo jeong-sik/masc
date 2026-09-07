@@ -90,6 +90,7 @@
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
   (re_export masc.keeper_chat_delivery_identity)
+  (re_export masc.keeper_operation_identity)
   (re_export masc.keeper_chat_operations)
   (re_export masc.keeper_execution_scope)
   (re_export masc.keeper_contract)

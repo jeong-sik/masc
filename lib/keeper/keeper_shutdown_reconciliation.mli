@@ -8,6 +8,7 @@ type error =
   | Outstanding_recorded_tasks of string list
   | Outstanding_tasks of string list
   | Outstanding_chat_operations of Keeper_chat_operation.Operation_id.t list
+  | Outstanding_autonomous_executions of Uuidm.t list
   | Chat_operations_unavailable of Keeper_chat_operation_store.error
   | Backlog_unavailable of string
   | Backlog_revision_conflict of { expected : int; actual : int }

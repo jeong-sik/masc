@@ -57,7 +57,8 @@ val select_finalization_checkpoint :
   Agent_core.Checkpoint.t * bool
 (** Reuse requires identical message values and equal serialized replay state,
     including Context and execution configuration. Only checkpoint creation
-    time may differ. Unencodable state is never declared already persisted. *)
+    time may differ. Unencodable replay metadata is never declared already
+    persisted; creation time and messages are excluded from metadata encoding. *)
 
 val finalization_checkpoint_already_persisted :
   source_already_persisted:bool ->

@@ -360,3 +360,12 @@ Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으
 조사 중 queue loader가 문법상 유효하지만 schema/domain을 해석할 수 없는 primary를 빈 상태로 반환하고, 다음 쓰기에서 pending과 disposition 증거를 대체할 수 있음을 확인했다. [#33947](https://github.com/jeong-sik/masc/pull/33947) head5e1f4673d4는 present-invalid를 Error로 반환해 snapshot·WAL을 유지한다. 실제 primary 부재에 한해서만 기존 WAL-only 복원을 유지한다. 별도 캐시 경합도 수정해, 읽은 바이트 전후의 동일한 파일 식별자에만 상태를 연결하고 쓰기 후 첫 읽기는 재파싱한다. 이후 변경 없는 읽기는 다시 캐시를 사용한다. 추가 파싱의 운영 성능 영향은 미측정이다.
 
 정상 owner 등록·작업 접수, malformed orphan의 Demand_unknown, 실제 completion WAL 보존·primary 부재 뒤 sibling/중복 처리 복원, dangling primary, decode 직후 파일 교체 경합 시나리오를 작성했다. 문법5파일·diff·variant 정적 검사 및 독립 재검토는 통과했다. 동작 테스트·빌드·배포는 아직 없으며 운영 큐를 변경하지 않았다. 두 원본 날짜의 system 로그를 새로 조회한 결과 fail-open 메시지는0건이었다. 이 수정은 source에서 발견한 데이터 보존 결함이며 원래 로그 카운트를 늘리거나 새 유실 사고를 관측했다고 주장하지 않는다.
+
+
+## 07:28–07:31Z 원격 검증 재개
+
+#33947의 PR check34095606842에서 lint·dashboard 타입 검사 SUCCESS와 실제 OCaml job 실행을 확인했다. GitHub 계정 문제의 해결 원인은 확인하지 않았지만, CI가 다시 실행 가능한 상태라는 직접 증거다. 과거 zero-step 거절 기록은 해당 attempt의 이력으로 유지한다.
+
+이 세션은 queue/state/durable-demand/reaction-ledger [34095821638](https://github.com/jeong-sik/masc/actions/runs/34095821638), WebFetch/bridge [34095824585](https://github.com/jeong-sik/masc/actions/runs/34095824585)를 각5e1f4673d4/120422bb9b에서 새로 dispatch했다. 설치 resolver는3d3695a1f3의 [34095776029](https://github.com/jeong-sik/masc/actions/runs/34095776029)가 실제 초기 단계를 실행 중이다. 모두 동작 테스트 결과는 아직 pending이다.
+
+기존#33936/#33938 필수 검사34093512926/34094034436은 다른 작업 주체가 이미 attempt2로 재실행했다. 이 세션의 추가 재실행 요청은 already running으로 거절돼 중복 실행되지 않았다. 해당 attempt2는 정확한 원 head에서 lint·dashboard SUCCESS, @check 진행 중임을 재확인했다. ACK와 CLI의 기존 필수 검사도 실제 실행 중이며 중복 재실행하지 않았다.

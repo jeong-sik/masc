@@ -843,33 +843,66 @@ type turn_edge =
    reopen it around the interruption -- drawing two turns where the keeper took
    one. The edges are the request's first and last row in this list, not the
    gaps between neighbours. *)
+(* A bracket says everything between the corners is one turn, and the pane has
+   one column to say it in. So a turn can only be bracketed over rows that sit
+   together.
+
+   This used to take each request's first and last row anywhere in the list.
+   When two turns interleaved, both drew their corners into the same column and
+   the claims crossed: on a live pane three [Rail_opens] arrived before any
+   close, and the first turn's bracket ran thirty-one minutes past a date
+   divider with three other turns' rows inside it. Nothing was left to say
+   which turn a [Rail_says] belonged to.
+
+   Rows outside every turn stay transparent. A journal commit or somebody
+   else's broadcast draws a siding meeting the line rather than a piece of it,
+   so a turn's rows are still together across one -- that is increment 2 of
+   RFC-chat-turn-rail-and-side-lanes, and it is why the interruption cases
+   below keep one bracket rather than three.
+
+   What this gives up: two rows of one turn, split by another turn's row, now
+   draw as two lone rows rather than one bracket. That much is what the column
+   can carry -- they are not adjacent, and a corner pair around them would be
+   claiming otherwise. *)
 let mark_turn_edges rows =
-  let first = Hashtbl.create 16 in
-  let last = Hashtbl.create 16 in
-  List.iteri
-    (fun index row ->
-      match chat_row_lane row with
-      | Lane_unowned | Lane_memory -> ()
-      | Lane_turn request_id ->
-          if not (Hashtbl.mem first request_id) then
-            Hashtbl.replace first request_id index;
-          Hashtbl.replace last request_id index)
-    rows;
+  let edges = Hashtbl.create 16 in
+  let close_run = function
+    | [] -> ()
+    | [ only ] -> Hashtbl.replace edges only Turn_alone
+    | opens_at :: rest ->
+        Hashtbl.replace edges opens_at Turn_opens;
+        let rec mark = function
+          | [] -> ()
+          | [ closes_at ] -> Hashtbl.replace edges closes_at Turn_closes
+          | index :: tl ->
+              Hashtbl.replace edges index Turn_continues;
+              mark tl
+        in
+        mark rest
+  in
+  (* [run] holds the rows of the turn being walked, newest first. *)
+  let rec walk running run = function
+    | [] -> close_run (List.rev run)
+    | (index, row) :: tl -> (
+        match chat_row_lane row with
+        | Lane_unowned | Lane_memory -> walk running run tl
+        | Lane_turn request_id ->
+            if
+              match running with
+              | Some current -> String.equal current request_id
+              | None -> false
+            then walk running (index :: run) tl
+            else (
+              close_run (List.rev run);
+              walk (Some request_id) [ index ] tl))
+  in
+  walk None [] (List.mapi (fun index row -> (index, row)) rows);
   List.mapi
     (fun index row ->
-      let edge =
-        match chat_row_lane row with
-        | Lane_unowned | Lane_memory -> Turn_outside
-        | Lane_turn request_id -> (
-            let opens = Hashtbl.find_opt first request_id = Some index in
-            let closes = Hashtbl.find_opt last request_id = Some index in
-            match opens, closes with
-            | true, true -> Turn_alone
-            | true, false -> Turn_opens
-            | false, true -> Turn_closes
-            | false, false -> Turn_continues)
-      in
-      (row, edge))
+      ( row
+      , match Hashtbl.find_opt edges index with
+        | Some edge -> edge
+        | None -> Turn_outside ))
     rows
 ;;
 

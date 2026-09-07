@@ -506,8 +506,85 @@ let image_probe_for backend ~image ~timeout_sec =
     ~listing
 ;;
 
+(* Build the image this binary carries the recipe for, into the store the
+   backend reads.
+
+   The gate below refuses a missing image rather than letting the runtime
+   fetch it, and that refusal is right: none of these runs has --pull=never,
+   so an absent image is a reach for a registry, and on 2026-08-28 that reach
+   came back 401 from registry-1.docker.io -- with credentials present it
+   would have pulled a stranger's image under the keeper's name. Building
+   from the recipe in this binary is not that. The bits are ours, no registry
+   is asked, and the result is the same on every host.
+
+   Only for [Keeper_sandbox_image.default_tag] itself. A keeper naming any
+   other image names one we have no recipe for, and an operator who pointed
+   the default at their own tag would find our recipe written over it.
+
+   Two keepers booting together can both reach here for the same tag. That
+   costs a duplicate build, not a wrong one -- the recipe is the same bytes
+   either way -- so there is no lock here until one is shown to be needed. *)
+let build_recipe_image_for backend ~image ~timeout_sec =
+  match Keeper_microvm_backend.recipe_delivery backend with
+  | Keeper_microvm_backend.Builds_no_images -> Error `No_build_command
+  | Keeper_microvm_backend.On_stdin ->
+    (* Docker's grammar reads the recipe on stdin, which this process spawner
+       does not offer. The context-directory form is what both grammars take,
+       so it is the one used for every runtime that builds at all. *)
+    Error `Not_attempted_here
+  | Keeper_microvm_backend.In_a_context_directory ->
+    let context = Filename.temp_file "masc-sandbox-image-" ".d" in
+    Sys.remove context;
+    Unix.mkdir context 0o700;
+    let cleanup () =
+      (try Sys.remove (Filename.concat context "Dockerfile") with Sys_error _ -> ());
+      try Unix.rmdir context with Unix.Unix_error _ -> ()
+    in
+    Fun.protect ~finally:cleanup (fun () ->
+        let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
+        let argv =
+          command_argv_for backend
+          @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
+              ~dockerfile ~context
+        in
+        match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+        | Unix.WEXITED 0, _, _ -> Ok ()
+        | _, _, stderr -> Error (`Build_failed stderr))
+
 let image_present_for backend ~image ~timeout_sec =
-  image_probe_for backend ~image ~timeout_sec |> image_present_result_for backend ~image
+  match image_probe_for backend ~image ~timeout_sec with
+  | Image_missing when String.equal image Keeper_sandbox_image.default_tag -> (
+    match build_recipe_image_for backend ~image ~timeout_sec with
+    | Ok () ->
+      (* Ask the store again rather than trust the build's exit: the gate's
+         question is whether the image is there, and only the store answers
+         that. *)
+      image_probe_for backend ~image ~timeout_sec
+      |> image_present_result_for backend ~image
+    | Error `No_build_command ->
+      Error
+        (Printf.sprintf
+           "microvm_image_missing: %s is not in %s's image store, and %s \
+            builds no images -- it has pull, load and save and no build. \
+            Next: build the image elsewhere, save it as an OCI archive, and \
+            `%s load` it."
+           image
+           (Backend.cli_name backend)
+           (Backend.cli_name backend)
+           (Backend.cli_name backend))
+    | Error `Not_attempted_here ->
+      image_present_result_for backend ~image Image_missing
+    | Error (`Build_failed stderr) ->
+      Error
+        (Printf.sprintf
+           "microvm_image_build_failed: %s was missing from %s's image store, \
+            and building it from the recipe in this binary failed. Next: run \
+            `masc sandbox-image --runtime %s` and read what it says. %s"
+           image
+           (Backend.cli_name backend)
+           (Backend.to_string backend)
+           (String.trim stderr)))
+  | probe -> image_present_result_for backend ~image probe
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

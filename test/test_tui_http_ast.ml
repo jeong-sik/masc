@@ -1841,6 +1841,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_raw_mode"
        ~callee:"Masc_tui_termios.disable_literal_next");
+  check int "raw mode reclaims Ctrl-O from VDISCARD" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_raw_mode"
+       ~callee:"Masc_tui_termios.disable_discard_output");
+  check int "terminal restoration returns the original discard key" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"restore_terminal" ~callee:"Masc_tui_termios.set_discard_output");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"restore_terminal" ~callee:"Frame_presenter.cleanup");

@@ -35,11 +35,13 @@ PEM_BODY = (
     "EFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789abcdEF\n"
 )
 
+# Split synthetic token prefixes across literals: the tracked source stays
+# clean while each evaluated positive fixture still contains the full shape.
 CASES: list[tuple[str, str, int]] = [
     (
         "launchd OAuth token (#636)",
-        "<key>CLAUDE_CODE_OAUTH_TOKEN_ci</key>\n"
-        "<string>sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</string>\n",
+        '<key>CLAUDE_CODE_OAUTH_TOKEN_ci</key>\n<string>sk-'
+        'ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</string>\n',
         1,
     ),
     (
@@ -55,17 +57,20 @@ CASES: list[tuple[str, str, int]] = [
     ),
     (
         "Resend API key (alert #10)",
-        "RESEND_API_KEY=re_AbCdEfGhIjKlMnOpQrStUvWxYz012345\n",
+        'RESEND_API_KEY=re_'
+        'AbCdEfGhIjKlMnOpQrStUvWxYz012345\n',
         1,
     ),
     (
         "GitHub token",
-        "gh_token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n",
+        'gh_token: ghp'
+        '_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n',
         1,
     ),
     (
         "AWS access key id",
-        "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n",
+        'aws_access_key_id = AKI'
+        'AIOSFODNN7EXAMPLE\n',
         1,
     ),
     (

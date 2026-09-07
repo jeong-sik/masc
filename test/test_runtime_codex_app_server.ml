@@ -1782,9 +1782,16 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                 ()))))))
 ;;
 
+(* [system_prompt] is what the production keeper path always supplies
+   ([Keeper_agent_run]'s call passes the composed turn prompt), and
+   [Keeper_official_client_host.prepare_turn] refuses a blank one: a blank
+   composition would run the turn under Codex's built-in instructions with
+   masc's tool surface attached (#33165). The sibling suites for the other two
+   official clients name a fixture prompt the same way. *)
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
     ?on_event ?(keeper_name = "codex-fixture")
+    ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
   let owns_base_path = Option.is_none base_path in
@@ -1833,6 +1840,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~keeper_name
                       ~base_path
                       ~goal
+                      ~system_prompt
                       ~tools
                       ~agent_core_tools:tools
                       ~initial_messages

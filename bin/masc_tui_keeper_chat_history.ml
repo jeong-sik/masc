@@ -99,6 +99,7 @@ type attachment_note =
   ; att_bytes : int
   ; att_width : int option
   ; att_height : int option
+  ; att_image : Masc_tui_image_preview.preview
   }
 
 type row =
@@ -476,6 +477,9 @@ let attachment_notes_of fields =
                          Option.value (int_field item "size") ~default:0
                      ; att_width = int_field item "width"
                      ; att_height = int_field item "height"
+                     ; att_image = Masc_tui_image_preview.persisted_attachment
+                         ~name ~mime:(Option.value (string_field item "mime_type") ~default:"")
+                         ~data:(string_field item "data")
                      })
           | _ -> None)
         items

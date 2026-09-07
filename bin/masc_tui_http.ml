@@ -2439,3 +2439,28 @@ let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : stri
       Error (Printf.sprintf "another surface answered first: %s" response_body)
   | Ok (status, response_body) ->
       Error (Printf.sprintf "answer returned %d: %s" status response_body)
+
+(** Browser Lane shares the authenticated TUI transport. Reads are POST because
+    selecting the Firefox tab belongs to the request body. *)
+let fetch_browser_lane ~host ~port view =
+  (* The server can spend 20s listing tabs and 20s reading the page. *)
+  match post_json_with_timeout ~timeout_sec:45.0 ~host ~port
+          ~path:"/api/v1/dashboard/browser-lane/read"
+          ~body:(Yojson.Safe.to_string (Masc_tui_types.Browser_lane_view.request_body view)) with
+  | Error detail -> Error detail
+  | Ok json -> Masc_tui_types.Browser_lane_view.decode json
+
+let browser_lane_session ~host ~port operation =
+  let open Masc_tui_types.Browser_lane_view in
+  match operation with
+  | Read -> Error "read is not a session operation"
+  | Open_session | Close_session ->
+      let action = match operation with Open_session -> "open" | Close_session -> "close" | Read -> "read" in
+      let body = Yojson.Safe.to_string (`Assoc ["action", `String action]) in
+      (* Native Firefox startup has a 60s request deadline. *)
+      match post_json_with_timeout ~timeout_sec:65.0 ~host ~port
+              ~path:"/api/v1/dashboard/browser-lane/session" ~body with
+      | Error detail -> Error detail
+      | Ok json ->
+          let* ok = get boolean "ok" json in
+          if ok then Ok () else let* detail = get string "error" json in Error detail

@@ -434,6 +434,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
   masc.keeper_chat_delivery_identity
@@ -970,6 +971,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_image_preview
   ocaml-msx.msx
   masc
   masc_tui_acting_pane
@@ -1130,6 +1132,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi
   masc_tui_answering
@@ -1347,7 +1350,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64))
 
 (library
  (name masc_tui_link_label)

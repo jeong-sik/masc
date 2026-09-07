@@ -347,7 +347,9 @@ let for_surface = function
       ]
       @ listing_meta
   | Connectors ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "B / S" "Browser / Slack Lane"
+          ~help:"read Firefox tabs and page text; switch live / automation inside the lane"
+      ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
@@ -807,3 +809,14 @@ let help_sections ?current () =
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
     :: List.map (fun (_, section) -> section) rest
+
+let footer_hints_browser_lane =
+  hints_of_bindings
+    [ b Navigate "B / S" "Browser / Slack"
+    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "[ / ]" "tab"
+    ; b Navigate "j/k" "text"
+    ; b Act "o / x" "open / close session"
+    ; b Act "r" "refresh"
+    ; b Navigate "Esc" "connectors"
+    ]

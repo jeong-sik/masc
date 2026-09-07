@@ -112,7 +112,7 @@ val run_named :
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   ?session_id:string ->
-  ?system_prompt:string ->
+  system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
   agent_core_tools:Agent_core.Tool.t list ->
   ?initial_messages:Agent_core.Types.message list ->

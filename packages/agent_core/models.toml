@@ -294,6 +294,37 @@ output_per_million = 4.5
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.1
 
+# 2026-09-07: codex 구독의 5.6 행들. 운영자가 runtime.toml 바인딩을 먼저
+# 추가했는데 카탈로그 행이 없어 부트가 "degraded catalog mode"(uncatalogued
+# runtime 2개)로 강등됐다 — 강등 모드에서는 케퍼빌리티 조회 경로 전체가 달라져
+# 다른 모델(openai-responses 라인)의 effort 계약 조회까지 비어 나왔다(#34033).
+# 가격은 developers.openai.com 2026-09-07: sol $4/$20, terra $2/$12, luna 는
+# #34066 의 openai-responses 행에 이미 있다(구독 레인은 이 행과 api-name 을
+# 공유한다).
+[[models]]
+id_prefix = "gpt-5.6-sol"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.6-terra"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 [[models]]
 id_prefix = "gpt-5.4"
 base = "openai_chat_extended"

@@ -162,7 +162,7 @@ let canonical_base_path raw =
   if String.equal normalized ""
   then Error Empty_after_normalization
   else
-    let absolute = absolute_path_from ~cwd:(current_working_dir ()) normalized in
+    let absolute = absolute_path normalized in
     let canonical = Env_config_core.normalize_masc_base_path_input absolute in
     if String.equal canonical "" || Filename.is_relative canonical
     then Error (Could_not_derive_absolute { input = raw })

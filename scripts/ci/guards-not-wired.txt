@@ -60,6 +60,4 @@ scripts/ci/check-env-snapshot-default-drift.py  # red
 scripts/ci/check-tla-harness-coverage.sh
 scripts/ci/check-yaml-syntax.py
 scripts/lib/worktree-cleanup-guards.sh
-scripts/tla-bug-model-ratchet.sh
 scripts/tla-check.sh
-scripts/tla-ppx-ratchet.sh

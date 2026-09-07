@@ -194,6 +194,12 @@ blocking_lints() {
     python3 scripts/ci/check_exact_field_decoder_preflight.py
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
+  # The two ratchets that survived #33313, which deleted eighteen nobody ran.
+  # Surviving that sweep was a decision to keep them; nothing has called them
+  # since. Both are green on main and both proven to fail: hide a -buggy.cfg
+  # for the first, take the last [@@deriving tla] out of a file for the second.
+  run_lint "TLA bug models keep their pair" bash scripts/tla-bug-model-ratchet.sh
+  run_lint "TLA ppx coverage floor" bash scripts/tla-ppx-ratchet.sh
   run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh
   run_lint "TLA annotation drift" \
     bash scripts/audit-tla-annotation-drift.sh --check-cross-spec

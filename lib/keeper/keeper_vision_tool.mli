@@ -132,7 +132,9 @@ val run_vision
     image and query, including when a partial JSON object cannot be parsed.
     Each candidate is attempted at most once; exhausting output-limited
     candidates returns [Vo_truncated]. Other invalid structured responses and
-    terminal policy rejections do not trigger this output-limit failover.
+    local transport wiring rejections do not trigger this output-limit failover.
+    Provider HTTP 400/422 rejections remain candidate-local and advance through
+    the existing request-rejection path.
     Eager ingestion can keep the turn alive with a typed unread placeholder. *)
 
 val handle

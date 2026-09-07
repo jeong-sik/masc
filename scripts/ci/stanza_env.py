@@ -30,11 +30,17 @@ import re
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-STANZA_DIR = os.path.join(REPO_ROOT, "test", "stanzas")
+
+# The directory a suite's stanza lives in. test/ is the default because that is
+# where all but a handful are, but 43 suites are not there -- every one under
+# packages/agent_core/test, plus tools/ -- and reading test/dune for those
+# finds a different suite's stanza or none at all. The targeted runner passes
+# --dir once it has resolved the name.
+DEFAULT_SUITE_DIR = "test"
 
 # %{dep:PATH} is the only dune variable a value may use. Paths in a stanza are
-# written relative to test/, which is where the targeted runner stands
-# (_build/default/test), so the path passes through unchanged.
+# written relative to the stanza's own directory, which is where the targeted
+# runner stands (_build/default/<dir>), so the path passes through unchanged.
 DEP_RE = re.compile(r"^%\{dep:([^}]+)\}$")
 VAR_RE = re.compile(r"%\{")
 
@@ -157,20 +163,27 @@ def resolve(key: str, value: str) -> tuple[str, str | None]:
     return value, None
 
 
-def stanza_text(suite: str) -> tuple[str, bool]:
+def stanza_dir(suite_dir: str) -> str:
+    return os.path.join(REPO_ROOT, suite_dir, "stanzas")
+
+
+def stanza_text(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> tuple[str, bool]:
     """(text, whether it is this suite's own file).
 
-    A file under test/stanzas belongs to one suite, so every setenv in it is
+    A file under <dir>/stanzas belongs to one suite, so every setenv in it is
     that suite's -- including the ones in a (rule (alias runtest) ...), which
     carries no (name ...) to match on. A suite with no such file is declared
-    inline in test/dune among many others, so there the stanza has to be
+    inline in <dir>/dune among many others, so there the stanza has to be
     found by name.
+
+    Only test/ has a stanzas/ directory today; the directories outside it
+    declare everything inline, which this reaches through the same fallback.
     """
-    path = os.path.join(STANZA_DIR, f"{suite}.inc")
+    path = os.path.join(stanza_dir(suite_dir), f"{suite}.inc")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as handle:
             return handle.read(), True
-    with open(os.path.join(REPO_ROOT, "test", "dune"), encoding="utf-8") as handle:
+    with open(os.path.join(REPO_ROOT, suite_dir, "dune"), encoding="utf-8") as handle:
         return handle.read(), False
 
 
@@ -183,6 +196,7 @@ def suite_env(
     else:
         pairs = []
         unattributable = False
+        matched = False
         for form in forms:
             named = (
                 isinstance(form, list)
@@ -201,12 +215,27 @@ def suite_env(
                 continue
             if suite not in stanza_names(form):
                 continue
+            matched = True
             pairs.extend(collect_setenv(form))
         if unattributable:
             raise StanzaError(
-                "declared inline in test/dune next to a setenv this could not "
-                "attribute; give the suite its own test/stanzas file or extend "
-                "this reader"
+                "declared inline in this directory's dune next to a setenv "
+                "this could not attribute; give the suite its own stanzas "
+                "file or extend this reader"
+            )
+        if not matched:
+            # A name this file does not declare used to answer "no
+            # environment", exit 0 -- the same answer as a suite that truly
+            # declares none. So a misspelling, or a suite read against the
+            # wrong directory, ran with a partial environment and reported a
+            # verdict the nightly lane would not agree with, which is the
+            # outcome the header says this reader exists to stop. Verified
+            # 2026-09-07 against every suite declared under a (test) or
+            # (tests) stanza in the tree: 1,053 of 1,053 are found, so
+            # refusing the rest refuses nothing that exists.
+            raise StanzaError(
+                "no (test)/(tests) stanza declares this suite here; check the "
+                "name and the directory it lives in"
             )
     env: list[tuple[str, str]] = []
     deps: list[str] = []
@@ -321,8 +350,16 @@ def self_test() -> int:
     env, _ = suite_env("test_one", FIXTURE_GROUP, own_file=False)
     check("a group stanza with no action yields nothing", env, [])
 
-    env, _ = suite_env("test_absent", FIXTURE_PLAIN, own_file=False)
-    check("a suite this text does not declare yields nothing", env, [])
+    # This used to assert the empty environment, which pinned the silent
+    # failure in place: a name the text does not declare answered exactly
+    # like a suite that declares no environment, so a misspelling or a read
+    # against the wrong directory ran the suite with a partial environment
+    # and said nothing. Refusing is the only answer that separates the two.
+    try:
+        suite_env("test_absent", FIXTURE_PLAIN, own_file=False)
+        check("a suite this text does not declare is refused", "answered", "refused")
+    except StanzaError:
+        check("a suite this text does not declare is refused", "refused", "refused")
 
     env, deps = suite_env("test_epsilon", FIXTURE_RULE)
     check(
@@ -350,7 +387,7 @@ def self_test() -> int:
     check("a suite with no setenv beside one that has some", env, [])
 
     # The one suite test.yml used to hardcode still reads the same three.
-    real = os.path.join(STANZA_DIR, "test_heartbeat_integration.inc")
+    real = os.path.join(stanza_dir(DEFAULT_SUITE_DIR), "test_heartbeat_integration.inc")
     if os.path.exists(real):
         with open(real, encoding="utf-8") as handle:
             env, _ = suite_env("test_heartbeat_integration", handle.read())
@@ -368,6 +405,29 @@ def self_test() -> int:
         print(f"stanza env self-test: {failures} case(s) wrong", file=sys.stderr)
         return 1
     print("stanza env self-test: the reader parses every stanza shape and refuses the rest")
+
+    # A suite outside test/ reads its own directory's dune, not test/dune.
+    # Before --dir the reader looked in test/ for every name, so a suite in
+    # packages/agent_core/test either matched a different suite's stanza
+    # there or none, and the runner could not call it at all.
+    outside = os.path.join(REPO_ROOT, "packages", "agent_core", "test", "dune")
+    if os.path.exists(outside):
+        text, own_file = stanza_text("test_provider", "packages/agent_core/test")
+        check("a suite outside test/ has no stanzas file", own_file, False)
+        env, _deps = suite_env("test_provider", text, own_file=own_file)
+        check("its own directory answers for it", env, [])
+        # The discriminating half. Reading the same suite against test/ has
+        # to refuse rather than answer "no environment" -- an earlier version
+        # of this case asserted the env was empty either way, which the wrong
+        # directory also satisfies, so it passed with --dir ignored.
+        wrong_text, wrong_own = stanza_text("test_provider", DEFAULT_SUITE_DIR)
+        try:
+            suite_env("test_provider", wrong_text, own_file=wrong_own)
+            check("test/ refuses a suite it does not declare", "answered", "refused")
+        except StanzaError:
+            check("test/ refuses a suite it does not declare", "refused", "refused")
+
+
     return 0
 
 
@@ -396,7 +456,7 @@ def check_all() -> int:
     """
     names = sorted(
         name[: -len(".inc")]
-        for name in os.listdir(STANZA_DIR)
+        for name in os.listdir(stanza_dir(DEFAULT_SUITE_DIR))
         if name.endswith(".inc")
     )
     inline = [name for name in inline_suite_names() if name not in set(names)]
@@ -427,19 +487,30 @@ def main(argv: list[str]) -> int:
         return self_test()
     if len(argv) == 2 and argv[1] == "--check-all":
         return check_all()
-    want_deps = len(argv) == 3 and argv[1] == "--deps"
-    if not (len(argv) == 2 or want_deps):
+    # --dir names the directory the suite's stanza lives in; without it the
+    # reader looks in test/, which is right for all but the 43 suites that
+    # live elsewhere.
+    args = argv[1:]
+    suite_dir = DEFAULT_SUITE_DIR
+    if len(args) >= 2 and args[0] == "--dir":
+        suite_dir = args[1]
+        args = args[2:]
+    want_deps = len(args) == 2 and args[0] == "--deps"
+    if not (len(args) == 1 or want_deps):
         print(__doc__, file=sys.stderr)
         return 2
-    suite = argv[2] if want_deps else argv[1]
+    suite = args[1] if want_deps else args[0]
     try:
-        text, own_file = stanza_text(suite)
+        text, own_file = stanza_text(suite, suite_dir)
         env, deps = suite_env(suite, text, own_file=own_file)
     except StanzaError as exc:
         print(f"{suite}: {exc}", file=sys.stderr)
         return 1
     if want_deps:
-        lines = [os.path.normpath(os.path.join("test", dep)) for dep in deps]
+        # A dep is written relative to its stanza's directory, and dune build
+        # takes targets from the repo root, so it is prefixed with that
+        # directory rather than with test/.
+        lines = [os.path.normpath(os.path.join(suite_dir, dep)) for dep in deps]
     else:
         lines = [f"{k}={v}" for k, v in env]
     for line in lines:

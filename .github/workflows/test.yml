@@ -238,8 +238,24 @@ jobs:
                    test/dune test/stanzas 2>/dev/null; then
               aliases+=("${suite}")
             else
-              suites+=("${suite}")
-              exes+=("test/${suite}.exe")
+              # The name used to be a path fragment under test/, so a suite
+              # outside it was unreachable: every one of the 43 under
+              # packages/agent_core/test and tools/ could only run in the
+              # nightly root @runtest, and a fix to one waited a night to be
+              # seen. Resolve the name instead -- under test/ first, so
+              # test_string_util and toml_line_editor/test_toml_line_editor
+              # keep meaning what they meant, then from the repo root, which
+              # is how packages/agent_core/test/test_provider is written.
+              if [ -f "test/${suite}.ml" ]; then
+                suite_path="test/${suite}"
+              elif [ -f "${suite}.ml" ]; then
+                suite_path="${suite}"
+              else
+                log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
+                exit 2
+              fi
+              suites+=("${suite_path}")
+              exes+=("${suite_path}.exe")
             fi
           done
           # dune build with no target builds everything; a suite input of
@@ -280,25 +296,36 @@ jobs:
           # runs with no environment because the reader broke is the exact
           # outcome this replaces.
           stanza_env_reader="${GITHUB_WORKSPACE}/scripts/ci/stanza_env.py"
+          # suites hold the resolved path; the reader takes the directory and
+          # the bare name, because a stanza names a suite without its path.
           stanza_deps=()
-          for suite in "${suites[@]}"; do
-            dep_lines=$(python3 "${stanza_env_reader}" --deps "${suite}")
+          for suite_path in "${suites[@]}"; do
+            python3 "${stanza_env_reader}" --dir "$(dirname "${suite_path}")" \
+              --deps "$(basename "${suite_path}")" > /tmp/stanza-deps.txt
             while IFS= read -r dep; do
               if [ -n "${dep}" ]; then stanza_deps+=("${dep}"); fi
-            done <<< "${dep_lines}"
+            done < /tmp/stanza-deps.txt
           done
           log "[targeted] dune build ${exes[*]} ${stanza_deps[*]+${stanza_deps[*]}}"
           opam exec -- dune build --root . "${exes[@]}" \
             ${stanza_deps[@]+"${stanza_deps[@]}"} 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
-          cd _build/default/test
-          for suite in "${suites[@]}"; do
+          # Each suite runs from its own directory under _build/default: a
+          # stanza's paths are written relative to the stanza, and dune's own
+          # runtest action stands there too, so anywhere else reads a
+          # different tree than the nightly lane does.
+          repo_root="${PWD}"
+          for suite_path in "${suites[@]}"; do
+            suite_dir="$(dirname "${suite_path}")"
+            suite="$(basename "${suite_path}")"
+            cd "${repo_root}/_build/default/${suite_dir}"
             suite_env=()
-            env_lines=$(python3 "${stanza_env_reader}" "${suite}")
+            python3 "${stanza_env_reader}" --dir "${suite_dir}" "${suite}" \
+              > /tmp/stanza-env.txt
             while IFS= read -r pair; do
               if [ -n "${pair}" ]; then suite_env+=("${pair}"); fi
-            done <<< "${env_lines}"
-            log "[targeted] ${suite}: stanza env ${suite_env[*]+${suite_env[*]}}"
-            log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            done < /tmp/stanza-env.txt
+            log "[targeted] ${suite_path}: stanza env ${suite_env[*]+${suite_env[*]}}"
+            log "[targeted] ${suite_path}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             started=$(date +%s)
             rc=0
             # ${arr[@]+"${arr[@]}"} expands an empty array to nothing under
@@ -313,12 +340,12 @@ jobs:
             # timeout(1) exits 124 when TERM ended the command and 137
             # when it took the KILL after the grace.
             case "${rc}" in
-              0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
+              0)   log "[targeted] ${suite_path}: OK in ${elapsed}s" ;;
               124|137)
-                   log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s;" \
+                   log "[targeted] ${suite_path}: TIMEOUT exit ${rc} after ${elapsed}s;" \
                        "the hung case is the one after the last [OK] line above"
                    status=1 ;;
-              *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"
+              *)   log "[targeted] ${suite_path}: FAIL exit ${rc} in ${elapsed}s"
                    status=1 ;;
             esac
           done

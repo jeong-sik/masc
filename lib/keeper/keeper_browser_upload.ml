@@ -25,16 +25,36 @@ let decode_hex output =
 let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
   let* backend_path = Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path in
   (* Endpoint stdout rewrites visible paths, so raw binary `cat` is unsuitable.
-     POSIX od's hex alphabet cannot contain a path. -N bounds the actual read;
-     four output bytes per input byte cover spacing and line separators. *)
-  let* output = Keeper_sandbox_read_runner.run_command ?turn_sandbox_factory
-      ~config ~meta
-      ~command_argv:["sh"; "-c";
-        "test -f \"$1\" || exit 1; exec od -An -v -tx1 -N \"$2\" \"$1\"";
-        "browser-upload"; backend_path; string_of_int max_bytes]
-      ~max_bytes:(4 * max_bytes)
-      ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) () in
-  decode_hex output
+     POSIX od's hex alphabet cannot contain a path. Keep each chunk's encoded
+     output inside Process_eio's retained head; increasing run_command's limit
+     cannot recover bytes that its subprocess capture has already elided.
+     BSD od uses indentation and double spaces (more than four output bytes
+     per input byte). Eight leaves room for both BSD and GNU layouts. *)
+  let chunk_bytes = Common.max_process_capture_head_bytes / 8 in
+  let bytes = Buffer.create (min max_bytes chunk_bytes) in
+  let rec read offset =
+    if offset = max_bytes then Ok (Buffer.contents bytes)
+    else
+      let count = min chunk_bytes (max_bytes - offset) in
+      let* output = Keeper_sandbox_read_runner.run_command ?turn_sandbox_factory
+          ~config ~meta
+          ~command_argv:["sh"; "-c";
+            "test -f \"$1\" || exit 1; exec od -An -v -tx1 -j \"$2\" -N \"$3\" \"$1\"";
+            "browser-upload"; backend_path; string_of_int offset; string_of_int count]
+          (* Keep the complete bounded Process_eio capture, including a possible
+             truncation marker. A second prefix cut could hide that marker and
+             turn incomplete hex into an apparently valid short final chunk.
+             This does not alter Process_eio's head/tail caps; od itself is
+             bounded by [count]. *)
+          ~max_bytes:max_int
+          ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) () in
+      let* chunk = decode_hex output in
+      if String.length chunk > count then Error "upload backend exceeded requested chunk size"
+      else (
+        Buffer.add_string bytes chunk;
+        if String.length chunk < count then Ok (Buffer.contents bytes)
+        else read (offset + String.length chunk)) in
+  read 0
 
 let with_staged_paths ?read_file ?turn_sandbox_factory ~config ~meta ~paths f =
   let read_file = match read_file with

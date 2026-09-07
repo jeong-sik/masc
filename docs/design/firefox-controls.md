@@ -122,7 +122,9 @@ object, the owning browser session retains it through later reads/submissions,
 tab closure and uncertain action outcomes. Only confirmed session teardown
 releases these files; pre-effect rejection removes unclaimed snapshots.
 Caller source files are never owned or removed. A 16 MiB per-file resource limit rejects oversized
-files before browser effects, without uploading truncated prefixes. Generic
+files before browser effects, without uploading truncated prefixes. Byte reads
+use bounded hex chunks sized from the subprocess capture head, including BSD
+od spacing, so the full supported range survives process-output retention. Generic
 tool callers without authoritative Keeper context cannot upload.
 
 The real Firefox scenario covers nested cross-origin frame input, top-level

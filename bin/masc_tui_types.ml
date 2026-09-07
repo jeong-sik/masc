@@ -2631,21 +2631,27 @@ module Browser_lane_view = struct
     tabs : tab list; page : page option; source : source; app : app;
     elapsed_ms : float;
   }
-  type operation = Read | Open_session | Close_session
+  type operation = Read | Open_session | Close_session | Goto of string
   type load = Idle | Loading of int * operation | Failed of string
   type t = {
     app : app; source : source; selected_tab : int option; scroll : int;
-    reading : reading option; load : load;
+    reading : reading option; load : load; url_draft : string option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
   let app_name = function Browser -> "browser" | Slack -> "slack"
   let create app =
     { app; source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle }
+      reading = None; load = Idle; url_draft = None }
   let switch_source source t =
-    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle }
+    { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle; url_draft = None }
   let refresh t = { t with selected_tab = None; scroll = 0 }
+  let fail_action detail t =
+    let url_draft = match t.load with
+      | Loading (_, Goto url) -> Some url
+      | Loading _ | Idle | Failed _ -> t.url_draft
+    in
+    { t with load = Failed detail; url_draft }
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source);
@@ -2748,6 +2754,10 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
           |> List.concat_map (fun line ->
               if line = "" then [""] else
               Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
+
+let browser_lane_url_line ~cols draft =
+  let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
+  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
 type state = {
   mutable metrics_scroll: int;
@@ -3776,6 +3786,7 @@ type state = {
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
 type text_input_target =
+  | Text_browser_url
   | Text_preset_name
   | Text_runtime_param
   | Text_palette
@@ -3802,6 +3813,9 @@ let text_input_target (state : state) ~compact_viewport =
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
+  else if state.view = Connectors && not compact_viewport
+          && Option.is_some (Option.bind state.browser_lane (fun view -> view.Browser_lane_view.url_draft))
+  then Some Text_browser_url
   else if identity_surface && Option.is_some state.identity_app_form then
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then

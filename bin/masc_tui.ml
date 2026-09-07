@@ -1810,7 +1810,7 @@ type async_msg =
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
-  | Browser_lane_session_done of int * (unit, string) result
+  | Browser_lane_action_done of int * (unit, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -4029,8 +4029,8 @@ let launch_browser_lane state ~mailbox operation =
         match operation with
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
-        | Open_session | Close_session -> Browser_lane_session_done
-            (generation, call (fun () -> Masc_tui_http.browser_lane_session ~host ~port operation))
+        | Open_session | Close_session | Goto _ -> Browser_lane_action_done
+            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -11697,15 +11697,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
-  | Browser_lane_session_done (generation, result) ->
+  | Browser_lane_action_done (generation, result) ->
       (match state.browser_lane with
        | Some view ->
            (match view.Browser_lane_view.load with
-            | Browser_lane_view.Loading (current, (Open_session | Close_session))
+            | Browser_lane_view.Loading (current, (Open_session | Close_session | Goto _))
               when generation = current ->
                 (match result with
                  | Error detail ->
-                     state.browser_lane <- Some { view with load = Failed detail }
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
                  | Ok () ->
                      state.browser_lane <- Some
                        { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
@@ -14021,6 +14021,11 @@ and is loaded on demand through keeper_skill.
             (* Typing in row search moves the cursor to the first match as
                each character lands, so a paste has to jump the same way or
                the query on screen and the row under it disagree. *)
+            | Some Text_browser_url ->
+                state.browser_lane <- Option.map
+                  (fun (view : Browser_lane_view.t) ->
+                    { view with url_draft = Some (Option.value ~default:"" view.url_draft ^ text) })
+                  state.browser_lane
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -14167,7 +14172,9 @@ and is loaded on demand through keeper_skill.
       in
       let quit_key =
         match key with
-        | Some k -> Render_schedule.Input_shortcut.is_quit ~message_mode k
+        | Some k ->
+            text_input_target state ~compact_viewport <> Some Text_browser_url
+            && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
@@ -14232,6 +14239,7 @@ and is loaded on demand through keeper_skill.
         && (not state.palette_open)
         && Option.is_none state.runtime_param_edit
         && Option.is_none state.search
+        && text_input_target state ~compact_viewport <> Some Text_browser_url
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
@@ -15315,12 +15323,37 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key
+         when text_input_target state ~compact_viewport = Some Text_browser_url ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let draft = Option.value ~default:"" view.Browser_lane_view.url_draft in
+                let edit url_draft = state.browser_lane <- Some { view with url_draft } in
+                (match key with
+                 | "esc" -> edit None
+                 | "\r" | "\n" | "enter" ->
+                     let url = String.trim draft in
+                     if url = "" then
+                       state.browser_lane <- Some { view with load = Failed "Enter a URL" }
+                     else begin
+                       edit None;
+                       launch_browser_lane state ~mailbox:async_messages (Browser_lane_view.Goto url)
+                     end
+                 | "\127" | "\b" | "backspace" ->
+                     edit (Some (Masc_tui_message_layout.drop_last_utf8_scalar draft))
+                 | "ctrl-u" | "\021" -> edit (Some "")
+                 | text when String.length text > 0
+                             && Char.code text.[0] >= 32
+                             && (String.length text = 1 || Char.code text.[0] >= 128) ->
+                     edit (Some (draft ^ text))
+                 | _ -> ()))
        | Some (("B" | "S") as key) when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
              (if key = "B" then Browser_lane_view.Browser else Slack)
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x") as key)
+               | "o" | "x" | "g") as key)
          when state.view = Connectors && Option.is_some state.browser_lane ->
            (match state.browser_lane with
             | None -> ()
@@ -15345,6 +15378,10 @@ and is loaded on demand through keeper_skill.
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
                  | "r" -> read (refresh view)
+                 | "g" when view.source = Automation && not (busy view) ->
+                     state.browser_lane <- Some { view with url_draft = Some "" }
+                 | "g" when view.source = Live ->
+                     add_event state "system" "Select automation (a) to navigate its Firefox session"
                  | "o" | "x" when view.source = Automation ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)

@@ -1749,7 +1749,7 @@ let settle_completed_snapshot
       let* settled = settle_head partition in
       (match rest with
        | [] -> ()
-       | _ :: _ -> Eio_guard.yield_if_ready ());
+       | _ :: _ -> Eio_guard.fair_yield ());
       settle_snapshot settled rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in

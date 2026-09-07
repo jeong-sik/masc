@@ -401,11 +401,6 @@ def self_test() -> int:
             ],
         )
 
-    if failures:
-        print(f"stanza env self-test: {failures} case(s) wrong", file=sys.stderr)
-        return 1
-    print("stanza env self-test: the reader parses every stanza shape and refuses the rest")
-
     # A suite outside test/ reads its own directory's dune, not test/dune.
     # Before --dir the reader looked in test/ for every name, so a suite in
     # packages/agent_core/test either matched a different suite's stanza
@@ -426,8 +421,10 @@ def self_test() -> int:
             check("test/ refuses a suite it does not declare", "answered", "refused")
         except StanzaError:
             check("test/ refuses a suite it does not declare", "refused", "refused")
-
-
+    if failures:
+        print(f"stanza env self-test: {failures} case(s) wrong", file=sys.stderr)
+        return 1
+    print("stanza env self-test: the reader parses every stanza shape and refuses the rest")
     return 0
 
 

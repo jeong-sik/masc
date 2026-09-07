@@ -15,6 +15,7 @@
 #
 scripts/check-agent-core-boundary.sh  # green
 scripts/check-boundary-guard-mli-pairs.sh  # green
+scripts/check-boundary-guard.sh
 scripts/check-checkpoint-installation-legacy-purge.sh
 scripts/check-dashboard-nav-event-parity.sh
 scripts/check-execute-async-surface.sh  # green

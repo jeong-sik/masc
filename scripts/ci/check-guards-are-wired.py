@@ -59,6 +59,22 @@ def walk(root: str):
             yield directory, name
 
 
+def without_comments(text: str) -> str:
+    """[text] with each line cut at its first '#'.
+
+    A name written in a comment is not a call. Without this, saying in
+    run-lint-suite.sh that some guard is deliberately *not* wired makes this
+    check believe it is -- an escape hatch that reads as documentation, which
+    is the worst kind.
+
+    Cutting at the first '#' also cuts one inside a string literal. That makes
+    the check stricter, never more permissive: the cost is a guard reported as
+    unwired when it is called through such a line, which fails loudly and is
+    answered by a line in the baseline. The other direction is silent.
+    """
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
 def read(path: str) -> str:
     try:
         with open(path, encoding="utf-8", errors="ignore") as handle:
@@ -83,12 +99,16 @@ def main() -> int:
         if not name.endswith(SCRIPT_SUFFIXES):
             continue
         path = os.path.relpath(os.path.join(directory, name), root)
-        scripts[path] = read(os.path.join(root, path))
+        scripts[path] = without_comments(read(os.path.join(root, path)))
     by_name = {os.path.basename(p): p for p in scripts}
 
     seed = []
     for directory, name in walk(root):
         if is_seed(directory, name):
+            # Not comment-stripped: a workflow's YAML comment marker is the
+            # same character a shell command's argument can carry, and a
+            # workflow that names a guard in a comment is not the failure this
+            # is about. The script-to-script edge is where a comment silences.
             seed.append(read(os.path.join(directory, name)))
     seed_text = "\n".join(seed)
 

@@ -136,9 +136,13 @@ let test_invalid_numeric_receipt () =
       check bool name true (match inspect binary with
         | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false)))
     ["finite outside civil-time range", "mtime", `Float 1e308;
-     "timestamp NaN", "mtime", `Float nan;
-     "timestamp positive infinity", "mtime", `Float infinity;
-     "timestamp negative infinity", "mtime", `Float neg_infinity;
+     (* Intlit writes verbatim wire tokens here. The malformed tokens must
+        reach the receipt parser; the standard Float writer rejects them
+        while constructing the fixture, before the boundary under test. *)
+     "timestamp NaN", "mtime", `Intlit "NaN";
+     "timestamp positive infinity", "mtime", `Intlit "Infinity";
+     "timestamp negative infinity", "mtime", `Intlit "-Infinity";
+     "timestamp exponent overflow", "mtime", `Intlit "1e999";
      "negative timestamp", "mtime", `Int (-1);
      "timestamp string", "mtime", `String "1577836800";
      "timestamp null", "mtime", `Null;

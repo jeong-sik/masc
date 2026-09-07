@@ -118,13 +118,20 @@ let consume ~write (state : Masc_tui_types.state) key =
     let m = machine_of state in
     (match key_of key with
     | Some k ->
-        Msx.set_key m k ~pressed:true;
+        (* [set_key] answers whether the key has a place in the matrix. A key
+           without one changes nothing, which is the same as the unmapped
+           case below -- so the answer does not change what happens here,
+           and both presses are read for their effect on [m] alone. *)
+        let (_pressed_a_matrix_key : bool) =
+          Msx.set_key m k ~pressed:true
+        in
         Msx.step m ~frames:1;
         draw ~write state;
         (* Release only after the frame the key was down for is drawn -- the
            pattern marks held keys, and drawing after the release would always
            show none. *)
-        Msx.set_key m k ~pressed:false
+        let (_released_it : bool) = Msx.set_key m k ~pressed:false in
+        ()
     | None ->
         Msx.step m ~frames:1;
         draw ~write state);

@@ -94,6 +94,31 @@ let test_child_is_killed_when_the_switch_is_released () =
     (managers env)
 ;;
 
+(* The manager awaits a child through [Eio_unix.Process.sigchld], which only a
+   backend that installs a SIGCHLD handler broadcasts. eio_posix installs one
+   at startup and eio_linux does not, so on Linux the wait used to never end.
+   Removing the handler here puts this backend into the state the other one
+   starts in, which is what lets the Linux failure run on any machine. *)
+let test_await_without_the_backends_sigchld_handler () =
+  Eio_main.run
+  @@ fun env ->
+  Sys.set_signal Sys.sigchld Sys.Signal_default;
+  Eio.Switch.run
+  @@ fun sw ->
+  let proc = Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/echo"; "hi" ] in
+  match
+    Eio.Time.with_timeout (Eio.Stdenv.clock env) 10.0 (fun () ->
+      Ok (Eio.Process.await proc))
+  with
+  | Ok (`Exited code) -> check int "exit code" 0 code
+  | Ok (`Signaled signal) -> failf "signaled %d" signal
+  | Error `Timeout ->
+    (* Put it back before failing: the switch's release hook reaps through the
+       same condition, so the teardown would hang here too. *)
+    Eio_unix.Process.install_sigchld_handler ();
+    fail "await never returned: the manager waited on a handler nothing installed"
+;;
+
 let () =
   run "posix_spawn_process_mgr"
     [ ( "parity with eio_posix"
@@ -103,6 +128,10 @@ let () =
         ; test_case "rejects a missing executable" `Quick test_missing_executable
         ; test_case "kills the child when the switch is released" `Quick
             test_child_is_killed_when_the_switch_is_released
+        ] )
+    ; ( "own dependencies"
+      , [ test_case "awaits without the backend's SIGCHLD handler" `Quick
+            test_await_without_the_backends_sigchld_handler
         ] )
     ]
 ;;

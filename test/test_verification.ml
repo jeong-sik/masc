@@ -3181,23 +3181,39 @@ let test_reader_routes_by_where_the_tree_lives () =
   with_temp_dir (fun base_path ->
       let config = W.default_config base_path in
       ignore (W.init config ~agent_name:None);
-      let route profile =
+      (* The profile is set on the meta this case hands over, not written into
+         the keeper TOML for [read_effective_meta] to overlay. Read that way,
+         a microvm profile makes the store resolve a host microvm backend
+         first, and a Linux runner with no microvm runtime answers
+         [microvm_backend_unresolved] -- so the case failed before it reached
+         the routing it is named after (#33849).
+
+         [evidence_artifact_reader] routes on [meta.sandbox_profile] alone,
+         through [tree_location_of_profile]. Owning that one field is what the
+         case is entitled to; where a TOML-owned field comes from is
+         [test_keeper_effective_meta_overlay]'s subject, and host capability
+         resolution is the sandbox backend's. *)
+      let route sandbox_profile =
         ensure_keeper_meta config "route-worker";
-        write_keeper_profile
-          ~base_path
-          ~keeper_name:"route-worker"
-          ~sandbox_profile:profile;
-        match Masc.Keeper_meta_store.read_effective_meta config "route-worker" with
+        match Masc.Keeper_meta_store.read_meta config "route-worker" with
         | Ok (Some meta) ->
             Option.is_some
-              (Masc.Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ())
+              (Masc.Keeper_tool_task_runtime.evidence_artifact_reader
+                 ~config
+                 ~meta:{ meta with sandbox_profile }
+                 ())
         | Ok None -> Alcotest.fail "meta did not load (none)"
         | Error detail -> Alcotest.failf "meta did not load: %s" detail
       in
+      (* All three arms of the profile variant, so adding a fourth has to
+         decide its side here. Remote_ssh routes to [Endpoint_owned] like
+         Micro_vm and was the arm neither assertion reached. *)
       Alcotest.(check bool) "microvm reads through the backend" true
-        (route "microvm");
+        (route Masc.Keeper_types_profile.Micro_vm);
+      Alcotest.(check bool) "remote ssh reads through the backend too" true
+        (route Masc.Keeper_types_profile.Remote_ssh);
       Alcotest.(check bool) "docker keeps the direct host read" false
-        (route "docker"))
+        (route Masc.Keeper_types_profile.Docker))
 
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the

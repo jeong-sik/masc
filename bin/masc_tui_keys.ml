@@ -301,7 +301,7 @@ let for_surface = function
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
+      ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "K" "calling Keeper"
@@ -385,6 +385,8 @@ let for_surface = function
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "v" "runtime.toml read status"
+          ~help:"source revision, validation issues, and application/restart details"
       ; b Navigate "9" "Runtime"
           ~help:"runtime status, lane routing, probes and connected clients"
       ; b Navigate "s" "resources"

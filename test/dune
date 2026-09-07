@@ -1272,7 +1272,7 @@
 (test
  (name test_fusion_run_registry_persist)
  (modules test_fusion_run_registry_persist)
- (libraries alcotest fs_compat yojson masc.fusion_core masc.string_util))
+ (libraries alcotest fs_compat yojson masc.fusion_core masc.run_registry_core masc.string_util))
 
 ; RFC-0207: per-keeper LLM runtime routing (runtime assignment + driver fail-fast).
 
@@ -4768,6 +4768,11 @@
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
  (libraries alcotest unix masc_tui_types masc_tui_msx))
+
+(test
+ (name test_tui_runtime_config_view)
+ (modules test_tui_runtime_config_view)
+ (libraries masc_tui_runtime_config_view))
 
 (test
  (name test_tui_runtime_listing)

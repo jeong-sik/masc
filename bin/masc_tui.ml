@@ -182,8 +182,8 @@ let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 let runtime_config_assignment_rows (state : state) =
   match state.runtime_config_view with
   | None -> []
-  | Some (_, rows) ->
-      rows
+  | Some reading ->
+      reading.rcv_rows
       |> List.filter_mapi (fun index row ->
              if Masc_tui_code_lexer.row_has_assignment row then Some index
              else None)
@@ -230,9 +230,10 @@ let runtime_config_section_line ~section rows =
    heading visible as context. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some section, Some (_, rows) ->
+  | Some section, Some { rcv_rows = rows; _ } ->
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
+    state.runtime_config_status_open <- false;
     let found = runtime_config_section_line ~section rows in
     (match found with
      | Some index ->
@@ -1940,7 +1941,8 @@ type async_msg =
       string * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
-  | Runtime_config_view_loaded of (string * string list, string) result
+  | Runtime_config_view_loaded of
+      (string * string list * Masc_tui_runtime_config_view.metadata, string) result
   | Runtime_params_loaded of
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of
@@ -6511,11 +6513,13 @@ let selected_surface_reference state =
   | Fusion ->
       (match state.fusion_mode, state.fusion_runs with
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
-       | Fusion_list, Some snapshot ->
+       | Fusion_list, Some _ ->
            Option.map
-             (fun (run : Tui_decode.fusion_run) ->
-                Link.reference Fusion_run run.fur_run_id)
-             (List.nth_opt snapshot.fus_runs state.fusion_cursor)
+             (function
+               | Tui_decode.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
+               | Tui_decode.Fusion_historical_evidence evidence ->
+                   Link.reference Board_post evidence.fhe_post_id)
+             (selected_fusion_entry state)
        | Fusion_list, None -> None)
   (* These four hold an id already and were answering None, so Ctrl-] did
      nothing on them: a lane names its keeper, a verification request names the
@@ -7864,16 +7868,11 @@ let apply_fusion_runs_load state = function
       in
       let current_selected_id =
         match state.fusion_mode with
-        | Fusion_detail run_id -> Some run_id
-        | Fusion_list ->
-            Option.bind state.fusion_runs (fun current ->
-                List.nth_opt current.Tui_decode.fus_runs state.fusion_cursor
-                |> Option.map (fun run -> run.Tui_decode.fur_run_id))
+        | Fusion_detail run_id -> Some ("run:" ^ run_id)
+        | Fusion_list -> Option.map fusion_entry_identity (selected_fusion_entry state)
       in
       let next_ids =
-        List.map
-          (fun run -> run.Tui_decode.fur_run_id)
-          snapshot.Tui_decode.fus_runs
+        List.map fusion_entry_identity (fusion_snapshot_entries snapshot)
       in
       let fallback_cursor =
         min (max 0 state.fusion_cursor) (max 0 (List.length next_ids - 1))
@@ -7896,8 +7895,8 @@ let apply_fusion_runs_load state = function
       state.fusion_cursor <- next_cursor;
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
-         when String.equal run_id selected
-              && List.exists (String.equal run_id) next_ids ->
+         when String.equal ("run:" ^ run_id) selected
+              && List.exists (String.equal selected) next_ids ->
            ()
        | Fusion_detail _, _ ->
            state.fusion_mode <- Fusion_list;
@@ -9395,14 +9394,17 @@ let open_harness_detail state =
            state.harness_cursor)
 
 let open_fusion_detail state ~mailbox =
-  let runs =
-    match state.fusion_runs with
-    | None -> []
-    | Some snapshot -> snapshot.fus_runs
-  in
-  match List.nth_opt runs state.fusion_cursor with
+  match selected_fusion_entry state with
   | None -> ()
-  | Some run ->
+  | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+      state.followed_from <- Some (state.view, None);
+      state.board_mode <- Board_read evidence.fhe_post_id;
+      state.board_scroll <- 0;
+      state.board_focus <- Right_pane;
+      goto_surface state ~mailbox Board;
+      start_board_post_refresh state ~host:server_peer_host ~port:state.port
+        ~post_id:evidence.fhe_post_id ~mailbox
+  | Some (Tui_decode.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
@@ -10643,7 +10645,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_params_error <- Some detail)
   | Runtime_config_view_loaded result -> (
       match result with
-      | Ok (path, lines) ->
+      | Ok (path, lines, metadata) ->
           (* Lexed once here rather than per frame or per row. TOML opens a
              string with a triple quote that closes several rows later, and
              masc's own tool declarations are written that way, so a row cannot
@@ -10657,7 +10659,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
-          state.runtime_config_view <- Some (path, rows);
+          state.runtime_config_view <- Some
+             { rcv_path = path; rcv_rows = rows; rcv_metadata = metadata };
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
@@ -13255,8 +13258,9 @@ let main () =
     | Some row -> (
       match state.runtime_config_view with
       | None -> add_event state "error" "config not loaded yet; r to reload"
-      | Some (_, source_rows) ->
+      | Some { rcv_rows = source_rows; _ } ->
         state.config_pane <- Config_runtime;
+        state.runtime_config_status_open <- false;
         (* Land a few rows above the header so the section reads as a block
            rather than starting at the top edge. *)
         (match config_models_source_line ~row source_rows with
@@ -13271,7 +13275,7 @@ let main () =
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some (_, rows) -> (
+    | Some { rcv_rows = rows; _ } -> (
       match Masc_tui_editor.editor_command () with
       | None ->
         report_action state "error"
@@ -15560,6 +15564,13 @@ and is loaded on demand through keeper_skill.
                       String.equal candidate.fur_run_id run.fur_run_id)
                       (selected_keeper_runs state))
                   |> Option.value ~default:0)
+       | Some "B" when state.view = Fusion
+           && state.fusion_mode = Fusion_list ->
+           (match selected_fusion_entry state with
+            | Some (Tui_decode.Fusion_historical_evidence _) ->
+                open_fusion_detail state ~mailbox:async_messages
+            | Some (Tui_decode.Fusion_retained_run _) | None ->
+                add_event state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
            (match state.fusion_mode, state.fusion_detail with
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
@@ -15568,6 +15579,7 @@ and is loaded on demand through keeper_skill.
                  | Some evidence ->
                      state.followed_from <- Some (state.view, Some id);
                      state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_scroll <- 0;
                      state.board_focus <- Right_pane;
                      goto_surface state ~mailbox:async_messages Board;
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -15606,6 +15618,35 @@ and is loaded on demand through keeper_skill.
             | None, _ | _, None -> ())
        | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
+       | Some ("v" | "V")
+         when state.view = Config && state.config_pane = Config_runtime ->
+           state.runtime_config_status_open <- not state.runtime_config_status_open;
+           state.runtime_config_status_scroll <- 0
+       | Some ("e" | "E" | "enter" | "\r" | "\n" | "/" | "n" | "N")
+         when state.view = Config && state.config_pane = Config_runtime
+              && state.runtime_config_status_open ->
+           (* This pane reads metadata. A source cursor retained behind it
+              cannot authorize an edit or a search of that hidden source. *)
+           ()
+       | Some (("esc" | "left" | "j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home") as key)
+         when state.view = Config && state.config_pane = Config_runtime
+              && state.runtime_config_status_open ->
+           (match key with
+            | "esc" | "left" -> state.runtime_config_status_open <- false
+            | "home" -> state.runtime_config_status_scroll <- 0
+            | _ ->
+                let terminal_rows, cols = get_terminal_size () in
+                let step = match key with
+                  | "pageup" | "pagedown" ->
+                      (* Match the status surface's five chrome rows after
+                         composer/agenda space has been reserved. *)
+                      max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
+                  | _ -> 1
+                in
+                let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
+                let limit = Masc_tui_render.runtime_config_status_scroll_limit state ~terminal_rows ~cols in
+                state.runtime_config_status_scroll <-
+                  max 0 (min limit (min limit state.runtime_config_status_scroll + delta)))
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
@@ -16696,9 +16737,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      let count =
-                       match state.fusion_runs with
-                       | None -> 0
-                       | Some snapshot -> List.length snapshot.fus_runs
+                       List.length (fusion_list_entries state)
                      in
                      state.fusion_cursor <-
                        max 0
@@ -17503,9 +17542,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      let count =
-                       match state.fusion_runs with
-                       | None -> 0
-                       | Some snapshot -> List.length snapshot.fus_runs
+                       List.length (fusion_list_entries state)
                      in
                      if state.fusion_cursor < count - 1 then
                        state.fusion_cursor <- state.fusion_cursor + 1

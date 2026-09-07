@@ -101,6 +101,18 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type replay_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; dropped_running : int
+  ; reached_end : bool
+  }
+
+type replay_status =
+  | Not_replayed
+  | Log_absent
+  | Replayed of replay_report
+
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
@@ -125,6 +137,7 @@ module Make (Payload : Payload) = struct
     { entries : entry list Atomic.t
     ; path : string option
     ; mutation_mutex : Cross_context_mutex.t
+    ; replay_status : replay_status
     }
 
   type event =
@@ -155,6 +168,7 @@ module Make (Payload : Payload) = struct
     ; reached_end : bool
     ; boundary : int
     ; lines_read : int
+    ; dropped_running : int
     }
 
   type retained_row =
@@ -214,7 +228,10 @@ module Make (Payload : Payload) = struct
     { entries = Atomic.make []
     ; path
     ; mutation_mutex = Cross_context_mutex.create ()
+    ; replay_status = Not_replayed
     }
+
+  let replay_status t = t.replay_status
 
   let event_to_yojson = function
     | Register { id; started_at; registration } ->
@@ -633,6 +650,7 @@ module Make (Payload : Payload) = struct
       ; reached_end = false
       ; boundary = 0
       ; lines_read = 0
+      ; dropped_running = 0
       }
     in
     if not (Fs_compat.file_exists path)
@@ -677,9 +695,14 @@ module Make (Payload : Payload) = struct
             Log.Misc.warn "%s: replay stat failed after streaming %s" Payload.name path;
             false
         in
+        let dropped_running =
+          match Payload.replayed_running_completion with
+          | Some _ -> 0
+          | None -> List.length (List.filter is_running entries)
+        in
         let entries = settle_replayed_running entries |> prune in
         { retained_entries = entries; rows; malformed = List.rev malformed; reached_end
-        ; boundary; lines_read = line_no - 1 }
+        ; boundary; lines_read = line_no - 1; dropped_running }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -692,6 +715,7 @@ module Make (Payload : Payload) = struct
   ;;
 
   let replay path =
+    let existed = Fs_compat.file_exists path in
     let snapshot = fold_replay_entries path in
     (match snapshot.malformed with
      | [] -> ()
@@ -708,6 +732,14 @@ module Make (Payload : Payload) = struct
     { entries = Atomic.make snapshot.retained_entries
     ; path = Some path
     ; mutation_mutex = Cross_context_mutex.create ()
+    ; replay_status =
+        if not existed then Log_absent
+        else Replayed
+          { lines_read = snapshot.lines_read
+          ; malformed_lines = List.length snapshot.malformed
+          ; dropped_running = snapshot.dropped_running
+          ; reached_end = snapshot.reached_end
+          }
     }
   ;;
 

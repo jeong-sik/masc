@@ -10263,6 +10263,26 @@ RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
 RUNTIME_CONFIG_RAW_PATH = "/api/v1/runtime/config/raw"
 
 
+def runtime_config_read_metadata() -> dict[str, object]:
+    return {
+        "ok": True,
+        "source_revision": "fixture-read-revision",
+        "validation": {
+            "valid": True, "schema_version": 1, "current_schema_version": 1,
+            "forward_schema": False, "issues": [],
+        },
+        "application": {
+            "operation": "read",
+            "routing": {"status": "active", "requires_restart": False},
+            "keeper_overlay": {
+                "status": "pending_restart", "configured_count": 1,
+                "requires_restart": True, "pending_keys": ["keeper.pending"],
+                "applied_keys": [], "preempted_keys": [],
+            },
+        },
+    }
+
+
 def config_navigation_source() -> str:
     lines = [
         "# operator notes stay visible",
@@ -10302,6 +10322,18 @@ def config_navigation_interaction() -> Interaction:
             start=0,
             timeout=3.0,
         )
+
+        status = send_and_wait(
+            process, master_fd, output, b"v", b"Pending restart: keeper.pending"
+        )
+        status_plain = CSI_RE.sub(b"", status)
+        for needle in (b"fixture-read-revision", b"Validation: valid", b"Keeper restart: required"):
+            if needle not in status_plain:
+                raise AssertionError(f"Config status omitted {needle!r}: {status_plain!r}")
+        # Source-only input must not open an editor or a hidden-source search.
+        # If / stole focus, v would become search text instead of returning.
+        send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
+        send_and_wait(process, master_fd, output, b"v", b"first-value = ")
 
         next_field = send_and_wait(
             process, master_fd, output, b"j", b"second-value = "
@@ -10957,6 +10989,8 @@ def fusion_run(
         "started_at": 1787557669.715736,
         "finished_at": None if status == "running" else 1787557684.715736,
         "status": status,
+        "stage": "accepted" if status == "running" else status,
+        "progress": {} if status == "running" else None,
     }
 
 
@@ -10972,6 +11006,8 @@ def fusion_runs_response(runs: list[dict[str, object]]) -> HttpResponse:
         {
             "generated_at": "2026-08-24T09:00:00Z",
             "count": len(runs),
+            "replay": {"status": "not_replayed"},
+            "historical_evidence": [],
             "runs": runs,
         },
     )
@@ -11320,7 +11356,7 @@ def fusion_list_detail_interaction(
                 )
         footer = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
-            b"K:calling Keeper  B:Board evidence  Enter:detail  "
+            b"K:calling Keeper  B:Board evidence  Enter:open  "
             b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
         footer_frame = resize_and_wait(
@@ -12610,6 +12646,7 @@ def run_config_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
+            **runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": config_navigation_source(),
         },
@@ -12913,6 +12950,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
+            **runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": "\n".join(
                 [

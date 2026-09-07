@@ -11707,6 +11707,15 @@ let fusion_run_summary run =
           (Terminal_text.single_line failure.frs_failure_code)
           (Terminal_text.single_line failure.frs_error) )
 
+let fusion_replay_warning = function
+  | Tui_decode.Fusion_not_replayed | Tui_decode.Fusion_log_absent -> None
+  | Tui_decode.Fusion_replayed { malformed_lines = 0; dropped_running = 0;
+                                incomplete = false } -> None
+  | Tui_decode.Fusion_replayed { malformed_lines; dropped_running; incomplete } ->
+      Some (Printf.sprintf
+        "Registry startup read: %d invalid rows; %d registrations omitted%s"
+        malformed_lines dropped_running (if incomplete then "; read incomplete" else ""))
+
 let render_fusion_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -11716,7 +11725,11 @@ let render_fusion_list (state : state) =
     | None -> []
     | Some snapshot -> snapshot.fus_runs
   in
-  let shown = List.length runs in
+  let entries = fusion_list_entries state in
+  let shown = List.length entries in
+  let history_count = shown - List.length runs in
+  let replay_warning = Option.bind state.fusion_runs
+      (fun snapshot -> fusion_replay_warning snapshot.fus_replay) in
   let now_epoch = Unix.gettimeofday () in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -11742,16 +11755,18 @@ let render_fusion_list (state : state) =
                match r.fur_status with Tui_decode.Fusion_failed _ -> acc + 1 | _ -> acc)
             0 runs
         in
-        let running_count = Stdlib.max 0 (shown - completed_count - failed_count) in
+        let running_count = Stdlib.max 0 (List.length runs - completed_count - failed_count) in
         let stats_note =
           Printf.sprintf " (%d runs · %s%d done%s · %s%d run%s%s)"
-            shown
+            (List.length runs)
             (Theme.ok ()) completed_count Ansi.reset
             (Theme.info ()) running_count Ansi.reset
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
         Printf.sprintf "%s%s  %s  %s"
-          (screen_title " MASC Fusion") stats_note timestamp
+          (screen_title " MASC Fusion")
+          (stats_note ^ (if history_count = 0 then "" else
+             Printf.sprintf " · %d Board evidence" history_count)) timestamp
           (connection_badge state)
   in
   (* Measured from the rows, the way the Approvals table measures its own
@@ -11787,7 +11802,11 @@ let render_fusion_list (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows = listing_chrome ~error:state.fusion_error in
+  Option.iter (fun warning ->
+      box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ warning);
+      box_divider buf cols) replay_warning;
+  let chrome_rows = listing_chrome ~error:state.fusion_error
+      + (if Option.is_some replay_warning then 2 else 0) in
   (* The selected run's lifecycle is a reading, not footer help. Reserve one
      row for it so every run says where it is in the four-stage flow. *)
   let content_height = max 1 (rows - chrome_rows - 1) in
@@ -11803,7 +11822,9 @@ let render_fusion_list (state : state) =
       with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note
-      | Page_empty -> "  (no retained Fusion runs)"
+      | Page_empty ->
+          if Option.is_some replay_warning then "  No readable retained runs; see startup read warning above"
+          else "  (no retained Fusion runs)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -11813,9 +11834,15 @@ let render_fusion_list (state : state) =
   else
     for index = 0 to content_height - 1 do
       let row_index = index + scroll in
-      match List.nth_opt runs row_index with
+      match List.nth_opt entries row_index with
       | None -> box_empty buf cols
-      | Some run ->
+      | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+          let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
+              ^ " · " ^ Link.reference Board_post evidence.fhe_post_id in
+          let marker = if row_index = state.fusion_cursor then
+              Ansi.reverse ^ ">" ^ Ansi.reset else " " in
+          box_line buf cols (marker ^ " " ^ line)
+      | Some (Tui_decode.Fusion_retained_run run) ->
           let status = fusion_run_status_to_string run.fur_status in
           let state_text =
             match run.fur_status with
@@ -11837,9 +11864,12 @@ let render_fusion_list (state : state) =
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
           else box_line buf cols ("  " ^ line)
     done;
-  (match List.nth_opt runs state.fusion_cursor with
+  (match List.nth_opt entries state.fusion_cursor with
    | None -> box_empty buf cols
-   | Some selected ->
+   | Some (Tui_decode.Fusion_historical_evidence _) ->
+       box_line_styled buf cols ~style:(Theme.warn ())
+         "  Historical Board evidence; run lifecycle unavailable · Enter:read original result"
+   | Some (Tui_decode.Fusion_retained_run selected) ->
        let style, summary = fusion_run_summary selected in
        box_line_styled buf cols ~style ("  " ^ fusion_run_duration ~now:now_epoch selected ^ " · " ^ summary));
   box_bottom buf cols;
@@ -16524,7 +16554,7 @@ let render_config_models (state : state) =
   box_top buf cols;
   let path_note =
     match state.runtime_config_view with
-    | Some (path, _) -> Ansi.dim ^ path ^ Ansi.reset
+    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
     | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
   in
   box_line buf cols
@@ -16614,9 +16644,55 @@ let render_config_models (state : state) =
        ~hints:"j/k:row  e:open [models.NAME]  p:next pane  r:reload  Tab:next");
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
+let config_metadata_summary (state : state) =
+  match state.runtime_config_view with
+  | None -> []
+  | Some reading ->
+      let lines = Masc_tui_runtime_config_view.summary_lines reading.rcv_metadata in
+      (match lines, state.runtime_config_view_error with
+       | (tone, text) :: rest, Some _ -> (tone, "Previous read · " ^ text) :: rest
+       | _ -> lines)
+
+let config_metadata_style = function
+  | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
+  | Good -> Theme.ok () | Warning -> Theme.warn () | Bad -> Theme.bad ()
+
 let config_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
-  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 7)
+  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows
+         - 7 - List.length (config_metadata_summary state))
+
+let runtime_config_status_lines state ~cols =
+  let lines =
+    (match state.runtime_config_view_error with
+     | None -> []
+     | Some detail -> [Masc_tui_runtime_config_view.Bad, "Read failed: " ^ detail])
+    @ match state.runtime_config_view with
+      | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
+      | Some reading ->
+          [Masc_tui_runtime_config_view.Neutral,
+           (if Option.is_some state.runtime_config_view_error then "Previous source: " else "Source: ") ^ reading.rcv_path]
+          @ Masc_tui_runtime_config_view.detail_lines reading.rcv_metadata
+  in
+  List.concat_map (fun (tone, text) ->
+    Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+      (Terminal_text.single_line text)
+    |> List.map (fun text -> tone, text)) lines
+
+let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
+  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
+  max 0 (List.length (runtime_config_status_lines state ~cols) - room)
+
+let render_runtime_config_status state =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"config-status"
+    ~title:(screen_title " MASC Config / runtime.toml status")
+    ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
+    ~body:(fun ~budget c ->
+      let lines = runtime_config_status_lines state ~cols in
+      let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in
+      lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
+      |> List.iter (fun (tone, text) -> c.push_styled ~style:(config_metadata_style tone) ("  " ^ text)))
 
 (* What voice resolved to, and on which microphone.
 
@@ -16698,12 +16774,13 @@ let render_voice (state : state) =
 ;;
 
 let render_config (state : state) =
+  if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   let path_note =
     match state.runtime_config_view with
-    | Some (path, _) -> Ansi.dim ^ path ^ Ansi.reset
+    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
     | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
   in
   box_line buf cols
@@ -16727,6 +16804,9 @@ let render_config (state : state) =
             (fit_width identity.Tui_decode.sid_masc_root 32)
             (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
             Ansi.reset));
+  List.iter (fun (tone, text) ->
+    box_line_styled buf cols ~style:(config_metadata_style tone)
+      ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
   box_divider buf cols;
   let content_height = config_content_height state in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -16740,7 +16820,7 @@ let render_config (state : state) =
        for _ = 2 to content_height do
          box_empty buf cols
        done
-   | None, Some (_, rows) ->
+   | None, Some { rcv_rows = rows; _ } ->
        let total = List.length rows in
        let max_scroll = max 0 (total - content_height) in
        let scroll = max 0 (min state.config_scroll max_scroll) in
@@ -16764,7 +16844,7 @@ let render_config (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:value field  PgUp/PgDn:page  e:edit (preview-checked)  r:reload  Tab:next");
+         "j/k:value field  v:read status  PgUp/PgDn:page  e:edit (preview-checked)  r:reload");
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =

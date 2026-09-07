@@ -4135,6 +4135,8 @@ let test_decode_fusion_list_and_exact_detail () =
   let snapshot_json =
     `Assoc
       [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int 2
       ; ( "runs"
         , `List
@@ -4225,6 +4227,8 @@ let test_decode_fusion_list_and_exact_detail () =
   let unknown_topology =
     `Assoc
       [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int 1
       ; "runs", `List [ fusion_run_json ~topology:"recursive" "fusion-new" ]
       ]
@@ -4402,6 +4406,8 @@ let test_decode_fusion_progress_and_completion_summary () =
   let snapshot runs =
     `Assoc
       [ "generated_at", `String "2026-09-01T00:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int (List.length runs)
       ; "runs", `List runs
       ]

@@ -44,6 +44,7 @@
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.
   masc.fusion_core
+  masc.run_registry_core
   masc.masc_tool_surface
   masc.operator
   masc.voice_bridge_core

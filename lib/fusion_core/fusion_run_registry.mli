@@ -99,6 +99,7 @@ type global_install_error = Already_installed
 
 val global : unit -> t
 val install_global : t -> (unit, global_install_error) result
+val replay_status : t -> Run_registry_core.replay_status
 val storage_filename : string
 val max_completed_retained : int
 

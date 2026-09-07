@@ -1818,6 +1818,7 @@ type async_msg =
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
@@ -4036,11 +4037,16 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
+  | Some view when (match operation with Read | Screenshot _ -> true | _ -> false)
+                   && not (selected_client_available view) ->
+      state.browser_lane <- Some { view with client_picker = Some 0;
+        load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
-      state.browser_lane <- Some { view with load = Loading (generation, operation) };
+      state.browser_lane <- Some { view with load = Loading (generation, operation);
+        clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
         (* The mailbox is the effect boundary. Cancellation still belongs to
@@ -4051,12 +4057,14 @@ let launch_browser_lane state ~mailbox operation =
           | exn -> Error (Printexc.to_string exn)
         in
         match operation with
+        | Discover _ -> Browser_lane_clients_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Screenshot tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
-              ~host ~port ~source:view.source ~tab_id);
+              ~host ~port ~view ~tab_id);
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
@@ -4067,10 +4075,18 @@ let launch_browser_lane state ~mailbox operation =
        | None ->
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
+let refresh_browser_lane state ~mailbox =
+  match state.browser_lane with
+  | Some view when not (Browser_lane_view.busy view) ->
+      state.browser_lane <- Some (Browser_lane_view.refresh view);
+      launch_browser_lane state ~mailbox
+        (match view.source with Live -> Discover Read_after_discovery | Automation -> Read)
+  | Some _ | None -> ()
+
 let open_browser_lane state ~mailbox =
   show_browser_lane state;
   release_composer_for_browser_reader state;
-  launch_browser_lane state ~mailbox Browser_lane_view.Read
+  refresh_browser_lane state ~mailbox
 
 let launch_runtime_surface_load state ~mailbox ~force =
   match state.runtime_surface_inflight with
@@ -5184,7 +5200,7 @@ let goto_surface state ~mailbox (destination : surface) =
         | None -> launch_connectors_load state ~mailbox
         | Some _ ->
             release_composer_for_browser_reader state;
-            launch_browser_lane state ~mailbox Browser_lane_view.Read)
+            refresh_browser_lane state ~mailbox)
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config -> (
@@ -11815,6 +11831,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
                detail))
+  | Browser_lane_clients_loaded (generation, result) ->
+      (match state.browser_lane with
+       | None -> ()
+       | Some view ->
+           let next, read = Browser_lane_view.accept_clients ~generation result view in
+           state.browser_lane <- Some next;
+           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read)
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
@@ -15556,6 +15579,33 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key
+         when (match browser_lane_on_screen state with
+           | Some view -> Option.is_some view.client_picker | None -> false)
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let open Browser_lane_view in
+                let cursor = Option.value ~default:0 view.client_picker in
+                (match key with
+                 | "esc" | "b" ->
+                     state.browser_lane_generation <- state.browser_lane_generation + 1;
+                     state.browser_lane <- Some { view with client_picker = None;
+                       load = (match view.load with Loading (_, Discover _) -> Idle | other -> other) }
+                 | "r" when not (busy view) ->
+                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                 | "j" | "down" | "k" | "up" ->
+                     let delta = if key = "j" || key = "down" then 1 else -1 in
+                     state.browser_lane <- Some { view with client_picker = Some
+                       (max 0 (min (List.length view.clients - 1) (cursor + delta))) }
+                 | "\r" | "\n" | "enter" when not (busy view) ->
+                     (match List.nth_opt view.clients cursor with
+                      | None -> ()
+                      | Some client ->
+                          state.browser_lane <- Some (choose_client client view);
+                          launch_browser_lane state ~mailbox:async_messages Read)
+                 | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
@@ -15567,7 +15617,7 @@ and is loaded on demand through keeper_skill.
                 in
                 match !terminal_draws_images, view.selected_tab with
                 | Some false, _ -> refuse terminal_draws_no_images
-                | _, None -> refuse "Read and select a Firefox tab before taking a screenshot"
+                | _, None -> refuse "Read and select a browser tab before taking a screenshot"
                 | (Some true | None), Some tab_id ->
                     launch_browser_lane state ~mailbox:async_messages
                       (Browser_lane_view.Screenshot tab_id))
@@ -15604,7 +15654,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g") as key)
+               | "o" | "x" | "g" | "b") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -15626,19 +15676,23 @@ and is loaded on demand through keeper_skill.
                      if state.view = Connectors then
                        launch_connectors_load state ~mailbox:async_messages
                  | "l" | "a" ->
-                     read (switch_source (if key = "l" then Live else Automation) view)
+                     state.browser_lane <- Some (switch_source (if key = "l" then Live else Automation) view);
+                     refresh_browser_lane state ~mailbox:async_messages
+                 | "b" when view.source = Live && not (busy view) ->
+                     state.browser_lane <- Some { view with client_picker = Some 0 };
+                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
-                 | "r" -> read (refresh view)
+                 | "r" -> refresh_browser_lane state ~mailbox:async_messages
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
-                     add_event state "system" "Select automation (a) to navigate its Firefox session"
+                     add_event state "system" "Select automation (a) to navigate its browser session"
                  | "o" | "x" when view.source = Automation ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)
                  | "o" | "x" ->
-                     add_event state "system" "Select automation (a) to open or close its Firefox session"
+                     add_event state "system" "Select automation (a) to open or close its browser session"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->
@@ -15651,7 +15705,7 @@ and is loaded on demand through keeper_skill.
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
               && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
            (* The child owns its keys. In particular b/u must never mutate a
-              hidden connector binding while Firefox content is on screen. *)
+              hidden connector binding while browser content is on screen. *)
            ()
        | Some ("j" | "down" | "k" | "up" as move)
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
@@ -17106,7 +17160,7 @@ and is loaded on demand through keeper_skill.
             | Connectors ->
                 (match browser_lane_on_screen state with
                  | None -> launch_connectors_load state ~mailbox:async_messages
-                 | Some _ -> launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read)
+                 | Some _ -> refresh_browser_lane state ~mailbox:async_messages)
             | Runtime ->
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true

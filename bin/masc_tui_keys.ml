@@ -355,7 +355,7 @@ let for_surface = function
       @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read Firefox tabs and page text; select live / automation inside Browser"
+          ~help:"read browser tabs and page text; select live / automation inside Browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -826,7 +826,8 @@ let help_sections ?current () =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "l / a" "live / automation"
+    [ b Navigate "b" "browser"
+    ; b Navigate "l / a" "live / automation"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"

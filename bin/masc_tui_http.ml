@@ -2473,6 +2473,11 @@ let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : stri
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)
+let fetch_browser_lane_clients ~host ~port =
+  let open Masc_tui_types.Browser_lane_view in
+  let* json = get_json ~host ~port ~path:"/api/v1/dashboard/browser-lane/clients" in
+  decode_clients json
+
 let fetch_browser_lane ~host ~port view =
   (* The server can spend 20s listing tabs and 20s reading the page. *)
   match post_json_with_timeout ~timeout_sec:45.0 ~host ~port
@@ -2481,10 +2486,9 @@ let fetch_browser_lane ~host ~port view =
   | Error detail -> Error detail
   | Ok json -> Masc_tui_types.Browser_lane_view.decode json
 
-let fetch_browser_lane_screenshot ~host ~port ~source ~tab_id =
+let fetch_browser_lane_screenshot ~host ~port ~view ~tab_id =
   let open Masc_tui_types.Browser_lane_view in
-  let body = Yojson.Safe.to_string (`Assoc [
-    "lane", `String (source_name source); "tabId", `Int tab_id]) in
+  let body = Yojson.Safe.to_string (request_body { view with selected_tab = Some tab_id }) in
   let* json = post_json_with_timeout ~timeout_sec:45.0 ~host ~port
       ~path:"/api/v1/dashboard/browser-lane/screenshot" ~body in
   let* screenshot = decode_screenshot json in
@@ -2495,7 +2499,7 @@ let fetch_browser_lane_screenshot ~host ~port ~source ~tab_id =
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Read | Screenshot _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Screenshot _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

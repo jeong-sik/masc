@@ -495,7 +495,17 @@ let run_candidates_outcome
           ; detail = Runtime.request_body_cap_error_to_string error
           }
       | Ok cap_bytes ->
-        (match fit_request_to_cap ~req ~cache ~cap_bytes with
+        (* [None] is the absence of a caller cap, which
+           [Runtime.validate_request_body_cap] preserves and
+           [keeper_dispatch_readiness] calls valid. A request has nothing to be
+           fitted to then, so it goes as it stands; fitting needs a number to
+           fit to and only the [Some] side has one. *)
+        let fitted =
+          match cap_bytes with
+          | None -> Ok req
+          | Some cap_bytes -> fit_request_to_cap ~req ~cache ~cap_bytes
+        in
+        (match fitted with
          | Error (actual_bytes, limit_bytes) ->
            record_vision_candidate_attempt
              ~runtime_id

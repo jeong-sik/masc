@@ -457,8 +457,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_float Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
        | "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC" ->
          display_float Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-       | "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" ->
-         display_float (Env_config_keeper.KeeperHealth.durable_queue_stale_sec ())
        | "MASC_KEEPER_WIRE_CAPTURE" ->
          display_bool (Env_config_keeper.KeeperWireCapture.enabled ())
        | "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" ->

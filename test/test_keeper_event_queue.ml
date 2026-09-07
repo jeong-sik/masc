@@ -1718,6 +1718,8 @@ let () =
         ~base_path
         ~keeper_name:runnable_keeper
         (enqueue empty runnable_pending);
+      let runnable_snapshot = snapshot_path ~base_path ~keeper_name:runnable_keeper in
+      let before_observation = read_file runnable_snapshot in
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in
@@ -1737,6 +1739,15 @@ let () =
           ~base_path
           ~owner_lifecycle
       in
+      Alcotest.(check string) "age observation leaves durable snapshot bytes unchanged"
+        before_observation (read_file runnable_snapshot);
+      let residence = match json_field "queue_residence" json with
+        | Some value -> value | None -> Alcotest.fail "queue residence missing" in
+      Alcotest.(check string) "first admission was not recorded" "first_admission_not_recorded"
+        (string_field "reason" residence);
+      Alcotest.(check bool) "residence is explicitly unknown, never source age" true
+        (json_field "oldest_age_seconds" residence = Some `Null
+         && string_field "status" residence = "unknown");
       Alcotest.(check string) "summary status" "degraded" (string_field "status" json);
       Alcotest.(check int)
         "keeper_count excludes snapshotless runtime dirs"
@@ -1745,9 +1756,9 @@ let () =
       Alcotest.(check int) "pending_count" 3 (int_field "pending_count" json);
       Alcotest.(check int) "total_count" 3 (int_field "total_count" json);
       Alcotest.(check (float 0.001))
-        "oldest_age_seconds"
+        "oldest_source_age_seconds"
         25.0
-        (float_field "oldest_age_seconds" json);
+        (float_field "oldest_source_age_seconds" json);
       Alcotest.(check int)
         "runnable backlog count excludes paused owner"
         1
@@ -1755,7 +1766,7 @@ let () =
       Alcotest.(check (float 0.001))
         "runnable oldest age excludes paused owner"
         25.0
-        (float_field "runnable_oldest_age_seconds" json);
+        (float_field "runnable_oldest_source_age_seconds" json);
       Alcotest.(check int)
         "paused/dead backlog count"
         2
@@ -1767,7 +1778,7 @@ let () =
       Alcotest.(check (float 0.001))
         "paused/dead oldest age"
         20.0
-        (float_field "paused_dead_oldest_age_seconds" json);
+        (float_field "paused_dead_oldest_source_age_seconds" json);
       Alcotest.(check bool)
         "paused/dead work requires explicit operator action"
         true
@@ -1797,7 +1808,7 @@ let () =
       Alcotest.(check (float 0.001))
         "runnable keeper oldest age"
         25.0
-        (float_field "oldest_age_seconds" runnable_summary);
+        (float_field "oldest_source_age_seconds" runnable_summary);
       let retained_disabled_json =
         Keeper_event_queue_persistence.fleet_summary_json
           ~now:30.0

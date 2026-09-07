@@ -115,7 +115,7 @@ let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
     - bin/opam  (fake: exists, exits 0)
 
     Returns [(bin_dir, dune_log)] where [dune_log] records each dune call. *)
-let setup_fake_repo ?(ocaml_version = "5.5.0") base =
+let setup_fake_repo ?(ocaml_version = "5.5.1") base =
   let scripts_dir = Filename.concat base "scripts" in
   let bin_dir = Filename.concat base "bin" in
   mkdir_p scripts_dir;
@@ -270,7 +270,7 @@ let test_opam_absent_aborts_before_dune () =
 (package
  (name masc)
  (depends
-  (ocaml (= 5.5.0))))
+  (ocaml (= 5.5.1))))
 |};
       write_executable
         (Filename.concat scripts_dir "dune-local.sh")
@@ -304,7 +304,7 @@ exit 0
       in
       check int "exits non-zero when opam absent" 1 code;
       check_contains "opam requirement is explicit" stderr
-        "opam is unavailable; MASC requires an opam-managed OCaml 5.5.0 switch";
+        "opam is unavailable; MASC requires an opam-managed OCaml 5.5.1 switch";
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let test_dune_lock_wait_reports_holder () =
@@ -820,7 +820,7 @@ let setup_repo_for_pin_check base =
 (package
  (name masc)
  (depends
-  (ocaml (= 5.5.0))))
+  (ocaml (= 5.5.1))))
 |};
   write_executable
     (Filename.concat scripts_dir "opam-pin-external-deps.sh")
@@ -837,7 +837,7 @@ case "$1 $2" in
 ' %s; exit 0 ;;
   "pin list") cat %s; exit 0 ;;
 esac
-if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.0
+if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.1
 '; exit 0; fi
 exit 0
 |}
@@ -963,7 +963,7 @@ let test_a_local_pin_reaches_the_screen_on_a_passing_build () =
 if [ "$1" = "exec" ] && [ "$3" = "ocamlfind" ] && [ "$4" = "query" ]; then
   printf '/fake/lib/%%s\n' "$5"; exit 0
 fi
-if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.0\n'; exit 0; fi
+if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.1\n'; exit 0; fi
 if [ "$1" = "list" ] && [ "$2" = "--installed" ] && [ -n "$4" ]; then
   printf '%%s\n' "$4"; exit 0
 fi
@@ -1048,7 +1048,7 @@ let test_skip_deps_check_env_bypasses_guard () =
 
 (* --- exact OCaml toolchain guard tests -------------------------------- *)
 
-let setup_repo_with_ocaml ?(required_version = "5.5.0")
+let setup_repo_with_ocaml ?(required_version = "5.5.1")
     ?(ocaml_version = "5.4.0") base =
   let bin_dir, dune_log =
     setup_fake_repo base ~ocaml_version:required_version
@@ -1091,7 +1091,7 @@ let test_old_ocaml_aborts_build () =
     in
     check int "exits non-zero on old OCaml" 1 code;
     check_contains "OCaml version message present" stderr "OCaml 5.4.0 detected";
-    check_contains "exact 5.5.0 mentioned" stderr "exactly 5.5.0";
+    check_contains "exact 5.5.1 mentioned" stderr "exactly 5.5.1";
     check_contains "skip hint present" stderr
       "MASC_SKIP_OCAML_VERSION_CHECK=1";
     check bool "dune not invoked" false (Sys.file_exists dune_log))
@@ -1112,7 +1112,7 @@ let test_ocaml_version_comes_from_dune_project () =
   with_temp_dir "dune-local-ocaml-version-ssot" (fun dir ->
     let bin_dir, dune_log =
       setup_repo_with_ocaml dir ~required_version:"5.6.0"
-        ~ocaml_version:"5.5.0"
+        ~ocaml_version:"5.5.1"
     in
     let code, _stdout, stderr =
       run_dune_local dir bin_dir
@@ -1124,14 +1124,14 @@ let test_ocaml_version_comes_from_dune_project () =
     in
     check int "exits non-zero on dune-project version mismatch" 1 code;
     check bool "live OCaml version message present" true
-      (String_util.contains_substring stderr "OCaml 5.5.0 detected");
+      (String_util.contains_substring stderr "OCaml 5.5.1 detected");
     check bool "dune-project exact version mentioned" true
       (String_util.contains_substring stderr "exactly 5.6.0");
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let test_split_opam_prefix_aborts_build () =
   with_temp_dir "dune-local-split-opam-prefix" (fun dir ->
-    let bin_dir, dune_log = setup_repo_with_ocaml dir ~ocaml_version:"5.5.0" in
+    let bin_dir, dune_log = setup_repo_with_ocaml dir ~ocaml_version:"5.5.1" in
     let wrong_prefix = Filename.concat dir "other-switch" in
     let code, _stdout, stderr =
       run_dune_local dir bin_dir
@@ -1147,7 +1147,7 @@ let test_split_opam_prefix_aborts_build () =
     check_contains "selected prefix present" stderr dir;
     check_contains "stale prefix present" stderr wrong_prefix;
     check_contains "repair command present" stderr
-      "opam env --switch=5.5.0 --set-switch";
+      "opam env --switch=5.5.1 --set-switch";
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let () =

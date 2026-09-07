@@ -386,6 +386,16 @@ class Resolver:
                         if candidates:
                             resolved = candidates[0]
                             self.substitutions[name] = resolved
+                            # Ahead of everything else. ocamlfind orders
+                            # -package by declared dependency, and nothing
+                            # declares a dependency on the implementation --
+                            # mirage-crypto-rng requires the virtual
+                            # `digestif`, so digestif_c.cmxa landed after it
+                            # and the link refused: "Wrong link order:
+                            # Mirage_crypto_rng__Fortuna depends on Digestif".
+                            if resolved not in packages:
+                                packages.insert(0, resolved)
+                            return True
                     if resolved not in packages:
                         packages.append(resolved)
                     return True

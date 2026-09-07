@@ -46,6 +46,8 @@ type error =
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Artifact_read_failed of Tool_blob_store.fetch_error | Artifact_missing of string
   | Artifact_write_failed of string | Directory_prepare_failed of string
+  | Directory_read_failed of string
+  | Directory_rejected of Fs_compat.owned_directory_chain_rejection
   | Lock_failed of File_lock_eio.durable_lock_error
   | Write_failed of Keeper_fs.durable_write_error
 
@@ -53,6 +55,7 @@ type 'a mutation = { value : 'a; lock_release_error : File_lock_eio.durable_lock
 let ( let* ) = Result.bind
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let id t = t.work_id
+let keeper_name t = t.keeper_name
 let revision t = digest (Yojson.Safe.to_string (to_yojson t))
 let status t = match t.state with
   | Queued -> Pending | Claimed owner -> Running owner | Proposed (_, p) -> Proposal_recorded p
@@ -84,6 +87,8 @@ let error_to_string = function
   | Artifact_missing sha -> "recovery artifact missing: " ^ sha
   | Artifact_write_failed s -> "recovery artifact write failed: " ^ s
   | Directory_prepare_failed s -> "recovery directory preparation failed: " ^ s
+  | Directory_read_failed s -> "recovery directory read failed: " ^ s
+  | Directory_rejected e -> Fs_compat.owned_directory_chain_rejection_to_string e
   | Lock_failed e -> File_lock_eio.durable_lock_error_to_string e
   | Write_failed e -> Keeper_fs.durable_write_error_to_string e
 
@@ -180,6 +185,33 @@ let load ~config ~id =
     let* () = validate t |> Result.map_error (fun e -> Invalid_record (error_to_string e)) in
     let* () = if t.work_id = id then Ok () else Error (Invalid_record "work ID differs from file") in
     Ok (Some t)
+type inventory_item =
+  | Available of t
+  | Unavailable of { file_name : string; error : error }
+
+let inventory ~config =
+  try
+    let* directory = Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:(Workspace.masc_root_dir config) (store_dir config)
+      |> Result.map_error (fun error -> Directory_rejected error) in
+    match directory with
+    | Fs_compat.Owned_directory_missing -> Ok []
+    | Fs_compat.Owned_directory _ ->
+      let files = Fs_compat.read_dir (store_dir config) in
+      Ok (List.filter_map (fun file_name ->
+        if Filename.extension file_name <> ".json" then None
+        else
+          let id = Filename.remove_extension file_name in
+          Some (match load ~config ~id with
+            | Ok (Some work) -> Available work
+            | Ok None -> Unavailable {file_name; error=Not_found}
+            | Error error -> Unavailable {file_name; error})) files)
+  with
+  | Sys_error error -> Error (Directory_read_failed error)
+  | Unix.Unix_error (code, operation, argument) ->
+    Error (Directory_read_failed
+      (Printf.sprintf "%s (%s %s)" (Unix.error_message code) operation argument))
+
 let prepare_directory config =
   Keeper_fs_durable_directory.ensure ~before_prepare:(fun () -> ())
     ~before_directory_fsync:(fun _ -> ()) ~ownership_root:(Workspace.masc_root_dir config)

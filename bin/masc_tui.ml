@@ -12921,6 +12921,17 @@ let main () =
   let refresh_interval_ns =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
+  (* A TUI key name to the lane's key vocabulary (RFC-0439 §3.3). The TUI sends
+     " " for space and single characters for letters; arrows come through by
+     name. [None] means "not a game key" -- esc is handled before this, and
+     deliberate non-key input ("") has no server key. *)
+  let msx_server_key = function
+    | " " -> Some "space"
+    | "up" | "down" | "left" | "right" as d -> Some d
+    | name when String.length name = 1 && Char.code name.[0] >= 33 && Char.code name.[0] < 127 ->
+        Some name
+    | _ -> None
+  in
   (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
      reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
   let msx_spectator_poll_seconds = 0.3 in
@@ -14148,9 +14159,28 @@ and is loaded on demand through keeper_skill.
         else None
       in
       (match msx_key with
-      | Some name ->
-          if not (Masc_tui_msx.consume ~write:write_to_terminal state name)
+      | Some "esc" ->
+          (* esc closes the spectator; consume returns false and owes a repaint. *)
+          if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
           then invalidate_frame_for_resize frame_presenter render_schedule
+      | Some name -> (
+          (* A game key: send it to the shared server machine (RFC-0439 §3.3),
+             then re-fetch so the human sees the result of their own press
+             without waiting for the next poll. A key with no server mapping
+             (e.g. deliberate non-key input) just repaints the cache. *)
+          match msx_server_key name with
+          | Some server_key ->
+              (match
+                 Masc_tui_http.post_msx_press ~host:server_peer_host
+                   ~port:state.port ~keys:[ server_key ]
+               with
+               | Ok _ | Error _ -> ());
+              state.msx_frame <-
+                Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+              Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+          (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
+          | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name))
       | None -> ());
       let key =
         if dismissed_image || Option.is_some msx_key then None

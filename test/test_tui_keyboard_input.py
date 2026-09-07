@@ -2372,7 +2372,7 @@ def keeper_selection_identity_interaction(
     )
     send_and_wait(process, master_fd, output, b"r", b"29453")
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+    escape_to_keeper_detail(process, master_fd, output, name=b"beta")
 
     (keepers_path / "beta.json").write_text("{", encoding="utf-8")
     read_available(master_fd, output)
@@ -2411,7 +2411,7 @@ def keeper_selection_identity_interaction(
         raise AssertionError(
             f"unreliable Keeper snapshot opened message mode: {stale_gate!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+    escape_to_keeper_detail(process, master_fd, output, name=b"beta")
     alpha_metadata = keeper_metadata("alpha")
     alpha_metadata["current_task_id"] = "task-29454"
     (keepers_path / "alpha.json").write_text(
@@ -2635,9 +2635,7 @@ def keeper_message_unreliable_roster_interaction(
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError("unreliable Keeper roster allowed a message POST")
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -4449,7 +4447,19 @@ def paste_into_a_field_interaction() -> Interaction:
         )
         # Esc arms the draft's send-or-discard; d throws it away and leaves
         # the pane, where q is draft text rather than quit.
-        send_and_wait(process, master_fd, output, b"\x1b", b"s:send  d:discard")
+        #
+        # The armed footer names more than those two -- editing in $EDITOR and
+        # cycling the hearth sit between them -- so the two keys this step is
+        # about are matched with what may come between, the way the TOOLS lane
+        # needle tolerates padding. A literal "s:send  d:discard" pinned a
+        # footer that had since grown, and starved.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            re.compile(rb"s:send" + rb"[\x1b\x20-\x7e]*?" + rb"d:discard"),
+        )
         send_and_wait(process, master_fd, output, b"d", b"MASC Board")
         os.write(master_fd, b"q")
 
@@ -4743,9 +4753,7 @@ def image_view_interaction() -> Interaction:
         send_and_wait(process, master_fd, output, missing, composer_showing(missing))
         send_and_wait(process, master_fd, output, b"\r", b"No such file")
 
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -5124,6 +5132,21 @@ def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     }, gate
 
 
+def seed_uncoalesced_queue(base_path: str) -> None:
+    """Give every queued line its own turn, which is what this scenario walks.
+
+    [tui].coalesce_queued_input is absent-reads-as-yes, and with it on a line
+    typed while an earlier one is still waiting joins that line instead of
+    queueing behind it -- one NEXT holding "queued-one\\nqueued-two" rather
+    than two. That is the right default (a thought, its correction and the
+    part the writer forgot are one message) and it is not what a scenario
+    about walking a queue of two can use.
+    """
+    config = Path(base_path, ".masc", "config", "runtime.toml")
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("[tui]\ncoalesce_queued_input = false\n", encoding="utf-8")
+
+
 def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
     """Pending input stays in NEXT, outside the active causal turn, and the
     arrows can still edit it."""
@@ -5155,7 +5178,12 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         # it, and the pane says so itself. Waiting on the fixture's own event
         # instead would stop pumping the terminal, and a TUI whose output
         # nobody reads blocks before it ever posts.
-        sending = send_and_wait(process, master_fd, output, b"\r", b"(sending ")
+        # The pane names the running turn "ACTIVE TURN"; the "(sending …)"
+        # spelling this waited on is gone, and the next wait already asks for
+        # the surviving one. Waiting here for the same words keeps the frame
+        # this step captures -- footer_while_sending is read off it -- while
+        # asking for something the pane still draws.
+        sending = send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
         wait_for_output(
             process,
             master_fd,
@@ -5179,13 +5207,26 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             process, master_fd, output, b"\r", b"queued-two"
         )
 
-        frame = frame_containing(second_queued, b"queued-two")
-        plain = CSI_RE.sub(b"", frame)
+        # The whole screen, not the frame that carried the second queue row.
+        # A frame holds the rows that changed, and the sent line's own row was
+        # drawn before either line was queued -- asking one frame for it fails
+        # on a screen that has it. second_queued is still the wait that says
+        # the second row arrived.
+        _ = second_queued
+        plain = CSI_RE.sub(b"", screen_text(bytes(output)))
         # Pending messages are visible but not represented as turns the model
         # has already received.
-        turn_user = "▶  YOU".encode()
+        #
+        # The gap between the caret and YOU is column padding, and it has
+        # changed width. Matching the pair rather than one spelling of the gap
+        # asks what this step is about -- the row is marked as a user turn --
+        # without pinning a layout that is free to move.
+        turn_user = re.compile("▶\\s+YOU".encode())
+        if turn_user.search(plain) is None:
+            raise AssertionError(
+                f"the sent line is not marked as a user turn: {plain!r}"
+            )
         for expected in (
-            turn_user,
             b"NEXT 1",
             b"queued-one",
             b"NEXT 2",
@@ -5198,7 +5239,7 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
                 )
         if b"TURN \xc2\xb7 QUEUED" in plain:
             raise AssertionError(f"pending input leaked into the transcript: {plain!r}")
-        if plain.find(turn_user) > plain.find(b"NEXT 1"):
+        if turn_user.search(plain).start() > plain.find(b"NEXT 1"):
             raise AssertionError(f"NEXT was drawn inside the causal transcript: {plain!r}")
         if b"Enter:queue(2)" not in plain:
             raise AssertionError(f"the footer lost its count: {plain!r}")
@@ -5271,9 +5312,7 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             start=0,
             timeout=10.0,
         )
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -5426,13 +5465,7 @@ def chat_steer_interaction(
             start=0,
             timeout=10.0,
         )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b",
-            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(
             process, master_fd, output, b"\x1b", b"MASC Keepers"
         )
@@ -5511,7 +5544,12 @@ def chat_reconcile_interaction(
             process, master_fd, output, b"held-next", composer_showing(b"held-next")
         )
         held = send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
-        held_plain = CSI_RE.sub(b"", frame_containing(held, b"NEXT 1"))
+        # The reconciliation line is a STATUS row the pane drew when the
+        # subscribe was lost, frames before this one. A frame carries the rows
+        # that changed, so asking the queueing frame for it fails on a screen
+        # that shows it.
+        _ = held
+        held_plain = CSI_RE.sub(b"", screen_text(bytes(output)))
         if b"reconciling" not in held_plain:
             raise AssertionError(
                 f"unknown outcome did not expose reconciliation state: {held_plain!r}"
@@ -5548,13 +5586,7 @@ def chat_reconcile_interaction(
             start=0,
             timeout=10.0,
         )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b",
-            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(
             process, master_fd, output, b"\x1b", b"MASC Keepers"
         )
@@ -6132,7 +6164,7 @@ def autonomous_turn_history_interaction() -> Interaction:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -6502,7 +6534,7 @@ def memory_journal_timeline_interaction(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -6819,7 +6851,7 @@ def context_inspector_interaction() -> Interaction:
         if b"/context" not in CSI_RE.sub(b"", help_frame):
             raise AssertionError(f"Help did not disclose /context: {help_frame!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -6867,9 +6899,7 @@ def clipboard_paste_key_interaction() -> Interaction:
             b"\x16",
             re.compile(rb"Ctrl-V: |pasted \[Image #1\]"),
         )
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -7606,7 +7636,7 @@ def live_markdown_interaction(
         raise AssertionError(f"language header has no neutral background: {frame!r}")
     if b"```bash" in plain:
         raise AssertionError(f"raw fence marker leaked into the chat: {frame!r}")
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
 
 
@@ -7977,7 +8007,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
                 raise AssertionError(
                     f"beta chat did not restore {expected!r}: {beta_again!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+        escape_to_keeper_detail(process, master_fd, output, name=b"beta")
         os.write(master_fd, b"q")
 
     return interact
@@ -8054,7 +8084,7 @@ def keeper_calls_interaction() -> Interaction:
         ):
             if needle not in pane:
                 raise AssertionError(f"Keeper Calls did not draw {what}: {pane!r}")
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -12251,7 +12281,7 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         # The dispatch lands the operator in the keeper's chat, where the
         # send (and its 503 from the fixture) is on screen; the POST bodies
         # above are the proof of what went out.
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -12542,6 +12572,7 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper chat queue is drawn and walked",
         interact=chat_queue_interaction(chat_queue_gate),
         http_fixtures=chat_queue_fixtures,
+        prepare_workspace=seed_uncoalesced_queue,
     )
     steer_requests: HttpRequests = []
     steer_fixtures, steer_gate = chat_steer_http_fixtures()

@@ -50,7 +50,10 @@ Firefox is driven through Mozilla's [geckodriver](https://firefox-source-docs.mo
 
 Validation lives in `test_browser_controls`, `test_browser_webdriver`,
 `test_browser_lane`, and the tool registry tests. CI build/test results and live
-Firefox measurements must be recorded independently. Shadow root targeting and download workflows are separate capability increments.
+Firefox measurements must be recorded independently. Shadow root targeting is a
+separate capability increment. Download completion
+observation and durable artifact reading are supported through native BiDi; see
+[Firefox downloads](firefox-downloads.md).
 Iframe, dialog and upload behavior is described below.
 
 ## Screenshot to Vision

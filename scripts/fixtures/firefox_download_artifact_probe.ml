@@ -1,6 +1,6 @@
 (* Compiled CI scenario: publish actual Firefox bytes through the production
    durable store, then recover every byte through the model's paged reader. *)
-let publish_download path =
+let publish_download download_path =
   let base_path = Sys.getenv "MASC_PROBE_ARTIFACT_BASE" in
   Result.map (fun artifact ->
     let open Yojson.Safe.Util in
@@ -21,8 +21,8 @@ let publish_download path =
         if next <= offset then failwith "artifact page did not advance";
         pages next (bytes :: accumulated) in
     let actual = pages 0 [] in
-    if actual <> In_channel.with_open_bin path In_channel.input_all
+    if actual <> In_channel.with_open_bin download_path In_channel.input_all
     then failwith "artifact reader changed downloaded bytes";
     Printf.printf "PASS real download durable artifact and paged reader (%d bytes)\n%!" (String.length actual);
     artifact)
-    (Masc.Browser_download_artifact.publish ~base_path path)
+    (Masc.Browser_download_artifact.publish ~base_path download_path)

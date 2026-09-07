@@ -171,13 +171,15 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           if List.length rows = count && List.for_all (fun row -> member "status" row = `String "completed") rows then rows
           else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.05; wait ()) in wait ()) in
     act downloads_tab (Browser_action.Click "#download-link");
-    ignore (await_downloads 1);
+    check "download 1 reached terminal completion" (List.length (await_downloads 1) = 1);
     act downloads_tab (Browser_action.Click "#download-link");
-    ignore (await_downloads 2);
+    check "download 2 reached terminal completion" (List.length (await_downloads 2) = 2);
     act downloads_tab (Browser_action.Click "#download-attribute");
-    ignore (await_downloads 3);
-    ignore (success (run (Browser_lane.Page_act (Browser_action.On_tab {
-      tab_id=downloads_tab;frame_path=["#download-frame"];interaction=Browser_action.Click "#frame-download"}))));
+    check "download 3 reached terminal completion" (List.length (await_downloads 3) = 3);
+    let frame_download_receipt = success (run (Browser_lane.Page_act (Browser_action.On_tab {
+      tab_id=downloads_tab;frame_path=["#download-frame"];interaction=Browser_action.Click "#frame-download"}))) in
+    check "frame download click confirms its tab and effect"
+      (member "tabId" frame_download_receipt = `Int downloads_tab && member "performed" frame_download_receipt = `Bool true);
     let rows = await_downloads 4 in
     check "distinct UUIDs correlate identical URLs and null navigation" (List.length (List.sort_uniq String.compare
       (List.map (fun row -> member "downloadId" row |> string) rows)) = 4);

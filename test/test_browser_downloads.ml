@@ -48,10 +48,10 @@ let with_dir f =
 let test_download_artifact_reader () =
   with_dir (fun root ->
     let staging = Filename.concat root "session-owned" in Unix.mkdir staging 0o700;
-    let path = Filename.concat staging "download.bin" in
+    let download_path = Filename.concat staging "download.bin" in
     let bytes = String.init 40000 (fun i -> Char.chr (i mod 256)) in
-    Out_channel.with_open_bin path (fun oc -> output_string oc bytes);
-    let verified, size = Masc.Browser_bidi_downloads.verify_file ~root:staging path |> ok in
+    Out_channel.with_open_bin download_path (fun oc -> output_string oc bytes);
+    let verified, size = Masc.Browser_bidi_downloads.verify_file ~root:staging download_path |> ok in
     check int "verified size" (String.length bytes) size;
     let published = Masc.Browser_download_artifact.publish ~base_path:root verified |> ok in
     let open Yojson.Safe.Util in
@@ -71,11 +71,14 @@ let test_download_artifact_reader () =
       if member "eof" page |> to_bool then String.concat "" (List.rev (part :: acc))
       else (check bool "pagination advances" true (next > offset); read next (part :: acc)) in
     check string "completed download bytes survive actual durable store and paged reader" bytes (read 0 []);
-    let symlink = Filename.concat staging "symlink" in Unix.symlink path symlink;
+    let symlink = Filename.concat staging "symlink" in Unix.symlink download_path symlink;
     check bool "symlink cannot become authoritative download path" true
       (Result.is_error (Masc.Browser_bidi_downloads.verify_file ~root:staging symlink));
     check bool "outside file cannot become authoritative download path" true
-      (Result.is_error (Masc.Browser_bidi_downloads.verify_file ~root:(Filename.concat root "other") path)))
+      (Result.is_error (Masc.Browser_bidi_downloads.verify_file ~root:(Filename.concat root "other") download_path));
+    Unix.unlink download_path;
+    check bool "missing source publication returns an error without an artifact" true
+      (Result.is_error (Masc.Browser_download_artifact.publish ~base_path:root download_path)))
 let () = run "browser downloads" ["evidence",[
   test_case "download UUID and descendant frame correlation" `Quick test_download_identity_and_frames;
   test_case "malformed completion remains unresolved" `Quick test_malformed_completion;

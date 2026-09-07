@@ -593,7 +593,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
      check string "deepseek pro exact model" "deepseek-v4-pro" entry.id_prefix;
      check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
-     check (option int) "deepseek pro context" (Some 524288)
+     check (option int) "deepseek pro context" (Some 1048576)
        entry.max_context_tokens;
      check (option bool) "deepseek pro tools" (Some true) entry.supports_tools;
      check (option bool) "deepseek pro reasoning" (Some true)
@@ -1422,7 +1422,10 @@ List.iter
      | None -> fail "expected MiniMax M3 Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
-       check (option int) "MiniMax M3 context" (Some 524288) runtime.model.max_context;
+       check (option (pair int string)) "MiniMax M3 provider-derived context"
+         (Some (512000, "capability"))
+         (Runtime.resolve_max_context_of_runtime runtime
+          |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source));
        (match runtime.model.capabilities with
        | Some caps ->
           check bool "MiniMax M3 response_format json disabled" false

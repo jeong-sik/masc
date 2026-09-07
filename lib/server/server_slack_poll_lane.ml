@@ -1,12 +1,7 @@
-(* See .mli for the high-level shape.
-
-   docs/design/slack-lane.md, task-1418 — the in-process collection lane.
-   The app's Event Subscriptions carry no message.channels/message.groups,
-   so Socket Mode pushes mentions only; the REST read below needs only
-   scopes the bot token already has. What the fiber collects is exactly
-   what the bridge poller (jeong-sik/me#1291) proved: plain human-authored
-   top-level messages of bound channels, deduped on ts, cursor advancing
-   only over messages actually seen. *)
+(* The optional REST collector is independent of the Browser-based Slack TUI.
+   Every fetched page is checkpointed before proceeding; completed windows
+   publish into the existing bounded recent-message ring before high-water
+   advances. See the interface for failure and restart semantics. *)
 
 module Rest = Slack_rest_client
 module Lane = Slack_lane
@@ -96,57 +91,185 @@ let load_poll_config ~path =
         | Ok toml -> poll_config_of_toml ~path ~toml))
 ;;
 
-(* ── cursor ────────────────────────────────────────────────────── *)
-(* { "C…": "1788708947.825569", … } — channel_id → last ts seen.
-   Slack ts are fixed-point strings; six fractional digits is the format
-   the API round-trips, and comparing them lexicographically preserves
-   order, so the cursor never reparses to a float. *)
+(* Slack's documented time pagination keeps the lower bound fixed and moves
+   latest to the final message's ts. Unlike opaque cursors these boundaries
+   remain usable across poll intervals and server restarts. *)
+let ( let* ) = Result.bind
 
-let cursor_path ~base_dir =
-  Filename.concat base_dir ".gate/runtime/slack/poll-cursor.json"
+type window = {
+  oldest : string;
+  upper : string;
+  before : string;
+  newest : string option;
+  messages : Rest.history_message list;
+}
+type checkpoint =
+  | Idle of string
+  | Scanning of window
+  | Ready of { oldest : string; high_water : string; messages : Rest.history_message list }
 
-(* An unreadable or corrupt cursor resets every channel to now, skipping
-   whatever the old cursor still owed — that loss is real, so it is loud.
-   The sibling iMessage cursor holds the same stance. *)
-let read_cursors ~path : (string * string) list =
-  match Safe_ops.read_file_safe path with
-  | Error detail ->
-    Log.Server.warn
-      "slack-lane: cursor unreadable (%s): %s — every channel restarts from        now and the uncollected window is lost"
-      path detail;
-    []
-  | Ok content ->
-    (match Yojson.Safe.from_string content with
-     | exception Yojson.Json_error detail ->
-       Log.Server.warn
-         "slack-lane: cursor corrupt (%s): %s — every channel restarts from           now and the uncollected window is lost"
-         path detail;
-       []
-     | `Assoc fields ->
-       List.filter_map
-         (fun (channel_id, value) ->
-           match value with
-           | `String ts when String.trim ts <> "" -> Some (channel_id, ts)
-           | _ -> None)
-         fields
-     | other ->
-       Log.Server.warn
-         "slack-lane: cursor has an unexpected shape (%s): %s — treating as         empty"
-         path (Yojson.Safe.to_string other);
-       [])
-;;
+let high_water = function
+  | Idle ts -> ts | Scanning window -> window.oldest | Ready ready -> ready.oldest
 
-let write_cursors ~path (cursors : (string * string) list) =
-  let dir = Filename.dirname path in
-  Fs_compat.mkdir_p dir;
-  let json =
-    `Assoc (List.map (fun (channel_id, ts) -> (channel_id, `String ts)) cursors)
+let timestamp ts =
+  let digits s = s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s in
+  match String.split_on_char '.' ts with
+  | [seconds; fraction] when digits seconds && digits fraction && String.length fraction = 6 ->
+    (match Int64.of_string_opt seconds, Int64.of_string_opt fraction with
+     | Some seconds, Some fraction
+       when seconds <= Int64.div (Int64.sub Int64.max_int fraction) 1_000_000L ->
+       Ok (Int64.add (Int64.mul seconds 1_000_000L) fraction)
+     | _ -> Error "Slack timestamp is outside the supported range")
+  | _ -> Error "Slack timestamp must contain seconds and six fractional digits"
+
+let field key fields = match List.assoc_opt key fields with
+  | Some value -> Ok value | None -> Error ("checkpoint lacks " ^ key)
+let string = function `String value -> Ok value | _ -> Error "checkpoint string expected"
+let ts_field key fields = let* json = field key fields in let* ts = string json in
+  let* _ = timestamp ts in Ok ts
+let optional_string = function `Null -> Ok None | `String value -> Ok (Some value)
+  | _ -> Error "checkpoint optional string expected"
+let rec traverse f = function
+  | [] -> Ok [] | value :: rest -> let* value = f value in
+    let* rest = traverse f rest in Ok (value :: rest)
+let message_json (m : Rest.history_message) =
+  let optional value = match value with None -> `Null | Some value -> `String value in
+  `Assoc ["ts", `String m.ts; "text", `String m.text; "user", optional m.user_id;
+    "bot", optional m.bot_id; "subtype", optional m.subtype; "thread", optional m.thread_ts]
+let decode_message = function
+  | `Assoc fields ->
+    let* ts = ts_field "ts" fields in
+    let* text = Result.bind (field "text" fields) string in
+    let optional key = Result.bind (field key fields) optional_string in
+    let* user_id = optional "user" in let* bot_id = optional "bot" in
+    let* subtype = optional "subtype" in let* thread_ts = optional "thread" in
+    Ok { Rest.ts; text; user_id; bot_id; subtype; thread_ts }
+  | _ -> Error "checkpoint message object expected"
+let messages_field fields =
+  let* json = field "messages" fields in match json with
+  | `List messages -> traverse decode_message messages
+  | _ -> Error "checkpoint messages array expected"
+let buffer_extents ~oldest messages =
+  let* low = timestamp oldest in
+  let rec loop previous first = function
+    | [] -> Ok (first, previous)
+    | (message : Rest.history_message) :: rest ->
+      let* current = timestamp message.ts in
+      if current <= previous then Error "checkpoint messages are not strictly chronological"
+      else loop current (match first with None -> Some current | Some _ -> first) rest
+  in loop low None messages
+
+let encode = function
+  | Idle high_water -> `Assoc ["kind", `String "idle"; "high_water", `String high_water]
+  | Scanning window -> `Assoc ["kind", `String "scanning"; "oldest", `String window.oldest;
+      "upper", `String window.upper; "before", `String window.before;
+      "newest", (match window.newest with None -> `Null | Some ts -> `String ts);
+      "messages", `List (List.map message_json window.messages)]
+  | Ready ready -> `Assoc ["kind", `String "ready"; "oldest", `String ready.oldest;
+      "high_water", `String ready.high_water;
+      "messages", `List (List.map message_json ready.messages)]
+let decode = function
+  | `Assoc fields ->
+    let* kind = field "kind" fields in
+    (match kind with
+     | `String "idle" -> let* ts = ts_field "high_water" fields in Ok (Idle ts)
+     | `String "scanning" ->
+       let* oldest = ts_field "oldest" fields in let* upper = ts_field "upper" fields in
+       let* before = ts_field "before" fields in
+       let* newest = Result.bind (field "newest" fields) optional_string in
+       let* () = match newest with None -> Ok () | Some ts -> Result.map (fun _ -> ()) (timestamp ts) in
+       let* messages = messages_field fields in
+       let* low = timestamp oldest in let* high = timestamp upper in let* next = timestamp before in
+       let* first, last = buffer_extents ~oldest messages in
+       let* staged = match newest with None -> Ok None | Some ts -> Result.map Option.some (timestamp ts) in
+       let consistent = match first, staged with
+         | None, None -> next = high
+         | Some first, Some newest -> next = first && newest = last && last < high
+         | None, Some _ | Some _, None -> false in
+       if low < next && next <= high && consistent
+       then Ok (Scanning {oldest; upper; before; newest; messages})
+       else Error "checkpoint window bounds or staged messages are inconsistent"
+     | `String "ready" ->
+       let* oldest = ts_field "oldest" fields in let* high_water = ts_field "high_water" fields in
+       let* messages = messages_field fields in
+       let* low = timestamp oldest in let* high = timestamp high_water in
+       let* _, last = buffer_extents ~oldest messages in
+       if low <= high && last = high then Ok (Ready {oldest; high_water; messages})
+       else Error "checkpoint high-water does not match its completed messages"
+     | _ -> Error "unknown Slack checkpoint kind")
+  | _ -> Error "Slack checkpoint must be an object"
+
+let cursor_path ~base_dir = Filename.concat base_dir ".gate/runtime/slack/poll-cursor.json"
+let read_checkpoints ~path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+  | _ ->
+    let* content = Safe_ops.read_file_safe path in
+    match Yojson.Safe.from_string content with
+    | exception Yojson.Json_error detail -> Error detail
+    | `Assoc fields ->
+      if List.length (List.sort_uniq String.compare (List.map fst fields)) <> List.length fields
+      then Error "duplicate Slack channel checkpoint"
+      else traverse (fun (channel, json) -> let* state = decode json in Ok (channel, state)) fields
+    | _ -> Error "Slack checkpoint store must be an object"
+let write_checkpoints ~path checkpoints =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file_atomic_strict path
+    (Yojson.Safe.to_string (`Assoc (List.map (fun (channel, state) -> channel, encode state) checkpoints)))
+
+let next_page window (page : Rest.conversations_history_ok) =
+  let* oldest = timestamp window.oldest in
+  let* before = timestamp window.before in
+  let rec validate previous = function
+    | [] -> Ok ()
+    | (message : Rest.history_message) :: rest ->
+      let* ts = timestamp message.ts in
+      if oldest < ts && ts < previous then validate ts rest
+      else Error "Slack page is not descending within the requested time window"
   in
-  (match Fs_compat.save_file_atomic path (Yojson.Safe.to_string json) with
-   | Error detail ->
-     Log.Server.warn "slack-lane: cursor write failed (%s): %s" path detail
-   | Ok () -> ())
-;;
+  let* () = validate before page.messages in
+  let newest = match window.newest, page.messages with
+    | Some ts, _ -> Some ts | None, message :: _ -> Some message.Rest.ts | None, [] -> None in
+  let messages = List.rev_append page.messages window.messages in
+  if page.has_more || Option.is_some page.next_cursor then
+    match List.rev page.messages with
+    | [] -> Error "Slack promised another page without a timestamp boundary"
+    | last :: _ -> Ok (Scanning {window with before = last.Rest.ts; newest; messages})
+  else
+    Ok (Ready {oldest = window.oldest;
+      high_water = Option.value ~default:window.oldest newest; messages})
+
+type collect_error = Fetch_failed of string | Checkpoint_failed of string | Page_invalid of string
+
+let collect ~now ~cursor ~fetch ~save ~publish =
+  let save state = Result.map_error (fun detail -> Checkpoint_failed detail) (save state) in
+  let parse result = Result.map_error (fun detail -> Page_invalid detail) result in
+  let rec run pages_left = function
+    | Ready ready ->
+      (* A failed publish or idle checkpoint leaves Ready durable for replay.
+         Slack_lane dedupes ts; its capacity remains recent-view retention. *)
+      publish ready.messages;
+      save (Idle ready.high_water)
+    | Scanning _ when pages_left = 0 -> Ok ()
+    | Scanning window ->
+      let* page = fetch ~oldest:window.oldest ~latest:window.before
+        |> Result.map_error (fun detail -> Fetch_failed detail) in
+      let* next = parse (next_page window page) in
+      let* () = save next in
+      run (pages_left - 1) next
+    | Idle oldest ->
+      let upper = Printf.sprintf "%.6f" now in
+      let* low = parse (timestamp oldest) in let* high = parse (timestamp upper) in
+      if high <= low then Ok ()
+      else
+        let pending = Scanning {oldest; upper; before = upper; newest = None; messages = []} in
+        let* () = save pending in
+        run pages_left pending
+  in
+  match cursor with
+  | None -> save (Idle (Printf.sprintf "%.6f" now))
+  | Some state -> run max_pages_per_cycle state
 
 (* ── filtering ─────────────────────────────────────────────────── *)
 (* The bridge poller's contract, stated once more: only plain
@@ -178,140 +301,62 @@ let pollable ~bot_user_id (m : Rest.history_message) : bool =
    | None -> true)
 ;;
 
-(* ── one channel, one cycle ────────────────────────────────────── *)
-
-(* A fresh channel starts its cursor at "now" rather than backfilling —
-   the same stance as the bridge poller. *)
-let six_digit_ts now = Printf.sprintf "%.6f" now
-;;
-
-type channel_cycle =
-  | Initialized (* first sight: cursor starts now, nothing collected *)
-  | Collected of { new_messages : int; advance_ts : string }
-  | Nothing_new
-  | Fetch_failed of string
-
-(* [truncated] is true when pagination stopped at the page cap (or Slack
-   promised more without a cursor) — the window below what was fetched is
-   still unseen. The caller must not advance past it blindly. *)
-let fetch_pages ~clock ~token ~channel_id ~oldest :
-    ((Rest.history_message list * bool), Rest.error) result =
-  let rec go ~pages_left ~cursor ~acc =
-    if pages_left = 0 then Ok (List.rev acc, true)
-    else
-      match
-        Rest.conversations_history ~clock ~token ~channel_id ~oldest ?cursor ()
-      with
-      | Error e -> Error e
-      | Ok page ->
-        let acc = page.Rest.messages @ acc in
-        if page.Rest.has_more && page.Rest.next_cursor <> None then
-          go ~pages_left:(pages_left - 1) ~cursor:page.Rest.next_cursor ~acc
-        else if page.Rest.has_more then Ok (List.rev acc, true)
-        else Ok (List.rev acc, false)
-  in
-  go ~pages_left:max_pages_per_cycle ~cursor:None ~acc:[]
-;;
-
-(* The cursor advances to the OLDEST ts actually fetched: everything above
-   it was fetched contiguously, and anything below (a truncated backlog)
-   stays reachable for the next cycle. Advancing to the newest would
-   permanently skip pages the cap never reached. Messages arrive
-   newest-first. *)
-let cursor_advance_of (messages : Rest.history_message list) : string option
-  =
-  match List.rev messages with
-  | [] -> None
-  | oldest :: _ -> Some oldest.Rest.ts
-;;
-
-let poll_channel ~clock ~token ~bot_user_id ~now ~capacity ~channel_id
-    ~cursor_opt : channel_cycle * string option =
-  match cursor_opt with
-  | None -> (Initialized, Some (six_digit_ts now))
-  | Some oldest -> (
-    match fetch_pages ~clock ~token ~channel_id ~oldest with
-    | Error e -> (Fetch_failed (error_to_string e), None)
-    | Ok (messages, truncated) ->
-      let () =
-        if truncated then
-          Log.Server.warn
-            "slack-lane: channel %s window exceeded %d pages; collecting              the newest part, the rest follows next cycle"
-            channel_id max_pages_per_cycle
-      in
-      let kept =
-        List.filter (fun m -> pollable ~bot_user_id m) messages
-      in
-      let push_one (m : Rest.history_message) =
-        Lane.push
-          ~channel_id
-          {
-            Lane.channel_id
-            ; ts = m.Rest.ts
-            ; user_id =
-              (match m.Rest.user_id with Some u -> u | None -> "")
-            ; text = m.Rest.text
-            ; received_unix = now
-          }
-          ~capacity
-      in
-      List.iter push_one kept;
-      (match cursor_advance_of messages with
-       | Some advance ->
-         ( Collected { new_messages = List.length kept; advance_ts = advance }
-         , Some advance )
-       | None -> (Nothing_new, None)))
-;;
-
-(* ── the cycle over all bound channels ──────────────────────────── *)
-
+(* Each page commits before the next fetch. A failed checkpoint write ends
+   this cycle, so an uncertain disk state is reread before any further change. *)
 let poll_cycle ~clock ~token ~bot_user_id ~base_dir ~capacity () =
-  match Channel_gate_slack_state.read_bindings_result () with
-  | Error e ->
-    Log.Server.warn "slack-lane: bindings unreadable, cycle skipped: %s"
-      (Channel_gate_binding_store.binding_store_error_to_string e)
-  | Ok bindings ->
-    let path = cursor_path ~base_dir in
-    let cursors = read_cursors ~path in
-    let now = Unix.gettimeofday () in
-    let next =
-      (* [channel_id] lives on both binding and audit_event, so the record
-         pattern is ambiguous; the annotation names the store's binding. *)
-      List.fold_left
-        (fun acc (binding : Channel_gate_binding_store.binding) ->
-          let channel_id = binding.Channel_gate_binding_store.channel_id in
-          let cursor_opt = List.assoc_opt channel_id cursors in
-          let outcome, advance =
-            poll_channel ~clock ~token ~bot_user_id ~now ~capacity ~channel_id
-              ~cursor_opt
-          in
-          (match outcome with
-           | Initialized ->
-             Log.Server.info
-               "slack-lane: channel %s first sight, collecting from now"
-               channel_id
-           | Collected { new_messages; advance_ts } ->
-             Log.Server.info
-               "slack-lane: channel %s +%d message(s), cursor at ts %s"
-               channel_id new_messages advance_ts
-           | Nothing_new -> ()
-           | Fetch_failed detail ->
-             Log.Server.warn
-               "slack-lane: channel %s fetch failed (cursor held): %s"
-               channel_id detail);
-          match advance with
-          | Some latest ->
-            (channel_id, latest) :: List.remove_assoc channel_id acc
-          | None -> acc)
-        cursors bindings
-    in
-    write_cursors ~path next
+  let path = cursor_path ~base_dir in
+  let result =
+    let* bindings = Channel_gate_slack_state.read_bindings_result ()
+      |> Result.map_error Channel_gate_binding_store.binding_store_error_to_string in
+    let* checkpoints = read_checkpoints ~path in
+    let committed = ref checkpoints in
+    let rec channels = function
+      | [] -> Ok ()
+      | (binding : Channel_gate_binding_store.binding) :: rest ->
+        let channel_id = binding.Channel_gate_binding_store.channel_id in
+        let save state =
+          let next = (channel_id, state) :: List.remove_assoc channel_id !committed in
+          let* () = write_checkpoints ~path next in
+          committed := next;
+          Ok () in
+        let fetch ~oldest ~latest =
+          Rest.conversations_history ~clock ~token ~channel_id ~oldest ~latest ()
+          |> Result.map_error error_to_string in
+        let publish messages =
+          let kept = List.filter (pollable ~bot_user_id) messages in
+          List.iter (fun (message : Rest.history_message) ->
+            match message.user_id with
+            | None -> ()
+            | Some user_id -> Lane.push ~channel_id ~capacity
+                { Lane.channel_id; ts=message.ts; user_id; text=message.text;
+                  received_unix=Unix.gettimeofday () }) kept;
+          Log.Server.info "slack-lane: channel %s completed window, published %d message(s) (recent buffer capacity %d)"
+            channel_id (List.length kept) capacity in
+        (match collect ~now:(Unix.gettimeofday ())
+          ~cursor:(List.assoc_opt channel_id !committed) ~fetch ~save ~publish with
+         | Ok () -> channels rest
+         | Error (Checkpoint_failed detail) -> Error ("channel " ^ channel_id ^ ": " ^ detail)
+         | Error (Fetch_failed detail | Page_invalid detail) ->
+           Log.Server.warn "slack-lane: channel %s held for replay: %s" channel_id detail;
+           channels rest)
+    in channels bindings
+  in
+  match result with
+  | Ok () -> ()
+  | Error detail -> Log.Server.warn "slack-lane: cycle stopped; durable checkpoint held for replay: %s" detail
 ;;
 
 module For_testing = struct
   let pollable = pollable
-
-  let cursor_advance_of = cursor_advance_of
+  type nonrec checkpoint = checkpoint
+  type nonrec collect_error = collect_error =
+    Fetch_failed of string | Checkpoint_failed of string | Page_invalid of string
+  let idle ts = Idle ts
+  let high_water = high_water
+  let encode = encode
+  let decode = decode
+  let read_checkpoints = read_checkpoints
+  let collect = collect
 end
 
 (* ── start ─────────────────────────────────────────────────────── *)

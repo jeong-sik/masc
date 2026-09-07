@@ -31,6 +31,9 @@ let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
      BSD od uses indentation and double spaces (more than four output bytes
      per input byte). Eight leaves room for both BSD and GNU layouts. *)
   let chunk_bytes = Common.max_process_capture_head_bytes / 8 in
+  let capture_bytes = Exec_buffer.max_render_bytes
+      ~head_cap:Common.max_process_capture_head_bytes
+      ~tail_cap:Common.max_process_capture_tail_bytes in
   let bytes = Buffer.create (min max_bytes chunk_bytes) in
   let rec read offset =
     if offset = max_bytes then Ok (Buffer.contents bytes)
@@ -46,7 +49,7 @@ let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
              turn incomplete hex into an apparently valid short final chunk.
              This does not alter Process_eio's head/tail caps; od itself is
              bounded by [count]. *)
-          ~max_bytes:max_int
+          ~max_bytes:capture_bytes
           ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) () in
       let* chunk = decode_hex output in
       if String.length chunk > count then Error "upload backend exceeded requested chunk size"

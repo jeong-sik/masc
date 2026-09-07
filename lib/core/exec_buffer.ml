@@ -137,6 +137,15 @@ let tail t =
       Bytes.blit t.tail_ring 0 out first second;
     Bytes.unsafe_to_string out
 
+let truncation_marker dropped = Printf.sprintf "\n...(truncated %d bytes)...\n" dropped
+
+let max_render_bytes ~head_cap ~tail_cap =
+  let marker = String.length (truncation_marker max_int) in
+  if head_cap < 0 || tail_cap < 0 || tail_cap > max_int - marker
+     || head_cap > max_int - marker - tail_cap then
+    invalid_arg "Exec_buffer.max_render_bytes: invalid capture bounds";
+  head_cap + tail_cap + marker
+
 let render t =
   (* If we retained everything, stitching head+tail back would
      duplicate the overlap.  Prefer the direct pieces to avoid that. *)
@@ -169,5 +178,4 @@ let render t =
           t.tail_cap
       else tail_raw
     in
-    Printf.sprintf "%s\n...(truncated %d bytes)...\n%s"
-      head_s dropped tail_s
+    head_s ^ truncation_marker dropped ^ tail_s

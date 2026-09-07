@@ -16,6 +16,7 @@ open Time_compat
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
+  | Page_capture of { tab_id : int }
   | Session_open of { headless : bool option }
   | Session_close
   | Page_goto of { url : string }
@@ -23,6 +24,7 @@ type verb =
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"
+  | Page_capture _ -> "page.capture"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
   | Page_goto _ -> "page.goto"
@@ -42,6 +44,8 @@ let verb_json = function
              ]
              |> List.filter_map Fun.id) )
       ]
+  | Page_capture { tab_id } ->
+    `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
   | Session_open { headless } ->
     `Assoc
       [ ("verb", `String "session.open")
@@ -59,15 +63,15 @@ let verb_json = function
    - [verb_is_read]: does this leave the browser session lifecycle unchanged?
      Opening and closing a keeper-owned browser are lifecycle writes.
    - [verb_allowed_on_live]: may this run against the operator's browser?
-     Only the two readers — the live lane exists to be read; sessions own
+     Only the readers — the live lane exists to be read; sessions own
      nothing there and a navigation acts with the operator's logins. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ -> true
+  | Tabs_list | Page_read _ | Page_capture _ -> true
   | Session_open _ | Session_close | Page_goto _ -> false
 ;;
 
 let verb_allowed_on_live = function
-  | Tabs_list | Page_read _ -> true
+  | Tabs_list | Page_read _ | Page_capture _ -> true
   | Session_open _ | Session_close | Page_goto _ -> false
 ;;
 

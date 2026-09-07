@@ -118,7 +118,7 @@ class NativeHost(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_tabs_and_page_roundtrip_fragmented_utf8(self):
-        for index, verb in enumerate(["tabs.list", "page.read"]):
+        for index, verb in enumerate(["tabs.list", "page.read", "page.capture"]):
             command = {"id": str(index), "verb": verb, "args": {"tabId": 42} if index else {}}
             self.server.commands.put(command)
             self.assertEqual(read_frame(self.process.stdout), command)

@@ -7120,7 +7120,9 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     return fixtures
 
 
-def skills_usage_clarity_http_fixtures() -> HttpFixtures:
+def skills_usage_clarity_http_fixtures(
+    *, ledgers_loaded: int = 19, unavailable: tuple[str, ...] = (), observed: bool = True
+) -> HttpFixtures:
     fixtures = keeper_runtime_http_fixtures()
     fixtures["/api/v1/dashboard/tools?keeper=alpha"] = (
         200,
@@ -7136,6 +7138,10 @@ def skills_usage_clarity_http_fixtures() -> HttpFixtures:
         {
             "schema": "masc.skill-snapshot/v1",
             "state": "ready",
+            "usage_coverage": {
+                "ledgers_loaded": ledgers_loaded,
+                "unavailable": list(unavailable),
+            },
             "snapshot": {
                 "snapshot_revision": "snapshot-rev1",
                 "catalog_revision": "catalog-rev1",
@@ -7157,7 +7163,7 @@ def skills_usage_clarity_http_fixtures() -> HttpFixtures:
                         "content_revision": "rev1",
                     },
                     "kind": "instruction",
-                    "usage": [
+                    "usage": ([
                         {
                             "keeper": "alpha",
                             "invocations": 12,
@@ -7165,16 +7171,27 @@ def skills_usage_clarity_http_fixtures() -> HttpFixtures:
                             "actions": 9,
                             "last_used_at": "2026-08-28T03:04:05Z",
                         }
-                    ],
+                    ] if observed else []),
                     "profile": {"flow": None, "plan": {}, "context": {}},
-                }
+                },
+                {
+                    "reference": {
+                        "identity": {"source_id": "workspace", "package_id": "pkg", "name": "unobserved-skill"},
+                        "content_revision": "rev2",
+                    },
+                    "kind": "composition",
+                    "usage": [],
+                    "profile": {"flow": None, "plan": {}, "context": {}},
+                },
             ],
         },
     )
     return fixtures
 
 
-def skills_usage_clarity_interaction() -> Interaction:
+def skills_usage_clarity_interaction(
+    *, ledgers_loaded: int = 19, unavailable: tuple[str, ...] = (), observed: bool = True
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -7199,21 +7216,86 @@ def skills_usage_clarity_interaction() -> Interaction:
             master_fd,
             output,
             b"p" * 3,
-            b"Skill Usage",
+            f"{1 if observed else 0} of 2 catalog Skills observed".encode(),
         )
         rendered = CSI_RE.sub(b"", usage)
-        for needle in (
-            b"work-intake",
-            b"alpha 12/12/9",
-            b"2026-08-28T03:04:05Z",
-        ):
+        expected = [
+            f"{1 if observed else 0} of 2 catalog Skills observed; {1 if observed else 2} without retained invocation".encode(),
+            b"Scope: exact Skill revisions in current Keeper sessions",
+            f"Activation ledgers loaded: {ledgers_loaded}; unavailable: {len(unavailable)}".encode(),
+        ]
+        expected.extend(f"Unavailable: {reason}".encode() for reason in unavailable)
+        if observed:
+            expected.extend((b"work-intake", b"alpha 12/12/9", b"2026-08-28T03:04:05Z"))
+        for needle in expected:
             if needle not in rendered:
-                raise AssertionError(
-                    f"Skill usage did not show {needle!r}: {usage!r}"
-                )
+                raise AssertionError(f"Skill usage did not show {needle!r}: {usage!r}")
+        if b"never invoked" in rendered:
+            raise AssertionError(f"Unknown historical usage was called never invoked: {usage!r}")
+        if not observed and b"alpha 12/12/9" in rendered:
+            raise AssertionError(f"Unobserved usage inherited a previous count: {usage!r}")
         os.write(master_fd, b"q")
 
     return interact
+
+
+def run_skill_usage_coverage_regression(executable: str) -> None:
+    for description, loaded, unavailable, observed in (
+        ("loaded current sessions do not prove lifetime non-use", 19, (), True),
+        ("partial ledger coverage preserves known usage", 1, ("bravo: metadata unavailable",), True),
+        ("unavailable inventory is not global zero usage", 0, ("keeper catalog: unavailable",), False),
+    ):
+        run_terminal_scenario(
+            executable,
+            description=f"Skill usage coverage: {description}",
+            interact=skills_usage_clarity_interaction(
+                ledgers_loaded=loaded, unavailable=unavailable, observed=observed
+            ),
+            http_fixtures=skills_usage_clarity_http_fixtures(
+                ledgers_loaded=loaded, unavailable=unavailable, observed=observed
+            ),
+        )
+
+
+def run_skill_usage_coverage_error_regression(executable: str) -> None:
+    for initial_error in (True, False):
+        fixtures = skills_usage_clarity_http_fixtures()
+        good = fixtures["/api/v1/skills"]
+        if not isinstance(good, tuple):
+            raise AssertionError("Skill catalog fixture must be a JSON response")
+        bad_payload = dict(good[1])
+        del bad_payload["usage_coverage"]
+        fail_reads = threading.Event()
+        if initial_error:
+            fail_reads.set()
+        fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
+
+        def interact(process, master_fd, _slave_fd, output, _base_path):
+            resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
+            tab_until(process, master_fd, output, b"MASC Config")
+            send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
+            frame = send_and_wait(
+                process, master_fd, output, b"p" * 3,
+                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+            )
+            if not initial_error:
+                fail_reads.set()
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
+            rendered = CSI_RE.sub(b"", frame)
+            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
+                raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
+            if initial_error:
+                if b"unavailable (no catalog reading)" not in rendered:
+                    raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
+            elif b"alpha 12/12/9" not in rendered:
+                raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")
+            os.write(master_fd, b"q")
+
+        run_terminal_scenario(
+            executable,
+            description=f"Skill usage coverage error: {'initial' if initial_error else 'refresh'}",
+            interact=interact, http_fixtures=fixtures,
+        )
 
 
 def message_origin_history_fixture() -> HttpResponse:
@@ -13285,7 +13367,97 @@ def run_held_back_override_regression(executable: str) -> None:
     )
 
 
+def run_fusion_history_regression(executable: str) -> None:
+    """Historical evidence remains inspectable without a retained run or recent Board row."""
+    fixtures = overview_event_http_fixtures()
+    run = fusion_run("history-701", keeper="not-a-proven-caller")
+    post = fusion_detail_response(run, "historical-judge-synthesis-701")[1]["evidence"]["post"]
+    post.update(author="board-author-701", body="original-board-body-701")
+    post["meta"]["observed_usage"] = {"input_tokens": 101, "output_tokens": 202}
+    refreshed = json.loads(json.dumps(post))
+    refreshed["meta"]["observed_usage"]["input_tokens"] = 303
+    wrong_post = json.loads(json.dumps(refreshed))
+    wrong_post["origin"]["fusion_run_id"] = "different-run-702"
+    response = fusion_runs_response([])
+    response[1]["replay"] = {
+        "status": "complete", "lines_read": 68,
+        "malformed_lines": 34, "dropped_running": 34,
+    }
+    response[1]["historical_evidence"] = [{
+        "run_id": "history-701", "post_id": post["id"],
+        "title": post["title"], "created_at": 1787557684.0,
+    }]
+    second_post = json.loads(json.dumps(post))
+    second_post.update(id="post-history-702", title="Second historical Fusion", author="board-author-702")
+    second_post["origin"]["fusion_run_id"] = "history-702"
+    response[1]["historical_evidence"].append({
+        "run_id": "history-702", "post_id": second_post["id"],
+        "title": second_post["title"], "created_at": 1787557600.0,
+    })
+    fixtures[FUSION_RUNS_PATH] = response
+    fixtures[f"/api/v1/board/{second_post['id']}"] = (200, second_post)
+    fixtures[f"/api/v1/board/{post['id']}"] = SequencedHttpResponse([
+        (200, post), (200, refreshed), (200, wrong_post), (200, refreshed),
+    ])
+
+    def interact(process, master_fd, slave_fd, output, base_path):
+        palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
+        send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
+        frame = resize_and_wait(
+            process, master_fd, output, rows=110, columns=170,
+            needle=b"BOARD ORIGINAL", controls=(FULL_REDRAW,),
+        )
+        visible = CSI_RE.sub(b"", frame)
+        for marker in (
+            b"This Board evidence does not provide execution status or finish time",
+            b"Board author: board-author-701", b"Run reference: history-701",
+            b"Observed tokens: 101 input / 202 output", b"Observed cost: not recorded",
+            b"question-proof-501", b"panel-answer-first-501",
+            b"historical-judge-synthesis-701", b"TOOL EXECUTIONS",
+            b"original-board-body-701",
+        ):
+            if marker not in visible:
+                raise AssertionError(f"historical inspector missing {marker!r}: {visible!r}")
+        if b"not-a-proven-caller" in visible:
+            raise AssertionError("historical evidence invented a retained run caller")
+        print("FUSION_HISTORY_PTY_FRAME=" + json.dumps({
+            "rows": 110, "columns": 170,
+            "ansi_base64": base64.b64encode(frame).decode("ascii"),
+        }), flush=True)
+        send_and_wait(
+            process, master_fd, output, b"r",
+            b"Observed tokens: 303 input / 202 output",
+        )
+        send_and_wait(
+            process, master_fd, output, b"r",
+            b"historical Fusion Board identity does not match the selected run and post",
+        )
+        stale = resize_and_wait(
+            process, master_fd, output, rows=111, columns=170,
+            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+        )
+        if b"different-run-702" in CSI_RE.sub(b"", stale):
+            raise AssertionError("mismatched Board origin replaced selected evidence")
+        send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
+        send_and_wait(process, master_fd, output, b"]", b"Board author: board-author-702")
+        send_and_wait(process, master_fd, output, b"[", b"Board author: board-author-701")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
+        send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+    run_terminal_scenario(
+        executable, description="historical Fusion evidence inspection and refresh",
+        interact=interact, http_fixtures=fixtures,
+    )
+
+
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[2] == "fusion-history":
+        run_fusion_history_regression(os.path.abspath(sys.argv[1]))
+        print("tui historical Fusion inspection: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
         print("tui CLI base-path regression: PASS")
@@ -13346,12 +13518,17 @@ def main() -> None:
         run_memory_journal_regression(os.path.abspath(sys.argv[1]))
         print("tui Memory journal regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "skill-usage-coverage":
+        run_skill_usage_coverage_regression(os.path.abspath(sys.argv[1]))
+        run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
+        print("tui Skill usage coverage regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
             "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
-            "memory-journal]"
+            "memory-journal|skill-usage-coverage]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

@@ -343,14 +343,14 @@ let rejection ?resets_at () =
               "session_id", `String "__SESSION__";
               "rate_limit_info", `Assoc rate_limit_info ]))
   ^ "\nemit " ^ shell_quote
-    {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","result":"quota diagnostic","api_error_status":429,"terminal_reason":"api_error"}|}
+    {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"quota-result","result":"quota diagnostic","api_error_status":429,"terminal_reason":"api_error"}|}
 ;;
 
 let claude_answer answer =
   "emit " ^ shell_quote (Yojson.Safe.to_string
     (`Assoc [ "type", `String "result"; "subtype", `String "success";
               "is_error", `Bool false; "session_id", `String "__SESSION__";
-              "result", `String answer ]))
+              "uuid", `String "answer-result"; "result", `String answer ]))
 ;;
 
 let with_quota_fixture f =
@@ -381,7 +381,7 @@ set -eu
 cat >/dev/null
 printf 'B\n' >> %s
 printf '%%s\n' '{"event":"init","conversation_id":"quota-b","init":{"model":"gemini-fixture","cwd":"/tmp","tools":[],"permission_mode":"always-proceed"}}'
-printf '%%s\n' '{"event":"result","result":{"conversation_id":"quota-b","status":"SUCCESS","response":"{\"verdict\":\"pass\"}","num_turns":1}}'
+printf '%%s\n' '{"event":"result","result":{"conversation_id":"quota-b","status":"SUCCESS","response":"{\"verdict\":\"pass\"}","num_turns":1,"usage":{"input_tokens":100,"output_tokens":7,"thinking_tokens":3,"cache_read_tokens":50,"total_tokens":107}}}'
 |} (shell_quote marker));
       let catalog = quota_fixture ~claude_cli ~agy_cli in
       load_config catalog;
@@ -442,7 +442,7 @@ let test_provider_reset_and_success_before_json_validation () =
     let account = scope a1 in
     write_file ~path:claude_cli ~perm:0o700
       (claude_script ~marker ~body:("emit " ^ shell_quote
-        {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","result":"quota diagnostic words without a typed quota"}|}));
+        {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"execution-error-result","result":"quota diagnostic words without a typed quota"}|}));
     ignore (walk_real ~dir [a1]);
     check bool "ordinary execution errors do not invent quota evidence" false
       (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ()));

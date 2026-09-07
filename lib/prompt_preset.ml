@@ -766,3 +766,16 @@ let restore ~base_path name =
   in
   Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result }
 ;;
+
+let same_settings (left : snapshot) (right : snapshot) =
+  let ordered rows = List.sort Stdlib.compare rows in
+  ordered left.prompt_overrides = ordered right.prompt_overrides
+  && ordered left.instructions = ordered right.instructions
+  && ordered left.assignments = ordered right.assignments
+  && ordered left.lanes = ordered right.lanes
+
+let source_directory ~base_path snapshot = preset_dir ~base_path snapshot.name
+
+let matches_saved_settings ~base_path snapshot =
+  let* current = capture ~base_path ~name:snapshot.name ~description:"comparison" in
+  Ok (same_settings snapshot current)

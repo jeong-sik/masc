@@ -76,7 +76,7 @@ let test_pane_row_and_detail () =
   check string "pane row" "morning                      overrides 1 · keepers 2 · assignments 12 · lanes 4  2026-09-03T10:26:08Z"
     (Text.pane_row morning);
   check (list string) "detail without a report"
-    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override keeper"
@@ -87,7 +87,7 @@ let test_pane_row_and_detail () =
      the interesting half is still in flight -- and this is the state the old
      option pair had no way to reach. *)
   check (list string) "a selection being read says so"
-    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override keeper"
@@ -100,7 +100,7 @@ let test_pane_row_and_detail () =
   (* A preset saved before the server named its overrides must not read as
      one that overrides nothing. *)
   check (list string) "an older preset says the keys are unknown"
-    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override 1개 — 어느 것인지는 이 프리셋에 적혀 있지 않습니다"
@@ -110,7 +110,7 @@ let test_pane_row_and_detail () =
        ~selected:(Some { morning with D.pm_override_keys = None })
        ~detail:Masc_tui_fetched.Absent ~report:None);
   check (list string) "and one that truly overrides nothing says that"
-    [ "morning · overrides 0 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 0 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override 없음"
@@ -125,6 +125,9 @@ let test_pane_row_and_detail () =
      in a pane. *)
   let contents : D.preset_detail =
     { D.pd_name = "morning"
+    ; pd_directory = "/fixture/presets/morning"
+    ; pd_settings_match = D.Preset_settings_match
+    ; pd_prompt_files = ["keeper", Some "/fixture/prompts/keeper.md", D.Prompt_override]
     ; pd_overrides = [ "keeper", 4431 ]
     ; pd_instructions = [ "analyst.toml", 812; "spruce.toml", 640 ]
     ; pd_assignments = [ "analyst", "glm-coding.glm-5.3" ]
@@ -132,12 +135,15 @@ let test_pane_row_and_detail () =
     }
   in
   check (list string) "the contents follow the manifest lines"
-    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override keeper"
     ; "지시문 analyst, spruce"
     ; ""
+    ; "Preset directory: /fixture/presets/morning"
+    ; "Matches saved workspace settings (Keeper reload timing still applies)"
+    ; "Prompt keeper · effective override · Markdown /fixture/prompts/keeper.md"
     ; "override keeper(4431B)"
     ; "지시문 analyst.toml(812B), spruce.toml(640B)"
     ; "배정 analyst→glm-coding.glm-5.3"
@@ -147,7 +153,7 @@ let test_pane_row_and_detail () =
   (* Matching the answer to the selection is the fetch type's job now, so
      what reaches here for a preset still in flight is simply Loading. *)
   check (list string) "a selection still in flight says so"
-    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override keeper"
@@ -162,7 +168,7 @@ let test_pane_row_and_detail () =
   (* The state that did not exist before: the pane could say nothing when a
      read failed, so a failure looked the same as a preset with no contents. *)
   check (list string) "a failed read says why"
-    [ "morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
+    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
     ; "프롬프트 override keeper"

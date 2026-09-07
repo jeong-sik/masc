@@ -108,7 +108,20 @@ let add_routes router =
                  respond_json_value_with_cors
                    request
                    reqd
-                   (ok_json [ "preset", Prompt_preset.snapshot_to_json snapshot ])
+                   (let base_path = base_path_of state in
+                    let matching = match Prompt_preset.matches_saved_settings ~base_path snapshot with
+                      | Ok true -> `Assoc ["status", `String "matches"]
+                      | Ok false -> `Assoc ["status", `String "differs"]
+                      | Error message -> `Assoc ["status", `String "unavailable"; "reason", `String message] in
+                    let files = List.map (fun (entry : Prompt_override_persistence.entry) ->
+                        let resolved = Prompt_registry.resolve_prompt entry.key in
+                        `Assoc ["key", `String entry.key;
+                                "path", (match resolved.file_path with Some path -> `String path | None -> `Null);
+                                "source", `String (Prompt_registry.prompt_source_to_string resolved.source)])
+                      snapshot.prompt_overrides in
+                    ok_json [ "preset", Prompt_preset.snapshot_to_json snapshot;
+                              "directory", `String (Prompt_preset.source_directory ~base_path snapshot);
+                              "saved_settings", matching; "prompt_files", `List files ])
                | Error message ->
                  respond_json_value_with_cors
                    ~status:`Not_found

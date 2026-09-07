@@ -185,6 +185,7 @@ let test_capture_save_load_round_trip () =
       (List.hd listing.Preset.presets).Preset.override_keys;
     (* And the whole of a preset is readable without applying it, because
        applying it is the decision being made. *)
+    Alcotest.(check bool) "save/load settings match" true (Preset.same_settings snapshot loaded);
     let shown = Preset.snapshot_to_json loaded in
     let field name =
       match shown with

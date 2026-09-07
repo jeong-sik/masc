@@ -15933,12 +15933,12 @@ let render_prompt_registry (state : state) =
    | Some row ->
        let source =
          match row.Tui_decode.pr_source with
-         | Tui_decode.Prompt_override -> "재정의"
-         | Tui_decode.Prompt_file -> "파일"
+         | Tui_decode.Prompt_override -> "override 사용 · MD는 기본값"
+         | Tui_decode.Prompt_file -> "MD 파일 사용"
          | Tui_decode.Prompt_missing -> "없음"
        in
        box_line buf cols
-         (Printf.sprintf "  유효 템플릿  %s \xc2\xb7 %s \xc2\xb7 %s"
+         (Printf.sprintf "  선택: %s \xc2\xb7 %s \xc2\xb7 %s"
             (Terminal_text.single_line row.pr_key)
             (Terminal_text.single_line source)
             (Terminal_text.single_line row.pr_file_path));

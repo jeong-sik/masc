@@ -2158,6 +2158,8 @@
 
 (include stanzas/test_msx_tools.inc)
 
+(include stanzas/test_msx_frame_route.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -3959,6 +3961,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-board-json)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-skill-usage-coverage)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   skill-usage-coverage)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-skill-usage-coverage)))
 
 ; Python unit suites over the scripts/ tree. These suites were first wired
 ; into runtest after the #32245 review found several of them running with no

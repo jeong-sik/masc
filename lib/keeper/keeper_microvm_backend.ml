@@ -38,6 +38,19 @@ let cli_name = function
    so assuming it anywhere else would hand a keeper a different isolation than
    the one its TOML declared. Returning [None] makes that a refusal the
    operator sees at boot. *)
+type recipe_delivery =
+  | On_stdin
+  | In_a_context_directory
+  | Builds_no_images
+
+(* nerdctl is the one taken on this codebase's own word rather than a local
+   reading: it speaks Docker's grammar, which is why the inspect parse for it
+   is Docker's too. *)
+let recipe_delivery = function
+  | Apple_container -> In_a_context_directory
+  | Microsandbox -> Builds_no_images
+  | Nerdctl_kata -> On_stdin
+
 let default_for_host () =
   match Sys.os_type with
   | "Unix" when Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist" ->

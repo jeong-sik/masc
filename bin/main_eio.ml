@@ -14,6 +14,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_microvm_backend = Masc.Keeper_microvm_backend
 module Keeper_config = Masc.Keeper_config
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
@@ -2173,6 +2174,50 @@ let build_commit_cmd =
    same on a host that has no checkout -- which is the whole point, since the
    only image MASC described before was one you could build from the repository
    and nowhere else. *)
+(* Build the recipe into the store of a runtime that takes a directory, not
+   stdin. Apple's [container build] is the one: its usage line takes a
+   context directory and it has no [-], so the recipe is written to a
+   directory of its own and named with [-f]. Nothing else goes in that
+   directory, so the context stays what the stdin form's [-] gave docker:
+   the recipe and nothing else. *)
+let sandbox_image_build_in_a_directory_exit ~cli ~tag =
+  let context = Filename.temp_file "masc-sandbox-image-" ".d" in
+  Sys.remove context;
+  Unix.mkdir context 0o700;
+  let dockerfile = Filename.concat context "Dockerfile" in
+  let cleanup () =
+    (try Sys.remove dockerfile with Sys_error _ -> ());
+    try Unix.rmdir context with Unix.Unix_error _ -> ()
+  in
+  Fun.protect ~finally:cleanup (fun () ->
+      let oc = open_out dockerfile in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc Keeper_sandbox_image.dockerfile);
+      let argv =
+        cli
+        :: Keeper_sandbox_image.context_directory_build_argv ~tag ~dockerfile
+             ~context
+      in
+      let pid =
+        Unix.create_process cli (Array.of_list argv) Unix.stdin Unix.stdout
+          Unix.stderr
+      in
+      let _, status = Unix.waitpid [] pid in
+      match status with
+      | Unix.WEXITED 0 ->
+        Printf.printf
+          "built %s into %s's image store\n\
+           Point a Keeper at it with sandbox_image = %S in its TOML.\n"
+          tag cli tag;
+        Cmd.Exit.ok
+      | Unix.WEXITED code ->
+        Printf.eprintf "sandbox-image: %s build exited %d\n" cli code;
+        Cmd.Exit.some_error
+      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+        Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" cli n;
+        Cmd.Exit.some_error)
+
 let sandbox_image_build_exit ~tag =
   let argv =
     Keeper_sandbox_runtime.docker_command_argv ()
@@ -2215,13 +2260,43 @@ let sandbox_image_build_exit ~tag =
        Printf.eprintf "sandbox-image: docker build stopped by signal %d\n" n;
        Cmd.Exit.some_error)
 
-let sandbox_image_cmd_exit print_only tag =
+(* Which store to build into. Docker stays the default because that is where
+   [sandbox_profile = "docker"] keepers look and where this command has always
+   put it. A microVM keeper looks somewhere else entirely -- each runtime
+   keeps its images apart from Docker's -- so the image its gate wants can
+   only be made by naming that runtime here. *)
+let sandbox_image_build_for_runtime ~runtime ~tag =
+  match runtime with
+  | None -> sandbox_image_build_exit ~tag
+  | Some backend ->
+    (match Keeper_microvm_backend.recipe_delivery backend with
+     | Keeper_microvm_backend.On_stdin -> sandbox_image_build_exit ~tag
+     | Keeper_microvm_backend.In_a_context_directory ->
+       sandbox_image_build_in_a_directory_exit
+         ~cli:(Keeper_microvm_backend.cli_name backend)
+         ~tag
+     | Keeper_microvm_backend.Builds_no_images ->
+       Printf.eprintf
+         "sandbox-image: %s builds no images -- it has pull, load and save \
+          and no build. Next: build %s elsewhere, save it as an OCI archive, \
+          and `%s load` it.\n"
+         (Keeper_microvm_backend.cli_name backend)
+         tag
+         (Keeper_microvm_backend.cli_name backend);
+       Cmd.Exit.some_error)
+
+let sandbox_image_cmd_exit print_only tag runtime =
   let tag = match tag with Some t -> t | None -> Keeper_sandbox_image.default_tag in
   if print_only
   then (
     print_string Keeper_sandbox_image.dockerfile;
     Cmd.Exit.ok)
-  else sandbox_image_build_exit ~tag
+  else
+    match runtime with
+    | Error message ->
+      prerr_endline message;
+      Cmd.Exit.some_error
+    | Ok runtime -> sandbox_image_build_for_runtime ~runtime ~tag
 
 let sandbox_image_cmd =
   let doc = "Build the general Keeper sandbox image from the recipe in this binary." in
@@ -2251,9 +2326,36 @@ let sandbox_image_cmd =
     let doc = "Image tag to build (default: " ^ Keeper_sandbox_image.default_tag ^ ")." in
     Arg.(value & opt (some string) None & info [ "tag" ] ~docv:"TAG" ~doc)
   in
+  let runtime =
+    let doc =
+      "microVM runtime whose image store to build into (one of "
+      ^ String.concat ", " Keeper_microvm_backend.valid_strings
+      ^ "). Omit for Docker's store, which is where sandbox_profile = \"docker\" \
+         keepers look. Each runtime keeps its images apart from Docker's, so a \
+         microvm keeper cannot see one built without this."
+    in
+    Arg.(value & opt (some string) None & info [ "runtime" ] ~docv:"RUNTIME" ~doc)
+  in
+  let resolved_runtime =
+    Term.(
+      const (fun named ->
+          match named with
+          | None -> Ok None
+          | Some name ->
+            (match Keeper_microvm_backend.of_string name with
+             | Some backend -> Ok (Some backend)
+             | None ->
+               Error
+                 (Printf.sprintf
+                    "sandbox-image: --runtime %S names no microVM runtime. One \
+                     of: %s."
+                    name
+                    (String.concat ", " Keeper_microvm_backend.valid_strings))))
+      $ runtime)
+  in
   Cmd.v
     (Cmd.info "sandbox-image" ~doc ~man)
-    Term.(const sandbox_image_cmd_exit $ print_only $ tag)
+    Term.(const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime)
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling

@@ -10330,6 +10330,9 @@ def config_navigation_interaction() -> Interaction:
         for needle in (b"fixture-read-revision", b"Validation: valid", b"Keeper restart: required"):
             if needle not in status_plain:
                 raise AssertionError(f"Config status omitted {needle!r}: {status_plain!r}")
+        # Source-only input must not open an editor or a hidden-source search.
+        # If / stole focus, v would become search text instead of returning.
+        send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
         send_and_wait(process, master_fd, output, b"v", b"first-value = ")
 
         next_field = send_and_wait(

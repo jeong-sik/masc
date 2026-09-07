@@ -15587,6 +15587,12 @@ and is loaded on demand through keeper_skill.
          when state.view = Config && state.config_pane = Config_runtime ->
            state.runtime_config_status_open <- not state.runtime_config_status_open;
            state.runtime_config_status_scroll <- 0
+       | Some ("e" | "E" | "enter" | "\r" | "\n" | "/" | "n" | "N")
+         when state.view = Config && state.config_pane = Config_runtime
+              && state.runtime_config_status_open ->
+           (* This pane reads metadata. A source cursor retained behind it
+              cannot authorize an edit or a search of that hidden source. *)
+           ()
        | Some (("esc" | "left" | "j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home") as key)
          when state.view = Config && state.config_pane = Config_runtime
               && state.runtime_config_status_open ->

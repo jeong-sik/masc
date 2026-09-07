@@ -33,7 +33,12 @@
 scripts/anti-fake-audit.sh  # report: the default scan scores each test file with bc
 #   arithmetic over pattern counts and fails under a threshold, so wiring it makes a
 #   PR's verdict a heuristic. --production-scan has a real rule and is red on main.
-scripts/ml_line_cap_audit.sh  # report: no failing exit anywhere in it
+scripts/ml_line_cap_audit.sh  # report, and both of its enforcing modes are
+#   unwireable at today's numbers: the cap is 500 and 587 .ml files under
+#   lib/bin/test exceed it. --fail-on-changed-violations blocks any PR that
+#   touches one of those 587, and a softer "do not grow an over-cap file" gate
+#   would have blocked 24 of the last 60 merges to main. Measured 2026-09-08;
+#   the number to move is 587, not the wiring. #34223
 scripts/check-memory-leak.sh  # tool: builds and runs a server
 scripts/check_silent_failure.sh  # report by default; --strict, the only mode that
 #   enforces, is red on main

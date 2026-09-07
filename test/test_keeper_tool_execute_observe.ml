@@ -157,33 +157,41 @@ let with_execution_workspace f =
 let execute_through_gate
       ?(observed_secret_files = fun () -> [])
       ?(prepare_secret_files = fun () -> Ok [])
-      ~run ~script base_path =
+      ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh)
+      ?base_host_env
+      ~run ~argv base_path =
   let dispatch_count = ref 0 in
   let dispatch target =
     incr dispatch_count;
+    let program, args =
+      match argv with
+      | program :: args -> program, args
+      | [] -> fail "the scenario needs a concrete command"
+    in
     let bin =
-      match Masc_exec.Exec_program.of_string "sh" with
+      match Masc_exec.Exec_program.of_string program with
       | Ok bin -> bin
-      | Error _ -> fail "sh is not an executable name"
+      | Error _ -> fail "the scenario program is not an executable name"
     in
     let ir =
       Keeper_tooling.Execute_shell_ir.simple_bin
-        ~cwd_raw:base_path ~sandbox:target bin [ "-c"; script ]
+        ~cwd_raw:base_path ~sandbox:target bin args
     in
-    Keeper_tooling.Execute_shell_ir.dispatch ~workdir:base_path ~sandbox:target ir
+    Keeper_tooling.Execute_shell_ir.dispatch
+      ~workdir:base_path ~sandbox:target ?base_host_env ir
   in
   let target = Masc_exec.Sandbox_target.host () in
   let stage = Stage.create ~route:(fun () -> Target.Boxed { target; run }) ~dispatch in
   let request : Gate.request =
     { keeper_name = "settlement"
     ; operation = "tool_execute"
-    ; input = `Assoc [ "input", `Assoc [ "argv", `List [ `String "sh"; `String "-c"; `String script ] ] ]
+    ; input = `Assoc [ "input", `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv) ] ]
     ; call_summary = None
     ; base_path
     ; causal_context = None
     ; task_id = None
     ; continuation_channel = None
-    ; sandbox_profile = Some Keeper_types_profile_sandbox.Remote_ssh
+    ; sandbox_profile = Some sandbox_profile
     }
   in
   let decision = Gate.decide ~keeper_always_allow:false ~observe:(Stage.observe stage) request in
@@ -224,7 +232,7 @@ let test_guest_local_failure_returns_the_execution_once () =
     execute_through_gate ~run:Keeper_types_profile_sandbox.Guest_local
       ~observed_secret_files:(fun () -> incr observed; [ "bound-snapshot/hosts.yml" ])
       ~prepare_secret_files:(fun () -> incr prepared; Error "github_app_token_refresh_failed")
-      ~script:"printf x >> append.txt; printf 'partial output\\n'; printf 'network refused\\n' >&2; exit 23"
+      ~argv:[ "sh"; "-c"; "printf x >> append.txt; printf 'partial output\\n'; printf 'network refused\\n' >&2; exit 23" ]
       base_path
   in
   check int "the full command was dispatched once" 1 count;
@@ -249,7 +257,7 @@ let test_successful_boxed_results_are_not_reexecuted () =
     (fun run ->
       with_execution_workspace @@ fun base_path ->
       let _, result, count, pending, _ =
-        execute_through_gate ~run ~script:"printf 'read result\\n'" base_path
+        execute_through_gate ~run ~argv:[ "sh"; "-c"; "printf 'read result\\n'" ] base_path
       in
       check int "one dispatch" 1 count;
       check int "no approval" 0 pending;
@@ -265,7 +273,7 @@ let test_observe_failure_still_reaches_the_judge () =
   with_execution_workspace @@ fun base_path ->
   let decision, result, count, pending, chunks =
     execute_through_gate ~run:Keeper_types_profile_sandbox.Observe
-      ~script:"printf 'write refused\\n' >&2; exit 23" base_path
+      ~argv:[ "sh"; "-c"; "printf 'write refused\\n' >&2; exit 23" ] base_path
   in
   check int "one observation dispatch" 1 count;
   check int "the Judge still has the request" 1 pending;
@@ -292,11 +300,149 @@ let test_manual_approval_does_not_prepare_identity () =
     execute_through_gate ~run:Keeper_types_profile_sandbox.Guest_local
       ~observed_secret_files:(fun () -> fail "manual approval read an execution identity")
       ~prepare_secret_files:(fun () -> fail "manual approval refreshed an identity")
-      ~script:"printf x >> append.txt" base_path
+      ~argv:[ "sh"; "-c"; "printf x >> append.txt" ] base_path
   in
   check int "not dispatched before approval" 0 count;
   check int "the original approval remains pending" 1 pending;
   check bool "no fabricated execution result" true (Option.is_none result)
+;;
+
+let write_scenario_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
+;;
+
+let read_scenario_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+(* Setup and the measured dispatch own exactly the same child environment.
+   Inherited Git directory/config/helper overrides must not redirect a
+   fixture's writes or change the behavior it is measuring. *)
+let scenario_git_env base_path =
+  [| "PATH=" ^ Sys.getenv "PATH"
+   ; "HOME=" ^ Filename.concat base_path "scenario-home"
+   ; "XDG_CONFIG_HOME=" ^ Filename.concat base_path "scenario-home"
+   ; "GIT_CONFIG_NOSYSTEM=1"
+   ; "GIT_CONFIG_GLOBAL=" ^ Filename.concat base_path "empty-git-config"
+   ; "LANG=C"
+  |]
+;;
+
+let scenario_git base_path args =
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_stdin_and_status_split
+      ~cwd:base_path ~env:(scenario_git_env base_path)
+      ~stdin_content:"" ("git" :: args)
+  in
+  match status with
+  | Unix.WEXITED 0 -> stdout
+  | _ -> failf "Git scenario setup failed: %s" stderr
+;;
+
+let prepare_git_scenario base_path =
+  Unix.mkdir (Filename.concat base_path "scenario-home") 0o700;
+  write_scenario_file (Filename.concat base_path "empty-git-config") "";
+  let git args = scenario_git base_path args in
+  check string "initialise isolated repository" ""
+    (git [ "-c"; "init.templateDir="; "init"; "-q" ]);
+  check string "bind scenario identity" ""
+    (git [ "config"; "user.name"; "Execution scenario" ]);
+  check string "bind scenario email" ""
+    (git [ "config"; "user.email"; "execution@example.invalid" ]);
+  let empty_hooks = Filename.concat base_path "empty-hooks" in
+  Unix.mkdir empty_hooks 0o700;
+  check string "no external setup hooks" ""
+    (git [ "config"; "core.hooksPath"; empty_hooks ]);
+  write_scenario_file (Filename.concat base_path "tracked.txt") "before\n";
+  check string "stage initial content" "" (git [ "add"; "tracked.txt" ]);
+  check string "commit fixture" ""
+    (git [ "-c"; "commit.gpgsign=false"; "commit"; "-q"; "-m"; "fixture" ]);
+  write_scenario_file (Filename.concat base_path "tracked.txt") "after\n"
+;;
+
+let require_boxed_git ~run ~argv base_path =
+  let decision, result, count, pending, chunks =
+    execute_through_gate ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm
+      ~base_host_env:(scenario_git_env base_path)
+      ~run ~argv base_path
+  in
+  (match decision with
+   | Gate.Allow { source = Gate.Observed_in_box execution; _ } ->
+     check bool "the configured observation mode survives" true (execution.run = run)
+   | Gate.Allow { source; _ } ->
+     failf "Git effects were assumed static: %s" (Gate.authorization_source_to_string source)
+   | Gate.Deferred _ -> fail "successful Git observation paid a Judge turn"
+   | Gate.Unavailable _ -> fail "Git scenario gate persistence failed");
+  check int "one execution, no replay" 1 count;
+  check int "no Judge queue entry" 0 pending;
+  match result with
+  | None -> fail "the Git execution lost its result"
+  | Some result ->
+    check bool "real Git exit zero" true (result.status = Unix.WEXITED 0);
+    let expected_chunks =
+      (if result.stdout = "" then [] else [ `Stdout result.stdout ])
+      @ (if result.stderr = "" then [] else [ `Stderr result.stderr ])
+    in
+    check bool "original output reaches Execute once" true (chunks = expected_chunks);
+    result
+;;
+
+(* This route uses a real subprocess on an isolated tree. It proves
+   classification, Gate selection and result settlement, not Linux Observe
+   enforcement. The effectful cases explicitly use Guest_local. *)
+let test_git_reads_use_the_box_without_a_judge_or_replay () =
+  List.iter
+    (fun argv ->
+      with_execution_workspace @@ fun base_path ->
+      prepare_git_scenario base_path;
+      let result = require_boxed_git ~run:observe_run ~argv base_path in
+      check string "the tracked change is returned" "tracked.txt\n" result.stdout)
+    [ [ "git"; "diff"; "--name-only" ]
+    ; [ "sh"; "-c"; "git diff --name-only" ]
+    ]
+;;
+
+let test_git_output_and_reflog_effects_are_executed_once () =
+  with_execution_workspace @@ fun base_path ->
+  prepare_git_scenario base_path;
+  let run = Keeper_types_profile_sandbox.Guest_local in
+  let output =
+    require_boxed_git ~run
+      ~argv:[ "git"; "diff"; "--name-only"; "--output=patch.txt" ] base_path
+  in
+  check string "Git directed its output to the requested file" "" output.stdout;
+  check string "the actual file effect survives" "tracked.txt\n"
+    (read_scenario_file (Filename.concat base_path "patch.txt"));
+  let reflog = Filename.concat base_path ".git/logs/HEAD" in
+  check bool "the fixture has a real reflog entry" true
+    (String.length (read_scenario_file reflog) > 0);
+  let expired =
+    require_boxed_git ~run
+      ~argv:[ "git"; "reflog"; "expire"; "--expire=all"; "--all" ] base_path
+  in
+  check string "reflog command output" "" expired.stdout;
+  check string "the reflog mutation really happened" "" (read_scenario_file reflog)
+;;
+
+let test_repository_configured_git_helper_is_not_assumed_readonly () =
+  with_execution_workspace @@ fun base_path ->
+  prepare_git_scenario base_path;
+  let helper = Filename.concat base_path "diff-helper" in
+  write_scenario_file helper
+    "#!/bin/sh\nprintf x >> helper-invocations\nprintf 'helper result\\n'\n";
+  Unix.chmod helper 0o700;
+  check string "repository configuration supplies the helper" ""
+    (scenario_git base_path [ "config"; "diff.external"; Filename.quote helper ]);
+  let result =
+    require_boxed_git ~run:Keeper_types_profile_sandbox.Guest_local
+      ~argv:[ "git"; "diff" ] base_path
+  in
+  check string "the actual helper output survives" "helper result\n" result.stdout;
+  check string "the configured helper ran exactly once" "x"
+    (read_scenario_file (Filename.concat base_path "helper-invocations"))
 ;;
 
 let () =
@@ -320,6 +466,14 @@ let () =
             test_observe_failure_still_reaches_the_judge
         ; test_case "manual approval does not prepare identity" `Quick
             test_manual_approval_does_not_prepare_identity
+        ] )
+    ; ( "git-effect-scenarios"
+      , [ test_case "Git argv and shell reads use one box without a Judge" `Quick
+            test_git_reads_use_the_box_without_a_judge_or_replay
+        ; test_case "Git output and reflog changes retain their actual effects" `Quick
+            test_git_output_and_reflog_effects_are_executed_once
+        ; test_case "repository-configured Git helper executes exactly once" `Quick
+            test_repository_configured_git_helper_is_not_assumed_readonly
         ] )
     ]
 ;;

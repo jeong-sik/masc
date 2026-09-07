@@ -5265,6 +5265,31 @@ let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
 
+let memory_overview_scrolled ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let count = List.length keepers in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context_rows =
+    match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
+    | None -> 0
+    | Some keeper ->
+        (* Divider, snapshot, facts, source, Librarian and Vision, then the
+           selected keeper's read errors and server alerts. *)
+        6 + List.length keeper.mkh_alerts
+        + (if Option.is_some keeper.mkh_read_error then 1 else 0)
+        + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+  in
+  { sc_count = count
+  ; sc_chrome =
+      Masc_tui_frame.chrome_rows
+      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
+      + 7 + context_rows
+      + (if memory_overview_query state <> "" then 1 else 0)
+      + (if Option.is_some state.memory_health_error then 2 else 0)
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
+
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
    category, and hiding them under a category filter would read as the store
@@ -5541,13 +5566,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        (* Fleet rows plus the detail panel of the row the cursor names. The
-           panel is one scroll unit: its own height follows the render, and
-           search only needs to land on rows that exist. *)
-        listing ~error:state.memory_health_error
-          (match state.memory_health with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
+        Some (memory_overview_scrolled state)
   | Changes ->
       Some
         { sc_count =

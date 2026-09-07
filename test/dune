@@ -3646,6 +3646,8 @@
  (libraries
   alcotest
   masc
+  masc_tui_frame
+  masc_tui_scroll
   masc_tui_message_layout
   masc_tui_render_memory
   masc_tui_theme

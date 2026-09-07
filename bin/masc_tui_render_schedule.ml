@@ -831,7 +831,7 @@ let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
   [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
       values.frow_age
-  ; Table.cell ~style:state_style ~header:"ST" ~width:fusion_state_width
+  ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
       values.frow_state
   ; Table.cell ~header:"KEEPER" ~width:keeper_width values.frow_keeper
   ; Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset

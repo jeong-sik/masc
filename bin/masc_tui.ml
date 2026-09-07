@@ -269,11 +269,16 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
       in
+      let scrolled =
+        if state.view = Memory && Option.is_none state.memory_facts_keeper then
+          memory_overview_scrolled ~cursor state
+        else scrolled
+      in
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the

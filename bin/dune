@@ -978,6 +978,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_frame
   masc_tui_image_preview
   ocaml-msx.msx
   masc
@@ -1101,6 +1102,8 @@
   masc_types
   masc_tui_ansi
   masc_tui_context_inspector
+  masc_tui_frame
+  masc_tui_scroll
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout

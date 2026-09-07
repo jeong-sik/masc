@@ -463,6 +463,89 @@ let test_render_memory_body_sorting () =
   check (option string) "known dates sort before absent snapshots" (Some "beta") (selected ())
 ;;
 
+let test_render_memory_overflow_selection () =
+  let state = make_state () in
+  state.view <- Types.Memory;
+  let keepers = List.init 5 (fun index ->
+      let keeper =
+        make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%d" index)
+          ~facts:10 ~snapshot_bytes:1024
+      in
+      if index <> 4 then keeper
+      else
+        { keeper with
+          mkh_source_read_error = Some "unreadable source snapshot"
+        ; mkh_alerts =
+            [{ ma_code = Decode.Source_snapshot_read_error
+             ; ma_label = "source"
+             ; ma_message = "unreadable source snapshot"
+             }]
+        })
+  in
+  state.memory_health <- Some
+    { mhs_generated_at = 1700000000.
+    ; mhs_keepers = keepers
+    ; mhs_total_facts = 50
+    ; mhs_total_observed_facts = 50
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 5120
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 1
+    ; mhs_warn_alerts = 1
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    };
+  let rows = 21 in
+  let budget = rows - Masc_tui_frame.chrome_rows in
+  let height layout =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.Types.sc_chrome
+      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
+  in
+  check int "five keepers fit two list rows beside their context" 2
+    (height (Types.memory_overview_scrolled state));
+  let assert_selected_visible () =
+    let used = ref 0 and selected = ref None in
+    let push _ = incr used in
+    Render_memory.render_memory_body ~cols:100 ~budget state
+      ~push ~push_styled:(fun ~style:_ line -> push line)
+      ~push_selected:(fun line ->
+        if !used < budget then selected := Some line;
+        incr used)
+      ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    let expected = Option.get (Types.selected_memory_keeper state) in
+    check bool "the selected keeper is inside the visible body" true
+      (Option.fold ~none:false ~some:(contains expected.mkh_keeper_id) !selected)
+  in
+  (* Move through an overflowing list using the same target-row layout as
+     keyboard input, including the context of the newly selected keeper. *)
+  for cursor = 0 to 4 do
+    let layout = Types.memory_overview_scrolled ~cursor state in
+    state.memory_health_cursor <- cursor;
+    state.memory_health_scroll <-
+      Masc_tui_scroll.ensure_visible ~cursor ~height:(height layout)
+        state.memory_health_scroll;
+    assert_selected_visible ()
+  done;
+  check int "the final row's error and alert leave one list row" 1
+    (height (Types.memory_overview_scrolled state));
+  check int "the final row requires scrolling" 4 state.memory_health_scroll;
+  state.search_last <- "keeper-4";
+  state.memory_health_error <- Some "refresh failed";
+  let layout = Option.get (Types.scrolled_surface state Types.Memory) in
+  check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
+  check (option (list string)) "search names the same filtered row"
+    (Some ["keeper-4"]) (Types.surface_row_texts state Types.Memory);
+  (* A refresh/filter can change the body before another keypress. *)
+  assert_selected_visible ()
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -483,6 +566,7 @@ let () =
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
+        ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ] )

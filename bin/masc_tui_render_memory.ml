@@ -405,20 +405,20 @@ let render_memory_body ~cols ~budget (state : state)
     | None -> []
     | Some k -> memory_context_lines k
   in
-  let context_rows =
-    match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
-  in
-  let fixed =
-    7
-    + (if search_bar <> "" then 1 else 0)
-    + context_rows
-    + (if Option.is_some state.memory_health_error then 2 else 0)
-  in
-  let available = max 1 (budget - fixed) in
+  let layout = memory_overview_scrolled ~cursor state in
+  let rows = budget + Masc_tui_frame.chrome_rows in
+  let available = max 1 (rows - layout.sc_chrome) in
   let overflowing = shown > available in
-  let content_height = if overflowing then max 1 (available - 1) else available in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.memory_health_scroll max_scroll) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
+  in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:shown ~height:content_height
+      state.memory_health_scroll
+    |> Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
+  in
   if shown = 0 then
     let note =
       if Option.is_some state.memory_health_error then

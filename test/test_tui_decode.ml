@@ -3171,11 +3171,24 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; "duplicate keeper identity rejects", duplicate_keeper
     ; "alert target mismatch rejects", wrong_alert_target
     ; "duplicate vision reason rejects", duplicate_vision_reason
+    ; "timestamp without readable snapshot rejects",
+      map_keeper 0 (replace_field "updated_at" (`Float 1700000000.)) json
+    ; "readable snapshot without timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" `Null) json
+    ; "negative snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float (-1.))) json
+    ; "nonfinite snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float infinity)) json
+    ; "text snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`String "1700000000")) json
     ];
   match Tui_decode.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
+      Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
+        [None; Some 1700000000.]
+        (List.map (fun keeper -> keeper.Tui_decode.mkh_updated_at) snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2

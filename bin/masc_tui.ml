@@ -1504,10 +1504,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
-         then gives full timestamp/request metadata a row of its own.
-         Ctrl-O would have read better for an origin, but it is VDISCARD on
-         this platform and [Unix.terminal_io] carries no IEXTEN field to turn
-         that off, so the terminal would eat the key before the loop saw it. *)
+         then gives full timestamp/request metadata a row of its own. *)
       state.msg_origin_display <- next_origin_display state.msg_origin_display;
       true
     end else if c = Some 21 then begin
@@ -12431,13 +12428,14 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
-(* Raw mode, and the one key the record cannot ask for.
+(* Raw mode, and the keys the record cannot ask for.
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
    filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
    among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
    that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
-   key. Pairing the two here is what keeps the three places that take raw mode
+   key. VDISCARD similarly consumes Ctrl-O on BSD terminals. Reclaiming both
+   here keeps the three places that take raw mode
    back (session start, the return from Ctrl-Z, the return from $EDITOR) from
    taking it back without the key.
 
@@ -12448,7 +12446,8 @@ let bracketed_paste_disable = "\x1b[?2004l"
 let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
   (* See above: a refusal is a hangup, which ends the session either way. *)
-  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool)
+  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool);
+  ignore (Masc_tui_termios.disable_discard_output Unix.stdin : bool)
 ;;
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
@@ -12572,6 +12571,7 @@ let main () =
      key, which the PTY harness catches as a terminal this program did not put
      back the way it found it. *)
   let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
+  let old_discard_output = Masc_tui_termios.discard_output Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -12612,7 +12612,9 @@ let main () =
     if old_literal_next >= 0
     then
       (* See the guard above: a refusal here is the terminal already gone. *)
-      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool)
+      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
+    if old_discard_output >= 0 then
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
   in
 
   (* Cleanup on exit *)

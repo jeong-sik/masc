@@ -209,3 +209,6 @@ val browser_lane_scroll_limit :
 
 val ask_question_scroll_limit : Masc_tui_types.state -> int
 val ask_question_page_size : Masc_tui_types.state -> int
+
+val runtime_config_status_scroll_limit :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> int

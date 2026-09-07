@@ -2902,6 +2902,12 @@ type workspace_activity_read = {
   war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
 }
 
+type runtime_config_reading = {
+  rcv_path : string;
+  rcv_rows : (string * string) list list;
+  rcv_metadata : Masc_tui_runtime_config_view.metadata;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3118,7 +3124,9 @@ type state = {
      surfaces read the same file the same way. Plain text is derived where it
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
-  mutable runtime_config_view: (string * (string * string) list list) option;
+  mutable runtime_config_view: runtime_config_reading option;
+  mutable runtime_config_status_open: bool;
+  mutable runtime_config_status_scroll: int;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -4581,6 +4589,8 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  runtime_config_status_open = false;
+  runtime_config_status_scroll = 0;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -5868,6 +5878,15 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
+  | Config when state.config_pane = Config_runtime && state.runtime_config_status_open -> None
+  | Config when state.config_pane = Config_runtime ->
+      Some
+        { sc_count = (match state.runtime_config_view with None -> 0 | Some r -> List.length r.rcv_rows)
+        ; sc_chrome = 7 + (match state.runtime_config_view with None -> 0 | Some r ->
+              List.length (Masc_tui_runtime_config_view.summary_lines r.rcv_metadata))
+        ; sc_overflow_takes_row = false
+        ; sc_preview_keep = None
+        }
   | Config ->
       (* Per pane, because the two panes over the same file are different
          lengths: the source pane draws every line, the models pane draws one
@@ -5886,7 +5905,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          | Config_themes | Config_voice ->
            (match state.runtime_config_view with
             | None -> 0
-            | Some (_, rows) -> List.length rows))
+            | Some reading -> List.length reading.rcv_rows))
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,

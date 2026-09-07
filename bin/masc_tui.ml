@@ -6513,11 +6513,13 @@ let selected_surface_reference state =
   | Fusion ->
       (match state.fusion_mode, state.fusion_runs with
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
-       | Fusion_list, Some snapshot ->
+       | Fusion_list, Some _ ->
            Option.map
-             (fun (run : Tui_decode.fusion_run) ->
-                Link.reference Fusion_run run.fur_run_id)
-             (List.nth_opt snapshot.fus_runs state.fusion_cursor)
+             (function
+               | Tui_decode.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
+               | Tui_decode.Fusion_historical_evidence evidence ->
+                   Link.reference Board_post evidence.fhe_post_id)
+             (selected_fusion_entry state)
        | Fusion_list, None -> None)
   (* These four hold an id already and were answering None, so Ctrl-] did
      nothing on them: a lane names its keeper, a verification request names the
@@ -7866,16 +7868,11 @@ let apply_fusion_runs_load state = function
       in
       let current_selected_id =
         match state.fusion_mode with
-        | Fusion_detail run_id -> Some run_id
-        | Fusion_list ->
-            Option.bind state.fusion_runs (fun current ->
-                List.nth_opt current.Tui_decode.fus_runs state.fusion_cursor
-                |> Option.map (fun run -> run.Tui_decode.fur_run_id))
+        | Fusion_detail run_id -> Some ("run:" ^ run_id)
+        | Fusion_list -> Option.map fusion_entry_identity (selected_fusion_entry state)
       in
       let next_ids =
-        List.map
-          (fun run -> run.Tui_decode.fur_run_id)
-          snapshot.Tui_decode.fus_runs
+        List.map fusion_entry_identity (fusion_snapshot_entries snapshot)
       in
       let fallback_cursor =
         min (max 0 state.fusion_cursor) (max 0 (List.length next_ids - 1))
@@ -7898,8 +7895,8 @@ let apply_fusion_runs_load state = function
       state.fusion_cursor <- next_cursor;
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
-         when String.equal run_id selected
-              && List.exists (String.equal run_id) next_ids ->
+         when String.equal ("run:" ^ run_id) selected
+              && List.exists (String.equal selected) next_ids ->
            ()
        | Fusion_detail _, _ ->
            state.fusion_mode <- Fusion_list;
@@ -9397,14 +9394,17 @@ let open_harness_detail state =
            state.harness_cursor)
 
 let open_fusion_detail state ~mailbox =
-  let runs =
-    match state.fusion_runs with
-    | None -> []
-    | Some snapshot -> snapshot.fus_runs
-  in
-  match List.nth_opt runs state.fusion_cursor with
+  match selected_fusion_entry state with
   | None -> ()
-  | Some run ->
+  | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+      state.followed_from <- Some (state.view, None);
+      state.board_mode <- Board_read evidence.fhe_post_id;
+      state.board_scroll <- 0;
+      state.board_focus <- Right_pane;
+      goto_surface state ~mailbox Board;
+      start_board_post_refresh state ~host:server_peer_host ~port:state.port
+        ~post_id:evidence.fhe_post_id ~mailbox
+  | Some (Tui_decode.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
@@ -15564,6 +15564,13 @@ and is loaded on demand through keeper_skill.
                       String.equal candidate.fur_run_id run.fur_run_id)
                       (selected_keeper_runs state))
                   |> Option.value ~default:0)
+       | Some "B" when state.view = Fusion
+           && state.fusion_mode = Fusion_list ->
+           (match selected_fusion_entry state with
+            | Some (Tui_decode.Fusion_historical_evidence _) ->
+                open_fusion_detail state ~mailbox:async_messages
+            | Some (Tui_decode.Fusion_retained_run _) | None ->
+                add_event state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
            (match state.fusion_mode, state.fusion_detail with
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
@@ -15572,6 +15579,7 @@ and is loaded on demand through keeper_skill.
                  | Some evidence ->
                      state.followed_from <- Some (state.view, Some id);
                      state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_scroll <- 0;
                      state.board_focus <- Right_pane;
                      goto_surface state ~mailbox:async_messages Board;
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -16724,9 +16732,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      let count =
-                       match state.fusion_runs with
-                       | None -> 0
-                       | Some snapshot -> List.length snapshot.fus_runs
+                       List.length (fusion_list_entries state)
                      in
                      state.fusion_cursor <-
                        max 0
@@ -17531,9 +17537,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      let count =
-                       match state.fusion_runs with
-                       | None -> 0
-                       | Some snapshot -> List.length snapshot.fus_runs
+                       List.length (fusion_list_entries state)
                      in
                      if state.fusion_cursor < count - 1 then
                        state.fusion_cursor <- state.fusion_cursor + 1

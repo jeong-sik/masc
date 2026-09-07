@@ -240,9 +240,28 @@ type fusion_run = {
   fur_summary : string option;
 }
 
+type fusion_replay =
+  | Fusion_not_replayed
+  | Fusion_log_absent
+  | Fusion_replayed of
+      { malformed_lines : int; dropped_running : int; incomplete : bool }
+
+type fusion_historical_evidence = {
+  fhe_run_id : string;
+  fhe_post_id : string;
+  fhe_title : string;
+  fhe_created_at : float;
+}
+
+type fusion_list_entry =
+  | Fusion_retained_run of fusion_run
+  | Fusion_historical_evidence of fusion_historical_evidence
+
 type fusion_snapshot = {
   fus_generated_at : string;
   fus_runs : fusion_run list;
+  fus_replay : fusion_replay;
+  fus_historical_evidence : fusion_historical_evidence list;
 }
 
 type fusion_panel_answer = {
@@ -5790,6 +5809,30 @@ let decode_fusion_run json =
     ; fur_summary
     }
 
+let decode_fusion_replay json =
+  let* status = required_string_field json "status" in
+  match status with
+  | "not_replayed" -> Ok Fusion_not_replayed
+  | "absent" -> Ok Fusion_log_absent
+  | "complete" | "incomplete" ->
+      let* _lines_read = required_nonnegative_int_field json "lines_read" in
+      let* malformed_lines = required_nonnegative_int_field json "malformed_lines" in
+      let* dropped_running = required_nonnegative_int_field json "dropped_running" in
+      Ok (Fusion_replayed { malformed_lines; dropped_running;
+                            incomplete = String.equal status "incomplete" })
+  | other -> Error (Printf.sprintf "unknown Fusion replay status %S" other)
+
+let decode_fusion_historical_evidence json =
+  let* fhe_run_id = required_string_field json "run_id" in
+  let* fhe_post_id = required_string_field json "post_id" in
+  let* fhe_title = required_string_field json "title" in
+  let* fhe_created_at = require_float_field json "created_at" in
+  if String.trim fhe_run_id = "" || String.trim fhe_post_id = "" then
+    Error "historical Fusion evidence requires a run and Board post identity"
+  else if not (Float.is_finite fhe_created_at) || fhe_created_at < 0. then
+    Error "historical Fusion evidence publication time must be finite and nonnegative"
+  else Ok { fhe_run_id; fhe_post_id; fhe_title; fhe_created_at }
+
 let decode_fusion_snapshot json =
   let* fus_generated_at = required_string_field json "generated_at" in
   let* count = required_int_field json "count" in
@@ -5799,7 +5842,14 @@ let decode_fusion_snapshot json =
     Error
       (Printf.sprintf "fusion run count is %d but runs contains %d rows" count
          (List.length fus_runs))
-  else Ok { fus_generated_at; fus_runs }
+  else
+    let* replay = required_member json "replay" in
+    let* fus_replay = decode_fusion_replay replay in
+    let* history = required_list_field json "historical_evidence" in
+    let* fus_historical_evidence =
+      decode_list "historical_evidence" decode_fusion_historical_evidence history
+    in
+    Ok { fus_generated_at; fus_runs; fus_replay; fus_historical_evidence }
 
 let decode_fusion_panel_result json =
   let* model = required_string_field json "model" in

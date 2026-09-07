@@ -301,7 +301,7 @@ let for_surface = function
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
+      ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "K" "calling Keeper"

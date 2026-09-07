@@ -1301,9 +1301,28 @@ type fusion_run = {
       neither. *)
 }
 
+type fusion_replay =
+  | Fusion_not_replayed
+  | Fusion_log_absent
+  | Fusion_replayed of
+      { malformed_lines : int; dropped_running : int; incomplete : bool }
+
+type fusion_historical_evidence = {
+  fhe_run_id : string;
+  fhe_post_id : string;
+  fhe_title : string;
+  fhe_created_at : float;
+}
+
+type fusion_list_entry =
+  | Fusion_retained_run of fusion_run
+  | Fusion_historical_evidence of fusion_historical_evidence
+
 type fusion_snapshot = {
   fus_generated_at : string;
   fus_runs : fusion_run list;
+  fus_replay : fusion_replay;
+  fus_historical_evidence : fusion_historical_evidence list;
 }
 
 type fusion_panel_answer = {

@@ -378,8 +378,33 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Enter:open  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
+
+let test_fusion_historical_evidence_is_a_selectable_board_reference () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let response = `Assoc
+    [ "generated_at", `String "2026-09-07T00:00:00Z"
+    ; "count", `Int 0; "runs", `List []
+    ; "replay", `Assoc ["status", `String "complete"; "lines_read", `Int 2;
+                        "malformed_lines", `Int 1; "dropped_running", `Int 1]
+    ; "historical_evidence", `List
+        [ `Assoc ["run_id", `String "past-run"; "post_id", `String "original-post";
+                  "title", `String "Original conclusion"; "created_at", `Float 10.]
+        ]
+    ] in
+  (match Tui_decode.decode_fusion_snapshot response with
+   | Error detail -> Alcotest.fail detail
+   | Ok snapshot -> state.fusion_runs <- Some snapshot);
+  check Alcotest.int "history remains in the selectable list with no retained runs"
+    1 (List.length (fusion_list_entries state));
+  (match selected_fusion_entry state with
+   | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+       check str "selection retains original Board identity" "original-post" evidence.fhe_post_id
+   | Some (Tui_decode.Fusion_retained_run _) | None ->
+       Alcotest.fail "historical evidence disappeared or became an invented run");
+  check Alcotest.int "historical evidence does not inflate Keeper run count"
+    0 (List.length (selected_keeper_runs state))
 
 let test_keeper_runs_selection_survives_a_shorter_list () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -399,6 +424,8 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
   let load runs =
     match Tui_decode.decode_fusion_snapshot (`Assoc
       [ "generated_at", `String "2026-09-07T00:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int (List.length runs); "runs", `List runs ]) with
     | Ok snapshot -> state.fusion_runs <- Some snapshot
     | Error detail -> Alcotest.fail detail
@@ -1466,6 +1493,8 @@ let () =
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
+        ; Alcotest.test_case "Fusion history is selectable without a retained run" `Quick
+            test_fusion_historical_evidence_is_a_selectable_board_reference
         ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick
             test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick

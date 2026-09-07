@@ -2435,6 +2435,20 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+(* Scope and path together name one thing to fetch. The same relative path
+   under two scopes is two different things -- two histories, two directory
+   listings -- so a request and the reply that comes back for it are the same
+   request only when both halves agree.
+
+   The Code pane asks for a directory listing per scope change, and a reply
+   that named only the directory was accepted under whichever scope was
+   current when it landed. Switch scope while one is in flight at the same
+   relative directory and the late reply overwrites the new scope's rows with
+   the old scope's (#33946). *)
+let code_scope_path_equal (left_scope, left_path) (right_scope, right_path) =
+  left_scope = right_scope && String.equal left_path right_path
+;;
+
 (* One row of the file pane's history view. Git owns committed history;
    Keeper file changes are durable tool-call facts. They share only their
    timestamp and exact repository address, which is enough to sort a display

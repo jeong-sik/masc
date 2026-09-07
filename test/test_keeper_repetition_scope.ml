@@ -258,7 +258,7 @@ let test_native_terminal_evidence_precedes_scope_failure () =
   let completed = Masc.Keeper_tools_agent_core.Terminal_effect_completed
       (Masc.Keeper_tool_execution.Memory_write_completed { revision = 1 }) in
   (match decide completed with
-   | Ok (Masc.Runtime_agent.Yield Masc.Runtime_agent.Terminal_tool_completed) -> ()
+   | Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) -> ()
    | _ -> fail "scope failure hid an exact completed effect");
   let failed = Masc.Keeper_tools_agent_core.Terminal_effect_failed
       { failure_class = Tool_result.Runtime_failure

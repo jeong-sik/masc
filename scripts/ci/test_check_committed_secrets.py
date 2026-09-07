@@ -35,13 +35,11 @@ PEM_BODY = (
     "EFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789abcdEF\n"
 )
 
-# Split synthetic token prefixes across literals: the tracked source stays
-# clean while each evaluated positive fixture still contains the full shape.
 CASES: list[tuple[str, str, int]] = [
     (
         "launchd OAuth token (#636)",
-        '<key>CLAUDE_CODE_OAUTH_TOKEN_ci</key>\n<string>sk-'
-        'ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</string>\n',
+        "<key>CLAUDE_CODE_OAUTH_TOKEN_ci</key>\n"
+        "<string>sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</string>\n",
         1,
     ),
     (
@@ -57,20 +55,17 @@ CASES: list[tuple[str, str, int]] = [
     ),
     (
         "Resend API key (alert #10)",
-        'RESEND_API_KEY=re_'
-        'AbCdEfGhIjKlMnOpQrStUvWxYz012345\n',
+        "RESEND_API_KEY=re_AbCdEfGhIjKlMnOpQrStUvWxYz012345\n",
         1,
     ),
     (
         "GitHub token",
-        'gh_token: ghp'
-        '_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n',
+        "gh_token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n",
         1,
     ),
     (
         "AWS access key id",
-        'aws_access_key_id = AKI'
-        'AIOSFODNN7EXAMPLE\n',
+        "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n",
         1,
     ),
     (
@@ -126,6 +121,41 @@ def check_repo_is_clean() -> int:
     return 1
 
 
+def check_novel_value_is_caught_end_to_end() -> int:
+    """Rules and allowlist together, on a value that is in neither.
+
+    The cases above measure the patterns. They cannot measure the allowlist,
+    and every literal in this file is pinned there -- so a bug that pinned
+    too much, or a rule satisfied only by its own fixture, would leave all
+    of them green. "Caught" only means something for a value the tree does
+    not already carry.
+
+    Which is why the probe is joined at runtime: written as one literal it
+    would be a credential shape in a tracked file, the check above would
+    demand it be pinned, and pinning it would make this check assert that
+    an allowlisted value is caught -- the opposite of the question. The
+    concatenation is the point, not a style choice.
+    """
+    probe_value = "sk-" + "ant-" + "oat01-" + "9zQwErTyUiOpAsDfGhJkLzXcVbNm7410"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        (root / "probe.txt").write_text(f"CLAUDE_CODE_OAUTH_TOKEN={probe_value}\n")
+        subprocess.run(["git", "add", "-N", "probe.txt"], cwd=root, check=True)
+        result = subprocess.run(
+            [sys.executable, str(GUARD), "--root", str(root)],
+            capture_output=True,
+            text=True,
+        )
+    if result.returncode != 0:
+        print("pass a novel credential shape fails the check")
+        return 0
+    print(
+        "FAIL a novel credential shape passed the check", file=sys.stderr
+    )
+    return 1
+
+
 def check_allowlist_entries_are_reachable(guard) -> int:
     """A pinned hash that matches nothing in the tree is a value that left
     without its exemption. Stale pins accumulate into a list nobody can
@@ -155,6 +185,7 @@ def check_allowlist_entries_are_reachable(guard) -> int:
 def main() -> int:
     guard = load_guard()
     failures = check_repo_is_clean()
+    failures += check_novel_value_is_caught_end_to_end()
     failures += check_allowlist_entries_are_reachable(guard)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -174,7 +205,7 @@ def main() -> int:
     if failures:
         print(f"\n{failures} expectation(s) failed", file=sys.stderr)
         return 1
-    print(f"\nall {len(CASES)} cases and 2 tree checks passed")
+    print(f"\nall {len(CASES)} cases and 3 tree checks passed")
     return 0
 
 

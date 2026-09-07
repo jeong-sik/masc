@@ -13,6 +13,23 @@ let with_tmp_dir (f : string -> unit) : unit =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () -> f tmp)
 ;;
 
+(* [raise_with_backtrace] uses the supplied trace as the exception's origin;
+   propagation through the callback, cleanup and atomic writer may append
+   frames. Every original raw slot must remain in order at the front. Raw
+   slots have process-local identity and can be compared (Printexc's public
+   contract), so no rendered location text or re-raise wording is involved. *)
+let check_backtrace_origin label expected observed =
+  let origin_length = Printexc.raw_backtrace_length expected in
+  check bool (label ^ ": captured origin is nonempty") true (origin_length > 0);
+  check bool (label ^ ": origin is not truncated") true
+    (Printexc.raw_backtrace_length observed >= origin_length);
+  for index = 0 to origin_length - 1 do
+    check bool (Printf.sprintf "%s: origin slot %d" label index) true
+      (Printexc.get_raw_backtrace_slot expected index
+       = Printexc.get_raw_backtrace_slot observed index)
+  done
+;;
+
 let rec mkdir_p_unix path =
   if path = "" || path = Filename.dirname path then ()
   else (
@@ -218,9 +235,8 @@ let test_save_file_atomic_strict_payload_sync_cancellation () =
    | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
      check bool "original cancellation preserved" true
        (failure.exception_ == cancellation);
-     check string "original cancellation backtrace preserved"
-       (Printexc.raw_backtrace_to_string cancellation_backtrace)
-       (Printexc.raw_backtrace_to_string failure.backtrace)
+     check_backtrace_origin "original cancellation backtrace preserved"
+       cancellation_backtrace failure.backtrace
    | Error failure ->
      failf
        "payload sync cancellation reported after rename: %s"
@@ -282,9 +298,8 @@ let check_save_file_atomic_strict_parent_sync_failure
    | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
      check bool (label ^ " preserves original exception") true
        (failure.exception_ == exception_);
-     check string (label ^ " preserves original backtrace")
-       (Printexc.raw_backtrace_to_string injected_backtrace)
-       (Printexc.raw_backtrace_to_string failure.backtrace)
+     check_backtrace_origin (label ^ " preserves original backtrace")
+       injected_backtrace failure.backtrace
    | Error failure ->
      failf
        "%s reported before rename: %s"
@@ -349,9 +364,8 @@ let check_streaming_atomic_callback_failure ~exception_ () =
    | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
      check bool "callback exception is preserved" true
        (failure.exception_ == exception_);
-     check string "callback backtrace is preserved"
-       (Printexc.raw_backtrace_to_string injected_backtrace)
-       (Printexc.raw_backtrace_to_string failure.backtrace)
+     check_backtrace_origin "callback backtrace is preserved"
+       injected_backtrace failure.backtrace
    | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
    | Ok () -> fail "failed streaming callback was published");
   check string "failed stream preserves original bytes" "old"
@@ -380,9 +394,8 @@ let test_streaming_atomic_parent_sync_failure () =
    | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
      check bool "parent sync exception is preserved" true
        (failure.exception_ == exception_);
-     check string "parent sync backtrace is preserved"
-       (Printexc.raw_backtrace_to_string injected_backtrace)
-       (Printexc.raw_backtrace_to_string failure.backtrace)
+     check_backtrace_origin "parent sync backtrace is preserved"
+       injected_backtrace failure.backtrace
    | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
    | Ok () -> fail "failed parent sync was accepted");
   check string "complete replacement remains visible after rename" "first\nsecond\n"

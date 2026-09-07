@@ -30,7 +30,17 @@ let lane_of ~tool_name ~start_time args =
 ;;
 
 let answer_to_result ~tool_name ~start_time = function
-  | Browser_lane.Answered data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+  | Browser_lane.Answered (`Assoc fields) ->
+    (match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
+     | Some (`Bool true), Some data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+     | Some (`Bool false), _ ->
+       let message = match List.assoc_opt "error" fields with
+         | Some (`String message) -> message
+         | _ -> "browser backend failed without an error message" in
+       make_workflow_err ~tool_name ~start_time message
+     | _ -> make_workflow_err ~tool_name ~start_time "invalid browser backend response")
+  | Browser_lane.Answered _ ->
+    make_workflow_err ~tool_name ~start_time "invalid browser backend response"
   | Browser_lane.Lane_absent ->
     make_workflow_err ~tool_name ~start_time
       "no browser lane connected: the live lane needs the operator's browser \

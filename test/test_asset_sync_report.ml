@@ -63,6 +63,31 @@ let test_nothing_copied_is_no_line () =
   check bool "no distribution line" true (MAS.distribution_line ~label:"tool" r = None)
 ;;
 
+(* An overwrite is an operator's edit being replaced, so the path is the
+   message. Before this the line said "1 overwritten" and the operator had
+   to guess which of 25 prompts, 154 tool definitions or 3 MCP surfaces it
+   was -- the same count-without-names the removed line was fixed for. *)
+let test_distribution_line_names_the_overwritten () =
+  let r = result ~copied:(many 3) ~overwritten:[ path 7 ] () in
+  let line = line_exn (MAS.distribution_line ~label:"prompt" r) in
+  check bool "names the overwritten path" true (contains ~needle:(path 7) line)
+
+(* Copies stay a count. A version bump makes dozens of them and the operator
+   never had those files, so the paths crowd out the one class of entry they
+   would act on. *)
+let test_distribution_line_does_not_name_copies () =
+  let r = result ~copied:[ path 1 ] ~overwritten:[ path 2 ] () in
+  let line = line_exn (MAS.distribution_line ~label:"prompt" r) in
+  check bool "copied path absent" false (contains ~needle:(path 1) line);
+  check bool "overwritten path present" true (contains ~needle:(path 2) line)
+
+(* The same budget the removed line holds: past ten the line says how many
+   it did not print rather than growing without bound. *)
+let test_distribution_line_caps_the_overwritten_sample () =
+  let r = result ~overwritten:(many 14) () in
+  let line = line_exn (MAS.distribution_line ~label:"tool" r) in
+  check bool "says how many it withheld" true (contains ~needle:"and 4 more" line)
+
 let test_distribution_line_counts_both_classes () =
   let r = result ~copied:(many 3) ~overwritten:(many 2) () in
   let line = line_exn (MAS.distribution_line ~label:"prompt" r) in
@@ -104,6 +129,18 @@ let () =
             "both classes are counted"
             `Quick
             test_distribution_line_counts_both_classes
+        ; test_case
+            "an overwrite is named"
+            `Quick
+            test_distribution_line_names_the_overwritten
+        ; test_case
+            "a copy is not named"
+            `Quick
+            test_distribution_line_does_not_name_copies
+        ; test_case
+            "the overwritten sample has the same budget"
+            `Quick
+            test_distribution_line_caps_the_overwritten_sample
         ] )
     ]
 ;;

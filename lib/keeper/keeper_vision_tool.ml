@@ -361,6 +361,10 @@ let run_candidates_outcome
   =
   let rec loop ~last_error ~attempt_index = function
     | [] ->
+      (* The walk's outcome is the last candidate's: what ended it. A verdict
+         an earlier candidate gave and the walk moved past (a 400, a capacity
+         refusal) is not the reason the image went unread, and it is already
+         on the candidate counter under that runtime's id. *)
       (match last_error with
        | None -> Vo_no_runtime "no schema-capable image runtime configured"
        | Some (`Timeout _runtime_id) -> Vo_timeout

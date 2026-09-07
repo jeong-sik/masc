@@ -147,6 +147,10 @@ val dynamic_tool_bytes : dynamic_tool list -> int
 type error =
   | Invalid_config of string
   | Spawn_failed of string
+  | Turn_input_write_failed of string
+      (* The client and thread were initialized, but complete turn-input
+         transmission is unconfirmed. Partial delivery must not be replayed
+         as a proven pre-spawn failure. *)
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -211,6 +215,10 @@ val run_turn :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   ?history:history_message list ->
+  ?on_prompt_sent:(unit -> unit) ->
+  (* Called after the complete turn-input message is written to the CLI.
+      This is transport evidence, not provider acceptance. Never called for
+      preparation, spawn, handshake, or incomplete input-write failures. *)
   ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->

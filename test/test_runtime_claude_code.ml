@@ -76,6 +76,7 @@ type fixture_step =
 let fixture_script
       ?(auth_json = auth_subscription)
       ?(before_initialize_response = [])
+      ?(close_before_user = false)
       steps
   =
   let path = Filename.temp_file "masc-claude-code-" ".sh" in
@@ -149,8 +150,10 @@ let fixture_script
     "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
   output_string output "[ -n \"$request_id\" ] || exit 95\n";
   List.iter write_step before_initialize_response;
+  if close_before_user then output_string output "exec 0<&-\n";
   output_string output
     "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
+  if close_before_user then output_string output "exit 62\n";
   output_string output "IFS= read -r user_message\n";
   List.iter write_step steps;
   output_string output "while IFS= read -r ignored; do :; done\n";
@@ -159,8 +162,8 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?auth_json ?before_initialize_response steps f =
-  let path = fixture_script ?auth_json ?before_initialize_response steps in
+let with_fixture ?auth_json ?before_initialize_response ?close_before_user steps f =
+  let path = fixture_script ?auth_json ?before_initialize_response ?close_before_user steps in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -190,7 +193,8 @@ let window_outlasting_process_start_s = 5.0
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
-    ?on_turn_started_delay_s ?on_stream_event ?(images = []) path =
+    ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent
+    ?(prompt = "Return the fixture marker") ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -223,8 +227,9 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_session_ready
       ?on_turn_started
       ?on_stream_event
+      ?on_prompt_sent
       config
-      ~prompt:"Return the fixture marker"
+      ~prompt
       ~images)
 ;;
 
@@ -266,6 +271,42 @@ let test_subscription_turn_and_env_scrub () =
       check string "subscription" "team" turn.subscription.subscription_type;
       check bool "new session" false turn.resumed;
       check bool "no usage block yields none" true (Option.is_none turn.usage))
+;;
+
+let test_prompt_transmission_boundary () =
+  let sent = ref 0 in
+  let report () = incr sent in
+  let missing = Filename.temp_file "missing-claude-" ".sh" in
+  Sys.remove missing;
+  check bool "missing client fails" true
+    (Result.is_error (run_fixture ~on_prompt_sent:report missing));
+  check int "spawn failure emits no input" 0 !sent;
+  with_fixture ~close_before_user:true [] (fun path ->
+    (match run_fixture ~prompt:(String.make 1_100_000 'x') ~on_prompt_sent:report path with
+     | Error (Runtime_claude_code.Turn_transport_interrupted
+         { stage = "user message write"; _ }) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "incomplete user message completed");
+    check int "incomplete write emits no input" 0 !sent);
+  with_fixture [ Expect_user_message_contains "transmission-marker";
+                 Emit assistant; Emit result ] (fun path ->
+    check bool "complete turn succeeds" true
+      (Result.is_ok (run_fixture ~prompt:"transmission-marker" ~on_prompt_sent:report path));
+    check int "complete write emits once" 1 !sent);
+  let rejection =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"rejected-turn","result":"fixture rejected","errors":["fixture rejected"]}|}
+  in
+  with_fixture [ Emit rejection ] (fun path ->
+    (match run_fixture ~on_prompt_sent:report path with
+     | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "provider rejection became success");
+    check int "provider rejection keeps transmitted evidence" 2 !sent);
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~on_prompt_sent:(fun () -> failwith "fixture observer failure") path with
+    | Error (Runtime_claude_code.Protocol_error { stage = "prompt sent callback"; _ }) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "observation failure silently continued")
 ;;
 
 let test_progress_resets_stream_idle_timeout () =
@@ -1930,6 +1971,7 @@ let () =
         ] )
     ; ( "admission"
       , [ test_case "validation is process-free" `Quick test_validation_is_process_free
+        ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
         ; test_case
             "subscription auth and env scrub"
             `Quick

@@ -148,6 +148,10 @@ let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
 type error =
   | Invalid_config of string
   | Spawn_failed of string
+  | Turn_input_write_failed of string
+      (* The client and thread were initialized, but complete turn-input
+         transmission is unconfirmed. Partial delivery must not be replayed
+         as a proven pre-spawn failure. *)
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -205,6 +209,7 @@ let permissions_profile_of_posture = function
 let error_to_string = function
   | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
   | Spawn_failed detail -> "failed to start Codex app-server: " ^ detail
+  | Turn_input_write_failed detail -> "Codex turn/start input write failed: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Codex app-server protocol error during %s: %s" stage detail
   | Rpc_error { method_; code; message } ->
@@ -243,6 +248,7 @@ let error_to_string = function
 let error_kind = function
   | Invalid_config _ -> "invalid_config"
   | Spawn_failed _ -> "spawn_failed"
+  | Turn_input_write_failed _ -> "turn_input_write_failed"
   | Protocol_error _ -> "protocol_error"
   | Rpc_error _ -> "rpc_error"
   | Subscription_required _ -> "subscription_required"
@@ -971,7 +977,7 @@ let history_item (message : history_message) =
 ;;
 
 let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort
-    ~thread_mode ~history ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched
+    ~thread_mode ~history ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
@@ -1060,27 +1066,39 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~thread_id)
   in
-  send_request io ~id:turn_request_id ~method_:"turn/start"
-    ~params:
-      (`Assoc
-         ([ "threadId", `String thread_id
-          ; ( "input"
-            , `List
-                (List.map image_input_item images
-                 @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]) )
-          ]
-          @ optional_field
-              "effort"
-              (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)
-          @ (match config.output_schema with
-             | None -> []
-             (* v2 TurnStartParams.outputSchema: "Optional JSON Schema used to
-                constrain the final assistant message for this turn." Unlike the
-                Antigravity CLI there is no second field to read -- the schema
-                binds the message itself, so the existing text path already
-                carries the constrained answer. *)
-             | Some schema -> [ "outputSchema", schema ])));
+  let* () =
+    try
+      send_request io ~id:turn_request_id ~method_:"turn/start"
+        ~params:
+          (`Assoc
+             ([ "threadId", `String thread_id
+              ; ( "input"
+                , `List
+                    (List.map image_input_item images
+                     @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]) )
+              ]
+              @ optional_field
+                  "effort"
+                  (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)
+              @ (match config.output_schema with
+                 | None -> []
+                 (* v2 TurnStartParams.outputSchema: "Optional JSON Schema used to
+                    constrain the final assistant message for this turn." Unlike the
+                    Antigravity CLI there is no second field to read -- the schema
+                    binds the message itself, so the existing text path already
+                    carries the constrained answer. *)
+                 | Some schema -> [ "outputSchema", schema ])));
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | exn ->
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      Error (Turn_input_write_failed (Printexc.to_string exn))
+  in
   on_turn_dispatched ();
+  let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
+    on_prompt_sent (); Ok ()) in
   (* The complete request is now outside this process. Admission stays finite
      through dispatch; only the subsequent model turn adopts its declared
      idle policy, including [None]. *)
@@ -1295,7 +1313,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~prompt ~images ~on_thread_ready
-    ~on_turn_starting ~on_turn_dispatched ~on_turn_started ~on_stream_event =
+    ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event =
   with_spawned_client
     ~mgr
     ~clock
@@ -1321,6 +1339,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
       ~on_turn_starting:(fun ~thread_id ->
         with_admission_timeout (fun () -> on_turn_starting ~thread_id))
       ~on_turn_dispatched
+      ~on_prompt_sent
       ~on_turn_started:(fun ~thread_id ~turn_id ->
         with_admission_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
       ~on_stream_event)
@@ -1428,6 +1447,7 @@ let probe_subscription ~mgr ~clock ~cwd config =
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
+    ?(on_prompt_sent = fun () -> ())
     ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
@@ -1475,6 +1495,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~on_thread_ready
               ~on_turn_starting
               ~on_turn_dispatched:(fun () -> turn_accepted := true)
+              ~on_prompt_sent
               ~on_turn_started
               ~on_stream_event
           with

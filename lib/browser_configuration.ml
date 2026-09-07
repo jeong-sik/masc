@@ -19,7 +19,14 @@ let parse toml =
     let uri = Uri.of_string endpoint in
     match Uri.scheme uri, Uri.host uri, Uri.userinfo uri, Uri.path uri,
           Uri.query uri, Uri.fragment uri with
-    | Some "http", Some ("127.0.0.1" | "localhost" | "::1"), None,
-      ("" | "/"), [], None ->
+    (* The three literals this used to list are a subset of what the error
+       below promises. #27576 is the same shape one layer down: an
+       implementation compared against 127.0.0.1 alone while saying
+       "loopback", so 127.0.0.2 and systemd-resolved's 127.0.0.53 read as
+       remote. [is_loopback_host] answers the question the message asks --
+       the whole of 127.0.0.0/8, ::1, an IPv4-mapped ::ffff:127.0.0.1, and
+       "localhost" in any case. *)
+    | Some "http", Some host, None, ("" | "/"), [], None
+      when Masc_network_defaults.is_loopback_host host ->
       Ok (Webdriver { endpoint = Uri.to_string (Uri.with_path uri ""); binary })
     | _ -> Error "browser.webdriver_url must be a loopback HTTP origin"

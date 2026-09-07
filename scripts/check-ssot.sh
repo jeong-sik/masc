@@ -88,10 +88,15 @@ check_rule "R1-masc-path" 0 \
   'workspace_utils_paths_backend|workspace_utils_backend_setup|workspace_eio' \
   lib bin
 
-# SSOT-R2 — loopback literal bypasses Masc_network_defaults.masc_http_default_host.
+# SSOT-R2 — loopback literal bypasses Masc_network_defaults.
 # Tracked: #8387.
 # Excluded: helper definition + display-name mapping (server_auth) + URL prefix predicate.
-check_rule "R2-loopback-literal" 1 \
+#
+# Baseline 0 since the two browser lane recognisers stopped listing
+# "127.0.0.1" | "localhost" | "::1" by hand and asked is_loopback_host, which
+# is the same widening #27576 made one layer down. Nothing in lib writes the
+# literal outside the helper now, so a new one is a new decision.
+check_rule "R2-loopback-literal" 0 \
   "Masc_network_defaults.masc_http_default_host" \
   '"127\.0\.0\.1"' \
   'masc_network_defaults|server_auth|graphql_endpoint' \

@@ -23,8 +23,12 @@ let verify_file ~root path =
 let endpoint url =
   let uri = Uri.of_string url in
   match Uri.scheme uri, Uri.host uri, Uri.port uri, Uri.userinfo uri, Uri.fragment uri with
-  | Some "ws", Some ("127.0.0.1" | "localhost" | "::1" as host), Some port, None, None
-    when port > 0 && port <= 65535 ->
+  (* Firefox reports whatever it bound. The three literals this used to list
+     are narrower than the error below claims and narrower than
+     [is_loopback_host], which is the one place that decides this (#27576). *)
+  | Some "ws", Some host, Some port, None, None
+    when Masc_network_defaults.is_loopback_host host
+         && port > 0 && port <= 65535 ->
     let resource = Uri.path_and_query uri in
     if resource = "" || resource.[0] <> '/' then Error "invalid BiDi WebSocket path"
     else Ok (host, port, resource)

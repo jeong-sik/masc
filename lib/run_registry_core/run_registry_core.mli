@@ -130,8 +130,20 @@ module Make (Payload : Payload) : sig
   (** Completion persistence is an observation-plane mutation. A durable
       append failure is returned explicitly with whether rollback established
       that it was not persisted or durability remains unknown. The in-memory
-      entry remains [Running], so the caller chooses how to expose that failed
+      entry keeps its previous state, so the caller chooses how to expose that failed
       observation without claiming a replayable completion. *)
+
+  val complete_with
+    :  t
+    -> id:string
+    -> make_completion:(Payload.completion option -> Payload.completion)
+    -> [ `Completed | `Persistence_failed of persistence_failure | `Unknown ]
+  (** Derive the completion from the previous in-memory completion under the
+      same mutation lock as its durable append and publication. [None] means
+      the entry is [Running]; an unknown id does not call [make_completion].
+      The previous value is the payload's [shed_completion] projection.
+      The callback must not re-enter this registry. This lets a subsystem
+      retain first-completion evidence without a racy [get] then [complete]. *)
 
   val list_entries : t -> entry list
   val get : t -> id:string -> entry option

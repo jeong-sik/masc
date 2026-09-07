@@ -95,6 +95,40 @@ let test_persist_failure_detail () =
   | None -> fail "expected replayed run"
 ;;
 
+(* A sink can publish a terminal observation before its continuation wake
+   fails. Recovery re-projects that completed run; its original timestamp
+   belongs to the persisted observation, not the later recovery attempt. *)
+let test_reprojection_preserves_first_completion_after_restart () =
+  let path = fresh_path "-reprojected-completion.jsonl" in
+  Fun.protect ~finally:(fun () -> remove_if_exists path) (fun () ->
+    Fs_compat.save_file path
+      (String.concat "\n"
+         [ {|{"event":"register","id":"recovered","started_at":10.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
+         ; {|{"event":"complete","id":"recovered","completion":{"result":{"outcome":"succeeded"},"finished_at":15.0}}|}
+         ; ""
+         ]);
+    let outcome = R.Succeeded_with_summary
+        { decision = R.decision_preview_of_string "publish"
+        ; summary = "The recovered evidence is available."
+        } in
+    let check_completion registry =
+      match R.get registry ~run_id:"recovered" with
+      | Some { R.finished_at = Some finished_at
+             ; status = R.Completed (R.Succeeded_with_summary { summary; _ }); _ } ->
+        check (float 0.0) "reprojection retains the first terminal time" 15.0 finished_at;
+        check string "outcome projection can still refresh"
+          "The recovered evidence is available." summary
+      | Some _ | None -> fail "reprojection lost the completed run"
+    in
+    let recovered = R.replay path in
+    R.mark_completed recovered ~run_id:"recovered" ~outcome;
+    check_completion recovered;
+    let restarted = R.replay path in
+    check_completion restarted;
+    R.mark_completed restarted ~run_id:"recovered" ~outcome;
+    check_completion (R.replay path))
+;;
+
 let test_persist_success_summary () =
   let path = fresh_path "-summary.jsonl" in
   let t = R.create ~path () in
@@ -261,6 +295,8 @@ let () =
     [ ( "rfc-0266-phase-d"
       , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
+        ; test_case "reprojection preserves first completion after restart" `Quick
+            test_reprojection_preserves_first_completion_after_restart
         ; test_case "success summary survives replay" `Quick
             test_persist_success_summary
         ; test_case

@@ -226,8 +226,17 @@ let mark_progress t ~run_id ~progress =
 ;;
 
 let mark_completed t ~run_id ~outcome =
-  match Store.complete t.store ~id:run_id
-      ~completion:{ Payload.outcome; finished_at = Unix.gettimeofday () } with
+  match Store.complete_with t.store ~id:run_id
+      ~make_completion:(fun previous ->
+        (* A durable continuation wake can fail after the sink published this
+           completion. Its retry may update the outcome projection, but it
+           cannot move the run's first terminal observation to the retry time. *)
+        let finished_at =
+          match previous with
+          | Some completion -> completion.Payload.finished_at
+          | None -> Unix.gettimeofday ()
+        in
+        { Payload.outcome; finished_at }) with
   | `Completed ->
     Stdlib.Mutex.protect t.progress_mutex (fun () ->
       Hashtbl.remove t.progress_by_run run_id)

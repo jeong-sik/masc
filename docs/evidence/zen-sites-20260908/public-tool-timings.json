@@ -1,0 +1,53 @@
+{
+  "scope": "Eight public cases; successful individual tool execution wall-clock only, excludes model generation and failed calls; p95 nearest rank; no cross-browser benchmark.",
+  "measurements": [
+    {
+      "tool": "BrowserAct",
+      "successful_calls": 20,
+      "median_ms": 59.75,
+      "p95_ms": 725.27
+    },
+    {
+      "tool": "BrowserGoto",
+      "successful_calls": 8,
+      "median_ms": 487.15,
+      "p95_ms": 1002.41
+    },
+    {
+      "tool": "BrowserInteract",
+      "successful_calls": 4,
+      "median_ms": 6.82,
+      "p95_ms": 7.73
+    },
+    {
+      "tool": "BrowserRead",
+      "successful_calls": 44,
+      "median_ms": 13.71,
+      "p95_ms": 63.44
+    },
+    {
+      "tool": "BrowserSession",
+      "successful_calls": 16,
+      "median_ms": 918.1,
+      "p95_ms": 1574.48
+    },
+    {
+      "tool": "BrowserTabs",
+      "successful_calls": 12,
+      "median_ms": 6.93,
+      "p95_ms": 25.09
+    },
+    {
+      "tool": "keeper_analyze_image",
+      "successful_calls": 6,
+      "median_ms": 2164.74,
+      "p95_ms": 5493.57
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "successful_calls": 6,
+      "median_ms": 4.44,
+      "p95_ms": 10.49
+    }
+  ]
+}

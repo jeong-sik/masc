@@ -1,0 +1,51 @@
+{
+  "schema_version": 8,
+  "revision": 4,
+  "operation_id": "shutdown-e802f34b-4bc9-4e8c-9323-5a4decf9a2ea",
+  "keeper_name": "zen-sites-13eafa51",
+  "lane_ownership": {
+    "kind": "registered_lane",
+    "lane_id": "lane-46d73401-7a2d-4085-9bce-5de839c25648"
+  },
+  "trace_id": "trace-1788796689245-00000",
+  "actor": "two-browser-proof",
+  "cleanup_intent": {
+    "reason": {
+      "kind": "operator_stop_retain_meta"
+    },
+    "remove_session": false
+  },
+  "turn_disposition": {
+    "kind": "no_inflight_turn"
+  },
+  "expected_backlog_version": 1,
+  "owned_task_ids": [],
+  "join_evidence": {
+    "lane_outcome": {
+      "kind": "shutdown_requested"
+    },
+    "terminal": {
+      "kind": "stopped"
+    },
+    "cleanup_error": null
+  },
+  "phase": {
+    "kind": "finalized",
+    "evidence": {
+      "cleanup": {
+        "settled_task_ids": [],
+        "pending_confirms_removed": 0,
+        "meta_snapshot_digest": "f90d20f03401b9ad52218b121ccac70d31abe8034fe9e2cc819cb48eb5d61707"
+      },
+      "meta_removed": false,
+      "session_removed": false,
+      "registry_unregistered": true,
+      "accumulator_dropped": true,
+      "completion": {
+        "kind": "not_requested"
+      }
+    }
+  },
+  "created_at": "2026-09-07T16:15:05Z",
+  "updated_at": "2026-09-07T16:15:05Z"
+}

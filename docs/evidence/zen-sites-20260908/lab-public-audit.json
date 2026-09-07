@@ -1,0 +1,893 @@
+{
+  "scope": "local generated fixture, metadata only, distinct from public-site proof",
+  "source": "a266a5d1254248388f2e37b0cbe20e14617454ef",
+  "keeper": "zen-advanced-2b65f103",
+  "runtime_instance_id": "01a07c93-09dd-7000-a91d-b4f1415d9a0f",
+  "at_unix": 1788799589.6778219,
+  "cases": [
+    {
+      "case": "1",
+      "phases": [
+        {
+          "phase": "initial",
+          "counts": {
+            "all_calls": 19,
+            "successful_calls": 16,
+            "failed_calls": 3,
+            "success_by_tool": {
+              "BrowserSession": 1,
+              "BrowserGoto": 1,
+              "BrowserTabs": 1,
+              "BrowserRead": 8,
+              "BrowserInteract": 4,
+              "BrowserAct": 1
+            },
+            "success_by_read_mode": {
+              "text": 3,
+              "elements": 3,
+              "frames": 2
+            },
+            "success_by_act": {
+              "scroll": 1
+            },
+            "success_by_interact": {
+              "fill": 1,
+              "click": 1,
+              "scroll": 2
+            }
+          },
+          "strict_audit_passed": false,
+          "server_effects": {
+            "top_input": true,
+            "top_click": true,
+            "nested_input": false,
+            "nested_select": false,
+            "nested_enter": false,
+            "nested_click": false,
+            "prompt_result": false,
+            "confirm_result": false,
+            "alert_returned": false,
+            "top_scroll": true,
+            "nested_scroll": true,
+            "exact_uploaded_bytes": false
+          }
+        },
+        {
+          "phase": "repair",
+          "operation_id": "kmsg-65dd0cc2dab4404ca9964213abd2c25e",
+          "counts": {
+            "all_calls": 28,
+            "successful_calls": 27,
+            "failed_calls": 1,
+            "success_by_tool": {
+              "BrowserTabs": 1,
+              "BrowserRead": 14,
+              "BrowserAct": 11,
+              "keeper_analyze_image": 1
+            },
+            "success_by_read_mode": {
+              "frames": 2,
+              "elements": 2,
+              "text": 6,
+              "dialog": 3,
+              "screenshot": 1
+            },
+            "success_by_act": {
+              "fill": 1,
+              "select": 1,
+              "press": 1,
+              "click": 4,
+              "scroll": 1,
+              "accept_dialog": 2,
+              "dismiss_dialog": 1
+            },
+            "success_by_interact": {}
+          }
+        },
+        {
+          "phase": "upload-recovery",
+          "operation_id": "kmsg-6df3278bf420f273061e1f5bdd58b99f",
+          "counts": {
+            "all_calls": 5,
+            "successful_calls": 5,
+            "failed_calls": 0,
+            "success_by_tool": {
+              "BrowserTabs": 1,
+              "BrowserRead": 1,
+              "Write": 3
+            },
+            "success_by_read_mode": {
+              "elements": 1
+            },
+            "success_by_act": {},
+            "success_by_interact": {}
+          }
+        },
+        {
+          "phase": "transfer-verification",
+          "operation_id": "kmsg-1c94841e4d4417236fe66ccc6a23f9cb",
+          "counts": {
+            "all_calls": 7,
+            "successful_calls": 7,
+            "failed_calls": 0,
+            "success_by_tool": {
+              "BrowserTabs": 1,
+              "BrowserRead": 3,
+              "BrowserAct": 2,
+              "keeper_analyze_image": 1
+            },
+            "success_by_read_mode": {
+              "elements": 1,
+              "text": 1,
+              "screenshot": 1
+            },
+            "success_by_act": {
+              "upload": 1,
+              "click": 1
+            },
+            "success_by_interact": {}
+          }
+        },
+        {
+          "phase": "close",
+          "counts": {
+            "all_calls": 1,
+            "successful_calls": 1,
+            "failed_calls": 0,
+            "success_by_tool": {
+              "BrowserSession": 1
+            },
+            "success_by_read_mode": {},
+            "success_by_act": {},
+            "success_by_interact": {}
+          },
+          "receipt": {
+            "operation_state": "Succeeded",
+            "driver_ready": true,
+            "at_unix": 1788798776.7155359
+          }
+        }
+      ],
+      "counts": {
+        "all_calls": 59,
+        "successful_calls": 55,
+        "failed_calls": 4,
+        "success_by_tool": {
+          "BrowserSession": 1,
+          "BrowserGoto": 1,
+          "BrowserTabs": 4,
+          "BrowserRead": 26,
+          "BrowserInteract": 4,
+          "BrowserAct": 14,
+          "keeper_analyze_image": 2,
+          "Write": 3
+        },
+        "success_by_read_mode": {
+          "text": 10,
+          "elements": 7,
+          "frames": 4,
+          "dialog": 3,
+          "screenshot": 2
+        },
+        "success_by_act": {
+          "scroll": 2,
+          "fill": 1,
+          "select": 1,
+          "press": 1,
+          "click": 5,
+          "accept_dialog": 2,
+          "dismiss_dialog": 1,
+          "upload": 1
+        },
+        "success_by_interact": {
+          "fill": 1,
+          "click": 1,
+          "scroll": 2
+        }
+      },
+      "initial_was_clean": false,
+      "strict_audit_passed": false,
+      "browser_workflow_covered_after_recovery": true,
+      "actual_written_bytes_transferred": true,
+      "write_to_upload_matches": [
+        {
+          "write_call_id": "call_wlhssa0j",
+          "write_at_unix": 1788798529.960844,
+          "upload_at_unix": 1788798700.78078,
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "requested_51_bytes_match": false
+        },
+        {
+          "write_call_id": "call_96cg0y5d",
+          "write_at_unix": 1788798547.497804,
+          "upload_at_unix": 1788798700.78078,
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "requested_51_bytes_match": false
+        },
+        {
+          "write_call_id": "call_sytssr7b",
+          "write_at_unix": 1788798583.745751,
+          "upload_at_unix": 1788798700.78078,
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "requested_51_bytes_match": false
+        }
+      ],
+      "requested_effects_and_coverage_verified": false,
+      "failed_calls": [
+        {
+          "call_id": "call_injgys65",
+          "tool": "BrowserAct",
+          "action": "fill",
+          "mode": null,
+          "at_unix": 1788797748.849418,
+          "input_sha256": "3f0ad3aaac533ac617d8df66924c124be989d1f7395975df891220c2500eb30e",
+          "result_sha256": "a9036ac5f825490c7f55a2bc6975c8f91562b4e3cef955acaa4a7305eb2be239",
+          "wire_failure_class": "workflow_rejection",
+          "diagnosis": "model sent literal backslash-u003e instead of observed CSS >"
+        },
+        {
+          "call_id": "call_19sw0xb2",
+          "tool": "BrowserAct",
+          "action": "fill",
+          "mode": null,
+          "at_unix": 1788797766.484687,
+          "input_sha256": "3f0ad3aaac533ac617d8df66924c124be989d1f7395975df891220c2500eb30e",
+          "result_sha256": "a9036ac5f825490c7f55a2bc6975c8f91562b4e3cef955acaa4a7305eb2be239",
+          "wire_failure_class": "workflow_rejection",
+          "diagnosis": "model sent literal backslash-u003e instead of observed CSS >"
+        },
+        {
+          "call_id": "call_xetex5tf",
+          "tool": "BrowserAct",
+          "action": "fill",
+          "mode": null,
+          "at_unix": 1788797828.907905,
+          "input_sha256": "3f0ad3aaac533ac617d8df66924c124be989d1f7395975df891220c2500eb30e",
+          "result_sha256": "a9036ac5f825490c7f55a2bc6975c8f91562b4e3cef955acaa4a7305eb2be239",
+          "wire_failure_class": "workflow_rejection",
+          "diagnosis": "model sent literal backslash-u003e instead of observed CSS >"
+        },
+        {
+          "call_id": "call_j8oz0278",
+          "tool": "Write",
+          "action": null,
+          "mode": null,
+          "at_unix": 1788798371.767271,
+          "input_sha256": "ba9c52dc8886ae3c9cd5a775f06a066867bc237724e15fef757abc1783217cff",
+          "result_sha256": "0079b0c8dccc4fe02376df76c55bbe2c09ba2d6af442e6589bf2d5e643b8fe80",
+          "wire_failure_class": "dependency_unavailable",
+          "diagnosis": "scratch microvm Linux shim missing; no sandbox Write or upload occurred in this call"
+        }
+      ],
+      "fixture_flags": {
+        "top_input": true,
+        "top_click": true,
+        "nested_input": true,
+        "nested_select": true,
+        "nested_enter": true,
+        "nested_click": true,
+        "prompt_result": true,
+        "confirm_result": true,
+        "alert_returned": true,
+        "top_scroll": true,
+        "nested_scroll": true,
+        "exact_uploaded_bytes": false
+      },
+      "coverage": {
+        "BrowserSession": true,
+        "BrowserGoto": true,
+        "BrowserTabs": true,
+        "BrowserRead": true,
+        "BrowserInteract": true,
+        "BrowserAct": true,
+        "Write": true,
+        "keeper_analyze_image": true,
+        "read_text": true,
+        "read_elements": true,
+        "read_frames": true,
+        "read_dialog": true,
+        "read_screenshot": true,
+        "selector_actions_previously_observed": false,
+        "successful_selector_actions_previously_observed": true,
+        "frame_paths_previously_observed": true,
+        "outer_frames": true,
+        "actual_upload_click": true,
+        "nested_read_text": true,
+        "nested_read_elements": true,
+        "nested_fill": true,
+        "nested_select": true,
+        "nested_press": true,
+        "nested_click": true,
+        "nested_scroll": true,
+        "interact_fill_expected_url": true,
+        "interact_click_expected_url": true,
+        "interact_scroll_expected_url": true,
+        "accept_prompt": true,
+        "dismiss_confirm": true,
+        "accept_alert": true,
+        "write_exact_synthetic": false,
+        "write_owned_synthetic": true,
+        "all_writes_synthetic": false,
+        "all_writes_owned_payloads": true,
+        "fresh_session_open": true,
+        "no_early_session_close": true,
+        "upload_owned_file": true,
+        "stored_png_analyzed": true,
+        "upload_post_after_click_before_inspection": true
+      },
+      "synthetic_file": {
+        "name": "advanced-upload-1.txt",
+        "bytes": 51,
+        "sha256": "d95f0978e89dbaf395e4b5f3dd75cb35cecf1e7b0cab65eca7bf2ac579cfa73b"
+      },
+      "actual_uploads": [
+        {
+          "at_unix": 1788798700.78078,
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "exact_bytes_match": false,
+          "filename_match": true
+        }
+      ],
+      "staged_owned_files": [
+        {
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "exact_bytes_match": false,
+          "directory_mode": "0o700",
+          "file_mode": "0o600"
+        }
+      ],
+      "lease_release_verified": true,
+      "approval_waits": [
+        {
+          "tool_call_id": "call_c8w83yzk",
+          "at_unix": 1788798005.518182,
+          "execution_started": false,
+          "execution_success": false
+        },
+        {
+          "tool_call_id": "call_j8oz0278",
+          "at_unix": 1788798225.437678,
+          "execution_started": true,
+          "execution_success": false
+        },
+        {
+          "tool_call_id": "call_wlhssa0j",
+          "at_unix": 1788798526.622213,
+          "execution_started": true,
+          "execution_success": true
+        },
+        {
+          "tool_call_id": "call_96cg0y5d",
+          "at_unix": 1788798546.147031,
+          "execution_started": true,
+          "execution_success": true
+        },
+        {
+          "tool_call_id": "call_sytssr7b",
+          "at_unix": 1788798583.362079,
+          "execution_started": true,
+          "execution_success": true
+        }
+      ],
+      "approval_answers": [
+        {
+          "at_unix": 1788798547.219457,
+          "tool_call_id": "call_96cg0y5d",
+          "tool": "Write",
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "expected_bytes_match": false,
+          "decision": "approve",
+          "response": {
+            "settled": true,
+            "remembered": false,
+            "decision": "approve"
+          }
+        },
+        {
+          "at_unix": 1788798583.467968,
+          "tool_call_id": "call_sytssr7b",
+          "tool": "Write",
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "expected_bytes_match": false,
+          "decision": "approve",
+          "response": {
+            "settled": true,
+            "remembered": false,
+            "decision": "approve"
+          }
+        },
+        {
+          "at_unix": 1788798527.125319,
+          "tool_call_id": "call_wlhssa0j",
+          "tool": "Write",
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "expected_bytes_match": false,
+          "decision": "approve",
+          "response": {
+            "settled": true,
+            "remembered": false,
+            "decision": "approve"
+          }
+        },
+        {
+          "at_unix": 1788798356.70768,
+          "tool_call_id": "call_j8oz0278",
+          "tool": "Write",
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "decision": "approve",
+          "response": {
+            "settled": true,
+            "remembered": false,
+            "decision": "approve"
+          },
+          "expected_bytes": 51,
+          "scope": "exact observed owned synthetic payload approved; missing newline remains functional mismatch, no global mode change"
+        }
+      ],
+      "models": [
+        "glm-5.3-flash"
+      ],
+      "runtime_ids": [
+        "ollama_cloud.ollama-cloud-glm-5-3-flash"
+      ],
+      "vision_model": null,
+      "vision_artifacts": [
+        {
+          "handle": "8d363f00f5bed4f309f0ebe68e957841214e76e0effd51ae607df0b97f5d2454",
+          "bytes": 53431,
+          "sha256": "8d363f00f5bed4f309f0ebe68e957841214e76e0effd51ae607df0b97f5d2454",
+          "analyzed": true
+        },
+        {
+          "handle": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6",
+          "bytes": 53761,
+          "sha256": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6",
+          "analyzed": true
+        }
+      ],
+      "http_capture": {
+        "bytes": 53761,
+        "sha256": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6"
+      },
+      "capture_scope": "direct Browser Lane HTTP PNG, not TUI or desktop compositor",
+      "close": {
+        "operation_state": "Succeeded",
+        "driver_ready": true,
+        "at_unix": 1788798776.7155359
+      },
+      "original_audit_sha256": "4655ec3108e28f3550df3b2fd0d8e1530c2f061d6cc448e74328664ea04627d3",
+      "raw_trace_sha256": {
+        "turn-1788797686283-429e-000016.jsonl": "561333d4eec4f460fcd3123962d5b858bb9cf9ec3fa3adc9a7204dfa767a7f2b",
+        "turn-1788797898512-429e-000017.jsonl": "0fdc9571454fa71c70e06e6ca7fca9f78b433a5fe5e6ffac0670faed9822b054",
+        "turn-1788798510982-429e-000018.jsonl": "a92e52ba0caa105fe6af37262ee65861048bd9ab1f264de85f626daf4e843c0d",
+        "turn-1788798691861-429e-000019.jsonl": "1c95c3b66e0f0de354745cd0e86ff32e764b4ac5f75bf7532858de32804fd899",
+        "turn-1788798772670-429e-000020.jsonl": "d032a8689c7a4a24cf4e9ac239b4d3653e6cf1c4f13e6883d90bf654498dcdfd",
+        "turn-1788798797278-429e-000021.jsonl": "25d63f1d5bcdd59d0a9106b762e495943165a5d00c88a70bfde89921e879c40b",
+        "turn-1788799015031-429e-000022.jsonl": "def9a15bfcb7e9b85de3002f9177a1b460a38a1a48355eec9f4ee8795440f866"
+      }
+    },
+    {
+      "case": "2",
+      "phases": [
+        {
+          "phase": "initial",
+          "counts": {
+            "all_calls": 39,
+            "successful_calls": 39,
+            "failed_calls": 0,
+            "success_by_tool": {
+              "BrowserSession": 1,
+              "BrowserGoto": 1,
+              "BrowserTabs": 1,
+              "BrowserRead": 17,
+              "BrowserInteract": 4,
+              "BrowserAct": 13,
+              "Write": 1,
+              "keeper_analyze_image": 1
+            },
+            "success_by_read_mode": {
+              "text": 9,
+              "elements": 2,
+              "frames": 2,
+              "dialog": 3,
+              "screenshot": 1
+            },
+            "success_by_act": {
+              "fill": 1,
+              "select": 1,
+              "press": 1,
+              "click": 5,
+              "scroll": 1,
+              "accept_dialog": 2,
+              "dismiss_dialog": 1,
+              "upload": 1
+            },
+            "success_by_interact": {
+              "fill": 1,
+              "click": 1,
+              "scroll": 2
+            }
+          }
+        },
+        {
+          "phase": "close",
+          "counts": {
+            "all_calls": 1,
+            "successful_calls": 1,
+            "failed_calls": 0,
+            "success_by_tool": {
+              "BrowserSession": 1
+            },
+            "success_by_read_mode": {},
+            "success_by_act": {},
+            "success_by_interact": {}
+          },
+          "receipt": {
+            "operation_state": "Succeeded",
+            "driver_ready": true,
+            "at_unix": 1788799021.053835
+          }
+        }
+      ],
+      "counts": {
+        "all_calls": 39,
+        "successful_calls": 39,
+        "failed_calls": 0,
+        "success_by_tool": {
+          "BrowserSession": 1,
+          "BrowserGoto": 1,
+          "BrowserTabs": 1,
+          "BrowserRead": 17,
+          "BrowserInteract": 4,
+          "BrowserAct": 13,
+          "Write": 1,
+          "keeper_analyze_image": 1
+        },
+        "success_by_read_mode": {
+          "text": 9,
+          "elements": 2,
+          "frames": 2,
+          "dialog": 3,
+          "screenshot": 1
+        },
+        "success_by_act": {
+          "fill": 1,
+          "select": 1,
+          "press": 1,
+          "click": 5,
+          "scroll": 1,
+          "accept_dialog": 2,
+          "dismiss_dialog": 1,
+          "upload": 1
+        },
+        "success_by_interact": {
+          "fill": 1,
+          "click": 1,
+          "scroll": 2
+        }
+      },
+      "initial_was_clean": false,
+      "strict_audit_passed": false,
+      "browser_workflow_covered_after_recovery": true,
+      "actual_written_bytes_transferred": true,
+      "write_to_upload_matches": [
+        {
+          "write_call_id": "call_og6ijb1q",
+          "write_at_unix": 1788798938.524506,
+          "upload_at_unix": 1788798950.7041762,
+          "bytes": 50,
+          "sha256": "03932fb0a6aac1eb537b69beada02dd4bac2ab6f46d40574a75837226d6866d9",
+          "requested_51_bytes_match": false
+        }
+      ],
+      "requested_effects_and_coverage_verified": false,
+      "failed_calls": [],
+      "fixture_flags": {
+        "top_input": true,
+        "top_click": true,
+        "nested_input": true,
+        "nested_select": true,
+        "nested_enter": true,
+        "nested_click": true,
+        "prompt_result": true,
+        "confirm_result": true,
+        "alert_returned": true,
+        "top_scroll": true,
+        "nested_scroll": true,
+        "exact_uploaded_bytes": false
+      },
+      "coverage": {
+        "BrowserSession": true,
+        "BrowserGoto": true,
+        "BrowserTabs": true,
+        "BrowserRead": true,
+        "BrowserInteract": true,
+        "BrowserAct": true,
+        "Write": true,
+        "keeper_analyze_image": true,
+        "read_text": true,
+        "read_elements": true,
+        "read_frames": true,
+        "read_dialog": true,
+        "read_screenshot": true,
+        "selector_actions_previously_observed": true,
+        "successful_selector_actions_previously_observed": true,
+        "frame_paths_previously_observed": true,
+        "outer_frames": true,
+        "actual_upload_click": true,
+        "nested_read_text": true,
+        "nested_read_elements": true,
+        "nested_fill": true,
+        "nested_select": true,
+        "nested_press": true,
+        "nested_click": true,
+        "nested_scroll": true,
+        "interact_fill_expected_url": true,
+        "interact_click_expected_url": true,
+        "interact_scroll_expected_url": true,
+        "accept_prompt": true,
+        "dismiss_confirm": true,
+        "accept_alert": true,
+        "write_exact_synthetic": false,
+        "write_owned_synthetic": true,
+        "all_writes_synthetic": false,
+        "all_writes_owned_payloads": true,
+        "fresh_session_open": true,
+        "no_early_session_close": true,
+        "upload_owned_file": true,
+        "stored_png_analyzed": true,
+        "upload_post_after_click_before_inspection": true
+      },
+      "synthetic_file": {
+        "name": "advanced-upload-2.txt",
+        "bytes": 51,
+        "sha256": "d653d7c2489708ae48f71b2b0c8d2819f5314292c7c70ac71be8eea5143a55a7"
+      },
+      "actual_uploads": [
+        {
+          "at_unix": 1788798950.7041762,
+          "filename": "advanced-upload-2.txt",
+          "bytes": 50,
+          "sha256": "03932fb0a6aac1eb537b69beada02dd4bac2ab6f46d40574a75837226d6866d9",
+          "exact_bytes_match": false,
+          "filename_match": true
+        }
+      ],
+      "staged_owned_files": [
+        {
+          "bytes": 50,
+          "sha256": "03932fb0a6aac1eb537b69beada02dd4bac2ab6f46d40574a75837226d6866d9",
+          "exact_bytes_match": false,
+          "directory_mode": "0o700",
+          "file_mode": "0o600"
+        }
+      ],
+      "lease_release_verified": true,
+      "approval_waits": [
+        {
+          "tool_call_id": "call_og6ijb1q",
+          "at_unix": 1788798937.571609,
+          "execution_started": true,
+          "execution_success": true
+        }
+      ],
+      "approval_answers": [
+        {
+          "at_unix": 1788798938.01348,
+          "tool_call_id": "call_og6ijb1q",
+          "tool": "Write",
+          "filename": "advanced-upload-2.txt",
+          "bytes": 50,
+          "sha256": "03932fb0a6aac1eb537b69beada02dd4bac2ab6f46d40574a75837226d6866d9",
+          "expected_bytes_match": false,
+          "decision": "approve",
+          "response": {
+            "settled": true,
+            "remembered": false,
+            "decision": "approve"
+          }
+        }
+      ],
+      "models": [
+        "glm-5.3-flash"
+      ],
+      "runtime_ids": [
+        "ollama_cloud.ollama-cloud-glm-5-3-flash"
+      ],
+      "vision_model": null,
+      "vision_artifacts": [
+        {
+          "handle": "90b06ad9e8a58340c151a91eab42b3bf514f5144b3ab1aea980c34dccc18dc51",
+          "bytes": 54387,
+          "sha256": "90b06ad9e8a58340c151a91eab42b3bf514f5144b3ab1aea980c34dccc18dc51",
+          "analyzed": true
+        }
+      ],
+      "http_capture": {
+        "bytes": 54387,
+        "sha256": "90b06ad9e8a58340c151a91eab42b3bf514f5144b3ab1aea980c34dccc18dc51"
+      },
+      "capture_scope": "direct Browser Lane HTTP PNG, not TUI or desktop compositor",
+      "close": {
+        "operation_state": "Succeeded",
+        "driver_ready": true,
+        "at_unix": 1788799021.053835
+      },
+      "original_audit_sha256": null,
+      "raw_trace_sha256": {
+        "turn-1788797686283-429e-000016.jsonl": "561333d4eec4f460fcd3123962d5b858bb9cf9ec3fa3adc9a7204dfa767a7f2b",
+        "turn-1788797898512-429e-000017.jsonl": "0fdc9571454fa71c70e06e6ca7fca9f78b433a5fe5e6ffac0670faed9822b054",
+        "turn-1788798510982-429e-000018.jsonl": "a92e52ba0caa105fe6af37262ee65861048bd9ab1f264de85f626daf4e843c0d",
+        "turn-1788798691861-429e-000019.jsonl": "1c95c3b66e0f0de354745cd0e86ff32e764b4ac5f75bf7532858de32804fd899",
+        "turn-1788798772670-429e-000020.jsonl": "d032a8689c7a4a24cf4e9ac239b4d3653e6cf1c4f13e6883d90bf654498dcdfd",
+        "turn-1788798797278-429e-000021.jsonl": "25d63f1d5bcdd59d0a9106b762e495943165a5d00c88a70bfde89921e879c40b",
+        "turn-1788799015031-429e-000022.jsonl": "def9a15bfcb7e9b85de3002f9177a1b460a38a1a48355eec9f4ee8795440f866"
+      }
+    }
+  ],
+  "hash_format": "SHA256 of canonical UTF-8 JSON (sorted keys, compact separators) for tool input/result",
+  "combined_attempt_calls": {
+    "all_calls": 98,
+    "successful_calls": 94,
+    "failed_calls": 4,
+    "success_by_tool": {
+      "BrowserSession": 2,
+      "BrowserGoto": 2,
+      "BrowserTabs": 5,
+      "BrowserRead": 43,
+      "BrowserInteract": 8,
+      "BrowserAct": 27,
+      "keeper_analyze_image": 3,
+      "Write": 4
+    },
+    "success_by_read_mode": {
+      "text": 19,
+      "elements": 9,
+      "frames": 6,
+      "dialog": 6,
+      "screenshot": 3
+    },
+    "success_by_act": {
+      "scroll": 3,
+      "fill": 2,
+      "select": 2,
+      "press": 2,
+      "click": 10,
+      "accept_dialog": 4,
+      "dismiss_dialog": 2,
+      "upload": 2
+    },
+    "success_by_interact": {
+      "fill": 2,
+      "click": 2,
+      "scroll": 4
+    }
+  },
+  "unique_attempt_call_ids": 98,
+  "close_calls": {
+    "all_calls": 2,
+    "successful_calls": 2,
+    "failed_calls": 0,
+    "success_by_tool": {
+      "BrowserSession": 2
+    },
+    "success_by_read_mode": {},
+    "success_by_act": {},
+    "success_by_interact": {}
+  },
+  "combined_all_executed_calls": {
+    "all_calls": 100,
+    "successful_calls": 96,
+    "failed_calls": 4,
+    "success_by_tool": {
+      "BrowserSession": 4,
+      "BrowserGoto": 2,
+      "BrowserTabs": 5,
+      "BrowserRead": 43,
+      "BrowserInteract": 8,
+      "BrowserAct": 27,
+      "keeper_analyze_image": 3,
+      "Write": 4
+    },
+    "success_by_read_mode": {
+      "text": 19,
+      "elements": 9,
+      "frames": 6,
+      "dialog": 6,
+      "screenshot": 3
+    },
+    "success_by_act": {
+      "scroll": 3,
+      "fill": 2,
+      "select": 2,
+      "press": 2,
+      "click": 10,
+      "accept_dialog": 4,
+      "dismiss_dialog": 2,
+      "upload": 2
+    },
+    "success_by_interact": {
+      "fill": 2,
+      "click": 2,
+      "scroll": 4
+    }
+  },
+  "unique_all_executed_call_ids": 100,
+  "shim_dependency_recovery": {
+    "at_unix": 1788798458.644567,
+    "installed_in_owned_scratch": true,
+    "bytes": 5436808,
+    "sha256": "7f00f70cfbb8596db63adae279216b4991fd9f8459894d1723a6c61c7f73ce39",
+    "architecture": "ELF Linux aarch64",
+    "existing_sidecar_matches": true,
+    "server_source": "a266a5d",
+    "shim_source_commit": null,
+    "provenance": "Copied existing installed Linux shim and its matching checksum sidecar; shim source/CI identity not established by this receipt",
+    "production_modified": false,
+    "fallback_backend": false,
+    "protocol_compatibility": "Actual sandbox Write succeeded via microvm after installation; BrowserAct upload read the same file via the declared backend and posted matching bytes"
+  },
+  "keeper_cleanup": {
+    "at_unix": 1788799082.777942,
+    "operation_id": "shutdown-0e41315b-34f5-41f9-9c8c-4bdc82e16b75",
+    "phase": "finalized",
+    "join_terminal": {
+      "kind": "stopped"
+    },
+    "cleanup_error": null,
+    "registry_unregistered": true,
+    "accumulator_dropped": true,
+    "paused": true,
+    "total_turns": 7,
+    "autoboot_enabled": false,
+    "proactive_enabled": false,
+    "keepalive_running": false,
+    "shutdown_admission_fence": false,
+    "driver_ready": true,
+    "owned_container_inventory": null,
+    "pending_approval_ids": [],
+    "manual_metadata_or_file_deletion": false,
+    "shared_server_driver_stopped": false,
+    "owned_container_was_running_after_finalized": true,
+    "initial_owned_container_count": 1,
+    "owned_container_absence_verified": false,
+    "initial_container_teardown_warning": "microvm_teardown_backend_unresolved",
+    "operator_container_cleanup": {
+      "stop_exit_code": 0,
+      "delete_exit_code": 1,
+      "delete_result": "not_found_after_successful_stop",
+      "scope": "exact owned VM only"
+    },
+    "post_stop_inventory": "unverified: both list and exact inspect failed with Apple container API XPC timeout",
+    "image_or_work_volume_deleted": false,
+    "inventory_failure": "XPC timeout for request to com.apple.container.apiserver/containerList",
+    "owned_vm_process_observation": {
+      "at_unix": 1788799501.253309,
+      "scope": "ps container-runtime executables whose args contain exact owned VM name; not authoritative container inventory",
+      "owned_runtime_processes": []
+    },
+    "resource_absence_verified": false,
+    "verification_run_finished": true
+  },
+  "verification_run_finished": true,
+  "requested_content_note": "Both model-facing Write arguments omitted the final LF: requested51 vsactual50 bytes. Upstream raw provider response parsing was not measured; this receipt does not assign that earlier cause.",
+  "future_product_fix_in_measurement": false,
+  "cleanup_verified": false,
+  "completed_two_repetitions": false,
+  "two_browser_workflows_exercised": true,
+  "result": "incomplete"
+}

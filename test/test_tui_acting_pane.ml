@@ -459,6 +459,40 @@ let test_narrow_budget_folds_the_fleet () =
   check bool "the fold is what a press scrolls into" true
     (List.mem Pane.Target_more drawn.Pane.targets)
 
+let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
+  let name = "한e\204\129🙂" in
+  let input = { fixture with
+    Pane.keepers = [ keeper "quiet"; keeper name; keeper "second"; keeper "approval" ];
+    selected = Some name;
+    approvals = [ { Pane.approval_keeper = "approval"; approval_tool = "검토🙂" } ];
+    entries = entries
+      [ 990., agent_core ~tool:"Read한🙂" ~turn:5 ~tool_use_id:"unicode"
+          ~at:990. ~correlation:("trace-" ^ name) lane;
+        980., settled ~at:980. "second" ] } in
+  let keeper_row view =
+    List.combine view.Pane.rows view.Pane.targets
+    |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
+    |> fst |> span_values
+  in
+  let full = Pane.lines ~rows:14 ~cols ~scroll:0 input in
+  let folded = Pane.lines ~rows:8 ~cols ~scroll:0 input in
+  let scrolled = Pane.lines ~rows:6 ~cols ~scroll:1 input in
+  check (list (pair string string)) "folded keeper keeps text, tones and click target"
+    (keeper_row full) (keeper_row folded);
+  check (list (pair string string)) "scrolled keeper keeps text, tones and click target"
+    (keeper_row full) (keeper_row scrolled);
+  let folded_text = List.map text folded.Pane.rows in
+  check bool "overview fold counts both hidden keepers" true
+    (contains "2 more" (List.nth folded_text 4));
+  check string "fold remains actionable" "more" (target_text (List.nth folded.targets 4));
+  check bool "overview focus still belongs to selected Unicode keeper" true
+    (contains name (List.nth folded_text 6));
+  check bool "overview focus shows current receipt age" true
+    (contains "evt 10.0s" (List.nth folded_text 6));
+  let later = Pane.lines ~rows:8 ~cols ~scroll:0 { input with Pane.now = now +. 20. } in
+  check bool "a later frame advances receipt age in the reused row" true
+    (contains "evt 30.0s" (text (List.nth later.Pane.rows 3)))
+
 (* ── targets ────────────────────────────────────────────────────────── *)
 
 let test_targets_name_the_keeper_under_each_fleet_row () =
@@ -738,6 +772,8 @@ let () =
         ; test_case "focus falls back to who acted last" `Quick
             test_focus_falls_back_to_who_acted_last
         ; test_case "narrow budget folds the fleet" `Quick test_narrow_budget_folds_the_fleet
+        ; test_case "folded and scrolled views preserve keeper row and focus" `Quick
+            test_folded_and_scrolled_views_preserve_keeper_row_and_focus
         ] )
     ; ( "a gone keeper"
       , [ test_case "a gone keeper's turn is not read as running" `Quick

@@ -10,7 +10,7 @@ A unique, temporary native host manifest under the standard macOS Mozilla/Native
 
 Zen runtime.getBrowserInfo() returned name Firefox, engine version 155.0.1, and an explicit zen.version field equal to 1.22b. Therefore browser name alone cannot identify Zen. Connection routing must use an opaque client identity; display branding can use the explicit Zen metadata.
 
-The local app copy retained FinderInfo metadata and strict codesign verification reported that metadata as disallowed. The executable content digest was verified against the official release, but this record does not claim local codesign verification passed.
+The local app copy retained FinderInfo metadata and strict codesign verification reported that metadata as disallowed. The downloaded release DMG digest was verified against the official asset digest, but this record does not claim local codesign verification passed.
 
 ## MASC and OCaml native host measurement
 

@@ -127,3 +127,5 @@ val help_sections :
     knew where the reader was. *)
 (** The help overlay's sections: Global first, then one section per surface
     that declares bindings, titled with the strip's spelling. *)
+
+val footer_hints_browser_lane : string

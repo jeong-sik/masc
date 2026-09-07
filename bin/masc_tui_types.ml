@@ -2644,6 +2644,7 @@ module Browser_lane_view = struct
       reading = None; load = Idle }
   let switch_source source t =
     { t with source; selected_tab = None; scroll = 0; reading = None; load = Idle }
+  let refresh t = { t with selected_tab = None; scroll = 0 }
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source);
@@ -2733,6 +2734,19 @@ module Browser_lane_view = struct
         | None -> t
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; load = Idle }
 end
+
+let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+  match view.reading with
+  | None -> []
+  | Some reading ->
+      match reading.page with
+      | None -> []
+      | Some page ->
+          String.split_on_char '\n'
+            (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
+          |> List.concat_map (fun line ->
+              if line = "" then [""] else
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
 
 type state = {
   mutable metrics_scroll: int;

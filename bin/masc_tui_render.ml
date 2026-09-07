@@ -13342,18 +13342,6 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
-let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
-  match view.reading with
-  | None -> []
-  | Some reading ->
-      match reading.page with
-      | None -> []
-      | Some page ->
-          String.split_on_char '\n' (Keeper_chat.terminal_safe_text page.text)
-          |> List.concat_map (fun line ->
-              if line = "" then [""] else
-              Message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
-
 let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let room = max 0 (max 1 (body_rows - 5) - 6) in

@@ -71,6 +71,40 @@ let test_a_far_future_span_does_not_wrap () =
     [ 1e9; 1e10; 1e19 ]
 ;;
 
+let test_a_fresh_stopwatch_reads_about_zero () =
+  let w = Deadline.start () in
+  let elapsed = Deadline.elapsed_seconds w in
+  check bool "not negative" true (elapsed >= 0.);
+  check bool "and close to zero" true (elapsed < 0.5)
+;;
+
+let test_elapsed_rises_as_time_passes () =
+  let w = Deadline.start () in
+  let first = Deadline.elapsed_seconds w in
+  Unix.sleepf 0.05;
+  let second = Deadline.elapsed_seconds w in
+  check bool "the second reading is larger" true (second > first);
+  check bool "by about the sleep" true (second -. first >= 0.04)
+;;
+
+(* The reason a stopwatch exists beside the deadline. [remaining_seconds]
+   clamps at zero, so a budget check answered from it reports the budget for
+   any run that overran -- and the line that reports how long cleanup took
+   would then say 0.25s whether it took that or ten times it. Reading past
+   the span is what separates the two, so it is what this pins: an
+   implementation of [elapsed_seconds] written as budget minus remaining
+   fails here and passes every other case in this file. *)
+let test_elapsed_keeps_rising_past_a_budget () =
+  let budget = 0.05 in
+  let w = Deadline.start () in
+  Unix.sleepf (budget *. 3.);
+  let elapsed = Deadline.elapsed_seconds w in
+  check bool
+    (Printf.sprintf "%.3fs is past the %.2fs budget" elapsed budget)
+    true
+    (elapsed > budget *. 2.)
+;;
+
 let () =
   run "monotonic_deadline"
     [ ( "deadline"
@@ -82,6 +116,14 @@ let () =
             test_remaining_falls_as_time_passes
         ; test_case "a far-future span does not wrap" `Quick
             test_a_far_future_span_does_not_wrap
+        ] )
+    ; ( "stopwatch"
+      , [ test_case "a fresh stopwatch reads about zero" `Quick
+            test_a_fresh_stopwatch_reads_about_zero
+        ; test_case "elapsed rises as time passes" `Quick
+            test_elapsed_rises_as_time_passes
+        ; test_case "elapsed keeps rising past a budget" `Quick
+            test_elapsed_keeps_rising_past_a_budget
         ] )
     ]
 ;;

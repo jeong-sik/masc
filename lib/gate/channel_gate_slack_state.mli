@@ -25,6 +25,13 @@ val resolve_keeper_for_channel_result :
 (** Resolve the keeper for [channel_id]. Store read failures remain typed and
     distinct from an unbound channel. *)
 
+val read_bindings_result :
+  unit ->
+  (Channel_gate_binding_store.binding list,
+   Channel_gate_binding_store.binding_store_error) result
+(** All bindings in the store. The socket gateway resolves per channel; the
+    slack-lane poll fiber iterates the whole list to know what to collect. *)
+
 val record_ready : bot_user_id:string -> unit
 (** Called by the in-process gateway's hello handler. Stores the bot identity
     that {!status_json} reports as [bot_user_id] / [last_ready_at]. *)

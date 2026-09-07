@@ -356,8 +356,9 @@ let agent_core_thinking_control_format = function
 (** A runtime [api-name] is an opaque deployment string, not automatically an
     AGENT_CORE catalog model. When AGENT_CORE has no exact provider/model row, project the
     complete typed runtime declaration into the Provider_config override that
-    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models keep the AGENT_CORE
-    row unchanged; an absent runtime capability block remains absent and is
+    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models preserve
+    the row except for explicit output ceilings and thinking transport declarations;
+    an absent runtime capability block remains absent and is
     rejected later by the normal startup gate. *)
 let model_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
@@ -378,10 +379,12 @@ let model_capabilities_override_of_model_spec
        (match
           runtime_caps.declared_thinking_control_format,
           runtime_caps.declared_supports_reasoning_budget,
-          runtime_caps.reasoning_streaming_format
+          runtime_caps.reasoning_streaming_format,
+          runtime_caps.max_output_tokens
         with
-        | None, None, None -> None
-        | thinking_control_format, supports_reasoning_budget, reasoning_streaming_format ->
+        | None, None, None, None -> None
+        | thinking_control_format, supports_reasoning_budget, reasoning_streaming_format,
+          max_output_tokens ->
           let effective_reasoning_budget =
             match thinking_control_format with
             (* A concrete transport-control declaration owns the associated
@@ -395,7 +398,11 @@ let model_capabilities_override_of_model_spec
           in
           Some
             { catalog_caps with
-              thinking_control_format =
+              max_output_tokens =
+                (match max_output_tokens with
+                 | Some _ -> max_output_tokens
+                 | None -> catalog_caps.max_output_tokens)
+            ; thinking_control_format =
                 (match thinking_control_format with
                  | Some format -> agent_core_thinking_control_format format
                  | None -> catalog_caps.thinking_control_format)

@@ -233,6 +233,7 @@ type fusion_run = {
   fur_preset : string;
   fur_topology : Fusion_types.fusion_topology;
   fur_started_at : float;
+  fur_finished_at : float option;
   fur_status : fusion_run_status;
   fur_stage : fusion_run_stage;
   fur_decision : string option;
@@ -5692,6 +5693,7 @@ let decode_fusion_run json =
     | None -> Error (Printf.sprintf "unknown fusion topology %S" topology)
   in
   let* fur_started_at = require_float_field json "started_at" in
+  let* fur_finished_at = required_nullable_float_field json "finished_at" in
   let* status = required_string_field json "status" in
   let* fur_status =
     match status with
@@ -5702,6 +5704,12 @@ let decode_fusion_run json =
         let* frs_error = required_string_field json "error" in
         Ok (Fusion_failed { frs_failure_code; frs_error })
     | other -> Error (Printf.sprintf "unknown fusion run status %S" other)
+  in
+  let* () =
+    match fur_status, fur_finished_at with
+    | Fusion_running, None -> Ok ()
+    | (Fusion_completed | Fusion_failed _), Some ts when Float.is_finite ts && ts >= 0. -> Ok ()
+    | _ -> Error "Fusion finish timestamp disagrees with run status"
   in
   let* stage = required_string_field json "stage" in
   let* progress = required_member json "progress" in
@@ -5725,6 +5733,7 @@ let decode_fusion_run json =
     ; fur_preset
     ; fur_topology
     ; fur_started_at
+    ; fur_finished_at
     ; fur_status
     ; fur_stage
     ; fur_decision

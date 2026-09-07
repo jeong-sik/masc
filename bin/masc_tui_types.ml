@@ -3109,6 +3109,7 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable keeper_run_cursor: int;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -4256,6 +4257,18 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let selected_keeper_runs (state : state) =
+  match selected_keeper state, state.fusion_runs with
+  | Some keeper, Some snapshot ->
+      List.filter (fun (run : Tui_decode.fusion_run) ->
+          String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
+  | _ -> []
+
+let selected_keeper_run (state : state) =
+  let runs = selected_keeper_runs state in
+  let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
+  Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
+
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
 let workspace_activity_rows (state : state) =
@@ -4513,6 +4526,7 @@ let create_state
   runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
+  keeper_run_cursor = 0;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;

@@ -4535,9 +4535,7 @@ def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
                 f"{message!r}"
             )
         # Chat opened from detail, so Esc goes back there first.
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -4622,9 +4620,7 @@ def word_delete_interaction(requests: HttpRequests) -> Interaction:
         if message != "still here":
             raise AssertionError(f"the keeper was sent {message!r}")
         # Chat opened from detail, so Esc goes back there first.
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -4813,9 +4809,7 @@ def paste_spill_interaction(requests: HttpRequests) -> Interaction:
                 f"the keeper was sent the placeholder, not the paste: {head!r}"
             )
 
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -4837,6 +4831,46 @@ def seed_playground_workspace(base_path: str) -> None:
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
         parents=True, exist_ok=True
+    )
+
+
+def escape_to_keeper_detail(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    *,
+    name: bytes,
+    presses: int = 4,
+) -> None:
+    """Leave a keeper's chat for its detail, however many Escapes that takes.
+
+    Escape does not mean one thing here, and the footer says which at each
+    moment: while a turn is running it reads "Esc:interrupt turn", and only
+    once none is does it read "Esc:detail". A scenario that just sent a
+    message is leaving with a turn running, so its first press interrupts
+    rather than leaves. Where the fixture answers the stream with 503 the
+    interrupt gets no answer either -- the pane says so -- and how many
+    presses it then takes is not a number a scenario can write down.
+
+    Waiting for the footer to change instead of counting does not work: the
+    composer's own footer already names Esc:detail, so that needle is
+    satisfied by bytes drawn before the first press.
+
+    The bound is here so a surface that never leaves fails as a test rather
+    than hangs. Arriving is the assertion; the number of presses is not.
+    """
+    title = b"Keepers \xe2\x96\xb8 \x1b[1m" + name
+    for _ in range(presses):
+        start = len(output)
+        os.write(master_fd, b"\x1b")
+        try:
+            wait_for_output(process, master_fd, output, title, start=start, timeout=2.0)
+            return
+        except AssertionError:
+            continue
+    raise AssertionError(
+        f"{presses} Escapes did not leave the chat for {name!r}'s detail: "
+        f"{bytes(output)[-600:]!r}"
     )
 
 
@@ -4900,9 +4934,7 @@ def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
                 f"the message carried the text as well as the file: {message[:120]!r}"
             )
 
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -5661,7 +5693,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         if payload.get("message") != expected_text:
             raise AssertionError(f"Keeper chat changed UTF-8 message bytes: {body!r}")
 
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -12266,7 +12298,7 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
         # The fixture answers 503, so the turn settles rather than streaming.
         # Esc then leaves the pane instead of interrupting, and q quits from
         # the detail view -- in the pane it would be typed into the composer.
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     return interact

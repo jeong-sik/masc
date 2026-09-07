@@ -352,8 +352,8 @@ let execute_downscale ~plans ~max_dim ~media_type ~bytes =
          originate inside these two catches. The catch stays wide because this
          is Fun.protect's finally: an exception escaping here is re-raised as
          Fun.Finally_raised and masks whatever the protected body raised. *)
-      (try Sys.remove in_file with _ -> ()) (* cancel-guard-ok *);
-      (try Sys.remove out_file with _ -> ()) (* cancel-guard-ok *))
+      (try Sys.remove in_file with _ -> ()) (* cancel-guard-ok: Sys.remove is not an Eio operation *);
+      (try Sys.remove out_file with _ -> ()) (* cancel-guard-ok: Sys.remove is not an Eio operation *))
     (fun () ->
       output_string in_oc bytes;
       close_out_noerr in_oc;

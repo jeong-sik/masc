@@ -301,6 +301,8 @@ let for_surface = function
       ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Navigate "K" "calling Keeper"
+      ; b Navigate "B" "Board evidence"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]

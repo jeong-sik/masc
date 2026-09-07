@@ -3850,6 +3850,89 @@ let test_responses_tool_images_on_http ~stream () =
   with Exit -> ()
 ;;
 
+let test_anthropic_image_sources_on_http ~stream () =
+  let open Types in
+  let images =
+    [ Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 }
+    ; Image { media_type = "application/octet-stream"
+            ; data = "https://images.invalid/reference.png"; source_type = Url }
+    ; Image { media_type = "application/octet-stream"
+            ; data = "file_fixture_image"; source_type = File_id }
+    ]
+  in
+  let image source = `Assoc [ "type", `String "image"; "source", source ] in
+  let expected_images =
+    [ image (`Assoc [ "type", `String "base64"; "media_type", `String "image/png"
+                   ; "data", `String "aW1hZ2U=" ])
+    ; image (`Assoc [ "type", `String "url"
+                   ; "url", `String "https://images.invalid/reference.png" ])
+    ; image (`Assoc [ "type", `String "file"; "file_id", `String "file_fixture_image" ])
+    ]
+  in
+  let history =
+    [ make_message ~role:User images
+    ; assistant_msg "Remembered the earlier images."
+    ; user_msg "Inspect another image before comparing."
+    ; make_message ~role:Assistant
+        [ ToolUse { id = "inspect-1"; name = "inspect_image"; input = `Assoc [] } ]
+    ; make_message ~role:Tool
+        [ ToolResult
+            { tool_use_id = "inspect-1"; content = "image result"
+            ; outcome = Tool_succeeded; json = None
+            ; content_blocks = Some (Text "image result" :: images) } ]
+    ; user_msg "Compare these with the earlier images."
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let captured = ref None in
+    let url =
+      if stream then
+        start_sse_server ~sw ~net:env#net ~capture_body:captured
+          (anthropic_sse_response "accepted images")
+      else
+        start_mock_server ~sw ~net:env#net ~capture_body:captured
+          (anthropic_response "accepted images")
+    in
+    let config = make_config url in
+    let result =
+      if stream then
+        Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
+          ~on_event:(fun _ -> ()) ()
+      else Complete.complete ~sw ~net:env#net ~config ~messages:history ()
+    in
+    (match result with Ok _ -> () | Error _ -> fail "fixture completion failed");
+    let body = match !captured with
+      | Some body -> Yojson.Safe.from_string body
+      | None -> fail "HTTP fixture received no request"
+    in
+    let open Yojson.Safe.Util in
+    let messages = body |> member "messages" |> to_list in
+    check int "history and merged tool followup retained" 5 (List.length messages);
+    let check_json label expected actual =
+      check bool label true (Yojson.Safe.equal expected actual)
+    in
+    check_json "earlier user image sources are native on the outgoing wire"
+      (`List expected_images) (List.hd messages |> member "content");
+    let tool_followup = List.nth messages 4 in
+    check string "tool result becomes an Anthropic user message" "user"
+      (tool_followup |> member "role" |> to_string);
+    check_json "tool images stay native and the followup remains after them"
+      (`List
+        [ `Assoc
+            [ "type", `String "tool_result"; "tool_use_id", `String "inspect-1"
+            ; "content", `List
+                (`Assoc [ "type", `String "text"; "text", `String "image result" ]
+                 :: expected_images)
+            ; "is_error", `Bool false ]
+        ; `Assoc [ "type", `String "text"
+                 ; "text", `String "Compare these with the earlier images." ] ])
+      (tool_followup |> member "content");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let () =
   run
     "complete_http"
@@ -3858,6 +3941,11 @@ let () =
             (test_responses_tool_images_on_http ~stream:false)
         ; test_case "stream native tool images and history" `Quick
             (test_responses_tool_images_on_http ~stream:true) ] )
+    ; ( "anthropic image wire"
+      , [ test_case "sync history and tool image source carriers" `Quick
+            (test_anthropic_image_sources_on_http ~stream:false)
+        ; test_case "stream history and tool image source carriers" `Quick
+            (test_anthropic_image_sources_on_http ~stream:true) ] )
     ; ( "complete"
       , [ test_case "anthropic ok" `Quick test_complete_anthropic_ok
         ; test_case

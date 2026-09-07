@@ -28,7 +28,7 @@ let test_atomic_read () =
   expect "read has no write-only Skill receipt requirement" (read.metadata.routing = Routing_active)
 let test_pending_and_preempted () =
   let read = fixture () |> overlay (fun value -> value
-    |> replace "status" (`String "mixed") |> replace "requires_restart" (`Bool true)
+    |> replace "status" (`String "pending_restart") |> replace "requires_restart" (`Bool true)
     |> replace "pending_keys" (`List [`String "keeper.pending"])
     |> replace "preempted_keys" (`List [`String "keeper.environment"])) |> decode |> success in
   expect "restart remains explicit" read.metadata.keeper_requires_restart;
@@ -56,10 +56,19 @@ let test_unknown_metadata_is_rejected () =
 let test_warnings_are_not_successfully_hidden () =
   let read = fixture () |> map_field "validation" (replace "issues" (`List [issue "warning"])) |> decode |> success in
   expect "valid with warnings uses Warning tone" (match List.nth (summary_lines read.metadata) 1 with Warning, _ -> true | _ -> false)
+let test_restart_projection_consistency () =
+  List.iter (fun json -> expect "restart contradiction rejected" (Result.is_error (decode json)))
+    [ fixture () |> overlay (replace "pending_keys" (`List [`String "keeper.pending"]));
+      fixture () |> overlay (replace "requires_restart" (`Bool true));
+      fixture () |> overlay (replace "status" (`String "pending_restart"));
+      fixture () |> overlay (fun value -> value
+        |> replace "requires_restart" (`Bool true)
+        |> replace "pending_keys" (`List [`String "keeper.pending"])) ]
 let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
   ["atomic GET source and metadata", test_atomic_read;
    "pending and preempted settings", test_pending_and_preempted;
    "invalid source remains readable", test_invalid_source_is_readable;
    "TOML parse failure projection", test_parse_failure_shape;
    "unknown and inconsistent metadata", test_unknown_metadata_is_rejected;
-   "warnings remain visible", test_warnings_are_not_successfully_hidden]
+   "warnings remain visible", test_warnings_are_not_successfully_hidden;
+   "restart status matches pending settings", test_restart_projection_consistency]

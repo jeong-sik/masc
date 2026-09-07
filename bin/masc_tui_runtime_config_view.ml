@@ -106,6 +106,14 @@ let decode json =
   let* pending_keys = get (list string) "pending_keys" keeper_json in
   let* applied_keys = get (list string) "applied_keys" keeper_json in
   let* preempted_keys = get (list string) "preempted_keys" keeper_json in
+  (* The server derives both projections from pending_keys. Accepting them
+     independently could show 'restart not required' over unapplied settings. *)
+  let pending = pending_keys <> [] in
+  let* () =
+    if keeper_requires_restart <> pending || (keeper = Pending_restart) <> pending
+    then Error "Keeper restart status contradicts pending settings"
+    else Ok ()
+  in
   Ok { path; source_text; metadata = {
     source_revision; validation; routing; routing_requires_restart; keeper; keeper_requires_restart;
     configured_count; pending_keys; applied_keys; preempted_keys;

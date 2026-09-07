@@ -13,9 +13,14 @@
 
 open Time_compat
 
+type interaction = Click of string | Fill of { selector : string; text : string }
+  | Scroll of { x : int; y : int }
+
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
+  | Page_capture of { tab_id : int }
+  | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
   | Page_goto of { url : string }
@@ -23,6 +28,8 @@ type verb =
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"
+  | Page_capture _ -> "page.capture"
+  | Page_interact _ -> "page.interact"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
   | Page_goto _ -> "page.goto"
@@ -30,6 +37,14 @@ let verb_to_string = function
 
 (* The wire carries a verb name plus args; the closed variant is the only
    thing that crosses a boundary. *)
+let interaction_args ~tab_id ~expected_url action =
+  let fields = match action with
+    | Click selector -> ["action", `String "click"; "selector", `String selector]
+    | Fill {selector; text} -> ["action", `String "fill"; "selector", `String selector; "text", `String text]
+    | Scroll {x; y} -> ["action", `String "scroll"; "x", `Int x; "y", `Int y] in
+  `Assoc (("tabId", `Int tab_id) :: fields @
+    (Option.map (fun url -> "expectedUrl", `String url) expected_url |> Option.to_list))
+
 let verb_json = function
   | Tabs_list -> `Assoc [ ("verb", `String "tabs.list"); ("args", `Assoc []) ]
   | Page_read { tab_id; max_chars } ->
@@ -42,6 +57,10 @@ let verb_json = function
              ]
              |> List.filter_map Fun.id) )
       ]
+  | Page_capture { tab_id } ->
+    `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
+  | Page_interact { tab_id; expected_url; action } ->
+    `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~expected_url action]
   | Session_open { headless } ->
     `Assoc
       [ ("verb", `String "session.open")
@@ -56,18 +75,18 @@ let verb_json = function
 (* Two different questions, two different classifications, both exhaustive
    over the closed verb set:
 
-   - [verb_is_read]: does this leave the browser session lifecycle unchanged?
-     Opening and closing a keeper-owned browser are lifecycle writes.
+   - [verb_is_read]: does this leave browser content and lifecycle unchanged?
+     Interaction, navigation, and session changes are writes.
    - [verb_allowed_on_live]: may this run against the operator's browser?
-     Only the two readers — the live lane exists to be read; sessions own
-     nothing there and a navigation acts with the operator's logins. *)
+     Readers and explicit-tab interactions are supported. Session ownership
+     and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ -> true
-  | Session_open _ | Session_close | Page_goto _ -> false
+  | Tabs_list | Page_read _ | Page_capture _ -> true
+  | Page_interact _ | Session_open _ | Session_close | Page_goto _ -> false
 ;;
 
 let verb_allowed_on_live = function
-  | Tabs_list | Page_read _ -> true
+  | Tabs_list | Page_read _ | Page_capture _ | Page_interact _ -> true
   | Session_open _ | Session_close | Page_goto _ -> false
 ;;
 
@@ -171,14 +190,13 @@ let lane_connected ~lane_name =
   | None -> false
 ;;
 
-(* The live lane is the operator's browser: it exists to be read. Sessions
-   belong to nobody here (the browser is already open), and a navigation can
-   act with the operator's logins — both stay on the automation lane, whose
-   profile no human owns. The extension refuses them too; this is the
-   server-side half of that defence in depth. *)
+(* The operator already owns the live session. Explicit-tab interactions may
+   activate page controls, including links; creating or closing the session and
+   direct URL navigation remain automation-only. Both backends enforce this
+   closed verb distinction. *)
 let live_lane_refused =
   Refused
-    "the live lane is read-only: session and navigation verbs belong to the \
+    "session ownership and direct navigation belong to the \
      automation lane"
 ;;
 

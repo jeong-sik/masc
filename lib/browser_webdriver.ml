@@ -1,7 +1,7 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type session = { id : string; mutable handles : (string * int) list; mutable next_tab : int }
-type t = { request : request; mutex : Eio.Mutex.t; mutable session : session option }
+type t = { request : request; binary : string option; mutex : Eio.Mutex.t; mutable session : session option }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -21,7 +21,7 @@ let decode_response ~status body =
       let* code = string_field "error" value in
       let* message = string_field "message" value in
       Error (Remote { code; message })
-let create ~request = { request; mutex = Eio.Mutex.create (); session = None }
+let create ?binary ~request () = { request; binary; mutex = Eio.Mutex.create (); session = None }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
@@ -78,7 +78,8 @@ let execute_unlocked t = function
        let args = if Option.value ~default:true headless then [`String "-headless"] else [] in
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
          ["browserName", `String "firefox";
-          "moz:firefoxOptions", `Assoc ["args", `List args]]]] in
+          "moz:firefoxOptions", `Assoc (("args", `List args) ::
+            (Option.map (fun path -> "binary", `String path) t.binary |> Option.to_list))]]] in
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
        t.session <- Some { id; handles = []; next_tab = 1 };
@@ -101,6 +102,28 @@ let execute_unlocked t = function
       else script t session
         "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
         [`Int cap])
+  | Browser_lane.Page_interact { tab_id; expected_url; action } ->
+    let* session = session t in
+    with_tab t session (Some tab_id) (fun () ->
+      let* result = script t session Browser_interaction.script
+        [Browser_lane.interaction_args ~tab_id ~expected_url action] in
+      match result with
+      | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
+      | _ -> Error (Protocol "invalid interaction response"))
+  | Browser_lane.Page_capture { tab_id } ->
+    let* session = session t in
+    with_tab t session (Some tab_id) (fun () ->
+      let* before = page_summary t session in
+      let* url = string_field "url" before in
+      let* image = call t session `GET "/screenshot" None in
+      let* after = page_summary t session in
+      let* after_url = string_field "url" after in
+      if not (String.equal url after_url) then Error (Protocol "tab navigated during capture")
+      else match image, field "title" after with
+      | `String data, Some (`String title) ->
+        Ok (`Assoc ["tabId", `Int tab_id; "title", `String title; "url", `String url;
+          "mimeType", `String "image/png"; "data", `String data])
+      | _ -> Error (Protocol "invalid screenshot response"))
   | Browser_lane.Tabs_list ->
     let* session = session t in
     let* handles = call t session `GET "/window/handles" None in

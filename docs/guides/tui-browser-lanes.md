@@ -34,7 +34,9 @@ Reads happen on entry, source or tab selection, navigation, and explicit refresh
 
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.
-Navigation controls only the isolated automation session; live browser access is read-only.
+The URL editor controls the isolated automation session. Keepers can separately
+use `BrowserInteract` to click, fill, or scroll an explicitly selected live tab;
+the TUI reader itself does not send those interaction commands.
 
 Requests use the authenticated TUI HTTP client. Reading allows 45 seconds for
 the tab-list and page-read phases; automation startup and navigation allow 65.

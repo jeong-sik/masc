@@ -84,7 +84,7 @@ let tag_of_runtime_handler
   | Tool_browser_tabs
   | Tool_browser_read
   | Tool_browser_session
-  | Tool_browser_goto -> Mod_misc
+  | Tool_browser_goto | Tool_browser_interact -> Mod_misc
   | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
   | Tool_masc_library_dispatch -> Mod_library
   | Tool_board_dispatch -> Mod_inline

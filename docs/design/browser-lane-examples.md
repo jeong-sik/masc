@@ -1,16 +1,17 @@
 # Browser Lane 사용 흐름
 
 Browser는 사이트 구분 없이 페이지를 읽는 공통 도구다. Keeper에 보이는
-이름은 `BrowserTabs`, `BrowserRead`, `BrowserSession`, `BrowserGoto`이며,
+이름은 `BrowserTabs`, `BrowserRead`, `BrowserSession`, `BrowserGoto`,
+`BrowserInteract`이며,
 등록 이름은 각각 `masc_browser_tabs`, `masc_browser_read`,
-`masc_browser_session`, `masc_browser_goto`다.
+`masc_browser_session`, `masc_browser_goto`, `masc_browser_interact`다.
 
 ## 연결
 
 운영자가 사용하는 Firefox/Zen은 `live`, Keeper가 URL을 열어 조사하는
-격리 Firefox는 `automation`이다. 두 브라우저는 로그인 세션을 공유하지 않는다.
+설정한 Gecko 브라우저의 격리 세션은 `automation`이다. 두 브라우저는 로그인 세션을 공유하지 않는다.
 
-Live 호스트를 설치하고 Firefox `about:debugging`에서 확장을 적재한다.
+Live 호스트를 설치하고 Firefox 또는 Zen의 `about:debugging`에서 확장을 적재한다.
 
 ```sh
 bash connectors/browser/install-host.sh \
@@ -30,6 +31,8 @@ geckodriver --host 127.0.0.1 --port 4444
 ```toml
 [browser]
 webdriver_url = "http://127.0.0.1:4444"
+# Optional: an absolute path to the installed Zen executable/app bundle.
+# binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 
 자세한 연결 계약은 [native Firefox](native-firefox-lane.md)에 있다.
@@ -73,6 +76,31 @@ BrowserRead {"lane":"automation","maxChars":12000}
 이번 작업이 새로 연 세션인지 확인하고 닫는다. 기존 세션을 재사용했다면
 다른 작업의 브라우저를 임의로 종료하지 않는다.
 
+## 화면과 상호작용
+
+선택한 탭의 화면을 보려면 `BrowserRead`에 `format=image`를 지정한다.
+Keeper는 반환된 `artifact`를 `analyze_image`에 전달한다. TUI에서는
+`Ctrl-O`로 같은 탭의 PNG를 미리 본다. 캡처 범위는 현재 viewport다.
+
+```json
+BrowserRead {"lane":"live","tabId":73,"format":"image"}
+BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
+```
+
+페이지에서 확인한 CSS selector가 있을 때 click 또는 fill을 사용한다.
+요소는 현재 문서에서 정확히 하나여야 한다. `expectedUrl`은 직전에
+읽은 URL을 전달하며, 페이지가 바뀌었으면 동작을 거부한다.
+
+```json
+BrowserInteract {"lane":"live","tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
+BrowserInteract {"lane":"live","tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
+```
+
+텍스트나 이미지에서 selector를 추측하지 않는다. 현재 도구는 자동으로
+DOM 요소 목록이나 좌표 기반 클릭 대상을 제공하지 않는다. fill은
+input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
+페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
+
 ## 반복 관측
 
 동일 페이지를 나중에 다시 확인하려면 `masc_schedule_create`로 후속 작업을
@@ -84,6 +112,5 @@ BrowserRead {"lane":"automation","maxChars":12000}
 
 `BrowserRead`는 렌더된 텍스트, URL, 제목, 전체 문자 수(`chars`)와 잘림
 여부(`truncated`)를 반환한다. 기본 반환 한도는 50,000 code points다.
-텍스트 읽기는 스크린샷이나 시각적 배치 검증이 아니다. 현재 도구는 탭
-목록·텍스트 읽기와 automation 세션·URL 이동을 지원한다. 클릭·입력·제출은
-별도 동작으로 구현되어 있지 않다.
+텍스트 읽기와 PNG 캡처는 별도 형식이다. 가상 스크롤, iframe, 접힌 영역,
+페이지 전체를 자동으로 탐색하지 않으므로 실제로 관측한 범위를 명시한다.

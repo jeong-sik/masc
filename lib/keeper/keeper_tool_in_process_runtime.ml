@@ -461,14 +461,40 @@ let handle_browser_tabs_with_outcome ~args =
     (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
 ;;
 
-let handle_browser_read_with_outcome ~args =
-  Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.0 args)
+let handle_browser_read_with_outcome ~(meta : keeper_meta) ~args =
+  let result = Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.0 args in
+  match Tool_misc_browser_lane.read_format args, result with
+  | Ok Tool_misc_browser_lane.Image, Tool_result.Completed { data = `Assoc fields; _ } ->
+    (* Keep PNG bytes off the model's text channel. The existing vision tool
+       can inspect this Keeper-owned durable handle in a later tool call. *)
+    let stored =
+      match List.assoc_opt "data" fields with
+      | Some (`String encoded) ->
+        (match Base64.decode encoded with
+         | Error (`Msg detail) -> Error detail
+         | Ok bytes ->
+           Result.bind (Keeper_vision_tool.validate_image_size bytes) (fun () ->
+             Keeper_vision_tool.store_artifact
+               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) bytes))
+      | _ -> Error "screenshot has no image payload" in
+    (match stored with
+     | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
+     | Ok artifact ->
+       Keeper_tool_execution.success_data (`Assoc
+         (("artifact", `String (Multimodal.Vision_artifact_store.to_string artifact)) ::
+          ("next", `String "Use analyze_image with this artifact and your visual question.") ::
+          List.filter (fun (key, _) -> not (String.equal key "data")) fields)))
+  | _ -> Keeper_tool_execution.of_tool_result result
 ;;
 
 let handle_browser_session_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
+;;
+
+let handle_browser_interact_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_interact ~tool_name:"masc_browser_interact" ~start_time:0.0 args)
 ;;
 
 let handle_browser_goto_with_outcome ~args =

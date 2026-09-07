@@ -481,6 +481,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_browser_read", keeper_shard_read);
     ("masc_browser_session", keeper_shard_write);
     ("masc_browser_goto", keeper_shard_write);
+    ("masc_browser_interact", keeper_shard_write);
     ("masc_web_search", keeper_shard_read);
     ("masc_web_fetch", keeper_shard_read);
     ("masc_file_list", keeper_shard_read);

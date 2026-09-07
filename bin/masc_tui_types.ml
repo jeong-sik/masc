@@ -1420,6 +1420,7 @@ type lanes_mode =
 type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
+  | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
 
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
@@ -2714,7 +2715,7 @@ let prev_metrics_section = function
 
 let metrics_section_label = function
   | Section_fleet -> "Engine & Scheduler"
-  | Section_resources -> "Fleet & Velocity"
+  | Section_resources -> "Work & Outcomes"
   | Section_tools -> "Memory & Gate Safety"
 
 (* What the [:] palette is for right now. A jump lists every destination
@@ -3021,6 +3022,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
+  mutable task_flow: Masc_tui_task_flow.t option;
   mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -3058,6 +3060,7 @@ type state = {
      the poll time that saw them finish. Fed by comparing consecutive
      keeper_turns polls; read by the footer glow and the overlay's ✓ rows. *)
   mutable keeper_turn_finishes: (string * float) list;
+  mutable keeper_turns_observed_at: float option;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -3839,6 +3842,8 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
+  mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
+  mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
@@ -4451,6 +4456,17 @@ let fusion_entry_identity = function
 let selected_fusion_entry state =
   List.nth_opt (fusion_list_entries state) state.fusion_cursor
 
+let fusion_detail_entry_index state =
+  fusion_list_entries state
+  |> List.find_index (fun entry ->
+      match state.fusion_mode, entry with
+      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+          String.equal id run.fur_run_id
+      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+          String.equal reference.fhe_post_id candidate.fhe_post_id
+          && String.equal reference.fhe_run_id candidate.fhe_run_id
+      | _ -> false)
+
 let selected_keeper_runs (state : state) =
   match selected_keeper state, state.fusion_runs with
   | Some keeper, Some snapshot ->
@@ -4630,6 +4646,7 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
+  task_flow = None;
   task_focus = Left_pane;
   help_open = false;
   agenda_open = false;
@@ -4641,6 +4658,7 @@ let create_state
   answering_scroll = 0;
   answering_cursor = 0;
   keeper_turn_finishes = [];
+  keeper_turns_observed_at = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -5019,6 +5037,8 @@ let create_state
   fusion_detail_error = None;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
+  fusion_historical_detail = None;
+  fusion_historical_inflight = None;
   observer = Observer_off;
   mcp_session = None;
   acting = [];

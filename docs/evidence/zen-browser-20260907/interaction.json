@@ -1,0 +1,56 @@
+{
+  "result": "passed",
+  "proof_scope": "actual Zen extension capture and interaction code; not new MASC OCaml binary or TUI",
+  "source_commit": "05189333e3f831cc8635c43e73e384c99d27ad12",
+  "browser_version": "1.22b",
+  "extension_source_sha256": "7e42258294bfa4ddc09be18c7fb2cd60663ddbeb142f958dd0b646fd847fb46a",
+  "source_worktree_dirty": false,
+  "controls": {
+    "filled": {
+      "tabId": 1,
+      "action": "fill",
+      "urlBefore": "http://127.0.0.1:56666/fixture",
+      "url": "http://127.0.0.1:56666/fixture",
+      "title": "MASC Zen browser visual proof",
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "clicked": {
+      "tabId": 1,
+      "action": "click",
+      "urlBefore": "http://127.0.0.1:56666/fixture",
+      "url": "http://127.0.0.1:56666/fixture",
+      "title": "MASC Zen browser visual proof",
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "observed": {
+      "value": "Hello from MASC",
+      "button": "Clicked",
+      "disabled": "unchanged"
+    },
+    "scrolled": {
+      "tabId": 1,
+      "action": "scroll",
+      "urlBefore": "http://127.0.0.1:56666/fixture",
+      "url": "http://127.0.0.1:56666/fixture",
+      "title": "MASC Zen browser visual proof",
+      "scrollX": 0,
+      "scrollY": 640
+    },
+    "errors": {
+      "wrong_url": "page_url_changed",
+      "ambiguous": "selector_is_ambiguous",
+      "disabled": "element_disabled",
+      "invalid_number": "input_rejected_value"
+    },
+    "numberAfter": "42"
+  },
+  "open_load_interact_capture_ms": 146,
+  "tab_id": 1,
+  "png_bytes": 37999,
+  "png_sha256": "485074f2f3ca74234e60f31d77b904639056dbac193694948de94cf94ee71404",
+  "title": "MASC Zen browser visual proof",
+  "viewport_only": true,
+  "extension_connected_to_production": false
+}

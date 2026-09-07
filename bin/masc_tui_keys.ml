@@ -85,7 +85,7 @@ let for_surface = function
   | Metrics ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "1-3" "section"
-          ~help:"1: Engine & Scheduler · 2: Fleet & Velocity · 3: Memory & Gate Safety"
+          ~help:"1: Engine & Scheduler · 2: Work & Outcomes · 3: Memory & Gate Safety"
       ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
       ; b Act "Esc" "overview"
       ; b Meta "r" "refresh"

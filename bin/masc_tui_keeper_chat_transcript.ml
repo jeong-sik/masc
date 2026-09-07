@@ -573,6 +573,7 @@ let handler_activity_kind handler =
   | Tool_browser_read
   | Tool_browser_session
   | Tool_browser_goto
+  | Tool_browser_interact
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch

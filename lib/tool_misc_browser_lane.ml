@@ -95,14 +95,45 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
          ~timeout_sec:45.0)
 ;;
 
+type read_format = Text | Image
+let read_format args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "format" fields with
+     | None | Some (`String "text") -> Ok Text
+     | Some (`String "image") -> Ok Image
+     | _ -> Error "format must be text or image")
+  | _ -> Error "browser read arguments must be an object"
+
 let handle_read ~tool_name ~start_time args : Tool_result.result =
-  match lane_of ~tool_name ~start_time args with
-  | Error error -> error
-  | Ok lane ->
-    let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
+  match read_format args with
+  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Ok Image ->
+    let input = match args with
+      | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"]) fields)
+      | other -> other in
+    (match Result.bind (Browser_surface.parse_capture_request input) Browser_surface.capture with
+     | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+     | Error error -> make_workflow_err ~tool_name ~start_time error)
+  | Ok Text ->
+    match lane_of ~tool_name ~start_time args with
+    | Error error -> error
+    | Ok lane ->
+      let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
+      answer_to_result ~tool_name ~start_time
+        (Browser_lane.issue ~lane_name:lane
+           ~verb:(Browser_lane.Page_read { tab_id = get_int_opt args "tabId"; max_chars = Some max_chars })
+           ~timeout_sec:default_timeout_sec)
+;;
+
+let handle_interact ~tool_name ~start_time args : Tool_result.result =
+  match Browser_interaction.parse args with
+  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Ok request ->
+    let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
     answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue
-         ~lane_name:lane
-         ~verb:(Browser_lane.Page_read { tab_id = get_int_opt args "tabId"; max_chars = Some max_chars })
-         ~timeout_sec:default_timeout_sec)
+      (Browser_lane.issue ~lane_name
+        ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
+          expected_url=request.expected_url; action=request.action})
+        ~timeout_sec:default_timeout_sec)
 ;;

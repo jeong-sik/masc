@@ -57,6 +57,11 @@ def run(binary: Path, server_binary: Path, stamp: str | None,
         fake_git.chmod(0o755)
         environment = os.environ.copy()
         environment["PATH"] = str(fake_bin)
+        # The server's existing module initialization announces its tool registry
+        # at INFO. Its module threshold is read before argument parsing, unlike
+        # the global level initialized by the normal runtime. Keep WARN/ERROR
+        # visible while testing the separate no-Git informational contract.
+        environment["MASC_LOG_MCP_LEVEL"] = "warn"
         environment["MASC_BASE_PATH"] = str(blocked_base / "runtime")
         environment["MASC_BASE_PATH_INPUT"] = str(blocked_base / "runtime")
 
@@ -117,6 +122,7 @@ def run(binary: Path, server_binary: Path, stamp: str | None,
                                  "git_probe_argv": calls, "stdout": result.stdout.decode(errors="replace")})
         print(json.dumps({"kind": "tui-build-identity-cli", "expected_embedded_commit": stamp,
                           "expected_embedded_commit_unix_ts": timestamp,
+                          "log_overrides": {"MASC_LOG_MCP_LEVEL": "warn"},
                           "no_tui_endpoint_connection": True,
                           "no_fixture_workspace_paths_created": True,
                           "no_tty": True, "no_git_probes": True, "readings": readings}, indent=2))

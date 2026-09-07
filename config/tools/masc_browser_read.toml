@@ -30,3 +30,8 @@ type = "string"
 enum = ["text", "image"]
 default = "text"
 description = "text reads rendered text; image captures the explicitly selected tab viewport for visual inspection. maxChars applies only to text."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."

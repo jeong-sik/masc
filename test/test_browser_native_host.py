@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 
 HOST = Path(sys.argv.pop(1)).resolve()
 TOKEN = "browser-host-test-token-no-secret"
@@ -63,14 +64,28 @@ class Peer(http.server.BaseHTTPRequestHandler):
         if self.headers.get("x-lane-token") != TOKEN or self.headers.get("x-lane") != "live":
             self.send_error(403)
             return
+        client_id = self.headers.get("x-browser-client-id")
+        try:
+            uuid.UUID(client_id)
+        except (ValueError, TypeError, AttributeError):
+            self.send_error(400)
+            return
+        self.server.identities.append((client_id, self.headers.get("x-browser-name"),
+            self.headers.get("x-browser-version"), self.headers.get("x-browser-engine-version")))
         if self.path == "/browser-lane/poll":
             self.server.poll_seen.set()
+            if self.server.reject_client:
+                self.send_error(400)
+                return
             try:
                 response = self.server.commands.get(timeout=10)
             except queue.Empty:
                 response = {"ok": True, "empty": True}
         elif self.path == "/browser-lane/result":
             self.server.results.put(body)
+            response = {"ok": True}
+        elif self.path == "/browser-lane/disconnect":
+            self.server.disconnected.set()
             response = {"ok": True}
         else:
             self.send_error(404)
@@ -96,9 +111,23 @@ class NativeHost(unittest.TestCase):
         self.server.commands = queue.Queue()
         self.server.results = queue.Queue()
         self.server.poll_seen = threading.Event()
+        self.server.disconnected = threading.Event()
+        self.server.identities = []
+        self.server.reject_client = self._testMethodName == "test_retired_client_exits_for_fresh_identity"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.process = subprocess.Popen([str(HOST), "--base-path", str(base), "--server", f"http://127.0.0.1:{self.server.server_port}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        metadata = read_frame(self.process.stdout)
+        self.assertEqual(metadata["verb"], "browser.info")
+        self.assertFalse(self.server.poll_seen.is_set(), "must discover actual browser before polling")
+        browser = {"name": "Firefox", "vendor": "Mozilla", "version": "155.0.1"}
+        if self._testMethodName != "test_firefox_metadata":
+            browser["zen"] = {"version": "1.22b"}
+        if self._testMethodName == "test_bad_metadata_never_polls":
+            browser["zen"] = {"version": ""}
+        self.process.stdin.write(encode_frame({"id": metadata["id"], "ok": True, "data": browser}))
+        self.process.stdin.flush()
+
 
     def tearDown(self):
         if self.process.poll() is None:
@@ -116,6 +145,20 @@ class NativeHost(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
         self.temporary.cleanup()
+
+    def test_firefox_metadata(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertTrue(all(row[1:] == ("firefox", "155.0.1", "155.0.1") for row in self.server.identities))
+
+    def test_retired_client_exits_for_fresh_identity(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertNotEqual(self.process.wait(timeout=5), 0)
+        self.assertTrue(self.server.disconnected.is_set())
+        self.assertEqual(len({identity[0] for identity in self.server.identities}), 1)
+
+    def test_bad_metadata_never_polls(self):
+        self.assertNotEqual(self.process.wait(timeout=2), 0)
+        self.assertFalse(self.server.poll_seen.is_set())
 
     def test_tabs_and_page_roundtrip_fragmented_utf8(self):
         for index, verb in enumerate(["tabs.list", "page.read", "page.capture", "page.interact"]):
@@ -144,6 +187,10 @@ class NativeHost(unittest.TestCase):
         self.process.stdin.close()
         self.assertEqual(self.process.wait(timeout=2), 0)
         self.assertEqual(self.process.stdout.read(), b"")
+        self.assertTrue(self.server.disconnected.is_set())
+        ids = {row[0] for row in self.server.identities}
+        self.assertEqual(len(ids), 1, "one native process owns one client UUID")
+        self.assertTrue(all(row[1:] == ("zen", "1.22b", "155.0.1") for row in self.server.identities))
 
     def test_oversized_frame_rejected_before_payload(self):
         self.process.stdin.write(struct.pack("<I", 1024 * 1024 + 1))

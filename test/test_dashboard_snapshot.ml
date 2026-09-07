@@ -9,6 +9,8 @@
 
 open Masc
 
+let config = Workspace.default_config "/tmp/dashboard-snapshot-test"
+
 let test_current_starts_empty () =
   Dashboard_snapshot.reset_for_test ();
   Alcotest.(check bool) "no live snapshot before publish"
@@ -18,7 +20,7 @@ let test_current_starts_empty () =
 let test_publish_then_current () =
   Dashboard_snapshot.reset_for_test ();
   let snap =
-    Dashboard_snapshot.make_for_test
+    Dashboard_snapshot.make_for_test ~config
       ~shell:(`String "shell-value")
       ~tools:(`String "tools-value")
       ~namespace_truth:(`String "nt-value")
@@ -32,7 +34,7 @@ let test_publish_then_current () =
     Alcotest.(check string) "shell roundtrip"
       "shell-value" (Yojson.Safe.Util.to_string t.shell);
     Alcotest.(check string) "tools roundtrip"
-      "tools-value" (Yojson.Safe.Util.to_string t.tools);
+      "tools-value" (Yojson.Safe.Util.to_string t.tools.json);
     Alcotest.(check string) "namespace_truth roundtrip"
       "nt-value" (Yojson.Safe.Util.to_string t.namespace_truth);
     Alcotest.(check string) "telemetry_summary roundtrip"
@@ -41,7 +43,7 @@ let test_publish_then_current () =
 
 let test_reset_clears_slot () =
   let snap =
-    Dashboard_snapshot.make_for_test
+    Dashboard_snapshot.make_for_test ~config
       ~shell:`Null ~tools:`Null
       ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
@@ -56,7 +58,7 @@ let test_reset_clears_slot () =
 let test_generated_at_recent () =
   let before = Unix.gettimeofday () in
   let s =
-    Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
+    Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:`Null
       ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   let after = Unix.gettimeofday () in
@@ -162,6 +164,55 @@ let test_activity_defaults_cache_retains_last_good () =
             (fun () -> failwith "cold")))
 ;;
 
+let test_tools_component_reuses_complete_representations () =
+  let now_value = ref 100. in
+  let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
+  let calls = ref 0 in
+  let json version = `Assoc
+    [ "version", `Int version
+    ; "tool_inventory", `List (List.init 200 (fun _ -> `String "tool-with-repeated-description"))
+    ; "keeper_waiting_inventory", `Assoc [ "waiting", `List [ `String "keeper-a" ] ]
+    ; "effective_keeper_surface", `Null
+    ; "skill_activations", `Null ] in
+  let refresh f = Dashboard_snapshot.For_testing.refresh_tools
+    ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config f in
+  let first = refresh (fun () -> incr calls; json 1) in
+  let raw = Yojson.Safe.to_string (json 1) in
+  Alcotest.(check string) "final decorated AST retains exact identity bytes"
+    raw first.encoded.identity;
+  Alcotest.(check string) "ETag describes final decorated bytes"
+    (Http_server_eio.Response.weak_etag_value raw) first.etag;
+  Alcotest.(check string) "resolved root captured with projection"
+    (Workspace.masc_root_dir config) first.masc_root;
+  List.iter (fun (accept_encoding, encoding) ->
+    let body, headers = Http_response_payload.select_prepared ~accept_encoding first.encoded in
+    Alcotest.(check (option string)) "selected encoding" encoding
+      (List.assoc_opt "content-encoding" headers);
+    Alcotest.(check (option string)) "all representations vary on encoding"
+      (Some "Accept-Encoding") (List.assoc_opt "vary" headers);
+    if encoding = Some "zstd" then (
+      match Compression_codec.decompress ~orig_size:(String.length raw) body with
+      | Ok decoded -> Alcotest.(check string) "compressed final projection roundtrip" raw decoded
+      | Error detail -> Alcotest.fail detail);
+    now_value := 120.;
+    let hit = refresh (fun () -> incr calls; json 2) in
+    let again, _ = Http_response_payload.select_prepared ~accept_encoding hit.encoded in
+    Alcotest.(check bool) "whole-snapshot tick reuses the component" true (first == hit);
+    Alcotest.(check bool) "poll reuses already encoded bytes" true (body == again))
+    [ None, None; Some "gzip", Some "gzip"; Some "zstd,gzip", Some "zstd";
+      Some "gzip;q=0,zstd;q=0", None ];
+  Alcotest.(check int) "one component computation inside TTL" 1 !calls;
+  now_value := 160.;
+  let retained = refresh (fun () -> failwith "tools refresh failed") in
+  Alcotest.(check bool) "failed refresh retains AST and every encoding together" true
+    (first == retained);
+  let second = refresh (fun () -> incr calls; json 2) in
+  Alcotest.(check bool) "successful component refresh replaces ETag" true
+    (first.etag <> second.etag);
+  Alcotest.(check string) "previous immutable component remains readable" raw first.encoded.identity;
+  Alcotest.(check string) "new bytes match new AST" (Yojson.Safe.to_string (json 2)) second.encoded.identity
+;;
+
 let () =
   Alcotest.run "Dashboard_snapshot"
     [
@@ -184,6 +235,8 @@ let () =
             `Quick test_projection_cache_retains_last_good_and_successful_null;
           Alcotest.test_case "activity defaults cache keeps last good"
             `Quick test_activity_defaults_cache_retains_last_good;
+          Alcotest.test_case "tools component reuses final HTTP representations"
+            `Quick test_tools_component_reuses_complete_representations;
         ] );
     ]
 ;;

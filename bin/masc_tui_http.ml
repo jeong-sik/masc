@@ -708,30 +708,30 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
   | Ok { Masc_http_client.headers; _ } ->
       Masc_tui_observer.session_id_of_headers headers
 
-(** Read the runtime's event feed until it ends.
+type observer_error =
+  | Transport_failed of string
+  | Http_refused of { status : int; detail : string }
 
-    Blocks on the calling fiber for the life of the stream and hands every
-    body chunk to [on_chunk] as it arrives. The silence bound is the one
-    the keeper chat stream uses: a feed from a runtime with keepers turning
-    that says nothing for that long has gone quiet, and the caller reopens
-    it on its own schedule. [Ok ()] is the server closing the stream; a
-    refusal and a transport failure both come back as [Error]. *)
+(** Stream headers are delivered before body chunks. A transport disconnect
+    and an explicit HTTP refusal remain distinct so a quiet connection does
+    not invalidate an otherwise usable MCP session or scoped replay cursor. *)
 let observe_runtime_events ~clock ~(host : string) ~(port : int)
-    ~(session_id : string) ~(on_chunk : string -> unit) : (unit, string) result
-    =
+    ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
+    ~on_response ~(on_chunk : string -> unit) : (unit, observer_error) result =
   let url = url_of ~host ~port ~path:observer_stream_path in
   let headers =
     ("Accept", "text/event-stream")
     :: ("Mcp-Session-Id", sanitize_header_value session_id)
     :: auth_headers ()
+    @ Sse_wire.observer_cursor_headers cursor
   in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url ~headers ~on_chunk ()
+      ~url ~headers ~on_response ~on_chunk ()
   with
-  | Error detail -> Error (report_err "observer stream failed" detail)
+  | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
-      Error (Printf.sprintf "observer stream refused with %d: %s" status body)
+      Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (** One MCP [tools/call] under an existing session.

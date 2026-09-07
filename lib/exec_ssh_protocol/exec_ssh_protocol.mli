@@ -59,9 +59,9 @@ val protocol_version : int
 (** {1 Execution mode (RFC-0422)}
 
     How the shim boxes the payload. [Effect] is unrestricted. [Observe]
-    denies every filesystem write outside the shim's per-run scratch
-    directory (Landlock) and every [socket(2)] (seccomp), so a payload that
-    exits 0 has provably landed nothing anywhere. [Guest_local] denies only
+    denies filesystem writes outside the shim's per-run scratch directory
+    and verified /dev/null discard device (Landlock), and every [socket(2)]
+    (seccomp). [Guest_local] denies only
     sockets: writes stay inside the box the payload runs in. Both boxes are
     applied by the shim to itself before exec, unprivileged under
     no_new_privs; a shim on a kernel without Landlock refuses them with

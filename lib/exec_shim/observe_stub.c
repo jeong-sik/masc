@@ -14,8 +14,8 @@
  *   deny_fs: a Landlock ruleset handling every filesystem access right the
  *   running ABI knows. "/" is allowed EXECUTE | READ_FILE | READ_DIR only;
  *   [scratch] (when non-empty) is allowed everything the ruleset handles.
- *   So a write anywhere but the scratch fails with EACCES, and there is no
- *   path the payload can take to a write the ruleset does not see.
+ *   The verified /dev/null character device also permits read/write, so
+ *   ordinary discard redirections work without granting persistent writes.
  *
  *   deny_net: a seccomp filter that answers socket(2) with EPERM for every
  *   address family. Landlock ABI 4 restricts TCP only and leaves UDP (DNS)
@@ -44,7 +44,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/sysmacros.h>
 
 #ifndef SYS_landlock_create_ruleset
 #define SYS_landlock_create_ruleset 444
@@ -150,6 +152,36 @@ static int add_path_rule(int ruleset_fd, const char *path, uint64_t allowed)
   return rc;
 }
 
+static int add_discard_device_rule(int ruleset_fd)
+{
+  struct stat status;
+  struct ll_path_beneath_attr attr;
+  int device_fd = open("/dev/null", O_PATH | O_NOFOLLOW | O_CLOEXEC);
+  int rc, saved;
+  if (device_fd < 0) return -1;
+  if (fstat(device_fd, &status) != 0) goto fail;
+  /* Linux's device registry defines /dev/null as character major 1, minor 3:
+   * Documentation/admin-guide/devices.txt. O_PATH|O_NOFOLLOW plus fstat
+   * rejects symlinks, regular-file replacements and other character devices.
+   * Bind the rule to this same fd, never a second path lookup. */
+  if (!S_ISCHR(status.st_mode) || status.st_rdev != makedev(1, 3)) {
+    errno = ENODEV;
+    goto fail;
+  }
+  attr.allowed_access = LL_FS_READ_FILE | LL_FS_WRITE_FILE;
+  attr.parent_fd = device_fd;
+  rc = (int) syscall(SYS_landlock_add_rule, ruleset_fd, LL_RULE_PATH_BENEATH, &attr, 0);
+  saved = errno;
+  close(device_fd);
+  errno = saved;
+  return rc;
+fail:
+  saved = errno;
+  close(device_fd);
+  errno = saved;
+  return -1;
+}
+
 static int deny_filesystem_writes(const char *scratch)
 {
   long abi = landlock_abi();
@@ -164,6 +196,8 @@ static int deny_filesystem_writes(const char *scratch)
   if (add_path_rule(ruleset_fd, "/", LL_FS_EXECUTE | LL_FS_READ_FILE | LL_FS_READ_DIR) != 0)
     goto fail;
   if (scratch[0] != '\0' && add_path_rule(ruleset_fd, scratch, handled) != 0)
+    goto fail;
+  if (add_discard_device_rule(ruleset_fd) != 0)
     goto fail;
   if (syscall(SYS_landlock_restrict_self, ruleset_fd, 0) != 0)
     goto fail;

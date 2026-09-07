@@ -624,7 +624,11 @@ let chat_title_row ~inner_cells ~title ~mode_suffix =
 let scroll_hint ~scrolled_back ~older_exist =
   if scrolled_back <= 0 then "PgUp:scroll back"
   else if older_exist then
-    Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (%d back)"
+    (* The marker answers the other half of the position question: how far
+       back is one number, whether pressing up keeps finding history is the
+       other. The start variant below says the opposite end. *)
+    Printf.sprintf
+      "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (%d back \xc2\xb7 more\xe2\x86\x91)"
       scrolled_back
   else
     (* At the oldest row with nothing more to fetch that is the more useful

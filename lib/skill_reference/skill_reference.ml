@@ -29,6 +29,10 @@ type t =
   ; content_revision : content_revision
   }
 
+type request =
+  | Pinned of t
+  | By_identity of identity
+
 type decode_error =
   | Expected_object of { field : string }
   | Expected_list of { field : string }
@@ -227,6 +231,31 @@ let of_yojson json =
     |> Result.map_error (fun error -> Invalid_content_revision error)
   in
   Ok (make ~identity ~content_revision)
+;;
+
+(* A caller naming a Skill either pins the revision or does not. Both are
+   valid asks and they are not the same ask, so the decode says which rather
+   than defaulting one into the other: [Pinned] must be honoured or refused
+   exactly, and [By_identity] has to be resolved against the frozen snapshot by
+   whoever holds it. This module does not hold it, so it does not resolve.
+   RFC-0411 §4.2. *)
+let request_of_yojson json =
+  let object_name = "skill_reference" in
+  let* fields = object_fields ~field:object_name json in
+  let* () =
+    exact_fields ~object_name ~allowed:[ "identity"; "content_revision" ] fields
+  in
+  let* identity_json = required_value ~object_name ~field:"identity" fields in
+  let* identity = identity_of_yojson identity_json in
+  match List.assoc_opt "content_revision" fields with
+  | None -> Ok (By_identity identity)
+  | Some _ ->
+    let* content = required_string ~object_name ~field:"content_revision" fields in
+    let* content_revision =
+      content_revision_of_string content
+      |> Result.map_error (fun error -> Invalid_content_revision error)
+    in
+    Ok (Pinned (make ~identity ~content_revision))
 ;;
 
 let list_of_yojson = function

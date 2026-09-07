@@ -2011,9 +2011,12 @@ type async_msg =
       (** provider id, then how many scopes were recorded *)
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
-  | Observer_opened of string
-  | Observer_received of Masc_tui_observer.decoded list
-  | Observer_closed of string
+  | Observer_opened of {
+      session_id : string;
+      handshake : (Sse_wire.observer_handshake option, string) result;
+    }
+  | Observer_received of string option * Masc_tui_observer.delivery list
+  | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Task_dispatched of {
       keeper : string;
       task_id : string;
@@ -6503,6 +6506,16 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+(* The MSX spectator takes the whole terminal, like the image overlay: it
+   draws the server's frame and the loop yields until [esc], re-fetching on a
+   timer. Fetch once now so it opens on a picture. The [&] key and the
+   palette's "go MSX" both land here, so the two doors open one screen. *)
+let open_msx_screen (state : Masc_tui_types.state) =
+  state.msx_frame <-
+    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+  Masc_tui_msx.open_screen ~write:write_to_terminal state
+
 (* Where a reference lands, and what it opens when it gets there.
 
    The surfaces already print [masc://] references beside what they name and
@@ -8320,8 +8333,10 @@ let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row 
    through the mailbox; the render fiber owns all state. The fiber ends with
    the stream, and whether to open another is the main loop's decision. *)
 let launch_observer state ~host ~port ~mailbox =
+  let exception Reconnect_without_cursor in
   state.observer <- Observer_opening;
   let session = state.mcp_session in
+  let cursor = state.observer_cursor in
   let run () =
     let result =
       try
@@ -8332,36 +8347,61 @@ let launch_observer state ~host ~port ~mailbox =
               Masc_tui_http.open_mcp_session ~host ~port
                 ~client_version:Runtime_build_version.current
         with
-        | Error detail -> Error detail
+        | Error detail -> Error (Masc_tui_http.Transport_failed detail)
         | Ok session_id -> (
-            enqueue_async mailbox (Observer_opened session_id);
             match Eio_context.get_clock_opt () with
-            | None -> Error "Eio clock is unavailable"
+            | None -> Error (Masc_tui_http.Transport_failed "Eio clock is unavailable")
             | Some clock ->
                 let reader = Masc_tui_observer.create () in
+                let instance_id = ref None in
+                let on_response ~status ~headers =
+                  if Masc.Tui_decode.is_success_http_status status then begin
+                    let handshake =
+                      match Sse_wire.decode_observer_response headers with
+                      | Ok (Some ({ replay = Sse_wire.Resumed; _ } as handshake)) ->
+                          (match cursor with
+                           | Some requested when String.equal requested.instance_id handshake.instance_id ->
+                               Ok (Some handshake)
+                           | Some _ | None -> Error "Observer resumed without a matching requested instance")
+                      | other -> other
+                    in
+                    instance_id :=
+                      (match handshake with
+                       | Ok (Some handshake) -> Some handshake.instance_id
+                       | Ok None | Error _ -> None);
+                    enqueue_async mailbox (Observer_opened { session_id; handshake });
+                    (match handshake, cursor with
+                     | (Ok None | Error _), Some _ ->
+                         (* An older peer may have already registered our old
+                            numeric cursor without understanding its epoch.
+                            Close that stream and reconnect without authority. *)
+                         raise Reconnect_without_cursor
+                     | (Ok (Some _) | Ok None | Error _), None
+                     | Ok (Some _), Some _ -> ())
+                  end
+                in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> enqueue_async mailbox (Observer_received decoded)
+                  | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
                 Masc_tui_http.observe_runtime_events ~clock ~host ~port
-                  ~session_id ~on_chunk)
+                  ~session_id ~cursor ~on_response ~on_chunk)
       with
+      | Reconnect_without_cursor ->
+          Error (Masc_tui_http.Transport_failed "Scoped replay unavailable; reconnecting without the previous cursor")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
-    enqueue_async mailbox
-      (Observer_closed
-         (match result with
-          | Ok () -> "the server closed the stream"
-          | Error detail -> detail))
+    enqueue_async mailbox (Observer_closed result)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       Eio.Fiber.fork_daemon ~sw (fun () ->
           run ();
           `Stop_daemon)
-  | None -> enqueue_async mailbox (Observer_closed "Eio switch is unavailable")
+  | None -> enqueue_async mailbox
+      (Observer_closed (Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
 
 (* The feed is opened only after a refresh has reached the server: opening
    it blind would report a closed feed every cycle while the TUI runs without
@@ -10213,12 +10253,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Observer_opened session_id ->
+  | Observer_opened { session_id; handshake } ->
       state.mcp_session <- Some session_id;
+      (match handshake with
+       | Ok (Some handshake) ->
+           (match handshake.replay with
+            | Sse_wire.Resumed -> ()
+            | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
+           state.observer_replay <- Observer_replay_scoped handshake
+       | Ok None ->
+           state.observer_cursor <- None;
+           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay"
+       | Error detail ->
+           state.observer_cursor <- None;
+           state.observer_replay <- Observer_replay_unavailable detail);
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
+      add_event state "observer" (observer_replay_description state.observer_replay);
       add_event state "observer" "runtime event feed open"
-  | Observer_received decoded ->
+  | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane
          shows the whole history anyway, and the loader is generation-
@@ -10247,8 +10300,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             String.equal name (Masc_tui_acting.keeper_of_event ~traces event)
       in
       List.iter
-        (fun item ->
-          match item with
+        (fun (delivery : Masc_tui_observer.delivery) ->
+          (* SSE publication commits IDs in order. Replaying a committed ID
+             must not append the event or retrigger its dependent refreshes. *)
+          let already_applied =
+            match instance_id, delivery.cursor, state.observer_cursor with
+            | Some instance_id, Some cursor, Some applied ->
+                String.equal instance_id applied.instance_id && cursor <= applied.event_id
+            | (None, _, _) | (_, None, _) | (_, _, None) -> false
+          in
+          if not already_applied then begin
+          (match delivery.decoded with
           | Masc_tui_observer.Event event ->
               (match state.observer with
                | Observer_live live ->
@@ -10296,7 +10358,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               end
           | Masc_tui_observer.Undecodable reason ->
               state.acting_undecodable <- state.acting_undecodable + 1;
-              state.acting_undecodable_last <- Some reason)
+              state.acting_undecodable_last <- Some reason);
+          (match delivery.decoded, delivery.cursor, instance_id with
+           | Masc_tui_observer.Event _, Some event_id, Some instance_id ->
+               state.observer_cursor <- Some { instance_id; event_id }
+           | Masc_tui_observer.Event _, (None | Some _), _
+           | Masc_tui_observer.Undecodable _, _, _ -> ());
+          end)
         decoded;
       if
         List.length state.acting
@@ -10368,18 +10436,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       Buffer.add_string state.msg_input original;
       add_event state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
-  | Observer_closed reason ->
+  | Observer_closed outcome ->
       let events =
         match state.observer with
         | Observer_live live -> live.events
         | Observer_off | Observer_opening | Observer_closed _ -> 0
       in
+      let reason =
+        match outcome with
+        | Ok () -> "the server closed the stream"
+        | Error (Masc_tui_http.Transport_failed detail) -> detail
+        | Error (Masc_tui_http.Http_refused { status; detail }) ->
+            (* Explicit missing/conflicting MCP sessions can be reinitialized.
+               EOF and transport errors never invalidate a session by count. *)
+            (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
+            Printf.sprintf "observer stream refused with %d: %s" status detail
+      in
       state.observer <-
         Observer_closed { reason; at = Unix.gettimeofday (); events };
-      (* A stream the server refused outright delivered nothing. The session
-         it was asked under is dropped so the next attempt opens a fresh one;
-         a stream that ran and ended keeps the session for the next. *)
-      if events = 0 then state.mcp_session <- None;
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_generation) ->
       http_refresh_inflight := false;
@@ -15287,6 +15361,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
+                 | Some (_, Masc_tui_types.Palette_msx) ->
+                     open_msx_screen state
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
@@ -16529,15 +16605,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" ->
-           (* The MSX spectator takes the whole terminal, like the image
-              overlay: it draws the server's frame and the loop yields until
-              [esc], re-fetching on a timer. Fetch once now so it opens on a
-              picture. *)
-           state.msx_frame <-
-             Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
-           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-           Masc_tui_msx.open_screen ~write:write_to_terminal state
+      | Some "&" -> open_msx_screen state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0

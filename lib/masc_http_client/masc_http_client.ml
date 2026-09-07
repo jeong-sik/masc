@@ -187,11 +187,11 @@ let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
     contract as {!post_stream}: no wall-clock cap, [idle_timeout_sec] bounds
     silence, and the caller chooses that bound because only it knows how
     long the stream it is reading is allowed to go quiet. *)
-let get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk () =
+let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
   Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`GET ~url
-    ~headers ~on_chunk ()
+    ~headers ?on_response ~on_chunk ()
 
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =

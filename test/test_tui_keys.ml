@@ -639,6 +639,28 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Overview documents the [m] hop" true
     (List.mem "m" overview_keys)
 
+let test_browser_lanes_highlight_config () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Connectors;
+  check Alcotest.int "channel bindings remain under Keepers"
+    (visible_surface_ring_index state (Keepers Keeper_list))
+    (visible_surface_ring_index state Connectors);
+  List.iter (fun app ->
+    List.iter (fun source ->
+      state.browser_lane <- Some
+        (Browser_lane_view.switch_source source (Browser_lane_view.create app));
+      let index = visible_surface_ring_index state Connectors in
+      check Alcotest.int "Browser and Slack readers highlight Config"
+        (visible_surface_ring_index state Config) index;
+      check Alcotest.bool "the selected ring entry is Config, not the fallback"
+        true (fst (List.nth (visible_surface_ring state) index) = Config))
+      [Browser_lane_view.Live; Browser_lane_view.Automation])
+    [Browser_lane_view.Browser; Browser_lane_view.Slack];
+  state.browser_lane <- None;
+  check Alcotest.int "closing the reader restores the Keeper parent"
+    (visible_surface_ring_index state (Keepers Keeper_list))
+    (visible_surface_ring_index state Connectors)
+
 let test_visible_surface_ring_declutter () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
@@ -1424,6 +1446,8 @@ let () =
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick
             test_metrics_is_an_overview_child
+        ; Alcotest.test_case "Browser and Slack readers belong to Config" `Quick
+            test_browser_lanes_highlight_config
         ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
             test_visible_surface_ring_declutter
         ; Alcotest.test_case "braille sparkline renders levels" `Quick

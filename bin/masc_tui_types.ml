@@ -5681,7 +5681,7 @@ let visible_surface_ring_index (state : state) (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
-    | Connectors when Option.is_some (browser_lane_on_screen state) -> Runtime
+    | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
     | Changes | Connectors | Schedules -> Keepers Keeper_list
     | Runtime | Lanes | Clients -> Config
     | Code -> Repositories

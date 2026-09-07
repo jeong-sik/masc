@@ -37,7 +37,10 @@ template_variables: []
 
 열린 화면이나 로그인된 업무 페이지가 작업에 필요하면 `BrowserTabs`로
 탭의 제목과 URL을 확인하고, 해당 탭의 실제 id를 `BrowserRead`에 전달합니다.
-`live`는 운영자가 사용 중인 Firefox를 읽고, `automation`은 격리된 브라우저입니다.
+`live`는 운영자의 Firefox/Zen 연결이고, `automation`은 격리된 Gecko 브라우저입니다.
+`live`의 `clientId`와 `tabId`는 한 쌍으로 유지하여 읽기·캡처·조작에 전달합니다.
+브라우저 선택이 모호하면 `BrowserTabs` 오류의 `clients` 목록에서 의도한 연결을
+선택하고 그 `clientId`로 다시 요청합니다. 끊어진 연결을 다른 브라우저로 대체하지 않습니다.
 직접 URL을 열어 조사할 때는 `BrowserSession` → `BrowserGoto` →
 `BrowserRead` (`lane=automation`) 순서로 사용합니다. 서로 다른 출처의 내용을
 비교할 때는 필요한 탭만 읽고, 답변에 관측한 URL과 내용을 연결합니다.

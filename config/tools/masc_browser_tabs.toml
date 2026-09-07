@@ -1,7 +1,6 @@
 name = "masc_browser_tabs"
 description = """
-Returns tabs with the selected clientId; carry this identity into BrowserRead/BrowserInteract when using a live browser.
-List open tabs in live Firefox/Zen (operator extension) or isolated automation Firefox. Returns an array of {id, active, title, url}; live also includes index/windowId. Choose relevant titles/URLs, then pass the returned id and same lane to BrowserRead."""
+List open tabs in the selected live Firefox/Zen connection or isolated configured Gecko automation browser. Returns {clientId, tabs}, where each tab has {id, active, title, url}; live tabs also include index/windowId. Carry the returned live clientId and tab id into BrowserRead/BrowserInteract. Automation clientId is null. If live selection is ambiguous or stale, the error includes current clients metadata and a retry instruction without dispatching a command. Choose the intended clientId and retry explicitly."""
 additional_properties = false
 
 [[params]]

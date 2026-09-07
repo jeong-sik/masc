@@ -454,8 +454,9 @@ let handle_memory_retract_with_outcome
     ~args
 ;;
 
-(* Browser lane readers (docs/design/browser-lane.md): one queue hop, no
-   gate — the verb set is closed and read-only at the state layer. *)
+(* Browser lane tools preserve selected native-client identity. The closed
+   state-layer verb set distinguishes reads from explicit-tab interactions;
+   session ownership and direct navigation remain automation-only. *)
 let handle_browser_tabs_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)

@@ -27,7 +27,7 @@ import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
-import { memo } from 'preact/compat'
+import { createPortal, memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
@@ -990,7 +990,9 @@ function ChatPreviewModal({
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
-  return html`
+  // Keep the fixed overlay relative to the viewport, outside transcript row
+  // layout/paint containment and the transcript scroll clip.
+  return createPortal(html`
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick=${onClose}
@@ -1016,7 +1018,7 @@ function ChatPreviewModal({
         <div class="chat-preview-modal-body">${children}</div>
       </div>
     </div>
-  `
+  `, document.body)
 }
 
 function codeBlockText(htmlContent: string, source?: string): string {
@@ -4608,7 +4610,7 @@ export function ChatTranscript({
   const scrollToBottom = () => {
     const el = scrollerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
+    el.scrollTop = 0
     pinnedRef.current = true
     setUnread(false)
     onSeenBottomRef.current?.()
@@ -4617,7 +4619,9 @@ export function ChatTranscript({
   const handleScroll = () => {
     const el = scrollerRef.current
     if (!el) return
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    // The reversed scroll container has one chronological content child:
+    // zero is the bottom, and history scrolls into negative coordinates.
+    const distance = -el.scrollTop
     const pinned = distance <= STICK_TO_BOTTOM_THRESHOLD_PX
     pinnedRef.current = pinned
     if (pinned) {
@@ -4630,9 +4634,9 @@ export function ChatTranscript({
     const el = scrollerRef.current
     if (!el) return
     if (pinnedRef.current) {
-      const snap = () => { el.scrollTop = el.scrollHeight }
-      snap()
-      requestAnimationFrame(snap)
+      // Zero stays the bottom as deferred rows acquire their measured height.
+      // No forced layout read or uncancelled next-frame correction is needed.
+      el.scrollTop = 0
       // Bottom-pinned with new content arriving means the operator is watching
       // it live — advance the cursor so the divider does not resurrect it.
       onSeenBottomRef.current?.()
@@ -4662,7 +4666,7 @@ export function ChatTranscript({
   return html`
     <div class=${`relative flex min-h-0 flex-col ${isPrimary ? 'flex-1' : ''}`}>
       <div
-        class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col overflow-y-auto ${
+        class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col-reverse overflow-y-auto ${
           isPrimary
             ? 'gap-5 rounded-[var(--r-2)] border border-transparent px-0 py-2 shadow-none'
             : variant === 'messenger'
@@ -4674,6 +4678,7 @@ export function ChatTranscript({
         ref=${scrollerRef}
         onScroll=${handleScroll}
       >
+        <div class="chat-transcript-content flex grow shrink-0 flex-col" style=${{ gap: 'inherit' }}>
         ${entries.length === 0
           ? html`
               <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
@@ -4695,6 +4700,7 @@ export function ChatTranscript({
               expandAutonomousRuns,
               action,
             })}
+        </div>
       </div>
       ${unread
         ? html`

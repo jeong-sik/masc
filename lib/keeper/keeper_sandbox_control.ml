@@ -127,9 +127,8 @@ let start_managed_container
                  ])
         | None ->
             let image =
-              match meta.sandbox_image with
-              | Some img when String.trim img <> "" -> img
-              | _ -> Env_config_sandbox.Runtime.docker_image ()
+              Env_config_sandbox.Runtime.image_declared_or_default
+                meta.sandbox_image
             in
             if String.trim image = "" then
               Error "keeper sandbox docker image is not configured"

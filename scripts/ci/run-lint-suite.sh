@@ -294,6 +294,37 @@ blocking_pr_lints() {
   # three filenames that no longer exist (#34201), and R6 counted 69 prose
   # mentions alongside the one root a program used. 2.7s.
   run_lint "SSOT rules" bash scripts/check-ssot.sh
+  # A second pass over #34018's list, this time the entries nobody had ever
+  # run. Same method as the six above: run clean, then run again with a
+  # violation planted. All seven failed on the planted one.
+  #
+  #   check-toml-syntax                        an unclosed array in config/
+  #   check-yaml-syntax                        the same in a workflow
+  #   check-sandbox-dune-version               dune-project asking for more
+  #                                            than the sandbox image installs
+  #   check-checkpoint-installation-legacy-purge  a retired symbol back in lib/
+  #   check-dashboard-nav-event-parity         a section the OCaml allowlist
+  #                                            does not carry
+  #   check-tla-harness-coverage               a .cfg-backed spec in neither
+  #                                            tla-check.sh nor the debt list
+  #   check-opam-lock-covers-deps              this one was already failing:
+  #                                            ocaml-msx was declared and
+  #                                            unlocked, so --locked skipped it
+  run_lint "TOML syntax" bash scripts/check-toml-syntax.sh
+  run_lint "YAML syntax" python3 scripts/ci/check-yaml-syntax.py
+  run_lint "Sandbox dune version" bash scripts/check-sandbox-dune-version.sh
+  run_lint "Checkpoint legacy purge" \
+    bash scripts/check-checkpoint-installation-legacy-purge.sh
+  run_lint "Dashboard nav-event parity" \
+    bash scripts/check-dashboard-nav-event-parity.sh
+  # This one also takes scripts/tla-check.sh off the not-wired list, which
+  # reads stronger than it is: TLC still runs nowhere. What the gate holds is
+  # tla-check.sh's spec list -- a new .cfg-backed spec has to be added to it
+  # or written down as debt, rather than appearing checked because no one
+  # looked.
+  run_lint "TLA harness coverage" bash scripts/ci/check-tla-harness-coverage.sh
+  run_lint "Opam lock covers declared deps" \
+    bash scripts/check-opam-lock-covers-deps.sh
 }
 
 advisory_lints() {

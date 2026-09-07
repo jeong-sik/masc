@@ -177,6 +177,44 @@ let load_keeper_profile_defaults_result_for_base_path ~base_path name :
     ~keeper_toml_path_opt:(keeper_toml_path_opt_for_base_path ~base_path name)
     name
 
+type keeper_profile_snapshot =
+  { configured_names : string list
+  ; profiles_by_file_name :
+      (string * (keeper_profile_defaults, keeper_toml_load_error) result) list
+  }
+
+let read_keeper_profile_snapshot ~base_path =
+  let declarations =
+    Keeper_types_profile_toml.discover_keepers_toml_with_paths
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+  in
+  { configured_names =
+      declarations
+      |> List.map (fun (_, discovery) -> keeper_toml_discovery_name discovery)
+      |> List.sort_uniq String.compare
+  ; profiles_by_file_name =
+      List.map
+        (fun (path, discovery) ->
+          let defaults =
+            match discovery with
+            | Loaded { keeper_name; defaults } ->
+              load_keeper_instructions ~toml_path:path keeper_name defaults
+            | Invalid { error; _ } -> Error error
+          in
+          (* Runtime lookup is by filename, while discovery uses keeper.name.
+             Keeping both avoids silently changing a mismatched declaration. *)
+          Filename.remove_extension (Filename.basename path), defaults)
+        declarations
+  }
+;;
+
+let snapshot_configured_keeper_names snapshot = snapshot.configured_names
+let snapshot_profile_defaults snapshot name =
+  match List.assoc_opt name snapshot.profiles_by_file_name with
+  | Some result -> result
+  | None -> Ok empty_keeper_profile_defaults
+;;
+
 type declarative_manifest_snapshot =
   | Declarative_manifest_missing
   | Declarative_manifest_present of

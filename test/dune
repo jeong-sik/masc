@@ -4723,3 +4723,5 @@
  (libraries alcotest masc.monotonic_deadline unix))
 
 (include stanzas/test_browser_webdriver.inc)
+
+(include stanzas/test_browser_surface.inc)

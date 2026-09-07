@@ -254,8 +254,11 @@ let poll_cycle ~clock ~token ~bot_user_id ~base_dir ~capacity () =
     let cursors = read_cursors ~path in
     let now = Unix.gettimeofday () in
     let next =
+      (* [channel_id] lives on both binding and audit_event, so the record
+         pattern is ambiguous; the annotation names the store's binding. *)
       List.fold_left
-        (fun acc { Channel_gate_binding_store.channel_id; _ } ->
+        (fun acc (binding : Channel_gate_binding_store.binding) ->
+          let channel_id = binding.Channel_gate_binding_store.channel_id in
           let cursor_opt = List.assoc_opt channel_id cursors in
           let outcome, advance =
             poll_channel ~clock ~token ~bot_user_id ~now ~capacity ~channel_id

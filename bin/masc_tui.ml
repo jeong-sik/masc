@@ -15288,7 +15288,7 @@ and is loaded on demand through keeper_skill.
                      read (switch_source (if key = "l" then Live else Automation) view)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
-                 | "r" -> read view
+                 | "r" -> read (refresh view)
                  | "o" | "x" when view.source = Automation ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)

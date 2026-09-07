@@ -26,6 +26,13 @@ let test_read_and_selection () =
     (request_body moved = `Assoc ["lane", `String "live"; "app", `String "browser"; "tabId", `Int 1]);
   expect "previous tab wraps" ((select_tab (-1) moved).selected_tab = Some 2)
 
+let test_refresh_rediscovers_tabs () =
+  let previous = { (loaded ()) with load = Failed "selected tab closed" } in
+  let retry = refresh previous in
+  expect "explicit refresh rediscovers tabs without stale id"
+    (request_body retry = `Assoc ["lane", `String "live"; "app", `String "browser"]);
+  expect "rediscovery retains previous content until reply" (retry.reading = previous.reading)
+
 let test_stale_response () =
   let current = { (switch_source Automation (create Slack)) with load = Loading (4, Read) } in
   let late = accept ~generation:3 (decode (response ())) current in
@@ -69,6 +76,7 @@ let test_empty_tabs () =
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
     ["read and tab selection", test_read_and_selection;
+     "closed-tab refresh recovery", test_refresh_rediscovers_tabs;
      "stale response and provenance", test_stale_response;
      "session generation", test_session_generation;
      "failed refresh preserves evidence", test_failed_refresh;

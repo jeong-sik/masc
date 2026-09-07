@@ -78,9 +78,13 @@ let test_http_read_status_provenance () =
     (read_status { ready with load = Failed "connection refused" } = Read_failed)
 
 let test_operator_reader_context () =
+  expect "automation does not invent a browser brand"
+    (browser_label (switch_source Automation (create ())) = "browser");
+  expect "live Zen keeps the normalized server identity"
+    (browser_label (choose_client zen { (create ()) with clients = [zen] }) = "Zen");
   expect "browser context identifies source without keeper prerequisite"
     (context_label (switch_source Automation (create ())) =
-     "Browser Lane · automation · Firefox page reader");
+     "Browser Lane · automation · browser page reader");
   expect "browser context identifies live source"
     (context_label (pinned ()) = "Browser Lane · live · Firefox page reader")
 

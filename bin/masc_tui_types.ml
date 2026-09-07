@@ -2730,7 +2730,7 @@ type palette_mode =
     }
 
 (* Browser reads remain separate from connector routing. A request generation
-   belongs to this view instance, so late Firefox replies cannot replace a
+   belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Live | Automation
@@ -2764,7 +2764,7 @@ module Browser_lane_view = struct
     | Live, Some client -> Some client.client_id
     | Live, None | Automation, _ -> None
   let browser_label t = match t.source, t.selected_client with
-    | Automation, _ -> "Firefox"
+    | Automation, _ -> "browser"
     | Live, Some client -> browser_name client.browser
     | Live, None -> "choose browser"
   let context_label t =

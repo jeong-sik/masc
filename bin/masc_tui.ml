@@ -15626,12 +15626,12 @@ and is loaded on demand through keeper_skill.
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
-                     add_event state "system" "Select automation (a) to navigate its Firefox session"
+                     add_event state "system" "Select automation (a) to navigate its browser session"
                  | "o" | "x" when view.source = Automation ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)
                  | "o" | "x" ->
-                     add_event state "system" "Select automation (a) to open or close its Firefox session"
+                     add_event state "system" "Select automation (a) to open or close its browser session"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->
@@ -15644,7 +15644,7 @@ and is loaded on demand through keeper_skill.
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
               && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
            (* The child owns its keys. In particular b/u must never mutate a
-              hidden connector binding while Firefox content is on screen. *)
+              hidden connector binding while browser content is on screen. *)
            ()
        | Some ("j" | "down" | "k" | "up" as move)
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs

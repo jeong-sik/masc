@@ -1,7 +1,7 @@
 # Browser Lane in the TUI
 
 Open `:` → `go Browser Lane`, or press `B` from Connectors. Browser starts with
-live Firefox and lists its open tabs. Select any page by title and URL; websites
+a live Firefox or Zen connection and lists its open tabs. Select any page by title and URL; websites
 have no dedicated views or filters. The reader occupies the full content width
 and shows the source in its context row. Keeper panels and the composer return
 when leaving the reader.
@@ -15,7 +15,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 
 | Key | Action |
 | --- | --- |
-| `l` / `a` | Live / automation Firefox |
+| `l` / `a` | Live / automation browser |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
@@ -34,7 +34,7 @@ Reads happen on entry, source or tab selection, navigation, and explicit refresh
 
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.
-Navigation controls only the isolated automation session; live Firefox is read-only.
+Navigation controls only the isolated automation session; live browser access is read-only.
 
 Requests use the authenticated TUI HTTP client. Reading allows 45 seconds for
 the tab-list and page-read phases; automation startup and navigation allow 65.
@@ -70,7 +70,8 @@ Each live read and Ctrl-O screenshot pins that connection UUID. Switching browse
 clears the previous tab, text, and scroll before reading the new browser. A missing
 selected connection opens the chooser without silently rebinding to another browser,
 even when only one remains or both browsers use the same tab number. Select a
-connection explicitly to recover. Automation retains its separate Firefox session.
+connection explicitly to recover. Automation retains its separate browser session. Its label stays generic because
+the automation response does not report the browser brand.
 
 Validation: the production pure Browser state module was interpreted against 14
 fixtures, including equal tab IDs across clients, stale discovery, disconnected pins,

@@ -13598,9 +13598,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
         | Loading (_, Read) -> "Reading " ^ browser_label view ^ "…", Theme.info ()
-        | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
-        | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
-        | Loading (_, Goto _) -> "Navigating automation Firefox…", Theme.info ()
+        | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
+        | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
+        | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | Idle -> (match view.reading with
@@ -13608,7 +13608,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
                 reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
       in
-      (* The global coordinator status is not the result of the Firefox HTTP
+      (* The global coordinator status is not the result of the browser HTTP
          request. Keep it labeled, including the existing workspace warning. *)
       c.push_styled ~style ("  coordinator " ^ connection_badge state ^ "  " ^ status);
       match view.client_picker with
@@ -13631,7 +13631,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some draft -> browser_lane_url_line ~cols draft
          | None -> match view.source with
              | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
-             | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");
+             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

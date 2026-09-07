@@ -650,10 +650,21 @@ let index_of haystack needle =
   in
   walk 0
 
+(* A column label that is a prefix of another label matches the wrong column
+   and says nothing about it. "ST" is inside "STARTED", so after the Memory
+   table renamed STATE to ST (#33919) the Fusion case read the first column
+   as the state one and reported its offset as 0. A label occurs once in a
+   header row, so more than one occurrence is the question being asked
+   wrongly rather than an answer. *)
 let offset_of needle text =
   match index_of text needle with
-  | Some index -> index
   | None -> failf "%S is not in %S" needle text
+  | Some index ->
+    let rest = String.sub text (index + String.length needle)
+                 (String.length text - index - String.length needle) in
+    (match index_of rest needle with
+     | Some _ -> failf "%S appears more than once in %S" needle text
+     | None -> index)
 
 (* Offsets are asked in display cells, not bytes: the delta column is headed
    with a two-byte glyph that occupies one cell. *)
@@ -1166,7 +1177,11 @@ let test_fusion_columns_hold_their_offsets () =
     in
     check_left_cell "STARTED" "A" ~header ~row ~inner_width;
     check_right_cell "AGE" "B" ~header ~row ~inner_width;
-    check_left_cell "ST" "C" ~header ~row ~inner_width;
+    (* The Fusion table's state column is still headed STATE. Reading "ST"
+       here found it inside STARTED, the column beside it, and placed the
+       state cell at 0 -- see [offset_of], which now refuses a label that
+       appears twice. *)
+    check_left_cell "STATE" "C" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
     if columns.fcol_show_preset then
       check_left_cell "PRESET" "E" ~header ~row ~inner_width;

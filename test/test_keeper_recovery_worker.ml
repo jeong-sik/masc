@@ -188,9 +188,25 @@ let with_fixture f =
     | Ok snapshot -> snapshot
     | Error _ -> fail "source checkpoint unavailable"
   in
+  let referenced_body = "Actual stored Tool result: the source measurement was 37." in
+  let referenced =
+    Tool_blob_store.put_durable
+      (Tool_blob_store.create ~base_path)
+      ~bytes:referenced_body
+      ~mime:"text/plain"
+  in
   let source =
     save
-      ("한글 source marker " ^ String.make (2 * Keeper_artifact_read.maximum_max_bytes) 'x')
+      (Yojson.Safe.to_string
+         (`Assoc
+             [ ( "stored_output"
+               , `String
+                   (Tool_output.encode_for_agent_core (Tool_output.Stored referenced)) )
+             ; ( "notes"
+               , `String
+                   ("한글 source marker "
+                    ^ String.make (2 * Keeper_artifact_read.maximum_max_bytes) 'x') )
+             ]))
   in
   let current = ref source in
   let path =
@@ -250,7 +266,7 @@ streaming = false
     | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog is unavailable"
     | Error e -> fail (Runtime.strict_init_error_to_string e)
   in
-  f env sw config work source current path save configure
+  f env sw config work source current path save configure (referenced, referenced_body)
 ;;
 
 let run
@@ -312,229 +328,274 @@ let proposal sha protect =
 let reload config work = Work.load ~config ~id:(Work.id work) |> ok |> Option.get
 
 let test_one_worker_reads_pages_and_submits () =
-  with_fixture (fun env sw config work source current path _ configure ->
-    let canonical = Fs_compat.load_file path in
-    (* Begin inside the Korean codepoint, so the actual page handler must return
-     Base64. Then read from zero through the handler's exact next_offset. *)
-    let split_offset = String.index canonical '\237' + 1 in
-    let calls = ref 0
-    and produced_pages = ref [] in
-    let read offset =
-      incr calls;
-      tool_call
-        ("read-" ^ string_of_int !calls)
-        "keeper_artifact_read"
-        (`Assoc
-            [ "sha256", `String (Work.source_artifact_sha256 work)
-            ; "offset", `Int offset
-            ])
-    in
-    let respond request =
-      let messages = J.(request |> member "messages" |> to_list) in
-      let tool_messages =
-        List.filter (fun m -> J.member "role" m = `String "tool") messages
-      in
-      match List.rev tool_messages with
-      | [] -> read split_offset
-      | latest :: _ ->
-        let page =
-          J.(latest |> member "content" |> to_string |> Yojson.Safe.from_string)
-        in
-        produced_pages
-        := (J.(latest |> member "tool_call_id" |> to_string), page) :: !produced_pages;
-        if !calls = 1
-        then read 0
-        else if J.(page |> member "eof" |> to_bool)
-        then
-          tool_call
-            "proposal-exact"
-            "keeper_recovery_propose"
-            (proposal (Work.source_artifact_sha256 work) true)
-        else read J.(page |> member "next_offset" |> to_int)
-    in
-    let endpoint, requests = start_server ~sw ~net:env#net respond in
-    configure endpoint;
-    let wire = ref []
-    and observed = ref [] in
-    let outcome =
-      run
+  with_fixture
+    (fun
         env
-        sw
-        config
-        work
-        current
-        ~on_observation:(fun value -> observed := value :: !observed)
-        ~on_request_wire_observation:
-          (fun
-            ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
-          wire
-          := (runtime_id, max_request_body_bytes, body_bytes, Option.is_some serialized)
-             :: !wire)
-        ()
-    in
-    let submitted =
-      match outcome with
-      | Worker.Proposal_recorded s -> s
-      | Worker.Stopped s -> fail (Worker.cause_to_string s.cause)
-    in
-    (match submitted.execution with
-     | Ok _ -> ()
-     | Error e -> fail (Agent_core.Error.to_string e));
-    check
-      int
-      "no second formatting model call after terminal submission"
-      (!calls + 1)
-      (List.length !requests);
-    check int "one receipt per produced page" !calls (List.length submitted.reads);
-    check
-      int
-      "page and terminal observations are forwarded"
-      (!calls + 1)
-      (List.length !observed);
-    check
-      int
-      "existing final wire observer receives every model request"
-      (List.length !requests)
-      (List.length !wire);
-    List.iter
-      (fun (id, cap, bytes, serialized) ->
-         check string "actual configured runtime" "fixture.sample" id;
-         check (option int) "no invented cap" None cap;
-         check bool "exact serialized wire observed" true (bytes > 0 && serialized))
-      !wire;
-    List.iter
-      (fun (receipt : Worker.read_receipt) ->
-         let page = List.assoc receipt.tool_use_id !produced_pages in
-         check
-           string
-           "encoded content digest is exact"
-           (digest J.(page |> member "content" |> to_string))
-           receipt.returned_content_sha256;
-         check
-           int
-           "receipt preserves source byte offset"
-           J.(page |> member "offset" |> to_int)
-           receipt.offset;
-         check
-           int
-           "receipt preserves source next offset"
-           J.(page |> member "next_offset" |> to_int)
-           receipt.next_offset;
-         check
-           string
-           "page is the bound immutable source"
-           (Work.source_artifact_sha256 work)
-           receipt.source_sha256;
-         check
-           (option string)
-           "receipt runtime correlation"
-           (Some "fixture.sample")
-           receipt.runtime_id;
-         check
-           string
-           "encoding corresponds to the actual page"
-           (match receipt.encoding with
-            | Worker.Utf_8 -> "utf-8"
-            | Worker.Base64 -> "base64")
-           J.(page |> member "encoding" |> to_string))
-      submitted.reads;
-    check
-      bool
-      "mid-codepoint page is explicitly Base64"
-      true
-      (List.exists
-         (fun (r : Worker.read_receipt) ->
-            r.offset = split_offset && r.encoding = Worker.Base64)
-         submitted.reads);
-    let first_request = List.hd (List.rev !requests) in
-    let messages = J.(first_request |> member "messages" |> to_list) in
-    let manifest =
-      List.find (fun m -> J.member "role" m = `String "user") messages
-      |> J.member "content"
-      |> J.to_string
-      |> Yojson.Safe.from_string
-    in
-    let source_index =
-      Projection.index
-        ~source
-        ~required:
-          (List.concat_map
-             (fun (r : Worker.requirement_binding) -> r.positions)
-             requirements)
-      |> Result.get_ok
-    in
-    check
-      (list string)
-      "prompt contains manifest only, no canonical source field"
-      [ "atoms"
-      ; "pending_stimulus_ids"
-      ; "purpose"
-      ; "required_refs"
-      ; "source_bytes"
-      ; "source_sha256"
-      ; "source_watermark"
-      ; "work_id"
-      ]
-      (J.to_assoc manifest |> List.map fst |> List.sort String.compare);
-    check
-      string
-      "manifest carries the exact atom metadata"
-      (Yojson.Safe.to_string
-         (`List (List.map Projection.atom_to_yojson (Projection.atoms source_index))))
-      (Yojson.Safe.to_string (J.member "atoms" manifest));
-    (match Projection.segments submitted.validated with
-     | [ Projection.Original [ _ ]; Projection.Derived d ] ->
-       check int "closed Tool pair starts at original assistant" 1 d.first_message;
-       check int "closed Tool pair ends at original Tool result" 2 d.last_message
-     | _ -> fail "required original and whole Tool pair projection were not preserved");
-    let stored = reload config work in
-    Work.verify_artifacts config stored |> ok;
-    check
-      (list string)
-      "pending stimuli survive worker publication"
-      [ "stimulus-a"; "stimulus-b" ]
-      (Work.pending_stimulus_ids stored);
-    let body =
-      Tool_blob_store.fetch
-        (Tool_blob_store.create ~base_path:config.base_path)
-        ~sha256:submitted.receipt.proposal_artifact_sha256
-      |> Result.get_ok
-      |> Option.get
-      |> Yojson.Safe.from_string
-    in
-    check
-      string
-      "durable envelope owns exact terminal invocation"
-      "proposal-exact"
-      J.(body |> member "proposal_invocation" |> member "tool_use_id" |> to_string);
-    check
-      string
-      "durable envelope preserves actual page receipts"
-      (Yojson.Safe.to_string
-         (`List (List.map Worker.read_receipt_to_yojson submitted.reads)))
-      (Yojson.Safe.to_string (J.member "handler_page_receipts" body));
-    check
-      string
-      "canonical source bytes and Tool identity remain untouched"
-      canonical
-      (Fs_compat.load_file path);
-    fixture_evidence
-    := Some
-         (`Assoc
-             [ ( "scope"
-               , `String "actual local HTTP fixture; scripted peer, no external model" )
-             ; "canonical_sha256", `String (digest canonical)
-             ; "http_requests", `Int (List.length !requests)
-             ; ( "handler_page_receipts"
-               , `List (List.map Worker.read_receipt_to_yojson submitted.reads) )
-             ; "proposal_receipt", Worker.proposal_receipt_to_yojson submitted.receipt
-             ; "application", `String "not performed"
-             ; "partial_restart", `String "not performed"
-             ]))
+         sw
+         config
+         work
+         source
+         current
+         path
+         _
+         configure
+         (referenced, referenced_body)
+       ->
+       let canonical = Fs_compat.load_file path in
+       (* Begin inside the Korean codepoint, so the actual page handler must return
+     Base64. Then read from zero through the handler's exact next_offset. *)
+       let split_offset = String.index canonical '\237' + 1 in
+       let calls = ref 0
+       and produced_pages = ref [] in
+       let read ?(sha256 = Work.source_artifact_sha256 work) offset =
+         incr calls;
+         tool_call
+           ("read-" ^ string_of_int !calls)
+           "keeper_artifact_read"
+           (`Assoc [ "sha256", `String sha256; "offset", `Int offset ])
+       in
+       let respond request =
+         let messages = J.(request |> member "messages" |> to_list) in
+         let tool_messages =
+           List.filter (fun m -> J.member "role" m = `String "tool") messages
+         in
+         match List.rev tool_messages with
+         | [] -> read split_offset
+         | latest :: _ ->
+           let page =
+             J.(latest |> member "content" |> to_string |> Yojson.Safe.from_string)
+           in
+           produced_pages
+           := (J.(latest |> member "tool_call_id" |> to_string), page) :: !produced_pages;
+           if !calls = 1
+           then read 0
+           else if
+             J.(page |> member "eof" |> to_bool)
+             && J.member "sha256" page = `String (Work.source_artifact_sha256 work)
+           then read ~sha256:referenced.Tool_output.sha256 0
+           else if J.(page |> member "eof" |> to_bool)
+           then
+             tool_call
+               "proposal-exact"
+               "keeper_recovery_propose"
+               (proposal (Work.source_artifact_sha256 work) true)
+           else read J.(page |> member "next_offset" |> to_int)
+       in
+       let endpoint, requests = start_server ~sw ~net:env#net respond in
+       configure endpoint;
+       let wire = ref []
+       and observed = ref [] in
+       let outcome =
+         run
+           env
+           sw
+           config
+           work
+           current
+           ~on_observation:(fun value -> observed := value :: !observed)
+           ~on_request_wire_observation:
+             (fun
+               ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
+             wire
+             := (runtime_id, max_request_body_bytes, body_bytes, Option.is_some serialized)
+                :: !wire)
+           ()
+       in
+       let submitted =
+         match outcome with
+         | Worker.Proposal_recorded s -> s
+         | Worker.Stopped s -> fail (Worker.cause_to_string s.cause)
+       in
+       (match submitted.execution with
+        | Ok _ -> ()
+        | Error e -> fail (Agent_core.Error.to_string e));
+       check
+         int
+         "no second formatting model call after terminal submission"
+         (!calls + 1)
+         (List.length !requests);
+       check int "one receipt per produced page" !calls (List.length submitted.reads);
+       check
+         int
+         "page and terminal observations are forwarded"
+         (!calls + 1)
+         (List.length !observed);
+       check
+         int
+         "existing final wire observer receives every model request"
+         (List.length !requests)
+         (List.length !wire);
+       List.iter
+         (fun (id, cap, bytes, serialized) ->
+            check string "actual configured runtime" "fixture.sample" id;
+            check (option int) "no invented cap" None cap;
+            check bool "exact serialized wire observed" true (bytes > 0 && serialized))
+         !wire;
+       List.iter
+         (fun (receipt : Worker.read_receipt) ->
+            let page = List.assoc receipt.tool_use_id !produced_pages in
+            check
+              string
+              "encoded content digest is exact"
+              (digest J.(page |> member "content" |> to_string))
+              receipt.returned_content_sha256;
+            check
+              int
+              "receipt preserves source byte offset"
+              J.(page |> member "offset" |> to_int)
+              receipt.offset;
+            check
+              int
+              "receipt preserves source next offset"
+              J.(page |> member "next_offset" |> to_int)
+              receipt.next_offset;
+            check
+              string
+              "receipt retains recovery's immutable source binding"
+              (Work.source_artifact_sha256 work)
+              receipt.recovery_source_sha256;
+            check
+              string
+              "receipt identifies the actual artifact read"
+              J.(page |> member "sha256" |> to_string)
+              receipt.artifact_sha256;
+            check
+              (option string)
+              "receipt runtime correlation"
+              (Some "fixture.sample")
+              receipt.runtime_id;
+            check
+              string
+              "encoding corresponds to the actual page"
+              (match receipt.encoding with
+               | Worker.Utf_8 -> "utf-8"
+               | Worker.Base64 -> "base64")
+              J.(page |> member "encoding" |> to_string))
+         submitted.reads;
+       check
+         bool
+         "mid-codepoint page is explicitly Base64"
+         true
+         (List.exists
+            (fun (r : Worker.read_receipt) ->
+               r.offset = split_offset && r.encoding = Worker.Base64)
+            submitted.reads);
+       let reference_receipt =
+         List.find
+           (fun (r : Worker.read_receipt) ->
+              r.artifact_sha256 = referenced.Tool_output.sha256)
+           submitted.reads
+       in
+       let reference_page = List.assoc reference_receipt.tool_use_id !produced_pages in
+       check
+         string
+         "the referenced stored Tool result is actually read"
+         referenced_body
+         J.(reference_page |> member "content" |> to_string);
+       (match Checkpoint.exact_snapshot_messages source with
+        | [ _
+          ; _
+          ; { Agent_core.Types.content = [ Agent_core.Types.ToolResult result ]; _ }
+          ] ->
+          check
+            string
+            "canonical source actually contains the stored artifact reference"
+            (Tool_output.encode_for_agent_core (Tool_output.Stored referenced))
+            J.(
+              Yojson.Safe.from_string result.content
+              |> member "stored_output"
+              |> to_string)
+        | _ -> fail "canonical Tool pair shape changed");
+       let first_request = List.hd (List.rev !requests) in
+       let messages = J.(first_request |> member "messages" |> to_list) in
+       let manifest =
+         List.find (fun m -> J.member "role" m = `String "user") messages
+         |> J.member "content"
+         |> J.to_string
+         |> Yojson.Safe.from_string
+       in
+       let source_index =
+         Projection.index
+           ~source
+           ~required:
+             (List.concat_map
+                (fun (r : Worker.requirement_binding) -> r.positions)
+                requirements)
+         |> Result.get_ok
+       in
+       check
+         (list string)
+         "prompt contains manifest only, no canonical source field"
+         [ "atoms"
+         ; "pending_stimulus_ids"
+         ; "purpose"
+         ; "required_refs"
+         ; "source_bytes"
+         ; "source_sha256"
+         ; "source_watermark"
+         ; "work_id"
+         ]
+         (J.to_assoc manifest |> List.map fst |> List.sort String.compare);
+       check
+         string
+         "manifest carries the exact atom metadata"
+         (Yojson.Safe.to_string
+            (`List (List.map Projection.atom_to_yojson (Projection.atoms source_index))))
+         (Yojson.Safe.to_string (J.member "atoms" manifest));
+       (match Projection.segments submitted.validated with
+        | [ Projection.Original [ _ ]; Projection.Derived d ] ->
+          check int "closed Tool pair starts at original assistant" 1 d.first_message;
+          check int "closed Tool pair ends at original Tool result" 2 d.last_message
+        | _ -> fail "required original and whole Tool pair projection were not preserved");
+       let stored = reload config work in
+       Work.verify_artifacts config stored |> ok;
+       check
+         (list string)
+         "pending stimuli survive worker publication"
+         [ "stimulus-a"; "stimulus-b" ]
+         (Work.pending_stimulus_ids stored);
+       let body =
+         Tool_blob_store.fetch
+           (Tool_blob_store.create ~base_path:config.base_path)
+           ~sha256:submitted.receipt.proposal_artifact_sha256
+         |> Result.get_ok
+         |> Option.get
+         |> Yojson.Safe.from_string
+       in
+       check
+         string
+         "durable envelope owns exact terminal invocation"
+         "proposal-exact"
+         J.(body |> member "proposal_invocation" |> member "tool_use_id" |> to_string);
+       check
+         string
+         "durable envelope preserves actual page receipts"
+         (Yojson.Safe.to_string
+            (`List (List.map Worker.read_receipt_to_yojson submitted.reads)))
+         (Yojson.Safe.to_string (J.member "handler_page_receipts" body));
+       check
+         string
+         "canonical source bytes and Tool identity remain untouched"
+         canonical
+         (Fs_compat.load_file path);
+       fixture_evidence
+       := Some
+            (`Assoc
+                [ ( "scope"
+                  , `String "actual local HTTP fixture; scripted peer, no external model"
+                  )
+                ; "canonical_sha256", `String (digest canonical)
+                ; "http_requests", `Int (List.length !requests)
+                ; ( "handler_page_receipts"
+                  , `List (List.map Worker.read_receipt_to_yojson submitted.reads) )
+                ; "proposal_receipt", Worker.proposal_receipt_to_yojson submitted.receipt
+                ; "application", `String "not performed"
+                ; "partial_restart", `String "not performed"
+                ]))
 ;;
 
 let test_proposal_cannot_publish_against_changed_source () =
-  with_fixture (fun env sw config work _ current path save configure ->
+  with_fixture (fun env sw config work _ current path save configure _ ->
     let endpoint, requests =
       start_server ~sw ~net:env#net (fun _ ->
         current := save "new canonical bytes";
@@ -561,7 +622,7 @@ let test_proposal_cannot_publish_against_changed_source () =
 ;;
 
 let test_required_original_cannot_be_summarized () =
-  with_fixture (fun env sw config work _ current _ _ configure ->
+  with_fixture (fun env sw config work _ current _ _ configure _ ->
     let endpoint, _ =
       start_server ~sw ~net:env#net (fun _ ->
         tool_call
@@ -581,7 +642,7 @@ let test_required_original_cannot_be_summarized () =
 ;;
 
 let test_source_io_failure_settles_claim () =
-  with_fixture (fun env sw config work _ current path _ _ ->
+  with_fixture (fun env sw config work _ current path _ _ _ ->
     let before = Fs_compat.load_file path in
     (match
        run
@@ -611,7 +672,7 @@ let test_source_io_failure_settles_claim () =
 ;;
 
 let test_published_proposal_survives_observer_failure () =
-  with_fixture (fun env sw config work _ current path _ configure ->
+  with_fixture (fun env sw config work _ current path _ configure _ ->
     let before = Fs_compat.load_file path in
     let endpoint, requests =
       start_server ~sw ~net:env#net (fun _ ->

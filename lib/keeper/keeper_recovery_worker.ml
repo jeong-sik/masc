@@ -19,7 +19,8 @@ type read_receipt =
   ; turn : int
   ; planned_index : int
   ; runtime_id : string option
-  ; source_sha256 : string
+  ; recovery_source_sha256 : string
+  ; artifact_sha256 : string
   ; offset : int
   ; next_offset : int
   ; total_bytes : int
@@ -371,43 +372,29 @@ let run
                match invocation env with
                | Error cause -> tool_failure artifact_schema.name start cause
                | Ok i ->
-                 let supplied_sha =
-                   match args with
-                   | `Assoc fields -> List.assoc_opt "sha256" fields
-                   | _ -> None
+                 let execution, page =
+                   Keeper_artifact_read.handle_with_page ~base_path:config.base_path ~args
                  in
-                 if supplied_sha <> Some (`String (Work.source_artifact_sha256 work))
-                 then
-                   tool_failure
-                     artifact_schema.name
-                     start
-                     (Invalid_submission
-                        "read must address this work's exact source artifact")
-                 else (
-                   let execution, page =
-                     Keeper_artifact_read.handle_with_page
-                       ~base_path:config.base_path
-                       ~args
-                   in
-                   Option.iter
-                     (fun (page : Keeper_artifact_read.page) ->
-                        let receipt =
-                          { tool_use_id = Invocation.tool_use_id i
-                          ; turn = Invocation.turn i
-                          ; planned_index = Invocation.planned_index i
-                          ; runtime_id = Atomic.get current_runtime
-                          ; source_sha256 = page.sha256
-                          ; offset = page.offset
-                          ; next_offset = page.next_offset
-                          ; total_bytes = page.total_bytes
-                          ; encoding = page.encoding
-                          ; returned_content_sha256 = digest page.content
-                          }
-                        in
-                        append_atomic observed_reads receipt;
-                        on_observation (Page_produced receipt))
-                     page;
-                   execution_result artifact_schema.name start execution))
+                 Option.iter
+                   (fun (page : Keeper_artifact_read.page) ->
+                      let receipt =
+                        { tool_use_id = Invocation.tool_use_id i
+                        ; turn = Invocation.turn i
+                        ; planned_index = Invocation.planned_index i
+                        ; runtime_id = Atomic.get current_runtime
+                        ; recovery_source_sha256 = Work.source_artifact_sha256 work
+                        ; artifact_sha256 = page.sha256
+                        ; offset = page.offset
+                        ; next_offset = page.next_offset
+                        ; total_bytes = page.total_bytes
+                        ; encoding = page.encoding
+                        ; returned_content_sha256 = digest page.content
+                        }
+                      in
+                      append_atomic observed_reads receipt;
+                      on_observation (Page_produced receipt))
+                   page;
+                 execution_result artifact_schema.name start execution)
         in
         let proposal_tool =
           Tool_bridge.agent_core_tool_of_masc_with_execution_env
@@ -531,10 +518,11 @@ let run
             ~base_path:config.base_path
             ~session_id:("recovery-" ^ Work.owner_claim_id owner)
             ~system_prompt:
-              "Read the bound canonical source with keeper_artifact_read as needed; \
-               pages are not a proof of understanding. Produce a faithful source-bound \
-               transmission proposal with keeper_recovery_propose. Keep all required and \
-               pending atoms original. Never claim the original Keeper task is complete."
+              "Read the canonical source and its referenced artifacts with \
+               keeper_artifact_read as needed; pages are not a proof of understanding. \
+               Produce a faithful source-bound transmission proposal with \
+               keeper_recovery_propose. Keep all required and pending atoms original. \
+               Never claim the original Keeper task is complete."
             ~goal:(Yojson.Safe.to_string manifest)
             ~tools
             ~agent_core_tools:tools

@@ -17,13 +17,16 @@ type page_encoding = Keeper_artifact_read.page_encoding =
 
 (** Successful handler-page production, not provider receipt, whole-source
     coverage, semantic understanding, or a partial-work restart checkpoint. The content
-    digest hashes the returned encoded content, not an implicitly decoded slice. *)
+    digest hashes the returned encoded content, not an implicitly decoded slice.
+    [recovery_source_sha256] binds this work's canonical source; [artifact_sha256]
+    identifies the actual page, which may be a referenced stored Tool result. *)
 type read_receipt =
   { tool_use_id : string
   ; turn : int
   ; planned_index : int
   ; runtime_id : string option
-  ; source_sha256 : string
+  ; recovery_source_sha256 : string
+  ; artifact_sha256 : string
   ; offset : int
   ; next_offset : int
   ; total_bytes : int
@@ -92,7 +95,8 @@ type outcome =
     The initial prompt carries purpose, source/requirement refs and atom
     manifest, never canonical bytes. A manifest too large for the chosen
     runtime remains a typed runtime failure; no numeric truncation is imposed.
-    Only the bound source artifact is offered by this worker's read Tool.
+    The existing workspace artifact reader remains available for stored Tool
+    results referenced by the canonical source. No additional SHA allowlist is imposed.
 
     Existing trace/event/wire callbacks pass through to the named runtime; page
     observations do not replace its model usage and Tool I/O evidence. Expected

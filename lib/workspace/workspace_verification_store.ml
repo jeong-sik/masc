@@ -16,6 +16,8 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
+type artifact_read_result = (string * int * bool, evidence_read_failure) result
+
 type submitted_evidence_item =
   | Evidence_note of string
   | Evidence_artifact of
@@ -760,10 +762,26 @@ let valid_producer_relative_path path =
    judge's call, and [verification.lookup.producer_tree] already tells it to
    make that call. *)
 
-let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
+(* The reader is injected because where an artifact lives depends on the
+   producer's sandbox profile, and that policy sits above this library: a
+   Docker keeper's files sit on the host playground this code can reach, while
+   a microvm/remote-ssh keeper's files sit inside the guest's work volume,
+   which only the sandbox backend can read. Without a reader the direct host
+   read stands (tests, host-profile keepers); with one, every artifact read --
+   snapshot and size pre-check alike -- goes through it, so the two can never
+   disagree about where a file is. *)
+let inspect_producer_relative_artifact ?artifact_read ~base_path ~worker ~reference
+    relative_path =
   if not (valid_producer_relative_path relative_path)
   then Evidence_invalid_reference
   else
+    match artifact_read with
+    | Some read -> (
+        match read ~worker ~relative:relative_path with
+        | Ok (content, bytes, truncated) ->
+            Evidence_artifact { reference; content; bytes; truncated }
+        | Error reason -> Evidence_artifact_unreadable { reference; reason })
+    | None -> (
     let project_root = project_root_of_base_path base_path in
     let ownership_root =
       Keeper_sandbox_config.host_root_abs_of_agent
@@ -782,12 +800,13 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     | Error (Evidence_symbolic_link as reason)
     | Error (Evidence_changed_during_read as reason)
     | Error (Evidence_read_error _ as reason) ->
-      Evidence_artifact_unreadable { reference; reason }
+      Evidence_artifact_unreadable { reference; reason } )
 
-let snapshot_submitted_evidence_item ~base_path ~worker reference =
+let snapshot_submitted_evidence_item ?artifact_read ~base_path ~worker reference =
   match classify_evidence_reference reference with
   | Artifact_reference relative_path ->
     inspect_producer_relative_artifact
+      ?artifact_read
       ~base_path
       ~worker
       ~reference
@@ -805,12 +824,18 @@ let snapshot_submitted_evidence_item ~base_path ~worker reference =
    business: the snapshot layer reports those as typed unreadable reasons, and
    duplicating that taxonomy here would drift. [None] means "no artifact
    reference / not measurable here", which callers treat as pass-through. *)
-let artifact_reference_size ~base_path ~worker reference =
+let artifact_reference_size ?artifact_read ~base_path ~worker reference =
   match classify_evidence_reference reference with
   | Artifact_reference relative_path ->
     if not (valid_producer_relative_path relative_path)
     then None
     else
+      (match artifact_read with
+       | Some read -> (
+           match read ~worker ~relative:relative_path with
+           | Ok (_content, bytes, _truncated) -> Some bytes
+           | Error _ -> None)
+       | None ->
       let project_root = project_root_of_base_path base_path in
       let ownership_root =
         Keeper_sandbox_config.host_root_abs_of_agent
@@ -826,14 +851,14 @@ let artifact_reference_size ~base_path ~worker reference =
            target
        with
        | Ok (Some prefix) -> Some prefix.file_size
-       | Ok None | Error _ -> None)
+       | Ok None | Error _ -> None))
   | Note_reference _ | Unresolvable_reference -> None
 
-let snapshot_submitted_evidence_json ~base_path ~worker references =
+let snapshot_submitted_evidence_json ?artifact_read ~base_path ~worker references =
   `List
     (List.map
        (fun reference ->
-         snapshot_submitted_evidence_item ~base_path ~worker reference
+         snapshot_submitted_evidence_item ?artifact_read ~base_path ~worker reference
          |> submitted_evidence_item_to_yojson)
        references)
 

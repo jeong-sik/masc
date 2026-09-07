@@ -98,6 +98,14 @@ type keeper_turn_complete = {
     the same call from the runtime's side, named by lane. *)
 type keeper_tool_call = {
   kt_keeper : string;
+  kt_turn : int option;
+      (** The turn the call ran in, on the same plane the agent-core wire
+          numbers turns -- measured 2026-09-07 over a live observer capture,
+          [keeper_tool_call.turn] equalled [keeper_turn_observation.turn] for
+          all eight keepers that ran, and differed from the settle's own
+          number ([keeper_turn_complete.turn]), which counts the keeper's
+          lifetime. [None] for a call the server reported without an
+          invocation. *)
   kt_tool : string;
   kt_duration_ms : float option;
   kt_disposition : string option;  (** [completed], as the server writes it *)

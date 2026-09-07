@@ -32,7 +32,7 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
 
 let user ?turn_sequence ?operation_seq ~request_id text at =
   row ?turn_sequence ?operation_seq ~request_id
-    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
     ~phase:Tui_types.Turn_input ~text at
 ;;
 
@@ -239,7 +239,7 @@ let check_edges label expected rows =
 let test_a_turn_opens_once_and_closes_once () =
   check_edges "three rows of one request"
     [ "opens"; "continues"; "closes" ]
-    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
         ~phase:Tui_types.Turn_input ~text:"go" 1.
     ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
         ~text:"read" 2.
@@ -262,7 +262,10 @@ let test_a_broadcast_belongs_to_no_turn () =
     [ "alone"; "outside"; "alone" ]
     [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
         ~text:"first" 1.
-    ; row ~role:(Tui_types.Message_user (Tui_types.Sent_by_other "alder"))
+    ; row
+        ~role:
+          (Tui_types.Message_user
+             (Tui_types.Sent_by_other { speaker = "alder"; surface = None }))
         ~phase:Tui_types.Turn_input ~text:"main is red" 2.
     ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
         ~text:"second" 3.
@@ -288,9 +291,12 @@ let test_a_journal_commit_belongs_to_no_turn () =
 let test_an_interrupted_turn_still_opens_once () =
   check_edges "a broadcast inside a turn"
     [ "opens"; "outside"; "continues"; "closes" ]
-    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator "you"))
+    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
         ~phase:Tui_types.Turn_input ~text:"go" 1.
-    ; row ~role:(Tui_types.Message_user (Tui_types.Sent_by_other "alder"))
+    ; row
+        ~role:
+          (Tui_types.Message_user
+             (Tui_types.Sent_by_other { speaker = "alder"; surface = None }))
         ~phase:Tui_types.Turn_input ~text:"main is red" 2.
     ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
         ~text:"read" 3.

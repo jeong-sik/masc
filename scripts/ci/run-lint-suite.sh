@@ -109,6 +109,7 @@ blocking_lints() {
   run_lint "Provider name hardcoding ratchet" bash scripts/lint/no-provider-name-hardcoding.sh --fail
   run_lint "Keeper behavior hardcoding" bash scripts/lint/no-keeper-behavior-hardcoding.sh
   run_lint "Eval tool-selector runtime import" bash scripts/lint/no-eval-tool-selector-runtime-import.sh
+  run_lint "One process manager in lib" bash scripts/lint/one-process-manager.sh
   run_lint "Legacy tool surface name" bash scripts/lint/no-legacy-tool-surface-name.sh --fail
   run_lint "Retired tool husk ratchet" bash scripts/lint/no-retired-tool-husks.sh --fail
   run_lint "Synthetic tool-call residue ratchet" bash scripts/lint/no-synthetic-tool-call-residue.sh --fail
@@ -152,6 +153,15 @@ blocking_pr_lints() {
   # the count drifted to 32 and back to 0 without anyone seeing either move.
   # Blocking at 0 keeps the next one from landing unnoticed.
   run_lint "Cancel guard on wildcard catches" bash scripts/lint-cancel-guard.sh
+  # A match whose every arm is a bare wildcard computes its scrutinee and
+  # throws it away, while reading as if it told two cases apart. Four were in
+  # the tree on 2026-09-06 and two of them sat on a real classifier, so the
+  # next reader kept looking for a distinction that was not there. Blocking at
+  # zero is what stops the fifth.
+  run_self_test_when_changed "Wildcard-only match self-test" \
+    scripts/ci/check-wildcard-only-match.py \
+    python3 scripts/ci/test_check_wildcard_only_match.py
+  run_lint "Wildcard-only match" python3 scripts/ci/check-wildcard-only-match.py
 }
 
 advisory_lints() {

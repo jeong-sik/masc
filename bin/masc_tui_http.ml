@@ -3,20 +3,26 @@
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 
 (* A request, a mailbox wait or a loop gap at least this long is written to
-   the TUI log with two clocks (RFC-0429 §3.0): wall time and process CPU
-   time. A request that took ten seconds of wall and none of CPU was waiting
-   on something; the cadence's routine polls stay under this and out of the
-   log. This is measurement, not a fix: the stall it exists to place has
-   not been placed yet. *)
-let slow_report_sec = 1.0
+   the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
+   time. A request that took ten seconds of elapsed and none of CPU was
+   waiting on something; the cadence's routine polls stay under this and out
+   of the log. This is measurement, not a fix: the stall it exists to place
+   has not been placed yet.
+
+   Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. The stall
+   being chased is around ten seconds, and a wall clock corrected by that
+   much would either invent it or hide it — the one thing this log must not
+   do. [Masc_tui_esc_interrupt] takes the same clock for the same reason. *)
+let slow_report_ns = 1_000_000_000L
+let ms_of_ns ns = Int64.to_float ns /. 1e6
 
 let timed ~verb ~path (run : unit -> (int * string, string) result) =
-  let started_wall = Unix.gettimeofday () and started_cpu = Sys.time () in
+  let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
-  let wall = Unix.gettimeofday () -. started_wall in
-  if wall >= slow_report_sec then
-    Log.Transport.info "http %s %s took %.0f ms wall, %.0f ms cpu: %s" verb path
-      (wall *. 1000.)
+  let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
+  if Int64.compare elapsed_ns slow_report_ns >= 0 then
+    Log.Transport.info "http %s %s took %.0f ms elapsed, %.0f ms cpu: %s" verb
+      path (ms_of_ns elapsed_ns)
       ((Sys.time () -. started_cpu) *. 1000.)
       (match result with
        | Ok (status, _) -> Printf.sprintf "status %d" status

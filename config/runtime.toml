@@ -493,7 +493,8 @@ supports-structured-output = false
 # Mirrors the AGENT_CORE catalog window. Kept in step by the
 # repo-runtime-toml-declares-no-clamped-max-context gate: a value above the
 # catalog's is clamped away and only reads as authoritative (#28738).
-max-context = 1000000
+# 2026-09-07 /api/show: 1048576. 1000000 은 십진 어림값이다.
+max-context = 1048576
 api-name = "deepseek-v4-flash"
 tools-support = true
 thinking-support = true
@@ -727,7 +728,8 @@ max-request-body-bytes = 524288
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
 api-name = "minimax-m3"
-max-context = 524288
+# 2026-09-07 /api/show: 512000. 524288 은 512x1024 — 십진 512K 를 이진으로 읽었다. 설정이 모델보다 크다고 믿는 쪽이라, 그 사이 크기의 턴은 만들어진 뒤 거절된다.
+max-context = 512000
 tools-support = true
 thinking-support = true
 streaming = true
@@ -853,7 +855,8 @@ max-tokens = 16384
 
 [models.ollama-cloud-deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
-max-context = 524288
+# 2026-09-07 /api/show: 1048576. 524288 은 max-request-body-bytes 의 공통 기본값이다. 실제의 절반만 쓰고 있었다.
+max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
@@ -911,7 +914,8 @@ max-request-body-bytes = 524288
 
 [models.ollama-cloud-glm-5-2]
 api-name = "glm-5.2"
-max-context = 1000000
+# 2026-09-07 /api/show: 1048576. 1000000 은 십진 어림값이다.
+max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1099,7 +1103,8 @@ max-request-body-bytes = 524288
 
 [models.ollama-cloud-minimax-m3]
 api-name = "minimax-m3"
-max-context = 524288
+# 2026-09-07 /api/show: 512000. 524288 은 512x1024 — 십진 512K 를 이진으로 읽었다. 설정이 모델보다 크다고 믿는 쪽이다.
+max-context = 512000
 tools-support = true
 thinking-support = true
 streaming = true

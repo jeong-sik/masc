@@ -30,6 +30,8 @@ let global =
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+  ; b Meta "&"
+      "the MSX screen: the emulator core over the whole terminal (esc: back)"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \
@@ -133,7 +135,7 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
-      ; b Act "Ctrl-N" "memory detail"
+      ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
              so a help promising "full detail" sends a reader looking for a
@@ -672,9 +674,6 @@ let footer_hints_memory_facts =
      ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
      ]
      @ listing_meta)
-
-let footer_hints_metrics =
-  hints_of_bindings (for_surface Metrics)
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)

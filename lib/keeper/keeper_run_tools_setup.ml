@@ -291,7 +291,14 @@ let seed_tool_calls_from_history
    body to [] is exactly the pre-fix behavior. *)
 let initial_tool_calls ~(history_messages : Agent_core.Types.message list) :
     Keeper_agent_result.tool_call_detail list =
-  seed_tool_calls_from_history ~history_messages
+  (* Serialising and hashing every tool call in the history is pure, so the
+     pool does it. The walk is over the whole history, which measured
+     1,278,158 B above, and it runs once per turn between the raw-trace
+     append and [Keeper_identity_tools.for_turn]: the 2026-09-06 20:29 KST
+     trace shows that stretch as the longest run left on the main domain,
+     55-222 ms across five Keepers. *)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    seed_tool_calls_from_history ~history_messages)
 ;;
 
 let prepare_agent_setup

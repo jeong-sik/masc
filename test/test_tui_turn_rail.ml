@@ -23,6 +23,7 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
   ; body
   ; markdown_source = Layout.Markdown_streaming
   ; turn_rail
+  ; action = Layout.Action_none
   }
 ;;
 
@@ -51,6 +52,20 @@ let test_every_piece_is_one_cell () =
     (fun rail ->
       check int "one cell" 1
         (Layout.display_width (Layout.turn_rail_glyph rail)))
+    every_rail
+;;
+
+(* The budget is what the layout subtracts from the body, so the margin has
+   to spend all of it. Measuring the widths against each other only says they
+   agree; it does not say they agree with [turn_rail_cells]. They did not: the
+   gutter drew three lead cells and one glyph and stopped, and the cell the
+   budget keeps between the glyph and the clock was taken by the label's first
+   character instead. *)
+let test_the_gutter_spends_its_whole_budget () =
+  List.iter
+    (fun rail ->
+      check int "the gutter is the budget wide" Layout.turn_rail_cells
+        (Layout.display_width (Layout.turn_rail_gutter rail)))
     every_rail
 ;;
 
@@ -277,12 +292,82 @@ let test_the_rail_does_not_eat_the_badge () =
     every_rail
 ;;
 
+(* The fold marker sits at the end of the first row, so that is the row a
+   press has to land on. A continuation carrying the action would take a press
+   that opens something the reader cannot see the handle for. *)
+let test_only_the_first_row_carries_the_action () =
+  let rows =
+    body_rows ~inner_width:40
+      { (entry ~turn_rail:Layout.Rail_says (String.make 200 'x')) with
+        Layout.action = Layout.Action_unfold_argument
+      }
+  in
+  match rows with
+  | [] -> failwith "no body row"
+  | first :: rest ->
+      check bool "the first row is pressable" true
+        (first.Layout.action = Layout.Action_unfold_argument);
+      List.iter
+        (fun (row : Layout.row) ->
+          check bool "and no continuation is" true
+            (row.Layout.action = Layout.Action_none))
+        rest
+;;
+
+(* Which of the rail's two ordinary pieces a row takes is decided by what the
+   row is, not by how many rows its turn had. Reading [Layout.all_styles]
+   rather than a list of its own: a style added without a decision here would
+   otherwise be silently sorted with the speech. *)
+let test_work_and_speech_split_the_same_way_for_every_style () =
+  let work, speech =
+    List.partition
+      (fun style ->
+        Layout.rail_for_style ~work:Layout.Rail_does ~speech:Layout.Rail_says
+          style
+        = Layout.Rail_does)
+      Layout.all_styles
+  in
+  check (list bool) "reasoning, tools and skills are the turn's work"
+    [ true; true; true; true; true; true ]
+    (* [mem], not [memq]: a [Skill] tone is a block, and the ones written here
+       are not the ones the list holds. *)
+    (List.map (fun style -> List.mem style work)
+       [ Layout.Tool
+       ; Layout.Thinking
+       ; Layout.Skill Layout.Skill_live
+       ; Layout.Skill Layout.Skill_used
+       ; Layout.Skill Layout.Skill_attention
+       ; Layout.Skill Layout.Skill_failure
+       ]);
+  check int "and everything else is what the turn says" 7 (List.length speech)
+;;
+
+(* A lone row of work still hangs off its turn. This is the arm the pane lost
+   when an autonomous turn stopped writing an empty reply beside its calls:
+   with two rows the turn drew a bracket, with one it drew nothing at all. *)
+let test_a_lone_row_keeps_work_and_drops_speech () =
+  check bool "a lone tool block is still work" true
+    (Layout.rail_for_style ~work:Layout.Rail_does ~speech:Layout.Rail_none
+       Layout.Tool
+     = Layout.Rail_does);
+  check bool "a lone utterance draws nothing" true
+    (Layout.rail_for_style ~work:Layout.Rail_does ~speech:Layout.Rail_none
+       Layout.Keeper
+     = Layout.Rail_none)
+;;
+
 let () =
   run "tui turn rail"
     [ ( "glyphs"
       , [ test_case "every piece is one cell" `Quick test_every_piece_is_one_cell
+        ; test_case "the gutter spends its whole budget" `Quick
+            test_the_gutter_spends_its_whole_budget
         ; test_case "the drawn pieces are distinct" `Quick
             test_the_drawn_pieces_are_distinct
+        ; test_case "work and speech split the same way for every style" `Quick
+            test_work_and_speech_split_the_same_way_for_every_style
+        ; test_case "a lone row keeps work and drops speech" `Quick
+            test_a_lone_row_keeps_work_and_drops_speech
         ] )
     ; ( "geometry"
       , [ test_case "the rail costs the same whatever it draws" `Quick
@@ -305,6 +390,8 @@ let () =
             test_the_siding_runs_tell_the_kinds_apart
         ; test_case "a wrapped arrival joins once" `Quick
             test_a_wrapped_arrival_joins_once_and_never_joins_the_turn
+        ; test_case "only the first row carries the action" `Quick
+            test_only_the_first_row_carries_the_action
         ; test_case "work branches once and then carries the turn" `Quick
             test_work_branches_once_and_then_carries_the_turn
         ] )

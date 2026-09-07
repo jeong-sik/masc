@@ -87,9 +87,10 @@ type kind =
       }
   | Said_by_keeper
   | Autonomous_reply
-      (** What an autonomous turn said after its trace. A blank reply remains
-          a row, but callers can mark it instead of drawing an empty keeper
-          message. *)
+      (** What an autonomous turn said after its trace. Always something: a
+          turn that wrote nothing produces no row at all, because nobody asked
+          it to speak and an empty line said less than the header already
+          does. A direct turn's blank reply is still a row. *)
   | Delivery_failed of
       { origin_request_id : string option
       ; recovered_at : float option
@@ -210,15 +211,15 @@ type decoded =
   ; dropped : int
       (** Rows the decoder could not read. Reported rather than inferred from
           the list's length: folding tool blocks shortens the list for reasons
-          that are not losses. *)
+          that are not losses, and so does an entry that was read and draws
+          nothing -- an autonomous wake that produced neither speech nor work
+          is not a row anyone lost. *)
   }
 
-val addressed_label : speaker -> Surface.t option -> string
-(** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
-    row is ["you"], the way it always read. A named author is drawn, and a
-    surface that is not an operator's own is appended — ["<keeper> · agent"],
-    ["<operator> · slack"] — so a fleet broadcast and a direct message do not
-    look alike. *)
+val addressed_label_parts : speaker -> Surface.t option -> string * string option
+(** The speaker and the surface they came in by, apart. The speaker column
+    cannot hold both, and cutting them as one string keeps the surface and
+    loses the name; whoever knows the column decides which to draw. *)
 
 (** One page of rows older than a cursor, from
     [GET /keepers/<name>/chat/history/page?before=<ts>].

@@ -95,6 +95,7 @@ let test_replaced_queue_recomputes_and_identical_inflight_does_not () =
     ; keeper_name
     ; message = "hello"
     ; attachments = []
+    ; references = []
     }
   in
   let push keeper_name =

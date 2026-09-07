@@ -64,17 +64,18 @@ type resolved_document_request =
     the upgrade handler cannot block to hold a per-connection switch
     open.  RFC-0281 Phase 2. *)
 (** Per-language LSP health (task-1691). A language is [Connected] once its
-    LSP process is spawned and initialized; it is [Overlay_only] (carrying the
-    last error) when the process could not be started/initialized. The name is
-    the wire word [masc/lspStatus] reports as [overlay_only]; what it means is
-    that the proxy answers that language's requests with empty results until a
-    server comes up. Degradation is per-language — the whole LSP process is
-    unavailable, not one method — so a single state covers every handler, and
-    every degraded handler records it instead of failing the request, so the
+    LSP process is spawned and initialized; it is [Unavailable] (carrying the
+    last error) when the process could not be started or initialized.
+    Degradation is per-language — the whole LSP process is unavailable, not
+    one method — so a single state covers every handler. What a request gets
+    while a language is [Unavailable] depends on the method: the six that go
+    through [relay_or_empty] answer that method's empty result, a relayed
+    method answers a JSON-RPC error, and a document-sync notification is
+    only logged. Every one of them records the state first, so the
     [masc/lspStatus] notification can report the degradation to the dashboard. *)
 type lang_health =
   | Connected
-  | Overlay_only of string
+  | Unavailable of string
 
 (** Typed LSP method variant for the methods handled explicitly by the proxy
     (lifecycle, MASC status, and the textDocument methods that answer empty
@@ -398,23 +399,23 @@ let send_client_notification cs method_ params =
 (* --- LSP health status (task-1691) --- *)
 
 (* Pure projection of one language's health into the [masc/lspStatus] wire
-   shape: [connected] / [overlay_only] / [command] (the configured LSP
-   executable, [null] when none is mapped) / [last_error]. *)
+   shape: [connected] / [command] (the configured LSP executable, [null] when
+   none is mapped) / [last_error]. The health is two states, so [connected]
+   carries it whole and [last_error] says why when it is false. *)
 let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
   let command =
     match Lsp_process_manager.language_of_lang_id lang_id with
     | Some language -> `String (fst (Runtime.lsp_servers () language))
     | None -> `Null
   in
-  let connected, overlay_only, last_error =
+  let connected, last_error =
     match health with
-    | Connected -> (true, false, `Null)
-    | Overlay_only err -> (false, true, `String err)
+    | Connected -> (true, `Null)
+    | Unavailable err -> (false, `String err)
   in
   `Assoc
     [ "lang", `String lang_id
     ; "connected", `Bool connected
-    ; "overlay_only", `Bool overlay_only
     ; "command", command
     ; "last_error", last_error
     ]
@@ -467,15 +468,15 @@ let set_health cs ~lang_id health =
    language as having no server, log a typed WARN, and notify the client.
    The caller then answers empty, so the request never fails and the keeper
    cycle is never blocked by an unavailable LSP. *)
-let note_overlay_only cs ~lang_id ~error =
+let note_unavailable cs ~lang_id ~error =
   Log.Server.warn "LSP server unavailable for %s: %s" lang_id error;
-  set_health cs ~lang_id (Overlay_only error)
+  set_health cs ~lang_id (Unavailable error)
 ;;
 
 let note_process_exit cs (proc : Lsp_process_manager.lsp_process) ~reason =
   if remove_process_if_current cs proc.lang_id proc
   then
-    note_overlay_only
+    note_unavailable
       cs
       ~lang_id:proc.lang_id
       ~error:("LSP process exited: " ^ reason)
@@ -751,7 +752,7 @@ let forward_request cs lang_id method_ params id =
     (* A relayed method has no empty answer of its own, so this stays a
        JSON-RPC error — but still record the per-language degradation so
        [masc/lspStatus] reflects it (task-1691). *)
-    note_overlay_only cs ~lang_id ~error:msg;
+    note_unavailable cs ~lang_id ~error:msg;
     send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
   | Ok proc ->
     let promise =
@@ -766,7 +767,7 @@ let forward_request cs lang_id method_ params id =
 let forward_notification cs lang_id method_ params =
   match ensure_lsp_process cs lang_id with
   | Error msg ->
-    note_overlay_only cs ~lang_id ~error:msg;
+    note_unavailable cs ~lang_id ~error:msg;
     Log.Server.warn "Cannot forward %s: %s" method_ msg
   | Ok proc -> Lsp_message_router.send_notification cs.router proc ~method_ ~params
 ;;
@@ -877,7 +878,7 @@ let relay_or_empty cs ~method_ ~(empty : Yojson.Safe.t) params id =
      | Known_lang lang_id ->
        (match ensure_lsp_process cs lang_id with
         | Error msg ->
-          note_overlay_only cs ~lang_id ~error:msg;
+          note_unavailable cs ~lang_id ~error:msg;
           send_response cs id empty
         | Ok proc ->
           let promise =
@@ -936,7 +937,7 @@ let dispatch_message cs msg =
           | Some Shutdown, Some n -> send_response cs n `Null
           | Some Exit, _ -> disconnect cs
           (* Typed LSP health for the dashboard (task-1691): per-language
-             connected / overlay_only / command / last_error. *)
+             connected / command / last_error. *)
           | Some Masc_lsp_status, Some n -> send_response cs n (current_status_json cs)
           | Some Masc_lsp_status, None -> ()
           | Some method_, None when is_document_sync_notification method_ ->
@@ -1156,7 +1157,7 @@ module For_testing = struct
   (* task-1691: the LSP health type + its pure wire projection. *)
   type health = lang_health =
     | Connected
-    | Overlay_only of string
+    | Unavailable of string
 
   let lang_status_json = lang_status_json
   let status_snapshot_json = status_snapshot_json

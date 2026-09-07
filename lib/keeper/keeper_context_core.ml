@@ -49,9 +49,12 @@ let checkpoint_for_persistence
   let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
-     keeper whose runtime cannot take an image, evict any inline image to a handle-only placeholder BEFORE
-     it is persisted, so a reloaded checkpoint can never re-materialise an
-     [Image] and re-trigger the RFC-0265 reroute. Store-only here — checkpoint
+     keeper whose runtime cannot take an image, evict any inline image to a
+     handle-only placeholder BEFORE it is persisted, so a reloaded checkpoint
+     can never re-materialise inline base64. A Url/File_id reference block is
+     not inline base64 (#33682): it persists as-is, and the RFC-0265 degrade
+     floor strips it from the dispatch view of a text-only runtime while the
+     persisted original stays requestable. Store-only here — checkpoint
      writes must not block the turn fiber on a vision provider call (eager
      extraction is site 1's job). Also the migration path for images persisted
      by pre-existing checkpoints. A runtime that takes the image itself keeps

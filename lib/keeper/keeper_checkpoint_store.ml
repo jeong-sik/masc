@@ -534,7 +534,7 @@ let canonical_session_location session_dir =
     try
       Fs_compat.mkdir_p parent;
       let location =
-        Eio_guard.run_in_systhread (fun () ->
+        Eio_guard.run_in_systhread ~label:"checkpoint-parent-stat" (fun () ->
           let parent = Unix.realpath parent in
           if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
           then
@@ -625,7 +625,7 @@ let load_canonical_bytes_strict path =
        | Unix.Unix_error (error, operation, argument) ->
          Error (unix_error error operation argument))
   in
-  match Eio_guard.run_in_systhread read with
+  match Eio_guard.run_in_systhread ~label:"checkpoint-read" read with
   | Ok content -> Ok content
   | Error _ as error -> error
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

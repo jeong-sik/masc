@@ -132,6 +132,10 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch

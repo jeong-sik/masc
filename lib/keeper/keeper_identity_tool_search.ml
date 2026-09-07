@@ -349,17 +349,74 @@ let carry_from_history ~carry_window ~entries history =
   carried_names, dropped
 ;;
 
+(* The names the conversation's last tool call asked this listing for, when
+   that call is still the last one.
+
+   A load reaches the agent of the turn that made it and no further, and the
+   carry is folded from calls, so a tool the model searched for and did not
+   get to call before the turn ended is not placed on the next request: it
+   sees the name again and searches again. Measured 2026-09-06 on sangsu,
+   asked to answer by voice: fourteen consecutive [keeper_tool_search] calls
+   for [keeper_voice_speak] and zero calls to it. Its own reasoning states
+   the rule it then breaks, so the model is not what is failing.
+
+   Most tools escape this because they get used in runs -- one turn where a
+   search and a call share a turn is enough, and the carry holds them after.
+   A tool called once, alone, by instruction never gets that turn. [make]'s
+   contract already promises the way out ("Recovering costs one round trip"),
+   which holds only if the load survives the turn that made it.
+
+   Read off the last [ToolUse] block rather than remembered: a later call of
+   any tool means the request was already answered or abandoned, so the grant
+   lapses on its own and no state has to be kept, expired, or reconciled
+   after a crash. That is the same discipline as the carry, and it is why
+   this is one request rather than a window: carrying every request grows the
+   surface back toward the full attached list, which is what
+   {!already_used} exists to avoid. *)
+let requested_by_last_call history =
+  let last = ref None in
+  List.iter
+    (fun (message : Agent_core.Types.message) ->
+       List.iter
+         (fun (block : Agent_core.Types.content_block) ->
+            match block with
+            | Agent_core.Types.ToolUse { name; input; _ } -> last := Some (name, input)
+            | Agent_core.Types.Text _
+            | Agent_core.Types.Thinking _
+            | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolResult _
+            | Agent_core.Types.Image _
+            | Agent_core.Types.Document _
+            | Agent_core.Types.ReasoningDetails _
+            | Agent_core.Types.Audio _ -> ())
+         message.Agent_core.Types.content)
+    history;
+  match !last with
+  | Some (name, input) when String.equal name tool_name ->
+    (* The listing's own parser, so a request this would place is exactly a
+       request the handler would have accepted. *)
+    (match requested_names input with
+     | Ok names -> names
+     | Error _ -> [])
+  | Some _ | None -> []
+;;
+
 (* [entries] order, not carry order: the tool array is a cache prefix keyed by
    the exact bytes in the exact order sent, so a tool that leaves the window
    and comes back must come back in the slot it left. *)
 let already_used_from_history ~carry_window ~entries history =
   let carried_names, dropped = carry_from_history ~carry_window ~entries history in
+  (* Placed, but not carried: the grant is spent by the next call of anything,
+     and [dropped] stays the carry's own answer so the window's diagnostics
+     keep measuring the window. *)
+  let requested = requested_by_last_call history in
+  let placed_name name =
+    List.exists (String.equal name) carried_names
+    || List.exists (String.equal name) requested
+  in
   let placed =
     List.filter_map
-      (fun entry ->
-         if List.exists (String.equal entry.name) carried_names
-         then Some entry.callable
-         else None)
+      (fun entry -> if placed_name entry.name then Some entry.callable else None)
       entries
   in
   placed, carried_names, dropped

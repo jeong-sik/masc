@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { render, options } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
+import type { ChatBlock, KeeperByteAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import {
   CHAT_COMPOSER_COMMAND_HEADER_SUFFIX,
@@ -2130,6 +2130,70 @@ describe('ChatComposer multimodal', () => {
     )
   }
 
+  it('adds a URL reference chip from the 🔗 input and sends its carrier block', async () => {
+    const onSend = vi.fn()
+    renderComposer({ draft: '이 그림 어때?', onSend })
+
+    const refButton = container.querySelector('[title="이미지 참조 첨부 (URL · file_id)"]') as HTMLButtonElement
+    refButton.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    const refInput = container.querySelector('[data-testid="composer-ref-input"] input') as HTMLInputElement
+    expect(refInput).not.toBeNull()
+    fireEvent.input(refInput, { target: { value: 'https://example.test/a.png' } })
+    fireEvent.keyDown(refInput, { key: 'Enter' })
+    await new Promise((r) => setTimeout(r, 10))
+
+    // The input row closes and a reference chip with the URL stays.
+    expect(container.querySelector('[data-testid="composer-ref-input"]')).toBeNull()
+    const chip = container.querySelector('[data-chat-attachment-draft^="ref-url-"]')
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toContain('https://example.test/a.png')
+    expect(chip?.textContent).toContain('URL 참조')
+
+    const sendButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent === '전송') as HTMLButtonElement
+    sendButton.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    const payload = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
+    expect(payload?.userBlocks).toEqual([
+      { type: 'image', url: 'https://example.test/a.png' },
+      { type: 'text', text: '이 그림 어때?' },
+    ])
+    const attachBlock = payload?.blocks.find(block => block.t === 'attach') as { ref?: unknown; via?: string } | undefined
+    expect(attachBlock?.ref).toEqual({ kind: 'url', url: 'https://example.test/a.png' })
+    expect(attachBlock?.via).toBe('URL 참조')
+  })
+
+  it('turns a pasted bare image URL into a reference chip, and leaves prose URLs as text', async () => {
+    renderComposer()
+    const textarea = container.querySelector('.composer-textarea') as HTMLTextAreaElement
+
+    // Bare image URL: becomes a chip, and no text lands in the draft.
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [],
+        getData: () => 'https://example.test/shot.png',
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(container.querySelector('[data-chat-attachment-draft^="ref-url-"]')).not.toBeNull()
+    expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).value).toBe('')
+
+    // A URL inside prose pastes as text, not as a chip.
+    fireEvent.paste(container.querySelector('.composer-textarea') as HTMLTextAreaElement, {
+      clipboardData: {
+        items: [],
+        getData: () => '문서는 https://example.test/doc.html 를 봐',
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    const chips = container.querySelectorAll('[data-chat-attachment-draft^="ref-url-"]')
+    expect(chips.length).toBe(1)
+  })
+
   it('renders attachment and voice buttons', () => {
     Object.assign(globalThis.navigator, { mediaDevices: { getUserMedia: vi.fn() } })
     Object.assign(globalThis, { MediaRecorder: vi.fn() })
@@ -2279,7 +2343,7 @@ describe('ChatComposer multimodal', () => {
   })
 
   it('does not derive client action ids from attachment payloads', async () => {
-    const baseAttachment: Omit<KeeperConversationAttachment, 'data'> = {
+    const baseAttachment: Omit<KeeperByteAttachment, 'data'> = {
       id: 'att-same',
       type: 'image',
       name: 'screen.png',

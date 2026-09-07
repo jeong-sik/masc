@@ -38,6 +38,15 @@ let server_entries =
       "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
   ]
 
+(* Rows from {!Env_setting} declarations. A knob declared there is reported
+   without being restated here, which is the shape the hand-written lists below
+   are being moved to. *)
+let declared_entries category =
+  Env_setting.rows_in ~category
+  |> List.map (fun (row : Env_setting.row) ->
+    entry ~default:row.default_display row.env_name row.description)
+;;
+
 let auth_entries =
   [
     entry ~sensitive:true ~default:"(none)" Env_config_core.admin_token_env_key
@@ -47,10 +56,23 @@ let auth_entries =
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";
   ]
+  @ declared_entries "auth"
+
+let host_pressure_entries =
+  [
+    entry ~default:"(none)" Env_config_core.host_fd_pressure_state_file_env_key
+      "Host fd-pressure state file the poller reads";
+    entry ~default:"false" Env_config_core.host_fd_pressure_poller_disabled_env_key
+      "Disable the host fd-pressure poller";
+    entry ~default:"1" Env_config_core.host_fd_pressure_poll_interval_sec_env_key
+      "Host fd-pressure poll interval (seconds)";
+    entry ~default:"120" Env_config_core.git_fetch_timeout_sec_env_key
+      "Timeout for a git fetch (seconds); floored at 10";
+  ]
 
 let runtime_entries =
   [
-    entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
+    entry ~default:"info" Env_config_core.log_level_env_key "Log level override";
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
@@ -86,6 +108,12 @@ let storage_entries =
   [
     entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES"
       "Max pubsub messages per batch";
+    (* Named through Env_config_core's own constants rather than restated here.
+       Env_setting cannot declare these: it reads through Env_config_core, so a
+       knob that module reads for itself would be a dependency cycle. This is
+       the shape MASC_ADMIN_TOKEN already uses. *)
+    entry ~default:"30" Env_config_core.jsonl_retention_days_env_key
+      "Days of dated JSONL kept before pruning";
   ]
 
 let transport_entries =
@@ -215,6 +243,7 @@ let channel_gate_entries =
     entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (floored at 1)";
   ]
+  @ declared_entries "channel"
 
 let decision_entries =
   [
@@ -267,8 +296,8 @@ let internal_timer_entries =
 
 let local_runtime_entries =
   [
-    entry ~default:"(none)" "MASC_URL"
-      "MASC MCP endpoint URL";
+    entry ~default:"(derived)" Env_config_core.mcp_url_env_key
+      "MASC MCP endpoint URL (derived from base URL when unset)";
   ]
 
 let message_gc_entries =
@@ -355,16 +384,13 @@ let sse_entries =
       "Per-client SSE event stream capacity (clamped 8-1024)";
   ]
 
+(* MASC_TELEMETRY_ENABLED, MASC_LOG_LEVEL, MASC_LOG_ROUTINE_LEVEL and
+   MASC_PARSE_WARN used to be restated here. [runtime_entries] already carries
+   them and the "runtime" category concatenates both lists, so the operator read
+   each of them twice -- and MASC_LOG_LEVEL answered "(auto)" in one row and
+   "(none)" in the other. *)
 let telemetry_entries =
   [
-    entry ~default:"true" Env_config_core.telemetry_enabled_env_key
-      "Whether telemetry tracking is enabled";
-    entry ~default:"(none)" Env_config_core.log_level_env_key
-      "Log level string (debug|info|warn|error)";
-    entry ~default:"debug" Env_config_core.log_routine_level_env_key
-      "Routine telemetry level (debug|info|warn|error|off)";
-    entry ~default:"false" Env_config_core.parse_warn_env_key
-      "Whether malformed env parses fail fast";
     entry ~default:"true" "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]
@@ -397,19 +423,22 @@ let worker_entries =
       "Local runtime debug logging (feature flag)";
   ]
 
-let category_specs =
+let category_specs () =
   [
     ( "server"
     , server_entries @ path_entries
-      @ docker_playground_entries @ test_entries );
+      @ docker_playground_entries @ test_entries
+      @ declared_entries "server" );
     "auth", auth_entries;
-    "transport", transport_entries;
+    "transport", transport_entries @ declared_entries "transport";
     "storage", storage_entries @ cache_entries @ board_entries;
     ( "runtime"
     , runtime_entries
       @ message_gc_entries @ internal_timer_entries
       @ sse_entries @ telemetry_entries
-      @ tool_entries );
+      @ tool_entries
+      @ host_pressure_entries
+      @ declared_entries "runtime" );
     "rate_limiting", rate_limiting_entries;
     "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;
     ( "keeper"
@@ -429,9 +458,9 @@ let category_specs =
   ]
 
 let all_categories () =
-  List.map (fun (name, entries) -> category name entries) category_specs
+  List.map (fun (name, entries) -> category name entries) (category_specs ())
 
-let valid_config_category_strings = List.map fst category_specs
+let valid_config_category_strings = List.map fst (category_specs ())
 
 let to_json ?server_meta ?generated_at ?cat () =
   let categories =

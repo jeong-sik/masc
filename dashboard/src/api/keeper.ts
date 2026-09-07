@@ -1,7 +1,7 @@
 // MASC Dashboard — Keeper operation messaging and SSE streaming
 
 import { asString, isRecord } from '../components/common/normalize'
-import type { KeeperUserInputBlock } from '../types'
+import type { KeeperConversationAttachment, KeeperUserInputBlock } from '../types'
 import {
   apiRequestErrorFromResponse,
   jsonHeaders,
@@ -364,6 +364,26 @@ export interface StreamAttachment {
   data: string
 }
 
+/** Only byte-backed attachments ride the [attachments] wire array — the
+ *  server's byte store. A reference (#33728) travels as its user_block
+ *  carrier (url / file_id) and sends no bytes at all. */
+export function wireAttachments(
+  attachments: readonly KeeperConversationAttachment[],
+): StreamAttachment[] {
+  return attachments.flatMap((att) =>
+    att.kind
+      ? []
+      : [{
+          id: att.id,
+          type: att.type,
+          name: att.name,
+          size: att.size,
+          mimeType: att.mimeType,
+          data: att.data,
+        }],
+  )
+}
+
 /** Co-view context sent from dashboard surfaces such as the Copilot Dock. */
 export interface KeeperStreamSurfaceContext {
   label: string
@@ -410,7 +430,7 @@ export interface StreamKeeperMessageOptions {
   operationId: string
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
-  attachments?: StreamAttachment[]
+  attachments?: KeeperConversationAttachment[]
   userBlocks?: KeeperUserInputBlock[]
   channel?: string
   channelWorkspaceId?: string
@@ -423,6 +443,22 @@ function streamUserBlockToWire(block: KeeperUserInputBlock): Record<string, unkn
     return {
       type: 'text',
       text: block.text,
+    }
+  }
+  // Image reference carriers (#33728): one field names the carrier and the
+  // server parses exactly one — attachment_id (bytes), url, or file_id.
+  if ('url' in block) {
+    return {
+      type: 'image',
+      url: block.url,
+      ...(block.mimeType ? { mime_type: block.mimeType } : {}),
+    }
+  }
+  if ('fileId' in block) {
+    return {
+      type: 'image',
+      file_id: block.fileId,
+      ...(block.mimeType ? { mime_type: block.mimeType } : {}),
     }
   }
   return {
@@ -477,14 +513,17 @@ export async function streamKeeperMessage(
     body.surface_context = surfaceContext
   }
   if (attachments && attachments.length > 0) {
-    body.attachments = attachments.map(att => ({
-      id: att.id,
-      type: att.type,
-      name: att.name,
-      size: att.size,
-      mime_type: att.mimeType,
-      data: att.data,
-    }))
+    const wire = wireAttachments(attachments)
+    if (wire.length > 0) {
+      body.attachments = wire.map(att => ({
+        id: att.id,
+        type: att.type,
+        name: att.name,
+        size: att.size,
+        mime_type: att.mimeType,
+        data: att.data,
+      }))
+    }
   }
   if (userBlocks && userBlocks.length > 0) {
     body.user_blocks = userBlocks.map(streamUserBlockToWire)

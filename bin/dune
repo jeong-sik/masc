@@ -142,6 +142,29 @@
   masc.tool_catalog_surfaces
   yojson))
 
+;; Tool parity artifact generator (task-1363): reads config/tools/*.toml
+;; through the production loader (Tool_definition_toml.load) and regenerates
+;; the test/golden/tool_parity_*.txt baselines. Manual-only via
+;; @regen_tool_parity_artifacts (tools/tool_parity_regen.inc); never a build
+;; dependency of anything.
+(executable
+ (name tool_parity_generator)
+ (modules tool_parity_generator)
+ (libraries
+  masc.masc_tool_surface
+  masc_types
+  yojson))
+
+;; Manual-only regeneration entry point for the tool parity baselines
+;; (task-1363): dune build @regen_tool_parity_artifacts. The generator reads
+;; config/tools/*.toml through the production loader and rewrites
+;; test/golden/tool_parity_*.txt; it is never a build dependency of anything.
+(rule
+ (alias regen_tool_parity_artifacts)
+ (action
+  (chdir %{workspace_root}
+    (run %{exe:tool_parity_generator.exe}))))
+
 ;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.
 
@@ -426,6 +449,7 @@
  (modules masc_tui_keeper_chat_transcript)
  (libraries
   masc
+  masc.keeper_tool_name
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
@@ -502,6 +526,7 @@
  (modules masc_tui_theme_catalog)
  (libraries
   masc.config_dir_resolver
+  masc.embedded_config
   masc.fs_compat
   masc.keeper_toml
   masc_tui_terminal_palette))
@@ -510,7 +535,8 @@
  (name masc_tui_theme_choice)
  (wrapped false)
  (modules masc_tui_theme_choice)
- (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme_catalog))
+ (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme
+  masc_tui_theme_catalog))
 
 (library
  (name masc_tui_color)
@@ -815,7 +841,7 @@
  (name masc_tui_memo)
  (wrapped false)
  (modules masc_tui_memo)
- (libraries masc_tui_code_lexer masc.ide_memo))
+ (libraries masc_tui_code_lexer masc.ide_memo masc.lsp_client))
 
 (library
  (name masc_tui_markdown)
@@ -944,6 +970,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  msx
   masc
   masc_tui_acting_pane
   masc_tui_gate_text
@@ -962,6 +989,7 @@
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
+  masc_tui_memo
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_diff
@@ -1136,6 +1164,7 @@
   base64
   masc_tui_credential
   masc_tui_types
+  masc_tui_msx
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
@@ -1189,6 +1218,7 @@
   masc_tui_link
   masc_tui_link_label
   masc_tui_link_preview
+  masc_tui_image_mosaic
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1251,6 +1281,7 @@
   str
   eio_main
   eio
+  eio.unix
   mtime.clock.os
   httpun
   cohttp
@@ -1329,3 +1360,39 @@
  (wrapped false)
  (modules masc_tui_link_preview)
  (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+
+(library
+ (name masc_tui_image_mosaic)
+ (wrapped false)
+ (modules masc_tui_image_mosaic))
+
+;; The MSX spectator screen. Depends on the worktree-local copy of the
+;; ocaml-msx core (lib/msx) -- see that directory's comment for the
+;; pin-instead-of-copy graduation path.
+(library
+ (name masc_tui_msx)
+ (wrapped false)
+ (modules masc_tui_msx)
+ (libraries
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_image_mosaic
+  msx))
+
+;; RFC-0429 §3.0: the same HTTP client the TUI uses, with no TUI around it.
+;; A request the server answers in milliseconds is logged by the live TUI as
+;; taking seconds; this separates the transport from the loop it runs in.
+(executable
+ (name masc_http_probe)
+ (modules masc_http_probe)
+ (public_name masc-http-probe)
+ (package masc)
+ (libraries
+  masc.http_client
+  masc.masc_eio_context
+  cstruct
+  eio
+  eio.unix
+  eio_main
+  unix
+  mtime.clock.os))

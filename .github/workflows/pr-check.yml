@@ -185,3 +185,43 @@ jobs:
         run: |
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}"
+
+  # dashboard/ ships a `typecheck` script and no lane calls it.
+  #
+  # ci.yml's header records that its dashboard job was folded away on
+  # 2026-09-02, and pr-check.yml never had one, so nothing type-checks the
+  # 697 test files and 9445 tests under dashboard/. What that cost, measured
+  # on 2026-09-06: #33454 left two TS2352 errors on main and they sat a full
+  # day, found only because a baseline was taken by hand (#33548 repairs them).
+  #
+  # This is the type-check alone, not the suite. `pnpm typecheck` over the
+  # whole dashboard is 8.7s locally. `pnpm test` is 481s in the single-worker
+  # shape package.json pins, or 95s parallel with one test that starves under
+  # load; RFC-0428 carries those numbers and the suite waits on that decision.
+  # The type-check does not need to wait for it.
+  dashboard-types:
+    name: dashboard typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        # The toolchain release.yml builds the SPA with: node 22 + pnpm 10.31.0.
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Type-check
+        working-directory: dashboard
+        # NO continue-on-error: main is green here once #33548 lands, and a
+        # type error is deterministic. Do not merge this before that one.
+        run: pnpm typecheck

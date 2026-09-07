@@ -474,7 +474,7 @@ let cleanup_staging_for_startup ~base_path =
   let* base_path = canonical_base_path base_path in
   let staging = staging_dir ~base_path in
   let report =
-    Eio_guard.run_in_systhread (fun () ->
+    Eio_guard.run_in_systhread ~label:"fusion-cleanup-atomic-orphans" (fun () ->
       Fs_compat.cleanup_atomic_orphans
         ~ownership_root:base_path
         ~base_path:staging

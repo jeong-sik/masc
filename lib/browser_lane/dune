@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name browser_lane)
+ (public_name masc.browser_lane)
+ (libraries eio yojson unix masc.time_compat))

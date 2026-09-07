@@ -59,7 +59,7 @@ import {
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
-import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
+import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusRejected, lspStatusSnapshot } from './ide-lsp-client'
 import { DEFAULT_MOBILE_BREAKPOINT } from '../../hooks/use-is-mobile'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
@@ -181,6 +181,7 @@ describe('IdeShell', () => {
     })
     ideContextFocus.value = null
     lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
+    lspStatusRejected.value = false
     clearTraces()
     clearLocalStorage()
   })
@@ -625,20 +626,50 @@ describe('IdeShell', () => {
     expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
   })
 
-  it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {
+  it('says the LSP reading is stale when a payload was rejected', async () => {
+    // The snapshot still holds the last readable payload, so without this chip
+    // the statusbar would describe a fleet it can no longer see.
+    lspStatusSnapshot.value = {
+      langs: [
+        { lang: 'ocaml', connected: true, command: 'ocamllsp', last_error: null },
+      ],
+    }
+    lspStatusRejected.value = true
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-lsp-payload"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('LSP status stale')
+    expect(chip.getAttribute('title')).toContain('could not be read')
+  })
+
+  it('surfaces LSP languages with no server in the IDE statusbar', async () => {
     lspStatusSnapshot.value = {
       langs: [
         {
           lang: 'ocaml',
           connected: false,
-          overlay_only: true,
           command: 'ocamllsp',
           last_error: 'ocamllsp unavailable',
         },
         {
+          lang: 'lua',
+          connected: false,
+          command: 'lua-language-server',
+          last_error: 'lua-language-server not on PATH',
+        },
+        {
           lang: 'typescript',
           connected: true,
-          overlay_only: false,
           command: 'typescript-language-server',
           last_error: null,
         },
@@ -657,8 +688,12 @@ describe('IdeShell', () => {
       expect(found).not.toBeNull()
       return found!
     })
-    expect(chip.textContent).toBe('LSP overlay-only 1')
-    expect(chip.getAttribute('title')).toContain('ocaml: ocamllsp unavailable')
+    expect(chip.textContent).toBe('LSP unavailable 2')
+    // One line per language, so an operator reads which ones and why
+    // instead of a count that names nothing.
+    expect(chip.getAttribute('title')).toBe(
+      'ocaml: ocamllsp unavailable\nlua: lua-language-server not on PATH',
+    )
     expect(chip.getAttribute('title')).not.toContain('typescript')
   })
 

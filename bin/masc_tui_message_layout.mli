@@ -75,6 +75,13 @@ type turn_rail =
     emits no {!Rail_closes}, so the rail stays open until the turn ends -- the
     fact is structural rather than a second spinner. *)
 
+(** What a press on a row opens. A variant rather than a bool because the
+    input layer must not recover the answer from the glyphs the row drew:
+    changing that text would kill the click with nothing to report. *)
+type row_action =
+  | Action_none
+  | Action_unfold_argument
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -130,6 +137,10 @@ type entry = {
       (** Which piece of its turn's bracket this entry draws. Carried on the
           entry because only the caller knows the turn's extent: the layout
           sees one entry at a time. *)
+  action : row_action;
+      (** What a press on this entry's first row opens. Carried on the entry
+          because the entry is where the folding was decided; the rows below
+          it are continuations of one decision, not decisions of their own. *)
 }
 
 type metadata =
@@ -213,6 +224,10 @@ type row = {
           under the other two it holds the origin on a message's first row and
           the same width in blanks on the rest, so a wrapped body lines up
           under where it started. *)
+  action : row_action;
+      (** What a press on this row opens, {!Action_none} on every row but the
+          first of an entry that carries one. The fold marker sits at the end
+          of the first row, so that is the row a press lands on. *)
 }
 
 val siding_lead : siding -> string
@@ -227,6 +242,12 @@ val turn_rail_gutter : turn_rail -> string
     included. Concatenate this rather than {!turn_rail_glyph}: a caller that
     drew the glyph and padded the rest itself would put the line in a
     different column on the rows that have a siding. *)
+
+val rail_for_style : work:turn_rail -> speech:turn_rail -> style -> turn_rail
+(** Which of two rail pieces a row of this style takes: [work] for reasoning,
+    tool calls and skills, [speech] for everything the turn says. Asked by
+    both the running turn and the turn of a single row, because what a row is
+    does not depend on how many rows came with it. *)
 
 val turn_rail_glyph : turn_rail -> string
 (** The one cell this rail piece draws, or a blank for {!Rail_none}. Box
@@ -395,6 +416,13 @@ val split_aligned_role_label :
     is content: a renderer that reverses the whole label paints empty cells as
     though they were the badge. The mark is empty for a label
     narrow enough that {!align_role_label} dropped it. *)
+
+val fit_speaker :
+  ?column:int -> speaker:string -> surface:string option -> unit -> string
+(** The label for a row someone else put here. Names the speaker, and adds the
+    surface they came in by only when both fit the column: cut as one string
+    the pair keeps the surface and loses the name, and an arrival's siding
+    already says the row came from outside. *)
 
 val align_role_label : ?column:int -> style:style -> string -> string
 (** Left-align a role label in [column] cells, defaulting to

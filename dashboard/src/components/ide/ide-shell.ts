@@ -31,7 +31,7 @@ import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { routeLinksForContext } from './ide-context-lens'
-import { lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
+import { lspStatusRejected, lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -136,6 +136,7 @@ interface IdeStatusbarInput {
   readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
   readonly lspStatus?: LspStatusSnapshot
+  readonly lspStatusStale?: boolean
 }
 
 function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
@@ -394,9 +395,9 @@ function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string
     .join('\n')
 }
 
-function lspOverlayOnlyStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
+function lspUnavailableStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
   return (status?.langs ?? [])
-    .filter(lang => lang.overlay_only)
+    .filter(lang => !lang.connected)
     .map(lang => {
       const error = lang.last_error?.trim()
       return error ? `${lang.lang}: ${error}` : lang.lang
@@ -432,6 +433,7 @@ export function deriveIdeStatusbarModel({
   workspaceIssues = [],
   dashboardConnected = false,
   lspStatus,
+  lspStatusStale = false,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -454,13 +456,23 @@ export function deriveIdeStatusbarModel({
     'warn',
     workspaceIssueTitle(workspaceIssues),
   )
-  const lspOverlayOnly = lspOverlayOnlyStatus(lspStatus)
+  const lspUnavailable = lspUnavailableStatus(lspStatus)
+  // A rejected payload leaves the reading below untouched, so it would go on
+  // describing a fleet that has since changed. Say that first: which servers
+  // are up matters less than whether the answer is current.
+  addStatusbarChip(
+    chips,
+    'lsp-payload',
+    lspStatusStale ? 'LSP status stale' : undefined,
+    'warn',
+    'The last masc/lspStatus payload could not be read, so the reading beside this is the one before it.',
+  )
   addStatusbarChip(
     chips,
     'lsp-status',
-    lspOverlayOnly.length > 0 ? `LSP overlay-only ${lspOverlayOnly.length}` : undefined,
+    lspUnavailable.length > 0 ? `LSP unavailable ${lspUnavailable.length}` : undefined,
     'warn',
-    lspOverlayOnly.join('\n'),
+    lspUnavailable.join('\n'),
   )
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
@@ -812,6 +824,7 @@ export function IdeShell() {
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
   const lspStatus = useSignalValue(lspStatusSnapshot)
+  const lspStatusStale = useSignalValue(lspStatusRejected)
   const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
   const activeLayers = availableLayersForView(
     layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null),
@@ -847,6 +860,7 @@ export function IdeShell() {
     workspaceIssues,
     dashboardConnected: dashboardRuntimeConnected(),
     lspStatus,
+    lspStatusStale,
   })
 
   useEffect(() => {

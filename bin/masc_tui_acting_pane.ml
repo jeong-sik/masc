@@ -8,15 +8,16 @@ module Reading = Masc.Tui_decode
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
    the configured names whole that the roster's window keeps whole. The
    reading's budget is set by the longest reading a row states in full:
-   [▶ network_read · 3 calls · 12.4s] is 32 cells, and a settled
-   [■ 5 calls · 38.2k tok · 41.0s] or a waiting [? approval · tool_execute]
-   fits inside it. A budget of 24 cut the tool name off every waiting row and
-   the age off every settled one. *)
+   [▶ network_read · 3 calls · 12.4s ago] is 36 cells, and a settled
+   [■ 5 calls · 38.2k tok · 41.0s ago] or a waiting [? approval ·
+   tool_execute] fits inside it. A budget of 24 cut the tool name off every
+   waiting row and the age off every settled one, and a budget of 32 cut
+   the [ago] off the settled rows (2026-09-06). *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
 let gap_cells = 1
-let reading_cells = 32
+let reading_cells = 36
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
 (* What the roster pane leaves a surface is the least a surface lays out
@@ -186,22 +187,43 @@ let current_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
+(* A settled turn's count is the one its settle confirmed -- the server's
+   own count of the whole turn, where the list is only what this feed saw,
+   and the feed can open mid-turn or drop the oldest rows.
+
+   This started as a workaround for something else: ledger rows carried no
+   turn number, landed on whatever chunk was newest, and a settled row read
+   2449 calls for a turn of one call (live capture 2026-09-06). Reading the
+   settle's number hid that. The rows now state their turn and are keyed on
+   it ([Acting.ck_session_turn]), so the list is no longer a running total
+   and this is a preference between two honest counts rather than a way
+   around a wrong one.
+
+   Before a settle there is no confirmed count, so the open turn counts its
+   list. *)
 let chunk_call_count (chunk : Acting.chunk) =
-  match Acting.chunk_tools chunk with
-  | [] -> Option.value ~default:0 chunk.Acting.ck_calls
-  | tools -> List.length tools
+  if chunk.Acting.ck_settled then Option.value ~default:0 chunk.Acting.ck_calls
+  else
+    match Acting.chunk_tools chunk with
+    | [] -> Option.value ~default:0 chunk.Acting.ck_calls
+    | tools -> List.length tools
 
 (* An unsettled chunk means the feed never saw the turn end. A keeper whose
    process is gone can never send that end, so for [Health_offline] and
    [Health_zombie] the row states what is known — the turn is unfinished —
-   instead of a "running" that reads as progress beside the gone mark. No
-   health reading ([None]) keeps the turn's own claim. *)
+   instead of an in-flight word that reads as progress beside the gone mark.
+   No health reading ([None]) keeps the turn's own claim. *)
 let keeper_can_finish = function
   | Some Reading.Health_offline | Some Reading.Health_zombie -> false
   | Some _ | None -> true
 
 let unfinished_glyph = "!"
 
+(* Vocabulary: the word "running" names the keeper's process phase and
+   nothing else. An in-flight turn is "in turn" on the fleet row and on the
+   focus header — one word per fact, and once per block: the calls under
+   the header name what they were doing and since when, not the state the
+   header above them already states. *)
 let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
@@ -213,16 +235,16 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
       let on =
         match current_tool chunk with
         | Some tool -> tool
-        | None -> "running"
+        | None -> "in turn"
       in
       [ { text = running_glyph ^ " "; tone = Ok }
       ; { text = join [ on; (if calls > 0 then calls_text calls else "") ]; tone = Plain }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
       ]
   | None, Some chunk when not chunk.Acting.ck_settled ->
       [ { text = unfinished_glyph ^ " "; tone = Warn }
       ; { text = "unfinished"; tone = Warn }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
       ]
   | None, Some chunk ->
       [ { text = settled_glyph ^ " "; tone = Dim }
@@ -233,7 +255,7 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
               ]
         ; tone = Plain
         }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
+      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
       ]
   | None, None -> [ { text = quiet_glyph ^ " quiet"; tone = Dim } ]
 
@@ -381,10 +403,11 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
-    | None when is_last && not chunk.Acting.ck_settled && can_finish ->
-        { text = "running" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Ok }
+    (* The header states the turn's state; the call's line states what it
+       was doing and since when, so the state word does not repeat under
+       its own header. The age is elapsed, so it says [ago]. *)
     | None when is_last && not chunk.Acting.ck_settled ->
-        { text = "unfinished" ^ middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Warn }
+        { text = age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
     | None -> { text = ""; tone = Dim }
   in
   let glyph =
@@ -405,22 +428,41 @@ let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk
        ; duration
        ])
 
+(* The turn number a settle confirmed is the keeper's own count. An
+   unsettled chunk still carries the agent session's numbering, which the
+   viewer does not trust: a session restart renumbers from zero, so the
+   same turn once drew as 1740 on the header and 3084 on the summary
+   (live capture 2026-09-06). A settle that carried no number settles the
+   chunk without naming it, and [turn_text] would draw that as [turn ?] --
+   a question the row cannot answer and the reader cannot act on (live
+   capture 2026-09-06). Only a number the settle confirmed becomes a
+   name. *)
+let turn_name (chunk : Acting.chunk) =
+  match chunk.Acting.ck_turn with
+  | Some _ when chunk.Acting.ck_settled -> Some (Acting.turn_text chunk.Acting.ck_turn)
+  | _ -> None
+
 let turn_summary_line ~cols ~now (chunk : Acting.chunk) =
+  let named =
+    match turn_name chunk with
+    | Some text -> [ { text; tone = Plain } ]
+    | None -> []
+  in
   fit_line ~cols
     (with_border
-       [ { text = settled_glyph ^ " "; tone = Dim }
-       ; { text = Acting.turn_text chunk.Acting.ck_turn; tone = Plain }
-       ; { text =
-             middle_dot
-             ^ join
-                 [ calls_text (chunk_call_count chunk)
-                 ; tokens_text chunk.Acting.ck_tokens
-                 ; cost_text chunk.Acting.ck_cost_usd
-                 ]
-         ; tone = Dim
-         }
-       ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at; tone = Dim }
-       ])
+       ( [ { text = settled_glyph ^ " "; tone = Dim } ]
+       @ named
+       @ [ { text =
+               middle_dot
+               ^ join
+                   [ calls_text (chunk_call_count chunk)
+                   ; tokens_text chunk.Acting.ck_tokens
+                   ; cost_text chunk.Acting.ck_cost_usd
+                   ]
+           ; tone = Dim
+           }
+         ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
+         ] ))
 
 (* Every focus row, oldest call first, then the earlier turns. The caller
    cuts to its budget. *)
@@ -438,12 +480,16 @@ let focus_lines ~cols input chunks name =
           else if can_finish then ("in turn", Ok)
           else ("unfinished", Warn)
         in
+        let named =
+          match turn_name current with
+          | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
+          | None -> []
+        in
         fit_line ~cols
           (with_border
-             [ { text = name; tone = Accent }
-             ; { text = middle_dot ^ Acting.turn_text current.Acting.ck_turn; tone = Plain }
-             ; { text = middle_dot ^ state_word; tone = state_tone }
-             ])
+             ( { text = name; tone = Accent }
+             :: named
+             @ [ { text = middle_dot ^ state_word; tone = state_tone } ] ))
     | [] ->
         fit_line ~cols
           (with_border
@@ -474,26 +520,9 @@ let focus_lines ~cols input chunks name =
               tool_line ~cols ~now:input.now ~can_finish current tool ~is_last:(index = count - 1))
             tools
         in
-        let calls =
-          if calls = [] && not current.Acting.ck_settled then
-            [ (if can_finish then
-                 [ { text = running_glyph ^ " "; tone = Ok }
-                 ; { text =
-                       "running" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                   ; tone = Ok
-                   }
-                 ]
-               else
-                 [ { text = unfinished_glyph ^ " "; tone = Warn }
-                 ; { text =
-                       "unfinished" ^ middle_dot ^ age_text ~now:input.now current.Acting.ck_at
-                   ; tone = Warn
-                   }
-                 ])
-              |> fit_line ~cols |> with_border
-            ]
-          else calls
-        in
+        (* A call-less open turn draws no body row: the header already
+           states the state and the age, and a row under it would repeat
+           both. *)
         calls @ List.map (turn_summary_line ~cols ~now:input.now) earlier
   in
   List.map (fun line -> (line, Target_none)) ((header :: approval_line) @ body)
@@ -608,7 +637,7 @@ let file_glyph file =
 (* One file: its kind, the address cut in the middle so the file name and
    the repository both stay readable, the range when known, the age. *)
 let file_line ~cols ~now index file =
-  let age = { text = age_text ~now file.file_at; tone = Dim } in
+  let age = { text = age_text ~now file.file_at ^ " ago"; tone = Dim } in
   let where = Option.value ~default:"" file.file_where in
   let inner = cols - border_cells - mark_cells in
   let right = Layout.display_width age.text in

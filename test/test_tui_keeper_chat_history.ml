@@ -75,9 +75,17 @@ let origin_request_id = function
 
 let full_tool_rows = History.tool_rows
 
+(* The pane draws the pair apart. Joined is how a whole-row assertion reads
+   it, so the join lives here rather than in the module under test. *)
+let joined_label speaker surface =
+  match History.addressed_label_parts speaker surface with
+  | name, None -> name
+  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
+;;
+
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
-      Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
+      Printf.sprintf "addressed(%s)" (joined_label speaker surface)
   | History.Said_by_keeper -> "keeper"
   | History.Autonomous_reply -> "autonomous"
   | History.Delivery_failed _ -> "delivery_failed"
@@ -501,6 +509,76 @@ let test_consecutive_tools_from_different_turns_do_not_merge () =
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 
+(* An autonomous wake that produced nothing used to reach the pane as a
+   speaker label over an empty line, and later as a label over a middle dot.
+   Neither says anything the header does not already say about a running
+   Keeper, and on one live screen eleven of fourteen Keeper rows were that
+   dot. *)
+let test_a_silent_autonomous_turn_draws_no_row () =
+  let decoded = decode (`List [ autonomous_turn [] ]) in
+  check (list string) "nothing is drawn for a turn that neither spoke nor ran"
+    []
+    (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows);
+  (* Not drawn because it had nothing to draw, not because the decoder could
+     not read it. *)
+  check int "the row was read" 0 decoded.History.dropped
+
+let test_a_whitespace_autonomous_reply_is_as_blank_as_none () =
+  (* The guard used to compare against "" exactly, so a reply of one newline
+     passed it and drew under the turn's own calls. *)
+  let decoded =
+    decode (`List [ autonomous_turn ~content:(`String "\n  ") [ tool "Read" ] ])
+  in
+  check bool "no reply row stands beside the call" false
+    (List.exists
+       (fun (row : History.row) -> row.History.kind = History.Autonomous_reply)
+       decoded.History.rows);
+  check int "the call the turn made is still drawn" 1
+    (List.length decoded.History.rows)
+
+let test_a_direct_turn_keeps_its_blank_reply () =
+  (* Somebody asked. That the answer came back empty is part of the exchange,
+     so the narrowing above stops at autonomous turns. *)
+  let decoded = decode (`List [ row ~role:"assistant" "" ]) in
+  check (list string) "the keeper row survives" [ "keeper" ]
+    (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows)
+
+(* The production shape: no [turn_ref] field, no delivery key, the turn id in
+   the marker. Of 598 rows on one live pane, 198 were autonomous and every one
+   looked like this, so reading only the other two places left every one of
+   them in no turn at all -- and the pane draws a turn's bracket, folds a
+   repeated speaker and hangs work off its turn from exactly that id. *)
+(* The pane cannot tell a readable name repeated in the id field from an
+   opaque id, so an agent called [codex-mcp-client] arrives unresolved. What
+   the decoder must not do is shorten it here as well: the speaker column cuts
+   once, and cut twice the row kept neither end -- twelve broadcast rows on
+   one live pane read "…p-…roadcast". *)
+let test_an_unresolved_speaker_reaches_the_column_whole () =
+  check (pair string (option string)) "the name and the surface arrive apart"
+    ("codex-mcp-client", Some "broadcast")
+    (History.addressed_label_parts
+       (History.Unresolved { id = Some "codex-mcp-client" })
+       (Some History.Surface.Broadcast));
+  (* Joined, which is what a caller with room for both makes of them. *)
+  check string "joined, they read as they always did"
+    "codex-mcp-client \xc2\xb7 broadcast"
+    (joined_label
+       (History.Unresolved { id = Some "codex-mcp-client" })
+       (Some History.Surface.Broadcast))
+;;
+
+let test_an_autonomous_turn_is_identified_by_its_marker () =
+  let decoded = decode (`List [ autonomous_turn [ reason "look"; tool "Read" ] ]) in
+  check (list (option string)) "the trace rows share the marker's turn"
+    [ Some "trace-1#54"; Some "trace-1#54" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows);
+  (* Turn identity, not an operation: the journal endpoint is keyed by the
+     latter and an autonomous turn never ran as one. *)
+  check (list (option string)) "and claim no operation"
+    [ None; None ]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows)
+;;
+
 let test_autonomous_trace_rows_keep_the_turn_ref () =
   let decoded =
     decode
@@ -562,7 +640,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   let label json =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
-        History.addressed_label speaker surface
+        joined_label speaker surface
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
@@ -657,9 +735,14 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
        (discord_label "1356818756755525815"));
   (* An author the producer could not name is not the person reading the pane.
      272 rows from Slack and Discord arrived this way and every one of them
-     was drawn as "you". *)
+     was drawn as "you".
+
+     The id arrives whole. It used to be shortened here as well, and #33699
+     took that out: the speaker column cuts once, and cut twice the row kept
+     neither end. The expectation was written before that and still asked for
+     the shortened form. *)
   check string "an unnamed connector author is not the operator"
-    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    "U09L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_authority:"external"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
@@ -667,7 +750,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   (* The producer repeating the id in the name field is the store saying it had
      no name, not a person called [U09L0RHPW7P]. *)
   check string "a name that repeats the id is not a name"
-    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    "U09L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
           ~speaker_authority:"external"
@@ -1083,11 +1166,6 @@ let test_a_blank_turn_with_no_trace_keeps_its_line () =
      turn happened. Unchanged from before trace blocks were read. *)
   let decoded = decode (`List [ row ~ts:7.0 ~role:"assistant" "" ]) in
   check (list string) "one keeper row, blank" [ "keeper" ]
-    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
-
-let test_a_blank_autonomous_turn_has_an_explicit_origin () =
-  let decoded = decode (`List [ autonomous_turn ~ts:8.0 [] ]) in
-  check (list string) "one autonomous row" [ "autonomous" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
 let test_persisted_identity_and_absolute_turn_survive_projection () =
@@ -1766,6 +1844,16 @@ let () =
             test_consecutive_tools_from_different_turns_do_not_merge
         ; test_case "autonomous trace rows retain turn_ref" `Quick
             test_autonomous_trace_rows_keep_the_turn_ref
+        ; test_case "an autonomous turn is identified by its marker" `Quick
+            test_an_autonomous_turn_is_identified_by_its_marker
+        ; test_case "an unresolved speaker reaches the column whole" `Quick
+            test_an_unresolved_speaker_reaches_the_column_whole
+        ; test_case "a silent autonomous turn draws no row" `Quick
+            test_a_silent_autonomous_turn_draws_no_row
+        ; test_case "a whitespace autonomous reply is as blank as none" `Quick
+            test_a_whitespace_autonomous_reply_is_as_blank_as_none
+        ; test_case "a direct turn keeps its blank reply" `Quick
+            test_a_direct_turn_keeps_its_blank_reply
         ; test_case "an addressed row says who sent it" `Quick
             test_an_addressed_row_says_who_sent_it_not_only_what_to_draw
         ; test_case "an addressed row is labelled by who sent it" `Quick
@@ -1787,8 +1875,6 @@ let () =
             test_missing_skill_evidence_stays_visible_beside_the_raw_call
         ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
             test_skill_evidence_count_mismatch_retains_every_raw_call
-        ; test_case "blank autonomous turn keeps its origin" `Quick
-            test_a_blank_autonomous_turn_has_an_explicit_origin
         ; test_case "projection keeps stable row and absolute turn identity"
             `Quick
             test_persisted_identity_and_absolute_turn_survive_projection

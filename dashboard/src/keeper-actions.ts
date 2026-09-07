@@ -882,12 +882,21 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
 function userInputMediaKindForAttachment(
   attachment: KeeperConversationAttachment,
 ): Exclude<KeeperUserInputBlock['type'], 'text'> {
+  if (attachment.kind === 'url' || attachment.kind === 'file_id') return 'image'
   if (attachment.type === 'image') return 'image'
   if (attachment.mimeType.startsWith('audio/')) return 'audio'
   return 'document'
 }
 
 function attachmentToUserInputBlock(attachment: KeeperConversationAttachment): KeeperUserInputBlock {
+  // A reference crosses as its native carrier (#33728): the server's parse
+  // accepts exactly one of attachment_id / url / file_id per image block.
+  if (attachment.kind === 'url') {
+    return { type: 'image', url: attachment.url, ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}) }
+  }
+  if (attachment.kind === 'file_id') {
+    return { type: 'image', fileId: attachment.fileId, ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}) }
+  }
   return {
     type: userInputMediaKindForAttachment(attachment),
     attachmentId: attachment.id,
@@ -919,7 +928,7 @@ function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
   if (media.length === 0) return ''
   const names = media
     .slice(0, 3)
-    .map(block => block.name.trim())
+    .map(block => ('url' in block ? block.url : 'fileId' in block ? `file_id ${block.fileId}` : block.name).trim())
     .filter(Boolean)
     .join(', ')
   const suffix = media.length > 3 ? ` 외 ${media.length - 3}개` : ''

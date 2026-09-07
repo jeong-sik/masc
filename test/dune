@@ -1824,6 +1824,11 @@
  (modules test_keeper_optional_request_cap)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+(test
+ (name test_keeper_required_tools)
+ (modules test_keeper_required_tools)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
 
 ; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
 (test

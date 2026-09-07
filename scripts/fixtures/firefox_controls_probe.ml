@@ -6,6 +6,7 @@ let endpoint = Sys.getenv "MASC_PROBE_DRIVER_URL"
 let fixture_url = Sys.getenv "MASC_PROBE_FIXTURE_URL"
 let remote_session = ref None
 let request ~method_ ~path ~body =
+  Eio_unix.run_in_systhread (fun () ->
   let method_name = match method_ with `GET -> "GET" | `POST -> "POST" | `DELETE -> "DELETE" | `PUT -> "PUT" | `PATCH -> "PATCH" | `HEAD -> "HEAD" in
   let args = ["curl";"--silent";"--show-error";"--max-time";"45";"--request";method_name;
     "--header";"Content-Type: application/json";"--write-out";"\n%{http_code}";endpoint ^ path]
@@ -21,7 +22,7 @@ let request ~method_ ~path ~body =
      | `POST,"/session",Ok (`Assoc fields) -> (match List.assoc_opt "sessionId" fields with Some (`String id) -> remote_session := Some id | _ -> ())
      | _ -> ());
     result
-  | _ -> Error (Driver.Transport "curl failed")
+  | _ -> Error (Driver.Transport "curl failed"))
 let member = Yojson.Safe.Util.member
 let integer json = Yojson.Safe.Util.to_int json
 let string json = Yojson.Safe.Util.to_string json

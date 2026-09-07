@@ -1,0 +1,51 @@
+{
+  "sessionId": "35e270d1-d269-4a15-8009-5fd8f4880082",
+  "downloads": [
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "f5f0e929-972a-4000-ada0-602cb04bee89",
+      "context": "8b8a02aa-1807-4bdb-9a3b-15c290314a7c",
+      "url": "http://127.0.0.1:50391/attachment",
+      "status": "completed",
+      "suggestedFilename": "same.bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-final-probe-20260907-r2/downloads/f0ebf0767cdd2a8abf5efec805392249/same.bin",
+      "bytes": 40960
+    },
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "04beac03-c947-4ba7-910b-057b05a2dcef",
+      "context": "8b8a02aa-1807-4bdb-9a3b-15c290314a7c",
+      "url": "http://127.0.0.1:50391/attachment",
+      "status": "completed",
+      "suggestedFilename": "same(1).bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-final-probe-20260907-r2/downloads/f0ebf0767cdd2a8abf5efec805392249/same(1).bin",
+      "bytes": 40960
+    },
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "c39ea83c-a3b2-4032-9818-99b8037f2041",
+      "context": "8b8a02aa-1807-4bdb-9a3b-15c290314a7c",
+      "url": "http://127.0.0.1:50391/plain-download",
+      "status": "completed",
+      "suggestedFilename": "attribute.bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-final-probe-20260907-r2/downloads/f0ebf0767cdd2a8abf5efec805392249/attribute.bin",
+      "bytes": 40960
+    },
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "524d07a4-e436-4bd3-a0d0-208d7ecc6faf",
+      "context": "36507222017",
+      "url": "http://127.0.0.1:50391/attachment?frame",
+      "status": "completed",
+      "suggestedFilename": "same(2).bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-final-probe-20260907-r2/downloads/f0ebf0767cdd2a8abf5efec805392249/same(2).bin",
+      "bytes": 40960
+    }
+  ],
+  "observation": "connected",
+  "reason": null
+}

@@ -225,6 +225,14 @@ blocking_pr_lints() {
     python3 scripts/ci/test_check_stale_base_revert.py
   run_lint "Stale-base revert guard (RFC-0235)" \
     python3 scripts/ci/check-stale-base-revert.py --base "${base}" --head HEAD
+  # Both do nothing without a base ref, which is why they belong here rather
+  # than beside the always-on lints. check-release-train-guard refuses a
+  # version downgrade -- 0.33.0 to 0.31.0 in dune-project reports it -- and
+  # check-pr-hygiene refuses an empty commit and a Request_priority erasure
+  # (#4186), which a planted `~priority:()` reports.
+  run_lint "Release train guard" \
+    bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
+  run_lint "PR hygiene" bash scripts/check-pr-hygiene.sh --base "${base}"
   # A wildcard catch that swallows Eio.Cancel.Cancelled is the bug this repo
   # modelled in TLA+ (CancelledAbsorbed / CancelledNeverAbsorbed) and hit at
   # runtime as an Assert_failure. The lint existed but no workflow ran it, so
@@ -348,6 +356,15 @@ blocking_pr_lints() {
   # concept walking back in unnoticed, but it is the first place to look if
   # the lint job gets slow.
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
+  # Two line-reference validators with nothing to validate: no spec preamble
+  # and no keeper docstring currently cites a line number. They were written
+  # after four citations in a retired queue model drifted 245 to 413 lines
+  # while every behavioural claim around them stayed true, so the failure they
+  # exist for arrives the moment someone writes the next citation. Wiring them
+  # at zero subjects costs a second each and means the first one is checked.
+  run_lint "TLA spec line-refs" bash scripts/audit-tla-ml-line-refs.sh
+  run_lint "OCaml spec-nav line-refs" \
+    bash scripts/audit-ocaml-spec-nav-line-refs.sh
 }
 
 advisory_lints() {

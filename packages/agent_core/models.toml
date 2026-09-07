@@ -3326,6 +3326,52 @@ supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
 
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
 [[models]]
 id_prefix = "glm-4.5v"
 base = "glm"

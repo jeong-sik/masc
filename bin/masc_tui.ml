@@ -1345,9 +1345,21 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      stops one and keeps what was said, which is the common case; this is the
      other one, and without it there is no way to abandon a recording that
      picked up something the operator did not mean to send. *)
-  | "esc" when Option.is_some state.voice_capture ->
+  | "esc" when Option.is_some state.voice_capture || Option.is_some state.voice_continuous ->
+    (* Discard the running capture, and disarm continuous in the same press:
+     rearm_continuous_capture restarts a capture the moment one ends, so an
+     Esc that only discarded never caught up — the operator pressed Esc,
+     watched the next recording start, and could not leave the surface at
+     all while the mode was armed. One press settles one layer: this press
+     ends the utterance AND the mode; the next Esc interrupts or leaves. *)
     state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
-    state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
+    (match state.voice_continuous with
+     | Some _ ->
+       state.voice_continuous <- None;
+       state.voice_floor <- None;
+       state.last_action <- Some ("voice: discarding, continuous off", Unix.gettimeofday ())
+     | None ->
+       state.last_action <- Some ("voice: discarding", Unix.gettimeofday ()));
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
     state.msg_recall_replaces <- None;
@@ -1385,8 +1397,19 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     when state.view = Keepers Keeper_message
          && state.keeper_message_focus = Right_pane
          && Buffer.length state.msg_input = 0
-         && Option.is_none state.msg_recall_replaces
-         && Option.is_none state.voice_capture ->
+         && Option.is_none state.msg_recall_replaces ->
+    (* Q's contract is walking away without stranding anything mid-flight.
+       A running capture used to make this arm decline — the Q fell through
+       to the printable arm and typed a letter — and with continuous armed
+       the operator could not leave at all. Settle instead: stop the capture
+       keeping what was heard, disarm continuous, leave. *)
+    (match state.voice_capture with
+     | Some _ ->
+       state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+       state.last_action <- Some ("voice: kept, leaving", Unix.gettimeofday ())
+     | None -> ());
+    state.voice_continuous <- None;
+    state.voice_floor <- None;
     leave_keeper_message state ~drain_queue;
     true
   | "\r" ->

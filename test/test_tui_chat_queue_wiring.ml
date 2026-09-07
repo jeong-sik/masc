@@ -1963,6 +1963,31 @@ let test_escape_reaches_the_interrupt () =
       launched
 ;;
 
+(* Continuous voice used to trap the operator in the chat: rearm_continuous_
+   capture restarts a capture the moment one ends, so an Esc that only
+   discarded the utterance never caught up -- the next recording started and
+   neither Esc nor Q could leave (Q\'s guard declined while a capture ran,
+   and the key fell through as a typed letter). Both keys now settle the
+   mode themselves: the esc arm disarms continuous in the same press, and
+   the Q arm stops the capture keeping what was heard, disarms, leaves. *)
+let test_escape_and_Q_settle_continuous_voice () =
+  (* The Q arm must reach the leave even while a capture runs: the old guard
+     declined on one and the key fell through as a typed letter, which with
+     continuous armed meant no way out of the surface. The esc side settles
+     through field writes the call counter cannot see; its regression lives
+     with the runtime suites that drive real state. *)
+  let leaves =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"leave_keeper_message"
+  in
+  if leaves < 1 then
+    failf
+      "the Q arm must call leave_keeper_message from handle_message_key; observed %d call(s)"
+      leaves
+;;
+
 (* The Esc-during-a-turn decision lives in Masc_tui_esc_interrupt so the
    dispatch and the footer read one table (test_tui_esc_interrupt pins it).
    The day either side re-derives the decision inline, hint and act diverge
@@ -2367,6 +2392,8 @@ let () =
             test_chat_shortcuts_reach_visibility_state
         ; test_case "Esc reaches the interrupt" `Quick
             test_escape_reaches_the_interrupt
+        ; test_case "Esc and Q settle continuous voice instead of trapping the operator" `Quick
+            test_escape_and_Q_settle_continuous_voice
         ; test_case "Esc dispatch and footer read the interrupt table" `Quick
             test_esc_dispatch_and_footer_read_the_interrupt_table
         ; test_case "quiet leave leaves without touching the turn" `Quick

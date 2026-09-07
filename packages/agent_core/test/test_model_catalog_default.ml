@@ -71,7 +71,10 @@ let test_subscription_models_resolve_their_own_rows () =
    whatever the catalog happens to say, including a row that admits nothing. *)
 let subscription_model_efforts =
   [ "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+    (* developers.openai.com/api/docs/models, read 2026-09-07. The previous
+       list came from the 2026-06-29 gpt-5.1 reference and was wrong at both
+       ends: sol takes no "minimal" and does take "max". *)
+  ; "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
   ; "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
@@ -442,6 +445,50 @@ let test_openai_responses_row_targets_the_responses_path () =
     (on_responses.accepted_reasoning_efforts <> None)
 ;;
 
+(* developers.openai.com/api/docs/models, read 2026-09-07: the gpt-5.6 rows
+   take none|low|medium|high|xhigh|max and gpt-6-astra takes the same without
+   "none". Neither takes "minimal", which the gpt-5.6 row carried from the
+   2026-06-29 gpt-5.1 reference, and both take "max", which it omitted.
+
+   No key in this workspace can reach either family yet -- all three answer
+   403 -- so these are the published contract and are pinned here rather than
+   probed. When access opens, a probe replaces this. *)
+let test_the_newer_openai_families_match_the_published_contract () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"newer openai families"
+  in
+  Model_catalog.set_global catalog;
+  let efforts label model =
+    match
+      Llm_provider.Capabilities.for_provider_model_id
+        ~wire:None
+        ~allow_bare_fallback:true
+        ~provider_label:label
+        ~model_id:model
+    with
+    | None -> failf "%s/%s resolves no capabilities" label model
+    | Some c ->
+      ( c.max_context_tokens
+      , match c.accepted_reasoning_efforts with
+        | None -> []
+        | Some l -> List.map Llm_provider.Reasoning_effort.to_string l )
+  in
+  let ctx_5_6, efforts_5_6 = efforts "codex_subscription" "gpt-5.6-sol" in
+  check (option int) "gpt-5.6 context" (Some 1_050_000) ctx_5_6;
+  check
+    (list string)
+    "gpt-5.6 efforts"
+    [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+    efforts_5_6;
+  let ctx_6, efforts_6 = efforts "openai-responses" "gpt-6-astra" in
+  check (option int) "gpt-6-astra context" (Some 1_050_000) ctx_6;
+  check
+    (list string)
+    "gpt-6-astra efforts omit none"
+    [ "low"; "medium"; "high"; "xhigh"; "max" ]
+    efforts_6
+;;
+
 
 let () =
   run
@@ -496,6 +543,10 @@ let () =
             "the openai-responses row targets the responses path"
             `Quick
             test_openai_responses_row_targets_the_responses_path
+        ; test_case
+            "the newer openai families match the published contract"
+            `Quick
+            test_the_newer_openai_families_match_the_published_contract
         ] )
     ]
 ;;

@@ -354,7 +354,49 @@ base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_computer_use = true
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+# developers.openai.com/api/docs/models, read 2026-09-07: sol, terra and
+# luna each take none|low|medium|high|xhigh|max. The list above was
+# inherited from the 2026-06-29 gpt-5.1 reference and was wrong at both
+# ends -- it carried "minimal", which these rows do not take, and omitted
+# "max", which they do.
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+
+[[models]]
+# gpt-6-astra. developers.openai.com/api/docs/models, read 2026-09-07:
+# 1.05M in / 128K out, effort low|medium|high|xhigh|max -- no "none"
+# and no "minimal", which is where it differs from the gpt-5.6 rows above.
+# Not probed: no key in this workspace has access yet (403 "does not have
+# access to model gpt-6-astra" on all three, 2026-09-07), so this row is the
+# published contract and nothing more.
+id_prefix = "gpt-6-astra"
+base = "openai_chat"
+chat_output_budget_field = "max_completion_tokens"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+
+[[models]]
+# The same model scoped to the Responses wire. A provider label that resolves
+# answers before the bare row is read (#33893), so without this gpt-6-astra
+# there takes the openai_chat provider defaults -- 128K and no efforts --
+# which is what the probe showed before this row went in.
+id_prefix = "gpt-6-astra"
+provider_name = "openai-responses"
+base = "openai_chat"
+chat_output_budget_field = "max_completion_tokens"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
 
 [[models]]
 id_prefix = "gpt-5.5"

@@ -776,6 +776,72 @@ let test_retryable_provider_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
+let test_capacity_failover_preserves_image_and_declared_caps () =
+  let errors =
+    [ Llm_provider.Http_client.request_body_too_large_error
+        ~actual_bytes:1_172_224 ~limit_bytes:65_536
+    ; Llm_provider.Http_client.ProviderFailure
+        { kind = Llm_provider.Http_client.Context_overflow { limit = Some 4096 }
+        ; message = "image context exceeds this candidate"
+        }
+    ; Llm_provider.Http_client.HttpError
+        { code = 413; body = "payload refused"; retry_after_header = None }
+    ]
+  in
+  List.iter
+    (fun error ->
+      with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+        let calls = ref [] in
+        let first_messages = ref None in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages ?tools:_ () =
+          assert (config.Llm_provider.Provider_config.max_request_body_bytes = Some 65_536);
+          calls := config.model_id :: !calls;
+          match !first_messages with
+          | None ->
+            first_messages := Some messages;
+            Error error
+          | Some original ->
+            assert (messages = original);
+            assert
+              (Runtime_agent.For_testing.required_modalities_of_messages messages
+               = [ "image" ]);
+            Ok (ok_response "image read on the next runtime")
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw
+                ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+                ~query:"read the screenshot" ~media_type:"image/png"
+                ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+        assert (outcome = Vt.Vo_ok "image read on the next runtime")))
+    errors
+
+let test_capacity_exhaustion_retains_size_failure () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    let calls = ref 0 in
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      incr calls;
+      Error
+        (Llm_provider.Http_client.HttpError
+           { code = 413; body = "payload refused"; retry_after_header = None })
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision ~complete ~sw
+            ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~query:"read the screenshot" ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+    in
+    assert (!calls = 2);
+    match outcome with
+    | Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail } ->
+      assert (String_util.contains_substring detail "413")
+    | _ -> failwith "exhausted image capacity must remain a visible runtime failure")
+
 let test_candidate_failover_is_not_cut_off_by_local_deadline () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -936,6 +1002,82 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
         (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
     | _ -> failwith "delegate eviction should replace the image with text")
 
+let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-fallback-projection" in
+    let bytes = "\x89PNG\r\n\x1a\noriginal-image" in
+    let image =
+      Agent_core.Types.Image
+        { media_type = "image/png"; data = Base64.encode_string bytes
+        ; source_type = Agent_core.Types.Base64 }
+    in
+    let nested =
+      Agent_core.Types.ToolResult
+        { tool_use_id = "read-screen"; content = "screenshot"
+        ; outcome = Agent_core.Types.Tool_succeeded; json = None
+        ; content_blocks = Some [ image ] }
+    in
+    let original = [ Agent_core.Types.Text "inspect"; image; nested ] in
+    let canonical_before = original in
+    let project = Vi.fallback_projector ~keeper_name () in
+    let labels = [ "mode", "eager"; "result", "ok"; "reason", "stored_unread" ] in
+    let before = metric_value Keeper_metrics.VisionIngestEvictions ~labels in
+    let projected = project ~mode:Vi.Eager original in
+    assert (projected.delegated_images = 2);
+    assert (project ~mode:Vi.Eager original = projected);
+    assert_metric_increment "repeated and nested image reads cached" before
+      (metric_value Keeper_metrics.VisionIngestEvictions ~labels);
+    let assert_stored = function
+      | Agent_core.Types.Text placeholder ->
+        let handle = artifact_handle_of_placeholder placeholder |> Store.of_string in
+        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
+         | Ok stored -> assert (stored = bytes)
+         | Error error -> failwith error)
+      | _ -> failwith "fallback image must carry its durable artifact"
+    in
+    (match projected.blocks with
+     | [ Agent_core.Types.Text "inspect"; direct
+       ; Agent_core.Types.ToolResult
+           { content_blocks = Some [ nested ]; content = "screenshot"; _ } ] ->
+       assert_stored direct;
+       assert (direct = nested)
+     | _ -> failwith "fallback must preserve nested tool result structure");
+    let labels = [ "mode", "store_only"; "result", "ok"; "reason", "stored" ] in
+    let before = metric_value Keeper_metrics.VisionIngestEvictions ~labels in
+    let historical = project ~mode:Vi.Store_only [ image; nested ] in
+    assert (project ~mode:Vi.Store_only [ image; nested ] = historical);
+    assert_metric_increment "historical duplicate image stored once" before
+      (metric_value Keeper_metrics.VisionIngestEvictions ~labels);
+    (match historical.blocks with
+     | direct :: _ -> assert_stored direct
+     | [] -> failwith "historical image lost");
+    assert (original = canonical_before);
+    assert
+      (Runtime_agent.For_testing.required_modalities_of_content_blocks original
+       = [ "image" ]))
+
+let test_fallback_reference_projection_is_explicitly_unread () =
+  let image source_type data =
+    Agent_core.Types.Image { source_type; data; media_type = "image/png" }
+  in
+  let original =
+    [ image Agent_core.Types.Url "https://example.invalid/screenshot.png"
+    ; image Agent_core.Types.File_id "file-screen-123" ]
+  in
+  let project = Vi.fallback_projector ~keeper_name:"vision-reference-projection" () in
+  let projected = project ~mode:Vi.Eager original in
+  assert (projected.delegated_images = 2);
+  (match projected.blocks with
+   | [ Agent_core.Types.Text url; Agent_core.Types.Text file ] ->
+     assert (String_util.contains_substring url "unread image URL:");
+     assert (String_util.contains_substring url "https://example.invalid/screenshot.png");
+     assert (String_util.contains_substring file "unread image file ID:");
+     assert (String_util.contains_substring file "file-screen-123");
+     assert (not (String_util.contains_substring url "artifact:"));
+     assert (not (String_util.contains_substring file "artifact:"))
+   | _ -> failwith "reference fallback must retain an honest unread reference");
+  assert (Runtime_agent.For_testing.required_modalities_of_content_blocks original = [ "image" ])
+
 let test_delegate_eviction_rejects_invalid_media_type_before_store () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-ingest-invalid-media" in
@@ -1081,6 +1223,43 @@ let test_delegates_media_follows_lane_capability () =
         "a candidate that takes images itself must keep them for the RFC-0265 \
          reroute")
 
+let test_delegates_media_matches_antigravity_transport () =
+  with_temp_base (fun base_path ->
+    let oauth_source = Filename.concat base_path "vision-oauth.json" in
+    write_file oauth_source "{}";
+    let config =
+      Printf.sprintf
+        {|[runtime]
+default = "gravity.vision"
+[providers.gravity]
+protocol = "antigravity-cli"
+command = "antigravity"
+is-non-interactive = true
+[providers.gravity.credentials]
+type = "file"
+path = %S
+[models.vision]
+api-name = "vision"
+max-context = 4096
+[models.vision.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+[gravity.vision]
+|}
+        oauth_source
+    in
+    with_temp_runtime_toml config (fun () ->
+      assert (Vi.delegates_media ~runtime_id:"gravity.vision");
+      let runtime =
+        match Runtime.get_runtime_by_id "gravity.vision" with
+        | Some runtime -> runtime
+        | None -> failwith "Antigravity runtime did not materialize"
+      in
+      assert
+        (not
+           (Runtime_agent.caps_admit_required_modalities
+              (Runtime_agent.input_capabilities_of_runtime runtime) [ "image" ]))))
+
 let test_evicted_history_has_no_image_modality () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-ingest-modality" in
@@ -1186,11 +1365,15 @@ let () =
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
   test_retryable_provider_error_tries_next_runtime ();
+  test_capacity_failover_preserves_image_and_declared_caps ();
+  test_capacity_exhaustion_retains_size_failure ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();
   test_non_retryable_provider_error_stops_without_trying_next_runtime ();
   test_accept_rejected_is_policy_rejection_without_failover ();
   test_eager_eviction_reason_preserves_typed_outcome ();
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
+  test_fallback_projection_preserves_artifacts_and_caches_each_mode ();
+  test_fallback_reference_projection_is_explicitly_unread ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();
   test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();
@@ -1198,4 +1381,5 @@ let () =
   test_non_delegate_eviction_preserves_inline_image ();
   test_evicted_history_has_no_image_modality ();
   test_delegates_media_follows_lane_capability ();
+  test_delegates_media_matches_antigravity_transport ();
   print_endline "test_keeper_vision_tool: all assertions passed"

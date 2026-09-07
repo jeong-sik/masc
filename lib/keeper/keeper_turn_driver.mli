@@ -296,6 +296,9 @@ module For_testing : sig
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
   val project_input_for_attempt :
+    project_images:
+      (mode:Keeper_vision_ingest.mode ->
+       Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->
     keeper_name:string ->
     emit_runtime_manifest:
       (?status:string ->
@@ -309,8 +312,8 @@ module For_testing : sig
     Runtime.t ->
     attempt_input
   (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
-      when the runtime admits the turn's modalities, otherwise the stripped
-      view plus the degraded manifest row emitted through
+      when the runtime admits the turn's modalities, otherwise image readings/references
+      precede the strip of other unsupported media, with manifest rows through
       [emit_runtime_manifest]. [Reroute] has no producer here because the
       decision is taken with no reroute candidates. *)
 

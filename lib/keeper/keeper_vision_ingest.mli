@@ -3,8 +3,7 @@
     Replaces an [Agent_core.Types.Image] content block with a text placeholder
     whose handle keys the raw bytes in the per-keeper
     {!Multimodal.Vision_artifact_store}. Enforced at BOTH ingestion entry sites
-    so the persisted checkpoint never holds inline base64 and rehydration
-    cannot re-materialise an [Image]:
+    for lanes that cannot carry inline images:
 
     - Site 1 (fresh input, [Eager]): the turn caller validates and stores every
       image, then runs at most one bounded [analyze_image] vision sub-call for
@@ -17,8 +16,9 @@
     a lane with a candidate that takes provider content blocks and declares
     image input keeps its images (RFC-0265 reroutes there, and seeing the pixels
     beats any reading); a lane with no such candidate evicts instead of letting
-    RFC-0265 drop the image. The three CLI executions take a prompt string, so an
-    image cannot reach them and they always evict. Idempotent: a [Text]
+    RFC-0265 drop the image. Claude Code and Codex carry images; Antigravity
+    carries text only. Per-candidate fallback projection handles a later
+    text-only candidate after a native image candidate fails. Idempotent: a [Text]
     placeholder is not an [Image], so re-running is a no-op. *)
 
 type mode =
@@ -70,6 +70,25 @@ val evict_message
 (** Site 2. Same transform applied to a message's content blocks at the
     checkpoint write boundary. Use [Store_only] here — checkpoint writes must
     not block the turn fiber on a provider call. *)
+
+type image_projection =
+  { blocks : Agent_core.Types.content_block list
+  ; delegated_images : int
+  }
+
+val fallback_projector
+  : keeper_name:string
+  -> unit
+  -> mode:mode
+  -> Agent_core.Types.content_block list
+  -> image_projection
+(** One projector per lane walk. Unsupported inline images become durable
+    artifact/read placeholders, including images nested in tool results.
+    Repeated candidates reuse the same result instead of calling vision again.
+    URL and file-id carriers become explicit unread reference text; this does
+    not fetch them or claim that the artifact-only analyze_image tool can.
+    Project the current goal with [Eager] before historical [Store_only] input.
+    The original blocks remain available to later image-capable candidates. *)
 
 val error_reasons : string list
 (** Every reason an image eviction can fail with. Closed by construction —

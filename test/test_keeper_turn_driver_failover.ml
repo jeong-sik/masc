@@ -870,10 +870,10 @@ let test_run_named_media_degrade_emits_typed_manifest () =
       ; manifest_keeper_turn_id = Some 1
       }
     in
-    let image =
-      Agent_core.Types.image_block
-        ~media_type:"image/png"
-        ~data:(Base64.encode_string "synthetic-image")
+    let audio =
+      Agent_core.Types.audio_block
+        ~media_type:"audio/wav"
+        ~data:(Base64.encode_string "synthetic-audio")
         ()
     in
     ignore
@@ -882,8 +882,8 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~keeper_name:"media-degrade-keeper"
          ~base_path:(Filename.get_temp_dir_name ())
          ~agent_core_tools:[]
-         ~goal:"inspect the image"
-         ~goal_blocks:[ image ]
+         ~goal:"inspect the audio"
+         ~goal_blocks:[ audio ]
          ~runtime_manifest_context:context
          ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
          ~body_timeout_s:0.5
@@ -974,12 +974,13 @@ let image_count_in_messages (messages : Agent_core.Types.message list) =
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
-    ~data:(Base64.encode_string "synthetic-image")
+    ~source_type:Agent_core.Types.Url
+    ~data:"https://example.invalid/screenshot.png"
     ()
 
-(* Per-attempt RFC-0265 projection: one image turn projected for the text-only
-   candidate loses its images in the goal and the history and records the
-   degrade against that runtime; projected for the vision candidate it is
+(* Per-attempt image projection: one image turn projected for the text-only
+   candidate retains image references in the goal and the history and records
+   delegation against that runtime; projected for the vision candidate it is
    untouched and records nothing. The view is a property of the runtime being
    dispatched, not of the lane head. *)
 let test_attempt_input_is_projected_per_runtime () =
@@ -996,10 +997,15 @@ let test_attempt_input_is_projected_per_runtime () =
           [ Agent_core.Types.Text "earlier image turn"; image ]
       ]
     in
+    let project_images =
+      Masc.Keeper_vision_ingest.fallback_projector
+        ~keeper_name:"per-attempt-projection" ()
+    in
     let project runtime_id =
       let events = ref [] in
       let projected =
         Driver.For_testing.project_input_for_attempt
+          ~project_images
           ~keeper_name:"per-attempt-projection"
           ~emit_runtime_manifest:(emit_manifest_collector events)
           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ])
@@ -1018,8 +1024,17 @@ let test_attempt_input_is_projected_per_runtime () =
          "text-only goal loses the image"
          0
          (image_count_in_blocks blocks);
+       Alcotest.(check bool)
+         "the unread URL remains in the provider input"
+         true
+         (List.exists
+            (function
+              | Agent_core.Types.Text text ->
+                contains ~needle:"https://example.invalid/screenshot.png" text
+              | _ -> false)
+            blocks);
        Alcotest.(check int)
-         "text-only goal is the text plus the degrade notice"
+         "text-only goal retains the image reference alongside the text"
          2
          (List.length blocks));
     Alcotest.(check int)
@@ -1027,13 +1042,13 @@ let test_attempt_input_is_projected_per_runtime () =
       0
       (image_count_in_messages text_view.Driver.attempt_initial_messages);
     (match text_events with
-     | [ (Runtime_manifest.Runtime_routed, Some "degraded", Some decision) ] ->
+     | [ (Runtime_manifest.Runtime_routed, Some "delegated", Some decision) ] ->
        Alcotest.(check string)
-         "the degrade names the text-only runtime"
+         "the delegation names the text-only runtime"
          "primary.text_model"
-         (string_member "degraded_runtime_id" decision)
+         (string_member "runtime_id" decision)
      | events ->
-       Alcotest.failf "expected one degraded row, got %d" (List.length events));
+       Alcotest.failf "expected one delegated row, got %d" (List.length events));
     let vision_view, vision_events = project "lanevision.vision_model" in
     (match vision_view.Driver.attempt_goal_blocks with
      | None -> Alcotest.fail "the vision goal must stay present"
@@ -1051,6 +1066,62 @@ let test_attempt_input_is_projected_per_runtime () =
       "the vision projection records nothing"
       0
       (List.length vision_events))
+
+let test_image_fallback_checkpoint_keeps_canonical_prefix () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id =
+      match Runtime.get_runtime_by_id id with
+      | Some value -> value
+      | None -> Alcotest.failf "missing runtime %s" id
+    in
+    let image = synthetic_image () in
+    let nested =
+      Agent_core.Types.ToolResult
+        { tool_use_id = "screenshot"; content = "captured screenshot"
+        ; outcome = Agent_core.Types.Tool_succeeded; json = None
+        ; content_blocks = Some [ image ] }
+    in
+    let history = [ message [ nested ] ] in
+    let checkpoint =
+      { (checkpoint_with_session_id "image-fallback") with messages = history }
+    in
+    let project_images =
+      Masc.Keeper_vision_ingest.fallback_projector ~keeper_name:"image-checkpoint" ()
+    in
+    let project ?(goal_blocks = Some [ image ]) runtime_id =
+      Driver.For_testing.project_input_for_attempt
+        ~project_images ~keeper_name:"image-checkpoint"
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint) ~runtime_id (runtime runtime_id)
+    in
+    let history_only = project ~goal_blocks:None "primary.text_model" in
+    Alcotest.(check bool) "history projection preserves the separate plain goal"
+      true (history_only.Driver.attempt_goal_blocks = None);
+    let text = project "primary.text_model" in
+    let dispatch_checkpoint =
+      match text.Driver.attempt_agent_core_checkpoint with
+      | Some value -> value
+      | None -> Alcotest.fail "checkpoint disappeared"
+    in
+    Alcotest.(check (list string)) "nested images became text references" []
+      (Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+         ~checkpoint_messages:dispatch_checkpoint.messages
+         ~initial_messages:text.Driver.attempt_initial_messages
+         ~goal_blocks:(Option.value text.Driver.attempt_goal_blocks ~default:[]));
+    let suffix = [ message [ Agent_core.Types.Text "answer" ] ] in
+    (match Masc.Keeper_replay_prefix.restore_messages
+             text.Driver.attempt_replay_prefix_projection
+             (dispatch_checkpoint.messages @ suffix) with
+     | Error error -> Alcotest.fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
+     | Ok restored ->
+       Alcotest.(check bool) "persisted prefix keeps the original image"
+         true (restored = history @ suffix));
+    let vision = project "lanevision.vision_model" in
+    Alcotest.(check bool) "a later vision candidate gets the original checkpoint"
+      true (vision.Driver.attempt_agent_core_checkpoint = Some checkpoint);
+    Alcotest.(check bool) "a later vision candidate gets the original goal"
+      true (vision.Driver.attempt_goal_blocks = Some [ image ]))
 
 (* Drives a two-candidate deferred lane through [run_named] on an image turn
    and records, per dispatched candidate, whether the history the provider
@@ -1149,19 +1220,19 @@ let check_deferred_lane_views ~order (result, observed, manifests) =
     true
     (saw_image "lanevision.vision_model");
   Alcotest.(check bool)
-    "the text-only candidate loses the image"
+    "the text-only candidate receives references instead of image blocks"
     false
     (saw_image "primary.text_model");
-  (match routed_rows_with_status "degraded" manifests with
+  (match routed_rows_with_status "delegated" manifests with
    | [ manifest ] ->
      let decision =
        Runtime_manifest.public_projection_of_decision manifest.decision
      in
      Alcotest.(check string)
-       "the one degrade names the text-only candidate"
+       "delegation names the text-only candidate"
        "primary.text_model"
-       (string_member "degraded_runtime_id" decision)
-   | rows -> Alcotest.failf "expected one degraded row, got %d" (List.length rows));
+       (string_member "runtime_id" decision)
+   | rows -> Alcotest.failf "expected one delegated row, got %d" (List.length rows));
   match result with
   | Error
       (Agent_core.Error.Config
@@ -2753,6 +2824,10 @@ let () =
             "attempt input is projected per runtime"
             `Quick
             test_attempt_input_is_projected_per_runtime;
+          Alcotest.test_case
+            "image fallback restores canonical checkpoint and later vision input"
+            `Quick
+            test_image_fallback_checkpoint_keeps_canonical_prefix;
           Alcotest.test_case
             "deferred lane vision then text projects per candidate"
             `Quick

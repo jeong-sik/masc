@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "observation": "existing production failure, before this patch",
+  "observed_date": "2026-09-07",
+  "source_sha256": "9570e7f16b9a44a3c6f1d622a0fc3a9bbbf78b0a81eb6cc1cee372dacaf34bd1",
+  "source_turn": 2202,
+  "attachment_bytes": 879167,
+  "base64_chars": 1172224,
+  "configured_vision_request_body_cap_bytes": 524288,
+  "runtime_attempts": [
+    {
+      "seq": 1,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_started",
+      "model": "glm-5.3-flash"
+    },
+    {
+      "seq": 4,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_finished",
+      "error": "Context overflow: newest conversation atom does not fit the model input budget: available_bytes=266971 newest_atom_bytes=1172439"
+    },
+    {
+      "seq": 5,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_started",
+      "model": "glm-5.3-flash"
+    },
+    {
+      "seq": 8,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_finished",
+      "error": "Context overflow: newest conversation atom does not fit the model input budget: available_bytes=31041 newest_atom_bytes=1172439"
+    },
+    {
+      "seq": 9,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_started",
+      "model": "glm-5.3-flash"
+    },
+    {
+      "seq": 12,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_finished",
+      "error": "Context overflow: model input budget leaves no room for history: capacity_bytes=131072 reserved_bytes=70797 undroppable_bytes=147199"
+    },
+    {
+      "seq": 13,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_started",
+      "model": "glm-5.3-flash"
+    },
+    {
+      "seq": 16,
+      "agent_name": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "record_type": "run_finished",
+      "error": "Context overflow: model input budget leaves no room for history: capacity_bytes=65536 reserved_bytes=64243 undroppable_bytes=147199"
+    },
+    {
+      "seq": 17,
+      "agent_name": "agent_core-glm-coding.glm-5.3",
+      "record_type": "run_started",
+      "model": "glm-5.3"
+    },
+    {
+      "seq": 20,
+      "agent_name": "agent_core-glm-coding.glm-5.3",
+      "record_type": "run_finished",
+      "error": "Rate limited: Rate limit reached for requests"
+    },
+    {
+      "seq": 21,
+      "agent_name": "agent_core-deepseek.deepseek-v4-flash",
+      "record_type": "run_started",
+      "model": "deepseek-v4-flash"
+    }
+  ],
+  "final_runtime": "deepseek.deepseek-v4-flash",
+  "final_input_media_notice": "one image omitted because the fallback runtime does not support image input",
+  "verification": {
+    "parser_dependency_scan": "passed (no compilation)",
+    "behavioral_tests": "pending targeted CI",
+    "deployed_patch": "not deployed",
+    "visual_after_patch": "not measured"
+  }
+}

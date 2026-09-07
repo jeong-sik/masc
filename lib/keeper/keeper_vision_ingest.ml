@@ -224,25 +224,12 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.conte
   | other -> other
 ;;
 
-(* A runtime takes an image itself only when its transport can carry one AND its
-   model declares image input. Both halves are required and neither implies the
-   other: Claude Code carries images in its stream-json content-block array and
-   Codex in its turn/start input list, but a model that does not declare image
-   input is still rejected before dispatch. Antigravity sends prompt text only, so an
-   image cannot reach it whatever the model declares. *)
-let transport_carries_images = function
-  | Runtime_execution.Agent_core _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Codex_app_server _ -> true
-  | Runtime_execution.Antigravity_cli _ -> false
-;;
-
+(* Routing and delegation share the transport-plus-model capability view. *)
 let runtime_takes_images_itself id =
   match Runtime.get_runtime_by_id id with
   | None -> false
   | Some (rt : Runtime.t) ->
-    transport_carries_images rt.Runtime.execution
-    && Runtime_agent.caps_admit_required_modalities
+    Runtime_agent.caps_admit_required_modalities
          (Runtime_agent.input_capabilities_of_runtime rt)
          [ "image" ]
 ;;
@@ -286,4 +273,54 @@ let evict_message ~mode ~delegate ~keeper_name (message : Agent_core.Types.messa
         evict_blocks ~mode ~delegate ~keeper_name message.Agent_core.Types.content
     }
   else message
+;;
+
+type image_projection =
+  { blocks : Agent_core.Types.content_block list
+  ; delegated_images : int
+  }
+
+let fallback_projector ~keeper_name () =
+  let cached = Hashtbl.create 8 in
+  let eager_budget = ref max_eager_reads_per_turn in
+  let project_image ~mode block =
+    match Hashtbl.find_opt cached (mode, block) with
+    | Some projected -> projected
+    | None ->
+      let projected =
+        match block with
+        | Agent_core.Types.Image { source_type = Agent_core.Types.Url; data; _ } ->
+          Agent_core.Types.Text
+            (Printf.sprintf
+               "[unread image URL: %s; this runtime cannot view the image]" data)
+        | Agent_core.Types.Image { source_type = Agent_core.Types.File_id; data; _ } ->
+          Agent_core.Types.Text
+            (Printf.sprintf
+               "[unread image file ID: %s; this runtime cannot view the image]" data)
+        | _ -> evict_block ~mode ~keeper_name ~eager_budget block
+      in
+      Hashtbl.add cached (mode, block) projected;
+      projected
+  in
+  let rec project ~mode blocks =
+    let reversed, delegated_images =
+      List.fold_left
+        (fun (reversed, count) block ->
+          match block with
+          | Agent_core.Types.Image _ ->
+            project_image ~mode block :: reversed, count + 1
+          | Agent_core.Types.ToolResult
+              { tool_use_id; content; outcome; json; content_blocks = Some nested } ->
+            let projected = project ~mode nested in
+            ( Agent_core.Types.ToolResult
+                { tool_use_id; content; outcome; json
+                ; content_blocks = Some projected.blocks }
+              :: reversed
+            , count + projected.delegated_images )
+          | other -> other :: reversed, count)
+        ([], 0) blocks
+    in
+    { blocks = List.rev reversed; delegated_images }
+  in
+  project
 ;;

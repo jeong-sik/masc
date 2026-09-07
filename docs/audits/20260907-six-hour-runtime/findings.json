@@ -167,7 +167,7 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "현재 실행 영수증과 과거 도구 증거는 분리됐지만 반복 감지는 전체 checkpoint를 사용. 06:13:07Z Execute count934 재관측. 명시적 Fresh/Resume 작업 식별·지속 상태 설계 완료, 구현은 남음. Fresh/Resume 경계 조사에서 direct operation ID 전달 누락과 HITL/Ask/Delegate/Composition의 영속 부모 연결 부재를 확인했다. 세션 전체 이력을 재개 증거로 사용하면 안 되며, scope 본 구현은 아직 남아 있다.",
+    "action": "최근 Execute count934로 미해결. #33950은 작업별 반복 기록과 checkpoint 복원 기반을 구현했고6개 대상 CI34098406950 실행 중. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 아직 남아 있다.",
     "status": "scope-design-required",
     "first": {
       "seq": 25984123,
@@ -275,7 +275,7 @@
     "count": 6,
     "note": "",
     "source": "lib/keeper/keeper_shutdown_finalize.ml",
-    "action": "원본 Finalized 증거 보존 ACK#33910 병합. #33926의662aa5ad4d에서103/103, HTTP#33920의daaf3bbfa8에서34/34 동작 테스트 PASS. 후속은 lint 설명 주석만 보완했으며 최초 새 CI는 결제/한도로 미실행했으나 현재 필수 검사와103/34 대상 동작 검증을 재실행 중. 실제 ACK는 미실행.",
+    "action": "ACK 도메인은 ad2af057c9에서103/103 PASS 후 외부가 cdae490f8774로 병합. HTTP는21500fe6d6에서34/34 PASS; 최종81c9f393967e는 ACK 파일 동일·필수 검사 PASS 후 외부가8ac44f2af180으로 병합. 실제 ACK는 미실행.",
     "status": "acknowledgement-stack",
     "first": {
       "seq": 26080010,
@@ -356,7 +356,7 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "05:44Z 수동 복구 후 다시 다른 서버 커밋으로 stale. 배송#33914 Python11/11; resolver#33922의3d3695a1f3 fixture 수정은 원격 반영됐지만 첫 CI가 결제/한도로 미시작했으며 현재 focused 검증34095776029가 실행 중. 실제 설치 smoke·배포 미완료.",
+    "action": "설치 resolver3d3695a1f3에서17/17·Web39/39 PASS. 외부 최종head8a67c07c99는 관련 파일 동일하며 c328dbe8로 병합됐다. 실제 설치 smoke34098251245는 검증 branch의 정확한3d에서3개 아키텍처로 실행 중. 운영 설치는 미실행.",
     "status": "distribution-stack",
     "first": {
       "seq": 26156709,
@@ -491,7 +491,7 @@
     "count": 19,
     "note": "search6 + fetch13; one query may fail two providers",
     "source": "lib/tool_misc_web_search.ml",
-    "action": "SearXNG 복구 후 실제 Keeper WebSearch 성공 관측. WebFetch 원래13건은401 네 건·404 아홉 건을 내부 고장으로 오분류. #33936에서 HTTP 코드와 실패 상태·상태별 안내를 보존하도록 수정; 동작 테스트34095824585 실행 중으로 결과 미확정. 최근 성공1건은 원래 실패 URL 복구 증명이 아님.",
+    "action": "실제 WebSearch·WebFetch 성공과 원래13개 URL 오류는 구분한다. HTTP 실패 분류·코드 보존#33936은120422bb9b에서 WebFetch14/14·bridge20/20 및 필수 검사 PASS. 외부가c7fe4f67a1로 병합; 원래 URL 접근 복구·배포는 미검증.",
     "status": "search-service-recovered",
     "first": {
       "seq": 25984475,
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다. 원문 보존의 동작 테스트34095821638은 현재 실행 중이며 결과 미확정.",
+    "action": "#33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 및 필수 검사 PASS 후 이 세션이d5e0685b38로 병합. #33938은 원본 시각과 실제 큐 체류 시간을 구분한다. 전체 큐의 FIFO 소비·현재 배포·장기 연속성은 미검증.",
     "status": "batch-drain-observed"
   }
 ]

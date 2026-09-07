@@ -13605,7 +13605,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)
       |> List.iter (fun line -> c.push_styled ~style:Ansi.reset ("  " ^ line));
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Ctrl-G / Esc:hide lane"
+        (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane"
            (if lines = [] then 0 else scroll + 1) (List.length lines)))
 
 let render_connectors (state : state) =

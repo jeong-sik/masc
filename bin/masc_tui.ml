@@ -12216,8 +12216,8 @@ let toggle_roster_pane_key = "\002"
    letter is text. *)
 let toggle_acting_pane_key = "\012"
 
-(* Ctrl-G keeps a reader one key away without consuming a typed letter. *)
-let toggle_browser_lane_key = "\007"
+(* Ctrl-^ keeps a reader one key away without consuming a typed letter. *)
+let toggle_browser_lane_key = "\030"
 
 let terminal_title_visible_keeper state =
   match state.view with
@@ -14442,6 +14442,8 @@ and is loaded on demand through keeper_skill.
               && not state.agenda_open && not state.answering_open
               && not state.context_inspector_open
               && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none state.ask_text_entry
+              && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
               && Option.is_none (text_input_target state ~compact_viewport) ->
            (match browser_lane_on_screen state with
             | Some _ -> hide_browser_lane state

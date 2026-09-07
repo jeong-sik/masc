@@ -1,7 +1,7 @@
 # Browser and Slack lanes in the TUI
 
 Open the command palette with `:` and select `go Browser Lane` or `go Slack Lane`.
-Press `Ctrl-G` to show or hide the most recently selected Lane (Browser on first use).
+Press `Ctrl-^` (Ctrl-Shift-6) to show or hide the most recently selected Lane (Browser on first use).
 Hiding returns to the previous surface and restores its search and composer focus.
 The selected tab, scroll and unsent chat draft survive the toggle within this TUI session.
 The views live inside Connectors. From the Connectors list, `B` and `S` open them.
@@ -24,7 +24,7 @@ preserved; voice can be started again after returning to the composer.
 | `r` | Refresh tabs and page |
 | `g` | Enter a URL in automation Firefox; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation Firefox session while automation is selected |
-| Ctrl-G / Esc / Left | Hide the reader and return to the previous surface |
+| Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
 The Runtime navigation family and title identify the operator reader. The title
 shows the source and the latest Browser HTTP request status; the global coordinator

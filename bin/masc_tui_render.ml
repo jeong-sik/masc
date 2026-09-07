@@ -8596,8 +8596,12 @@ let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
 
    A lone row of speech draws nothing. One thing said is not a hierarchy, and
    marking it would put a rail on nearly every row of ordinary chatter, which
-   is where a reader stops seeing it at all. A lone row of work is a different
-   case and keeps its branch.
+   is where a reader stops seeing it at all.
+
+   A lone row of work draws its own stub rather than the branch a running turn
+   uses. Drawn as that branch, a run of them read as one turn's several
+   branches: four consecutive autonomous wakes came out as four twigs off a
+   trunk that was not there, and the boundary between the turns disappeared.
 
    The split between speech and work is the fact the pane was missing.
    Reasoning, tool calls and skills are what a turn did to arrive at what it
@@ -8641,7 +8645,7 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
      common autonomous turn became a single tool block with nothing marking it
      as work at all. *)
   | Turn_alone ->
-      Message_layout.rail_for_style ~work:Message_layout.Rail_does
+      Message_layout.rail_for_style ~work:Message_layout.Rail_stands
         ~speech:Message_layout.Rail_none style
   | Turn_opens -> Message_layout.Rail_opens
   | Turn_closes -> Message_layout.Rail_closes

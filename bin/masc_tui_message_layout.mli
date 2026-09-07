@@ -53,6 +53,11 @@ type turn_rail =
       (** What the turn did to get there -- reasoning, tool calls, a skill.
           Drawn as a branch off the trunk, because a turn's work is
           subordinate to the turn and was reading as a sibling of it. *)
+  | Rail_stands
+      (** A turn of one row that did work: it opens and closes on that line,
+          so it branches off nothing. Apart from {!Rail_does} because a run of
+          them is a run of turns, and drawn as a branch they read as one
+          turn's several branches -- the boundary between them disappeared. *)
   | Rail_closes  (** The last row of a turn that has finished. *)
   | Rail_joins of siding
       (** Belongs to no turn and landed while one was running. It joins the

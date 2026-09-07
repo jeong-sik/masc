@@ -100,7 +100,7 @@ try:
   lane=(repo/'lib/browser_lane/browser_lane.ml').read_text()
   verbs=lane[lane.index('type interaction ='):lane.index('\nlet verb_to_string')]
   verbs+=lane[lane.index('let interaction_args'):lane.index('\nlet verb_json')]
-  answer=lane[lane.index('type answer ='):lane.index('(* The public tool surface')]
+  answer=lane[lane.index('type answer ='):].split('\n\n',1)[0]
   source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\n'+verbs+answer+'\nend;;\n'
   interaction=(repo/'lib/browser_interaction.ml').read_text()
   source+='module Browser_interaction = struct\n'+interaction[interaction.index('let script ='):]+'\nend;;\n'

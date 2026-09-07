@@ -67,6 +67,65 @@ async function pageCapture(args) {
     mimeType: "image/png", data: dataUrl.slice(prefix.length)};
 }
 
+function interactInPage(args) {
+  if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
+    throw new Error("page_url_changed");
+  const before = location.href;
+  if (args.action === "scroll") {
+    if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+      throw new Error("scroll_coordinates_must_be_integers");
+    window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
+  } else if (args.action === "click" || args.action === "fill") {
+    if (typeof args.selector !== "string" || !args.selector.trim())
+      throw new Error("selector_required");
+    let elements;
+    try { elements = document.querySelectorAll(args.selector); }
+    catch { throw new Error("invalid_css_selector"); }
+    if (elements.length !== 1)
+      throw new Error(elements.length === 0 ? "element_not_found" : "selector_is_ambiguous");
+    const element = elements[0];
+    const style = getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility === "hidden" || style.display === "none")
+      throw new Error("element_not_visible");
+    if (element.matches(":disabled")) throw new Error("element_disabled");
+    if (args.action === "click") {
+      if (typeof element.click !== "function") throw new Error("element_not_clickable");
+      element.click();
+    } else {
+      if (typeof args.text !== "string") throw new Error("fill_text_required");
+      const input = element instanceof HTMLInputElement;
+      const textarea = element instanceof HTMLTextAreaElement;
+      if ((!input && !textarea) || (input && !["text", "search", "email", "url", "tel", "password", "number"].includes(element.type)))
+        throw new Error("element_is_not_a_text_input");
+      if (element.readOnly) throw new Error("element_read_only");
+      const prototype = input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
+      const previousValue = element.value;
+      setter.call(element, args.text);
+      if (element.value !== args.text) {
+        setter.call(element, previousValue);
+        throw new Error("input_rejected_value");
+      }
+      element.dispatchEvent(new Event("input", {bubbles: true}));
+      element.dispatchEvent(new Event("change", {bubbles: true}));
+      if (element.value !== args.text) throw new Error("input_changed_during_events");
+    }
+  } else throw new Error("unknown_interaction_action");
+  return {action: args.action, urlBefore: before, url: location.href,
+    title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+}
+
+async function pageInteract(args) {
+  if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+  if (!['click', 'fill', 'scroll'].includes(args.action)) throw new Error("unknown_interaction_action");
+  // JSON encoding keeps selectors and text out of executable source syntax.
+  const [result] = await browser.tabs.executeScript(args.tabId, {
+    code: `(${interactInPage.toString()})(${JSON.stringify(args)})`,
+  });
+  if (!result) throw new Error("page_unavailable");
+  return {tabId: args.tabId, ...result};
+}
+
 async function onHostMessage(msg) {
   const reply = { id: msg?.id, ok: false };
   try {
@@ -77,6 +136,10 @@ async function onHostMessage(msg) {
         break;
       case "page.read":
         reply.data = await pageRead(msg.args);
+        reply.ok = true;
+        break;
+      case "page.interact":
+        reply.data = await pageInteract(msg.args);
         reply.ok = true;
         break;
       case "page.capture":

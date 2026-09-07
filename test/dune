@@ -4812,6 +4812,8 @@
  (modules test_tui_runtime_listing)
  (libraries alcotest masc masc_tui_types))
 
+(include stanzas/test_browser_interaction.inc)
+
 (rule
  (alias runtest-test_tui_keyboard_input-fusion-history)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)

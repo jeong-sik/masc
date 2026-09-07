@@ -12320,8 +12320,7 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = workspace_activity_rows state in
-  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  let rows, cursor, selected = workspace_activity_selection state in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
     ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
@@ -12360,7 +12359,7 @@ let render_workspace_activity (state : state) repo_id =
                 if first + i = cursor then c.push_selected line else c.push line
           done;
           c.push_divider ();
-          c.push (match List.nth_opt rows cursor with
+          c.push (match selected with
             | None -> "  Task and file links appear when a recorded change names them"
             | Some (change, path) ->
                 "  " ^ Terminal_text.single_line path ^ " · " ^

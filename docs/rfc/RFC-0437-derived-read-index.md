@@ -1,5 +1,5 @@
 ---
-rfc: "0436"
+rfc: "0437"
 title: 원장은 그대로 두고 읽는 길만 색인으로 — 게이트 없이
 status: Draft
 created: 2026-09-07

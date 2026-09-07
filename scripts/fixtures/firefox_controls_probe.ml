@@ -31,7 +31,7 @@ let success = function
   | _ -> failwith "no browser answer"
 let check message condition = if not condition then failwith message else Printf.printf "PASS %s\n%!" message
 let () = Eio_main.run (fun _ ->
-  let driver = Driver.create ~request in
+  let driver = Driver.create ~request () in
   let run verb = Driver.execute driver verb in
   let close () = match Driver.close driver with
     | Ok () -> ()

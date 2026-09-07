@@ -298,7 +298,7 @@ let repeated_tool_call_input ~threshold tool_calls =
 let direct_repetition_boundary ~execution ~tool_calls =
   match Keeper_repetition_scope.Execution.failure execution with
   | Some error ->
-    Error (Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+    Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   | None ->
     let repeated =
       match repeated_exact_tool_call
@@ -569,7 +569,7 @@ let tool_boundary_before_repetition ~repetition_execution state =
   | Ok Runtime_agent.Continue ->
     match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
     | Some error ->
-      Error (Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+      Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
     | None -> Ok Runtime_agent.Continue
 ;;
 

@@ -26,10 +26,24 @@ val recent_rows :
     the read stopped early.
 
     Advances the index over what the ledger gained since the last call, then
-    reads the rows it names back out of the ledger. A read failure returns
-    [Error] and leaves no index behind. *)
+    reads and validates the rows it names back out of the ledger. Replaced,
+    shortened, or same-size modified files are reindexed in full. Earlier
+    bytes of a growing inode must remain append-only; arbitrary in-place
+    rewrites followed by regrowth are outside that ledger contract.
+
+    Blocking index transactions run in a system thread for Eio callers.
+    A read failure returns [Error] and leaves no index behind. *)
 
 val forget_for_ledger : ledger_dir:string -> unit
 (** Drop the open handle for this ledger. The file stays; the next read
     reopens it. For a caller that has just removed or replaced the ledger
     directory. *)
+
+module For_testing : sig
+  val recent_rows :
+    before_scan:(path:string -> unit) ->
+    store:Dated_jsonl.t -> ?keeper_name:string -> n:int -> unit ->
+    (Yojson.Safe.t list, string) result
+  (** Inject a filesystem failure after the index transaction starts. The
+      callback runs in the blocking worker and must not use Eio effects. *)
+end

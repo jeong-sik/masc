@@ -1250,7 +1250,7 @@ let iter_all_entries_result t f =
   iter_months (List.rev months)
 ;;
 
-let iter_range_entries_result t ~since ~until f =
+let fold_range_file_paths_result t ~since ~until ~init ~f =
   let ( let* ) = Result.bind in
   match parse_date since, parse_date until with
   | None, _ | _, None -> Error (Invalid_date_range { since; until })
@@ -1270,21 +1270,18 @@ let iter_range_entries_result t ~since ~until f =
          || (String.equal month until_month
              && String.compare day_number until_day > 0))
     in
-    let rec iter_days month month_path = function
-      | [] -> Ok ()
+    let rec iter_days acc month month_path = function
+      | [] -> Ok acc
       | day :: rest ->
-        let* () =
+        let* acc =
           if day_in_range month day
-          then
-            iter_json_file_entries_result
-              (Filename.concat month_path day)
-              f
-          else Ok ()
+          then f acc (Filename.concat month_path day)
+          else Ok acc
         in
-        iter_days month month_path rest
+        iter_days acc month month_path rest
     in
-    let rec iter_months = function
-      | [] -> Ok ()
+    let rec iter_months acc = function
+      | [] -> Ok acc
       | (month, year, month_number) :: rest ->
         let month_path = Filename.concat t.base_dir month in
         let* days =
@@ -1296,8 +1293,8 @@ let iter_range_entries_result t ~since ~until f =
           |> List.filter (day_in_range month)
           |> List.rev
         in
-        let* () = iter_days month month_path selected_days in
-        iter_months rest
+        let* acc = iter_days acc month month_path selected_days in
+        iter_months acc rest
     in
     let* entries =
       list_directory_result ~missing_is_empty:true t.base_dir
@@ -1309,7 +1306,18 @@ let iter_range_entries_result t ~since ~until f =
         Some (month, year, month_number)
       | Some _ | None -> None)
     |> List.rev
-    |> iter_months
+    |> iter_months init
+;;
+
+let range_day_file_paths_result t ~since ~until =
+  fold_range_file_paths_result t ~since ~until ~init:[]
+    ~f:(fun paths path -> Ok (path :: paths))
+  |> Result.map List.rev
+;;
+
+let iter_range_entries_result t ~since ~until f =
+  fold_range_file_paths_result t ~since ~until ~init:()
+    ~f:(fun () path -> iter_json_file_entries_result path f)
 ;;
 
 let iter_range t ~since ~until f =

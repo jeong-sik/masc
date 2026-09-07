@@ -4147,6 +4147,38 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
+def screen_rows(drawn: bytes) -> dict[int, bytes]:
+    """The screen the pane has painted, as row number to plain text.
+
+    A frame is a set of (row, text) pairs, not a picture, so no single frame
+    holds the whole screen: a row keeps whatever was written to it until
+    something writes it again. Replaying every absolute row address in
+    arrival order and keeping the last write to each row reconstructs what
+    is on screen. The pane never scrolls the terminal -- it addresses rows
+    absolutely -- so nothing moves a row's text to another row behind this."""
+    rows: dict[int, bytes] = {}
+    addresses = list(CURSOR_ROW_RE.finditer(drawn))
+    for index, address in enumerate(addresses):
+        end = (
+            addresses[index + 1].start()
+            if index + 1 < len(addresses)
+            else len(drawn)
+        )
+        rows[int(address.group(1))] = CSI_RE.sub(b"", drawn[address.end() : end])
+    return rows
+
+
+def screen_row_of(rows: dict[int, bytes], needle: bytes) -> int:
+    """The topmost row [needle] currently occupies, or -1 when it is gone."""
+    carrying = [row for row, text in rows.items() if needle in text]
+    return min(carrying) if carrying else -1
+
+
+def screen_text(drawn: bytes) -> bytes:
+    """The plain text of the screen, rows joined top to bottom."""
+    return b"\n".join(text for _, text in sorted(screen_rows(drawn).items()))
+
+
 BRACKETED_PASTE_ON = b"\x1b[?2004h"
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
@@ -5743,6 +5775,40 @@ def memory_journal_backfill_fixture() -> HttpResponse:
     return status, payload
 
 
+MEMORY_JOURNAL_REQUEST_TS = 1788273291.814646
+
+# The scenario runs a 30-row terminal and the chat pane is shorter than that,
+# so this many one-line messages make a transcript taller than the pane. Page-up
+# then has something to read back: without them the pane clamps the scroll to
+# nothing, says "back at the newest row", and the scroll-pin claim below has
+# nothing to measure (#33757).
+MEMORY_JOURNAL_FILLER_ROWS = 30
+
+# The filler sits an hour before the turn under test so that turn's own
+# civil-hour rail is drawn directly above it and stays on screen with it.
+# Filler in the same hour would put that rail at the top of the transcript,
+# where the pane's newest window no longer reaches it.
+SECONDS_PER_HOUR = 3600.0
+MEMORY_JOURNAL_OLDEST_TS = (
+    MEMORY_JOURNAL_REQUEST_TS - SECONDS_PER_HOUR - float(MEMORY_JOURNAL_FILLER_ROWS)
+)
+
+
+def memory_journal_filler_rows() -> list[dict[str, object]]:
+    """Older conversation, oldest first, one second apart."""
+    return [
+        {
+            "id": f"assistant:filler-{index}",
+            "role": "assistant",
+            "content": f"older conversation row {index}",
+            "ts": MEMORY_JOURNAL_OLDEST_TS + float(index),
+            "turn_ref": f"trace-filler#{index}",
+            "transcript_slot": {"kind": "terminal_assistant"},
+        }
+        for index in range(MEMORY_JOURNAL_FILLER_ROWS)
+    ]
+
+
 def memory_journal_chat_fixture() -> HttpResponse:
     # Both conversation rows belong to one direct turn, while the Journal
     # observation lands between their clocks. Keeping the turn physically
@@ -5750,12 +5816,13 @@ def memory_journal_chat_fixture() -> HttpResponse:
     # may label the rows, but the shared visible axis must remain monotonic.
     return (
         200,
-        [
+        memory_journal_filler_rows()
+        + [
             {
                 "id": "user:before-journal",
                 "role": "user",
                 "content": "direct turn before Librarian",
-                "ts": 1788273291.814646,
+                "ts": MEMORY_JOURNAL_REQUEST_TS,
                 "delivery_key": {
                     "kind": "operation",
                     "operation_id": "tui-direct-regression",
@@ -5827,52 +5894,62 @@ def autonomous_turn_history_interaction() -> Interaction:
 def memory_journal_timeline_interaction(
     memory: SequencedHttpResponse,
 ) -> Interaction:
-    def assert_monotonic_direct_turn(frame: bytes) -> None:
-        plain = CSI_RE.sub(b"", frame)
+    def assert_monotonic_direct_turn(drawn: bytes) -> None:
+        """Every claim here is about the screen, so it reads the screen.
+
+        The pane resends only the rows that changed, so the frame that
+        expands the Journal entry does not carry the request row above it or
+        the hour rail above that -- both were written once, when they first
+        appeared, and nothing has changed them since."""
+        rows = screen_rows(drawn)
+        plain = screen_text(drawn)
         hour = time.strftime(
-            "%Y-%m-%d · %H:00", time.localtime(1788273291.814646)
+            "%Y-%m-%d · %H:00", time.localtime(MEMORY_JOURNAL_REQUEST_TS)
         ).encode()
         styled_rail = re.compile(
             rb"\x1b\[[0-9;]*m\x1b\[1m"
             + "── ".encode()
             + re.escape(hour)
         )
-        if styled_rail.search(frame) is None:
+        if styled_rail.search(drawn) is None:
             raise AssertionError(
                 "Civil-hour rail was not drawn in semantic colour and bold "
-                f"weight for {hour!r}: {frame!r}"
+                f"weight for {hour!r}: {drawn!r}"
             )
         # The renderer groups by civil hour (checked above) and does not
         # also draw a per-message HH:MM:SS clock in the resting chat body
         # (no such formatting exists in bin/masc_tui_render.ml). The three
         # exact-second clock checks below are a fossil from a design that
         # predates hour-grouping; only content ordering still applies.
-        positions = [
-            plain.find(hour),
-            plain.find(b"direct turn before Librarian"),
-            plain.find(b"Librarian committed current memory revision 9"),
-            plain.find(b"direct turn after Librarian"),
-        ]
-        if any(position < 0 for position in positions) or positions != sorted(positions):
+        ordered = (
+            hour,
+            b"direct turn before Librarian",
+            b"Librarian committed current memory revision 9",
+            b"direct turn after Librarian",
+        )
+        positions = [screen_row_of(rows, needle) for needle in ordered]
+        if any(position < 0 for position in positions) or positions != sorted(
+            positions
+        ):
             raise AssertionError(
                 "The direct-turn request, Journal entry, and reply did not "
-                f"share one monotonic axis: {frame!r}"
+                f"share one monotonic axis: {dict(zip(ordered, positions))!r}"
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
             (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
-                raise AssertionError(f"Missing {label} label: {frame!r}")
+                raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
         # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
         # bold arrow/circle glyph checked above is what actually marks the
         # causal role; this only confirms the label itself still renders.
         for label in (b"YOU", b"alpha"):
-            if b"\x1b[2m" + label not in frame:
+            if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{frame!r}"
+                    f"{drawn!r}"
                 )
 
     def interact(
@@ -5925,7 +6002,7 @@ def memory_journal_timeline_interaction(
             b"Librarian committed current memory revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
-        assert_monotonic_direct_turn(resting)
+        assert_monotonic_direct_turn(bytes(output))
         if b"\xc2\xb7 Ctrl-N" not in plain_resting:
             raise AssertionError(
                 f"Journal summary did not expose its detail key: {resting!r}"
@@ -5983,10 +6060,14 @@ def memory_journal_timeline_interaction(
             b"superseded by provider grouping",
         )
         plain_visible = CSI_RE.sub(b"", visible)
-        assert_monotonic_direct_turn(visible)
-        if re.search("\u25c8\\s+JOURNAL".encode(), plain_visible) is None:
+        assert_monotonic_direct_turn(bytes(output))
+        # Read off the screen, not this frame: expanding the entry rewrote
+        # the rows under its header, and the header itself did not change,
+        # so the pane had no reason to send it again.
+        if re.search("◈\\s+JOURNAL".encode(), screen_text(bytes(output))) is None:
             raise AssertionError(
-                f"Memory timeline did not draw its distinct Journal marker: {visible!r}"
+                "Memory timeline did not draw its distinct Journal marker: "
+                f"{screen_text(bytes(output))!r}"
             )
         if "\u250a".encode() not in plain_visible:
             raise AssertionError(
@@ -6023,18 +6104,22 @@ def memory_journal_timeline_interaction(
                     f"Memory timeline drew an unconsumed escape {escaped!r}: {visible!r}"
                 )
 
-        scrolled = send_and_wait(
-            process, master_fd, output, b"k", b"reading back 1 row(s)"
-        )
-        scrolled_frame = frame_containing(scrolled, b"reading back 1 row(s)")
-        anchor = b"Librarian committed current memory revision 9"
-        if anchor not in CSI_RE.sub(b"", scrolled_frame):
-            raise AssertionError(
-                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
-            )
-        anchor_row_before = frame_row_of(scrolled_frame, anchor)
-        status_row_before = frame_row_of(scrolled_frame, b"reading back 1 row(s)")
-        anchor_offset_before = anchor_row_before - status_row_before
+        # A wheel notch reads back, and it is the shallow way to do it: a
+        # page would carry the pinned row below off the newest window, and
+        # this block is about where that row sits, not about how far the
+        # pane can travel. A single row per press was the arrow key's old
+        # behaviour and is gone.
+        #
+        # The status row names its row count only while an older page
+        # exists, so the needle is the part that marks reading back in
+        # either wording.
+        reading_back = b"Ctrl-E returns to the newest"
+        # The producer's older journal rows have to land before the pane is
+        # read back, because a pane that is read back does not ask for them:
+        # the tick reloads the transcript only at the newest row, and the
+        # journal comes down that same load (bin/masc_tui.ml, the msg_scroll
+        # guard on launch_keeper_history_load). What the pin below is about
+        # is where the row sits once they are in.
         memory.responses.append(memory_journal_backfill_fixture())
         served_before_backfill = memory.served
         wait_for_fixture_served(
@@ -6047,26 +6132,38 @@ def memory_journal_timeline_interaction(
             timeout=5.0,
         )
         drain_until_quiet(process, master_fd, output)
+        scrolled = send_and_wait(
+            process, master_fd, output, b"\x1b[<64;5;5M", reading_back
+        )
+        scrolled_frame = frame_containing(scrolled, reading_back)
+        anchor = b"Librarian committed current memory revision 9"
+        if anchor not in CSI_RE.sub(b"", scrolled_frame):
+            raise AssertionError(
+                f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
+            )
+        anchor_row_before = frame_row_of(scrolled_frame, anchor)
+        status_row_before = frame_row_of(scrolled_frame, reading_back)
+        anchor_offset_before = anchor_row_before - status_row_before
         refreshed_frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=31,
             columns=100,
-            needle=b"reading back 1 row(s)",
+            needle=reading_back,
             controls=(FULL_REDRAW,),
         )
         if anchor not in CSI_RE.sub(b"", refreshed_frame):
             raise AssertionError(
-                "A producer-side Journal backfill moved the structural scroll pin: "
+                "A redraw moved the pinned row out of the read-back window: "
                 f"{refreshed_frame!r}"
             )
         anchor_row_after = frame_row_of(refreshed_frame, anchor)
-        status_row_after = frame_row_of(refreshed_frame, b"reading back 1 row(s)")
+        status_row_after = frame_row_of(refreshed_frame, reading_back)
         anchor_offset_after = anchor_row_after - status_row_after
         if anchor_offset_after != anchor_offset_before:
             raise AssertionError(
-                "Journal prepend changed the pinned row's footer-relative slot: "
+                "A redraw changed the pinned row's footer-relative slot: "
                 f"before={anchor_offset_before} after={anchor_offset_after} "
                 f"frame={refreshed_frame!r}"
             )
@@ -6119,15 +6216,24 @@ def memory_journal_timeline_interaction(
         )
         os.write(master_fd, b"\x0e\x06")
         wait_for_terminal_input_consumed(_slave_fd)
-        widened = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=31,
-            columns=100,
-            needle=b"journal:full",
-            controls=(FULL_REDRAW,),
-        )
+        try:
+            widened = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=31,
+                columns=100,
+                needle=b"journal:full",
+                controls=(FULL_REDRAW,),
+            )
+        except AssertionError as timed_out:
+            # The raw byte dump this would otherwise carry runs to a hundred
+            # kilobytes and is cut by the CI log before it says anything. The
+            # screen is the part that answers what the toggles did.
+            raise AssertionError(
+                "Widening back never showed journal:full. Screen:\n"
+                + screen_text(bytes(output)).decode("utf8", "replace")
+            ) from timed_out
         if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
@@ -12570,6 +12676,12 @@ def run_memory_journal_regression(executable: str) -> None:
         interact=memory_journal_timeline_interaction(memory_journal_sequence),
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
+            # Reading back asks for the page behind the oldest row it holds,
+            # keyed by that row's own timestamp. Without an answer the pane
+            # draws the load error instead of the reading-back status row,
+            # and the scroll-pin claim below has nothing to measure against.
+            "/api/v1/keepers/alpha/chat/history/page?before=%.17g"
+            % MEMORY_JOURNAL_OLDEST_TS: (200, {"messages": [], "has_more": False}),
             "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
         },
         refresh=0.5,

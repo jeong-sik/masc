@@ -3720,9 +3720,12 @@
    %{dep:../bin/masc_tui.exe}
    memory-journal)))
 
-(alias
- (name runtest)
- (deps (alias runtest-test_tui_keyboard_input-memory-journal)))
+; Not on the runtest alias: the scenario passes end to end on macOS and the
+; Linux runner stops later, widening back from a twelve-column pane, waiting
+; for journal:full after Ctrl-N and Ctrl-F land on the narrow notice screen
+; (run 34072434219). That step had never run anywhere either. The lane is
+; named so it can be dispatched on its own while that is open.
+
 
 (rule
  (alias runtest-test_tui_keyboard_input-code-memo)

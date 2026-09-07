@@ -132,6 +132,7 @@ type runtime_handler =
   | Tool_browser_read
   | Tool_browser_session
   | Tool_browser_goto
+  | Tool_slack_read
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -258,6 +259,7 @@ let runtime_handler_to_string = function
   | Tool_browser_read -> "tool_browser_read"
   | Tool_browser_session -> "tool_browser_session"
   | Tool_browser_goto -> "tool_browser_goto"
+  | Tool_slack_read -> "tool_slack_read"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
@@ -472,6 +474,7 @@ let descriptor
       | Tool_browser_read
       | Tool_browser_session
       | Tool_browser_goto
+      | Tool_slack_read
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch

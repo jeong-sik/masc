@@ -62,6 +62,7 @@
   ; unqualified here, so the dependency has to be spelled out.
   masc.tool_types
   masc.browser_lane
+  masc.slack_lane
   masc.tool_metrics_store
   masc.crypto_rng
   masc.time_codec

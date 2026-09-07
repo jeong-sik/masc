@@ -29,6 +29,7 @@ let web_fetch_schema : tool_schema = Tool_schemas_misc_toml.web_fetch
 
 let web_schemas = [ web_search_schema; web_fetch_schema ]
 
+let slack_read_schema : tool_schema = Tool_schemas_misc_toml.slack_read
 let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
 let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
 
@@ -36,7 +37,12 @@ let browser_session_schema : tool_schema = Tool_schemas_misc_toml.browser_sessio
 let browser_goto_schema : tool_schema = Tool_schemas_misc_toml.browser_goto
 
 let browser_lane_schemas =
-  [ browser_tabs_schema; browser_read_schema; browser_session_schema; browser_goto_schema ]
+  [ slack_read_schema
+  ; browser_tabs_schema
+  ; browser_read_schema
+  ; browser_session_schema
+  ; browser_goto_schema
+  ]
 
 (* [schemas] is the public misc schema set, now read from
    config/tools/masc_*.toml. Operator control and web runtime schemas use the
@@ -106,6 +112,7 @@ type misc_operation =
   | Misc_browser_read
   | Misc_browser_session
   | Misc_browser_goto
+  | Misc_slack_read
 [@@deriving enumerate]
 
 let misc_operations = all_of_misc_operation
@@ -125,6 +132,7 @@ let misc_tool_name = function
   | Misc_browser_read -> "masc_browser_read"
   | Misc_browser_session -> "masc_browser_session"
   | Misc_browser_goto -> "masc_browser_goto"
+  | Misc_slack_read -> "masc_slack_read"
 ;;
 
 let misc_operation_of_tool_name value =
@@ -144,7 +152,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_browser_tabs
   | Misc_browser_read
   | Misc_browser_session
-  | Misc_browser_goto -> None
+  | Misc_browser_goto
+  | Misc_slack_read -> None
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

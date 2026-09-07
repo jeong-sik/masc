@@ -723,6 +723,7 @@ let test_published_proposal_survives_observer_failure () =
 
 let () =
   Alcotest.run
+    ~and_exit:false
     "keeper_recovery_worker"
     [ ( "actual-worker"
       , [ test_case

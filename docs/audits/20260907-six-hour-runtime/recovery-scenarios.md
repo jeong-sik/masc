@@ -11,7 +11,7 @@
 | GLM HTTP429가 발생하고 다른 후보가 있음 | 해당 후보 순서를 낮추되 모든 후보는 시도 가능 | #34059 139 PASS, 병합. 실제 Api 오류·같은 설정 reload·credential 교체·전체 후보 낮은 순위·성공 후 해제 검증 | 최신 운영 바이너리에서 candidate 선택과 완료 관측 |
 | 한 provider/model의 접근권이 거절됨 | 효과와 caller 권한이 허용하면 다음 선언 후보 진행 | #34087 93 PASS: 401/403 후속 성공, 효과 attempted/unknown 차단, caller 거부, 소진·400 종결 보존 | 필수 검사 PASS·병합 확인. 운영 적용과 후속 성공은 별도 확인 |
 | enum과 description이 함께 있는 도구 스키마 | 유효한 단일 description JSON 생성 | #34075 실제 codec46 PASS 및 필수 검사 PASS, 병합 | 운영 provider 수락 |
-| GPT-5.5를 추론·도구와 함께 사용 | 기존 Responses 경로에 caller의 정확한 effort 전달 | #34055 catalog/header71 PASS. #34093은 실제 TOML→binding→HTTP와 supported effort 보강 중 | #34093 원격 테스트, 운영 설정 선택, 실제 계정 권한 |
+| 현재 OpenAI 모델을 추론·도구와 함께 사용 | 기존 Responses 경로에 caller의 정확한 effort 전달 | #34093 currentmain daa734에서104 PASS: 현재두모델×URL두형태의실제HTTP4조합 검증. 생산catalog변경없음 | #34093 필수 검사 진행 중. 실제 계정 권한·장기 연속성 별도 |
 | 설정 전환 중 취소 | 실제 Owner fence를 관측하고 정리 | #34012 115 PASS, 같은1초 deadline에서 이벤트 대기 통과, 병합 | 이 테스트 결과가 생산 writer 교착의 재현·수리 증거는 아님 |
 
 추가로 확인해야 할 native 경계는 [독립 소스 리뷰](native-continuation-source-review.json)에 있다. 이전 provider의 늦은 callback은 정확한 execution/attempt 소유권으로 걸러야 한다. journal commit이 불확실하면 정확한 이전/다음 record를 재조회해 중복 관측을 막고, 이 한 작업의 충돌을 Keeper 전체 저장소 장애로 바꾸지 않아야 한다. 반복 감지의 historical baseline은 attempt 시작 시점에 고정해야 한다.

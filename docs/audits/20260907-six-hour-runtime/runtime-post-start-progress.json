@@ -1,0 +1,28 @@
+{
+  "window_start": "2026-09-07T14:54:10Z",
+  "window_end": "2026-09-07T14:57:00Z",
+  "levels": {
+    "WARN": 53,
+    "INFO": 833,
+    "ERROR": 8
+  },
+  "success_path_logs": [
+    {
+      "outcome_label": "OK",
+      "runtime_lane": "runtime",
+      "count": 6
+    }
+  ],
+  "cycle_failure_logs": {
+    "openai-responses.gpt-6-astra": 1,
+    "openai-responses.gpt-5.6-luna": 2,
+    "glm-coding.glm-5.3": 1
+  },
+  "signals": {
+    "exact_loop": 3
+  },
+  "limits": [
+    "Short uncontrolled post-start observation; counters do not prove a particular failover path or sustained recovery.",
+    "Only source-defined success log shape is counted; no raw messages or tool payloads retained."
+  ]
+}

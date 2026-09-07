@@ -1,0 +1,14 @@
+{
+  "observed_at": "2026-09-07T15:01:11.343948+00:00",
+  "health_available": true,
+  "status": "ok",
+  "overall_status": "warning",
+  "binary_commit": "0799f02f796a647b4ef1fac57f54a064d7d3c6db",
+  "started_at": "2026-09-07T14:59:19Z",
+  "effective_base_path": "/Users/dancer/me",
+  "effective_masc_root": "/Users/dancer/me/.masc",
+  "dashboard_status": "missing",
+  "limits": [
+    "Final point-in-time health is not a proof of sustained Keeper progress."
+  ]
+}

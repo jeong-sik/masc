@@ -46,7 +46,7 @@
 
 ### 2. GLM 요청 제한
 
-- 조치: 실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 14:05Z 현재 운영 바이너리에 이 병합은 없으며 최근1시간 GLM429 diagnostic87건이 남아 있다. 운영 fallback 성공은 미검증.
+- 조치: 실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 14:55Z 운영0799f02f79에 포함됨을 확인했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 재기동 후에도 실제 rate-limit 오류는 남아 있으며 특정 fallback 성공·장기 연속성은 미검증이다.
 - 관련 코드/경계: `lib/keeper/keeper_runtime_attempt.ml`
 - 최초 증거: `2026-09-06T21:05:50Z` / seq `25985072` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267592`
 > [agent_core:http_client] {"event":"http_client_4xx_request_header_profile","url":"https://api.z.ai/api/coding/paas/v4/chat/completions","status":429,"response_server":null,"cf_ray":null,"request_header_count":4,"total_request_header_bytes":148,"max_single_header_bytes":73,"cdn_per_header_limit_bytes":8192,"header_sizes":[{"name":"Authorization","bytes":73},{"name":"Content-Type","bytes":32},{"name":"content-length","bytes":24},{"name":"connection","bytes":19}],"note":"4xx from an LLM endpoint. Header VALUES omitted (may carry credentials); sizes only. A cloudflare/RunPod edge rejects a single header line over cdn_per_header_limit_bytes with an opaque 400 before the origin — compare max_single_header_bytes."}
@@ -146,7 +146,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다. 09:35Z 외부 바이너리 변경 후 다시 stale/unbound이며 실행·디스크 바이너리 hash도 불일치했다.
+- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 설치 smoke PASS. 08:29Z 같은 소스의dashboard 자산 복구와실제브라우저표시는관측했다. 이후외부바이너리·자산변경으로14:55Z stale/unbound, 최종15:01Z health에서는missing이다. 실행바이너리0799f02f79와일치하는설치릴리스자산연결은미완료다.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -516,3 +516,20 @@ Responses는다른세션의#34055가이미catalog행으로표현하므로새prot
 14:38:29Z #34087은 모든 필수 검사와93/93 동작 테스트를 통과한 a0e412에서656d1493d5로 병합됐다. [후속 운영 확인](runtime-health-followup-connection.json)에서는 잠시8935 연결이 거절됐다가14:39:08Z 새 바이너리3a3968edce의 health가warming으로 응답했다. 로그에는14:36:33Z SIGTERM/정상 종료, 새 프로세스 시작은14:39:00Z다. 이 세션은 배포·재시작하지 않았으며 신호 발신자는 확인하지 않았다. 최신 상태를 앞선14:05Z warning 관측과 구분한다.
 
 사용자가 요청한 비정체 복구 조건은 [복구 시나리오 표](recovery-scenarios.md)에 테스트 범위와 남은 native 연결을 나누어 정리했다.
+
+
+#34093의0d7dcbd555 [remote34133788720](https://github.com/jeong-sik/masc/actions/runs/34133788720)은 header58/catalog14/codec45=117/117 PASS다. 실제8회 HTTP와 미지원effort의 요청 전 거절 시나리오를 실행했다. 이 결과는 당시9c98 기반의 기록으로 보존한다. 최신main ef6c7f7183에는 다른 세션의#34066(14:19:24Z,1d69ef1516)이 이미 Responses provider와 새로운 OpenAI 모델 구성을 반영했고, GPT-5.5 세 행은 제거돼 있다. #34055는 현재conflicting이다. 제거된 목록을 복원하지 않고, #34093의검증을 현재main의 gpt-5.6-luna/gpt-6-astra 구성으로 옮긴다. 이 재구성은 기존117 PASS를 새head의 결과로 주장하지 않는다.
+
+
+## 14:55Z 실제 readiness 복구와 운영 한계
+
+14:39:08Z의warming 프로세스는 결국stale assignment두 건(openai.gpt-5.5 참조) 때문에ready 전에 종료됐다. 이후다른세션이14:44:34Z runtime.toml을새Responses binding으로바꿨음을확인했다. root의[오프라인검사](runtime-offline-routing-probe.json)는두HTTP binding의참조/materialization 통과만확인하며degraded boot전체검증은아니다.
+
+root가14:53:40Z설치된바이너리로한번기동을시도했으나이미BasePath를소유한PID61803때문에[거절됐다](root-start-attempt-rejected.json). root프로세스62279는서버를시작하지않았고소유권강제해제·설정수정·바이너리교체는없었다.
+
+[14:55:28Z readiness 관측](runtime-readiness-recovery-1454.json):기존소유자61803이8935에서응답하고binary0799f02f79,시작14:54:10Z,전체warning이었다. journal/input/checkpoint/429/schema/access수정의병합커밋을모두포함한다. dashboard는stale/unbound이며같은릴리스자산연결은미완료다. [시작후2분50초관측](runtime-post-start-progress.json)에서성공경로OK로그6건이있었지만반복신호3건과cycle실패가남았다. 이후분리한실패원문은새OpenAI와GLM의Rate limited: Rate limit reached for requests였다. 서버ready·소스포함이장기연속성이나특정failover성공의증거는아니다.
+
+#34093은다른세션이반영한현재main의모델을보존하도록재구성했다. 현재head daa73469a7은테스트1파일만수정하며현재gpt-5.6-luna/high,gpt-6-astra/high각각root,/v1의4조합을검증한다. 생산catalog는수정하지않았고제거된GPT-5.5행도복원하지않았다. 기존0d7의117PASS는역사적증거로남고새head검증과분리한다.
+
+
+현재main기반 #34093 daa734의 [실행34135259999](current-responses-daa734-ci-summary.json)은header58/codec46=104/104 PASS다. 새실제HTTP4조합도통과했다. production catalog와runtime protocol변경은0파일이다. 필수검사34135718899은진행중이며,이PR은병합완료로표시하지않는다.

@@ -479,15 +479,40 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        | _ -> ());
        exit 127)
   | pid ->
-    Unix.close boundary_w;
-    Unix.close stdin_r;
-    Unix.close stdout_w;
-    Unix.close stderr_w;
-    Unix.set_nonblock stdout_r;
-    Unix.set_nonblock stderr_r;
-    Unix.set_nonblock stdin_w;
-    Unix.set_nonblock boundary_r;
-    (pid, stdin_w, stdout_r, stderr_r, boundary_r)
+    (try
+       Unix.close boundary_w;
+       Unix.close stdin_r;
+       Unix.close stdout_w;
+       Unix.close stderr_w;
+       Unix.set_nonblock stdout_r;
+       Unix.set_nonblock stderr_r;
+       Unix.set_nonblock stdin_w;
+       Unix.set_nonblock boundary_r;
+       (pid, stdin_w, stdout_r, stderr_r, boundary_r)
+     with exn ->
+       (* fork has succeeded: an error preparing the parent's descriptors is
+          not proof the child refused to run. Terminate the child and any
+          process group it established before dropping supervision handles. *)
+       Fun.protect
+         ~finally:(fun () ->
+           List.iter
+             (fun fd -> try Unix.close fd with
+               | Unix.Unix_error (Unix.EBADF, _, _) -> ())
+             !opened)
+         (fun () ->
+           let kill target =
+             try Unix.kill target Sys.sigkill with
+             | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+           in
+           kill (-pid);
+           kill pid;
+           let rec reap () =
+             match Unix.waitpid [] pid with
+             | _ -> ()
+             | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+           in
+           reap ());
+       raise exn)
 
 let child_boundary_of_ack = function
   | "A" -> Exec_ssh_protocol.Sandbox_applied
@@ -742,7 +767,9 @@ let run () =
     let receipt boundary : Exec_ssh_protocol.execution_receipt =
       { mode = req.Exec_ssh_protocol.mode; boundary }
     in
-    let shim_fail msg = shim_fail ~v ~execution_receipt:(receipt Refused) msg in
+    let shim_fail ?(boundary = Exec_ssh_protocol.Refused) msg =
+      shim_fail ~v ~execution_receipt:(receipt boundary) msg
+    in
     (match load_config () with
      | Error e -> shim_fail e
      | Ok config ->
@@ -796,7 +823,7 @@ let run () =
                try spawn ~before_exec ~argv ~env ~cwd () with
                | exn ->
                  cleanup ();
-                 shim_fail
+                 shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
              let trailer, boundary =

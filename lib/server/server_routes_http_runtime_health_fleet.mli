@@ -40,4 +40,5 @@ val keeper_fleet_runtime_resolution_fields :
   unit -> (string * Yojson.Safe.t) list
 
 val keeper_fleet_runtime_resolution_light_fields :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   unit -> (string * Yojson.Safe.t) list

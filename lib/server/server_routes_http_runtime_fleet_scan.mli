@@ -6,6 +6,7 @@ type paused_keeper_scan = {
 }
 val sorted_unique_strings : String.t list -> String.t list
 val effective_autoboot_enabled :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   Workspace.config ->
   string ->
   Keeper_meta_contract.keeper_meta -> bool
@@ -49,6 +50,7 @@ type keeper_identity_drift_scan = {
   meta_without_config_names : string list;
 }
 val keeper_fleet_meta_scan :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   ?include_paused_details:bool ->
   Workspace.config -> keeper_fleet_meta_scan
 val keeper_identity_drift_health_json : Workspace.config -> Yojson.Safe.t
@@ -100,6 +102,7 @@ type keeper_execution_snapshot = {
 }
 val empty_keeper_execution_snapshot : keeper_execution_snapshot
 val keeper_execution_snapshot :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   Workspace.config -> keeper_execution_snapshot
 (** Canonical per-owner execution projection for one route assembly. Every
     owner is classified once from current effective durable metadata, registry
@@ -111,6 +114,7 @@ val owner_execution_truth :
   Keeper_activation_readiness.owner_execution_truth
 val active_task_owner_fiber_scan_semantics : string
 val keeper_fleet_safety_health_json :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
   ?phase_snapshot:keeper_phase_snapshot ->

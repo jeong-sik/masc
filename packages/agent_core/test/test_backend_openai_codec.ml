@@ -2291,6 +2291,75 @@ let test_responses_tool_choice_respects_capability_gate () =
     (member "tool_choice" (chat_body ~supports:true) |> to_string)
 ;;
 
+(* The chat-completions function schema refuses oneOf/anyOf/allOf/enum/const/not
+   at the top level and answers 400 for the whole request, so masc's Execute
+   schema -- which carries a top-level oneOf for "argv or script, not both" --
+   took every openai lane down with it: 2,525 failures in six hours on
+   2026-09-07, two keepers at 204 and 207 consecutive.
+
+   The keyword is dropped only where it is refused. Nested uses are legal and
+   must survive, and the exclusivity itself is not lost: the runtime refuses a
+   call naming both (keeper_tool_execute_typed_input.ml) and one naming
+   neither. *)
+let test_top_level_unsupported_keywords_are_dropped () =
+  let schema =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ "argv", `Assoc [ "type", `String "array" ]
+            ; "script", `Assoc [ "type", `String "string" ]
+            ; ( "shell"
+              , `Assoc
+                  [ "type", `String "string"
+                  ; "enum", `List [ `String "sh"; `String "bash" ]
+                  ] )
+            ] )
+      ; ( "oneOf"
+        , `List
+            [ `Assoc [ "required", `List [ `String "argv" ] ]
+            ; `Assoc [ "required", `List [ `String "script" ] ]
+            ] )
+      ]
+  in
+  let params =
+    Serialize.build_openai_tool_json
+      (`Assoc
+          [ "name", `String "Execute"
+          ; "description", `String "d"
+          ; "input_schema", schema
+          ])
+    |> member "function"
+    |> member "parameters"
+  in
+  (match params with
+   | `Assoc fields ->
+     List.iter
+       (fun key ->
+         Alcotest.(check bool)
+           (Printf.sprintf "top-level %s is gone" key)
+           false
+           (List.mem_assoc key fields))
+       [ "oneOf"; "anyOf"; "allOf"; "enum"; "const"; "not" ]
+   | _ -> Alcotest.fail "parameters must stay an object");
+  check_string
+    "the schema is otherwise untouched"
+    "object"
+    (params |> member "type" |> to_string);
+  (* Nested enum is legal on this wire and carries the shell ladder. Dropping
+     it would silently widen what the model may pass. *)
+  check_string
+    "a nested enum survives"
+    "sh"
+    (params
+     |> member "properties"
+     |> member "shell"
+     |> member "enum"
+     |> to_list
+     |> List.hd
+     |> to_string)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
@@ -2472,6 +2541,10 @@ let () =
             "tool_choice respects capability gate"
             `Quick
             test_responses_tool_choice_respects_capability_gate
+        ; Alcotest.test_case
+            "top-level unsupported schema keywords are dropped"
+            `Quick
+            test_top_level_unsupported_keywords_are_dropped
         ] )
     ]
 ;;

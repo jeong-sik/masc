@@ -67,7 +67,64 @@ let build (offer : Keeper_identity_tools.offered_tool) =
           }))
 ;;
 
-let placement ?(agent_cell = ref None) ?(history = []) ?(carry_window = 0) offering =
+module Load_receipts = Keeper_tool_load_receipts
+
+let trace_id value =
+  match Keeper_id.Trace_id.of_string value with
+  | Ok id -> id
+  | Error reason -> fail reason
+;;
+
+let task_id value =
+  match Keeper_id.Task_id.of_string value with
+  | Ok id -> id
+  | Error reason -> fail reason
+;;
+
+let receipt_surface offering =
+  List.map
+    (fun (offer : Keeper_identity_tools.offered_tool) ->
+       { Load_receipts.source =
+           Attached
+             { provider_id = offer.provider.id
+             ; endpoint = offer.provider.mcp_url
+             ; remote_name = offer.remote_name
+             }
+       ; schema = offer.schema
+       })
+    offering
+;;
+
+let restored_receipts ~source ~target =
+  match Load_receipts.restore ~source ~target with
+  | Ok restored -> restored
+  | Error error -> fail (Load_receipts.error_to_string error)
+;;
+
+let make_receipts ?(trace = "search-test") ?task ?current_task_id ~context offering =
+  let current_task_id =
+    match current_task_id with Some read -> read | None -> fun () -> Ok task
+  in
+  Load_receipts.create
+    ~restored:(restored_receipts ~source:context ~target:context)
+    ~trace_id:(trace_id trace)
+    ~task_id:task
+    ~current_task_id
+    ~surface:(receipt_surface offering)
+;;
+
+let placement
+      ?(agent_cell = ref None)
+      ?(history = [])
+      ?(carry_window = 0)
+      ?receipts
+      offering
+  =
+  let receipts =
+    match receipts with
+    | Some receipts -> receipts
+    | None -> make_receipts ~context:(Agent_core.Context.create_sync ()) offering
+  in
   Keeper_identity_tool_search.make
     ~keeper_name:"search-test"
     { Keeper_identity_tool_search.deferred =
@@ -83,14 +140,15 @@ let placement ?(agent_cell = ref None) ?(history = []) ?(carry_window = 0) offer
     ; agent_cell
     ; history
     ; carry_window
+    ; receipts
     }
 ;;
 
-let search ?agent_cell ?history ?carry_window offering =
+let search ?agent_cell ?history ?carry_window ?receipts offering =
   Option.map
     (fun (p : Keeper_identity_tool_search.placement) ->
        p.Keeper_identity_tool_search.tool)
-    (placement ?agent_cell ?history ?carry_window offering)
+    (placement ?agent_cell ?history ?carry_window ?receipts offering)
 ;;
 
 let the_tool offering =
@@ -99,7 +157,22 @@ let the_tool offering =
   | None -> fail "an attached service was offered and produced no tool"
 ;;
 
-let execute tool input = Agent_core.Tool.execute tool input
+let invocation ?(turn = 0) ?(planned_index = 0) id =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id:id
+    ~turn
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_core.Tool_contract.Concurrent
+      }
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+;;
+
+let execute tool input =
+  Agent_core.Tool.execute ~invocation:(invocation "toolu_execute") tool input
+;;
 
 let contains haystack needle =
   let n = String.length haystack
@@ -137,11 +210,6 @@ let valid_utf8 s =
 
 let names_input names =
   `Assoc [ "names", `List (List.map (fun n -> `String n) names) ]
-;;
-
-
-let test_nothing_attached_offers_no_tool () =
-  check bool "no tool" true (Option.is_none (search []))
 ;;
 
 let test_the_listing_names_every_attached_tool () =
@@ -353,7 +421,6 @@ let discovery = Alcotest.testable
    needs through it. These three cases are what "it found something" and "it
    did not" look like from inside the turn. *)
 
-
 let with_placement offering f =
   Eio_main.run
   @@ fun env ->
@@ -409,7 +476,6 @@ let test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded () =
       (p.Keeper_identity_tool_search.observe_turn ()))
 ;;
 
-
 (* One assistant message calling [name], the shape the model leaves behind in
    history when it actually runs an attached tool. *)
 let called tool_name_called =
@@ -440,8 +506,8 @@ let asked_for names =
   }
 ;;
 
-let already_used ?history ?carry_window offering =
-  match placement ?history ?carry_window offering with
+let already_used ?history ?carry_window ?receipts offering =
+  match placement ?history ?carry_window ?receipts offering with
   | Some p ->
     List.map
       (fun (t : Agent_core.Tool.t) -> t.Agent_core.Tool.schema.name)
@@ -452,26 +518,6 @@ let already_used ?history ?carry_window offering =
 
 let two_offered =
   [ "jira_search", "Search issues"; "confluence_search", "Search pages" ]
-;;
-
-(* The turn that made a load is the only one it reaches, so a Keeper working
-   on one thing across several turns re-asks every time. Live 2026-08-30: one
-   Keeper asked for [github_issue_read] on five consecutive turns. *)
-(* The listing's bytes are charged to every request of the turn, so a tool
-   handed over with its schema must not also spend a line saying it exists.
-   Measured over three days of live surfaces, that duplication was a median 7
-   of the listed tools and reached 24 -- a third of one listing. *)
-let test_a_carried_tool_is_not_also_named_in_the_listing () =
-  let tool =
-    match search ~history:[ called "atlassian_jira_search" ] (offered two_offered) with
-    | Some tool -> tool
-    | None -> fail "expected a listing tool"
-  in
-  let description = tool.Agent_core.Tool.schema.description in
-  check bool "the carried tool is not listed again" false
-    (contains description "atlassian_jira_search");
-  check bool "the tool that was not carried is still listed" true
-    (contains description "atlassian_confluence_search")
 ;;
 
 (* Omitted from the prose, not from the surface: a model that names a tool it
@@ -508,51 +554,13 @@ let test_a_tool_this_conversation_ran_comes_back_with_its_schema () =
     (already_used ~history:[ called "atlassian_jira_search" ] (offered two_offered))
 ;;
 
-(* The bound. Asking is not evidence of need: carrying every requested tool
-   grows the surface back toward the full attached list, measured at 111 of a
-   possible 133 an hour after that shipped.
-
-   Narrowed rather than dropped. A request is answered on the next request and
-   spent there: any later call, of any tool, ends it. What the measurement
-   above warns about is accumulation, and one request that the next call
-   clears does not accumulate. *)
-let test_a_tool_asked_for_and_then_left_behind_is_not_carried () =
+let test_a_request_without_a_successful_load_grants_nothing () =
   check
     (list string)
-    "the request is gone and only the call it moved on to is placed"
-    [ "atlassian_confluence_search" ]
+    "a ToolUse request is not a successful load receipt"
+    []
     (already_used
-       ~history:
-         [ asked_for [ "atlassian_jira_search" ]; called "atlassian_confluence_search" ]
-       (offered two_offered))
-;;
-
-(* The deadlock this narrowing exists for. A load reaches the agent of the
-   turn that made it and no further, so when a tool call ends the turn, a
-   tool searched for and not yet called is not placed on the next request --
-   the model sees the name again and searches again. Measured 2026-09-06:
-   sangsu made fourteen consecutive searches for [keeper_voice_speak] and
-   called it zero times. [make] already promises this costs one round trip. *)
-let test_the_last_request_is_placed_on_the_next_turn () =
-  check
-    (list string)
-    "the tool the last call asked for is placed"
-    [ "atlassian_jira_search" ]
-    (already_used ~history:[ asked_for [ "atlassian_jira_search" ] ] (offered two_offered))
-;;
-
-(* A request grants exactly its own names. A listing that placed everything a
-   conversation ever asked for is the accumulation the bound above measured. *)
-let test_a_request_places_only_what_it_named () =
-  check
-    (list string)
-    "an earlier request is not revived by a later one"
-    [ "atlassian_confluence_search" ]
-    (already_used
-       ~history:
-         [ asked_for [ "atlassian_jira_search" ]
-         ; asked_for [ "atlassian_confluence_search" ]
-         ]
+       ~history:[ asked_for [ "atlassian_jira_search" ] ]
        (offered two_offered))
 ;;
 
@@ -752,6 +760,408 @@ let test_a_zero_window_places_everything () =
        (offered two_offered))
 ;;
 
+let loaded_output result =
+  match result with
+  | Ok output -> output
+  | Error error -> fail error.Agent_core.Types.message
+;;
+
+let placed_names (p : Keeper_identity_tool_search.placement) =
+  List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) p.already_used
+;;
+
+let require_placement value =
+  match value with
+  | Some placement -> placement
+  | None -> fail "expected the deferred-tool listing"
+;;
+
+let with_receipt_fixture ?(task = Some (task_id "task-901")) ?current_task_id offering f =
+  Eio_main.run
+  @@ fun env ->
+  let context = Agent_core.Context.create () in
+  let receipts = make_receipts ?task ?current_task_id ~context offering in
+  let agent =
+    Agent_core.Agent.create
+      ~context
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~net:env#net
+      ()
+  in
+  let p =
+    placement ~receipts ~agent_cell:(ref (Some agent)) offering |> require_placement
+  in
+  f env context receipts agent p
+;;
+
+let test_successful_sibling_loads_survive_and_consume_individually () =
+  let offering =
+    offered [ "jira_search", "Search"; "page_create", "Create"; "page_read", "Read" ]
+  in
+  with_receipt_fixture offering (fun _env context _receipts _agent p ->
+    Eio.Fiber.List.iter
+      (fun (index, name) ->
+         Agent_core.Tool.execute
+           ~invocation:(invocation ~turn:7 ~planned_index:index ("load-" ^ name))
+           p.tool
+           (names_input [ name ])
+         |> loaded_output
+         |> ignore)
+      [ 2, "atlassian_page_read"; 0, "atlassian_jira_search"; 1, "atlassian_page_create" ];
+    (* Repeating a successful load replaces its receipt; it does not grow the set. *)
+    execute p.tool (names_input [ "atlassian_jira_search" ]) |> loaded_output |> ignore;
+    let restored = make_receipts ~task:(task_id "task-901") ~context offering in
+    let next =
+      placement ~receipts:restored ~history:[ called "keeper_status" ] offering
+      |> require_placement
+    in
+    check
+      (list string)
+      "all sibling loads reach the next request, in catalog order"
+      [ "atlassian_jira_search"; "atlassian_page_create"; "atlassian_page_read" ]
+      (placed_names next);
+    let tool =
+      List.find
+        (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "atlassian_jira_search")
+        next.already_used
+    in
+    execute tool (`Assoc []) |> loaded_output |> ignore;
+    check
+      (list string)
+      "dispatch consumes its own grant only"
+      [ "atlassian_page_create"; "atlassian_page_read" ]
+      (Load_receipts.pending_names restored);
+    let after =
+      placement ~receipts:restored ~history:[ called "atlassian_jira_search" ] offering
+      |> require_placement
+    in
+    let wire p =
+      p.Keeper_identity_tool_search.tool :: p.already_used
+      |> List.map (fun (tool : Agent_core.Tool.t) ->
+        Agent_core.Tool.wire_json_of_schema tool.schema)
+      |> fun schemas -> Yojson.Safe.to_string (`List schemas)
+    in
+    check
+      string
+      "consuming a load into ordinary carry preserves the tool prefix bytes"
+      (wire next)
+      (wire after);
+    let next_restored = make_receipts ~task:(task_id "task-901") ~context offering in
+    check
+      (list string)
+      "consumption reaches the persisted Context snapshot"
+      [ "atlassian_page_create"; "atlassian_page_read" ]
+      (Load_receipts.pending_names next_restored))
+;;
+
+let test_sibling_load_waits_for_atomic_publication () =
+  let offering = offered two_offered in
+  with_receipt_fixture offering (fun _env context receipts agent p ->
+    Eio.Switch.run (fun sw ->
+      let entered, enter = Eio.Promise.create () in
+      let release, finish = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Load_receipts.loaded
+          receipts
+          ~invocation:(invocation "first-load")
+          ~names:[ "atlassian_jira_search" ]
+          ~apply:(fun () ->
+            Eio.Promise.resolve enter ();
+            Eio.Promise.await release;
+            Agent_core.Agent.extend_tools agent [ build (List.hd offering) ])
+        |> function Ok () -> () | Error error -> fail (Load_receipts.error_to_string error));
+      Eio.Promise.await entered;
+      Eio.Fiber.fork ~sw (fun () ->
+        execute p.tool (names_input [ "atlassian_confluence_search" ])
+        |> loaded_output
+        |> ignore);
+      Eio.Fiber.yield ();
+      Eio.Promise.resolve finish ());
+    let restored = make_receipts ~task:(task_id "task-901") ~context offering in
+    check
+      (list string)
+      "a sibling blocked on publication does not overwrite the first load"
+      [ "atlassian_confluence_search"; "atlassian_jira_search" ]
+      (Load_receipts.pending_names restored);
+    let before = Agent_core.Context.to_json context in
+    let failure = Failure "extension failed before installation" in
+    (try
+       Load_receipts.loaded
+         restored
+         ~invocation:(invocation "failed-load")
+         ~names:[ "atlassian_jira_search" ]
+         ~apply:(fun () -> raise failure)
+       |> ignore;
+       fail "the extension failure was swallowed"
+     with
+     | Failure _ as observed ->
+       check bool "the original extension exception propagates" true (observed == failure));
+    check
+      string
+      "a failed extension cannot replace a successful receipt"
+      (Yojson.Safe.to_string before)
+      (Yojson.Safe.to_string (Agent_core.Context.to_json context));
+    check (list string) "the same receipt state remains readable after the failure"
+      [ "atlassian_confluence_search"; "atlassian_jira_search" ]
+      (Load_receipts.pending_names restored);
+    let retry =
+      placement ~receipts:restored ~agent_cell:(ref (Some agent)) offering
+      |> require_placement
+    in
+    execute retry.tool (names_input [ "atlassian_jira_search" ])
+    |> loaded_output |> ignore;
+    let reloaded =
+      match List.find_opt
+              (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "atlassian_jira_search")
+              retry.already_used with
+      | Some tool -> tool
+      | None -> fail "a load after the failed extension did not place its tool"
+    in
+    execute reloaded (`Assoc []) |> loaded_output |> ignore;
+    check (list string) "later load and dispatch use the same unpoisoned receipt state"
+      [ "atlassian_confluence_search" ] (Load_receipts.pending_names restored))
+;;
+
+let test_failed_and_unknown_loads_do_not_grant () =
+  let offering = offered two_offered in
+  with_receipt_fixture offering (fun _env _context receipts _agent p ->
+    let refused label result =
+      match result with
+      | Error _ -> ()
+      | Ok _ -> fail (label ^ " unexpectedly loaded a tool")
+    in
+    let no_agent = placement ~receipts offering |> require_placement in
+    refused
+      "missing agent"
+      (execute no_agent.tool (names_input [ "atlassian_jira_search" ]));
+    refused "unknown-only request" (execute p.tool (names_input [ "atlassian_typo" ]));
+    refused "malformed request" (execute p.tool (`Assoc [ "names", `Int 1 ]));
+    refused
+      "missing invocation"
+      (Agent_core.Tool.execute p.tool (names_input [ "atlassian_jira_search" ]));
+    check
+      (list string)
+      "no unsuccessful request creates a receipt"
+      []
+      (Load_receipts.pending_names receipts);
+    execute p.tool (names_input [ "atlassian_jira_search"; "atlassian_typo" ])
+    |> loaded_output
+    |> ignore;
+    check
+      (list string)
+      "a partial load records only tools actually installed"
+      [ "atlassian_jira_search" ]
+      (Load_receipts.pending_names receipts))
+;;
+
+let test_load_survives_purge_checkpoint_and_resume () =
+  let offering = offered two_offered in
+  with_receipt_fixture offering (fun env _context _receipts agent p ->
+    let output =
+      Agent_core.Tool.execute
+        ~invocation:(invocation "toolu_ask")
+        p.tool
+        (names_input [ "atlassian_jira_search" ])
+      |> loaded_output
+    in
+    let checkpoint = Agent_core.Agent.checkpoint agent in
+    let checkpoint =
+      { checkpoint with
+        messages =
+          [ asked_for [ "atlassian_jira_search" ]
+          ; Agent_core.Types.tool_result_msg
+              ~tool_use_id:"toolu_ask"
+              ~content:output.content
+              ()
+          ]
+      }
+    in
+    let checkpoint =
+      match
+        Keeper_checkpoint_purge.purge
+          ~config:{ Keeper_checkpoint_purge.default_config with keep_recent_messages = 0 }
+          checkpoint
+      with
+      | Ok (checkpoint, report) ->
+        check
+          int
+          "the successful result body was really purged"
+          1
+          report.tool_results_cleared;
+        checkpoint
+      | Error _ -> fail "purge rejected the closed successful load cycle"
+    in
+    let checkpoint =
+      match Agent_core.Checkpoint.of_json (Agent_core.Checkpoint.to_json checkpoint) with
+      | Ok checkpoint -> checkpoint
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    let fresh_context = Agent_core.Context.create () in
+    Agent_core.Context.set fresh_context "unrelated-live-context" (`String "keep");
+    let restored = restored_receipts ~source:checkpoint.context ~target:fresh_context in
+    check
+      (option string)
+      "restoration preserves unrelated live Context"
+      (Some "keep")
+      (match Agent_core.Context.get fresh_context "unrelated-live-context" with
+       | Some (`String value) -> Some value
+       | _ -> None);
+    let receipts =
+      Load_receipts.create
+        ~restored
+        ~trace_id:(trace_id "search-test")
+        ~task_id:(Some (task_id "task-901"))
+        ~current_task_id:(fun () -> Ok (Some (task_id "task-901")))
+        ~surface:(receipt_surface offering)
+    in
+    let agent_cell = ref None in
+    let next =
+      placement ~receipts ~agent_cell ~history:checkpoint.messages offering
+      |> require_placement
+    in
+    let resumed =
+      Agent_core.Agent.resume
+        ~net:env#net
+        ~checkpoint
+        ~context:fresh_context
+        ~tools:(next.tool :: next.already_used)
+        ()
+    in
+    agent_cell := Some resumed;
+    let tool =
+      match
+        Agent_core.Tool_set.find "atlassian_jira_search" (Agent_core.Agent.tools resumed)
+      with
+      | Some tool -> tool
+      | None -> fail "restart lost the successful outstanding load"
+    in
+    execute tool (`Assoc []) |> loaded_output |> ignore;
+    check
+      (list string)
+      "the resumed invocation consumes the grant"
+      []
+      (Load_receipts.pending_names receipts))
+;;
+
+let test_same_turn_claim_owns_its_successful_load () =
+  let offering = offered (two_offered @ [ "page_read", "Read" ]) in
+  let current = ref (Ok None) in
+  with_receipt_fixture ~task:None ~current_task_id:(fun () -> !current) offering
+    (fun _env context receipts agent p ->
+      execute p.tool (names_input [ "atlassian_jira_search" ]) |> loaded_output |> ignore;
+      current := Ok (Some (task_id "task-902"));
+      execute p.tool (names_input [ "atlassian_confluence_search" ]) |> loaded_output |> ignore;
+      check (list string) "the new Task owns only loads made for that Task"
+        [ "atlassian_confluence_search" ] (Load_receipts.pending_names receipts);
+      let before = Agent_core.Context.to_json context in
+      current := Error "owner metadata temporarily unavailable";
+      (match execute p.tool (names_input [ "atlassian_page_read" ]) with
+       | Ok _ -> fail "unknown work ownership installed a deferred tool"
+       | Error error ->
+         check bool "work lookup failure can be retried" true error.recoverable;
+         check bool "work lookup failure is infrastructure, not an argument error"
+           true (error.error_class = Some Agent_core.Types.Transient));
+      check bool "failed work lookup did not install its requested tool" false
+        (Agent_core.Tool_set.mem "atlassian_page_read" (Agent_core.Agent.tools agent));
+      check string "failed work lookup preserves existing receipts"
+        (Yojson.Safe.to_string before) (Yojson.Safe.to_string (Agent_core.Context.to_json context));
+      let next = make_receipts ~task:(task_id "task-902") ~context offering in
+      check (list string) "the next turn retains the load made after the claim"
+        [ "atlassian_confluence_search" ] (Load_receipts.pending_names next))
+;;
+
+let test_runtime_attempt_keeps_the_expanded_tool_set () =
+  let offering = offered two_offered in
+  with_receipt_fixture offering (fun env context receipts agent p ->
+    execute p.tool (names_input [ "atlassian_jira_search" ]) |> loaded_output |> ignore;
+    let tools = Keeper_agent_tool_surface.on_the_wire
+        ~agent_cell:(ref (Some agent)) ~built:[ p.tool ] in
+    let replacement = Agent_core.Agent.create ~net:env#net ~context ~tools
+        ~config:(Agent_core.Types.default_config ~model:"another-runtime") () in
+    let tool = match Agent_core.Tool_set.find "atlassian_jira_search" (Agent_core.Agent.tools replacement) with
+      | Some tool -> tool
+      | None -> fail "the next runtime attempt dropped the tool the prior attempt loaded"
+    in
+    execute tool (`Assoc []) |> loaded_output |> ignore;
+    check (list string) "replacement runtime uses the same receipt authority" []
+      (Load_receipts.pending_names receipts))
+;;
+
+let test_work_and_surface_changes_retire_loads () =
+  let offering = offered two_offered in
+  with_receipt_fixture offering (fun _env context _receipts _agent p ->
+    execute p.tool (names_input [ "atlassian_jira_search" ]) |> loaded_output |> ignore;
+    let initial = Agent_core.Context.copy context in
+    let changed label ?(trace = "search-test") ?(task = Some (task_id "task-901")) surface
+      =
+      let target = Agent_core.Context.create () in
+      let receipts =
+        Load_receipts.create
+          ~restored:(restored_receipts ~source:initial ~target)
+          ~trace_id:(trace_id trace)
+          ~task_id:task
+          ~current_task_id:(fun () -> Ok task)
+          ~surface
+      in
+      check (list string) label [] (Load_receipts.pending_names receipts);
+      let returned =
+        Load_receipts.create
+          ~restored:(restored_receipts ~source:target ~target)
+          ~trace_id:(trace_id "search-test")
+          ~task_id:(Some (task_id "task-901"))
+          ~current_task_id:(fun () -> Ok (Some (task_id "task-901")))
+          ~surface:(receipt_surface offering)
+      in
+      check
+        (list string)
+        "returning to an old scope does not revive retired loads"
+        []
+        (Load_receipts.pending_names returned)
+    in
+    changed "Task switched" ~task:(Some (task_id "task-902")) (receipt_surface offering);
+    changed "Task ended" ~task:None (receipt_surface offering);
+    changed "trace changed" ~trace:"next-conversation" (receipt_surface offering);
+    changed
+      "catalog changed"
+      (receipt_surface (offered (two_offered @ [ "typo", "Now present" ])));
+    changed
+      "input schema changed"
+      (receipt_surface
+         (offered ~input_schema:(`Assoc [ "type", `String "object" ]) two_offered));
+    let moved =
+      receipt_surface offering
+      |> List.map (fun (entry : Load_receipts.surface_entry) ->
+        match entry.source with
+        | Builtin -> entry
+        | Attached attached ->
+          { entry with
+            source = Attached { attached with endpoint = "https://other.example/mcp" }
+          })
+    in
+    changed "same named service moved endpoints" moved)
+;;
+
+let test_invalid_restore_does_not_replace_live_state () =
+  let source = Agent_core.Context.create_sync () in
+  Agent_core.Context.set_scoped
+    source
+    Agent_core.Context.Session
+    "keeper_tool_load_receipts"
+    (`Assoc [ "pending", `List [] ]);
+  let target = Agent_core.Context.create_sync () in
+  let _ = make_receipts ~context:target (offered two_offered) in
+  let before = Agent_core.Context.to_json target in
+  (match Load_receipts.restore ~source ~target with
+   | Error (Load_receipts.Invalid_snapshot _) -> ()
+   | Error (Load_receipts.Work_scope_unavailable _) -> fail "restoration queried live work"
+   | Ok _ -> fail "an incomplete snapshot was accepted as empty");
+  check
+    string
+    "a malformed source leaves target state byte-for-byte unchanged"
+    (Yojson.Safe.to_string before)
+    (Yojson.Safe.to_string (Agent_core.Context.to_json target))
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -770,12 +1180,8 @@ let () =
     ; ( "carried across turns"
       , [ test_case "a tool this conversation ran comes back with its schema" `Quick
             test_a_tool_this_conversation_ran_comes_back_with_its_schema
-        ; test_case "a request the conversation moved past is not carried" `Quick
-            test_a_tool_asked_for_and_then_left_behind_is_not_carried
-        ; test_case "the last request is placed on the next turn" `Quick
-            test_the_last_request_is_placed_on_the_next_turn
-        ; test_case "a request places only what it named" `Quick
-            test_a_request_places_only_what_it_named
+        ; test_case "a request without a successful load grants nothing" `Quick
+            test_a_request_without_a_successful_load_grants_nothing
         ; test_case "a conversation that ran nothing carries nothing" `Quick
             test_a_conversation_that_ran_nothing_carries_nothing
         ; test_case "a name no longer offered is not placed" `Quick
@@ -788,6 +1194,24 @@ let () =
             test_a_carried_tool_is_not_also_named_in_the_listing
         ; test_case "a carried tool can still be named" `Quick
             test_a_carried_tool_can_still_be_named
+        ] )
+    ; ( "successful load continuity"
+      , [ test_case "sibling loads survive and consume individually" `Quick
+            test_successful_sibling_loads_survive_and_consume_individually
+        ; test_case "sibling load waits for atomic publication" `Quick
+            test_sibling_load_waits_for_atomic_publication
+        ; test_case "failed and unknown loads grant nothing" `Quick
+            test_failed_and_unknown_loads_do_not_grant
+        ; test_case "load survives purge checkpoint and resume" `Quick
+            test_load_survives_purge_checkpoint_and_resume
+        ; test_case "a same-turn claim owns its successful load" `Quick
+            test_same_turn_claim_owns_its_successful_load
+        ; test_case "runtime attempt retains the expanded tool set" `Quick
+            test_runtime_attempt_keeps_the_expanded_tool_set
+        ; test_case "work and surface changes retire loads" `Quick
+            test_work_and_surface_changes_retire_loads
+        ; test_case "invalid restore preserves live state" `Quick
+            test_invalid_restore_does_not_replace_live_state
         ] )
     ; ( "the carry window"
       , [ test_case "drops a tool whose last call is outside it" `Quick

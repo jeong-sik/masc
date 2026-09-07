@@ -222,6 +222,8 @@ let lane_should_retry
     error =
   if is_last || not allow_retry then
     false
+  else if Keeper_required_tools.should_try_next error then
+    true
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
     allow_accept_no_progress_retry
@@ -840,6 +842,7 @@ let run_named
     ~system_prompt
     ?(tools = [])
     ~agent_core_tools
+    ?(tool_requirement = Keeper_required_tools.Optional)
     ?(initial_messages = [])
     ?model_input_projection
     ?stream_idle_timeout_s
@@ -1117,6 +1120,18 @@ let run_named
         , None
         , Keeper_provider_attempt_effect.No_effect_observed )
       | Resolved_runtime runtime ->
+      let has_tools, surface_enabled = match runtime.Runtime.execution with
+        | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
+        | Runtime_execution.Codex_app_server _
+        | Runtime_execution.Antigravity_cli _ -> tools <> [], true
+        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
+      (match Keeper_required_tools.check_surface tool_requirement
+          ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools with
+       | Error failure ->
+         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+         Error (Keeper_required_tools.to_core_error failure), None,
+         Keeper_provider_attempt_effect.No_effect_observed
+       | Ok () ->
       (* Shadows the caller's inputs with this candidate's dispatch view; the
          originals stay bound above for the next candidate's own projection. *)
       let { attempt_goal_blocks = goal_blocks
@@ -1504,6 +1519,13 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
+        (match Keeper_required_tools.check_provider tool_requirement
+            ~runtime_id:attempt_runtime_id provider_config with
+         | Error failure ->
+           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+           Error (Keeper_required_tools.to_core_error failure), None,
+           Keeper_provider_attempt_effect.No_effect_observed
+         | Ok () ->
         (match
            Runtime.validate_dispatch_credential ~provider_config runtime
          with
@@ -1662,7 +1684,7 @@ let run_named
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed ))))
-       )
+       )))
     attempt_candidates
 
 

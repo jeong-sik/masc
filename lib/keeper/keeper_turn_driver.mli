@@ -115,6 +115,7 @@ val run_named :
   system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
   agent_core_tools:Agent_core.Tool.t list ->
+  ?tool_requirement:Keeper_required_tools.t ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
   ?stream_idle_timeout_s:float ->

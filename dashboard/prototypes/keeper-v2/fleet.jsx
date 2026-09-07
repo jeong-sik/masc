@@ -68,7 +68,7 @@ const FN_ITEMS = [
 function FleetNav() {
   return (
     <nav className="v2-nav">
-      <a className="nav-brand" href={FN_APP} title="MASC — Multi-Agent Streaming Coordination" style={{ textDecoration: 'none' }}>
+      <a className="nav-brand" href={FN_APP} title="MASC — Multi-Agent Shared Context" style={{ textDecoration: 'none' }}>
         <div className="nav-home">M</div>
         <span className="nlbl">MASC</span>
       </a>

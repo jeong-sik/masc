@@ -506,21 +506,20 @@ let focus_min_rows = 2
 
 (* The overview: the fleet folded to at most half the rows, the focus block
    after a rule. What the fleet tab opens on. *)
-let overview_rows ~cols ~below input newest ordered focus focus_rows =
+let overview_rows ~cols ~below fleet_rows focus focus_rows =
+  let fleet_count = List.length fleet_rows in
   let fleet_budget =
     match focus with
     | Some _ when below >= fleet_min_rows + focus_min_rows ->
-        min (List.length ordered) (below / 2)
-    | Some _ | None -> min (List.length ordered) below
+        min fleet_count (below / 2)
+    | Some _ | None -> min fleet_count below
   in
   let fleet =
-    if List.length ordered > fleet_budget && fleet_budget >= 2 then
-      let shown = List.filteri (fun index _ -> index < fleet_budget - 1) ordered in
-      List.map (fleet_row ~cols input newest) shown
-      @ [ more_line ~cols (List.length ordered - (fleet_budget - 1)) ]
+    if fleet_count > fleet_budget && fleet_budget >= 2 then
+      List.filteri (fun index _ -> index < fleet_budget - 1) fleet_rows
+      @ [ more_line ~cols (fleet_count - (fleet_budget - 1)) ]
     else
-      List.filteri (fun index _ -> index < fleet_budget) ordered
-      |> List.map (fleet_row ~cols input newest)
+      List.filteri (fun index _ -> index < fleet_budget) fleet_rows
   in
   let after_fleet = below - List.length fleet in
   let focus_block =
@@ -594,14 +593,15 @@ let fleet_lines ~cols ~below ~scroll input =
   in
   (* The full list: every fleet row, then the rule and the focus block when
      there is one. Scrolling walks this; the overview folds it. *)
+  let fleet_rows = List.map (fleet_row ~cols input newest) ordered in
   let body =
-    List.map (fleet_row ~cols input newest) ordered
+    fleet_rows
     @ (match focus_rows with
        | [] -> []
        | _ :: _ -> (rule_line ~cols, Target_none) :: focus_rows)
   in
   window ~cols ~below ~scroll body ~overview:(fun () ->
-    overview_rows ~cols ~below input newest ordered focus focus_rows)
+    overview_rows ~cols ~below fleet_rows focus focus_rows)
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 

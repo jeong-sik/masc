@@ -1,0 +1,56 @@
+{
+  "observed_at": "2026-09-07T14:39:08.066797+00:00",
+  "root_deploy_or_restart_performed": false,
+  "previous_attempt": "ConnectionRefusedError on127.0.0.1:8935; no health response",
+  "health_available": true,
+  "status": "ok",
+  "overall_status": "warming",
+  "binary_commit": "3a3968edce9361412d790617d5e3f311b726202d",
+  "started_at": "2026-09-07T14:39:00Z",
+  "listener_fields": [
+    "p10682",
+    "cmasc",
+    "f7"
+  ],
+  "masc_pids": [
+    530,
+    10682
+  ],
+  "recent_lifecycle_signals": [
+    {
+      "ts": "2026-09-07T14:36:33Z",
+      "level": "INFO",
+      "module": "Server",
+      "signal": "sigterm"
+    },
+    {
+      "ts": "2026-09-07T14:36:33Z",
+      "level": "INFO",
+      "module": "Server",
+      "signal": "shutting down"
+    },
+    {
+      "ts": "2026-09-07T14:36:33Z",
+      "level": "INFO",
+      "module": "Server",
+      "signal": "server stopped"
+    },
+    {
+      "ts": "2026-09-07T14:36:33Z",
+      "level": "INFO",
+      "module": "Server",
+      "signal": "shutdown complete"
+    },
+    {
+      "ts": "2026-09-07T14:36:33Z",
+      "level": "INFO",
+      "module": "Server",
+      "signal": "shutdown complete"
+    }
+  ],
+  "last_log_ts": "2026-09-07T14:39:08Z",
+  "limits": [
+    "A connection refusal does not identify who stopped the server or why.",
+    "No raw messages, process arguments or credentials retained."
+  ]
+}

@@ -5,7 +5,7 @@ operator_surface: primary
 ---
 
 ### full [primary: 공개 MCP 프로필의 도구 발견 안내]
-MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration.
+MASC (Multi-Agent Shared Context) enables AI agent collaboration.
 PROJECT: Agents sharing the same base path (.masc/ folder) align together.
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool
 surfaces use the configured cluster/default label).

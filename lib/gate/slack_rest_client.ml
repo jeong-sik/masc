@@ -317,3 +317,122 @@ let users_info ?clock ?(timeout_sec = default_http_timeout_sec) ~token ~user_id
   match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_users_info_response ~status ~body
+
+(* ── conversations.history — the slack-lane poll fiber's read ──── *)
+
+type history_message = {
+  ts : string;
+  user_id : string option;   (* Absent when the author is an app/bot. *)
+  bot_id : string option;    (* Present for app/bot authors. *)
+  subtype : string option;   (* Present for message_changed, joins, … *)
+  thread_ts : string option; (* Present when this is a thread reply. *)
+  text : string;
+}
+
+type conversations_history_ok = {
+  messages : history_message list;  (* Slack order: newest first. *)
+  has_more : bool;
+  next_cursor : string option;      (* response_metadata.next_cursor. *)
+}
+
+let build_conversations_history_request ~token ~channel_id ?oldest ?limit ?cursor () =
+  let url = "https://slack.com/api/conversations.history" in
+  let headers =
+    ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+    :: auth_headers ~token
+  in
+  let parts = [ "channel=" ^ channel_id ] in
+  let parts =
+    match oldest with Some oldest -> parts @ [ "oldest=" ^ oldest ] | None -> parts
+  in
+  let parts =
+    match limit with Some limit -> parts @ [ "limit=" ^ string_of_int limit ] | None -> parts
+  in
+  let parts =
+    match cursor with Some cursor -> parts @ [ "cursor=" ^ cursor ] | None -> parts
+  in
+  (url, headers, String.concat "&" parts)
+
+(* Gate_rest_json exposes no array field; messages are destructured over
+   Yojson with a local string extractor rather than widening the shared
+   gate JSON surface for one caller. *)
+let yojson_string_field name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) -> Some value
+     | _ -> None)
+  | _ -> None
+;;
+
+let parse_conversations_history_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | Error msg -> Error (Other (Printf.sprintf "response rejected (%s): %s" msg body))
+    | Ok json ->
+      let ok =
+        match Gate_rest_json.bool_field "ok" json with Some b -> b | None -> false
+      in
+      if not ok then
+        let err =
+          match Gate_rest_json.string_field "error" json with
+          | Some e -> e
+          | None -> "conversations.history failed"
+        in
+        Error (Slack_api { error = err })
+      else
+        match Gate_rest_json.to_yojson json with
+        | `Assoc fields ->
+          let parsed =
+            match List.assoc_opt "messages" fields with
+            | Some (`List items) ->
+              List.map
+                (fun item ->
+                  match yojson_string_field "ts" item with
+                  | Some ts ->
+                    Ok
+                      { ts
+                      ; user_id = yojson_string_field "user" item
+                      ; bot_id = yojson_string_field "bot_id" item
+                      ; subtype = yojson_string_field "subtype" item
+                      ; thread_ts = yojson_string_field "thread_ts" item
+                      ; text =
+                          (match yojson_string_field "text" item with
+                           | Some text -> text
+                           | None -> "")
+                      }
+                  | None -> Error "message without ts")
+                items
+            | _ -> []
+          in
+          (match List.find_opt Result.is_error parsed with
+           | Some (Error msg) -> Error (Other msg)
+           | Some (Ok _) | None ->
+             let has_more =
+               match List.assoc_opt "has_more" fields with
+               | Some (`Bool b) -> b
+               | _ -> false
+             in
+             let next_cursor =
+               match List.assoc_opt "response_metadata" fields with
+               | Some (`Assoc md) ->
+                 (match List.assoc_opt "next_cursor" md with
+                  | Some (`String cursor) when cursor <> "" -> Some cursor
+                  | _ -> None)
+               | _ -> None
+             in
+             Ok
+               { messages = List.filter_map Result.get_ok parsed
+               ; has_more
+               ; next_cursor
+               })
+        | _ -> Error (Other "ok=true but response is not an object")
+
+let conversations_history ?clock ?(timeout_sec = default_http_timeout_sec) ~token
+    ~channel_id ?oldest ?limit ?cursor () =
+  let (url, headers, body) =
+    build_conversations_history_request ~token ~channel_id ?oldest ?limit ?cursor ()
+  in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_conversations_history_response ~status ~body

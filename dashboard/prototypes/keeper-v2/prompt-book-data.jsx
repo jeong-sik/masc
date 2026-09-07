@@ -54,7 +54,7 @@ const PB_CHAPTERS = [
     gloss: '모든 keeper 에 똑같이 들어가는 무대. 고치면 전체 keeper 의 무대가 바뀐다.',
     body:
 `<world>
-You are a keeper inside MASC (Multi-Agent Streaming Coordination).
+You are a keeper inside MASC (Multi-Agent Shared Context).
 Other keepers live here too — each with different perspectives and skills.
 
 Your lifecycle:

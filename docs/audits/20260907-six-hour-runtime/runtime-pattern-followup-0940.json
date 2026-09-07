@@ -1,0 +1,54 @@
+{
+  "observed_at": "2026-09-07T09:43:44Z",
+  "window_start": "2026-09-07T08:37:36Z",
+  "window_end": "2026-09-07T09:43:44Z",
+  "last_record": "2026-09-07T09:43:44Z",
+  "records": 22486,
+  "levels": {
+    "INFO": 20726,
+    "WARN": 1483,
+    "ERROR": 277
+  },
+  "patterns": {
+    "repeated_exact_tool_loop": {
+      "literal": "yielding repeated exact tool loop",
+      "count": 11,
+      "first": "2026-09-07T08:41:09Z",
+      "last": "2026-09-07T09:33:37Z"
+    },
+    "missing_tool_results": {
+      "literal": "insufficient tool messages following tool_calls",
+      "count": 0
+    },
+    "overlapping_checkpoint": {
+      "literal": "Overlapping_tool_cycle",
+      "count": 0
+    },
+    "composition_publication_failure": {
+      "literal": "Skill composition evidence publication failed",
+      "count": 0
+    },
+    "new_keeper_shutdown_recovery": {
+      "literal": "shutdown recovery failed keeper=new-keeper",
+      "count": 0
+    },
+    "browser_lane_absent": {
+      "literal": "no browser lane connected",
+      "count": 0
+    },
+    "librarian_failure": {
+      "literal": "memory os librarian failed",
+      "count": 0
+    },
+    "claude_quota": {
+      "literal": "Claude Code subscription turn failed (kind=quota_blocked)",
+      "count": 0
+    }
+  },
+  "limits": [
+    "Literal signal counts, not an exhaustive incident classifier.",
+    "Zero observations do not prove the triggering path ran.",
+    "Deployments and keeper workload may change within this window; no controlled before-after rate claim."
+  ],
+  "raw_messages_retained": false
+}

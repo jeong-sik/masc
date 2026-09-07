@@ -1,0 +1,22 @@
+{
+  "pr_number": 34093,
+  "head_sha": "0d7dcbd555e72f3475b3b3b955dbaa1163fa0183",
+  "base_pr": 34055,
+  "base_sha": "9c98d378e4304493cea6d99c91c5fbc064e3b9b1",
+  "run_id": 34133788720,
+  "observed_at": "2026-09-07T14:38:08.276771+00:00",
+  "state": "remote validation in progress",
+  "source_review": "author and independent root review complete",
+  "scenarios_defined": {
+    "responses_requests": 6,
+    "chat_none_requests": 2,
+    "minimal_rejected_before_http": 1
+  },
+  "changed_production_contract": "Only accepted_reasoning_efforts in three GPT5.5 rows: none, low, medium, high, xhigh.",
+  "official_source": "https://developers.openai.com/api/docs/models/gpt-5.5",
+  "limits": [
+    "Defined request combinations are not yet executed test evidence.",
+    "No new runtime protocol; discarded proposal retained only in an unpublished worktree.",
+    "No production API request, configuration change or account access proof."
+  ]
+}

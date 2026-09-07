@@ -17165,7 +17165,7 @@ let help_ascii_banner ~cols (state : state) =
   if inner_width >= 72 then
     [ "  " ^ (Theme.info ()) ^ "\xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97" ^ Ansi.reset
       ^ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "M A S C" ^ Ansi.reset
-      ^ "  \xc2\xb7  " ^ Ansi.bold ^ "Multi-Agent System Coordinator" ^ Ansi.reset
+      ^ "  \xc2\xb7  " ^ Ansi.bold ^ "Multi-Agent Shared Context" ^ Ansi.reset
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
       ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
@@ -17175,7 +17175,7 @@ let help_ascii_banner ~cols (state : state) =
     ; ""
     ]
   else
-    [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent System Coordinator ]" ^ Ansi.reset
+    [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent Shared Context ]" ^ Ansi.reset
     ; "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
       ^ Ansi.dim ^ " · [?] Close · [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
     ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset

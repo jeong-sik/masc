@@ -226,7 +226,7 @@ let with_lock t f =
        would poison the receipt lock and prevent every later load or use. *)
     let result =
       Eio.Mutex.use_rw ~protect:true lock (fun () ->
-        try Ok (f ()) with exn -> (* cancel-guard-ok *)
+        try Ok (f ()) with exn -> (* cancel-guard-ok: re-raised below with its backtrace *)
           Error (exn, Printexc.get_raw_backtrace ()))
     in
     (match result with

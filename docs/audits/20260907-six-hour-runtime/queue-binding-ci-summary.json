@@ -1,0 +1,26 @@
+{
+  "head": "b9f30528ff2ee2d43da5cfeafec9bebe9b5b4c01",
+  "run": "https://github.com/jeong-sik/masc/actions/runs/34107295665",
+  "conclusion": "success",
+  "tests_total": 77,
+  "suites": {
+    "queue_state": 36,
+    "repetition_scope": 11,
+    "cancellation_transaction": 7,
+    "source_terminal_transaction": 11,
+    "transfer_transaction": 12
+  },
+  "review_fixes": [
+    "Explicit test leaf dependency",
+    "Same-binding retry confirms durability after uncertain rename without phantom revision or notifications"
+  ],
+  "later_change": {
+    "head_prefix": "9f79ffbb72",
+    "description": "One justification comment only; targeted behavior not rerun for this comment.",
+    "required_checks": "pending at capture"
+  },
+  "limits": [
+    "Queue identity persistence is not autonomous Fresh/Resume admission or child-parent continuation.",
+    "No production deployment or whole-FIFO proof."
+  ]
+}

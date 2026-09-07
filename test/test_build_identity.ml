@@ -499,6 +499,7 @@ let test_executable_provenance_rejects_mismatches () =
 
 let test_executable_provenance_binding_rejects_replacement_and_forgery () =
   let path = Filename.temp_file "build-provenance" ".json" in
+  let displaced_path = path ^ ".displaced" in
   let snapshot_root = Filename.temp_file "dashboard-blobs" "" in
   Sys.remove snapshot_root;
   Unix.mkdir snapshot_root 0o700;
@@ -520,6 +521,7 @@ let test_executable_provenance_binding_rejects_replacement_and_forgery () =
   Fun.protect
     ~finally:(fun () ->
       if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists displaced_path then Sys.remove displaced_path;
       if Sys.file_exists snapshot_root then Unix.rmdir snapshot_root)
     (fun () ->
       write raw;
@@ -537,10 +539,20 @@ let test_executable_provenance_binding_rejects_replacement_and_forgery () =
           ~expected_executable_inode:2
       in
       Alcotest.(check bool) "exact inode binding accepted" true (Result.is_ok (validate ()));
-      Sys.remove path;
+      (* Keep the original inode allocated: unlink/recreate can reuse it and
+         would not establish the distinct-file premise of this assertion. *)
+      Unix.rename path displaced_path;
       write raw;
+      let replacement = Unix.lstat path in
+      Alcotest.(check bool) "replacement has a distinct filesystem identity" true
+        (replacement.st_dev <> sidecar.st_dev || replacement.st_ino <> sidecar.st_ino);
       Alcotest.(check bool) "same-byte replacement rejected" true (Result.is_error (validate ()));
+      Sys.remove path;
+      Unix.rename displaced_path path;
       write (raw ^ " ");
+      let forged = Unix.lstat path in
+      Alcotest.(check (pair int int)) "forgery preserves the bound inode"
+        (sidecar.st_dev, sidecar.st_ino) (forged.st_dev, forged.st_ino);
       Alcotest.(check bool) "forged bytes rejected" true (Result.is_error (validate ())))
 ;;
 

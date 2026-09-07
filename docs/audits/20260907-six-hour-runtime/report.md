@@ -238,3 +238,9 @@ http_client 및 exact_output_measurement_transport가 getaddrinfo 첫 주소만 
 [PR #33846](https://github.com/jeong-sik/masc/pull/33846), head cd7c2ffe3e. microVM 정리를 전체 Keeper 준비 단계에서 분리하고 같은 lifecycle lock으로 목록 조회부터 삭제까지 보호한다. fake CLI를 사용한 실제 boot 진입 대기, live owner 보존, 실패 후 lock 재사용, switch 소유 취소 테스트를 추가했다. 보호된 sweep 자체의 취소는 해당 pass가 끝날 때까지 지연된다. 성공적인 VM 생성은 이 테스트가 검증하지 않는다. [targeted CI 34079859096](https://github.com/jeong-sik/masc/actions/runs/34079859096) 결과 확인 전.
 
 두 원본 system JSONL 파일을 전체 스캔한 결과 JSON 파싱 실패0행, timestamp 누락0행이었다. CI summary 파일은 해당 실행 로그의 판정 줄을 추출하고 후행 공백만 정리했다.
+
+## 새 운영 재조회 (서로 길이가 다른 관측 창)
+
+03:32Z 재조회 binary148a773ff8의 Git ancestry에는 #33829/#33833/#33834/#33839 네 변경이 실제 포함된다. 이 배포와 merge는 다른 작업 주체가 진행했으며 본 세션이 실행하지 않았다. 03:22:10Z–03:32:26Z 약10분, 4,391행에서 insufficient-tool-message cycle error0, overlapping checkpoint0, composition evidence failure0, check·lint warning0, Claude quota13이 관측됐다. 전체6시간 대비 단순 감소율이나 완치율로 비교할 수 없다. 해당 경로가 실제 충분히 실행됐는지와 concurrent 변경 영향이 남는다.
+
+가장 최근 health는 runnable pending61, oldest2292초(약38분)이며 여전히 stalled/degraded이다. 직전 관측 pending115/oldest6471초에서 줄었지만 감소만으로 FIFO 소비·효과 전달 성공을 판정하지 않는다. dashboard stamp는 여전히 missing. 최신 health-final.json과 post-deployment-observation.json 참고.

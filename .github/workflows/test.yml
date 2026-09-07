@@ -300,11 +300,12 @@ jobs:
           # the bare name, because a stanza names a suite without its path.
           stanza_deps=()
           for suite_path in "${suites[@]}"; do
-            python3 "${stanza_env_reader}" --dir "$(dirname "${suite_path}")" \
-              --deps "$(basename "${suite_path}")" > /tmp/stanza-deps.txt
+            dep_lines=$(python3 "${stanza_env_reader}" \
+              --dir "$(dirname "${suite_path}")" \
+              --deps "$(basename "${suite_path}")")
             while IFS= read -r dep; do
               if [ -n "${dep}" ]; then stanza_deps+=("${dep}"); fi
-            done < /tmp/stanza-deps.txt
+            done <<< "${dep_lines}"
           done
           log "[targeted] dune build ${exes[*]} ${stanza_deps[*]+${stanza_deps[*]}}"
           opam exec -- dune build --root . "${exes[@]}" \
@@ -319,11 +320,10 @@ jobs:
             suite="$(basename "${suite_path}")"
             cd "${repo_root}/_build/default/${suite_dir}"
             suite_env=()
-            python3 "${stanza_env_reader}" --dir "${suite_dir}" "${suite}" \
-              > /tmp/stanza-env.txt
+            env_lines=$(python3 "${stanza_env_reader}" --dir "${suite_dir}" "${suite}")
             while IFS= read -r pair; do
               if [ -n "${pair}" ]; then suite_env+=("${pair}"); fi
-            done < /tmp/stanza-env.txt
+            done <<< "${env_lines}"
             log "[targeted] ${suite_path}: stanza env ${suite_env[*]+${suite_env[*]}}"
             log "[targeted] ${suite_path}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             started=$(date +%s)

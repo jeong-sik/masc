@@ -49,25 +49,11 @@ scripts/audit-hardcoding-truth.sh  # report: prints "Status: findings", exits 0
 scripts/audit-keeper-credential-drift.sh  # report
 scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc credential store
 scripts/audit-keeper-tool-boundary-matrix.sh  # tool
-scripts/audit-ocaml-spec-nav-line-refs.sh  # green, but 0 citations exist to check
 scripts/audit-rfc-closeout-lag.sh  # report
-scripts/audit-tla-ml-line-refs.sh  # green, but 0 citations exist to check
 scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-boundary-guard-mli-pairs.sh  # green; diff-driven on BASE_REF, and no
 #   planted violation has been shown to fail it yet
-scripts/check-boundary-guard.sh
-scripts/check-checkpoint-installation-legacy-purge.sh
-scripts/check-dashboard-nav-event-parity.sh
-scripts/check-keeper-runtime-setting-registry.sh  # red
-scripts/check-ollama-model-context.py
-scripts/check-opam-lock-covers-deps.sh
-scripts/check-pr-hygiene.sh
+scripts/check-ollama-model-context.py  # tool: needs OLLAMA_CLOUD_API_KEY and network
 scripts/check-pr-sync.sh
-scripts/check-release-train-guard.sh
-scripts/check-sandbox-dune-version.sh
-scripts/check-toml-syntax.sh
-scripts/ci/check-env-snapshot-default-drift.py  # red
-scripts/ci/check-tla-harness-coverage.sh
-scripts/ci/check-yaml-syntax.py
-scripts/lib/worktree-cleanup-guards.sh
-scripts/tla-check.sh
+scripts/lib/worktree-cleanup-guards.sh  # not a check: a function library the name
+#   pattern picks up

@@ -6216,15 +6216,24 @@ def memory_journal_timeline_interaction(
         )
         os.write(master_fd, b"\x0e\x06")
         wait_for_terminal_input_consumed(_slave_fd)
-        widened = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=31,
-            columns=100,
-            needle=b"journal:full",
-            controls=(FULL_REDRAW,),
-        )
+        try:
+            widened = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=31,
+                columns=100,
+                needle=b"journal:full",
+                controls=(FULL_REDRAW,),
+            )
+        except AssertionError as timed_out:
+            # The raw byte dump this would otherwise carry runs to a hundred
+            # kilobytes and is cut by the CI log before it says anything. The
+            # screen is the part that answers what the toggles did.
+            raise AssertionError(
+                "Widening back never showed journal:full. Screen:\n"
+                + screen_text(bytes(output)).decode("utf8", "replace")
+            ) from timed_out
         if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "

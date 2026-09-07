@@ -1,6 +1,8 @@
 (** Upload bytes are read with the Keeper's file authority before the browser
     receives any command. The callback receives private immutable snapshots,
-    retaining the source basenames, valid only for the callback's duration. *)
+    retaining the source basenames. Snapshots claimed by WebDriver remain valid
+    until confirmed browser session teardown; unclaimed files are cleaned when
+    the callback exits. *)
 val max_file_bytes : int
 
 val with_staged_paths :

@@ -28,7 +28,7 @@ let ok = function
   | Lane.Answered (`Assoc fields) -> (match List.assoc_opt "data" fields with Some data -> data | None -> fail "no data")
   | Lane.Refused message | Lane.Rejected_before_effect message -> fail message
   | _ -> fail "browser did not answer"
-let fixture f = Eio_main.run (fun env ->
+let fixture ?(failure=(fun _ -> None)) f = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   let current = ref "a" in
   let calls = ref [] in
@@ -36,6 +36,9 @@ let fixture f = Eio_main.run (fun env ->
   let request ~method_ ~path ~body =
     Eio.Fiber.yield ();
     calls := (!current,method_,path,body) :: !calls;
+    match failure path with
+    | Some error -> Error error
+    | None ->
     match method_,path with
     | `DELETE,"/session/s" -> Ok `Null
     | `POST,"/session" -> Ok (`Assoc ["sessionId",`String "s";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/s"]])
@@ -160,13 +163,52 @@ let test_owned_upload_staging () = with_upload_context (fun config meta -> fixtu
   (match outcome with
    | Ok (Lane.Answered _) -> ()
    | _ -> fail "owned binary snapshot did not reach native upload");
-  List.iter (fun path -> check bool "snapshot removed after completion" false (Sys.file_exists path)) !captured;
+  List.iter (fun path -> check bool "snapshot survives selection completion" true (Sys.file_exists path)) !captured;
+  (match Driver.close driver with Ok () -> () | Error error -> fail (Driver.error_message error));
+  List.iter (fun path -> check bool "snapshot removed after confirmed session close" false (Sys.file_exists path)) !captured;
+  check bool "caller source survives session cleanup" true (Sys.file_exists source);
   let invoked = ref false in
   let result = Masc.Keeper_browser_upload.with_staged_paths
     ~read_file:(fun ~host_path:_ ~max_bytes -> Ok (String.make max_bytes 'x'))
     ~config ~meta ~paths:["payload.bin"] (fun _ -> invoked := true) in
   check bool "oversized files are refused" true (Result.is_error result);
   check bool "oversized bytes never reach browser" false !invoked))
+let test_upload_lease_failures () =
+  let failing = ref false in
+  let failure path = if !failing &&
+    (String.ends_with ~suffix:"/value" path || path="/session/s")
+    then Some (Driver.Transport "response timed out") else None in
+  fixture ~failure (fun driver _ _ matches ->
+    let captured = ref [] in
+    let stage f = Lane.Upload_lease.with_staged_files
+        ~files:["payload.bin",(fun () -> Ok "bytes")]
+        (fun paths -> captured := paths; f paths) in
+    matches := 0;
+    (match stage (fun paths -> act driver 1 (Action.Upload {selector="input";paths})) with
+     | Ok (Lane.Rejected_before_effect _) -> () | _ -> fail "absent input should reject before effect");
+    List.iter (fun path -> check bool "pre-effect snapshot is cleaned" false (Sys.file_exists path)) !captured;
+    matches := 1; failing := true;
+    (match stage (fun paths -> act driver 1 (Action.Upload {selector="input";paths})) with
+     | Ok (Lane.Refused _) -> () | _ -> fail "uncertain upload should fail with effect uncertainty");
+    List.iter (fun path -> check bool "uncertain upload retains File backing" true (Sys.file_exists path)) !captured;
+    check bool "unconfirmed close fails" true (Result.is_error (Driver.close driver));
+    List.iter (fun path -> check bool "unconfirmed close retains files" true (Sys.file_exists path)) !captured;
+    failing := false;
+    check bool "confirmed close succeeds" true (Result.is_ok (Driver.close driver));
+    List.iter (fun path -> check bool "confirmed close releases files" false (Sys.file_exists path)) !captured)
+let test_upload_lease_cancellation () = Eio_main.run (fun _ ->
+  let owner = Lane.Upload_lease.create_owner () in
+  let claimed,resolve = Eio.Promise.create () in
+  let paths = ref [] in
+  Eio.Fiber.first
+    (fun () -> match Lane.Upload_lease.with_staged_files ~files:["payload.bin",(fun () -> Ok "bytes")]
+       (fun staged -> paths := staged; Lane.Upload_lease.claim ~owner ~paths:staged;
+         Eio.Promise.resolve resolve (); Eio.Fiber.await_cancel ()) with
+       | Ok () -> () | Error error -> fail error)
+    (fun () -> Eio.Promise.await claimed);
+  List.iter (fun path -> check bool "cancelled callback retains claimed bytes" true (Sys.file_exists path)) !paths;
+  Lane.Upload_lease.release_owner owner;
+  List.iter (fun path -> check bool "confirmed owner teardown releases cancelled upload" false (Sys.file_exists path)) !paths)
 let test_context_arguments () =
   let valid action args = `Assoc (["action",`String action;"tabId",`Int 1] @ args) in
   List.iter (fun input -> match Action.parse input with
@@ -191,5 +233,7 @@ let () = run "Firefox controls" ["behavior",[
   test_case "stale ids cannot target a new session" `Quick test_stale_session_id;
   test_case "pre-effect failures permit correction" `Quick test_pre_effect_tool_outcome;
   test_case "owned uploads use exact private snapshots" `Quick test_owned_upload_staging;
+  test_case "upload files follow confirmed session lifetime" `Quick test_upload_lease_failures;
+  test_case "cancelled selection retains session-owned snapshots" `Quick test_upload_lease_cancellation;
   test_case "context and file arguments are explicit" `Quick test_context_arguments;
   test_case "arguments are parsed before effects" `Quick test_parser]]

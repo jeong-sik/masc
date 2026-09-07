@@ -94,7 +94,7 @@ execution={'mode':'compiled' if args.compiled_probe else 'interpreter','state':'
 try:
  if args.compiled_probe:execution['probe_sha256']=hashlib.sha256(args.compiled_probe.read_bytes()).hexdigest()
  (out/'sources.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in [
-  'lib/browser_webdriver.ml','lib/browser_downloads.ml','lib/browser_bidi_downloads.ml','lib/browser_download_artifact.ml','lib/browser_lane/browser_action.ml','lib/browser_lane/browser_lane.ml',
+  'lib/browser_webdriver.ml','lib/browser_downloads.ml','lib/browser_bidi_downloads.ml','lib/browser_download_artifact.ml','lib/browser_lane/browser_action.ml','lib/browser_lane/browser_lane.ml','lib/browser_lane/browser_upload_lease.ml',
   'lib/browser_page_script.ml','scripts/fixtures/firefox_download_artifact_probe.ml','scripts/fixtures/firefox_controls_probe.ml','scripts/probe-firefox-controls.py','test/dune']},indent=2)+'\n')
  server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
  threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -117,7 +117,8 @@ try:
   lane=(repo/'lib/browser_lane/browser_lane.ml').read_text()
   verbs=lane[lane.index('type verb ='):lane.index('\nlet verb_to_string')]
   answer=lane[lane.index('type answer ='):lane.index('(* The public tool surface')]
-  source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\n'+verbs+answer+'\nend;;\n'
+  source+='module Browser_upload_lease = struct\n'+(repo/'lib/browser_lane/browser_upload_lease.ml').read_text()+'\nend;;\n'
+  source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\nmodule Upload_lease = Browser_upload_lease\n'+verbs+answer+'\nend;;\n'
   source+='module Fs_compat = struct let rec mkdir_p path = if not (Sys.file_exists path) then (mkdir_p (Filename.dirname path); Unix.mkdir path 0o700) end;;\n'
   for module,path in [('Crypto_rng','lib/crypto_rng/crypto_rng.ml'),('Browser_downloads','lib/browser_downloads.ml'),('Browser_bidi_downloads','lib/browser_bidi_downloads.ml'),('Browser_page_script','lib/browser_page_script.ml'),('Driver','lib/browser_webdriver.ml')]:
    source+='module '+module+' = struct\n'+(repo/path).read_text()+'\nend;;\n'

@@ -13,6 +13,7 @@
 
 open Time_compat
 module Action = Browser_action
+module Upload_lease = Browser_upload_lease
 
 type verb =
   | Tabs_list

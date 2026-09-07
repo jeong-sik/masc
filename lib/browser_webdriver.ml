@@ -1,6 +1,6 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
-type session = { id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
+type session = { uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
 type t = { start_downloads : Browser_downloads.start; request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -31,11 +31,13 @@ let decode_response ~status body =
       Error (Remote { code; message })
 let create ~start_downloads ~request = { start_downloads; request; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
-let release_downloads session = Result.iter (fun (d : Browser_downloads.connection) -> d.close ()) session.downloads
+let release_resources session =
+  Result.iter (fun (d : Browser_downloads.connection) -> d.close ()) session.downloads;
+  Browser_lane.Upload_lease.release_owner session.uploads
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = "invalid session id"; _ }) -> release_downloads session; t.session <- None
+   | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; release_resources session
    | Ok _ | Error _ -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
@@ -52,7 +54,7 @@ let close_unlocked ?request t = match t.session with
     let request = Option.value ~default:t.request request in
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
-    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> release_downloads session; t.session <- None; Ok ()
+    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; release_resources session; Ok ()
     | Error error -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
@@ -141,6 +143,7 @@ let interact t session ~perform_effect = function
     let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
     let* is_file = script t session "return arguments[0].localName==='input' && arguments[0].type==='file';" [element] in
     let* () = if is_file = `Bool true then Ok () else Error (Protocol "upload requires a file input") in
+    Browser_lane.Upload_lease.claim ~owner:session.uploads ~paths;
     let* _ = element_call perform_effect id "/clear" (`Assoc []) in
     element_call perform_effect id "/value" (`Assoc ["text",`String (String.concat "\n" paths)])
   | Browser_lane.Action.Accept_dialog text ->
@@ -195,7 +198,7 @@ let execute_action t action =
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
-        (match result with `List [] -> release_downloads session; t.session <- None | _ -> ());
+        (match result with `List [] -> t.session <- None; release_resources session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | _ ->
         (* Do not issue another fallible browser request after an effect.
@@ -215,12 +218,16 @@ let execute_unlocked t = function
           "moz:firefoxOptions", `Assoc ["args", `List args]]]] in
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
-       let owned = { id; handles = []; download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+       let owned = { id; handles = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->
          let committed = ref false in
          Eio.Switch.on_release setup_sw (fun () ->
-           if not !committed then ignore (close_unlocked t));
+           if not !committed then
+             match close_unlocked t with
+             | Ok () -> ()
+             | Error error -> owned.downloads <- Error
+                 ("BiDi setup incomplete; session cleanup failed: " ^ error_message error));
          let* capabilities = match field "capabilities" result with
            | Some value -> Ok value | None -> Error (Protocol "Firefox omitted capabilities") in
          let* websocket_url = string_field "webSocketUrl" capabilities in

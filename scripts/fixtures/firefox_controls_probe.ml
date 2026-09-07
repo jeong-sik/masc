@@ -142,7 +142,24 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "load-time dialog recovery leaves page readable" (contains (member "text" (read load_tab) |> string) "Firefox fixture");
     act load_tab Browser_action.Close_tab;
     let upload = open_tab "/upload" in
-    act upload (Browser_action.Upload {selector="#upload";paths=[Sys.getenv "MASC_PROBE_UPLOAD_PATH"]});
+    let source_path = Sys.getenv "MASC_PROBE_UPLOAD_PATH" in
+    let read_upload () =
+      let ic=open_in_bin source_path in
+      Fun.protect ~finally:(fun () -> close_in ic) (fun () -> Ok (read_all ic)) in
+    let staged_paths = ref [] in
+    (match Browser_lane.Upload_lease.with_staged_files
+      ~files:[Filename.basename source_path,read_upload] (fun paths ->
+        staged_paths := paths;
+        check "upload uses a private snapshot instead of caller source" (List.hd paths <> source_path);
+        act upload (Browser_action.Upload {selector="#upload";paths})) with
+     | Ok () -> () | Error error -> failwith error);
+    check "selected snapshots survive staging callback return" (List.for_all Sys.file_exists !staged_paths);
+    let session_id = match !remote_session with Some id -> id | None -> failwith "no owned session" in
+    let result = request ~method_:`POST ~path:("/session/" ^ session_id ^ "/execute/async")
+      ~body:(Some (`Assoc ["script",`String "const done=arguments[arguments.length-1]; document.querySelector('#upload').files[0].text().then(text=>done({text}),error=>done({error:String(error)}));";"args",`List []])) in
+    (match result with
+     | Ok data -> check "later File text read preserves staged bytes" (member "text" data = `String "Firefox upload 한글\n")
+     | Error error -> failwith (Driver.error_message error));
     act upload (Browser_action.Click "#send-upload");
     check "real multipart upload preserves file bytes" (contains (member "text" (read upload) |> string) "Upload verified");
     let downloads_tab = open_tab "/downloads" in
@@ -179,10 +196,13 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     act downloads_tab Browser_action.Close_tab;
     check "completed downloads remain readable after their tab closes" (List.length (download_rows ()) = 4);
     act upload Browser_action.Close_tab;
+    check "closing one tab retains session-owned files" (List.for_all Sys.file_exists !staged_paths);
     act first Browser_action.Close_tab;
     check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     let closed = success (run Browser_lane.Session_close) in
     check "session close is confirmed" (member "closed" closed = `Bool true);
+    check "confirmed session teardown removes private snapshots" (List.for_all (fun path -> not (Sys.file_exists path)) !staged_paths);
+    check "session cleanup never deletes caller source file" (Sys.file_exists source_path);
     open_session ();
     let fresh = open_tab "/fresh" in
     check "reopened sessions never reuse tab IDs" (fresh > second);

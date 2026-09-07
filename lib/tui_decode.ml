@@ -1527,11 +1527,17 @@ let int_field_or json key ~default =
   | _ -> required_int_field json key
 
 let required_display_field json key =
+  (* A bare epoch reaches us here when the server is too old to carry the ISO
+     twin. Render it as a date at the one place a display value is formatted,
+     so no pane shows a raw Unix epoch. *)
   match member key json with
   | `String value -> Ok value
-  | `Int value -> Ok (string_of_int value)
-  | `Intlit value -> Ok value
-  | `Float value -> Ok (Printf.sprintf "%.0f" value)
+  | `Int value -> Ok (Time_codec.rfc3339_of_unix (Float.of_int value))
+  | `Intlit value -> (
+      match float_of_string_opt value with
+      | Some epoch -> Ok (Time_codec.rfc3339_of_unix epoch)
+      | None -> Ok value)
+  | `Float value -> Ok (Time_codec.rfc3339_of_unix value)
   | `Null -> missing_field key
   | bad -> field_type_error key "a scalar display value" bad
 

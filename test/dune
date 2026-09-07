@@ -4000,7 +4000,8 @@
  (action
   (run python3 %{dep:test_tui_build_identity.py}
    %{dep:../bin/masc_tui.exe}
-   %{dep:../lib/build_commit/build_commit_generated.ml})))
+   %{dep:../lib/build_commit/build_commit_generated.ml}
+   --expected-version %{version:masc})))
 
 (alias
  (name runtest)

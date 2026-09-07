@@ -117,9 +117,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
     parser.add_argument("generated_stamp", type=Path)
-    # A directly built Dune executable has no artifact substitution yet.
-    # Installed/promoted binaries can be checked with their release version.
-    parser.add_argument("--expected-version", default="dev")
+    # Dune supplies the same package version used by linked build metadata.
+    parser.add_argument("--expected-version", required=True)
     arguments = parser.parse_args()
     run(arguments.binary.resolve(), read_stamp(arguments.generated_stamp), arguments.expected_version)
     print("tui build identity CLI: PASS")

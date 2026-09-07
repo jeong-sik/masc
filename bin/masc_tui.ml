@@ -1346,7 +1346,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      other one, and without it there is no way to abandon a recording that
      picked up something the operator did not mean to send. *)
   | "esc" when Option.is_some state.voice_capture ->
-    state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+    request_voice_stop state Masc.Voice_bridge.Discard;
     state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
@@ -4039,6 +4039,7 @@ let launch_browser_lane state ~mailbox operation =
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
 let open_browser_lane state ~mailbox app =
+  release_composer_for_browser_reader state;
   state.view <- Connectors;
   state.browser_lane <- Some (Browser_lane_view.create app);
   state.search <- None;
@@ -5097,7 +5098,9 @@ let goto_surface state ~mailbox (destination : surface) =
    | Connectors ->
        (match state.browser_lane with
         | None -> launch_connectors_load state ~mailbox
-        | Some _ -> launch_browser_lane state ~mailbox Browser_lane_view.Read)
+        | Some _ ->
+            release_composer_for_browser_reader state;
+            launch_browser_lane state ~mailbox Browser_lane_view.Read)
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config -> (
@@ -9686,6 +9689,7 @@ let rearm_continuous_capture state ~mailbox ~keeper =
 
 let handle_composer_key state ~base_path ~mailbox key =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+     || Option.is_some (browser_lane_on_screen state)
   then false
   else
   let composer = Composer_projection.of_state state in
@@ -9726,7 +9730,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          leaving two recorders on one device with no way to end either. *)
       (match state.voice_capture, composer.Composer.target with
        | Some _, _ ->
-           state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+           request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
            state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
        | None, Composer.Ready keeper_name ->
            launch_voice_capture state ~mailbox ~keeper:keeper_name
@@ -9755,7 +9759,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          said; this abandons it. *)
       (match state.voice_capture with
        | Some _ ->
-           state.voice_stop_requested <- Some Masc.Voice_bridge.Discard;
+           request_voice_stop state Masc.Voice_bridge.Discard;
            state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
        | None ->
            save_message_draft state;
@@ -9973,12 +9977,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.voice_config <- None;
            state.voice_config_error <- Some message)
   | Voice_level { keeper; db } ->
-      if state.voice_capture = Some keeper then state.voice_level_db <- Some db
+      if state.voice_capture = Some keeper
+         && state.voice_stop_requested <> Some Masc.Voice_bridge.Discard
+      then state.voice_level_db <- Some db
   | Voice_transcribed { keeper; text } ->
-      if state.voice_capture = Some keeper then (
-        state.voice_capture <- None;
-        state.voice_level_db <- None;
+      (match settle_voice_transcript state ~keeper with
+       | None -> ()
+       | Some disposition ->
         rearm_continuous_capture state ~mailbox ~keeper;
+        match disposition with
+        | Masc.Voice_bridge.Discard -> ()
+        | Masc.Voice_bridge.Keep_what_was_heard ->
         (* Appended, not replacing: an operator who typed part of a message and
            then spoke the rest keeps both. A separator only where there is
            something to separate. *)
@@ -14072,6 +14081,10 @@ and is loaded on demand through keeper_skill.
                      paste.Masc_tui_paste.text))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
+       | Some (Pasted _) when Option.is_some (browser_lane_on_screen state) ->
+           (* The URL field above owns paste while open; a page reader has
+              no hidden Keeper composer or attachment destination. *)
+           ()
        | Some (Pasted paste)
          when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The
@@ -15942,7 +15955,7 @@ and is loaded on demand through keeper_skill.
                          launch_voice_capture state ~mailbox:async_messages ~keeper
                      (* The same toggle the composer row carries. *)
                      | Some _ ->
-                         state.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+                         request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
                          state.last_action <-
                            Some ("voice: stopping", Unix.gettimeofday ())
                      | None -> ())
@@ -19380,10 +19393,14 @@ and is loaded on demand through keeper_skill.
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
          | Connectors ->
-             (* Browser content is fetched on entry and explicit refresh.
-                Periodic tab reads would continually drive Firefox focus. *)
-             if Option.is_none state.browser_lane then
-               launch_connectors_load state ~mailbox:async_messages
+             (match state.browser_lane with
+              | None -> launch_connectors_load state ~mailbox:async_messages
+              | Some view when Browser_lane_view.should_refresh_on_tick view ->
+                  (* Live extension reads do not focus Firefox tabs. Reuse
+                     this surface's configured cadence for the Slack stream;
+                     automation still reads only on an operator action. *)
+                  launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read
+              | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)

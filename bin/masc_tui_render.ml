@@ -1011,6 +1011,10 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
+  match browser_lane_on_screen state with
+  | Some view ->
+      Theme.recede () ^ fit_width (Browser_lane_view.context_label view) cols ^ Ansi.reset
+  | None ->
   let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
@@ -1051,6 +1055,9 @@ let composer_line state ~cols =
   | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
+  match browser_lane_on_screen state with
+  | Some _ -> Frame_presenter.Hidden
+  | None ->
   let composer = Composer_projection.of_state state in
   match composer.Composer.focus with
   | Composer.Unfocused -> Frame_presenter.Hidden
@@ -13358,9 +13365,16 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
   let label = match view.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
-  let title = Printf.sprintf "%s  %s  %s"
-      (screen_title (" MASC " ^ label)) (source_name view.source)
-      (connection_badge state) in
+  let read_status = Browser_lane_view.read_status view in
+  let read_style = match read_status with
+    | Read_ok -> Theme.ok ()
+    | Read_failed -> Theme.bad ()
+    | Reading | Operating -> Theme.info ()
+    | Unread -> Theme.recede ()
+  in
+  let title = Printf.sprintf "%s  %s  %s[%s]%s"
+      (screen_title (" MASC Runtime / " ^ label)) (source_name view.source)
+      read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.url_draft with
       | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
@@ -13377,7 +13391,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
                 reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
       in
-      c.push_styled ~style ("  " ^ status);
+      (* The global coordinator status is not the result of the Firefox HTTP
+         request. Keep it labeled, including the existing workspace warning. *)
+      c.push_styled ~style ("  coordinator " ^ connection_badge state ^ "  " ^ status);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
@@ -18539,7 +18555,7 @@ let render (state : state) =
        state.palette_open || state.context_inspector_open || state.help_open
        || state.agenda_open || state.answering_open
      in
-     if modal || state.view = Acting then 0
+     if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state) then 0
      else if
        Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden
          ~cols:terminal_cols

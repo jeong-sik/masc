@@ -260,7 +260,14 @@ def judge(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--exe", default="_build/default/bin/masc_tui.exe")
-    parser.add_argument("--base-path", default=os.environ.get("MASC_BASE_PATH", os.path.expanduser("~/me/.masc")))
+    # No default. This drives a real TUI against a real store, and the
+    # fallback here was one machine's home directory, so anyone else running
+    # it measured whatever happened to be at a path they had never named.
+    parser.add_argument(
+        "--base-path",
+        default=os.environ.get("MASC_BASE_PATH"),
+        help="MASC base path; falls back to $MASC_BASE_PATH, and one of the two is required",
+    )
     parser.add_argument("--rows", type=int, default=80)
     parser.add_argument("--cols", type=int, default=240)
     parser.add_argument(
@@ -272,6 +279,8 @@ def main() -> int:
     parser.add_argument("--chat-wait", type=float, default=6.0, help="seconds for the chat history to load")
     parser.add_argument("--timing-file", default=None, help="where the TUI appends its frame histogram")
     args = parser.parse_args()
+    if not args.base_path:
+        parser.error("--base-path or MASC_BASE_PATH is required")
 
     timing = args.timing_file or os.path.join(os.getcwd(), ".tmp", "tui-frame-timing.txt")
     os.makedirs(os.path.dirname(timing), exist_ok=True)

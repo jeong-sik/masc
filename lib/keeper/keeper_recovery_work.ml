@@ -241,7 +241,6 @@ let claim ~config ~id ~expected_revision ~instance_id =
   let* () = nonblank "owner instance" instance_id in
   update ~config ~id ~expected_revision (fun t -> match t.state with
     | Queued | Claimed _ ->
-      let* () = verify_artifacts config t in
       let owner = {instance_id; claim_id = Random_id.uuid_v7 ()} in
       let next = {t with state = Claimed owner} in Ok (next, (next, owner))
     | Proposed _ | Work_failed _ | Work_cancelled _ -> Error Terminal_state)

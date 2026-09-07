@@ -121,12 +121,15 @@ let artifact_path config work =
 let test_missing_source_keeps_terminal_evidence () = with_fixture (fun config path source _ ->
   let canonical = Fs_compat.load_file path in
   let first = create config source "missing-source" in
-  let running, owner = claim config first "process-a" in
-  Unix.unlink (artifact_path config running);
+  Unix.unlink (artifact_path config first);
+  let running, owner = claim config (read config (Work.id first)) "process-a" in
   Work.verify_artifacts config running
   |> reject "missing source is explicit" (function Work.Artifact_missing _ -> true | _ -> false);
-  Work.claim ~config ~id:(Work.id running) ~expected_revision:(Work.revision running) ~instance_id:"process-b"
-  |> reject "missing source cannot be claimed" (function Work.Artifact_missing _ -> true | _ -> false);
+  Work.record_proposal ~config ~id:(Work.id running) ~owner
+    ~expected_revision:(Work.revision running) ~current_source:source
+    ~claimed_required_refs:["task:required";"user:direct"]
+    ~claimed_stimulus_ids:["stimulus-a";"stimulus-b"] ~proposal_bytes:"unavailable source proposal"
+  |> reject "claim is not permission to publish without source" (function Work.Artifact_missing _ -> true | _ -> false);
   let failed = Work.fail ~config ~id:(Work.id running) ~owner ~expected_revision:(Work.revision running)
     (Work.Source_access_unavailable "immutable source artifact is missing") |> ok |> changed in
   (match Work.status (read config (Work.id failed)) with

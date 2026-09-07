@@ -92,8 +92,9 @@ val load : config:Workspace.config -> id:string -> (t option, error) result
 
 val verify_artifacts : Workspace.config -> t -> (unit, error) result
 (** Separately verifies actual source bytes/digest/checkpoint identity and any
-    recorded proposal artifact. Claim and proposal publication require it;
-    cursor bookkeeping and terminal recording do not re-read the whole source. *)
+    recorded proposal artifact. Proposal publication requires it. The worker
+    owner must call it before recovery execution; claiming, cursor bookkeeping
+    and terminal recording do not re-read the whole source. *)
 
 val claim
   :  config:Workspace.config
@@ -102,6 +103,9 @@ val claim
   -> instance_id:string
   -> ((t * owner) mutation, error) result
 (** Claims Pending work or fences a previously Running claim with a fresh token.
+    A claim proves ledger ownership only, not source availability. Missing
+    source must still permit claiming and recording its typed failure; the
+    owner must verify_artifacts before starting recovery execution.
     The caller is the existing Keeper Owner; it must stop/join an earlier live
     worker before re-claiming. This ledger does not detect process death or
     cancel workers. Reload/re-claim preserves the exact work ID and cursor. *)

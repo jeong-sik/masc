@@ -73,6 +73,47 @@ let chunk_bytes = 4096
    composer's already answers. *)
 let payload_media_type = "image/png"
 
+(* Raw pixels, for a caller that holds a frame rather than a file. [f=24] is
+   three bytes per pixel with no container, so the escape has to state the
+   pixel dimensions the PNG header would otherwise carry -- [s=] and [v=] --
+   and the terminal scales that into the cell box like any other image.
+
+   Kept beside [place] rather than folded into it: the two formats need
+   different keys, and a single function taking a format would let a caller
+   send RGB bytes under [f=100], which is exactly the silent drop the comment
+   above warns about. A caller holding a frame reaches for this one because
+   it is the one that asks for the frame's dimensions. *)
+let place_rgb ~data ~pixel_width ~pixel_height { columns; rows } =
+  let encoded = Base64.encode_string data in
+  let length = String.length encoded in
+  let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
+  let rec emit offset =
+    let remaining = length - offset in
+    let size = min chunk_bytes remaining in
+    let more = if remaining > size then 1 else 0 in
+    if offset = 0
+    then
+      Buffer.add_string out
+        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T,c=%d,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 pixel_width) (max 1 pixel_height) (max 1 columns) (max 1 rows)
+           more
+           (String.sub encoded offset size)
+           st)
+    else
+      Buffer.add_string out
+        (Printf.sprintf "%sm=%d;%s%s" apc more (String.sub encoded offset size) st);
+    if more = 1 then emit (offset + size)
+  in
+  (* A frame whose bytes do not match its stated dimensions would be drawn as
+     whatever the terminal makes of the mismatch, so refuse instead. *)
+  if length = 0 || String.length data <> pixel_width * pixel_height * 3
+  then ""
+  else begin
+    emit 0;
+    Buffer.contents out
+  end
+;;
+
 let place ~data { columns; rows } =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in

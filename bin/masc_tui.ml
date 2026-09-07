@@ -13094,6 +13094,9 @@ let main
          | _ -> Masc_tui_graphics.Unsupported_protocol)
   in
   active_graphics_protocol := proto;
+  (* The spectator draws its own screen and cannot reach this ref, so it is
+     handed the same answer rather than probing again. *)
+  Masc_tui_msx.set_graphics_protocol proto;
   terminal_draws_images :=
     Some
       (match proto with

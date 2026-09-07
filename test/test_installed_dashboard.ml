@@ -49,6 +49,62 @@ let test_exact_release () = with_fixture (fun _ root binary _ ->
   check string "assets root" (Filename.concat root "assets") (Installed.assets_root b);
   Unix.utimes (Filename.concat root "assets/dashboard/.build-stamp") 1577836800. 1577836800.;
   check bool "old stamp does not break exact receipt" true (Result.is_ok (Installed.load b ".build-stamp")))
+let test_health_rechecks_installed_files () =
+  let open Yojson.Safe.Util in
+  List.iter (fun (name, relative, replacement, index_present, error_kind) ->
+    with_fixture (fun _ root binary _ ->
+      let installed = Installed.Bound (bound binary) in
+      let health () = Masc.Web_dashboard.For_testing.surface_status_json installed in
+      let before = health () in
+      check string (name ^ ": initially ready") "ok" (before |> member "status" |> to_string);
+      check bool "initial index present" true (before |> member "index_present" |> to_bool);
+      check string "verified installed receipt" "verified"
+        (before |> member "installed_release" |> member "status" |> to_string);
+      check string "original receipt timestamp" "2020-01-01T00:00:00Z"
+        (before |> member "build_stamp_at" |> to_string);
+      check string "selected installed root" (Filename.concat root "assets")
+        (before |> member "assets_root" |> to_string);
+      check string "index digest" (sha "<p>exact release</p>")
+        (before |> member "index_sha256" |> to_string);
+      check string "no recovery needed" "none"
+        (before |> member "recovery" |> member "kind" |> to_string);
+      let path = Filename.concat root relative in
+      (match replacement with None -> Unix.unlink path | Some body -> write path body);
+      let after = health () in
+      check string (name ^ ": next request rejects damage") "unavailable"
+        (after |> member "status" |> to_string);
+      check bool "index presence retains independent read outcome" index_present
+        (after |> member "index_present" |> to_bool);
+      check bool "only verified index has a digest" index_present
+        (after |> member "index_sha256" <> `Null);
+      check string "installed evidence fails closed" "unavailable"
+        (after |> member "installed_release" |> member "status" |> to_string);
+      check string "concrete verification failure retained" error_kind
+        (after |> member "installed_release" |> member "error" |> member "kind" |> to_string);
+      check string "exact artifact repair required" "repair_exact_artifacts_and_restart"
+        (after |> member "recovery" |> member "kind" |> to_string);
+      check string "read failure recovery reason" "exact_read_failed"
+        (after |> member "recovery" |> member "reason" |> to_string);
+      check bool "repair requires restart" true
+        (after |> member "recovery" |> member "restart_required" |> to_bool);
+      check bool "fresh stamp metadata survives only an index-only failure"
+        (relative = "assets/dashboard/index.html")
+        (after |> member "build_stamp_at" <> `Null);
+      if relative = "assets/dashboard/.build-stamp" then (
+        write path "2020-01-01T00:00:00Z\n";
+        let restored = health () in
+        check string "restored stamp is reverified on next request" "ok"
+          (restored |> member "status" |> to_string);
+        check string "restored stamp clears recovery" "none"
+          (restored |> member "recovery" |> member "kind" |> to_string))))
+    ["removed receipt", "release.json", None, false, "exact_read_failed";
+     "corrupt receipt", "release.json", Some "{}", false, "digest_mismatch";
+     "removed stamp", "assets/dashboard/.build-stamp", None, true, "exact_read_failed";
+     "corrupt stamp", "assets/dashboard/.build-stamp", Some "2021-01-01T00:00:00Z\n", true, "digest_mismatch";
+     "removed binary", "masc", None, false, "exact_read_failed";
+     "corrupt binary", "masc", Some "changed binary size", false, "exact_read_failed";
+     "removed index", "assets/dashboard/index.html", None, false, "exact_read_failed";
+     "corrupt index", "assets/dashboard/index.html", Some "<p>wrong release</p>", false, "digest_mismatch"]
 let test_pointer_switch () = with_fixture (fun temp _ binary pointer ->
   let b = bound (Unix.realpath pointer) in
   Unix.unlink pointer;
@@ -174,7 +230,8 @@ let test_read_only_install () = with_fixture (fun _ root binary _ ->
       check (result string error) "read-only installed release serves" (Ok "<p>exact release</p>")
         (Installed.load (bound binary) "index.html")))
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)
-  ["malformed numeric fields", test_invalid_numeric_receipt;
+  ["health rechecks installed files", test_health_rechecks_installed_files;
+   "malformed numeric fields", test_invalid_numeric_receipt;
    "civil-time boundaries", test_civil_time_boundaries;
    "read-only installed files", test_read_only_install;
    "source authority precedence", test_authority_precedence;

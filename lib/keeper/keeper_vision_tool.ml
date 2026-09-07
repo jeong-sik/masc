@@ -494,8 +494,15 @@ let run_candidates_outcome
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
           }
-      | Ok cap_bytes ->
-        (match fit_request_to_cap ~req ~cache ~cap_bytes with
+      | Ok declared_cap ->
+        (* A candidate that declares no cap (#34163) has nothing to fit to;
+           it gets the image as it is. *)
+        let fitted =
+          match declared_cap with
+          | None -> Ok req
+          | Some cap_bytes -> fit_request_to_cap ~req ~cache ~cap_bytes
+        in
+        (match fitted with
          | Error (actual_bytes, limit_bytes) ->
            record_vision_candidate_attempt
              ~runtime_id

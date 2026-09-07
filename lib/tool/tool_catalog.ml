@@ -226,6 +226,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_status", read_state_tool);
     ("masc_tasks", read_state_tool);
     ("masc_messages", with_semantic_flags ~mcp_context_required:true read_state_tool);
+    ("masc_slack_read", read_state_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);
@@ -470,6 +471,16 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_lane_status", keeper_shard_read);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
+    ("keeper_analyze_image", keeper_shard_read);
+    ("masc_browser_tabs", keeper_shard_read);
+    ("masc_browser_read", keeper_shard_read);
+    ("masc_browser_session", keeper_shard_read);
+    ("masc_browser_goto", keeper_shard_write);
+    ("masc_web_search", keeper_shard_read);
+    ("masc_web_fetch", keeper_shard_read);
+    ("masc_file_list", keeper_shard_read);
+    ("masc_file_upload", keeper_shard_write);
+    ("masc_file_delete", keeper_shard_write);
     ("keeper_memory_search", keeper_shard_read);
     ("keeper_memory_retract", keeper_shard_write);
     ("keeper_memory_write", keeper_shard_write);

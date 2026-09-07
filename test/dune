@@ -2151,6 +2151,8 @@
 
 (include stanzas/test_slack_poll_lane.inc)
 
+(include stanzas/test_slack_read_tool.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -3123,7 +3125,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries alcotest fmt masc_tui_types))
+ (libraries alcotest fmt masc masc_tui_types))
 
 (test
  (name test_tui_ask_selection_wiring)

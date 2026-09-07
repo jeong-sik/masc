@@ -159,14 +159,23 @@ def test_http_endpoint(
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self, request_body: bytes | None = None) -> None:
-            fixture = fixtures.get(
-                self.path,
-                (200, {})
-                if self.path == "/health"
-                else fleet_safety_fixture()
-                if self.path == "/health?full=1"
-                else (503, {"error": "fixture endpoint unavailable"}),
-            )
+            # Resolution order is load-bearing: exact fixture keys and the
+            # /health specials keep their legacy meaning (an exact path is
+            # still required), and only then does a query-stripped path get
+            # a second chance -- paged endpoints carry a float timestamp
+            # (e.g. /chat/history/page?before=1788678…) a scenario cannot
+            # key on. Everything else still falls to the 503 sentinel.
+            path_only = self.path.split("?", 1)[0]
+            if self.path in fixtures:
+                fixture = fixtures[self.path]
+            elif self.path == "/health":
+                fixture = (200, {})
+            elif self.path == "/health?full=1":
+                fixture = fleet_safety_fixture()
+            elif path_only in fixtures:
+                fixture = fixtures[path_only]
+            else:
+                fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
             else:
@@ -6215,8 +6224,24 @@ def memory_journal_timeline_interaction(
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        os.write(master_fd, b"\x0e\x06")
-        wait_for_terminal_input_consumed(_slave_fd)
+        # FIONREAD only observes the kernel queue: the TUI can read both
+        # toggles into its input buffer before dispatching either. Resizing
+        # at that point invalidates the old frame and correctly suppresses
+        # input until the new one is painted. Ctrl-T's emitted mouse mode
+        # acknowledges dispatch after the preceding keys, even when their
+        # changed header is hidden by this narrow notice. Restore tracking
+        # before widening; the journal assertion below still proves Ctrl-N.
+        read_available(master_fd, output)
+        tracking_ack_start = len(output)
+        os.write(master_fd, b"\x0e\x06\x14\x14")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"\x1b[?1006;1000h",
+            start=tracking_ack_start,
+            timeout=3.0,
+        )
         try:
             widened = resize_and_wait(
                 process,
@@ -6227,14 +6252,14 @@ def memory_journal_timeline_interaction(
                 needle=b"journal:full",
                 controls=(FULL_REDRAW,),
             )
-        except AssertionError as timed_out:
+        except AssertionError:
             # The raw byte dump this would otherwise carry runs to a hundred
             # kilobytes and is cut by the CI log before it says anything. The
             # screen is the part that answers what the toggles did.
             raise AssertionError(
                 "Widening back never showed journal:full. Screen:\n"
                 + screen_text(bytes(output)).decode("utf8", "replace")
-            ) from timed_out
+            ) from None
         if b"journal:full" not in CSI_RE.sub(b"", widened):
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
@@ -7056,6 +7081,13 @@ def viewport_gap_history_fixture() -> HttpResponse:
     )
 
 
+def viewport_gap_history_page_fixture() -> HttpResponse:
+    # The only stored message is already in the initial history. The server
+    # answers strictly before its timestamp, so this page must be empty;
+    # repeating that message fabricates an older row and moves the scroll pin.
+    return (200, {"messages": [], "has_more": False, "next_before": None})
+
+
 LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
 
 ## 정확한 5개 git 명령 (task478 worktree에서 실행):
@@ -7289,17 +7321,15 @@ def viewport_gap_interaction(
         raise AssertionError(
             f"PgUp retained a synthetic gap inside transcript rows: {complete!r}"
         )
-    # PgUp triggers a paged history fetch; without a fixture for the paged
-    # endpoint the fetch 503s and the fallback history replaces the rows,
-    # so the post-PgDn projection draws line-20/21/22 (one row shy of the
-    # live edge) instead of line-23. The head row survives only in the
-    # pre-PgUp frame, so assert against the accumulated output, not the
-    # diff frame PgDn itself re-emits.
-    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-22")
+    # An exhausted older page leaves the transcript intact. PgDn must restore
+    # the oversized live-edge projection in this response, including its gap
+    # and newest row; previously emitted bytes cannot prove that transition.
+    newest = send_and_wait(process, master_fd, output, b"\x1b[6~", b"line-23")
     newest_plain = CSI_RE.sub(b"", newest)
-    if b"line-00" not in newest_plain and b"line-00" not in bytes(output):
+    positions = [newest_plain.find(needle) for needle in (b"line-00", marker, b"line-23")]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
         raise AssertionError(
-            "PgDn did not return the exact oversized live-edge projection "
+            "PgDn did not restore the oversized live-edge projection "
             f"after one PgUp: {newest!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
@@ -9735,8 +9765,10 @@ def enter_outside_changes_interaction(
     if b"MASC Activity" not in acting:
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
-    send_and_wait(process, master_fd, output, b"l", b"MASC System Logs")
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+    send_and_wait(process, master_fd, output, b"l", b"[1 Events | 2 Logs*]")
+    send_and_wait(process, master_fd, output, b"1", b"[1 Events* | 2 Logs]")
+    send_and_wait(process, master_fd, output, b"2", b"[1 Events | 2 Logs*]")
+    send_and_wait(process, master_fd, output, b"\x1b", b"[1 Events* | 2 Logs]")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
@@ -10319,15 +10351,12 @@ def runtime_surface_interaction(
     ) -> None:
         completed = False
         try:
-            # Channels now lives under the selected Keeper, so the ring
-            # predecessor of Runtime is Workspace. Each hop is
-            # needle-verified so an async frame between presses cannot lap
-            # the walk; the last Tab stays bare because the probe fixture
-            # must observe its request after [start].
-            tab_until(process, master_fd, output, b"MASC Workspace")
+            # Runtime is a Config child. Verify the parent before opening it;
+            # keep [9] bare so the probe request is observed after [start].
+            tab_until(process, master_fd, output, b"MASC Config")
             read_available(master_fd, output)
             start = len(output)
-            os.write(master_fd, b"\t")  # Workspace -> Runtime
+            os.write(master_fd, b"9")  # Config -> Runtime
             if not wait_for_fixture_event(
                 process, master_fd, output, initial_probe.requested, timeout=10.0
             ):
@@ -10364,7 +10393,7 @@ def runtime_surface_interaction(
                 "utf-8"
             )
             for needle in (
-                "MASC Runtime",
+                "MASC Config / Runtime",
                 "LANE",
                 "CANDIDATE",
                 "PROVIDER / MODEL",
@@ -10418,7 +10447,7 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"MASC Runtime detail",
+                b"MASC Config / Runtime detail",
             )
             lane_detail_plain = CSI_RE.sub(b"", lane_detail)
             for needle in (
@@ -10448,7 +10477,7 @@ def runtime_surface_interaction(
                 b"\x1b[D",
                 b"1/2 runtime-a",
             )
-            if b"MASC Runtime detail" in CSI_RE.sub(b"", lane_list):
+            if b"MASC Config / Runtime detail" in CSI_RE.sub(b"", lane_list):
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
             all_list = send_and_wait(
@@ -10465,7 +10494,7 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"MASC Runtime detail",
+                b"MASC Config / Runtime detail",
             )
             catalog_detail_plain = CSI_RE.sub(b"", catalog_detail)
             for needle in (
@@ -10504,7 +10533,7 @@ def runtime_surface_interaction(
                 output,
                 rows=20,
                 columns=100,
-                needle=b"MASC Runtime",
+                needle=b"MASC Config / Runtime",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -10514,7 +10543,7 @@ def runtime_surface_interaction(
                 output,
                 rows=30,
                 columns=100,
-                needle=b"MASC Runtime",
+                needle=b"MASC Config / Runtime",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -10548,7 +10577,7 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Config")
+            send_and_wait(process, master_fd, output, b"\x1b", b"9:Runtime")
             os.write(master_fd, b"q")
             completed = True
         finally:
@@ -11826,6 +11855,9 @@ def run_keyboard_regression(executable: str) -> None:
         interact=viewport_gap_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
         extra_env={"NO_COLOR": "1"},
     )
@@ -11962,58 +11994,6 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/verification/requests?limit=200": verification_gate,
         },
     )
-    repositories_fixtures = keeper_runtime_http_fixtures()
-    repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
-    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
-        200,
-        [
-            {"path": "src", "label": "src", "depth": 0, "parent": "",
-             "hasChildren": True, "diff": None, "keeperId": None,
-             "hueIndex": None},
-            {"path": "note.ml", "label": "note.ml", "depth": 0, "parent": "",
-             "hasChildren": False, "diff": None, "keeperId": None,
-             "hueIndex": None},
-        ],
-    )
-    repo_file = (
-        200,
-        {
-            "ok": True,
-            "content": (
-                "(* masc(alpha) decision: keep n at three until the probe lands *)\n"
-                "let n = 3\n"
-            ),
-        },
-    )
-    for file_path in (
-        "/api/v1/workspace/file?path=note.ml&repo_id=masc",
-    ):
-        repositories_fixtures[file_path] = repo_file
-    repositories_fixtures[
-        "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
-    ] = (
-        200,
-        {"ok": True, "commits": [
-            {"hash": "abc1234", "timestamp_ms": 1787650000000,
-             "author": "keeper", "subject": "docs: seed the file (#1256)"},
-        ]},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Repositories Enter opens the Code tree",
-        interact=repositories_enter_interaction(),
-        http_fixtures=repositories_fixtures,
-    )
-    add_requests: HttpRequests = []
-    with repository_declaration_editor_script() as repo_editor:
-        run_terminal_scenario(
-            executable,
-            description="Repositories add says what it did",
-            interact=repository_add_interaction(add_requests),
-            http_fixtures=repositories_fixtures,
-            http_requests=add_requests,
-            extra_env={"EDITOR": repo_editor},
-        )
     verdict_requests: HttpRequests = []
     with reject_editor_script() as reject_editor:
         run_terminal_scenario(
@@ -12302,6 +12282,62 @@ def run_repositories_regression(executable: str) -> None:
         interact=repositories_path_interaction,
         http_fixtures=fixtures,
     )
+    # The two scenarios below opened a repository's own tree and declared a
+    # new repository from the default group, where a failure earlier in the
+    # run kept them from running at all. They are repository scenarios, so
+    # they run under the repositories alias with the one above.
+    repositories_fixtures = keeper_runtime_http_fixtures()
+    repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
+    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
+        200,
+        [
+            {"path": "src", "label": "src", "depth": 0, "parent": "",
+             "hasChildren": True, "diff": None, "keeperId": None,
+             "hueIndex": None},
+            {"path": "note.ml", "label": "note.ml", "depth": 0, "parent": "",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    repo_file = (
+        200,
+        {
+            "ok": True,
+            "content": (
+                "(* masc(alpha) decision: keep n at three until the probe lands *)\n"
+                "let n = 3\n"
+            ),
+        },
+    )
+    for file_path in (
+        "/api/v1/workspace/file?path=note.ml&repo_id=masc",
+    ):
+        repositories_fixtures[file_path] = repo_file
+    repositories_fixtures[
+        "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
+    ] = (
+        200,
+        {"ok": True, "commits": [
+            {"hash": "abc1234", "timestamp_ms": 1787650000000,
+             "author": "keeper", "subject": "docs: seed the file (#1256)"},
+        ]},
+    )
+    run_terminal_scenario(
+        executable,
+        description="Repositories Enter opens the Code tree",
+        interact=repositories_enter_interaction(),
+        http_fixtures=repositories_fixtures,
+    )
+    add_requests: HttpRequests = []
+    with repository_declaration_editor_script() as repo_editor:
+        run_terminal_scenario(
+            executable,
+            description="Repositories add says what it did",
+            interact=repository_add_interaction(add_requests),
+            http_fixtures=repositories_fixtures,
+            http_requests=add_requests,
+            extra_env={"EDITOR": repo_editor},
+        )
 
 
 def run_project_changes_regression(executable: str) -> None:
@@ -12375,6 +12411,9 @@ def run_chat_clarity_regression(executable: str) -> None:
         interact=viewport_gap_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                viewport_gap_history_page_fixture()
+            ),
         },
         extra_env={"NO_COLOR": "1"},
     )
@@ -12678,11 +12717,12 @@ def run_memory_journal_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": memory_journal_chat_fixture(),
             # Reading back asks for the page behind the oldest row it holds,
-            # keyed by that row's own timestamp. Without an answer the pane
+            # matched independent of its timestamp. Without an answer the pane
             # draws the load error instead of the reading-back status row,
             # and the scroll-pin claim below has nothing to measure against.
-            "/api/v1/keepers/alpha/chat/history/page?before=%.17g"
-            % MEMORY_JOURNAL_OLDEST_TS: (200, {"messages": [], "has_more": False}),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                200, {"messages": [], "has_more": False, "next_before": None}
+            ),
             "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_sequence,
         },
         refresh=0.5,

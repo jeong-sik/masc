@@ -1011,6 +1011,10 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
+  match browser_lane_on_screen state with
+  | Some view ->
+      Theme.recede () ^ fit_width (Browser_lane_view.context_label view) cols ^ Ansi.reset
+  | None ->
   let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
@@ -1051,6 +1055,9 @@ let composer_line state ~cols =
   | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
+  match browser_lane_on_screen state with
+  | Some _ -> Frame_presenter.Hidden
+  | None ->
   let composer = Composer_projection.of_state state in
   match composer.Composer.focus with
   | Composer.Unfocused -> Frame_presenter.Hidden
@@ -7004,11 +7011,11 @@ let render_clients (state : state) =
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Runtime · Clients") timestamp
+          (screen_title " MASC Config / Runtime · Clients") timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC Runtime · Clients") shown timestamp
+          (screen_title " MASC Config / Runtime · Clients") shown timestamp
           (connection_badge state)
   in
   box_top buf cols;
@@ -10614,13 +10621,13 @@ let render_system_logs (state : state) =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC System Logs") timestamp
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]") timestamp
           (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s (%d of %d, seq %d)%s  %s  %s"
-          (screen_title " MASC System Logs")
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]")
           total_entries snapshot.sys_total snapshot.sys_latest_seq filter_note
           timestamp (connection_badge state)
   in
@@ -13359,9 +13366,16 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
   let label = match view.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
-  let title = Printf.sprintf "%s  %s  %s"
-      (screen_title (" MASC " ^ label)) (source_name view.source)
-      (connection_badge state) in
+  let read_status = Browser_lane_view.read_status view in
+  let read_style = match read_status with
+    | Read_ok -> Theme.ok ()
+    | Read_failed -> Theme.bad ()
+    | Reading | Operating -> Theme.info ()
+    | Unread -> Theme.recede ()
+  in
+  let title = Printf.sprintf "%s  %s  %s[%s]%s"
+      (screen_title (" MASC Runtime / " ^ label)) (source_name view.source)
+      read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.url_draft with
       | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
@@ -13378,7 +13392,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
                 reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
       in
-      c.push_styled ~style ("  " ^ status);
+      (* The global coordinator status is not the result of the Firefox HTTP
+         request. Keep it labeled, including the existing workspace warning. *)
+      c.push_styled ~style ("  coordinator " ^ connection_badge state ^ "  " ^ status);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
@@ -13746,7 +13762,7 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Runtime detail")
+    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Config / Runtime detail")
        (Terminal_text.single_line target_label) (connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
@@ -13806,7 +13822,7 @@ let render_runtime (state : state) =
     match state.runtime_surface with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Runtime") timestamp
+          (screen_title " MASC Config / Runtime") timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -13832,7 +13848,7 @@ let render_runtime (state : state) =
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s  %s%s  %s  %s"
-          (screen_title " MASC Runtime")
+          (screen_title " MASC Config / Runtime")
           (tab ~active:lanes_active
              (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count shown))
           (tab ~active:(not lanes_active)
@@ -14511,7 +14527,7 @@ let render_acting (state : state) =
   let header =
     Printf.sprintf "%s  %s  %s"
       (screen_title
-         (Printf.sprintf " MASC Activity (%d of %d held, %s)" shown held
+         (Printf.sprintf " MASC Activity  [1 Events* | 2 Logs] (%d of %d held, %s)" shown held
             (Acting.filter_label state.acting_filter)))
       timestamp
       (connection_badge state)
@@ -15634,7 +15650,7 @@ let config_pane_strip (state : state) =
     ; name Config_themes "themes"
     ; name Config_voice "voice"
     ]
-  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+  ^ Ansi.dim ^ "  p:next  9:Runtime" ^ Ansi.reset
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this
@@ -16720,8 +16736,7 @@ let help_surface_name (surface : surface) =
   | Planning | Verification | Harness -> "Planning"
   | Fusion -> "Fusion"
   | Repositories | Code | Changes -> "Workspace"
-  | Runtime | Lanes | Clients -> "Runtime"
-  | Config | Resources | Tools -> "Config"
+  | Runtime | Lanes | Clients | Config | Resources | Tools -> "Config"
   | Connectors | Schedules -> "Keepers"
   | System_logs -> "Activity"
 
@@ -18540,7 +18555,7 @@ let render (state : state) =
        state.palette_open || state.context_inspector_open || state.help_open
        || state.agenda_open || state.answering_open
      in
-     if modal || state.view = Acting then 0
+     if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state) then 0
      else if
        Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden
          ~cols:terminal_cols

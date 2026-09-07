@@ -8,14 +8,14 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config.
+Board, Planning, Fusion, Workspace, Config.
 Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
-Config reaches Resources with `s` and Tools with `t`, and Activity
+Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
 Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
 entries;
@@ -1349,7 +1349,7 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 
 ### System Logs
 
-The log browser hangs off Activity under `l`; Esc returns there.
+Activity combines Events and Logs: `1` opens Events and `2` opens Logs from either view. `l` also opens Logs from Events; Esc returns there.
 
 The server's log ring, the same source the dashboard `logs` tab reads.
 

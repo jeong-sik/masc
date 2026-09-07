@@ -26,7 +26,9 @@ same Browser surface without creating another browser transport.
 The optional existing REST collector (`server_slack_poll_lane`) is independent
 of this browser view. It uses the configured bot token, bound channels and
 `[slack] poll_enabled`; its buffer is not represented as browser observations.
-Its pagination-loss finding remains separate from the Browser integration.
+Its durable pagination checkpoints are described in
+[slack-poll-checkpoints.md](slack-poll-checkpoints.md). That collection path
+remains independent of the Browser integration.
 
 Native automation uses stock Firefox through OCaml WebDriver; see
 [native-firefox-lane.md](native-firefox-lane.md). It has an isolated profile,

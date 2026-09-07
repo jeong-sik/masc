@@ -2081,7 +2081,6 @@ let surface_ring : (surface * string) list =
     (Planning, "Planning");
     (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Runtime, "Runtime");
     (Config, "Config");
   ]
 
@@ -2104,8 +2103,7 @@ let surface_ring_index (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -2718,6 +2716,9 @@ module Browser_lane_view = struct
 
   let source_name = function Live -> "live" | Automation -> "automation"
   let app_name = function Browser -> "browser" | Slack -> "slack"
+  let context_label t =
+    let app = match t.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
+    Printf.sprintf "%s · %s · Firefox page reader" app (source_name t.source)
   let create app =
     { app; source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None }
@@ -2730,7 +2731,25 @@ module Browser_lane_view = struct
       | Loading _ | Idle | Failed _ -> t.url_draft
     in
     { t with load = Failed detail; url_draft }
+  type read_status = Unread | Reading | Operating | Read_ok | Read_failed
+  let read_status t =
+    match t.load, t.reading with
+    | Idle, None -> Unread
+    | Idle, Some _ -> Read_ok
+    | Loading (_, Read), _ -> Reading
+    | Loading (_, (Open_session | Close_session | Goto _)), _ -> Operating
+    | Failed _, _ -> Read_failed
+  let read_status_label = function
+    | Unread -> "HTTP unread"
+    | Reading -> "HTTP reading"
+    | Operating -> "HTTP action"
+    | Read_ok -> "HTTP read ok"
+    | Read_failed -> "HTTP failed"
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
+  let should_refresh_on_tick t =
+    match t.app, t.source, t.url_draft, t.load with
+    | Slack, Live, None, (Idle | Failed _) -> true
+    | _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source);
               "app", `String (app_name t.app) ]
@@ -3863,6 +3882,41 @@ type state = {
    paint had to draw compact is not showing the field, and the two identity
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
+(* Browser and Slack are operator readers inside Connectors. A retained
+   reader model must not change chrome after the operator leaves its view. *)
+let browser_lane_on_screen (state : state) =
+  match state.view with Connectors -> state.browser_lane | _ -> None
+
+(* Discard belongs to this capture until it settles. A later stop/keep key
+   must not revive a transcript whose recording the operator abandoned. *)
+let request_voice_stop (state : state) request =
+  match state.voice_stop_requested with
+  | Some Masc.Voice_bridge.Discard -> ()
+  | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
+      state.voice_stop_requested <- Some request
+
+let release_composer_for_browser_reader (state : state) =
+  state.composer_focused <- false;
+  state.voice_continuous <- None;
+  state.voice_floor <- None;
+  state.voice_level_db <- None;
+  (* Keep the occupied capture until its callback, so returning to the
+     composer cannot start a second microphone while this one shuts down. *)
+  if Option.is_some state.voice_capture then
+    request_voice_stop state Masc.Voice_bridge.Discard
+
+(* The transcript may already be in the mailbox when the reader opens.
+   Settle ownership before deciding whether its text can reach the draft. *)
+let settle_voice_transcript (state : state) ~keeper =
+  if state.voice_capture <> Some keeper then None
+  else begin
+    let disposition = Option.value state.voice_stop_requested
+        ~default:Masc.Voice_bridge.Keep_what_was_heard in
+    state.voice_capture <- None;
+    state.voice_level_db <- None;
+    Some disposition
+  end
+
 type text_input_target =
   | Text_browser_url
   | Text_preset_name
@@ -5688,9 +5742,9 @@ let visible_surface_ring_index (state : state) (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
+    | Connectors when Option.is_some (browser_lane_on_screen state) -> Runtime
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting

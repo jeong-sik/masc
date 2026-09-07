@@ -2,8 +2,14 @@
 
 Open the command palette with `:` and select `go Browser Lane` or `go Slack Lane`.
 The views live inside Connectors. From the Connectors list, `B` and `S` open them.
-Both start with the live Firefox source. Slack asks the server to filter matching
+Both start with the live Firefox source. Reader views use the full content width
+and show Browser/Slack source context in the bottom row. Keeper fleet/changes
+panels and the Keeper composer return when the operator leaves the reader. Slack asks the server to filter matching
 Slack tabs; it does not send Slack messages or change channel bindings.
+
+Entering a reader ends continuous voice mode and discards any capture still in
+flight, including a transcript awaiting delivery. An existing Keeper draft is
+preserved; voice can be started again after returning to the composer.
 
 | Key | Action |
 | --- | --- |
@@ -17,12 +23,17 @@ Slack tabs; it does not send Slack messages or change channel bindings.
 | `o` / `x` | Open / close the automation Firefox session while automation is selected |
 | Esc / Left | Return to connector routing |
 
-The title identifies the source. Successful reads show server latency, matching
+The Runtime navigation family and title identify the operator reader. The title
+shows the source and the latest Browser HTTP request status; the global coordinator
+connection and workspace warnings remain labeled separately on the read-status row. Successful reads show server latency, matching
 tab count, selected tab, page URL, character count and truncation. A failed or
 pending refresh labels retained content as a previous read. Source switches clear
 that content; generation-stamped replies prevent an earlier request from
-populating a later app or source. Reads happen on entry, tab selection and explicit
-refresh, so a periodic TUI tick does not continually select Firefox tabs.
+populating a later app or source. Live Slack refreshes automatically on the TUI's
+configured refresh interval while its view is open. The existing Firefox extension
+reads tabs and page content without changing focus. A pending request or URL editor
+pauses automatic reads; connection failures stay visible and retry on later ticks.
+Browser and automation views read on entry, tab selection and explicit `r` refresh.
 
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Its typed
 and pasted characters belong to the URL field, so letters cannot activate lane
@@ -39,7 +50,7 @@ See the [Eio fiber reference](https://ocaml.org/p/eio/1.0/doc/eio/Eio/Fiber/inde
 
 `test/test_tui_browser_lane.ml` exercises tab selection, strict schema decoding,
 late responses, source identity, failed-refresh retention and empty Slack tabs.
-For this change its nine state scenarios were executed using the OCaml interpreter
+For this change its twelve state scenarios were executed using the OCaml interpreter
 with the production pure module extracted verbatim. All changed OCaml files
 passed parser checks. Multiline projection, URL input ownership and Unicode URL
 viewport tests are committed for CI; they were not executed locally. These checks do not establish full executable typechecking,

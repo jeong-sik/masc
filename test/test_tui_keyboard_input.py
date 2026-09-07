@@ -12768,11 +12768,12 @@ def run_browser_client_picker_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
         if reads != [{"lane": "live", "clientId": zen}]:
             raise AssertionError("Zen choice did not pin its client ID")
+        read_available(master_fd, output)
+        chooser_start = len(output)
         send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
-        # Wait for discovery settlement: Enter must never select the inventory
-        # retained while a new connection list is still in flight.
-        wait_for_output(process, master_fd, output, b"Firefox", timeout=3.0)
-        drain_until_quiet(process, master_fd, output)
+        # b clears the displayed inventory until discovery settles. Require a
+        # row from this request, not Firefox text in an earlier chooser frame.
+        wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
         if reads[-1] != {"lane": "live", "clientId": firefox}:
             raise AssertionError("browser switch reused the old browser's tab ID")

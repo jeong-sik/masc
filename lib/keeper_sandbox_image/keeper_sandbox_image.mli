@@ -24,3 +24,12 @@ val dockerfile : string
 val build_argv : tag:string -> string list
 (** Arguments after the docker command for [docker build -t <tag> -]. The
     trailing ["-"] is the context: the caller feeds {!dockerfile} to stdin. *)
+
+val context_directory_build_argv :
+  tag:string -> dockerfile:string -> context:string -> string list
+(** Arguments after a runtime command that takes a directory rather than
+    stdin: [build -t <tag> -f <dockerfile> <context>]. Apple's [container
+    build] is one — its usage line takes a context directory and it offers no
+    [-] — so the caller writes {!dockerfile} to a file and names it here.
+    Which runtimes need this is {!Keeper_microvm_backend.recipe_delivery}'s
+    answer, not this module's: it knows the recipe, not the fleet. *)

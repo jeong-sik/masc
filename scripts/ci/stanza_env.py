@@ -15,6 +15,11 @@ not run, because its verdicts look real.
     stanza_env.py <suite>          KEY=VALUE per line, for `env`
     stanza_env.py --deps <suite>   dune targets to build first, from the root
 
+Build targets include literal files in the stanza's (deps ...) as well as
+%{dep:...} environment values. This is not a Dune dependency-expression
+evaluator: source_tree, glob, alias and variable-bearing deps remain owned by
+Dune's runtest action.
+
 The two forms spell the same file differently on purpose. A stanza writes a
 path relative to test/, which is where the runner stands
 (_build/default/test), so the environment keeps it as written; `dune build`
@@ -144,6 +149,22 @@ def collect_setenv(form) -> list[tuple[str, str]]:
     return found
 
 
+def collect_literal_deps(form) -> list[str]:
+    """Literal file targets required by a directly executed test action.
+
+    Building the test executable does not build these action dependencies.
+    In particular, a suite can spawn a sibling executable declared here.
+    """
+    if not isinstance(form, list) or not form:
+        return []
+    if form[0] == "deps":
+        return [
+            item for item in form[1:]
+            if isinstance(item, str) and not VAR_RE.search(item)
+        ]
+    return [dep for item in form for dep in collect_literal_deps(item)]
+
+
 def resolve(key: str, value: str) -> tuple[str, str | None]:
     """(value for env, dune target to build first).
 
@@ -193,8 +214,10 @@ def suite_env(
     forms = parse(tokenize(text))
     if own_file:
         pairs = collect_setenv(forms)
+        deps = collect_literal_deps(forms)
     else:
         pairs = []
+        deps = []
         unattributable = False
         matched = False
         for form in forms:
@@ -217,6 +240,7 @@ def suite_env(
                 continue
             matched = True
             pairs.extend(collect_setenv(form))
+            deps.extend(collect_literal_deps(form))
         if unattributable:
             raise StanzaError(
                 "declared inline in this directory's dune next to a setenv "
@@ -238,7 +262,7 @@ def suite_env(
                 "name and the directory it lives in"
             )
     env: list[tuple[str, str]] = []
-    deps: list[str] = []
+    deps = list(dict.fromkeys(deps))
     for key, value in pairs:
         resolved, dep = resolve(key, value)
         env.append((key, resolved))
@@ -324,6 +348,32 @@ def self_test() -> int:
     )
     check("plain values need nothing built", deps, [])
 
+    sibling = "(test (name test_spawn) (deps sibling.exe ../config/runtime.toml))"
+    env, deps = suite_env("test_spawn", sibling)
+    check(
+        "literal action dependencies need building without setenv", deps,
+        ["sibling.exe", "../config/runtime.toml"],
+    )
+    check("action dependencies do not invent environment values", env, [])
+    _, deps = suite_env(
+        "test_spawn", sibling + "(test (name test_other) (deps other.exe))",
+        own_file=False,
+    )
+    check(
+        "neighboring suite dependencies do not leak", deps,
+        ["sibling.exe", "../config/runtime.toml"],
+    )
+    _, deps = suite_env(
+        "test_two", "(tests (names test_one test_two) (deps shared.exe))",
+        own_file=False,
+    )
+    check("group members receive the group's action dependencies", deps, ["shared.exe"])
+    _, deps = suite_env(
+        "test_spawn", "(test (name test_spawn) (deps sibling.exe)"
+        " (action (setenv RUNNER %{dep:sibling.exe} (run %{test}))))",
+    )
+    check("the same target declared twice is built once", deps, ["sibling.exe"])
+
     env, _ = suite_env("test_beta", FIXTURE_SPLIT)
     check("a setenv split across lines is one pair", env, [("HOME", "/tmp/beta-home")])
 
@@ -367,7 +417,10 @@ def self_test() -> int:
         env,
         [("KEEPER_STORE_LAYOUT_MANIFEST_EXE", "../bin/manifest.exe")],
     )
-    check("and its dep is a target", deps, ["../bin/manifest.exe"])
+    check(
+        "its script and executable deps are targets", deps,
+        ["test_epsilon.py", "../bin/manifest.exe"],
+    )
 
     try:
         suite_env("test_zeta", "(tests (names test_zeta))\n(setenv OTHER x (run y))", own_file=False)

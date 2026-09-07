@@ -9,6 +9,8 @@ description = "Toggle a standard emoji reaction on a board post or comment."
 # a day and costs at most 4 extra requests over the same week.
 defer_loading = true
 
+identity_fields = ["user_id"]
+
 [[params]]
 name = "target_type"
 type = "string"

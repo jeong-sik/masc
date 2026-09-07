@@ -1,5 +1,6 @@
 name = "masc_board_hearths"
 description = "List active hearths (topic categories) with post counts"
+identity_fields = []
 
 
 # Held back from the request until the model asks for it by name.

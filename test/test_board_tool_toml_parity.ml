@@ -1508,6 +1508,47 @@ let test_model_visible_board_rows_are_byte_identical () =
     rows
 ;;
 
+(* The identity fields each board tool declares in its TOML, as literals.
+   [Board_tool_registry.identity_fields_for_board_name] is generated from those
+   files, so a declaration that goes missing or drifts is a mismatch here
+   rather than an empty list that binds nothing at runtime. No wildcard: a new
+   board tool has to be pinned before this compiles. *)
+let declared_identity_fields : Tool_name.Board_name.t -> string list = function
+  | Tool_name.Board_name.Board_post -> [ "author" ]
+  | Tool_name.Board_name.Board_post_update -> [ "author" ]
+  | Tool_name.Board_name.Board_list -> []
+  | Tool_name.Board_name.Board_post_get -> []
+  | Tool_name.Board_name.Board_comment -> [ "author" ]
+  | Tool_name.Board_name.Board_vote -> [ "voter" ]
+  | Tool_name.Board_name.Board_stats -> []
+  | Tool_name.Board_name.Board_search -> []
+  | Tool_name.Board_name.Board_comment_vote -> [ "voter" ]
+  | Tool_name.Board_name.Board_reaction -> [ "user_id" ]
+  | Tool_name.Board_name.Board_profile -> []
+  | Tool_name.Board_name.Board_hearths -> []
+  | Tool_name.Board_name.Board_curation_read -> []
+  | Tool_name.Board_name.Board_curation_submit -> [ "submitted_by" ]
+  | Tool_name.Board_name.Board_delete -> [ "author" ]
+  | Tool_name.Board_name.Board_cleanup -> []
+  | Tool_name.Board_name.Board_sub_board_create -> [ "owner" ]
+  | Tool_name.Board_name.Board_sub_board_list -> []
+  | Tool_name.Board_name.Board_sub_board_get -> []
+  | Tool_name.Board_name.Board_sub_board_update -> [ "owner" ]
+  | Tool_name.Board_name.Board_sub_board_delete -> [ "owner" ]
+;;
+
+let test_identity_fields_are_the_declared_literals () =
+  check int "every board tool is pinned" 21 (List.length Tool_name.Board_name.all);
+  List.iter
+    (fun board ->
+      check
+        (list string)
+        (Tool_name.Board_name.to_string board)
+        (declared_identity_fields board)
+        (Board_tool_registry.identity_fields_for_board_name board))
+    Tool_name.Board_name.all
+;;
+
 let () =
   run "board_tool_toml_parity"
     [ ( "parity"
@@ -1517,6 +1558,8 @@ let () =
             test_keeper_projections_are_byte_identical
         ; test_case "model-visible board rows are byte-identical" `Quick
             test_model_visible_board_rows_are_byte_identical
+        ; test_case "identity fields are the declared literals" `Quick
+            test_identity_fields_are_the_declared_literals
         ] )
     ]
 ;;

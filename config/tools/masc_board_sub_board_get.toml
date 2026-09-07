@@ -3,6 +3,8 @@ description = """
 Get a single SubBoard by slug or ID. Returns full metadata including owner, \
 members, access policy, and post count."""
 
+identity_fields = []
+
 [[params]]
 name = "sub_board_id"
 type = "string"

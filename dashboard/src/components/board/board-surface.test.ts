@@ -281,7 +281,7 @@ describe('BoardSurface Component', () => {
     const { container } = render(h(BoardSurface, null))
     // The board surface intentionally omits SurfaceHeader; the sub-board rail
     // and "전체 피드" heading are the only structure above the posts. board is
-    // in SURFACE_OWN_LEAD_IDS so the generic SurfaceLead is also suppressed.
+    // 'own' in SURFACE_LEAD_SOURCE so the generic SurfaceLead is also suppressed.
     expect(container.querySelector('header.v2-surface-header')).toBeNull()
     expect(container.querySelector('h1')?.textContent).toBe('Board')
   })

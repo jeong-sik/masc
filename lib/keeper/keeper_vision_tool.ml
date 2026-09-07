@@ -166,8 +166,22 @@ let terminal_policy_http_error = function
   | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
   | _ -> false
 
+(* Capacity belongs to the selected binding. A later image runtime may admit
+   the same pixels under a different request/context ceiling. HTTP 413 states
+   that cause directly; arbitrary HTTP 400/422 prose must not infer it. *)
+let candidate_capacity_http_error = function
+  | Llm_provider.Http_client.HttpError { code = 413; _ }
+  | Llm_provider.Http_client.ProviderFailure
+      { kind =
+          (Llm_provider.Http_client.Request_body_too_large _
+          | Llm_provider.Http_client.Context_overflow _)
+      ; _
+      } -> true
+  | _ -> false
+
 let failure_class_of_http_error = function
   | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
+  | err when candidate_capacity_http_error err -> Tool_result.Runtime_failure
   | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
 
@@ -373,7 +387,19 @@ let run_candidates_outcome
               ~reason:"timeout";
             continue_with (`Timeout runtime_id)
        | Error err ->
-            if terminal_policy_http_error err
+            if candidate_capacity_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"candidate_capacity_error";
+              (* Another attempt on this binding cannot change its hard limit;
+                 advance without transient-outage backoff or rewriting pixels. *)
+              loop
+                ~last_error:(Some (`Provider_error err))
+                ~attempt_index:(attempt_index + 1)
+                rest)
+            else if terminal_policy_http_error err
             then (
               record_vision_candidate_attempt
                 ~runtime_id

@@ -10759,6 +10759,7 @@ def fusion_run(
         "preset": "trio",
         "topology": "simple",
         "started_at": 1787557669.715736,
+        "finished_at": None if status == "running" else 1787557684.715736,
         "status": status,
     }
 
@@ -11106,12 +11107,12 @@ def fusion_list_detail_interaction(
         loaded = bytes(output[start:frame_end])
         plain = CSI_RE.sub(b"", loaded)
         for column in (
-            b"TIME",
+            b"STARTED",
             b"AGE",
-            b"STATUS",
+            b"STATE",
             b"KEEPER",
             b"PRESET",
-            # No TOPOLOGY column: the header row is TIME AGE STATUS KEEPER
+            # No TOPOLOGY column: the header row is STARTED AGE STATE KEEPER
             # PRESET RUN, and the keeper column took the width the run id used
             # to sit whole in.
             b"RUN",
@@ -11122,13 +11123,22 @@ def fusion_list_detail_interaction(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
         footer = (
-            b"j/k:move  PgUp/PgDn:page  Enter:detail  "
+            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"K:calling Keeper  B:Board evidence  Enter:detail  "
             b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
-        if footer not in plain:
+        footer_frame = resize_and_wait(
+            process, master_fd, output, rows=30, columns=200,
+            needle=b"MASC Fusion", controls=(FULL_REDRAW,),
+        )
+        if footer not in CSI_RE.sub(b"", footer_frame):
             raise AssertionError(
-                f"Fusion list footer disagrees with its exercised keys: {plain!r}"
+                f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
             )
+        resize_and_wait(
+            process, master_fd, output, rows=30, columns=120,
+            needle=b"MASC Fusion", controls=(FULL_REDRAW,),
+        )
 
         selected = send_and_wait(
             process, master_fd, output, b"j", FUSION_TARGET_LISTED
@@ -11257,7 +11267,7 @@ def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]
             b'event: message\n'
             b'data: {"type":"fusion_run_status","run":{"run_id":"fusion-target-601",'
             b'"keeper":"beta","preset":"trio","topology":"simple",'
-            b'"started_at":1787557669.7,"status":"completed"}}\n\n'
+            b'"started_at":1787557669.7,"finished_at":1787557684.7,"status":"completed"}}\n\n'
         ),
         content_type="text/event-stream",
     )

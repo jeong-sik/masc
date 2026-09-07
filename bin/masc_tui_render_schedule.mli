@@ -135,7 +135,7 @@ val keeper_columns_used_width : keeper_columns -> int
 (** {1 Memory fleet columns} *)
 
 type memory_columns = {
-  mcol_show_revision : bool;
+  mcol_show_updated : bool;
   mcol_show_source : bool;
   mcol_name : int;
 }
@@ -144,7 +144,7 @@ type memory_columns = {
 type memory_row_values = {
   mrow_state : string;
   mrow_name : string;
-  mrow_revision : string;
+  mrow_updated : string;
   mrow_facts : string;
   mrow_size : string;
   mrow_source : string;
@@ -318,13 +318,18 @@ type fusion_row_values = {
   frow_run : string;
 }
 
-val fusion_run_width : inner_width:int -> keeper_width:int -> int
-val fusion_header_row : keeper_width:int -> run_width:int -> string
+type fusion_columns = {
+  fcol_keeper : int;
+  fcol_run : int;
+  fcol_show_preset : bool;
+}
+
+val allocate_fusion_columns : inner_width:int -> keeper_width:int -> fusion_columns
+val fusion_header_row : fusion_columns -> string
 
 val fusion_row :
   state_style:string ->
-  keeper_width:int ->
-  run_width:int ->
+  fusion_columns ->
   fusion_row_values ->
   string
 (** One run, on the same columns as {!fusion_header_row}. The keeper cell is

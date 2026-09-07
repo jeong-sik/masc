@@ -142,3 +142,15 @@ let voice_send_on_stop ~base_path =
   match doc_of_path (runtime_toml_path ~base_path) with
   | None -> None
   | Some doc -> voice_send_on_stop_of_doc doc
+
+let board_sort ~base_path =
+  Option.bind (doc_of_path (runtime_toml_path ~base_path))
+    (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort")
+
+let set_board_sort ~base_path sort =
+  match Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content -> Toml_line_editor.edit_table_scalar content
+          ~path:"tui" ~key:"board_sort" ~value:(Some sort)) with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message

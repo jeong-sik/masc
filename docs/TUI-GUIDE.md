@@ -1562,6 +1562,30 @@ Config Presets distinguishes the selected saved preset from a settings match. It
 
 Config Prompts labels whether the effective text comes from an override or the Markdown file. When an override is active, the displayed Markdown path identifies the base file, not the effective override storage.
 
+### Following a Fusion run
+
+Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+### Questions and Gate modes
+
+In Approvals, `a` opens the selected Ask in a dedicated answer reader. The header shows Ask and Question position plus answered count. Left/Right (or j/k) changes the question; PgUp/PgDn and the wheel scroll long prompts and choices. `[`/`]` changes the Ask, and Esc returns to Approvals. Choice digits apply only to the active question.
+
+`w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading.
+
+### Board navigation and Planning changes
+
+Board `s` stores the chosen order in `[tui].board_sort` in the resolved `runtime.toml`. `f` and `F` move to the next and previous Hearth; `H` opens a searchable chooser including all Hearths. IDs use subdued text, Hearths the information color, and authors the success color; votes retain their sign and replies remain an explicit count.
+
+Planning shows net changes in completed Goals, completed Tasks, and pending Goal reviews since the first successful Planning reading in this TUI session. The displayed baseline timestamp defines the window. These are changes in snapshot counts, not a durable completion history or operator-approval throughput.
+
+### Memory overview
+
+The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
+
+Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
+
 ### Workspace activity
 
 On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.

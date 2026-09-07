@@ -777,6 +777,7 @@ type memory_alert = {
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
+  mkh_updated_at : float option;
   mkh_facts : int;
   mkh_observed_facts : int;
   mkh_derived_facts : int;
@@ -1280,6 +1281,7 @@ type fusion_run = {
   fur_preset : string;
   fur_topology : Fusion_types.fusion_topology;
   fur_started_at : float;
+  fur_finished_at : float option;
   fur_status : fusion_run_status;
   fur_stage : fusion_run_stage;
   (** Process-local stage for running rows, or the exact terminal stage. *)

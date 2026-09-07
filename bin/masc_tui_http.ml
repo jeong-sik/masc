@@ -1342,6 +1342,13 @@ let post_dashboard_gate_external_mode ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate external mode" json
 
+let post_dashboard_gate_workspace_mode ~(host : string) ~(port : int)
+    ~(mode : string) : (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [("mode", `String mode)]) in
+  match post_json ~host ~port ~path:"/api/v1/dashboard/gate/mode" ~body with
+  | Error detail -> Error detail
+  | Ok json -> expect_ok_true ~what:"gate workspace mode" json
+
 (** GET /api/v1/dashboard/gate/keeper-settings — durable per-keeper Gate
     settings: which Keepers were held stricter than the workspace, and which
     judge each is put to first. *)

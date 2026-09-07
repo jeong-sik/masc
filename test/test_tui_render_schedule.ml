@@ -621,7 +621,7 @@ let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
 let memory_probe =
   { Schedule.mrow_state = "S"
   ; mrow_name = "N"
-  ; mrow_revision = "R"
+  ; mrow_updated = "R"
   ; mrow_facts = "F"
   ; mrow_size = "Z"
   ; mrow_source = "U"
@@ -633,7 +633,7 @@ let memory_probe =
 let memory_overflowing =
   { Schedule.mrow_state = "read-error-and-then-some"
   ; mrow_name = "pinewood-pr-jira-checker-and-a-longer-tail"
-  ; mrow_revision = "1234567890"
+  ; mrow_updated = "1234567890"
   ; mrow_facts = "9876543"
   ; mrow_size = "1234567.8 MB"
   ; mrow_source = "r32 i8 1.5 KB with more than the cell holds"
@@ -697,10 +697,10 @@ let test_memory_header_and_row_share_their_offsets () =
     let columns = Schedule.allocate_memory_columns ~inner_width in
     let header = Schedule.memory_header_row columns in
     let row = Schedule.memory_row columns memory_probe in
-    check_left_cell "STATE" "S" ~header ~row ~inner_width;
+    check_left_cell "ST" "S" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "N" ~header ~row ~inner_width;
-    if columns.Schedule.mcol_show_revision then
-      check_right_cell "REV" "R" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_updated then
+      check_right_cell "UPDATED" "R" ~header ~row ~inner_width;
     check_right_cell "FACTS" "F" ~header ~row ~inner_width;
     check_right_cell "SIZE" "Z" ~header ~row ~inner_width;
     if columns.Schedule.mcol_show_source then
@@ -733,7 +733,7 @@ let test_memory_empty_readings_still_hold_their_cells () =
   let blank =
     { Schedule.mrow_state = ""
     ; mrow_name = ""
-    ; mrow_revision = ""
+    ; mrow_updated = ""
     ; mrow_facts = ""
     ; mrow_size = ""
     ; mrow_source = ""
@@ -748,12 +748,12 @@ let test_memory_empty_readings_still_hold_their_cells () =
 let test_memory_columns_drop_from_the_right () =
   let narrow = Schedule.allocate_memory_columns ~inner_width:50 in
   check bool "no source when narrow" false narrow.Schedule.mcol_show_source;
-  check bool "no revision when narrow" false narrow.Schedule.mcol_show_revision;
+  check bool "no revision when narrow" false narrow.Schedule.mcol_show_updated;
   check bool "the name still has cells" true (narrow.Schedule.mcol_name > 0);
   (* Wide enough for the revision beside a keeper name at its widest, which is
      what a returning column now waits for. *)
   let medium = Schedule.allocate_memory_columns ~inner_width:80 in
-  check bool "revision returns first" true medium.Schedule.mcol_show_revision;
+  check bool "revision returns first" true medium.Schedule.mcol_show_updated;
   check bool "source is still out" false medium.Schedule.mcol_show_source;
   let wide = Schedule.allocate_memory_columns ~inner_width:120 in
   check bool "source returns when wide" true wide.Schedule.mcol_show_source
@@ -1065,8 +1065,8 @@ let test_headers_fit_their_columns () =
             ~summary_width:(Schedule.change_summary_width ~inner_width) )
       ; ( "fusion"
         , let keeper_width = 16 in
-          Schedule.fusion_header_row ~keeper_width
-            ~run_width:(Schedule.fusion_run_width ~inner_width ~keeper_width) )
+          Schedule.fusion_header_row
+            (Schedule.allocate_fusion_columns ~inner_width ~keeper_width) )
       ; ( "planning"
         , let phase_width = planning_phase_width in
           Schedule.planning_header_row ~phase_width
@@ -1147,7 +1147,7 @@ let fusion_probe =
   }
 
 let fusion_overflowing =
-  { Schedule.frow_time = "11:08:43.512"
+  { Schedule.frow_time = "2026-09-07 11:08"
   ; frow_age = "1234.5s"
   ; frow_state = "cancelled-by-the-operator"
   ; frow_keeper = "pinewood-pr-jira-checker"
@@ -1158,23 +1158,24 @@ let fusion_overflowing =
 let test_fusion_columns_hold_their_offsets () =
   let keeper_width = 16 in
   for inner_width = 80 to 240 do
-    let run_width = Schedule.fusion_run_width ~inner_width ~keeper_width in
+    let columns = Schedule.allocate_fusion_columns ~inner_width ~keeper_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = Schedule.fusion_header_row ~keeper_width ~run_width in
+    let header = Schedule.fusion_header_row columns in
     let row =
-      Schedule.fusion_row ~state_style:"" ~keeper_width ~run_width fusion_probe
+      Schedule.fusion_row ~state_style:"" columns fusion_probe
     in
-    check_left_cell "TIME" "A" ~header ~row ~inner_width;
+    check_left_cell "STARTED" "A" ~header ~row ~inner_width;
     check_right_cell "AGE" "B" ~header ~row ~inner_width;
-    check_left_cell "STATE" "C" ~header ~row ~inner_width;
+    check_left_cell "ST" "C" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
-    check_left_cell "PRESET" "E" ~header ~row ~inner_width;
+    if columns.fcol_show_preset then
+      check_left_cell "PRESET" "E" ~header ~row ~inner_width;
     check_left_cell "RUN" "F" ~header ~row ~inner_width;
     check int
       (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
       (width header)
       (width
-         (Schedule.fusion_row ~state_style:"\027[31m" ~keeper_width ~run_width
+         (Schedule.fusion_row ~state_style:"\027[31m" columns
             fusion_overflowing))
   done
 
@@ -1182,14 +1183,24 @@ let test_fusion_columns_hold_their_offsets () =
    out of the run id rather than out of the frame. *)
 let test_fusion_keeper_growth_comes_out_of_the_run_id () =
   let inner_width = 140 in
-  let narrow = Schedule.fusion_run_width ~inner_width ~keeper_width:16 in
-  let wide = Schedule.fusion_run_width ~inner_width ~keeper_width:26 in
-  check int "ten cells move from the run id to the keeper" (narrow - 10) wide;
+  let narrow = Schedule.allocate_fusion_columns ~inner_width ~keeper_width:16 in
+  let wide = Schedule.allocate_fusion_columns ~inner_width ~keeper_width:26 in
+  check int "ten cells move from the run id to the keeper" (narrow.fcol_run - 10) wide.fcol_run;
   check int "and the row is the same width either way"
     (Masc_tui_message_layout.display_width
-       (Schedule.fusion_header_row ~keeper_width:16 ~run_width:narrow))
+       (Schedule.fusion_header_row narrow))
     (Masc_tui_message_layout.display_width
-       (Schedule.fusion_header_row ~keeper_width:26 ~run_width:wide))
+       (Schedule.fusion_header_row wide));
+  let inner_width = 80 - 6 in
+  let compact = Schedule.allocate_fusion_columns ~inner_width ~keeper_width:26 in
+  let header = Schedule.fusion_header_row compact in
+  let row = Schedule.fusion_row ~state_style:"" compact fusion_overflowing in
+  check bool "80-column terminal keeps a complete table inside its frame" true
+    (Masc_tui_message_layout.display_width header <= inner_width
+     && Masc_tui_message_layout.display_width row <= inner_width);
+  check bool "narrow table gives preset cells to identities" false compact.fcol_show_preset;
+  check bool "the local start date remains whole" true
+    (String.starts_with ~prefix:"2026-09-07 11:08" row)
 
 let test_fusion_sidebar_label_format () =
   let label =

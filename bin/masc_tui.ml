@@ -269,11 +269,16 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
       in
+      let scrolled =
+        if state.view = Memory && Option.is_none state.memory_facts_keeper then
+          memory_overview_scrolled ~cursor state
+        else scrolled
+      in
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the
@@ -1869,7 +1874,7 @@ type async_msg =
       (** approval id, rearm outcome, and the action slot this explicit retry
           owns. The server accepts it only if every observed identity field
           still matches the blocked row. *)
-  | Gate_external_mode_set of string * (unit, string) result
+  | Gate_mode_set of gate_lane * string * (unit, string) result
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
   | Surface_tool_approval_answered of
@@ -2604,16 +2609,20 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
                      Error "Eio switch is unavailable",
                      generation )))
 
-let launch_gate_external_mode_set state ~mailbox ~mode =
+let launch_gate_mode_set state ~mailbox ~lane ~mode =
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode with
+      try
+        (match lane with
+         | Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
+         | External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Gate_external_mode_set (mode, result))
+    enqueue_async mailbox (Gate_mode_set (lane, mode, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2622,7 +2631,7 @@ let launch_gate_external_mode_set state ~mailbox ~mode =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Gate_external_mode_set (mode, Error "Eio switch is unavailable"))
+        (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
   (* [reserve_refresh] declines while the operator's own press is still in
@@ -7823,6 +7832,8 @@ let apply_planning_load state = function
         Planning_selection.reconcile ~current_ids
           ~next_ids:(goal_ids planning) ~current
       in
+      if Option.is_none state.planning_baseline then
+        state.planning_baseline <- Some planning;
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -7844,6 +7855,10 @@ let apply_planning_load state = function
 
 let apply_fusion_runs_load state = function
   | Ok snapshot ->
+      let keeper_run_id =
+        Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
+          (selected_keeper_run state)
+      in
       let current_selected_id =
         match state.fusion_mode with
         | Fusion_detail run_id -> Some run_id
@@ -7869,6 +7884,11 @@ let apply_fusion_runs_load state = function
               ~default:fallback_cursor
       in
       state.fusion_runs <- Some snapshot;
+      let keeper_runs = selected_keeper_runs state in
+      state.keeper_run_cursor <-
+        Option.bind keeper_run_id (fun id ->
+          List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
+        |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_error <- None;
       state.fusion_cursor <- next_cursor;
       (match state.fusion_mode, current_selected_id with
@@ -8097,6 +8117,7 @@ let load_keeper_logs_if_safe state base_path limit keeper =
 ;;
 
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
+  state.keeper_run_cursor <- 0;
   match selected_keeper state with
   | None -> ()
   | Some keeper ->
@@ -8147,6 +8168,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
+  state.keeper_run_cursor <- 0;
   state.view <- Keepers Keeper_detail;
   state.keeper_detail_focus <- Right_pane;
   state.detail_scroll <- 0;
@@ -8708,6 +8730,7 @@ let enter_ask_answering state =
       state.approval_detail_open <- false;
       state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
       state.ask_question_cursor <- 0;
+      state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
       state.pending_ask_submit <- None
 
@@ -8723,6 +8746,7 @@ let move_ask_cursor state delta =
     if next <> state.ask_cursor then begin
       state.ask_cursor <- next;
       state.ask_question_cursor <- 0;
+      state.ask_question_scroll <- 0;
       state.pending_ask_submit <- None;
       match (state.ask_answer_mode, List.nth_opt rows next) with
       (* Walking the list while browsing is not answering. Opening a draft
@@ -8741,9 +8765,11 @@ let move_ask_question_cursor state delta =
   | None -> ()
   | Some (row : Tui_decode.ask_row) ->
       let count = List.length row.Tui_decode.ar_questions in
-      if count > 0 then
+      if count > 0 then begin
         state.ask_question_cursor <-
-          max 0 (min (count - 1) (state.ask_question_cursor + delta))
+          max 0 (min (count - 1) (state.ask_question_cursor + delta));
+        state.ask_question_scroll <- 0
+      end
 
 let with_ask_draft state f =
   match (selected_ask_row state, selected_ask_question state) with
@@ -11341,16 +11367,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            add_event state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
                 detail))
-  | Gate_external_mode_set (mode, result) ->
+  | Gate_mode_set (lane, mode, result) ->
       (match result with
        | Ok () ->
            add_event state "system"
-             (Printf.sprintf "External-services Gate lane set to %s" mode);
+             (Printf.sprintf "%s Gate set to %s" (gate_lane_label lane) mode);
            launch_gate_snapshot_load state ~mailbox
        | Error detail ->
            add_event state "error"
-             (Printf.sprintf "External-services Gate lane change failed: %s"
-                detail))
+             (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
        | Ok (modes, judges) ->
@@ -11803,8 +11828,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         launch_runtime_surface_load state ~mailbox ~force:true
       end
   | Workspace_activity_loaded (request, result) ->
-      state.workspace_activity <- Masc_tui_fetched.complete ~equal:String.equal
-        state.workspace_activity request result
+      apply_workspace_activity_read state request result
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -12403,6 +12427,12 @@ let main () =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
+  (match Masc_tui_config.board_sort ~base_path with
+   | None -> ()
+   | Some value ->
+       (match board_sort_of_string value with
+        | Some sort -> state.board_sort <- sort
+        | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
   (match Masc_tui_config.theme ~base_path with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
@@ -14436,8 +14466,16 @@ and is loaded on demand through keeper_skill.
               && not state.context_inspector_open ->
            (match k with
             | "esc" -> leave_ask_answering state
-            | "up" | "k" | "wheel-up" -> move_ask_question_cursor state (-1)
-            | "down" | "j" | "wheel-down" -> move_ask_question_cursor state 1
+            | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
+            | "right" | "down" | "j" -> move_ask_question_cursor state 1
+            | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
+                let delta = match k with
+                  | "pageup" -> -(Masc_tui_render.ask_question_page_size state)
+                  | "pagedown" -> Masc_tui_render.ask_question_page_size state
+                  | "wheel-up" -> -1 | _ -> 1 in
+                state.ask_question_scroll <- max 0
+                  (min (Masc_tui_render.ask_question_scroll_limit state)
+                     (state.ask_question_scroll + delta))
             | "[" -> move_ask_cursor state (-1)
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
@@ -15045,6 +15083,9 @@ and is loaded on demand through keeper_skill.
                      open_browser_lane state ~mailbox:async_messages app
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
+                 | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->
+                     launch_gate_mode_set state ~mailbox:async_messages ~lane
+                       ~mode:(Masc.Keeper_gate_mode.to_string mode)
                  | Some (_, Masc_tui_types.Palette_config pane) ->
                      state.config_pane <- pane;
                      state.config_scroll <- 0;
@@ -15080,6 +15121,15 @@ and is loaded on demand through keeper_skill.
                      (match index_of 0 state.tasks with
                       | Some index -> state.task_cursor <- index
                       | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
+                     state.board_hearth <- hearth;
+                     state.board_cursor <- 0;
+                     state.board_mode <- Board_list;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_http_refresh state ~host:server_peer_host ~port:state.port
+                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_board_post post_id) ->
                      goto_surface state ~mailbox:async_messages Board;
                      let rec find i = function
@@ -15439,6 +15489,63 @@ and is loaded on demand through keeper_skill.
            (* The child owns its keys. In particular b/u must never mutate a
               hidden connector binding while Firefox content is on screen. *)
            ()
+       | Some ("j" | "down" | "k" | "up" as move)
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
+              && not (Masc_tui_roster_pane.arrows_go_left
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
+           let count = List.length (selected_keeper_runs state) in
+           let delta = if move = "j" || move = "down" then 1 else -1 in
+           state.keeper_run_cursor <- max 0 (min (count - 1) (state.keeper_run_cursor + delta));
+           state.detail_scroll <- state.keeper_run_cursor
+       | Some ("\r" | "\n" | "right")
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
+              && not (Masc_tui_roster_pane.arrows_go_left
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
+           (match selected_keeper_run state with
+            | None -> ()
+            | Some (_, run) ->
+                state.followed_from <- Some (state.view, None);
+                goto_surface state ~mailbox:async_messages Fusion;
+                state.fusion_mode <- Fusion_detail run.fur_run_id;
+                state.fusion_scroll <- 0;
+                state.fusion_detail <- None;
+                state.fusion_detail_error <- None;
+                launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "K" when state.view = Fusion ->
+           let run = match state.fusion_mode, state.fusion_runs with
+             | Fusion_detail id, Some snapshot -> List.find_opt
+                 (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
+             | Fusion_list, Some snapshot -> List.nth_opt snapshot.fus_runs state.fusion_cursor
+             | _, None -> None in
+           (match Option.bind run (fun (run : Tui_decode.fusion_run) ->
+              List.find_index (fun (k : keeper) -> String.equal k.k_name run.fur_keeper) state.keepers) with
+            | None -> add_event state "system" "The calling Keeper is not in the current roster"
+            | Some index ->
+                state.followed_from <- Some (state.view, None);
+                state.keeper_cursor <- index;
+                Option.iter (open_keeper_detail state ~base_path ~mailbox:async_messages) (selected_keeper state);
+                state.detail_tab <- Detail_runs;
+                state.keeper_run_cursor <-
+                  Option.bind run (fun (run : Tui_decode.fusion_run) ->
+                    List.find_index (fun (candidate : Tui_decode.fusion_run) ->
+                      String.equal candidate.fur_run_id run.fur_run_id)
+                      (selected_keeper_runs state))
+                  |> Option.value ~default:0)
+       | Some "B" when state.view = Fusion ->
+           (match state.fusion_mode, state.fusion_detail with
+            | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
+                (match detail.fud_evidence with
+                 | None -> add_event state "system" "No Board evidence has been recorded for this run"
+                 | Some evidence ->
+                     state.followed_from <- Some (state.view, Some id);
+                     state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_focus <- Right_pane;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                       ~post_id:evidence.fe_post_id ~mailbox:async_messages)
+            | _ -> add_event state "system" "Open a Fusion run to follow its Board evidence")
        | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open ->
            (match state.repositories with
             | None -> ()
@@ -15462,21 +15569,14 @@ and is loaded on demand through keeper_skill.
              (state.workspace_activity_cursor + delta))
        | Some ("\r" | "\n" | "right")
          when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           (match List.nth_opt (workspace_activity_rows state) state.workspace_activity_cursor with
-            | None -> ()
-            | Some (change, path) ->
-                state.code_scope <- Code_scope_keeper change.Tui_decode.fc_keeper;
-                state.code_dir <- "";
-                state.code_cursor <- 0;
-                state.code_entries <- [];
-                state.code_entries_error <- None;
-                state.code_file <- Masc_tui_fetched.clear state.code_file;
-                state.code_focus_file <- Right_pane;
-                state.followed_from <- Some (state.view, None);
-                state.view <- Code;
-                Option.iter (fun repo_id -> launch_code_file_load state ~mailbox:async_messages
-                    ~path:(Playground_paths.bundle_relative_repo_path ~repo_id path))
-                  state.workspace_activity_repo)
+           let _, _, selected = workspace_activity_selection state in
+           (match state.workspace_activity_repo, selected with
+            | Some repo_id, Some (change, relative_path) ->
+                let path = Playground_paths.bundle_relative_repo_path ~repo_id relative_path in
+                enter_keeper_code_file state ~keeper:change.Tui_decode.fc_keeper ~path;
+                launch_code_entries_load state ~mailbox:async_messages;
+                launch_code_file_load state ~mailbox:async_messages ~path
+            | None, _ | _, None -> ())
        | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "/"
@@ -16134,6 +16234,16 @@ and is loaded on demand through keeper_skill.
               with
               | index :: _ -> index
               | [] -> 0)
+       | Some "w" when state.view = Approvals ->
+           state.palette_open <- true;
+           state.palette_mode <- Palette_jump;
+           state.palette_query <- "gate Workspace / ";
+           state.palette_cursor <- 0
+       | Some "H" when state.view = Board && state.board_mode <> Board_compose ->
+           state.palette_open <- true;
+           state.palette_mode <- Palette_jump;
+           state.palette_query <- "hearth ";
+           state.palette_cursor <- 0
        | Some ":" ->
            state.palette_open <- true;
            state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -18210,10 +18320,9 @@ and is loaded on demand through keeper_skill.
                        keeper's facts themselves. *)
                     match state.memory_health with
                     | None -> ()
-                    | Some snapshot -> (
+                    | Some _ -> (
                         match
-                          List.nth_opt snapshot.Masc.Tui_decode.mhs_keepers
-                            state.memory_health_cursor
+                          selected_memory_keeper state
                         with
                         | None -> ()
                         | Some keeper ->
@@ -18321,8 +18430,8 @@ and is loaded on demand through keeper_skill.
               [fetch_board] -- so this refetches rather than filtering the
               page in hand. *)
            state.board_hearth <-
-             Board_hearth.next ~current:state.board_hearth
-               ~census:state.board_hearths;
+             (if key = Some "F" then Board_hearth.previous else Board_hearth.next)
+               ~current:state.board_hearth ~census:state.board_hearths;
            state.board_cursor <- 0;
            state.board_mode <- Board_list;
            add_event state "system"
@@ -19097,6 +19206,9 @@ and is loaded on demand through keeper_skill.
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
                      state.board_sort <- next_board_sort state.board_sort;
+                     (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
+                      | Ok () -> ()
+                      | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
                      add_event state "system"
                        ("Board order: "
                         ^ board_sort_label state.board_sort);
@@ -19205,36 +19317,10 @@ and is loaded on demand through keeper_skill.
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->
-                (* Cycle the external-services Gate lane: what happens to a
-                   Keeper's call into an attached outside service. Its own
-                   switch — the workspace lane never opens it. An unknown
-                   stored value cycles to manual, the fail-closed end. *)
-                (match state.gate_modes with
-                 | None ->
-                     add_event state "system"
-                       "Gate lanes are not loaded yet; wait for the refresh"
-                 | Some modes ->
-                     (* Cycle through the closed Keeper_gate_mode variants
-                        rather than a string re-spelling: a fourth mode
-                        makes this match a compile error instead of a
-                        silent fall-through to manual. An unrecognized
-                        stored value still cycles to manual, the
-                        fail-closed end. *)
-                     let next =
-                       match
-                         Masc.Keeper_gate_mode.of_string
-                           modes.Tui_decode.glm_external
-                       with
-                       | Some Masc.Keeper_gate_mode.Manual ->
-                           Masc.Keeper_gate_mode.Auto_judge
-                       | Some Masc.Keeper_gate_mode.Auto_judge ->
-                           Masc.Keeper_gate_mode.Always_allow
-                       | Some Masc.Keeper_gate_mode.Always_allow | None ->
-                           Masc.Keeper_gate_mode.Manual
-                     in
-                     launch_gate_external_mode_set state
-                       ~mailbox:async_messages
-                       ~mode:(Masc.Keeper_gate_mode.to_string next))
+                state.palette_open <- true;
+                state.palette_mode <- Palette_jump;
+                state.palette_query <- "gate Outside services / ";
+                state.palette_cursor <- 0
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Board | Planning | Verification | Harness

@@ -2545,6 +2545,20 @@ let ask_section_rows buf =
   String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
   !n
 
+let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
+  box_wrapped_field buf cols
+    ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
+    ~style:Ansi.bold
+    (Terminal_text.single_line entry.ate_text ^ "\xe2\x96\x8c");
+  match Ask_projection.response_for draft ~question with
+  | Some (Ask_projection.Draft_chose _) ->
+      box_line buf cols
+        (Printf.sprintf "      %ssaving replaces what you picked%s"
+           Ansi.dim Ansi.reset)
+  | Some (Ask_projection.Draft_wrote _)
+  | Some Ask_projection.Draft_skipped
+  | None -> ()
+
 (* One question with everything the operator answers it by: the prompt, the
    choices and their marks, whatever the draft holds, and the free-text line.
    Lifted out of the panel so the panel can draw a question into a buffer of
@@ -2602,7 +2616,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
              (if picked then Ansi.bold else Ansi.dim)
              (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
              Ansi.reset)
-        ~style:(if picked then Ansi.bold else Ansi.dim)
+        ~style:(if picked then Ansi.bold ^ Theme.ok () else Theme.info ())
         choice.Masc.Tui_decode.ac_label;
       (* What picking this commits to. The wire carries it, the dashboard
          draws it under the label, and this pane dropped it -- so the operator
@@ -2646,22 +2660,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
          search uses. Without it the keys went into a buffer nothing on screen
          showed, which reads as a terminal that has stopped listening. *)
       | Some entry ->
-          box_wrapped_field buf cols
-            ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
-            ~style:Ansi.bold
-            (Terminal_text.single_line entry.ate_text ^ "\xe2\x96\x8c");
-          (* The domain's response is one of three -- chosen, written, or
-             skipped -- so saving text drops the picks. Said while the marks
-             are still on screen: a choice that vanishes on Enter reads as the
-             surface having lost it. *)
-          (match Ask_projection.response_for draft ~question with
-           | Some (Ask_projection.Draft_chose _) ->
-               box_line buf cols
-                 (Printf.sprintf "      %ssaving replaces what you picked%s"
-                    Ansi.dim Ansi.reset)
-           | Some (Ask_projection.Draft_wrote _)
-           | Some Ask_projection.Draft_skipped
-           | None -> ())
+          draw_ask_text_entry buf cols ~draft ~question entry
       | None -> (
           (* The key that opens the editor is named by the footer, which knows
              whether the question under the cursor takes text; naming it on
@@ -2722,7 +2721,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
       let open_rows = Ask_projection.open_rows snapshot in
       box_divider buf cols;
       box_line buf cols
-        (Printf.sprintf "%sQuestions waiting on you (%d)%s" Ansi.bold
+        (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
            (List.length open_rows) Ansi.reset);
       match open_rows with
       | [] ->
@@ -2917,6 +2916,59 @@ let approval_detail_rows line =
   String.iter (fun c -> if c = '\n' then incr n) line;
   !n
 
+let question_hints (state : state) =
+    (* One name for the key in both modes. [ and ] call the same function
+       either way -- they walk the asks -- and the surface used to call that
+       "question" while browsing and "ask" while answering, which is the same
+       key asking the operator to learn it twice. Named once here so the two
+       footers cannot drift apart again.
+
+       The vocabulary is the repository's: [/] walks the container a surface
+       is a list of. Board says post, Changes says keeper, this says ask. *)
+    let walk_asks = "[/]:ask" in
+    match state.ask_answer_mode with
+    | Ask_browsing ->
+        Printf.sprintf
+          "j/k:move  y/n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
+           r:refresh  Tab:next"
+          walk_asks
+    | Ask_answering { aam_ask_id } -> (
+        match state.ask_text_entry with
+        (* Typing owns the keyboard, so the footer stops offering the keys it
+           has taken: the digits are text here, not choices. *)
+        | Some _ -> "Enter:save  Esc:cancel"
+        | None ->
+            (* Say when the next Enter sends. The approval queue two panes up
+               already draws its armed state; this one announced itself only as
+               an event, on a surface that draws no events, so the first Enter
+               looked like a key that had not landed. *)
+            (match state.pending_ask_submit with
+             | Some armed when String.equal armed aam_ask_id ->
+                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
+             | Some _ | None ->
+                 (* Only the keys the selected question answers to. A question
+                    can arrive with no choices at all -- the server accepts one
+                    as long as it welcomes free text -- and there [1-9] does
+                    nothing, which reads as a pane that has stopped listening
+                    rather than as a key that was never for this question. *)
+                 let question = selected_ask_question state in
+                 let has_choices =
+                   match question with
+                   | Some (q : Masc.Tui_decode.ask_question) ->
+                       q.Masc.Tui_decode.aq_choices <> []
+                   | None -> false
+                 in
+                 let takes_text =
+                   match question with
+                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
+                   | None -> false
+                 in
+                 Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \
+                                 Enter:answer  Esc:back"
+                   walk_asks
+                   (if has_choices then "1-9:pick  " else "")
+                   (if takes_text then "t:write  " else "")))
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3027,10 +3079,12 @@ let render_approvals (state : state) =
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ ->
          Printf.sprintf
-           "  %sGate workspace:%s  ·  outside services:%s%s"
-           Ansi.dim
-           modes.Tui_decode.glm_workspace
-           modes.Tui_decode.glm_external
+           "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
+           (Theme.info ())
+           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
+            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
+            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
      | None, None ->
@@ -3289,63 +3343,95 @@ let render_approvals (state : state) =
 
   Buffer.add_buffer buf ask_buf;
 
-  let hints =
-    (* One name for the key in both modes. [ and ] call the same function
-       either way -- they walk the asks -- and the surface used to call that
-       "question" while browsing and "ask" while answering, which is the same
-       key asking the operator to learn it twice. Named once here so the two
-       footers cannot drift apart again.
-
-       The vocabulary is the repository's: [/] walks the container a surface
-       is a list of. Board says post, Changes says keeper, this says ask. *)
-    let walk_asks = "[/]:ask" in
-    match state.ask_answer_mode with
-    | Ask_browsing ->
-        Printf.sprintf
-          "j/k:move  y/n:decide  e:outside lane  %s  a:answer a question  \
-           r:refresh  Tab:next"
-          walk_asks
-    | Ask_answering { aam_ask_id } -> (
-        match state.ask_text_entry with
-        (* Typing owns the keyboard, so the footer stops offering the keys it
-           has taken: the digits are text here, not choices. *)
-        | Some _ -> "Enter:save  Esc:cancel"
-        | None ->
-            (* Say when the next Enter sends. The approval queue two panes up
-               already draws its armed state; this one announced itself only as
-               an event, on a surface that draws no events, so the first Enter
-               looked like a key that had not landed. *)
-            (match state.pending_ask_submit with
-             | Some armed when String.equal armed aam_ask_id ->
-                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-             | Some _ | None ->
-                 (* Only the keys the selected question answers to. A question
-                    can arrive with no choices at all -- the server accepts one
-                    as long as it welcomes free text -- and there [1-9] does
-                    nothing, which reads as a pane that has stopped listening
-                    rather than as a key that was never for this question. *)
-                 let question = selected_ask_question state in
-                 let has_choices =
-                   match question with
-                   | Some (q : Masc.Tui_decode.ask_question) ->
-                       q.Masc.Tui_decode.aq_choices <> []
-                   | None -> false
-                 in
-                 let takes_text =
-                   match question with
-                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
-                   | None -> false
-                 in
-                 Printf.sprintf "j/k:question  %s  %s%ss:skip  c:clear  \
-                                 Enter:answer  Esc:back"
-                   walk_asks
-                   (if has_choices then "1-9:pick  " else "")
-                   (if takes_text then "t:write  " else "")))
+  let hints = question_hints state
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
+
+let question_asks (state : state) =
+  match state.asks_snapshot with
+  | None -> []
+  | Some snapshot -> Ask_projection.open_rows snapshot
+
+let ask_question_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let lines =
+    match List.nth_opt (question_asks state) state.ask_cursor with
+    | None -> ["  No questions waiting"]
+    | Some row ->
+        let draft = Ask_projection.draft_for state.ask_draft ~row in
+        (match List.nth_opt row.ar_questions state.ask_question_cursor with
+         | None -> ["  No question selected"]
+         | Some question ->
+             let text, _ = ask_block (fun b ->
+               match state.ask_text_entry with
+               | Some entry when String.equal
+                   (Ask_projection.free_text_question_id entry.ate_slot) question.aq_id ->
+                   (* Typing owns the keys. Keep the editor separate from
+                      choices and context that can fill the reader. *)
+                   box_wrapped_field b cols ~head:"  " ~style:Ansi.bold
+                     question.aq_prompt;
+                   draw_ask_text_entry b cols ~draft ~question entry
+               | Some _ | None ->
+                   draw_ask_question b cols state ~row ~draft ~question
+                     ~answering:true ~selected_question:true;
+                   draw_ask_context b cols ~row) in
+             String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))
+  in
+  (* title, progress, help, two dividers, outer edges and footer *)
+  let room = max 1 (rows - 9) in
+  (lines, room)
+
+let ask_question_page_size state = snd (ask_question_viewport state)
+
+let ask_question_scroll_limit state =
+  let lines, room = ask_question_viewport state in
+  max 0 (List.length lines - room)
+
+let render_question_reader (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let asks = question_asks state in
+  let selected = List.nth_opt asks state.ask_cursor in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Approvals / Questions");
+  box_line buf cols
+    (match selected with
+     | None -> "  No questions waiting"
+     | Some row ->
+         let draft = Ask_projection.draft_for state.ask_draft ~row in
+         let answered = List.filter (fun question ->
+             Option.is_some (Ask_projection.response_for draft ~question)) row.ar_questions |> List.length in
+         Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d answered%s"
+           (Theme.warn ()) (Terminal_text.single_line row.ar_keeper)
+           (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
+           (List.length row.ar_questions) answered Ansi.reset);
+  box_line buf cols
+    (if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
+     else "  Left/Right: previous/next question · [/]: previous/next ask · Esc: approvals");
+  box_divider buf cols;
+  let lines, room = ask_question_viewport state in
+  let limit = max 0 (List.length lines - room) in
+  let scroll =
+    if Option.is_some state.ask_text_entry then limit
+    else max 0 (min state.ask_question_scroll limit)
+  in
+  for i = 0 to room - 1 do
+    match List.nth_opt lines (scroll + i) with
+    | Some line -> Buffer.add_string buf (line ^ "\n")
+    | None -> box_empty buf cols
+  done;
+  box_divider buf cols;
+  box_line buf cols
+    (if Option.is_some state.ask_text_entry then "  Writing answer · Enter saves locally before you send"
+     else Printf.sprintf "  Lines %d-%d/%d · PgUp/PgDn or wheel to read"
+       (if lines = [] then 0 else scroll + 1) (min (List.length lines) (scroll + room)) (List.length lines));
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
+  finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf
 
 (* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
    posts and 588 are automation; the 22 a person wrote are what an operator is
@@ -3511,7 +3597,7 @@ let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
       Ansi.dim
-      ^ "  hearths: none counted yet \xe2\x80\x94 f narrows once they are"
+      ^ "  H:choose hearth · f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -3583,7 +3669,7 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  order %s · s cycles ranking"
+    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -3652,8 +3738,8 @@ let render_board_list (state : state) =
           else " 0"
         in
         let replies_text =
-          if p.bp_comment_count > 0 then Printf.sprintf "💬%d" p.bp_comment_count
-          else "c0"
+          if p.bp_comment_count > 0 then Printf.sprintf "%d" p.bp_comment_count
+          else "0"
         in
         let values =
           { Render_schedule.brow_mark = board_kind_mark p.bp_kind
@@ -3667,11 +3753,10 @@ let render_board_list (state : state) =
           }
         in
         let styles =
-          { Render_schedule.bstyle_id =
-              Masc_tui_theme.tone Masc_tui_theme.Accent
+          { Render_schedule.bstyle_id = Theme.recede ()
           ; bstyle_hearth =
               if String.equal hearth_text "" then Ansi.dim else (Theme.info ())
-          ; bstyle_author = Masc_tui_theme.tone Masc_tui_theme.Accent
+          ; bstyle_author = Theme.ok ()
           ; bstyle_age = Ansi.dim
           ; bstyle_score = board_score_style p.bp_votes
           ; bstyle_replies =
@@ -3695,8 +3780,7 @@ let render_board_list (state : state) =
 
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         "j/k:move  PgUp/PgDn:page  right/Enter:read  s:sort  f:hearth  Y:copy link  v/V:vote  w:write  r:refresh  Tab:next");
+       ~hints:(Masc_tui_keys.footer_hints state.view));
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
@@ -4069,17 +4153,6 @@ let planning_phase_label phase = Goal_phase.to_string phase
    [complet~] with sixty columns of space to its right -- the mark that says
    "there was more" on a value nothing was cut from. Taken from the phase list
    so a new phase widens the column instead of losing its last letter. *)
-(* Rows the Planning list spends above its goals, and the row it holds below
-   them for the selected goal's verdict. Both were bare numbers at the two
-   places that read them, and both went up by two when the list gained the
-   column names it never had. Still tallied rather than counted: the counted
-   form needs the rows below the list to be certain, and being one short is
-   silent -- the frame drops its last row, which is the footer. #32928 carries
-   that change for the three surfaces where the tail is already established. *)
-(* One more than it was: the JUDGE legend sits under the column header. *)
-let planning_list_chrome_rows = 15
-let planning_list_verdict_rows = 2
-
 let planning_phase_column =
   List.fold_left
     (fun widest phase ->
@@ -4278,6 +4351,12 @@ let render_planning_list (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let tail = Buffer.create 256 in
+  box_bottom tail cols;
+  Buffer.add_string tail
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints state.view));
+  let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
   let now = Unix.localtime now_unix in
@@ -4292,6 +4371,10 @@ let render_planning_list (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  Sort [s]: %s · Filter [f]: %s"
+       (planning_sort_label state.planning_sort)
+       (planning_filter_label state.planning_filter));
   box_divider buf cols;
 
   let goals =
@@ -4313,7 +4396,7 @@ let render_planning_list (state : state) =
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
-       for _ = 1 to rows - boxed_surface_chrome_rows - 1 do
+       for _ = 1 to rows - count_frame_lines buf - tail_rows do
          box_empty buf cols
        done
    | Some p ->
@@ -4373,6 +4456,15 @@ let render_planning_list (state : state) =
          |> String.concat backlog_sep
        in
        box_line buf cols rollup;
+       box_line_styled buf cols ~style:(Theme.info ())
+         (match state.planning_baseline with
+          | None -> "  Trend: waiting for the first successful reading"
+          | Some first ->
+              Printf.sprintf "  Net change since %s: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                (Terminal_text.single_line first.pl_generated_at)
+                (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
+                (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
+                (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
        box_line buf cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        box_divider buf cols;
@@ -4388,8 +4480,15 @@ let render_planning_list (state : state) =
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
           read straight off, and every one of them changes what to do next. *)
-       box_line_styled buf cols ~style:Ansi.dim
-         ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
+       (* Reserve the divider, a goal (or empty note), and the selected
+          verdict before spending a row on the legend. At the minimum
+          height the headers and summary stay in place and a goal remains
+          visible; taller frames get the legend back. *)
+       let selection_rows = if count = 0 then 0 else 1 in
+       let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
+       if count_frame_lines buf + 1 + rows_after_legend <= rows then
+         box_line_styled buf cols ~style:Ansi.dim
+           ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
        box_divider buf cols;
 
        if count = 0 then begin
@@ -4401,12 +4500,14 @@ let render_planning_list (state : state) =
            | _ -> "  no goals in this filter (f to change)"
          in
          box_line buf cols (Ansi.dim ^ empty_note ^ Ansi.reset);
-         for _ = 1 to rows - planning_list_chrome_rows do
+         for _ = 1 to rows - count_frame_lines buf - tail_rows do
            box_empty buf cols
          done
        end else begin
          (* One row is reserved below the list for the selected goal's verdict. *)
-         let content_height = rows - planning_list_chrome_rows - planning_list_verdict_rows in
+         let content_height =
+           rows - count_frame_lines buf - selection_rows - tail_rows
+         in
          let scroll_offset =
            if state.planning_cursor >= content_height then
              state.planning_cursor - content_height + 1
@@ -4513,11 +4614,7 @@ let render_planning_list (state : state) =
                (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset)
        end);
 
-  box_bottom buf cols;
-
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+  Buffer.add_buffer buf tail;
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
@@ -7861,22 +7958,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let run_lines =
       match state.fusion_runs with
-      | None -> [ Ansi.dim ^ "  (loading this Keeper's Fusion runs…)" ^ Ansi.reset ]
-      | Some snapshot ->
-          let runs =
-            List.filter
-              (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_keeper k.k_name)
-              snapshot.fus_runs
-          in
-          if runs = [] then [ Ansi.dim ^ "  (no retained Fusion runs for this Keeper)" ^ Ansi.reset ]
-          else
-            List.map
-              (fun (run : Tui_decode.fusion_run) ->
-                 Printf.sprintf "  %-12s %-16s %s"
-                   (Tui_decode.fusion_run_status_to_string run.fur_status)
-                   (Terminal_text.single_line run.fur_preset)
-                   (Terminal_text.single_line run.fur_run_id))
-              runs
+      | None -> ["  Loading Fusion runs..."]
+      | Some _ ->
+          let runs = selected_keeper_runs state in
+          "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
+          (if runs = [] then ["  No retained Fusion runs for this Keeper"]
+           else List.mapi (fun index (run : Tui_decode.fusion_run) ->
+             let tm = Unix.localtime run.fur_started_at in
+             Printf.sprintf "%s %04d-%02d-%02d %02d:%02d · %s · %s · %s"
+               (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
+                     (selected_keeper_run state) then ">" else " ")
+               (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+               tm.Unix.tm_hour tm.Unix.tm_min
+               (Tui_decode.fusion_run_status_to_string run.fur_status)
+               (Terminal_text.single_line run.fur_preset)
+               (Terminal_text.single_line run.fur_run_id)) runs)
     in
     let all_lines =
       match state.detail_tab with
@@ -7966,6 +8062,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let scroll =
       Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
         ~content_height state.detail_scroll
+      |> fun scroll ->
+        if state.detail_tab = Detail_runs then
+          Option.fold ~none:scroll
+            ~some:(fun (cursor, _) ->
+              Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
+                ~height:(max 1 content_height) scroll)
+            (selected_keeper_run state)
+        else scroll
     in
 
     for i = 0 to visible_lines - 1 do
@@ -11557,8 +11661,17 @@ let fusion_run_progress_text = function
   | Fusion_stage_failed -> "failed"
 
 let fusion_run_clock run =
-  Terminal_text.clock_timestamp
-    (Masc_domain.iso8601_of_unix_seconds run.fur_started_at)
+  let tm = Unix.localtime run.fur_started_at in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min
+
+let fusion_run_duration ~now run =
+  match run.fur_status, run.fur_finished_at with
+  | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
+  | (Fusion_completed | Fusion_failed _), Some finished ->
+      Message_layout.span_text (finished -. run.fur_started_at)
+  | (Fusion_completed | Fusion_failed _), None -> "not recorded"
 
 let fusion_run_age ~now run =
   Option.value ~default:"\xe2\x80\x94"
@@ -11648,15 +11761,15 @@ let render_fusion_list (state : state) =
   in
   (* The run id takes what the named columns leave, once the keeper column has
      been sized to the names it actually holds. *)
-  let run_width =
-    Render_schedule.fusion_run_width ~keeper_width
+  let columns =
+    Render_schedule.allocate_fusion_columns ~keeper_width
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Render_schedule.fusion_header_row ~keeper_width ~run_width);
+    ("  " ^ Render_schedule.fusion_header_row columns);
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -11700,7 +11813,7 @@ let render_fusion_list (state : state) =
             | Fusion_completed | Fusion_failed _ -> status
           in
           let line =
-            Render_schedule.fusion_row ~keeper_width ~run_width
+            Render_schedule.fusion_row columns
               ~state_style:(fusion_run_status_color run.fur_status)
               { Render_schedule.frow_time = fusion_run_clock run
               ; frow_age = fusion_run_age ~now:now_epoch run
@@ -11718,7 +11831,7 @@ let render_fusion_list (state : state) =
    | None -> box_empty buf cols
    | Some selected ->
        let style, summary = fusion_run_summary selected in
-       box_line_styled buf cols ~style ("  " ^ summary));
+       box_line_styled buf cols ~style ("  " ^ fusion_run_duration ~now:now_epoch selected ^ " · " ^ summary));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -11937,7 +12050,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
     ; ( Ansi.reset
-      , Printf.sprintf "  Actions: %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
+      , Printf.sprintf "  Actions: K Keeper · B Board · %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
           (Theme.info ()) Ansi.reset
           (Theme.info ()) Ansi.reset
           (Theme.info ()) Ansi.reset )
@@ -11959,8 +12072,14 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     ; ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ started_text
+    ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"
+    ; Ansi.reset, "  Duration: " ^ fusion_run_duration ~now run
     ]
+    @ (match detail.fud_evidence with
+       | None -> [Ansi.dim, "  Original question and Board link: awaiting evidence"]
+       | Some evidence ->
+           [ Theme.info (), "  Board: " ^ Link.reference Board_post evidence.fe_post_id
+           ; Ansi.bold, "  Original question: " ^ Terminal_text.single_line evidence.fe_question ])
     @
     match run.fur_status with
     | Fusion_running -> []
@@ -12320,8 +12439,7 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = workspace_activity_rows state in
-  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  let rows, cursor, selected = workspace_activity_selection state in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
     ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
@@ -12360,7 +12478,7 @@ let render_workspace_activity (state : state) repo_id =
                 if first + i = cursor then c.push_selected line else c.push line
           done;
           c.push_divider ();
-          c.push (match List.nth_opt rows cursor with
+          c.push (match selected with
             | None -> "  Task and file links appear when a recorded change names them"
             | Some (change, path) ->
                 "  " ^ Terminal_text.single_line path ^ " · " ^
@@ -12961,11 +13079,12 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf
-          "%s (%d keepers · %d failed/no ordinary · %d ordinary facts [o%d/d%d] · %d support-invalidated · %d source facts)  %s  %s"
+        Printf.sprintf "%s · %d keepers · %d need memory · read %s (local)  %s"
           (screen_title " MASC Memory") shown s.mhs_starving_keepers
-          s.mhs_total_facts s.mhs_total_observed_facts s.mhs_total_derived_facts
-          s.mhs_total_support_invalidations s.mhs_total_source_facts timestamp
+          (let tm = Unix.localtime s.mhs_generated_at in
+           Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+             (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+             tm.Unix.tm_hour tm.Unix.tm_min)
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"
@@ -16713,9 +16832,24 @@ let render_surface (state : state) =
        | Board_list -> render_board_list state
        | Board_compose -> render_board_compose state
        | Board_read post_id ->
-           match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
-           | Some post -> render_board_read state post
-           | None -> render_board_list state)
+           match Board_detail.view_for state.board_detail ~post_id with
+           | Board_detail.Ready (post, _) -> render_board_read state post
+           | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+               (match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
+                | Some post -> render_board_read state post
+                | None ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    surface_chrome state ~terminal_rows ~cols ~surface_key:"board-read"
+                      ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~body:(fun ~budget:_ c ->
+                        match Board_detail.view_for state.board_detail ~post_id with
+                        | Board_detail.Failed detail ->
+                            c.push_styled ~style:(Theme.bad ())
+                              ("  Board post load failed: " ^ Terminal_text.single_line detail)
+                        | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
+                        | Board_detail.Loading -> c.push "  Loading Board post..."
+                        | Board_detail.Ready _ -> ())))
   | Planning ->
       (match state.planning_mode with
        | Planning_list -> render_planning_list state
@@ -16726,6 +16860,8 @@ let render_surface (state : state) =
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
+  | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
+      render_question_reader state
   | Approvals ->
       (* Open on the row the cursor is on. An ask that resolves while it is
          open takes the row with it, so the detail closes rather than showing

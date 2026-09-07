@@ -1,8 +1,19 @@
 (* TUI settings read from the [tui] table of runtime.toml. The server reads the
    rest of that file for its own turn/provider config; the TUI reads only the
    handful of keys it draws, so this stays a small client-side read rather than
-   a round-trip through the server. The path is resolved the same way
+   a round-trip through the server. One read supplies all startup choices.
+   The path is resolved the same way
    keeper_runtime_config resolves it, so both processes read one file. *)
+
+type t = {
+  theme : string option;
+  board_sort : string option;
+  lift_colours : bool option;
+  table_frame : bool option;
+  hints_visible : bool option;
+  coalesce_queued_input : bool option;
+  voice_send_on_stop : bool option;
+}
 
 let runtime_toml_path ~base_path =
   let inputs = Config_dir_resolver.inputs_from_env () in
@@ -25,11 +36,6 @@ let doc_of_path path =
    the terminal exactly as it did before this key existed. *)
 let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc "tui.theme"
 
-let theme ~base_path =
-  match doc_of_path (runtime_toml_path ~base_path) with
-  | None -> None
-  | Some doc -> theme_of_doc doc
-
 (* The writer for the one key above that changes while masc runs. The other
    settings in this file are read once at boot and never moved from inside
    the TUI, so they have nothing to store; the theme is picked on a pane, and
@@ -37,7 +43,7 @@ let theme ~base_path =
 
    [None] withdraws the choice: the key is removed rather than set to a name
    meaning "the terminal's", because absence is the state the reader is going
-   back to -- the same absence [theme] already reads as "no stored choice".
+   back to -- the same absence [load] reads as "no stored choice".
 
    Pure, and deliberately spelled in the editor's table-and-key form while
    [theme_of_doc] reads the loader's dotted form. The two grammars are not
@@ -46,7 +52,7 @@ let theme ~base_path =
 let text_with_theme content ~theme =
   Toml_line_editor.edit_table_scalar content ~path:"tui" ~key:"theme" ~value:theme
 
-(* Store [theme] in the same runtime.toml [theme] reads. Runtime does the
+(* Store [theme] in the same runtime.toml [load] reads. Runtime does the
    load, the edit and the write under one lock, so the keeper assignment an
    operator changes from the dashboard at that moment is not lost.
 
@@ -79,21 +85,11 @@ let set_theme ~base_path theme =
    reader's call to make, which is the point of the key. *)
 let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.lift_colours"
 
-let lift_colours ~base_path =
-  match doc_of_path (runtime_toml_path ~base_path) with
-  | None -> None
-  | Some doc -> lift_colours_of_doc doc
-
 (* Whether tables draw their outer box, [tui].table_frame. Absent reads as
    "no", which is what the pane drew before the key existed: the box is paid
    for out of the columns, and taking a cell of content from a reader who did
    not ask is the change that needs the stronger reason. *)
 let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.table_frame"
-
-let table_frame ~base_path =
-  match doc_of_path (runtime_toml_path ~base_path) with
-  | None -> None
-  | Some doc -> table_frame_of_doc doc
 
 (* Whether footers spell their key hints, [tui].hints_visible. Absent reads
    as "yes" -- the hints predate the key, and a reader who never set it must
@@ -103,11 +99,6 @@ let table_frame ~base_path =
    reader who turned hints off still needs the door back. *)
 let hints_visible_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc "tui.hints_visible"
-
-let hints_visible ~base_path =
-  match doc_of_path (runtime_toml_path ~base_path) with
-  | None -> None
-  | Some doc -> hints_visible_of_doc doc
 
 (* Whether a line typed while an earlier one is still waiting joins that line
    instead of queueing behind it, [tui].coalesce_queued_input. Absent reads as
@@ -133,19 +124,17 @@ let coalesce_queued_input_of_doc doc =
 let voice_send_on_stop_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc "tui.voice_send_on_stop"
 
-let coalesce_queued_input ~base_path =
-  match doc_of_path (runtime_toml_path ~base_path) with
-  | None -> None
-  | Some doc -> coalesce_queued_input_of_doc doc
-
-let voice_send_on_stop ~base_path =
-  match doc_of_path (runtime_toml_path ~base_path) with
-  | None -> None
-  | Some doc -> voice_send_on_stop_of_doc doc
-
-let board_sort ~base_path =
-  Option.bind (doc_of_path (runtime_toml_path ~base_path))
-    (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort")
+let load ~base_path =
+  let doc = doc_of_path (runtime_toml_path ~base_path) in
+  let read extract = Option.bind doc extract in
+  { theme = read theme_of_doc;
+    board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort");
+    lift_colours = read lift_colours_of_doc;
+    table_frame = read table_frame_of_doc;
+    hints_visible = read hints_visible_of_doc;
+    coalesce_queued_input = read coalesce_queued_input_of_doc;
+    voice_send_on_stop = read voice_send_on_stop_of_doc;
+  }
 
 let set_board_sort ~base_path sort =
   match Runtime.edit_config_text

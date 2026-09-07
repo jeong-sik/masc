@@ -109,8 +109,12 @@ let test_defaults_pinned () =
     (S.Hardening.require_userns ());
   (* Cleanup *)
   (* Runtime *)
-  check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
-    (S.Runtime.docker_image ());
+  (* Not a default: with_clean_sandbox_env installs this name from
+     string_env_defaults, so this reads back what it set. The code's default
+     is Keeper_sandbox_image.default_tag and Test_sandbox_image_recipe pins
+     it, which it can only do on a host that leaves the name unset. *)
+  check string "Runtime.docker_image reads the env it was given"
+    "masc-keeper-sandbox:local" (S.Runtime.docker_image ());
   check bool "Runtime.docker_playground_enabled default" false
     (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
@@ -222,6 +226,37 @@ let test_relax_fs_propagates_to_derived () =
     check bool "tmpfs_mount drops noexec when relax_fs"
       true (not contains_noexec))
 
+(* Six paths that start a container used to read a Keeper's declaration
+   inline, and one of the six trimmed it while the other five handed the
+   surrounding whitespace to the runtime as part of the tag. These pin the one
+   reading they now share. *)
+let test_declared_image_wins () =
+  check string "the Keeper's own tag"
+    "example.invalid/keeper:v3"
+    (S.Runtime.image_declared_or_default (Some "example.invalid/keeper:v3"))
+
+(* Named rather than left to the ambient environment: an operator who exports
+   MASC_KEEPER_SANDBOX_DOCKER_IMAGE is a correct configuration, and a test that
+   read it would pass without touching the fallback. *)
+let test_undeclared_image_is_the_configured_one () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+    (Some "example.invalid/fallback:v1") (fun () ->
+      check string "no declaration falls to the configured image"
+        "example.invalid/fallback:v1"
+        (S.Runtime.image_declared_or_default None))
+
+let test_whitespace_is_not_part_of_the_tag () =
+  check string "a declaration is trimmed"
+    "example.invalid/keeper:v3"
+    (S.Runtime.image_declared_or_default (Some "  example.invalid/keeper:v3\n"))
+
+let test_a_declaration_of_only_whitespace_is_no_declaration () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+    (Some "example.invalid/fallback:v1") (fun () ->
+      check string "whitespace declares nothing"
+        "example.invalid/fallback:v1"
+        (S.Runtime.image_declared_or_default (Some "   ")))
+
 let () =
   run "env_config_sandbox"
     [ ( "defaults",
@@ -244,5 +279,14 @@ let () =
     ; ( "filesystem",
         [ test_case "relax_fs propagates to derived" `Quick
             test_relax_fs_propagates_to_derived
+        ] )
+    ; ( "sandbox image",
+        [ test_case "a declared image wins" `Quick test_declared_image_wins
+        ; test_case "no declaration is the configured image" `Quick
+            test_undeclared_image_is_the_configured_one
+        ; test_case "whitespace is not part of the tag" `Quick
+            test_whitespace_is_not_part_of_the_tag
+        ; test_case "a declaration of only whitespace is no declaration" `Quick
+            test_a_declaration_of_only_whitespace_is_no_declaration
         ] )
     ]

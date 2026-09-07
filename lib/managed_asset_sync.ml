@@ -324,8 +324,14 @@ let sync ~domain ~read ~files ~dest_dir () =
          then (
            (* Both sides live inside this binary: [current] is what the crunch
               step embedded, [managed] is what the embedded manifest declares.
-              They can only disagree in a half-built binary, so name the
-              direction and the remedy. The previous wording ("manifest differs
+              They disagree two ways. A half-built binary is one. The other,
+              and the one that actually happens, is a source tree whose
+              manifest was not updated alongside the asset: then the binary is
+              built correctly and rebuilding reproduces the same mismatch.
+              Measured 2026-09-06 -- #33472 and #33639 each added tool TOMLs
+              without their manifest line, and every boot since told an
+              operator to rebuild, which could not have worked. So name both
+              directions and both remedies. The previous wording ("manifest differs
               from current assets") left the reader to guess whether the
               runtime directory, the source tree, or the build was at fault;
               one 2026-08-25 recovery attempt spent half an hour on that
@@ -339,10 +345,12 @@ let sync ~domain ~read ~files ~dest_dir () =
              failed =
                [ ( manifest_path domain
                  , Printf.sprintf
-                     "half-built binary: its embedded %s set and its %s do not \
-                      match, so rebuild before starting. Embedded but unlisted: \
-                      %s. Listed but not embedded: %s."
+                     "the embedded %s set and its %s do not match. Either the \
+                      manifest is missing a line for the asset beside it (edit %s \
+                      and rebuild), or this binary is half-built (rebuild). \
+                      Embedded but unlisted: %s. Listed but not embedded: %s."
                      (noun domain)
+                     (manifest_path domain)
                      (manifest_path domain)
                      (render missing)
                      (render extra) )

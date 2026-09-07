@@ -706,7 +706,9 @@ let test_response_finalization_keeps_visible_reply_only () =
       ~suppress_response_text:true
       ()
   in
-  check string "explicit suppression is empty" "" suppressed.response_text
+  check string "suppression preserves the observed response"
+    "Internal completion text" suppressed.response_text;
+  check bool "suppression belongs to the replay decision" true suppressed.withheld_from_replay
 ;;
 
 (* A rejected [keeper_task_done] carries producer-owned typed outcome data.
@@ -976,7 +978,7 @@ let test_default_done_is_terminal () =
    The declared parameter must reach the transition record — the audit entry
    for the submission carries it in details — while handoff_context.summary
    keeps the result summary. *)
-let test_done_passes_declared_notes_to_transition () =
+let check_done_notes ~notes_fields ~expected_notes () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -1010,11 +1012,11 @@ let test_done_passes_declared_notes_to_transition () =
            ~name:"keeper_task_done"
            ~args:
              (`Assoc
-               [ "task_id", `String "task-001"
+               ([ "task_id", `String "task-001"
                ; "result", `String "implementation complete"
-               ; "notes", `String "handoff notes for the next keeper"
+
                ; "evidence_refs", `List [ `String "note:commit abc123" ]
-               ])
+               ] @ notes_fields))
        in
        (match execution.disposition with
         | Tool_result.Completed () -> ()
@@ -1053,79 +1055,35 @@ let test_done_passes_declared_notes_to_transition () =
        (match submission_notes with
         | Some notes ->
           check string "declared notes reach the transition record"
-            "handoff notes for the next keeper" notes
+            expected_notes notes
         | None ->
           fail
             "no task_submit_for_verification audit entry carries a notes field"))
 
-(* task-1426 fallback: a caller that omits notes keeps the pre-repair
-   behavior — the result text falls back into the transition's notes field,
-   so the transition's non-empty-notes requirement stays satisfied for
-   existing callers that never passed notes. *)
-let test_done_without_notes_falls_back_to_result () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       Masc.Workspace_metric_hooks.install ();
-       let config = Masc.Workspace.default_config base_path in
-       let agent_name = "task-create-test" in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       ignore
-         (Masc.Workspace.add_task
-            config
-            ~title:"Notes fallback"
-            ~priority:2
-            ~description:"");
-       ignore
-         (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
-       (match
-          Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" ()
-        with
-        | Ok _ -> ()
-        | Error error ->
-          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
-       let meta = keeper_meta () in
-       let execution =
-         Task.handle_keeper_task_tool_with_outcome
-           ~config
-           ~meta
-           ~name:"keeper_task_done"
-           ~args:
-             (`Assoc
-               [ "task_id", `String "task-001"
-               ; "result", `String "implementation complete"
-               ; "evidence_refs", `List [ `String "note:commit abc123" ]
-               ])
-       in
-       (match execution.disposition with
-        | Tool_result.Completed () -> ()
-        | Tool_result.Deferred () ->
-          fail "notes fallback completion was deferred"
-        | Tool_result.Failed _ ->
-          fail ("notes fallback completion failed: " ^ execution.raw_output));
-       let audit_entries = Masc.Audit_log.read_entries ~n:50 config in
-       let submission_notes =
-         List.find_map
-           (fun (entry : Masc.Audit_log.audit_entry) ->
-              match entry.action with
-              | Masc.Audit_log.Custom "task_submit_for_verification" ->
-                (match entry.details with
-                 | `Assoc kvs ->
-                   (match List.assoc_opt "notes" kvs with
-                    | Some (`String notes) -> Some notes
-                    | _ -> None)
-                 | _ -> None)
-              | _ -> None)
-           audit_entries
-       in
-       (match submission_notes with
-        | Some notes ->
-          check string "omitted notes fall back to the result text"
-            "implementation complete" notes
-        | None ->
-          fail
-            "no task_submit_for_verification audit entry carries a notes field"))
+let test_done_passes_declared_notes_to_transition () =
+  List.iter (fun text ->
+    check_done_notes ~notes_fields:[ "notes", `String text ] ~expected_notes:text ())
+    [ "handoff notes for the next keeper"; ""; "  preserved spacing\nsecond line  " ]
+
+let test_done_without_notes_stays_absent () =
+  check_done_notes ~notes_fields:[] ~expected_notes:"" ()
+
+let test_done_rejects_malformed_notes () =
+  List.iter (fun notes ->
+    let base_path = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = keeper_meta () in
+      let outcome = Task.handle_keeper_task_tool_with_outcome ~config ~meta
+        ~name:"keeper_task_done"
+        ~args:(`Assoc [ "task_id", `String "task-001"; "result", `String "completed work"
+                     ; "notes", notes; "evidence_refs", `List [ `String "note:evidence" ] ]) in
+      match outcome.disposition with
+      | Tool_result.Failed _ ->
+        check bool "malformed note creates no workspace state" true
+          (Array.length (Sys.readdir base_path) = 0)
+      | Tool_result.Completed () | Tool_result.Deferred () -> fail "malformed note was accepted"))
+    [ `Null; `Int 7; `Bool false; `List [] ]
 
 (* task-540: an oversized artifact: evidence list must be refused at the
    keeper_task_done boundary with the byte count and the note: escape hatch,
@@ -1165,6 +1123,10 @@ let test_done_refuses_oversized_artifact_evidence () =
        (* Producer playground fixture: the artifact size check resolves
           [artifact:<path>] against the agent's sandbox root, so the file
           must exist there for the byte count to be measurable at all. *)
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       Fs_compat.mkdir_p keepers_dir;
+       Out_channel.with_open_text (Filename.concat keepers_dir (agent_name ^ ".toml"))
+         (fun channel -> output_string channel "[keeper]\nsandbox_profile = \"docker\"\n");
        let producer_root =
          Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path:
@@ -1416,7 +1378,9 @@ let () =
             "done passes the declared notes parameter to the transition (task-1426)"
             `Quick test_done_passes_declared_notes_to_transition
         ; test_case
-            "done without notes falls back to the result text (task-1426)"
-            `Quick test_done_without_notes_falls_back_to_result
+            "done without notes does not invent handoff notes"
+            `Quick test_done_without_notes_stays_absent
+        ; test_case "malformed notes fail before workspace mutation" `Quick
+            test_done_rejects_malformed_notes
         ] )
     ]

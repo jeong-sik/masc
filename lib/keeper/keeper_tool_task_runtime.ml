@@ -1092,21 +1092,23 @@ let handle_keeper_task_tool_with_outcome
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
-    (* task-1426: the schema (config/tools/keeper_task_done.toml) declares a
-       [notes] parameter ("Verification handoff notes"), but the handler used
-       to drop it and inject [result_text] into the transition's notes field
-       instead — a schema-behavior mismatch that silently discarded whatever
-       the submitter wrote in notes (live case: geek-scout's 767B and
-       polisher's 876B notes both vanished from every record). Parse the
-       declared parameter and pass it through; [result_text] stays on
-       handoff_context.summary, where the result summary belongs. When the
-       caller omits notes, fall back to [result_text] so pre-existing callers
-       that relied on the old injection keep a non-empty transition notes
-       field. *)
-    let notes_text =
-      let supplied = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
-      if supplied = "" then result_text else supplied
+    (* Preserve the optional handoff note independently of the result summary.
+       A present note, including an empty string, is never replaced. *)
+    let notes =
+      match Json_field.string args "notes" with
+      | Json_field.Found text -> Ok [ "notes", `String text ]
+      | Json_field.Field_absent -> Ok []
+      | Json_field.Wrong_shape { expected; got } ->
+        Error (Printf.sprintf "notes must be %s, got %s" expected got)
     in
+    (match notes with
+    | Error message ->
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:(Keeper_tool_outcome.Error { reason = message })
+           message)
+    | Ok notes ->
     if task_id = ""
     then
       Keeper_tool_execution.failure
@@ -1169,16 +1171,12 @@ let handle_keeper_task_tool_with_outcome
         [
           "task_id", `String task_id;
           "action", `String action;
-          (* task-1426: pass the declared [notes] parameter through instead of
-             overwriting it with [result_text]. The result summary still lands
-             on handoff_context.summary below. *)
-          "notes", `String notes_text;
           ( "handoff_context",
             `Assoc
               [ "summary", `String result_text
               ; "evidence_refs", Json_util.json_string_list evidence_refs
               ] );
-        ]
+        ] @ notes
       in
       let transition_result =
         Task.Tool.handle_transition
@@ -1212,7 +1210,7 @@ let handle_keeper_task_tool_with_outcome
       | Tool_result.Deferred { metadata; _ } ->
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
-        Keeper_tool_execution.failure ~class_ payload)))
+        Keeper_tool_execution.failure ~class_ payload))))
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

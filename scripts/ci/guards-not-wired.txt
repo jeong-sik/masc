@@ -22,6 +22,10 @@
 # audit-*. They were not passing this check, they were not in it. Counts went
 # 76/23 to 103/45.
 #
+scripts/check-memory-leak.sh  # tool: builds and runs a server
+scripts/check_silent_failure.sh  # green, not proven to fail yet
+scripts/dashboard-drift-check.sh  # green, not proven to fail yet
+scripts/viewer-local-e2e-check.sh  # tool: needs a running viewer
 scripts/audit-agent-core-payload.py  # tool: reads the live .masc trace store
 scripts/audit-catchall.sh  # report
 scripts/audit-code-smell.sh  # report
@@ -53,10 +57,8 @@ scripts/check-release-train-guard.sh
 scripts/check-sandbox-dune-version.sh
 scripts/check-toml-syntax.sh
 scripts/ci/check-env-snapshot-default-drift.py  # red
-scripts/ci/check-spec-file-refs.py
 scripts/ci/check-tla-harness-coverage.sh
 scripts/ci/check-yaml-syntax.py
-scripts/ci/check_env_reads_below_config.py  # red
 scripts/ci/check_exact_field_decoder_preflight.py  # red
 scripts/lib/worktree-cleanup-guards.sh
 scripts/tla-bug-model-ratchet.sh

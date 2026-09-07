@@ -165,6 +165,25 @@ blocking_lints() {
   # the first, an OCaml constructor the TLA set does not carry trips the
   # second. --check-cross-spec is opt-in and nothing was opting in, so the
   # three cross-spec sets it compares were compared nowhere.
+  # #32511 replaced the nine-job lane with one manual job. One step it deleted
+  # was "Meta bug-class gates (SSOT, SIL, STR, BND)", nine guards run together
+  # (#9516 #9517 #9519 #9521). Of those nine: two scripts no longer exist,
+  # check_model_prefix_inheritance is above, check_exact_field_decoder_preflight
+  # is red (#34018), and these five are green. Each was proven to fail by
+  # injection -- a spawn_config_of_key reference, a try ignore (, a docs/spec
+  # page naming a missing file, a Mirrors: pointing nowhere, and for the env
+  # floor by having been red until #34056.
+  run_lint "SSOT spawn drift" bash scripts/ci/check-ssot-spawn-drift.sh
+  run_lint "Silent failure patterns" \
+    bash scripts/ci/check-silent-failure-patterns.sh
+  run_lint "Spec Mirrors: references resolve" bash scripts/check-spec-truth.sh
+  run_lint "docs/spec names files that exist" \
+    python3 scripts/ci/check-spec-file-refs.py
+  run_lint "Env-read config floor self-test" \
+    python3 scripts/ci/check_env_reads_below_config.py --self-test
+  run_lint "Env reads below the config floor" \
+    python3 scripts/ci/check_env_reads_below_config.py
+
   # Both were red on main until today, which is the proof they can fail:
   # audit-path-ssot for one expanduser site (#34080), audit-odoc-refs for two
   # references its own field pattern could not resolve (#34081).

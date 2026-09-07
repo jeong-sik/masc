@@ -71,7 +71,32 @@ let test_disabled_blocks_outbound () =
          (option string)
          "operator reason"
          (Some "Slack connector disabled by [slack] enabled=false")
-         (Env.unavailable_reason ()))
+         (Env.unavailable_reason ());
+       with_env
+         "MASC_SLACK_BINDING_STORE_PATH"
+         (Filename.concat config_root "bindings.json")
+         (fun () ->
+            with_env
+              "MASC_SLACK_BINDING_AUDIT_PATH"
+              (Filename.concat config_root "audit.jsonl")
+              (fun () ->
+                 let status = State.connector_json () in
+                 let field key = Yojson.Safe.Util.member key status in
+                 check
+                   string
+                   "existing offline status vocabulary"
+                   "offline"
+                   (Yojson.Safe.Util.to_string (field "status"));
+                 check
+                   bool
+                   "unavailable"
+                   false
+                   (Yojson.Safe.Util.to_bool (field "available"));
+                 check
+                   string
+                   "connector projection explains disable policy"
+                   "Slack connector disabled by [slack] enabled=false"
+                   (Yojson.Safe.Util.to_string (field "error")))))
 ;;
 
 let test_true_restores_enabled () =

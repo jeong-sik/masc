@@ -47,7 +47,9 @@ and the separate OAuth identity configuration do not consult this setting.
 Missing `enabled` preserves the existing enabled behavior; `true` enables it.
 Non-boolean values, malformed TOML, or an unreadable existing configuration file
 disable the API connector with a configuration error. Changes apply at startup;
-this is not a hot disconnect switch.
+this is not a hot disconnect switch. Other runtime configuration validators can
+still reject the entire startup for malformed `runtime.toml`; this policy does
+not make an invalid server configuration bootable.
 
 Native automation uses stock Firefox through OCaml WebDriver; see
 [native-firefox-lane.md](native-firefox-lane.md). It has an isolated profile,

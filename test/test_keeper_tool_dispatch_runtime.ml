@@ -7344,7 +7344,7 @@ let validate_probe_output ~tool_name ~data =
        failf "%s output validation failed before reaching the schema" tool_name)
 
 let test_lane_status_observations_remain_composable () =
-  let module Profile = Masc.Keeper_types_profile_sandbox in
+  let module Profile = Masc.Keeper_types_profile in
   with_exec_fixture
     ~always_allow:true
     "lane-status-composable-observations"

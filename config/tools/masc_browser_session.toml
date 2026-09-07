@@ -1,7 +1,8 @@
 name = "masc_browser_session"
 description = """
-Open or close the automation lane's keeper-dedicated browser (a Playwright \
-Firefox build with its own profile, separate from the operator's session). \
+Open or close the automation lane's keeper-dedicated stock Firefox browser \
+through MASC's OCaml WebDriver client, with an isolated profile separate \
+from the operator's session. Configure browser.webdriver_url first. \
 Action "open" launches it (headless by default), "close" shuts it down. \
 The live lane has no session to manage — the operator's browser owns \
 itself. After open, use masc_browser_goto and masc_browser_read with \

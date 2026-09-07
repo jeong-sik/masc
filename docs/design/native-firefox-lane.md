@@ -13,8 +13,10 @@ webdriver_url = "http://127.0.0.1:4444"
 
 Run `geckodriver --host 127.0.0.1 --port 4444`, then restart MASC. Session
 open/close, navigation, tab listing and page reading use the native executor.
-The configured endpoint must be a loopback HTTP origin. Without this setting,
-the existing automation command queue remains available.
+The configured endpoint must be a loopback HTTP origin. This setting is
+required for automation: without an installed native executor, automation
+commands return `Lane_absent`. The external poll/result endpoints accept
+only `live`; they cannot register or answer for automation.
 
 The OCaml client serializes commands for its owned session, retains stable
 integer tab IDs, reports WebDriver failures, and forgets invalid sessions so

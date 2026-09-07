@@ -2,10 +2,10 @@
     (docs/design/browser-lane.md, task-1382).
 
     A lane is one connected browser backend: "live" is the user's real
-    Firefox/Zen through the extension's native-messaging host, "automation"
-    is the Playwright daemon. Backends long-poll this process for commands
-    over HTTP ([Server_routes_http_routes_browser_lane]) and post results
-    back; keeper tools issue verbs and await the answer.
+    Firefox/Zen through the extension's native-messaging host. "automation"
+    is the in-process OCaml WebDriver executor. Only the live host long-polls
+    this process and posts results through the HTTP transport; automation
+    owns its session directly inside the server.
 
     Verbs are a closed variant: an unknown verb is refused by name on every
     boundary (tool input, lane issue, backend), the same rule the observe
@@ -79,9 +79,9 @@ type answer =
   | Timed_out
   | Refused of string
 
-(* Two lanes by design — "live" (the user's browser via the extension host)
-   and "automation" (the Playwright daemon). Anything else is refused. *)
-let allowed_lane_names = [ "live"; "automation" ]
+(* The public tool surface also accepts "automation", but external transports
+   can only register the operator's live browser. *)
+let external_lane_name = "live"
 
 type lane =
   { name : string
@@ -95,12 +95,12 @@ let lanes : (string, lane) Hashtbl.t = Hashtbl.create 4
 let lanes_mutex = Eio.Mutex.create ()
 
 let lane_named ~name =
+  if not (String.equal name external_lane_name) then None
+  else
   Eio.Mutex.use_rw ~protect:true lanes_mutex (fun () ->
       match Hashtbl.find_opt lanes name with
       | Some lane -> Some lane
       | None ->
-        if not (List.mem name allowed_lane_names) then None
-        else
           let lane =
             { name
             ; commands = Eio.Stream.create 16
@@ -130,6 +130,8 @@ let take_command ~lane_name ~window_sec =
 
 (* The result side: resolve the tool call waiting on this id. *)
 let deliver_result ~lane_name ~id ~payload =
+  if not (String.equal lane_name external_lane_name) then Error "unknown_lane"
+  else
   match Hashtbl.find_opt lanes lane_name with
   | None -> Error "unknown_lane"
   | Some lane ->
@@ -206,4 +208,5 @@ let issue ~lane_name ~verb ~timeout_sec =
     Eio.Fiber.first
       (fun () -> execute verb)
       (fun () -> Time_compat.sleep timeout_sec; Timed_out)
+  | "automation", None -> Lane_absent
   | _ -> issue_queued ~lane_name ~verb ~timeout_sec

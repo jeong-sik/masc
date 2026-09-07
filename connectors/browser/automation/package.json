@@ -1,6 +1,0 @@
-{
-  "name": "masc-browser-automation",
-  "private": true,
-  "main": "masc-browser-automation.js",
-  "dependencies": { "playwright": "^1.60.0" }
-}

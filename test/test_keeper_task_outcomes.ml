@@ -1074,14 +1074,22 @@ let test_done_rejects_malformed_notes () =
     Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let meta = keeper_meta () in
+      let before = Sys.readdir base_path |> Array.to_list |> List.sort String.compare in
       let outcome = Task.handle_keeper_task_tool_with_outcome ~config ~meta
         ~name:"keeper_task_done"
         ~args:(`Assoc [ "task_id", `String "task-001"; "result", `String "completed work"
                      ; "notes", notes; "evidence_refs", `List [ `String "note:evidence" ] ]) in
       match outcome.disposition with
       | Tool_result.Failed _ ->
-        check bool "malformed note creates no workspace state" true
-          (Array.length (Sys.readdir base_path) = 0)
+        let reason = Yojson.Safe.from_string outcome.raw_output
+          |> U.member "typed_outcome" |> U.member "reason" |> U.to_string in
+        let expected_shape = match notes with
+          | `Null -> "null" | `Int _ -> "int" | `Bool _ -> "bool"
+          | `List _ -> "list" | _ -> fail "unexpected test input" in
+        check string "rejected by the notes boundary"
+          ("notes must be string, got " ^ expected_shape) reason;
+        check (list string) "rejection adds no workspace entry" before
+          (Sys.readdir base_path |> Array.to_list |> List.sort String.compare)
       | Tool_result.Completed () | Tool_result.Deferred () -> fail "malformed note was accepted"))
     [ `Null; `Int 7; `Bool false; `List [] ]
 

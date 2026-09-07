@@ -850,8 +850,10 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.browser_session_schema.name
       ~description:Tool_schemas_misc.browser_session_schema.description
       ~input_schema:Tool_schemas_misc.browser_session_schema.input_schema
-      ~ordinary_execution_mode:Concurrent
-      ~policy:(policy ~readonly:true ())
+      (* Session lifecycle changes must preserve tool-call order relative to
+         browser reads and navigation in the same batch. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
       ~executor:In_process
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox

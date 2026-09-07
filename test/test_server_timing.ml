@@ -86,7 +86,7 @@ let test_phase_token_total_and_lowercase () =
     Tools_compute;
     Telemetry_query; Telemetry_filter;
     Telemetry_summary_per_keeper; Telemetry_summary_aggregate;
-    Json_serialize;
+    Json_serialize; Mcp_http_auth; Mcp_identity; Mcp_dispatch;
   ] in
   List.iter (fun p ->
     let tok = Server_timing.phase_token p in

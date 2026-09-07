@@ -257,11 +257,20 @@ let schedule_runner_status_json () =
        ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
 ;;
 
-let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
+let measure_health_phase timing phase f =
+  match timing with
+  | None -> f ()
+  | Some timing -> Server_timing.measure timing phase f
+
+let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") ~request_authority request =
   let uptime_secs = health_uptime_secs () in
-  let build = Build_identity.current () in
-  let path_diagnostics = health_path_diagnostics () in
+  let build =
+    measure_health_phase timing Server_timing.Health_build_identity Build_identity.current
+  in
+  let path_diagnostics =
+    measure_health_phase timing Server_timing.Health_paths health_path_diagnostics
+  in
   let full_health_url_fields =
     match full_health_url with
     | Some url -> [ ("full_health_url", `String url) ]
@@ -281,7 +290,8 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("http_listener", Transport_metrics.http_listener_json ());
       ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
       ( "internal_mcp_auth"
-      , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
+      , measure_health_phase timing Server_timing.Health_internal_auth (fun () ->
+          internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path) );
       ("otel", otel_health_json ());
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
@@ -289,16 +299,18 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
-      ("dashboard_surface", Web_dashboard.surface_status_json ());
+      ("dashboard_surface",
+       measure_health_phase timing Server_timing.Health_dashboard_surface
+         Web_dashboard.surface_status_json);
       ("subsystems", Subsystem_health.to_yojson ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
       ("scheduler", scheduler_json ());
     ]
 
-let make_health_probe_json ?(listener = "http/1.1") ~request_authority request =
+let make_health_probe_json ?timing ?(listener = "http/1.1") ~request_authority request =
   Tool_args.ok_assoc
-    (make_health_probe_fields ~listener ~health_detail:"probe"
+    (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
        ~full_health_url:"/health?full=1" ~request_authority request)
 
 (* Keeper fleet scan / paused-keeper diagnostics / phase counts / fleet safety
@@ -1397,7 +1409,7 @@ let full_health_snapshot_state () =
         !full_health_worker_joins,
         !full_health_invalidation_generation ))
 
-let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
+let make_cached_full_health_json ?timing ?(listener = "http/1.1") ~request_authority
     request =
   let now = Unix.gettimeofday () in
   let snapshot, _refresh_in_flight, _refresh_started_at, _refresh_requested, _,
@@ -1420,7 +1432,7 @@ let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
     | None -> full_health_placeholder_fields ()
   in
   Tool_args.ok_assoc
-    (make_health_probe_fields ~listener ~health_detail:"full" ~request_authority
+    (make_health_probe_fields ?timing ~listener ~health_detail:"full" ~request_authority
        request
      @ fields
      @ [
@@ -1528,18 +1540,27 @@ end
 let full_health_requested request =
   Server_utils.bool_query_param request "full" ~default:false
 
-let make_health_response_json ?(listener = "http/1.1") ~request_authority
+let make_health_response_json ?timing ?(listener = "http/1.1") ~request_authority
     request =
-  if full_health_requested request
-  then make_cached_full_health_json ~listener ~request_authority request
-  else make_health_probe_json ~listener ~request_authority request
+  measure_health_phase timing Server_timing.Health_response (fun () ->
+    if full_health_requested request
+    then make_cached_full_health_json ?timing ~listener ~request_authority request
+    else make_health_probe_json ?timing ~listener ~request_authority request)
+
+let make_health_response_body ?listener ~request_authority request =
+  let timing = Server_timing.create () in
+  let json = make_health_response_json ~timing ?listener ~request_authority request in
+  let body =
+    Server_timing.measure timing Server_timing.Json_serialize (fun () ->
+      Yojson.Safe.to_string json)
+  in
+  body, Server_timing.extra_header timing
 
 (** Health check handler *)
 let health_handler request reqd =
   let request_authority = Server_request_authority.current_exn () in
-  Http.Response.json_value
-    (make_health_response_json ~request_authority request)
-    reqd
+  let body, extra_headers = make_health_response_body ~request_authority request in
+  Http.Response.json ~extra_headers body reqd
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.
     Does not depend on server_state initialization.

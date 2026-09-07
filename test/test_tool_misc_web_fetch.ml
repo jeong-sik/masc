@@ -470,6 +470,62 @@ let test_destination_boundary () =
        "https://example.com/next"
      = Ok ())
 
+(* The real handler and model bridge preserve an upstream rejection as a
+   failed call, without leaking its body, adding credentials, or replaying it.
+   A second explicit request can succeed, proving failures were not cached. *)
+let test_upstream_http_failure status guidance =
+  let calls = ref 0 in
+  let url = Printf.sprintf "https://example.com/upstream-failure-%d" status in
+  Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+    (fun ~timeout_sec:_ ~headers ~max_response_bytes:_ requested ->
+      incr calls;
+      check string "requested resource" url requested;
+      check bool "no account credentials attached" false
+        (List.exists
+           (fun (name, _) ->
+             match String.lowercase_ascii name with
+             | "authorization" | "cookie" -> true
+             | _ -> false)
+           headers);
+      Ok
+        { Masc.Tool_misc_web_fetch.http_status =
+            Some (if !calls = 1 then status else 200)
+        ; final_url = url
+        ; redirect_count = 0
+        ; content_type = Some "text/plain"
+        ; downloaded_bytes = None
+        ; body = if !calls = 1 then "upstream-private-body" else "available"
+        })
+    (fun () ->
+      let result = handle url in
+      check int "no automatic replay" 1 !calls;
+      (match result with
+       | Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; metadata; message; _ } ->
+           check bool "status-specific next action" true
+             (String_util.contains_substring message guidance);
+           (match metadata with
+            | Some json ->
+                check int "typed HTTP status" status
+                  Yojson.Safe.Util.(json |> member "upstream_http_status" |> to_int)
+            | None -> fail "upstream status metadata missing")
+       | Tool_result.Failed _ -> fail "upstream response misclassified"
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+           fail "upstream rejection advanced the call");
+      (match Masc.Tool_bridge.to_agent_core_typed_result result with
+       | Ok _ -> fail "model bridge accepted failed fetch"
+       | Error { message; recoverable; _ } ->
+           check bool "no bridge replay authorization" false recoverable;
+           check bool "remote body not exposed" false
+             (String_util.contains_substring message "upstream-private-body");
+           let json = Yojson.Safe.from_string message in
+           check int "status reaches model" status
+             Yojson.Safe.Util.(json |> member "masc.payload"
+               |> member "upstream_http_status" |> to_int));
+      let second = success_json (handle url) in
+      check int "failure not cached" 2 !calls;
+      check string "explicit subsequent success" "available"
+        Yojson.Safe.Util.(second |> member "text" |> to_string))
+
 let () =
   run "tool_misc_web_fetch"
     [
@@ -490,5 +546,17 @@ let () =
           test_case "truncation outline maps headings" `Quick
             test_truncation_outline_maps_headings;
           test_case "destination boundary" `Quick test_destination_boundary;
+          test_case "upstream authentication response" `Quick
+            (fun () -> test_upstream_http_failure 401 "valid authentication");
+          test_case "upstream permission response" `Quick
+            (fun () -> test_upstream_http_failure 403 "refused access");
+          test_case "upstream hidden or missing resource" `Quick
+            (fun () -> test_upstream_http_failure 404 "does not prove deletion");
+          test_case "upstream gone resource" `Quick
+            (fun () -> test_upstream_http_failure 410 "authoritative replacement");
+          test_case "upstream quota response" `Quick
+            (fun () -> test_upstream_http_failure 429 "No reset time");
+          test_case "upstream service failure" `Quick
+            (fun () -> test_upstream_http_failure 503 "service's state");
         ] );
     ]

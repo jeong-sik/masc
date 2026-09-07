@@ -258,6 +258,30 @@ blocking_pr_lints() {
     scripts/ci/check-committed-secrets.py \
     python3 scripts/ci/test_check_committed_secrets.py
   run_lint "No committed credentials" python3 scripts/ci/check-committed-secrets.py
+  # Six of the guards #34018 listed as unwired, each one measured twice: run
+  # on untouched main (passes) and then run again with a violation planted
+  # (fails). A guard that only does the first is a guard that passes, which
+  # is not the same thing.
+  #
+  #   check-eio-conventions       Eio_unix.sleep under lib/
+  #   audit-ocaml-phase-count     "12-phase" in a keeper comment, SSOT is 8
+  #   audit-tla-phase-count       the same drift on the spec side
+  #   audit-route-tool-catalog    a route demanding a tool the catalog lacks
+  #   audit-shell-ir-consumption  a retired authorization symbol back in lib/
+  #   base-policy-audit           `open Base` in an .mli
+  #
+  # The last two take an argument to enforce anything. Bare, one prints
+  # metrics and the other prints a summary, both exiting 0 -- so the name
+  # alone would have wired a guard that cannot fail. Three more from that
+  # list are staying out for the same reason and the baseline says why.
+  run_lint "Eio conventions" bash scripts/check-eio-conventions.sh
+  run_lint "OCaml phase-count drift" bash scripts/audit-ocaml-phase-count.sh
+  run_lint "TLA phase-count drift" bash scripts/audit-tla-phase-count.sh
+  run_lint "Route tool catalog" bash scripts/audit-route-tool-catalog.sh
+  run_lint "Shell IR structural boundary" \
+    bash scripts/audit-shell-ir-consumption.sh \
+    --baseline scripts/shell-ir-consumption-baseline.json
+  run_lint "Base policy" bash scripts/base-policy-audit.sh --fail-on-regression
 }
 
 advisory_lints() {

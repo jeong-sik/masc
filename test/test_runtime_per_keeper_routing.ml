@@ -305,13 +305,15 @@ streaming = true
 let runtime_route_model_catalog =
   {|
 [[models]]
-id_prefix = "openai_compat/qwen"
+id_prefix = "qwen"
+provider_name = "runpod_mtp"
 base = "openai_chat"
 max_context_tokens = 128000
 supports_tools = true
 
 [[models]]
-id_prefix = "openai_compat/gpt"
+id_prefix = "gpt"
+provider_name = "openai"
 base = "openai_chat"
 max_context_tokens = 64000
 supports_tools = true
@@ -319,7 +321,8 @@ supports_response_format_json = true
 supports_structured_output = true
 
 [[models]]
-id_prefix = "openai_compat/small"
+id_prefix = "small"
+provider_name = "openai"
 base = "openai_chat"
 max_context_tokens = 32000
 supports_tools = true
@@ -925,7 +928,7 @@ let test_lane_candidates_create_the_lane_table () =
       (string_contains written {|"openai.gpt"|}
        && string_contains written {|"runpod_mtp.qwen"|});
     match Runtime.resolve_assignment "openai.gpt" with
-    | `Missing -> Alcotest.fail "the lane disappeared after being written"
+    | `Missing | `Unavailable _ -> Alcotest.fail "the lane disappeared after being written"
     | `Lane lane ->
       Alcotest.(check (list string))
         "the resolver reads back the failover order it was given"
@@ -956,7 +959,7 @@ let test_lane_candidates_replace_rather_than_append () =
     in
     Alcotest.(check int) "one lane table, not two" 1 (List.length headers);
     match Runtime.resolve_assignment "openai.gpt" with
-    | `Missing -> Alcotest.fail "the lane disappeared"
+    | `Missing | `Unavailable _ -> Alcotest.fail "the lane disappeared"
     | `Lane lane ->
       (* [with_terminal_default] appends the default, so a single declared
          candidate resolves to two. That is the point of the terminal: a lane

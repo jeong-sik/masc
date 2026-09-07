@@ -5,33 +5,6 @@
 # Claude Platform model overview / adaptive-thinking docs (checked 2026-07-10).
 # Static pricing rows use standard rates; time-limited promotional pricing is
 # intentionally not encoded as a model capability or runtime control.
-# 2026-09-07: OpenAI direct reserve row. Vision + tools verified by live probe
-# (8x8 red PNG -> "빨강", tool definition accepted). Reasoning happens
-# server-side and bills inside the completion budget — budget fields must use
-# max_completion_tokens (chat_output_budget_field below). tool_choice
-# forcing left off (unverified on this key).
-[[models]]
-id_prefix = "gpt-5.5"
-base = "openai_chat"
-provider_name = "openai"
-chat_output_budget_field = "max_completion_tokens"
-thinking_control_format = "reasoning_effort"
-accepted_reasoning_efforts = ["low", "medium", "high"]
-max_context_tokens = 272000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_parallel_tool_calls = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-supports_image_input = true
-supports_native_streaming = true
-input_per_million = 5.0
-output_per_million = 30.0
-cache_read_multiplier = 0.1
 
 [[models]]
 id_prefix = "claude-fable-5"
@@ -307,19 +280,7 @@ base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_computer_use = true
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-
-[[models]]
-id_prefix = "gpt-5.5"
-base = "openai_chat_extended"
-max_context_tokens = 1050000
-max_output_tokens = 128000
-supports_computer_use = true
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-input_per_million = 5.0
-output_per_million = 30.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.1
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
 
 [[models]]
 id_prefix = "gpt-5.4-mini"
@@ -331,6 +292,37 @@ accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh
 input_per_million = 0.75
 output_per_million = 4.5
 cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+# 2026-09-07: codex 구독의 5.6 행들. 운영자가 runtime.toml 바인딩을 먼저
+# 추가했는데 카탈로그 행이 없어 부트가 "degraded catalog mode"(uncatalogued
+# runtime 2개)로 강등됐다 — 강등 모드에서는 케퍼빌리티 조회 경로 전체가 달라져
+# 다른 모델(openai-responses 라인)의 effort 계약 조회까지 비어 나왔다(#34033).
+# 가격은 developers.openai.com 2026-09-07: sol $4/$20, terra $2/$12, luna 는
+# #34066 의 openai-responses 행에 이미 있다(구독 레인은 이 행과 api-name 을
+# 공유한다).
+[[models]]
+id_prefix = "gpt-5.6-sol"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.6-terra"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
 [[models]]
@@ -520,7 +512,9 @@ cache_read_multiplier = 0.0333
 id_prefix = "deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
-max_context_tokens = 1000000
+# https://api-docs.deepseek.com/quick_start/agent_integrations/codex/
+# Provider-published model catalog: context_window = 1048576 (2026-09-08).
+max_context_tokens = 1048576
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
@@ -729,7 +723,8 @@ supports_native_streaming = true
 id_prefix = "deepseek-v4-pro"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
-max_context_tokens = 524288
+# /api/show model_info["deepseek4.context_length"] = 1048576 (2026-09-08).
+max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
@@ -930,7 +925,8 @@ supports_native_streaming = true
 id_prefix = "glm-5.2"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
-max_context_tokens = 1000000
+# /api/show model_info["glm5.2.context_length"] = 1048576 (2026-09-08).
+max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
@@ -1082,7 +1078,8 @@ supports_native_streaming = true
 id_prefix = "minimax-m3"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
-max_context_tokens = 524288
+# /api/show model_info["minimax-m3.context_length"] = 512000 (2026-09-08).
+max_context_tokens = 512000
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
@@ -2538,19 +2535,134 @@ request_path = "/responses"
 api_key_env = "DEEPSEEK_API_KEY"
 capabilities_base = "openai_chat"
 
-# 2026-09-07: OpenAI direct — reserve-only. The operator's key carries prepaid
-# balance and gpt-5.5/gpt-5.5-pro only (live /v1/models probe 2026-09-07;
-# gpt-5.6 is project-gated "does not have access"). gpt-5.5 rejects the classic
-# max_tokens field, hence chat_output_budget_field on the model row (live 400:
-# "Use 'max_completion_tokens' instead"). Pricing per developers.openai.com
-# 2026-09-07: $5/$30 short-context, $10/$45 long-context (272K window).
 [[providers]]
-id = "openai"
+id = "openai-responses"
 kind = "openai_compat"
 base_url = "https://api.openai.com"
-request_path = "/v1/chat/completions"
+request_path = "/v1/responses"
 api_key_env = "OPENAI_API_KEY"
 capabilities_base = "openai_chat"
+
+
+# 2026-09-07 라이브 실측: 이 키의 호출 가능 모델은 gpt-5.6-luna($0.20/$1.20,
+# deepseek-flash 출력가보다 싸다), gpt-6-astra($10/$50), gpt-5.4. sol/terra 는
+# /v1/models 에 나오지만 프로젝트 게이트로 호출 거부. gpt-5.5 는 이 날 접근이
+# 사라졌다. 모델들이 chat/completions 에서 function tools+reasoning_effort 를
+# 함께 거부하므로(라이브 400) 두 행 모두 responses 표면으로.
+# 2026-09-07 probe on /v1/responses, this key, once access opened. All three
+# gpt-5.6 rows and gpt-6-astra answer the same way:
+#
+#   effort minimal            400  "'minimal' is not supported with the
+#                                   '<model>' model" -- the message names it
+#   effort none               200 on gpt-5.6-*, 400 on gpt-6-astra
+#   effort low|medium|high|xhigh|max   200
+#   ~950K-token input         200; larger answers 429 on the org's
+#                             tokens-per-minute limit, not on length
+#
+# So the ladder is measured, and the ceiling is the published 1.05M with this
+# account meeting its rate limit first. 272000 and low|medium|high were the
+# conservative values these rows started at.
+[[models]]
+id_prefix = "gpt-5.6-luna"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+# 2026-09-07 라이브 실측(15:11Z): "Unsupported parameter: 'temperature' is not
+# supported with this model" — reasoning 모델이 sampling 필드를 거부한다.
+# deepseek 계열 행과 같은 방어.
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 0.2
+output_per_million = 1.2
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# gpt-5.6-sol and -terra, callable on this key since 2026-09-07 (both answer
+# 200 on /v1/responses; the same probe as the luna row above gives all three
+# the same effort ladder). Prices from developers.openai.com/api/docs/pricing,
+# read the same day: sol $4/$20, terra $2/$12. Cached-input rates are a tenth
+# of input on both, which is what the multipliers below already say.
+[[models]]
+id_prefix = "gpt-5.6-sol"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.6-terra"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-6-astra"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+# 2026-09-07 라이브 실측(15:11Z): "Unsupported parameter: 'temperature' is not
+# supported with this model" — reasoning 모델이 sampling 필드를 거부한다.
+# deepseek 계열 행과 같은 방어.
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 
 [[providers]]
 id = "gemini"
@@ -3207,6 +3319,52 @@ supports_seed = true
 
 [[models]]
 id_prefix = "glm-4.6v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+id_prefix = "glm-4.6v"
+provider_name = "glm"
 base = "glm"
 max_context_tokens = 128000
 max_output_tokens = 32768

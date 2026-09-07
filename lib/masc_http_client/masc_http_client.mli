@@ -130,6 +130,7 @@ val get_stream :
   idle_timeout_sec:float ->
   url:string ->
   headers:(string * string) list ->
+  ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
   (Pool.stream_outcome, string) result

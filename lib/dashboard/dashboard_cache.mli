@@ -11,17 +11,27 @@
 
     {b Runtime prerequisites}: callers must initialise [Time_compat.set_clock]
     and [Eio_context.set_switch] before using the cache. Background
-    stale-while-revalidate fibers are forked via [Eio_context.get_switch_opt]. *)
+    stale-while-revalidate fibers are registered on the root switch's owning
+    domain and survive the requesting fiber or turn switch. Computation still
+    uses the executor pool. *)
+
+type payload_origin = Seeded | Computed | Timeout
+(** The producer of this exact payload, independent of its JSON contents and
+    of any later replacement in the cache. *)
+
+type payload_preparation = Identity_only | Http_encodings
+(** Representations prepared by the cache-fill worker. *)
 
 type cached_payload = {
   json : Yojson.Safe.t;
   raw_json : string;
   etag : string;
+  origin : payload_origin;
+  encoded : Http_response_payload.prepared option;
 }
 (** Cached dashboard payload carrying the Yojson AST, pre-serialized JSON string,
-    and weak entity tag. Precomputing string and tag on cache fill enables
-    sub-millisecond HTTP conditional revalidation without serializing or hashing
-    on repeat requests. *)
+    and weak entity tag. Payload computation prepares all three together before
+    publication, so repeat requests do not serialize or hash again. *)
 
 val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 (** [get_or_compute key ~ttl f] returns a cached value if [key] exists and
@@ -37,10 +47,21 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     one [f] runs; others wait for the result (stampede protection). *)
 
 val get_or_compute_payload :
+  ?preparation:payload_preparation ->
   string -> ttl:float -> (unit -> Yojson.Safe.t) -> cached_payload
 (** [get_or_compute_payload key ~ttl f] returns the {!cached_payload} for [key].
     Calls [f ()] on cache miss, and memoizes both the JSON AST and the serialized
-    string + ETag. *)
+    string + ETag. With an executor pool installed, computation, serialization,
+    and hashing share one worker submission on cold fills and background refresh.
+    Cache hits with prepared bytes do not submit work.
+    [Http_encodings] also prepares gzip/zstd inside that worker before publication.
+    Preparation policy must be consistent for all producers of a cache key.
+    Seeds and uncached timeout envelopes retain identity bytes only. *)
+
+val select_http_representation :
+  accept_encoding:string option -> cached_payload -> string * (string * string) list
+(** Select already prepared bytes and headers without compression or allocation
+    of response bodies. The payload ETag always identifies its identity bytes. *)
 
 val peek : string -> Yojson.Safe.t option
 (** [peek key] returns the currently cached value for [key] when a fresh or
@@ -81,11 +102,14 @@ val get_or_compute_with_timeout :
     cache entries are still served normally. *)
 
 val get_or_compute_payload_with_timeout :
+  ?preparation:payload_preparation ->
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
   (unit -> Yojson.Safe.t) -> cached_payload
 (** Same timeout and stale-value semantics as {!get_or_compute_with_timeout},
     retaining the memoized bytes and ETag of the returned JSON. Timeout envelopes
-    are returned uncached. Serialization is lazy on the first payload read. *)
+    are returned uncached. Preparation completes inside the timed worker compute
+    before the cache entry is published. Prepared hits and stale responses do
+    not wait for executor capacity. *)
 
 val set_default_clock : _ Eio.Time.clock -> unit
 (** Register the process clock so every {!get_or_compute} runs under the
@@ -99,7 +123,10 @@ val seed_stale_if_missing :
 (** [seed_stale_if_missing key ~stale_for value] inserts [value] as an
     immediately-stale entry only when [key] is absent. The next
     [get_or_compute] read returns [value] immediately and refreshes in the
-    background when a switch is available. Existing entries are left intact. *)
+    background when a switch is available. Existing entries are left intact.
+    Seeds are intended for small warming responses: their bytes and ETag are
+    prepared synchronously before publication, without using the executor pool.
+    An existing slot skips preparation; a slot installed concurrently wins. *)
 
 val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,
@@ -116,3 +143,16 @@ val invalidate_all : unit -> unit
 val stats : unit -> Yojson.Safe.t
 (** Returns [{"entries": N, "fresh": M, "stale": S, "computing": C, "expired": K}]
     for diagnostics. *)
+
+module For_testing : sig
+  val with_refresh_registered_hook : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Pause after the root refresh is forked but before its registration is
+      acknowledged to the reader. Process-wide; tests must not overlap other
+      cache refreshes. The previous hook is restored on return or exception. *)
+
+  val with_payload_prepared_hook :
+    (cached_payload -> unit) -> (unit -> 'a) -> 'a
+  (** Observe completed serialization before publication; restore the previous
+      hook on return or exception. Tests using this process-wide hook must not
+      overlap unrelated cache work. *)
+end

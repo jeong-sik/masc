@@ -141,14 +141,18 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
    is the stage's failure, as a Docker container that will not start is. No
    pipeline runner, as for an OpenSSH endpoint: the shim runs one command
    per connection. *)
-let microvm_runner ~runtime ~timeout_sec =
+let microvm_runner ?on_receipt ~runtime ~timeout_sec () =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
     | Error err ->
+      Option.iter
+        (fun notify ->
+          notify (Keeper_sandbox_remote.Execution_unavailable Request_not_sent))
+        on_receipt;
       Masc_exec.Sandbox_target.Transport_failed
         { output_files = None; reason = err; stdout = ""; stderr = err }
     | Ok endpoint ->
-      Keeper_sandbox_remote.runner ~timeout_sec endpoint
+      Keeper_sandbox_remote.runner ?on_receipt ~timeout_sec endpoint
         ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
 ;;
 
@@ -187,7 +191,7 @@ let observation_run_for ~base_path ~keeper_name =
    the operator has said so in runtime.toml ([private_home = true]); without
    that declaration the request keeps the judge rather than writing where
    someone else may also live. *)
-let observe_route_for_endpoint ~run ~timeout_sec ~target_of_runner endpoint =
+let observe_route_for_endpoint ?on_receipt ~run ~timeout_sec ~target_of_runner endpoint =
   match run, Keeper_sandbox_remote.transport endpoint with
   | ( Keeper_types_profile_sandbox.Guest_local
     , Keeper_sandbox_remote.Openssh { endpoint = declared; _ } )
@@ -207,6 +211,7 @@ let observe_route_for_endpoint ~run ~timeout_sec ~target_of_runner endpoint =
         { target =
             target_of_runner
               (Keeper_sandbox_remote.runner
+                 ?on_receipt
                  ~mode:(protocol_mode_of_run run)
                  ~timeout_sec
                  endpoint)
@@ -231,6 +236,7 @@ let guest_target
       ~timeout_sec
       ~base_path
       ?capture_dir
+      ?on_receipt
       ()
   =
   let sandbox_profile, guest_profile =
@@ -258,7 +264,7 @@ let guest_target
       | Micro_vm_guest ->
         ( Masc_exec.Sandbox_target.micro_vm
             ~image
-            ~runner:(microvm_runner ~runtime ~timeout_sec)
+            ~runner:(microvm_runner ?on_receipt ~runtime ~timeout_sec ())
             ()
         , fun () ->
             match observation_run_for ~base_path ~keeper_name:meta.name with
@@ -268,6 +274,7 @@ let guest_target
                | Error err -> No_box err
                | Ok endpoint ->
                  observe_route_for_endpoint
+                   ?on_receipt
                    ~run
                    ~timeout_sec
                    ~target_of_runner:(fun runner ->
@@ -277,7 +284,7 @@ let guest_target
     Ok { target; runtime; sandbox_profile; observe_route }
 ;;
 
-let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
+let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt () =
   match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name:meta.name with
   | Error message ->
     Error
@@ -312,7 +319,7 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
                  ]
                message)
         | Ok () ->
-          let runner = Keeper_sandbox_remote.runner ~timeout_sec ssh in
+          let runner = Keeper_sandbox_remote.runner ?on_receipt ~timeout_sec ssh in
           let sandbox_endpoint = Keeper_sandbox_ssh.sandbox_endpoint ~base_path endpoint in
           Ok
             { target =
@@ -323,6 +330,7 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
                   | Error reason -> No_box reason
                   | Ok run ->
                     observe_route_for_endpoint
+                      ?on_receipt
                       ~run
                       ~timeout_sec
                       ~target_of_runner:(fun runner ->

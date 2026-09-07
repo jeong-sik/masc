@@ -1,0 +1,89 @@
+{
+  "observed_at": "2026-09-07T11:04:11Z",
+  "window_start": "2026-09-07T10:04:11Z",
+  "window_end": "2026-09-07T11:04:11Z",
+  "levels": {
+    "INFO": 26434,
+    "WARN": 1521,
+    "ERROR": 270
+  },
+  "error_modules": {
+    "Keeper": 268,
+    "Misc": 2
+  },
+  "patterns": {
+    "repeated_exact_tool_loop": {
+      "literal": "yielding repeated exact tool loop",
+      "count": 10,
+      "first": "2026-09-07T10:05:23Z",
+      "last": "2026-09-07T11:03:56Z"
+    },
+    "missing_tool_results": {
+      "literal": "insufficient tool messages following tool_calls",
+      "count": 0
+    },
+    "overlapping_checkpoint": {
+      "literal": "Overlapping_tool_cycle",
+      "count": 0
+    },
+    "composition_publication_failure": {
+      "literal": "Skill composition evidence publication failed",
+      "count": 0
+    },
+    "new_keeper_shutdown_recovery": {
+      "literal": "shutdown recovery failed keeper=new-keeper",
+      "count": 0
+    },
+    "browser_lane_absent": {
+      "literal": "no browser lane connected",
+      "count": 2,
+      "first": "2026-09-07T10:19:32Z",
+      "last": "2026-09-07T10:19:32Z"
+    },
+    "librarian_failure": {
+      "literal": "memory os librarian failed",
+      "count": 0
+    },
+    "claude_quota": {
+      "literal": "Claude Code subscription turn failed (kind=quota_blocked)",
+      "count": 1,
+      "first": "2026-09-07T10:08:42Z",
+      "last": "2026-09-07T10:08:42Z"
+    }
+  },
+  "limits": [
+    "Literal signal counts, not an exhaustive incident classifier.",
+    "Zero observations do not prove the triggering path ran.",
+    "Deployments and keeper workload may change within this window; no controlled before-after rate claim."
+  ],
+  "raw_messages_retained": false,
+  "records": 28225,
+  "last_record": "2026-09-07T11:04:11Z",
+  "health_available": true,
+  "health": {
+    "overall_status": "degraded",
+    "status": "ok",
+    "version": "0.33.0",
+    "build": {
+      "binary_commit": "2fc09f02d9bd5a1f9c7b3973f77c62413e76748c",
+      "executable_sha256": "5147ea66d4978f8599b6c4c982ad2f7902d9ae20f445bcd49defd9c101f59bbc",
+      "started_at": "2026-09-07T10:41:44Z",
+      "provenance_source": "self_observed"
+    },
+    "paths": {
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc"
+    },
+    "dashboard_surface": {
+      "status": "stale",
+      "index_sha256": "c48dc2528c6961af26f0223894309d14774dd3c7388271af446a27137eca66df",
+      "build_source_commit": null,
+      "installed_release": null,
+      "recovery": {
+        "kind": "build_in_place",
+        "reason": "unbound_assets_stale",
+        "restart_required": false
+      }
+    }
+  }
+}

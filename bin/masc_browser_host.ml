@@ -3,12 +3,12 @@
 
 let ( let* ) = Result.bind
 
-(* Mozilla permits 1 MiB from host to browser, 4 GiB in the other direction.
-   This reader deliberately applies the smaller resource bound both ways:
-   browser lane page reads are bounded, and an unbounded tab list must fail
-   explicitly rather than allocate a browser-controlled 4 GiB frame.
+(* Mozilla limits host-to-browser messages to 1 MiB. Browser-to-host frames
+   have a separate 8 MiB resource bound: this admits a 5 MiB Vision PNG after
+   base64 encoding plus its JSON envelope, without admitting a 4 GiB frame.
    https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging#app_side *)
-let frame_limit = 1024 * 1024
+let command_frame_limit = 1024 * 1024
+let reply_frame_limit = 8 * 1024 * 1024
 
 (* The server's long-poll window is 25 seconds. These transport deadlines
    leave it room to finish and bound a dead extension or HTTP connection. *)
@@ -16,12 +16,13 @@ let http_timeout_sec = 55.
 let extension_timeout_sec = 20.
 let reconnect_delay_sec = 5.
 
-type verb = Tabs_list | Page_read | Page_capture
+type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_interact
 type command = { id : string; verb : verb; args : Yojson.Safe.t }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
 type exchange = Replied of Yojson.Safe.t | Write_timed_out
 type cycle = Continue | Stop of string
+type poll_error = Invalid_client | Poll_failed of string
 
 let object_fields = function
   | `Assoc fields -> Ok fields
@@ -54,13 +55,22 @@ let decode_poll json =
       match name with
       | "tabs.list" -> Ok (Forward { id; verb = Tabs_list; args })
       | "page.read" -> Ok (Forward { id; verb = Page_read; args })
+      | "page.elements" -> Ok (Forward { id; verb = Page_elements; args })
       | "page.capture" -> Ok (Forward { id; verb = Page_capture; args })
+      | "page.interact" -> Ok (Forward { id; verb = Page_interact; args })
       | _ -> Ok (Reject id)
 
 let command_json command =
   `Assoc
     [ "id", `String command.id
-    ; "verb", `String (match command.verb with Tabs_list -> "tabs.list" | Page_read -> "page.read" | Page_capture -> "page.capture")
+    ; "verb", `String
+        (match command.verb with
+         | Browser_info -> "browser.info"
+         | Tabs_list -> "tabs.list"
+         | Page_read -> "page.read"
+         | Page_elements -> "page.elements"
+         | Page_capture -> "page.capture"
+         | Page_interact -> "page.interact")
     ; "args", command.args
     ]
 
@@ -88,8 +98,8 @@ let read_frame reader =
       let length =
         Int64.logand (Int64.of_int32 (Bytes.get_int32_le header 0)) 0xffff_ffffL
       in
-      if length = 0L || length > Int64.of_int frame_limit then
-        Error "native frame length is outside the 1 MiB limit"
+      if length = 0L || length > Int64.of_int reply_frame_limit then
+        Error "native frame length is outside the 8 MiB reply limit"
       else
         let* json = parse_json (Eio.Buf_read.take (Int64.to_int length) reader) in
         Ok (Some json)
@@ -100,7 +110,7 @@ let read_frame reader =
 let write_frame stdout json =
   let payload = Yojson.Safe.to_string json in
   let length = String.length payload in
-  if length > frame_limit then Error "command exceeds native frame limit"
+  if length > command_frame_limit then Error "command exceeds native frame limit"
   else (
     let header = Bytes.create 4 in
     Bytes.set_int32_le header 0 (Int32.of_int length);
@@ -108,7 +118,26 @@ let write_frame stdout json =
     Eio.Flow.copy_string payload stdout;
     Ok ())
 
-type config = { server : Uri.t; token_file : string }
+type config = { server : Uri.t; token_file : string; client_id : string }
+type browser_info = { browser : string; version : string; engine_version : string }
+let browser_info json =
+  let* envelope = object_fields json in
+  if List.assoc_opt "ok" envelope <> Some (`Bool true) then Error "browser metadata unavailable"
+  else
+    let* fields = match List.assoc_opt "data" envelope with
+      | Some data -> object_fields data | None -> Error "browser metadata missing" in
+    let version fields key =
+      let* value = required_string fields key in
+      if String.length value <= 64 && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) value
+      then Ok value else Error "invalid browser version" in
+    let* engine_version = version fields "version" in
+    match List.assoc_opt "zen" fields with
+    | Some (`Assoc zen) ->
+      let* version = version zen "version" in Ok {browser="zen"; version; engine_version}
+    | None when List.assoc_opt "name" fields = Some (`String "Firefox") ->
+      Ok {browser="firefox"; version=engine_version; engine_version}
+    | Some _ | None -> Error "unsupported browser metadata"
+
 
 let resolve_config ~base_path ~server ~token_file =
   try
@@ -150,7 +179,7 @@ let resolve_config ~base_path ~server ~token_file =
             if Filename.is_relative path then Filename.concat base path else path
         | None -> Filename.concat (Filename.concat base Common.masc_dirname) "browser-lane/token"
       in
-      Ok { server; token_file }
+      Ok { server; token_file; client_id=Uuidm.to_string (Uuidm.v4_gen (Random.State.make_self_init ()) ()) }
   with
   | Env_config_core.Config_error message -> Error message
   | Invalid_argument _ -> Error "invalid server origin or base path"
@@ -177,7 +206,7 @@ let http_error_message = function
   | Response_too_large -> "HTTP response exceeds 1 MiB"
   | Request_timed_out -> "HTTP request timed out"
 
-let post ~clock ~client ~config ~token path json =
+let post ~clock ~client ~config ~info ~token path json =
   Eio.Fiber.first
     (fun () ->
       try
@@ -185,14 +214,16 @@ let post ~clock ~client ~config ~token path json =
           let response, body =
             Cohttp_eio.Client.post client ~sw
               ~headers:(Cohttp.Header.of_list
-                [ "Content-Type", "application/json"; "x-lane", "live"; "x-lane-token", token ])
+                [ "Content-Type", "application/json"; "x-lane", "live"; "x-lane-token", token;
+                  "x-browser-client-id", config.client_id; "x-browser-name", info.browser;
+                  "x-browser-version", info.version; "x-browser-engine-version", info.engine_version ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
               (endpoint config path)
           in
           let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
           if status <> 200 then Error (Http_status status)
           else
-            let body = Eio.Buf_read.of_flow body ~max_size:(frame_limit + 1) in
+            let body = Eio.Buf_read.of_flow body ~max_size:(command_frame_limit + 1) in
             parse_json (Eio.Buf_read.take_all body)
             |> Result.map_error (fun _ -> Response_invalid))
       with
@@ -204,7 +235,7 @@ let post ~clock ~client ~config ~token path json =
 let run env config =
   let clock = Eio.Stdenv.clock env in
   let client = Cohttp_eio.Client.make ~https:None (Eio.Stdenv.net env) in
-  let reader = Eio.Buf_read.of_flow (Eio.Stdenv.stdin env) ~max_size:(frame_limit + 4) in
+  let reader = Eio.Buf_read.of_flow (Eio.Stdenv.stdin env) ~max_size:(reply_frame_limit + 4) in
   (* Single Eio domain; reading/writing this cell has no suspension point.
      One pending command is the ownership contract of the serial live host. *)
   let pending : (string * Yojson.Safe.t Eio.Promise.u) option ref = ref None in
@@ -242,9 +273,9 @@ let run env config =
     pending := None;
     answer
   in
-  let rec publish payload =
+  let rec publish info payload =
     let* token = read_token config.token_file in
-    match post ~clock ~client ~config ~token "result" payload with
+    match post ~clock ~client ~config ~info ~token "result" payload with
     | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Ok ()
     | Ok _ -> Error "invalid result acknowledgement"
     | Error (Http_status 400) ->
@@ -256,39 +287,55 @@ let run env config =
         Log.Transport.warn "browser-host: result delivery failed: %s"
           (http_error_message error);
         Eio.Time.sleep clock reconnect_delay_sec;
-        publish payload
+        publish info payload
   in
-  let rec poll () =
-    (* Reread at each poll so a token rotation does not require restarting Firefox. *)
+  let rec poll info () =
     let result =
-      let* token = read_token config.token_file in
-      let* response =
-        post ~clock ~client ~config ~token "poll" (`Assoc [])
-        |> Result.map_error http_error_message
-      in
-      let* next = decode_poll response in
-      match next with
-       | Empty -> Ok Continue
-       | Reject id ->
-           let* () = publish (failure id "unsupported live browser verb") in
-           Ok Continue
-       | Forward command ->
-           (match forward command with
-            | Replied payload -> let* () = publish payload in Ok Continue
-            | Write_timed_out ->
-                (* A partial frame cannot be followed by another command.
-                   Close this stream and let the extension reconnect. *)
-                Ok (Stop "native frame write timed out"))
+      let* token = read_token config.token_file |> Result.map_error (fun detail -> Poll_failed detail) in
+      let* response = post ~clock ~client ~config ~info ~token "poll" (`Assoc [])
+        |> Result.map_error (function
+          | Http_status 400 -> Invalid_client
+          | error -> Poll_failed (http_error_message error)) in
+      let dispatch () =
+        let* next = decode_poll response in
+        match next with
+        | Empty -> Ok Continue
+        | Reject id ->
+          let* () = publish info (failure id "unsupported live browser verb") in Ok Continue
+        | Forward command ->
+          match forward command with
+          | Replied payload -> let* () = publish info payload in Ok Continue
+          | Write_timed_out -> Ok (Stop "native frame write timed out") in
+      dispatch () |> Result.map_error (fun detail -> Poll_failed detail)
     in
     match result with
     | Ok (Stop detail) -> Error detail
-    | Ok Continue -> poll ()
-    | Error detail ->
+    | Ok Continue -> poll info ()
+    | Error Invalid_client -> Error "native client registration rejected"
+    | Error (Poll_failed detail) ->
         Log.Transport.warn "browser-host: poll failed: %s" detail;
         Eio.Time.sleep clock reconnect_delay_sec;
-        poll ()
+        poll info ()
   in
-  Eio.Fiber.first receive poll
+  let observed_info = ref None in
+  let run_poll () =
+    match forward {id="browser-info"; verb=Browser_info; args=`Assoc []} with
+    | Write_timed_out -> Error "browser metadata frame write timed out"
+    | Replied reply ->
+      let* info = browser_info reply in
+      observed_info := Some info;
+      poll info () in
+  let outcome = Eio.Fiber.first receive run_poll in
+  (* EOF ends this native-process identity. Cleanup is best effort and bounded;
+     a dead server must not keep Firefox's native child alive. *)
+  (match !observed_info, read_token config.token_file with
+   | Some info, Ok token ->
+     Eio.Fiber.first
+       (* See bounded EOF cleanup above: failed disconnect must not retain the native child. *)
+       (fun () -> ignore (post ~clock ~client ~config ~info ~token "disconnect" (`Assoc [])))
+       (fun () -> Eio.Time.sleep clock 0.25)
+   | _ -> ());
+  outcome
 
 let () =
   Log.init_from_env ();

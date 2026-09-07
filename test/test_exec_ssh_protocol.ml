@@ -349,6 +349,38 @@ let test_probe_major_is_spoken_or_a_skew () =
   | Ok _ -> fail "no major accepted"
   | Error msg -> check bool "says there is no major" true (contains "no numeric major" msg)
 
+let test_execution_receipts_preserve_process_outcome () =
+  let open Exec_ssh_protocol in
+  let trailer = { v = newest; exit = Some 127; signal = None;
+                  timed_out = false; shim_error = None } in
+  List.iter (fun mode ->
+    List.iter (fun boundary ->
+      let execution_receipt = { mode; boundary } in
+      let wire = render_trailer ~execution_receipt trailer in
+      check bool "same response retains exact receipt" true
+        (parse_execution_receipt wire = Ok (Some execution_receipt));
+      check bool "receipt never rewrites the child status" true
+        (parse_trailer wire = Ok trailer))
+      [Sandbox_applied; Setup_failed; Exec_failed; Child_ack_unavailable; Refused])
+    [Effect; Observe; Guest_local];
+  check bool "old peer supplies no receipt, not inferred Effect" true
+    (parse_execution_receipt (render_trailer trailer) = Ok None);
+  let malformed receipt =
+    "\x1e" ^ Yojson.Safe.to_string
+      (`Assoc ["masc_exec_result", `Assoc
+        ["v", `Int (int_of_major newest); "exit", `Int 127; "signal", `Null;
+         "timed_out", `Bool false; "shim_error", `Null; "execution_receipt", receipt]])
+    ^ "\x1e"
+  in
+  List.iter (fun receipt ->
+    let wire = malformed receipt in
+    check bool "malformed receipt does not erase process outcome" true
+      (parse_trailer wire = Ok trailer);
+    check bool "malformed receipt is explicitly rejected" true
+      (Result.is_error (parse_execution_receipt wire)))
+    [`Null; `Assoc []; `Assoc ["mode", `String "observe";
+       "plan", `String "unrestricted"; "boundary", `String "sandbox_applied"]]
+
 let () =
   run "exec ssh protocol"
     [ "frame", [ test_case "roundtrip" `Quick test_frame_roundtrip
@@ -360,7 +392,9 @@ let () =
                ; test_case "mode strings are closed" `Quick test_mode_strings_are_closed
                ; test_case "stdin_len mismatch is transport error" `Quick
                    test_frame_stdin_len_mismatch_is_transport_error ]
-    ; "trailer", [ test_case "roundtrip" `Quick test_trailer_roundtrip
+    ; "trailer", [ test_case "execution receipts preserve process outcome" `Quick
+                     test_execution_receipts_preserve_process_outcome
+                 ; test_case "roundtrip" `Quick test_trailer_roundtrip
                  ; test_case "malformed is transport error" `Quick test_trailer_malformed_is_transport_error
                  ; test_case "absent is transport error" `Quick test_trailer_absent_is_transport_error
                  ; test_case "last match wins" `Quick test_trailer_last_match_wins

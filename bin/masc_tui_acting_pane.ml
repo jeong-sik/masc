@@ -57,7 +57,6 @@ type keeper = {
   mark : string;
   mark_tone : tone;
   health : Reading.keeper_health_reading option;
-  trace_id : string;
 }
 
 and tone =
@@ -107,7 +106,7 @@ type input = {
   keepers : keeper list;
   selected : string option;
   approvals : approval list;
-  entries : Acting.entry list;
+  chunks : Acting.chunk list;
   changes : changes;
 }
 
@@ -236,24 +235,23 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
 
 (* ── Lines ─────────────────────────────────────────────────────────────── *)
 
-let width spans =
-  List.fold_left (fun acc span -> acc + Layout.display_width span.text) 0 spans
-
 (* Exactly [cols] cells: cut the spans that overflow, pad what falls short.
-   A span cut to nothing is dropped so a tone does not open on empty text. *)
+   Retained spans keep their measured cells; only a clipped span is remeasured. *)
 let fit_line ~cols spans =
   let rec cut used acc = function
-    | [] -> List.rev acc
+    | [] -> List.rev acc, used
     | span :: rest ->
         let cells = Layout.display_width span.text in
         if used + cells <= cols then cut (used + cells) (span :: acc) rest
         else
           let room = cols - used in
-          if room <= 0 then List.rev acc
-          else List.rev ({ span with text = Layout.take_cells span.text room } :: acc)
+          if room <= 0 then List.rev acc, used
+          else
+            let text = Layout.take_cells span.text room in
+            List.rev ({ span with text } :: acc), used + Layout.display_width text
   in
-  let spans = cut 0 [] spans in
-  let short = cols - width spans in
+  let spans, used = cut 0 [] spans in
+  let short = cols - used in
   if short > 0 then spans @ [ { text = String.make short ' '; tone = Plain } ]
   else spans
 
@@ -507,21 +505,20 @@ let focus_min_rows = 2
 
 (* The overview: the fleet folded to at most half the rows, the focus block
    after a rule. What the fleet tab opens on. *)
-let overview_rows ~cols ~below input newest ordered focus focus_rows =
+let overview_rows ~cols ~below fleet_rows focus focus_rows =
+  let fleet_count = List.length fleet_rows in
   let fleet_budget =
     match focus with
     | Some _ when below >= fleet_min_rows + focus_min_rows ->
-        min (List.length ordered) (below / 2)
-    | Some _ | None -> min (List.length ordered) below
+        min fleet_count (below / 2)
+    | Some _ | None -> min fleet_count below
   in
   let fleet =
-    if List.length ordered > fleet_budget && fleet_budget >= 2 then
-      let shown = List.filteri (fun index _ -> index < fleet_budget - 1) ordered in
-      List.map (fleet_row ~cols input newest) shown
-      @ [ more_line ~cols (List.length ordered - (fleet_budget - 1)) ]
+    if fleet_count > fleet_budget && fleet_budget >= 2 then
+      List.filteri (fun index _ -> index < fleet_budget - 1) fleet_rows
+      @ [ more_line ~cols (fleet_count - (fleet_budget - 1)) ]
     else
-      List.filteri (fun index _ -> index < fleet_budget) ordered
-      |> List.map (fleet_row ~cols input newest)
+      List.filteri (fun index _ -> index < fleet_budget) fleet_rows
   in
   let after_fleet = below - List.length fleet in
   let focus_block =
@@ -583,8 +580,7 @@ let window ~cols ~below ~scroll ~overview body =
     (drawn, scroll_max)
 
 let fleet_lines ~cols ~below ~scroll input =
-  let traces = List.map (fun keeper -> (keeper.name, keeper.trace_id)) input.keepers in
-  let chunks = Acting.chunks ~traces input.entries in
+  let chunks = input.chunks in
   let newest = newest_chunk_by_keeper chunks in
   let focus = focus_keeper input newest in
   let ordered = fleet_order input newest in
@@ -595,14 +591,15 @@ let fleet_lines ~cols ~below ~scroll input =
   in
   (* The full list: every fleet row, then the rule and the focus block when
      there is one. Scrolling walks this; the overview folds it. *)
+  let fleet_rows = List.map (fleet_row ~cols input newest) ordered in
   let body =
-    List.map (fleet_row ~cols input newest) ordered
+    fleet_rows
     @ (match focus_rows with
        | [] -> []
        | _ :: _ -> (rule_line ~cols, Target_none) :: focus_rows)
   in
   window ~cols ~below ~scroll body ~overview:(fun () ->
-    overview_rows ~cols ~below input newest ordered focus focus_rows)
+    overview_rows ~cols ~below fleet_rows focus focus_rows)
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 

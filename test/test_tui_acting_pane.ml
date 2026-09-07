@@ -26,6 +26,10 @@ let agent_core ?(kind = Observer.Tool_called) ?tool ?turn ?tool_use_id ~at
     ; at
     ; correlation = Some correlation
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
 
 let settled ~at keeper : Observer.event =
@@ -47,7 +51,10 @@ let entries events =
   |> List.sort (fun a b -> Float.compare b.Acting.ae_at a.Acting.ae_at)
 
 let keeper ?(mark = "\xe2\x97\x8f") ?(tone = Pane.Ok) ?(health = None) name : Pane.keeper =
-  { Pane.name; mark; mark_tone = tone; health; trace_id = "trace-" ^ name }
+  { Pane.name; mark; mark_tone = tone; health }
+
+let chunks names values =
+  Acting.chunks ~traces:(List.map (fun name -> name, "trace-" ^ name) names) values
 
 let lane = "agent_core-glm-coding.glm-5.3"
 
@@ -55,20 +62,8 @@ let lane = "agent_core-glm-coding.glm-5.3"
    turn earlier. polisher is waiting on an approval. quiet-one never acted.
    The full list is eight rows: four fleet rows, the rule, and sangsu's
    three focus rows (its header, Read, Execute). *)
-let fixture : Pane.input =
-  { Pane.now
-  ; tab = Pane.Tab_fleet
-  ; feed = Pane.Feed_live 1_234
-  ; keepers =
-      [ keeper "quiet-one" ~tone:Pane.Dim
-      ; keeper "sangsu"
-      ; keeper "rondo"
-      ; keeper "polisher"
-      ]
-  ; selected = Some "sangsu"
-  ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
-  ; entries =
-      entries
+let fixture_entries =
+  entries
         [ (900., settled ~at:900. "rondo")
         ; ( 905.
           , Observer.Keeper_tool_call
@@ -78,6 +73,12 @@ let fixture : Pane.input =
               ; kt_duration_ms = Some 5.
               ; kt_disposition = Some "completed"
               ; kt_at = 905.
+      ; kt_tool_use_id = None
+      ; kt_schedule = None
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = None
+      ; kt_tool_output_preview = None
               } )
         ; ( 980.
           , agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
@@ -92,6 +93,20 @@ let fixture : Pane.input =
           , agent_core ~tool:"Execute" ~turn:5 ~tool_use_id:"b" ~at:990.
               ~correlation:"trace-sangsu" lane )
         ]
+
+let fixture : Pane.input =
+  { Pane.now
+  ; tab = Pane.Tab_fleet
+  ; feed = Pane.Feed_live 1_234
+  ; keepers =
+      [ keeper "quiet-one" ~tone:Pane.Dim
+      ; keeper "sangsu"
+      ; keeper "rondo"
+      ; keeper "polisher"
+      ]
+  ; selected = Some "sangsu"
+  ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
+  ; chunks = chunks [ "quiet-one"; "sangsu"; "rondo"; "polisher" ] fixture_entries
   ; changes = Pane.Changes_absent
   }
 
@@ -108,6 +123,63 @@ let width (line : Pane.line) =
   List.fold_left
     (fun acc s -> acc + Masc_tui_message_layout.display_width s.Pane.text)
     0 line
+
+let span_values (line : Pane.line) =
+  List.map (fun (span : Pane.span) ->
+    let tone = match span.tone with
+      | Pane.Plain -> "plain" | Pane.Dim -> "dim" | Pane.Accent -> "accent"
+      | Pane.Ok -> "ok" | Pane.Warn -> "warn" | Pane.Bad -> "bad" | Pane.Info -> "info"
+    in
+    span.text, tone) line
+
+let test_clipped_header_preserves_spans_and_padding () =
+  let prefix =
+    [ "│", "dim"; "[Recent]", "accent"; " ", "plain";
+      "Changes", "dim"; " · 4 keepers · ", "dim" ]
+  in
+  let reason = "\027[31m한\027[0me\204\129🙂X" in
+  let input = { fixture with Pane.feed = Pane.Feed_closed reason } in
+  (* Explicit rendered spans pin ANSI bytes and tones, including a wide
+     grapheme that leaves a one-cell gap filled by a separate Plain span. *)
+  let cases =
+    [ 0, []
+    ; -1, []
+    ; 1, [ "│", "dim" ]
+    ; 4, [ "│", "dim"; "[Re", "accent" ]
+    ; 9, [ "│", "dim"; "[Recent]", "accent" ]
+    ; 10, [ "│", "dim"; "[Recent]", "accent"; " ", "plain" ]
+    ; 17, [ "│", "dim"; "[Recent]", "accent"; " ", "plain"; "Changes", "dim" ]
+    ; 32, prefix
+    ; 45, prefix @ [ "feed closed: \027[31m", "bad" ]
+    ; 46, prefix @ [ "feed closed: \027[31m", "bad"; " ", "plain" ]
+    ; 47, prefix @ [ "feed closed: \027[31m한\027[0m", "bad" ]
+    ; 48, prefix @ [ "feed closed: \027[31m한\027[0me\204\129", "bad" ]
+    ; 49, prefix @ [ "feed closed: \027[31m한\027[0me\204\129", "bad"; " ", "plain" ]
+    ; 50, prefix @ [ "feed closed: \027[31m한\027[0me\204\129🙂", "bad" ]
+    ; 51, prefix @ [ "feed closed: " ^ reason, "bad" ]
+    ; 53, prefix @ [ "feed closed: " ^ reason, "bad"; "  ", "plain" ]
+    ]
+  in
+  List.iter (fun (cols, expected) ->
+    let drawn = Pane.lines ~rows:1 ~cols ~scroll:0 input in
+    let row = List.hd drawn.Pane.rows in
+    check (list (pair string string)) (Printf.sprintf "header at %d cells" cols)
+      expected (span_values row);
+    check int "rendered cell budget" (max 0 cols) (width row)) cases
+
+let test_full_width_row_retains_empty_toned_spans () =
+  let drawn = Pane.lines ~rows:14 ~cols:Pane.pane_cols ~scroll:0 fixture in
+  let row = List.find (fun row -> contains "Execute" (text row))
+    (List.rev drawn.Pane.rows) in
+  let trailing = List.rev (span_values row) in
+  match trailing with
+  | duration :: gap :: _ ->
+    check (pair string string) "unknown duration retains its empty Dim span"
+      ("", "dim") duration;
+    check (pair string string) "absent duration gap retains its empty Plain span"
+      ("", "plain") gap;
+    check int "tool row still exactly fills the pane" Pane.pane_cols (width row)
+  | _ -> fail "tool row lost its spans"
 
 let target_text = function
   | Pane.Target_none -> "none"
@@ -163,8 +235,8 @@ let dead_fixture : Pane.input =
       :: keeper "mute"
       :: fixture.Pane.keepers
   ; selected = Some "goner"
-  ; entries =
-      fixture.Pane.entries
+  ; chunks = chunks [ "goner"; "bare"; "mute"; "quiet-one"; "sangsu"; "rondo"; "polisher" ]
+      (fixture_entries
       @ entries
           [ ( 995.
             , agent_core ~kind:Observer.Turn_started ~turn:7 ~at:995.
@@ -186,7 +258,7 @@ let dead_fixture : Pane.input =
                 ; tc_tool_calls = Some 2
                 ; tc_at = 908.
                 } )
-          ]
+          ])
   }
 
 let dead_drawn = Pane.lines ~rows ~cols ~scroll:0 dead_fixture
@@ -250,7 +322,7 @@ let test_event_age_uses_local_receipt_not_producer_time () =
   let input =
     { fixture with
       Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; entries = entries
+    ; chunks = chunks [ "sangsu" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:3 ~at:100.
             ~correlation:"trace-sangsu" lane ]
     }
@@ -272,7 +344,7 @@ let test_settled_unknown_call_total_stays_unknown () =
   let input =
     { fixture with
       Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; entries = entries [ 990., event ]
+    ; chunks = chunks [ "sangsu" ] @@ entries [ 990., event ]
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
@@ -284,7 +356,7 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
   let input =
     { fixture with
       Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; entries = entries
+    ; chunks = chunks [ "sangsu" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
             ~correlation:"trace-sangsu" lane
         ; 980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
@@ -392,6 +464,40 @@ let test_narrow_budget_folds_the_fleet () =
   check bool "the fold is what a press scrolls into" true
     (List.mem Pane.Target_more drawn.Pane.targets)
 
+let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
+  let name = "한e\204\129🙂" in
+  let input = { fixture with
+    Pane.keepers = [ keeper "quiet"; keeper name; keeper "second"; keeper "approval" ];
+    selected = Some name;
+    approvals = [ { Pane.approval_keeper = "approval"; approval_tool = "검토🙂" } ];
+    chunks = chunks [ name; "quiet"; "second"; "approval" ] @@ entries
+      [ 990., agent_core ~tool:"Read한🙂" ~turn:5 ~tool_use_id:"unicode"
+          ~at:990. ~correlation:("trace-" ^ name) lane;
+        980., settled ~at:980. "second" ] } in
+  let keeper_row view =
+    List.combine view.Pane.rows view.Pane.targets
+    |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
+    |> fst |> span_values
+  in
+  let full = Pane.lines ~rows:14 ~cols ~scroll:0 input in
+  let folded = Pane.lines ~rows:8 ~cols ~scroll:0 input in
+  let scrolled = Pane.lines ~rows:6 ~cols ~scroll:1 input in
+  check (list (pair string string)) "folded keeper keeps text, tones and click target"
+    (keeper_row full) (keeper_row folded);
+  check (list (pair string string)) "scrolled keeper keeps text, tones and click target"
+    (keeper_row full) (keeper_row scrolled);
+  let folded_text = List.map text folded.Pane.rows in
+  check bool "overview fold counts both hidden keepers" true
+    (contains "2 more" (List.nth folded_text 4));
+  check string "fold remains actionable" "more" (target_text (List.nth folded.targets 4));
+  check bool "overview focus still belongs to selected Unicode keeper" true
+    (contains name (List.nth folded_text 6));
+  check bool "overview focus shows current receipt age" true
+    (contains "evt 10.0s" (List.nth folded_text 6));
+  let later = Pane.lines ~rows:8 ~cols ~scroll:0 { input with Pane.now = now +. 20. } in
+  check bool "a later frame advances receipt age in the reused row" true
+    (contains "evt 30.0s" (text (List.nth later.Pane.rows 3)))
+
 (* ── targets ────────────────────────────────────────────────────────── *)
 
 let test_targets_name_the_keeper_under_each_fleet_row () =
@@ -485,7 +591,7 @@ let test_event_and_count_labels_fit_the_existing_width () =
     { fixture with
       Pane.keepers = [ keeper "sixteen-charname" ]; selected = Some "sixteen-charname";
       approvals = [];
-      entries = entries
+      chunks = chunks [ "sixteen-charname" ] @@ entries
         [ 987.6, agent_core ~tool:"network_read" ~turn:3 ~tool_use_id:"width"
             ~at:987.6 ~correlation:"trace-sixteen-charname" lane ]
     }
@@ -637,6 +743,38 @@ let test_state_text_reads_each_case () =
   check string "no chunk means no observed events" "  no events"
     (plain (Pane.keeper_state_text ~now ~health:None ~approval:None None))
 
+let test_reused_chunks_keep_presentation_inputs_live () =
+  let traces = [ "sangsu", "trace-sangsu"; "rondo", "trace-rondo" ] in
+  let projection = Acting.refresh_projection ~previous:None ~traces fixture_entries in
+  let reused = Acting.refresh_projection ~previous:(Some projection)
+    ~traces:(List.map Fun.id traces) fixture_entries in
+  check bool "event projection is reused" true (projection == reused);
+  let input = { fixture with Pane.chunks = Acting.projection_chunks reused } in
+  let row_for name view = List.combine view.Pane.rows view.Pane.targets
+    |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
+    |> fst |> text in
+  let initial = Pane.lines ~rows ~cols ~scroll:0 input in
+  check bool "initial event age" true (contains "evt 10.0s" (row_for "sangsu" initial));
+  let changed = { input with Pane.now = now +. 20.; selected = Some "rondo";
+    keepers = List.map (fun (keeper : Pane.keeper) ->
+      if keeper.name = "sangsu" then { keeper with health = Some Masc.Tui_decode.Health_offline }
+      else keeper) input.keepers } in
+  let later = Pane.lines ~rows ~cols ~scroll:0 changed in
+  check bool "age advances independently of chunks" true (contains "evt 30.0s" (row_for "sangsu" later));
+  check bool "new health changes unresolved record display" true
+    (contains "unfinished" (row_for "sangsu" later));
+  let later_text = List.map text later.Pane.rows in
+  check bool "new selection changes focus keeper" true
+    (contains "settled" (List.nth later_text (last_index_of_in later_text "rondo")));
+  let pending = { changed with approvals =
+    [ { Pane.approval_keeper = "sangsu"; approval_tool = "Write" } ] } in
+  let approved_view = Pane.lines ~rows:6 ~cols ~scroll:0 pending in
+  check bool "new approval is visible and takes ordering priority" true
+    (contains "approval" (row_for "sangsu" approved_view));
+  check string "click target follows newly prioritized keeper" "keeper:sangsu"
+    (target_text (List.nth approved_view.Pane.targets 2));
+  check int "viewport budget remains live" 6 (List.length approved_view.Pane.rows)
+
 let test_tokens_and_ages_are_compact () =
   check string "both sides summed" "74.2k tok" (Pane.tokens_text (Some 73_877, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
@@ -654,6 +792,10 @@ let () =
             test_content_cols_give_the_surface_the_rest
         ; test_case "threshold leaves the surface the roster floor" `Quick
             test_threshold_leaves_the_surface_the_roster_floor
+        ; test_case "clipped header preserves styled Unicode spans" `Quick
+            test_clipped_header_preserves_spans_and_padding
+        ; test_case "full-width row retains empty toned spans" `Quick
+            test_full_width_row_retains_empty_toned_spans
         ] )
     ; ( "rows"
       , [ test_case "every row is the pane width" `Quick test_every_row_is_the_pane_width
@@ -667,6 +809,8 @@ let () =
         ; test_case "focus falls back to who acted last" `Quick
             test_focus_falls_back_to_who_acted_last
         ; test_case "narrow budget folds the fleet" `Quick test_narrow_budget_folds_the_fleet
+        ; test_case "folded and scrolled views preserve keeper row and focus" `Quick
+            test_folded_and_scrolled_views_preserve_keeper_row_and_focus
         ] )
     ; ( "a gone keeper"
       , [ test_case "a gone keeper's turn is not read as running" `Quick
@@ -715,6 +859,8 @@ let () =
         ] )
     ; ( "text"
       , [ test_case "state text reads each case" `Quick test_state_text_reads_each_case
+        ; test_case "reused chunks keep presentation inputs live" `Quick
+            test_reused_chunks_keep_presentation_inputs_live
         ; test_case "tokens and ages are compact" `Quick test_tokens_and_ages_are_compact
         ] )
     ]

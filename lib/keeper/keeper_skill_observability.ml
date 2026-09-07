@@ -183,8 +183,15 @@ let flow_of_plan plan =
   { nodes; batches }
 ;;
 
+(* The same shape the Available line draws, so the gauge and the surface cannot
+   drift: identity, ": ", description. It counted the whole reference while the
+   line printed the whole reference; both dropped the content_revision together
+   (RFC-0411 §4.1). A gauge left on the old shape would keep reporting bytes
+   nobody spends. *)
 let instruction_discovery_bytes reference description =
-  String.length (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+  String.length
+    (Skill_reference.identity_to_yojson reference.Skill_reference.identity
+     |> Yojson.Safe.to_string)
   + 2
   + String.length description
 ;;

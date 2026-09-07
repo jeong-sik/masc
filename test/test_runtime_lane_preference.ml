@@ -153,9 +153,53 @@ let test_preferred_of_lane_expires () =
         None
         (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1"))
 
+let test_rate_limit_hint_expires_exactly () =
+  let noted = State.note_rate_limit ~noted_at:10. ~retry_after:(Some 5.) None in
+  Alcotest.(check bool) "before provider reset retains observation" true
+    (Option.is_some (State.observe_rate_limit ~now:14.999 noted));
+  Alcotest.(check bool) "at provider reset drops observation" true
+    (Option.is_none (State.observe_rate_limit ~now:15. noted))
+;;
+
+let test_rate_limit_without_hint_has_no_synthetic_expiry () =
+  let noted = State.note_rate_limit ~noted_at:10. ~retry_after:None None in
+  match State.observe_rate_limit ~now:1_000_000. noted with
+  | Some (State.Unknown_scope_rate_limit { retry_after = None; noted_at }) ->
+      Alcotest.(check (float 0.)) "original observation retained" 10. noted_at
+  | Some (State.Unknown_scope_rate_limit _) | None ->
+      Alcotest.fail "no-hint rate limit acquired an invented deadline"
+;;
+
+let test_rate_limit_invalid_hints_do_not_create_deadlines () =
+  List.iter (fun seconds ->
+    let noted = State.note_rate_limit ~noted_at:10. ~retry_after:(Some seconds) None in
+    match State.observe_rate_limit ~now:1000. noted with
+    | Some (State.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
+    | Some (State.Unknown_scope_rate_limit _) | None ->
+        Alcotest.fail "invalid provider delay became usable")
+    [Float.nan; Float.infinity; Float.neg_infinity; -1.]
+;;
+
+let test_rate_limit_delayed_observation_keeps_newer_hint () =
+  let newer = State.note_rate_limit ~noted_at:20. ~retry_after:(Some 3.) None in
+  let delayed = State.note_rate_limit ~noted_at:10. ~retry_after:None newer in
+  Alcotest.(check bool) "old response cannot replace newer expiry" true
+    (Option.is_none (State.observe_rate_limit ~now:23. delayed))
+;;
+
 let () =
   Alcotest.run "runtime_lane_preference"
-    [ ( "state"
+    [ ( "candidate backpressure"
+      , [ Alcotest.test_case "hint expires at provider boundary" `Quick
+            test_rate_limit_hint_expires_exactly
+        ; Alcotest.test_case "no synthetic expiry" `Quick
+            test_rate_limit_without_hint_has_no_synthetic_expiry
+        ; Alcotest.test_case "invalid hints remain unknown" `Quick
+            test_rate_limit_invalid_hints_do_not_create_deadlines
+        ; Alcotest.test_case "delayed observation retains newer hint" `Quick
+            test_rate_limit_delayed_observation_keeps_newer_hint
+        ])
+    ; ( "state"
       , [ Alcotest.test_case
             "active preference reorders"
             `Quick

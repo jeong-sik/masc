@@ -29,6 +29,13 @@ type t = private
   ; content_revision : content_revision
   }
 
+type request =
+  | Pinned of t
+  | By_identity of identity
+      (** A caller that named a Skill without pinning its revision. Resolving
+          it needs the frozen turn snapshot, which this module does not hold —
+          see {!request_of_yojson}. *)
+
 type decode_error =
   | Expected_object of { field : string }
   | Expected_list of { field : string }
@@ -80,6 +87,13 @@ val pp : Format.formatter -> t -> unit
 (** Canonical exact JSON printer used by enclosing derived domain printers. *)
 val list_to_yojson : t list -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, decode_error) result
+
+val request_of_yojson : Yojson.Safe.t -> (request, decode_error) result
+(** The same object as {!of_yojson} with [content_revision] optional. Absent, the
+    caller named a Skill and left the revision to whoever holds the frozen turn
+    snapshot; present, it is decoded and validated exactly as before, so a
+    revision that was spelled out is still honoured or refused rather than
+    quietly replaced. RFC-0411 §4.2. *)
 val list_of_yojson : Yojson.Safe.t -> (t list, decode_error) result
 (** Decoders are strict: objects reject unknown and duplicate fields, lists
     reject duplicate exact references, and the former string-only Task shape is

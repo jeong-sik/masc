@@ -56,15 +56,12 @@ type feed =
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
     colour the caller reads out of the same health. [health] is that same
     reading. A gone process marks an unclosed feed record [unfinished]; every
-    other unclosed record is [open/gap], without asserting a current turn.
-    [trace_id] resolves agent-core events, which name their runtime lane,
-    back to the keeper. *)
+    other unclosed record is [open/gap], without asserting a current turn. *)
 type keeper = {
   name : string;
   mark : string;
   mark_tone : tone;
   health : Masc.Tui_decode.keeper_health_reading option;
-  trace_id : string;
 }
 
 (** A colour the renderer resolves through the theme. Names a reading, never
@@ -125,7 +122,9 @@ type input = {
       (** the keeper the cursor is on; on the Recent tab the most recently
           observed keeper stands in when there is none *)
   approvals : approval list;  (** pending, any keeper *)
-  entries : Masc_tui_acting.entry list;  (** newest first, as the TUI holds them *)
+  chunks : Masc_tui_acting.chunk list;
+      (** Event-derived projection, newest first; all presentation inputs above
+          remain live independently of chunk reuse. Ignored on Changes. *)
   changes : changes;  (** the selected keeper's, for the changes tab *)
 }
 

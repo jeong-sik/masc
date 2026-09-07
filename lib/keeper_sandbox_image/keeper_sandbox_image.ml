@@ -17,12 +17,14 @@ let default_tag = "masc-sandbox:general"
 let dockerfile =
   {|# MASC general Keeper sandbox.
 #
-# Built by `masc sandbox-image build`, which pipes this file to
-# `docker build -` -- there is no build context and no COPY, so it builds the
-# same way from an installed binary as from a checkout.
+# Built by `masc sandbox-image`, which hands this file to the container
+# runtime's build command -- on stdin where the runtime reads a Dockerfile
+# there, in a directory of its own where it does not. Either way this file is
+# the whole context and there is no COPY, so it builds the same way from an
+# installed binary as from a checkout.
 #
-# This is the toolchain a Keeper turn needs to read, search and edit a
-# repository, and nothing more. A Keeper that has to build a project needs that
+# This is what a Keeper turn needs to read, search and edit a repository, and
+# to hand the result back. A Keeper that has to build a project needs that
 # project's toolchain instead: point it at another image with `sandbox_image`
 # in its TOML.
 FROM debian:bookworm-slim
@@ -33,15 +35,29 @@ FROM debian:bookworm-slim
 # git: history and diffs are how a Keeper reports what it changed.
 # ca-certificates, curl: anything that reaches the network at all.
 # less, procps, findutils: what a shell turn reaches for without thinking.
+# gh: MASC mounts a GitHub CLI config into the guest, points GH_CONFIG_DIR at
+#     it, and runs `gh auth status` there as a preflight. Shipping the
+#     credentials and not the program that reads them left a Keeper able to
+#     commit and unable to open a pull request.
+# python3: MASC's own repository-checkout probe runs `python3 -c` in the guest
+#     (keeper_sandbox_remote_checkouts.ml). Without it the probe exits 127 and
+#     the Keeper reports its workspace as unreadable.
+#
+# These two are not a toolchain choice. They are what MASC itself asks the
+# guest for, and an image that ships without them breaks a contract MASC
+# already made. Which language toolchain a Keeper needs stays the operator's
+# call, named per Keeper with sandbox_image.
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
        bash \
        ca-certificates \
        curl \
        findutils \
+       gh \
        git \
        less \
        procps \
+       python3 \
        ripgrep \
   && rm -rf /var/lib/apt/lists/*
 
@@ -63,6 +79,14 @@ CMD ["bash", "-l"]
 |}
 
 let build_argv ~tag = [ "build"; "-t"; tag; "-" ]
+
+let write_recipe_into ~dir =
+  let path = Filename.concat dir "Dockerfile" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc dockerfile);
+  path
 
 let context_directory_build_argv ~tag ~dockerfile ~context =
   [ "build"; "-t"; tag; "-f"; dockerfile; context ]

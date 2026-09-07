@@ -36,10 +36,15 @@ let rec atomic_update atomic f =
 let token_counter = Atomic.make 0
 let next_token () = Atomic.fetch_and_add token_counter 1
 
+type payload_origin = Seeded | Computed | Timeout
+type payload_preparation = Identity_only | Http_encodings
+
 type cached_payload = {
   json : Yojson.Safe.t;
   raw_json : string;
   etag : string;
+  origin : payload_origin;
+  encoded : Http_response_payload.prepared option;
 }
 
 let etag_hex_chars = 12
@@ -49,9 +54,32 @@ let weak_etag_of_string s =
   let sub = String.sub hash 0 (min etag_hex_chars (String.length hash)) in
   "W/\"" ^ sub ^ "\""
 
+let payload_prepared_hook : (cached_payload -> unit) option Atomic.t =
+  Atomic.make None
+
+let refresh_registered_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
+type refresh_registration = Queued | Registered | Abandoned
+
+let payload_of_json ?(preparation = Identity_only) ~origin json =
+  let raw_json = Yojson.Safe.to_string json in
+  let etag = weak_etag_of_string raw_json in
+  let encoded =
+    match preparation with
+    | Identity_only -> None
+    | Http_encodings -> Some (Http_response_payload.prepare raw_json)
+  in
+  let payload = { json; raw_json; etag; origin; encoded } in
+  Option.iter (fun hook -> hook payload) (Atomic.get payload_prepared_hook);
+  payload
+
+let select_http_representation ~accept_encoding payload =
+  match payload.encoded with
+  | Some prepared -> Http_response_payload.select_prepared ~accept_encoding prepared
+  | None -> payload.raw_json, []
+
 type entry = {
-  value : Yojson.Safe.t;
-  raw : (string * string) option Atomic.t;
+  payload : cached_payload;
   expires_at : float;
   stale_until : float;
 }
@@ -60,24 +88,7 @@ type slot =
   | Ready of entry
   | Computing of { token : int; started_at : float; stale : entry option }
 
-let ensure_raw entry =
-  match Atomic.get entry.raw with
-  | Some pair -> pair
-  | None ->
-      let raw_json = Yojson.Safe.to_string entry.value in
-      let etag = weak_etag_of_string raw_json in
-      let pair = (raw_json, etag) in
-      Atomic.set entry.raw (Some pair);
-      pair
-
-let payload_of_entry entry =
-  let (raw_json, etag) = ensure_raw entry in
-  { json = entry.value; raw_json; etag }
-
-let payload_of_json json =
-  let raw_json = Yojson.Safe.to_string json in
-  let etag = weak_etag_of_string raw_json in
-  { json; raw_json; etag }
+let payload_of_entry entry = entry.payload
 
 let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
 
@@ -429,11 +440,10 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       inc_cache_hit ();
       let do_bg_compute () =
         match compute () with
-        | value ->
+        | payload ->
           let ts = now () in
           let new_entry = {
-            value;
-            raw = Atomic.make None;
+            payload;
             expires_at = ts +. jittered_ttl ~key ttl;
             stale_until = ts +. jittered_ttl ~key ttl +. stale_grace;
           } in
@@ -484,22 +494,50 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | _ -> ((), map)
         )
       in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           (try
-              Eio.Fiber.fork ~sw (fun () ->
-                try do_bg_compute ()
-                with
-                | Eio.Cancel.Cancelled _ as e ->
+      (* Snapshot refreshes can read this cache from an executor worker. Eio
+         switches belong to one domain: forking there with the server's root
+         switch raises before the refresh starts. Only register the fork on
+         the root owner; [compute] still submits its work to the executor.
+         The root lifetime also keeps this shared refresh outside a reader's
+         turn switch. *)
+      let registration = Atomic.make Queued in
+      let abandon_registration () =
+        if Atomic.compare_and_set registration Queued Abandoned then
+          restore_stale_ready ()
+      in
+      let register_refresh () =
+        match SMap.find_opt key (Atomic.get table) with
+        | Some (Computing { token = current; _ })
+          when current = token
+            && Atomic.compare_and_set registration Queued Registered ->
+          (* Once the root claims registration, it owns cleanup even if the
+             reader is cancelled before the dispatch acknowledgement arrives.
+             Resetting its slot from that reader would start a second refresh
+             while the first one is still alive. *)
+          (try
+             (match Eio_context.get_root_switch_opt () with
+              | Some sw ->
+                Eio.Fiber.fork ~sw (fun () ->
+                  try do_bg_compute () with
+                  | Eio.Cancel.Cancelled _ as e ->
                     restore_stale_ready ();
-                    raise e)
-            with
-            | Invalid_argument _ ->
-                restore_stale_ready ()
-            | Eio.Cancel.Cancelled _ -> ())
-       | None ->
-           Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
-           do_bg_compute ());
+                    raise e);
+                Option.iter (fun hook -> hook ()) (Atomic.get refresh_registered_hook)
+              | None ->
+                Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
+                do_bg_compute ())
+           with
+           | Invalid_argument _ -> restore_stale_ready ()
+           | Eio.Cancel.Cancelled _ as e ->
+             restore_stale_ready ();
+             raise e)
+        | _ -> ()
+      in
+      (try Eio_context.run_on_owner_domain register_refresh with
+       | Invalid_argument _ -> abandon_registration ()
+       | Eio.Cancel.Cancelled _ as e ->
+         abandon_registration ();
+         raise e);
       stale_entry
     | `Compute token ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
@@ -551,10 +589,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       run_compute ();
       let ts = now () in
       (match !result_ref with
-       | Some (Ok value) ->
+       | Some (Ok payload) ->
            let new_entry = {
-             value;
-             raw = Atomic.make None;
+             payload;
              expires_at = ts +. jittered_ttl ~key ttl;
              stale_until = ts +. jittered_ttl ~key ttl +. stale_grace;
            } in
@@ -592,6 +629,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             | _ -> raise exn)
        | None ->
            let fallback_val = ref None in
+           let fallback_payload = payload_of_json ~origin:Timeout
+             (timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ())) in
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; stale; _ }) when c = token ->
@@ -601,11 +640,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       fallback_val := Some cooldown;
                       ((), SMap.add key (Ready cooldown) map)
                   | None ->
-                      let err_json =
-                        timeout_error_json ~timeout_kind:"compute" key
-                          (max_wait_sec ())
-                      in
-                      let cooldown = { value = err_json; raw = Atomic.make None; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
+                      let cooldown = { payload = fallback_payload; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
                       fallback_val := Some cooldown;
                       ((), SMap.add key (Ready cooldown) map))
              | _ -> ((), map)
@@ -613,8 +648,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            (match !fallback_val with
             | Some entry -> entry
             | None ->
-                let err_json = timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ()) in
-                { value = err_json; raw = Atomic.make None; expires_at = ts +. 5.0; stale_until = ts +. 5.0 }))
+                { payload = fallback_payload; expires_at = ts +. 5.0; stale_until = ts +. 5.0 }))
     | `Retry_stuck (elapsed, _ceiling) ->
       (* Pair the watchdog with an SLO-actionable signal: if this counter
          climbs sustainedly, [release_on_cancel] is not firing and the
@@ -648,11 +682,10 @@ let get_or_compute_simple key ~ttl compute =
     (* PR-0.2.A: cache miss observation. *)
     inc_cache_miss ();
     (match compute () with
-     | value ->
+     | payload ->
        let ts_after = now () in
        let entry = {
-         value;
-         raw = Atomic.make None;
+         payload;
          expires_at = ts_after +. jittered_ttl ~key ttl;
          stale_until = ts_after +. jittered_ttl ~key ttl +. stale_grace;
        } in
@@ -679,18 +712,17 @@ let get_or_compute_entry key ~ttl compute =
   clear_timeout_circuit key;
   entry
 
-let peek_payload key =
+let peek_entry key =
   let ts = now () in
   let map = Atomic.get table in
   match SMap.find_opt key map with
-  | Some (Ready entry) when entry.stale_until > ts -> Some (payload_of_entry entry)
-  | Some (Computing { stale = Some stale_entry; _ }) -> Some (payload_of_entry stale_entry)
+  | Some (Ready entry) when entry.stale_until > ts -> Some entry
+  | Some (Computing { stale = Some stale_entry; _ }) -> Some stale_entry
   | _ -> None
 
-let peek key =
-  match peek_payload key with
-  | Some payload -> Some payload.json
-  | None -> None
+let peek_payload key = Option.map payload_of_entry (peek_entry key)
+
+let peek key = Option.map (fun entry -> entry.payload.json) (peek_entry key)
 
 (* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
 
@@ -727,42 +759,37 @@ let peek key =
    whole worker is the intent; RFC-0204 rejects *reclassifying* existing I/O
    submissions to 1.0, which is a different change. Pool size then bounds how
    many computes run at once, so no separate concurrency gate is added. *)
-let offloaded compute () = Executor_pool_ref.submit_or_inline compute
+let offloaded_payload ~preparation compute () =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    payload_of_json ~preparation ~origin:Computed (compute ()))
 
-let get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute =
+let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
+    key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
-    payload_of_json (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
+    payload_of_json ~origin:Timeout (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
   else
-    let compute = offloaded compute in
+    let compute = offloaded_payload ~preparation compute in
+    let with_timeout f =
+      match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (f ())) with
+      | Ok value -> value
+      | Error `Timeout ->
+          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+          raise (Compute_timeout (key, false))
+    in
     try
       let entry =
         if Eio_guard.is_ready () then
-          get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
-            match
-              Eio.Time.with_timeout clock timeout_sec (fun () ->
-                Ok (compute ()))
-            with
-            | Ok value -> value
-            | Error `Timeout ->
-              Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-              raise (Compute_timeout (key, false)))
+          get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl
+            (fun () -> with_timeout compute)
         else
-          get_or_compute_simple key ~ttl (fun () ->
-            match
-              Eio.Time.with_timeout clock timeout_sec (fun () ->
-                Ok (compute ()))
-            with
-            | Ok value -> value
-            | Error `Timeout ->
-              Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-              raise (Compute_timeout (key, false)))
+          get_or_compute_simple key ~ttl (fun () -> with_timeout compute)
       in
       clear_timeout_circuit key;
       payload_of_entry entry
     with
     | Compute_timeout (key, waiting) ->
         record_timeout_circuit key;
-        payload_of_json (timeout_error_json ~waiting key timeout_sec)
+        payload_of_json ~origin:Timeout (timeout_error_json ~waiting key timeout_sec)
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   (get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute).json
@@ -798,31 +825,36 @@ let set_default_clock clock =
    their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
-let get_or_compute_unbounded_payload key ~ttl compute =
-  let entry = get_or_compute_entry key ~ttl compute in
+let get_or_compute_unbounded_payload ~preparation key ~ttl compute =
+  let entry = get_or_compute_entry key ~ttl (offloaded_payload ~preparation compute) in
   payload_of_entry entry
 
 
-let get_or_compute_payload key ~ttl compute =
+let get_or_compute_payload ?(preparation = Identity_only) key ~ttl compute =
   match Atomic.get default_clock with
   | Some clock ->
-    get_or_compute_payload_with_timeout key ~ttl ~clock
+    get_or_compute_payload_with_timeout ~preparation key ~ttl ~clock
       ~timeout_sec:default_compute_timeout_sec compute
-  | None -> get_or_compute_unbounded_payload key ~ttl compute
+  | None -> get_or_compute_unbounded_payload ~preparation key ~ttl compute
 
 let get_or_compute key ~ttl compute =
   (get_or_compute_payload key ~ttl compute).json
 ;;
 
 let seed_stale_if_missing key ~stale_for value =
-  let ts = now () in
-  atomic_update table (fun map ->
-      match SMap.find_opt key map with
-      | Some _ -> ((), map)
-      | None ->
-          ((), SMap.add key
-            (Ready { value; raw = Atomic.make None; expires_at = ts; stale_until = ts +. stale_for })
-            map));
+  if not (SMap.mem key (Atomic.get table)) then begin
+    (* Warming seeds are small and must remain available even while all workers
+       are busy. Prepare before publication, without queueing behind refreshes. *)
+    let payload = payload_of_json ~origin:Seeded value in
+    let ts = now () in
+    atomic_update table (fun map ->
+        match SMap.find_opt key map with
+        | Some _ -> ((), map)
+        | None ->
+            ((), SMap.add key
+              (Ready { payload; expires_at = ts; stale_until = ts +. stale_for })
+              map))
+  end;
   clear_timeout_circuit key
 
 let invalidate key =
@@ -837,6 +869,20 @@ let invalidate_prefix prefix =
 let invalidate_all () =
   Atomic.set table SMap.empty;
   clear_timeout_circuit_all ()
+
+module For_testing = struct
+  let with_refresh_registered_hook hook f =
+    let previous = Atomic.exchange refresh_registered_hook (Some hook) in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set refresh_registered_hook previous)
+      f
+
+  let with_payload_prepared_hook hook f =
+    let previous = Atomic.exchange payload_prepared_hook (Some hook) in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set payload_prepared_hook previous)
+      f
+end
 
 (* Slot kind string used in [stats ()] entry list and tests.  Kept as a
    total function rather than a string buried in [stats ()] so callers can

@@ -91,6 +91,18 @@ let all =
       ~category:"spawn"
       "Bytes of each spawned process stream kept for reading"
   ; setting
+      (* The clamp in Env_config_keeper.KeeperLaneGate is [0.001, 600], which
+         is what this range repeats. Its doc comment says "(0, 600]"; the code
+         is the one an operator meets. *)
+      ~range:(float_range ~min:0.001 ~max:600. ())
+      ~env_name:"MASC_KEEPER_LANE_ADMISSION_WAIT_BUDGET_SEC"
+      ~exposure:Env_only
+      ~value_kind:Float
+      ~default:"60"
+      ~consumers:[ "Keeper_msg_async submit lane" ]
+      ~category:"turn"
+      "Seconds a submit waits for its lane before reporting it unavailable"
+  ; setting
       ~range:(float_range ~min:0.05 ())
       ~env_name:"MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC"
       ~exposure:Env_only

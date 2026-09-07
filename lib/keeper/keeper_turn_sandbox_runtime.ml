@@ -57,7 +57,7 @@ let sweep_abandoned_microvm_guests
          rather than being absorbed. It is
          caught here only because [use_rw ~protect:true] poisons the mutex for
          every later boot and teardown if the body raises. *)
-      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* cancel-guard-ok *)
+      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* re-raised below *)
   with
   | Ok outcomes -> outcomes
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
@@ -733,9 +733,7 @@ let failed_exec_state_probe_error ~status ~output detail =
 ;;
 
 let resolve_image (t : t) =
-  match t.meta.sandbox_image with
-  | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_sandbox.Runtime.docker_image ()
+  Env_config_sandbox.Runtime.image_declared_or_default t.meta.sandbox_image
 ;;
 
 (* A microvm guest mounts its work volume, the shim, runtime config, and its

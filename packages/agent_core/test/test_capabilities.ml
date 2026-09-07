@@ -630,7 +630,7 @@ let test_lookup_deepseek_v4_flash () =
       ~model_id:"deepseek-v4-flash"
   with
   | Some c ->
-    check (option int) "context 1M" (Some 1_000_000) c.max_context_tokens;
+    check (option int) "context 1M" (Some 1_048_576) c.max_context_tokens;
     check (option int) "output 384K" (Some 384_000) c.max_output_tokens;
     check bool "tools" true c.supports_tools;
     (* thinking mode (default) 400s on forced tool_choice; auto stays valid *)
@@ -815,7 +815,7 @@ let test_lookup_glm_ocr () =
 
 let test_ollama_cloud_current_catalog_resolves () =
   let cases =
-    [ "deepseek-v4-pro", 524_288, false
+    [ "deepseek-v4-pro", 1_048_576, false
     ; "minimax-m2.1", 204_800, false
     ; "minimax-m2.5", 196_608, false
     ; "qwen3.5:397b", 262_144, true
@@ -836,9 +836,9 @@ let test_ollama_cloud_current_catalog_resolves () =
     ; "deepseek-v3.2", 163_840, false
     ; "mistral-large-3:675b", 262_144, true
     ; "glm-5.1", 202_752, false
-    ; "glm-5.2", 1_000_000, false
+    ; "glm-5.2", 1_048_576, false
     ; "gpt-oss:120b", 131_072, false
-    ; "minimax-m3", 524_288, true
+    ; "minimax-m3", 512_000, true
     ; "ministral-3:3b", 262_144, true
     ; "glm-5", 202_752, false
     ; "qwen3-coder-next", 262_144, false

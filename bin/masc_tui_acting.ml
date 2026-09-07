@@ -681,6 +681,26 @@ let chunks ~traces entries =
   Hashtbl.fold (fun _ keeper_chunks acc -> keeper_chunks @ acc) chunks []
   |> List.stable_sort (fun a b -> Float.compare b.ck_at a.ck_at)
 
+type chunk_projection = {
+  source_entries : entry list;
+  source_traces : (string * string) list;
+  projected_chunks : chunk list;
+}
+
+let refresh_projection ~previous ~traces entries =
+  let same_trace (keeper, trace) (other_keeper, other_trace) =
+    String.equal keeper other_keeper && String.equal trace other_trace
+  in
+  match previous with
+  | Some projection
+    when projection.source_entries == entries
+      && List.equal same_trace projection.source_traces traces -> projection
+  | _ ->
+    { source_entries = entries; source_traces = traces;
+      projected_chunks = chunks ~traces entries }
+
+let projection_chunks projection = projection.projected_chunks
+
 let chunk_rows ~traces entries =
   let chunks, plains = fold_chunks ~traces entries in
   let chunk_rows =
@@ -722,3 +742,64 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
+
+let evidence_fields (entry : entry) =
+  let field label value = label, value in
+  let some label value = field label (Some value) in
+  let number label value = field label (Option.map string_of_int value) in
+  match entry.ae_event with
+  | Observer.Agent_core e ->
+      let kind = match e.kind with
+        | Tool_called -> "tool_called" | Tool_completed -> "tool_completed"
+        | Turn_started -> "turn_started" | Turn_ready -> "turn_ready"
+        | Turn_completed -> "turn_completed" | Agent_started -> "agent_started"
+        | Agent_completed -> "agent_completed" | Agent_failed -> "agent_failed"
+        | Agent_yielded -> "agent_yielded" | Tool_approval_completed -> "tool_approval_completed"
+        | Telemetry -> "telemetry_event" | Agent_core_other name -> name in
+      [ some "Source" "runtime observer event"
+      ; some "Event kind" kind
+      ; field "Tool name" e.tool
+      ; field "Tool use ID" e.tool_use_id
+      ; field "Execution ID" e.execution_id
+      ; field "Event ID" e.event_id
+      ; field "Run ID" e.run_id
+      ; field "Parent event ID" e.parent
+      ; field "Caused by" e.caused_by
+      ; field "Correlation ID" e.correlation
+      ; field "Runtime agent" e.agent
+      ; field "Task ID" e.task
+      ; number "Turn" e.turn
+      ; field "Batch index / size" (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
+      ; some "Input/output" "not carried by this observer event"
+      ; some "Skill receipt" "not carried by this observer event"
+      ]
+  | Observer.Keeper_tool_call call ->
+      let schedule_fields =
+        match call.kt_schedule with
+        | None -> [ field "Execution schedule" None ]
+        | Some (Error error) -> [ some "Execution schedule error" error ]
+        | Some (Ok schedule) ->
+            [ some "Execution mode"
+                (match schedule.execution_mode with
+                 | Agent_core.Tool_contract.Concurrent -> "concurrent"
+                 | Agent_core.Tool_contract.Serial -> "serial")
+            ; some "Planned index (zero-based)" (string_of_int schedule.planned_index)
+            ; some "Batch index (zero-based) / size"
+                (Printf.sprintf "%d / %d" schedule.batch_index schedule.batch_size)
+            ]
+      in
+      [ some "Source" "keeper_tool_call observer event"
+      ; some "Keeper" call.kt_keeper
+      ; some "Tool name" call.kt_tool
+      ; number "Turn" call.kt_turn
+      ; field "Disposition" call.kt_disposition
+      ; field "Tool use ID" call.kt_tool_use_id
+      ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
+      ] @ schedule_fields
+  | event ->
+      let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+      [ some "Source" "observer event"
+      ; some "Event" row.label
+      ; some "Detail" row.detail
+      ; some "Call evidence" "this event is not an exact tool invocation"
+      ]

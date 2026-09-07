@@ -59,9 +59,9 @@ val protocol_version : int
 (** {1 Execution mode (RFC-0422)}
 
     How the shim boxes the payload. [Effect] is unrestricted. [Observe]
-    denies every filesystem write outside the shim's per-run scratch
-    directory (Landlock) and every [socket(2)] (seccomp), so a payload that
-    exits 0 has provably landed nothing anywhere. [Guest_local] denies only
+    denies filesystem writes outside the shim's per-run scratch directory
+    and verified /dev/null discard device (Landlock), and every [socket(2)]
+    (seccomp). [Guest_local] denies only
     sockets: writes stay inside the box the payload runs in. Both boxes are
     applied by the shim to itself before exec, unprivileged under
     no_new_privs; a shim on a kernel without Landlock refuses them with
@@ -203,7 +203,29 @@ type trailer =
                                     before/without running the payload *)
   }
 
-val render_trailer : trailer -> string
+type execution_boundary =
+  | Sandbox_applied
+  | Setup_failed
+  | Exec_failed
+  | Child_ack_unavailable
+  | Refused
+(** [Sandbox_applied] acknowledges that the child finished its sandbox setup.
+    It does not prove exec succeeded or that the command achieved its goal.
+    [Exec_failed] means setup succeeded but exec itself reported an error. *)
+
+type execution_receipt = { mode : mode; boundary : execution_boundary }
+(** The mode/plan is reported by the shim. Only [Sandbox_applied] and
+    [Exec_failed] acknowledge successful sandbox setup; a refusal, setup
+    failure, or absent child acknowledgement does not. *)
+
+val execution_receipt_to_yojson : execution_receipt -> Yojson.Safe.t
+val parse_execution_receipt : string -> (execution_receipt option, string) result
+(** Read optional evidence from the same result trailer. Missing evidence is
+    [Ok None]; malformed evidence is [Error], never inferred from requested
+    mode, stderr text, or the payload exit code. As with [parse_trailer], the
+    transport status must agree before the response is authoritative. *)
+
+val render_trailer : ?execution_receipt:execution_receipt -> trailer -> string
 (** [render_trailer t] is the exact [\x1e]-delimited byte string the
     shim appends to stderr.  Control bytes inside [shim_error] are
     JSON-escaped by the renderer, so no literal [\x1e] can appear

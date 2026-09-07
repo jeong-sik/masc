@@ -93,6 +93,9 @@ EXTERNAL_MODULE_PREFIXES = frozenset(
         "Sys",
         "Unix",
         "Uri",
+        # ocaml-msx, an opam dependency: lib/msx_lane calls into it and
+        # names it in its own docs.
+        "Msx",
         "Yojson",
     }
 )
@@ -102,7 +105,11 @@ BINDING_RE = re.compile(
     r"([A-Za-z_][A-Za-z0-9_']*)",
     re.M,
 )
-RECORD_FIELD_RE = re.compile(r"^\s*([a-z_][A-Za-z0-9_']*)\s*:", re.M)
+# Every field but the first is written `; name : t`, so a pattern anchored on
+# the name alone sees one field per record. {!Exec_ssh_endpoint.t.private_home}
+# is a valid odoc field reference that this reported as undefined for that
+# reason.
+RECORD_FIELD_RE = re.compile(r"^\s*;?\s*([a-z_][A-Za-z0-9_']*)\s*:", re.M)
 VARIANT_ARM_RE = re.compile(r"^\s*\|\s*([A-Za-z_][A-Za-z0-9_']*)", re.M)
 TYPE_NAME_RE = re.compile(r"^\s*type\s+([a-z_][A-Za-z0-9_']*)", re.M)
 DOC_RE = re.compile(r"\(\*\*(.*?)\*\)", re.S)

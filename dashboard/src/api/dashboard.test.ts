@@ -4579,7 +4579,7 @@ describe('fetchRuntimeProviders', () => {
             },
           ],
           disabled_runtime_ids: ['mimo.mimo-v2.5-pro'],
-          dropped_assignments: [
+          unavailable_assignments: [
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
@@ -4685,7 +4685,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
-    expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
+    expect(result.startup_degradation?.unavailable_assignments[0]?.keeper_name).toBe('budgettest')
     expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })

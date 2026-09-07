@@ -1502,6 +1502,23 @@ type observer_status =
       events : int;  (** frames the stream delivered before it closed *)
     }
 
+type observer_replay_status =
+  | Observer_replay_unobserved
+  | Observer_replay_scoped of Sse_wire.observer_handshake
+  | Observer_replay_unavailable of string
+
+let observer_replay_description = function
+  | Observer_replay_unobserved -> "Replay: not negotiated"
+  | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
+      "Replay: live from connection; earlier history not loaded"
+  | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
+      "Replay: retained window resumed; history completeness unknown"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
+      "Replay reset: server instance changed; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
+      "Replay reset: previous cursor had no instance; disconnected history not recovered"
+
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
    about four events a second, so this is a few minutes of scrollback; what
@@ -2731,35 +2748,48 @@ type palette_mode =
     }
 
 (* Browser reads remain separate from connector routing. A request generation
-   belongs to this view instance, so late Firefox replies cannot replace a
+   belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Live | Automation
+  type browser = Firefox | Zen
+  type client = { client_id : string; browser : browser }
+  type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
     tab_id : int; title : string; url : string; text : string;
     chars : int; truncated : bool;
   }
   type reading = {
-    tabs : tab list; page : page option; source : source;
+    tabs : tab list; page : page option; source : source; client_id : string option;
     elapsed_ms : float;
   }
   type screenshot = {
-    source : source; tab_id : int; title : string; url : string;
+    source : source; client_id : string option; tab_id : int; title : string; url : string;
     data : string; elapsed_ms : float;
   }
-  type operation = Read | Open_session | Close_session | Goto of string | Screenshot of int
+  type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
   type load = Idle | Loading of int * operation | Failed of string
   type t = {
+    clients : client list; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
+  let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
+  let client_id t = match t.source, t.selected_client with
+    | Live, Some client -> Some client.client_id
+    | Live, None | Automation, _ -> None
+  let browser_label t = match t.source, t.selected_client with
+    | Automation, _ -> "browser"
+    | Live, Some client -> browser_name client.browser
+    | Live, None -> "choose browser"
   let context_label t =
-    Printf.sprintf "Browser Lane · %s · Firefox page reader" (source_name t.source)
+    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
   let create () =
-    { source = Live; selected_tab = None; scroll = 0;
+    { clients = []; selected_client = None; client_picker = None;
+      source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0 }
@@ -2775,7 +2805,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2786,7 +2816,37 @@ module Browser_lane_view = struct
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
-            @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
+            @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
+            @ (match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id]))
+  let selected_client_available t = match t.source, t.selected_client with
+    | Automation, _ -> true
+    | Live, None -> false
+    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+  let choose_client client t =
+    { t with selected_client = Some client; selected_tab = None;
+      reading = None; scroll = 0; load = Idle; client_picker = None }
+  let accept_clients ~generation result t =
+    match t.load with
+    | Loading (current, Discover purpose) when current = generation ->
+        (match result with
+         | Error detail -> { t with clients = []; selected_tab = None; reading = None;
+             scroll = 0; client_picker = Some 0; load = Failed detail }, false
+         | Ok clients ->
+             let next = { t with clients; load = Idle } in
+             match t.selected_client, clients, purpose with
+             | None, [client], Read_after_discovery -> choose_client client next, true
+             | Some _, _, _ when selected_client_available next ->
+                 { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
+                 purpose = Read_after_discovery
+             | _, _, _ ->
+                 let load = match t.selected_client, clients with
+                   | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
+                   | None, [] -> Failed "No connected browser; r:refresh connections"
+                   | None, _ -> Idle
+                 in
+                 { next with selected_tab = None; reading = None; scroll = 0;
+                   client_picker = Some 0; load }, false)
+    | Loading _ | Idle | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function
     | `Assoc fields -> (match List.assoc_opt name fields with
@@ -2799,6 +2859,36 @@ module Browser_lane_view = struct
     | `String "live" -> Ok Live | `String "automation" -> Ok Automation
     | _ -> Error "unknown browser source"
   let get parse name json = let* value = field name json in parse value
+  let parse_client json =
+    let* client_id = get string "clientId" json in
+    let* browser = get (function
+      | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
+      | _ -> Error "unknown native browser") "browser" json in
+    if String.trim client_id = "" then Error "empty browser client ID"
+    else Ok { client_id; browser }
+  let decode_clients json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* clients = field "clients" data in
+      match clients with
+      | `List rows ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | row :: rest ->
+                let* client = parse_client row in
+                if List.exists (fun (old : client) -> old.client_id = client.client_id) acc
+                then Error "duplicate browser client ID"
+                else loop (client :: acc) rest
+          in loop [] rows
+      | _ -> Error "expected browser clients array"
+  let parse_client_id source json =
+    let* value = field "clientId" json in
+    match source, value with
+    | Live, `String id when String.trim id <> "" -> Ok (Some id)
+    | Automation, `Null -> Ok None
+    | _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* id = get integer "id" json in
     let* title = get string "title" json in
@@ -2834,17 +2924,19 @@ module Browser_lane_view = struct
       let* tabs = get parse_tabs "tabs" data in
       let* page = get parse_page "page" data in
       let* source = get parse_source "source" data in
+      let* client_id = parse_client_id source data in
       let* elapsed_ms = get milliseconds "elapsed_ms" data in
       match page with
       | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
           Error "page tab is absent from returned tabs"
-      | _ -> Ok { tabs; page; source; elapsed_ms }
+      | _ -> Ok { tabs; page; source; client_id; elapsed_ms }
   let decode_screenshot json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail
     else
       let* value = field "data" json in
       let* source = get parse_source "source" value in
+      let* client_id = parse_client_id source value in
       let* tab_id = get integer "tabId" value in
       let* title = get string "title" value in
       let* url = get string "url" value in
@@ -2852,7 +2944,7 @@ module Browser_lane_view = struct
       let* data = get string "data" value in
       let* elapsed_ms = get milliseconds "elapsed_ms" value in
       if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
-      else Ok { source; tab_id; title; url; data; elapsed_ms }
+      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
 
   (* Settle the browser operation even when a later key cancelled opening the
      image. The caller separately checks image intent before drawing. *)
@@ -2861,10 +2953,11 @@ module Browser_lane_view = struct
     | Loading (current, Screenshot requested_tab) when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
+                              && screenshot.client_id = client_id t
                               && screenshot.tab_id = requested_tab
                               && t.selected_tab = Some requested_tab ->
              { t with load = Idle }, Some screenshot
-         | Ok _ -> { t with load = Failed "screenshot source or tab mismatch" }, None
+         | Ok _ -> { t with load = Failed "screenshot source, client or tab mismatch" }, None
          | Error detail -> { t with load = Failed detail }, None)
     | Loading _ | Idle | Failed _ -> t, None
 
@@ -2872,10 +2965,10 @@ module Browser_lane_view = struct
     match t.load with
     | Loading (current, Read) when current = generation ->
         (match result with
-         | Ok reading when reading.source = t.source ->
+         | Ok reading when reading.source = t.source && reading.client_id = client_id t ->
              { t with reading = Some reading; load = Idle;
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
-         | Ok _ -> { t with load = Failed "browser response source mismatch" }
+         | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
     | Loading _ | Idle | Failed _ -> t
   let select_tab direction t =
@@ -3025,6 +3118,8 @@ type state = {
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* One event-derived projection; live presentation inputs are never cached. *)
+  mutable acting_chunk_projection: Masc_tui_acting.chunk_projection option;
   (* The selected keeper's recorded file changes, keyed by keeper name, for
      the pane's Changes tab. Refetched when the feed shows that keeper
      complete a tool call and on the operator cadence. *)
@@ -3072,6 +3167,14 @@ type state = {
      the last frame the server handed it and when it last asked. *)
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
+  (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
+     inventory to plug into the shared machine. It is an overlay on the MSX
+     screen -- while [msx_menu_open] the keyboard drives the picker, not the
+     game, so its keys never reach the emulator. [msx_carts] is the inventory
+     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+  mutable msx_menu_open: bool;
+  mutable msx_carts: string list;
+  mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -3776,7 +3879,10 @@ type state = {
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
           tools reuse it rather than minting one per attempt. Cleared when
-          the server refuses it. *)
+          the server explicitly reports it missing or conflicting. *)
+  mutable observer_cursor: Sse_wire.observer_cursor option;
+      (** Last applied complete event, scoped to the responding process. *)
+  mutable observer_replay: observer_replay_status;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -3784,6 +3890,9 @@ type state = {
   mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
   mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
   mutable acting_filter: Masc_tui_acting.filter;
+  mutable acting_cursor: int;
+  mutable acting_detail: Masc_tui_acting.entry option;
+  mutable acting_detail_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -4360,6 +4469,16 @@ let keeper_reading (state : state) (keeper : keeper) :
         keeper.k_name
   }
 
+let acting_flat_entries state =
+  List.filter
+    (fun entry -> Masc_tui_acting.visible state.acting_filter entry.Masc_tui_acting.ae_event)
+    state.acting
+
+let selected_acting_entry state =
+  match state.acting_filter with
+  | Masc_tui_acting.Turns -> None
+  | Actions | Everything -> List.nth_opt (acting_flat_entries state) state.acting_cursor
+
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
@@ -4599,6 +4718,7 @@ let create_state
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
@@ -4617,6 +4737,9 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
+  msx_menu_open = false;
+  msx_carts = [];
+  msx_menu_index = 0;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -4965,6 +5088,8 @@ let create_state
   fusion_historical_inflight = None;
   observer = Observer_off;
   mcp_session = None;
+  observer_cursor = None;
+  observer_replay = Observer_replay_unobserved;
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -4972,6 +5097,9 @@ let create_state
   acting_scroll = 0;
   acting_unseen = 0;
   acting_filter = Masc_tui_acting.Turns;
+  acting_cursor = 0;
+  acting_detail = None;
+  acting_detail_scroll = 0;
   verification = None;
   verification_error = None;
   verification_scroll = 0;
@@ -5275,6 +5403,8 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Acting_selection of int * int
+  | Acting_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -5316,6 +5446,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
+  | Acting_detail_scroll value -> state.acting_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
@@ -6444,6 +6576,7 @@ let gate_mode_label = function
 type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
+  | Palette_msx
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6548,6 +6681,7 @@ let palette_entries (state : state) =
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
+  @ [ "go MSX", Palette_msx ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

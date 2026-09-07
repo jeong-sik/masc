@@ -3,105 +3,108 @@
 > Current package version: v0.33.0
 > Latest changelog entry: v0.33.0 (2026-09-06)
 > Latest published GitHub release: v0.33.0 (2026-09-06)
-> Updated: 2026-09-06
+> Updated: 2026-09-07
 
-This roadmap is the 6-8 week operating view for `masc`. It is a planning document, not a release promise.
-For the product scope and GitHub planning model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
-For historical feature-train rules and release intake background, see [docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md).
+A planning view, not a release promise. The operating model behind it
+(labels, priority, pull-request and release rules) is
+[docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md). The
+historical feature-train rules are
+[docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md).
 
-## Product Scope
+## Scope
 
-`masc` is a repo-local MCP server for coordinating long-running Keepers, MCP clients, and workspace state inside one repository.
+`masc` is a harness for running several coding agents against one repository.
 
-Scope levels:
+| Level | Surface | Meaning |
+|---|---|---|
+| Front door | The TUI and the MCP workspace | What a user meets first, and what a release must not break |
+| Supporting | Keepers, sandboxes, the Gate | Advanced paths; behaviour depends on runtime and configuration |
+| Maintained | Dashboard | Kept building, type-checked, and truthful. New operator features land in the TUI first |
+| Deferred | Extraction, cluster mode, broad architecture cleanup | Visible, not scheduled |
 
-- Front door: repo workspace collaboration
-- Supporting: dashboard and operator visibility
-- Deferred or experimental: broad research surfaces, extraction work, and deep architecture cleanup
+## Where the backlog comes from
 
-## Active 6-8 Week Tracks
+Every issue carries a `masc-triage` block, and its `impact` axis ranks the
+backlog: `breaks-continuity`, then `breaks-collab`, `blinds-operator`,
+`degrades`, `internal`. `must-do: true` marks what breaks the product promise
+now. Counted on 2026-09-07:
 
-| Track | Goal | Why now | Primary references |
-|------|------|---------|--------------------|
-| Product truth and onboarding | Make the product easy to describe and start correctly | front-door docs and product posture are still fragmented | `README.md`, `docs/PRODUCT-OPERATING-PLAN.md`, `docs/PRODUCT-REVIEW.md` |
-| GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | Issues declare a `masc-triage` block; release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
-| Scope hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/SPEC-INDEX.md`, open issues below |
+| Open | Count |
+|---|---|
+| Issues | 1,210 |
+| `must-do` | 74 |
+| `impact/breaks-continuity` | 174 |
+| `impact/breaks-collab` | 26 |
+| `impact/blinds-operator` | 250 |
+| `impact/degrades` | 451 |
+| `impact/internal` | 285 |
+
+The live list is
+[open `must-do` issues](https://github.com/jeong-sik/masc/issues?q=is%3Aissue+is%3Aopen+label%3Amust-do).
+This file names groups and examples from it; the query is the source.
 
 ## Now
 
-Items that directly affect the current product scope:
+Open `must-do` issues, grouped. Numbers are issues.
 
-- CI truth and merge gates
-  - `#3418` quick-suite Eio regression
-  - `#3404` missing `ripgrep` in lint
-  - `#3396` shared quick-suite regression tracker
-- Transport and health truth
-  - `#3408` gRPC / WS discovery says `listening=false` while the transport is reachable
-- Config visibility foundation
-  - `#3364` centralize env config
-  - `#3365` dashboard config introspection
-  - `#3363` deduplicate env vars
-- Product and release truth
-  - README / roadmap / changelog alignment
-  - issue / PR / release hygiene automation
+- **Keeper continuity.** A Keeper that cannot boot, or drops what it already
+  decided: #32463 (meta file reset on boot), #32461 (an undecodable snapshot
+  still blocks the keeper), #31738 (a blocked-shutdown record makes a keeper
+  unbootable), #33267 (a rejected `max_tokens` response kept in the
+  checkpoint), #32504 (schema hard cut reconciled in one place at boot).
+- **Sandbox truth.** #33638 (an observe run allowed network writes in
+  production), #33492 (the microvm adapter cannot express
+  drop-all-capabilities and read-only rootfs on `msb`).
+- **Server lifecycle.** #33600 (`start-masc.sh` hijacked by the TUI hand-over),
+  #31711 (servers receive external SIGTERM).
+- **CI truth on `main`.** #32372, #32522, #32507, #32503 (suites red on
+  `main`), #31801 (a ratchet that counts zero on CI runners and passes),
+  #32181 (hangs that burn the test budget).
+- **Operator visibility.** #32828 (a rejected prompt override is invisible),
+  #32747 (a Gate record shows the pre-routing command), #31729 (decision-feed
+  token, cost, and stop-reason fields never written), #31722 (the dashboard
+  snapshot materialises 440k events per cycle).
+- **Verification.** #31862 (the judge cannot read producer evidence), #31629
+  (launcher provenance for verifier-grade proof), #32061 (non-Keeper owners
+  cannot submit completion over MCP).
 
 ## Next
 
-Items that improve advanced workflows after the front-door scope is cleaner:
-
-- auth and API contract hardening for non-local operation
-- ready-to-delegate contract
-  - verifier turn-budget reliability
-  - clearer runtime / model visibility in proof
-- richer operator diagnosis bundles and deeper read confidence
+- TUI: every operator action reachable without the dashboard. The two screens
+  that exist only in the dashboard (the IDE shell, the Lab diagnostics) are
+  not on the TUI path; whether they move or retire is open.
+- microVM backends beyond `apple_container`: `microsandbox` boot,
+  `nerdctl_kata` measured on a Linux host, `network_mode = "policy"` on more
+  than one backend.
+- Auth and API contract for non-local operation.
+- Verifier and delegation: turn-budget reliability, and the runtime and model
+  visible in proof.
+- Read-only diagnosis bundles for operators.
 
 ## Later
 
-Important work that stays visible but does not drive the next 6-8 weeks:
+- Extraction and package separation: `masc-games`, the kitchen-sink breakup,
+  large module decomposition.
+- Deep Eio and architecture cleanup: less global mutable state,
+  actor and message-passing conversions, interface and error-pipeline
+  refactors.
+- Distribution and platform work: cluster mode, a chaos framework.
 
-- wide extraction and package separation
-  - `masc-games`
-  - kitchen-sink breakup
-  - large module decomposition
-- deep Eio and architecture cleanup
-  - global mutable state reduction
-  - actor/message-passing conversions
-  - broad interface and error-pipeline refactors
-- exploratory distribution and platform work
-  - binary distribution
-  - cluster mode
-  - chaos framework
+## Release lane rules
 
-## Release Lane Rules
+- The active line is pre-1.0: `0.y.0` opens a user-visible train and `0.y.z`
+  stabilizes it.
+- `1.0.0` does not open until the TUI, the MCP workspace, and release truth
+  hold without caveats.
+- `v2.*` tags are audit history only.
+- No tag while `must-do` issues remain open.
+- No tag while version truth is broken across `dune-project`, `masc.opam`,
+  `ROADMAP.md`, and `CHANGELOG.md`.
+- The backlog is ordered by `impact/*`.
 
-- The active release line is pre-1.0: `0.y.0` opens a user-visible train and `0.y.z` stabilizes it.
-- Do not open `1.0.0` until repo workspace collaboration, release truth, and the core operator path are trustworthy without caveats.
-- Historical `v2.*` tags remain audit history only; they do not define the active SemVer policy.
-- Do not tag a release while `must-do` issues remain open.
-- Do not tag a release while version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
-- Order the backlog by `impact/*`, which is ranked by which product failure the issue causes.
+## References
 
-## Completed Reference Points
-
-See [CHANGELOG.md](CHANGELOG.md) for release-by-release details.
-
-| Version | Theme | Key deliverables |
-|--------|-------|------------------|
-| v0.3.0 | Release line reset | restart SemVer at pre-1.0, skip already-used `v0.1.x`, freeze legacy `v2.*` line, and teach release automation about the new series |
-
-Legacy `v2.*` reference points:
-
-| Version | Theme | Key deliverables |
-|--------|-------|------------------|
-| v2.87.0 | Release closeout | CI green, changelog honesty, worktree cleanup |
-| v2.91.0 | Immortal Base (legacy tag name) | supervision, health, graceful shutdown |
-| v2.92.0 | Product Portfolio Trim | explicit keep / archive decisions for experimental surfaces |
-| v2.93.0-v2.158.0 | Incremental | see changelog and product operating plan |
-
-## Design References
-
+- [CHANGELOG.md](CHANGELOG.md), release by release
 - [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md)
-- [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md)
-- [docs/IMMORTAL-SERVER-ROADMAP.md](docs/IMMORTAL-SERVER-ROADMAP.md)
+- [docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md)
 - [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md)
- 

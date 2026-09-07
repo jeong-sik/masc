@@ -644,6 +644,7 @@ let do_request_streaming
     ~(idle_timeout_sec : float)
     ?headers
     ?body
+    ?on_response
     ~method_
     ~(on_chunk : string -> unit)
     uri
@@ -692,6 +693,8 @@ let do_request_streaming
           let headers_list =
             Piaf.Response.headers resp |> Piaf.Headers.to_list
           in
+          Option.iter (fun notify -> notify ~status ~headers:headers_list)
+            on_response;
           let start_sec = Eio.Time.now clock in
           let on_chunk =
             if status_is_success status then Some on_chunk else None
@@ -719,11 +722,12 @@ let request_streaming
     ~url
     ?headers
     ?body
+    ?on_response
     ~on_chunk
     () =
   let uri = Uri.of_string url in
   do_request_streaming t ~clock ~idle_timeout_sec ?headers ?body ~method_
-    ~on_chunk uri
+    ?on_response ~on_chunk uri
 
 (* ── Stats ─────────────────────────────────────────────────────── *)
 

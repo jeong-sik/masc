@@ -81,6 +81,7 @@ let completed_run_result () : Runtime_agent.run_result =
   ; trace_ref = None
   ; run_validation = None
   ; runtime_observation = None
+  ; cooperative_boundary = None
   ; stop_reason = Runtime_agent.Completed
   }
 
@@ -473,7 +474,7 @@ let test_lanes_accessor_returns_declared_lanes () =
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
-    | `Missing -> Alcotest.fail "expected assignment to resolve"
+    | `Missing | `Unavailable _ -> Alcotest.fail "expected assignment to resolve"
     | `Lane lane ->
       Alcotest.(check string)
         "lane id shadows runtime id"
@@ -490,7 +491,7 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
 let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "fallback.test_model" with
-    | `Missing -> Alcotest.fail "expected runtime to resolve"
+    | `Missing | `Unavailable _ -> Alcotest.fail "expected runtime to resolve"
     | `Lane lane ->
       Alcotest.(check string)
         "lane is named after the runtime it was assigned"
@@ -505,7 +506,7 @@ let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
 let test_lane_already_naming_the_default_is_unchanged () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing -> Alcotest.fail "expected lane to resolve"
+    | `Missing | `Unavailable _ -> Alcotest.fail "expected lane to resolve"
     | `Lane lane ->
       Alcotest.(check (list string))
         "declared candidates already terminate at the default"
@@ -563,7 +564,7 @@ let test_resolve_assignment_missing () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "not.configured" with
     | `Missing -> ()
-    | `Lane _ -> Alcotest.fail "expected missing assignment")
+    | `Lane _ | `Unavailable _ -> Alcotest.fail "expected missing assignment")
 
 let runtime_toml_assignment_to_lane =
   {|
@@ -779,7 +780,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing ->
+    | `Missing | `Unavailable _ ->
       Alcotest.fail "expected resilient assignment to resolve to a lane"
     | `Lane lane ->
       let first_candidate_id =
@@ -1503,7 +1504,7 @@ let test_text_official_client_history_stays_admissible () =
 let test_lane_media_reroute_stays_within_lane () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing ->
+    | `Missing | `Unavailable _ ->
       Alcotest.fail "expected resilient assignment to resolve to a lane"
     | `Lane lane ->
       let first_candidate_id, remaining_candidate_ids =
@@ -2050,70 +2051,171 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
-(* The wiring, not the module. A 429 is what a spent quota actually arrives
-   as, and it reaches the driver as [RateLimit], not [HardQuota] -- 402 is the
-   only thing that becomes [HardQuota]. Matching [HardQuota] alone meant this
-   loop recorded nothing for any real rate limit, which the tests above could
-   not see because they hand-build the error. This one builds it the way the
-   transport does, so it fails if the driver stops reading the classifier's
-   own answer. *)
-let rate_limit_error_from_a_429 ~body =
-  match
-    Llm_provider.Error.of_retry_api_error
-      ~provider:"shared_a"
-      (Llm_provider.Retry.classify_error ~retry_after_header:None ~status:429 ~body)
-  with
-  | Llm_provider.Error.RateLimit _ as e -> Agent_core.Error.Provider e
-  | other ->
-    Alcotest.failf
-      "a 429 must classify as RateLimit; got %s"
-      (Llm_provider.Error.to_string other)
+(* Use the actual agent transport projection. Mapping through
+   Error.of_retry_api_error here would manufacture Provider.RateLimit and miss
+   the Api.RateLimited variant returned by the real provider path. *)
+let rate_limit_error_from_a_429 ?(retry_after_header = None) ~body () =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    (Llm_provider.Http_client.HttpError { code = 429; body; retry_after_header })
 ;;
 
-let test_a_rate_limited_account_is_demoted_in_the_same_walk () =
+let observed_candidate runtime_id =
+  let runtime = Option.get (Runtime.get_runtime_by_id runtime_id) in
+  Runtime_lane_preference.candidate_backpressure
+    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_preference
+;;
+
+let backpressure_order runtime_ids =
+  match runtime_ids with
+  | [] -> []
+  | next_runtime_id :: later_runtime_ids ->
+    let hint = Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"quota_lane" ~failed_runtime_id:"previous.test_model"
+      ~next_runtime_id ~later_runtime_ids
+      ~failure:(retryable_network_error "previous attempt") in
+    Driver.quota_ordered_deferred_runtime_lane ~now:(Unix.gettimeofday ()) hint
+    |> Driver.deferred_runtime_ids
+;;
+
+let test_http_429_preserves_unknown_scope_and_fallback () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Runtime_quota_window.reset_for_testing ();
-    Fun.protect
-      ~finally:Runtime_quota_window.reset_for_testing
-      (fun () ->
-         let attempts = ref [] in
-         let result =
-           Driver.For_testing.attempt_runtime_candidates
-             ~runtime_id:"quota_lane"
-             ~runtime_id_of:Fun.id
-             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-             ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-               attempts := !attempts @ [ runtime_id ];
-               match runtime_id with
-               | "shared_a.test_model" ->
-                 (* The body ollama.com actually returns: a message and no
-                    retry_after, so nothing states when the account is back. *)
-                 attempt_without_effect
-                   (Error
-                      (rate_limit_error_from_a_429
-                         ~body:
-                           {|{"error":{"message":"you have reached your weekly usage limit","type":"api_error"}}|}))
-                   None
-               | "other.test_model" -> attempt_without_effect (Ok runtime_id) None
-               | "shared_b.test_model" ->
-                 Alcotest.fail
-                   "a sibling on the same credential must move behind the \
-                    unrelated account"
-               | other -> Alcotest.failf "unexpected candidate %s" other)
-             [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
-         in
-         (match result with
-          | Ok runtime_id ->
-            Alcotest.(check string)
-              "the unrelated account serves the turn"
-              "other.test_model"
-              runtime_id
-          | Error error ->
-            Alcotest.failf "expected fallback success: %s" (Agent_core.Error.to_string error));
-         Alcotest.(check (list string))
-           "a 429 with no stated reset reorders the rest of this walk"
-           [ "shared_a.test_model"; "other.test_model" ]
-           !attempts))
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let attempts = ref [] in
+      let result = Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+          attempts := !attempts @ [runtime_id];
+          attempt_without_effect (match runtime_id with
+            | "shared_a.test_model" -> Error (rate_limit_error_from_a_429
+                ~body:{|{"error":{"message":"rate limited"}}|} ())
+            | "shared_b.test_model" -> Error (Agent_core.Error.Provider
+                (Llm_provider.Error.RateLimit
+                  { provider = "shared_b"; retry_after = None; detail = "rate limited" }))
+            | "other.test_model" -> Ok runtime_id
+            | other -> Alcotest.failf "unexpected candidate %s" other) None)
+        ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"] in
+      Alcotest.(check (list string)) "both unknown-scope refusals allow sibling and disjoint fallback"
+        ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"] !attempts;
+      (match result with
+       | Ok id -> Alcotest.(check string) "disjoint candidate completes" "other.test_model" id
+       | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
+      List.iter (fun id ->
+        (match observed_candidate id with
+         | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
+         | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+           Alcotest.fail "rate limit must retain unknown scope and absent hint");
+        let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
+        Alcotest.(check bool) "no credential quota inferred" false
+          (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ())))
+        ["shared_a.test_model"; "shared_b.test_model"];
+      Alcotest.(check (list string)) "independent later resolution demotes only observed candidates"
+        ["other.test_model"; "shared_a.test_model"; "shared_b.test_model"]
+        (backpressure_order ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"])))
+;;
+
+let test_rate_limit_order_never_excludes_and_success_clears () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    let ids = ["shared_a.test_model"; "shared_b.test_model"] in
+    List.iter (fun id ->
+      let runtime = Option.get (Runtime.get_runtime_by_id id) in
+      Runtime_lane_preference.note_rate_limit ~candidate:runtime.candidate_preference
+        ~retry_after:(Some 300.)) ids;
+    Alcotest.(check (list string)) "all observed candidates remain in declared order"
+      ids (backpressure_order ids);
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        attempts := !attempts @ [runtime_id];
+        attempt_without_effect
+          (if String.equal runtime_id "shared_a.test_model" then
+            Error (rate_limit_error_from_a_429 ~retry_after_header:(Some 300.) ~body:"{}" ())
+           else Ok ()) None)
+      (backpressure_order ids) in
+    (match result with Ok () -> () | Error _ -> Alcotest.fail "all-demoted fallback was blocked");
+    Alcotest.(check (list string)) "Retry-After is ordering, not admission" ids !attempts;
+    Alcotest.(check bool) "success clears even an unexpired hint" true
+      (Option.is_none (observed_candidate "shared_b.test_model"));
+    match observed_candidate "shared_a.test_model" with
+    | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
+        Alcotest.(check (float 0.)) "actual HTTP header survives driver ingress" 300. seconds
+    | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+        Alcotest.fail "actual Retry-After hint was lost")
+;;
+
+let test_rate_limit_candidate_survives_unchanged_reload_only () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
+    let attempt runtime reload =
+      let result = Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
+        ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
+        ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+        ~candidate_dispatchable:(fun _ -> true)
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+          reload ();
+          attempt_without_effect (Error (rate_limit_error_from_a_429
+            ~body:{|{"error":{"message":"rate limited","retry_after":300.0}}|} ())) None)
+        [runtime] in
+      match result with
+      | Error (Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after = Some seconds; _ })) ->
+          Alcotest.(check (float 0.)) "body hint preserved" 300. seconds
+      | Error _ | Ok _ -> Alcotest.fail "real transport 429 variant/hint changed"
+    in
+    attempt old (fun () -> ());
+    let assert_order () = Alcotest.(check (list string)) "same binding remains demoted"
+      ["other.test_model"; "shared_a.test_model"]
+      (backpressure_order ["shared_a.test_model"; "other.test_model"]) in
+    assert_order ();
+    reload_runtime_config runtime_toml_quota_lane;
+    assert_order ();
+    (* A frozen dispatch finishes after the same id is bound to another
+       credential reference. It must update only the old observation cell. *)
+    attempt old (fun () -> reload_runtime_config
+      (runtime_toml_quota_lane_with_shared_credential "REBOUND_QUOTA_TEST_KEY"));
+    Alcotest.(check bool) "old response remains on old frozen binding" true
+      (Option.is_some (Runtime_lane_preference.candidate_backpressure
+        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+    Alcotest.(check bool) "replacement does not inherit old response" true
+      (Option.is_none (observed_candidate "shared_a.test_model"));
+    Alcotest.(check (list string)) "replacement starts in declared order"
+      ["shared_a.test_model"; "other.test_model"]
+      (backpressure_order ["shared_a.test_model"; "other.test_model"]))
+;;
+
+let test_rate_limit_credential_rotation_under_same_reference () =
+  let key = "MASC_HTTP429_CANDIDATE_ROTATION_TEST_KEY" in
+  let original = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value original ~default:""))
+    (fun () ->
+      Unix.putenv key "fixture-credential-before";
+      let toml = runtime_toml_quota_lane_with_shared_credential key in
+      with_runtime_config toml (fun () ->
+        let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
+        let result = Driver.For_testing.attempt_runtime_candidates
+          ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
+          ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
+          ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+          ~candidate_dispatchable:(fun _ -> true)
+          ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+          ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+            Unix.putenv key "fixture-credential-after";
+            reload_runtime_config toml;
+            attempt_without_effect (Error (rate_limit_error_from_a_429 ~body:"{}" ())) None)
+          [old] in
+        (match result with
+         | Error (Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)) -> ()
+         | Error _ | Ok _ -> Alcotest.fail "expected actual transport rate limit");
+        Alcotest.(check bool) "old observation stays attached to dispatched value" true
+          (Option.is_some (Runtime_lane_preference.candidate_backpressure
+            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+        Alcotest.(check bool) "same reference with new resolved credential has no old observation" true
+          (Option.is_none (observed_candidate "shared_a.test_model"))))
 ;;
 
 let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
@@ -2899,6 +3001,90 @@ let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
       .Provider_context_overflow _ ->
     Alcotest.fail "network exhaustion must not enter an outer catalog fallback"
 
+let access_error_from_http code =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    ~provider:"candidate-access-fixture"
+    (Llm_provider.Http_client.HttpError
+       { code; body = "candidate access denied"; retry_after_header = None })
+;;
+
+let test_candidate_access_denial_reaches_the_next_declared_runtime () =
+  List.iter (fun code ->
+    let denied = access_error_from_http code in
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        attempts := runtime_id :: !attempts;
+        attempt_without_effect
+          (if runtime_id = "denied" then Error denied else Ok runtime_id) None)
+      ["denied"; "available"] in
+    (match result with
+     | Ok selected -> Alcotest.(check string) "available candidate finishes" "available" selected
+     | Error error -> Alcotest.failf "HTTP%d stopped the lane: %s" code (Agent_core.Error.to_string error));
+    Alcotest.(check (list string)) "walk stays inside declared candidates"
+      ["denied"; "available"] (List.rev !attempts)) [401;403]
+;;
+
+let test_access_failover_preserves_effect_and_caller_authority () =
+  List.iter (fun code ->
+    List.iter (fun disposition ->
+      let attempts = ref 0 in
+      let result = Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+          incr attempts;
+          if runtime_id <> "denied" then Alcotest.fail "possible effect was replayed";
+          Error (access_error_from_http code), None, disposition)
+        ["denied"; "available"] in
+      Alcotest.(check int) "effect owner attempted once" 1 !attempts;
+      match result with
+      | Error error ->
+        (match Driver.classify_masc_internal_error error with
+         | Some (Driver.Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+           Alcotest.(check bool) "exact effect disposition preserved" true
+             (effect_disposition = disposition)
+         | _ -> Alcotest.fail "access error lost the effect fence")
+      | Ok _ -> Alcotest.fail "effectful access denial unexpectedly succeeded")
+      [Masc.Keeper_provider_attempt_effect.Effect_attempted;
+       Masc.Keeper_provider_attempt_effect.Observation_unavailable];
+    let attempts = ref 0 in
+    let deferred = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+        incr attempts; attempt_without_effect (Error (access_error_from_http code)) None)
+      ["denied"; "available"] in
+    Alcotest.(check bool) "caller denial remains an error" true (Result.is_error result);
+    Alcotest.(check int) "caller denies immediate second attempt" 1 !attempts;
+    Alcotest.(check int) "existing deferred retry path retains the successor" 1 (List.length !deferred))
+    [401;403]
+;;
+
+let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
+  List.iter (fun code ->
+    let denied = access_error_from_http code in
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        attempts := runtime_id :: !attempts; attempt_without_effect (Error denied) None)
+      ["first"; "last"] in
+    let expected = if code = 400 then ["first"] else ["first"; "last"] in
+    Alcotest.(check (list string)) "no candidate beyond the declared suffix"
+      expected (List.rev !attempts);
+    match result with
+    | Error error -> Alcotest.(check string) "original terminal diagnostic retained"
+        (Agent_core.Error.to_string denied) (Agent_core.Error.to_string error)
+    | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") [400;401;403]
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -3042,9 +3228,15 @@ let () =
             `Quick
             test_attempt_loop_reorders_shared_quota_sibling_same_turn;
           Alcotest.test_case
-            "a 429 with no stated reset demotes in the same walk"
+            "actual HTTP 429 preserves unknown scope and disjoint fallback"
             `Quick
-            test_a_rate_limited_account_is_demoted_in_the_same_walk;
+            test_http_429_preserves_unknown_scope_and_fallback;
+          Alcotest.test_case "rate limit never excludes and success clears" `Quick
+            test_rate_limit_order_never_excludes_and_success_clears;
+          Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
+            test_rate_limit_candidate_survives_unchanged_reload_only;
+          Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick
+            test_rate_limit_credential_rotation_under_same_reference;
           Alcotest.test_case
             "hard quota keeps attempted scope across runtime reload"
             `Quick
@@ -3125,6 +3317,12 @@ let () =
             "missing deferred head is consumed once"
             `Quick
             test_missing_deferred_head_is_consumed_once;
+          Alcotest.test_case "candidate access denial tries the next runtime" `Quick
+            test_candidate_access_denial_reaches_the_next_declared_runtime;
+          Alcotest.test_case "access failover preserves effect and caller authority" `Quick
+            test_access_failover_preserves_effect_and_caller_authority;
+          Alcotest.test_case "access exhaustion and bad requests remain terminal" `Quick
+            test_exhausted_access_errors_and_bad_requests_remain_terminal;
           Alcotest.test_case
             "initial lane exhaustion cannot escape declared candidates"
             `Quick

@@ -281,6 +281,40 @@ let test_glm_chat_envelope () =
     ~receipt:(Glm.request_output_token_receipt glm_artifact)
 ;;
 
+(* keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z: the tool
+   asked for 65536, the clamp landed on the glm provider default (40960), and
+   Z.AI refused it (code 1210, [1,32768]). A runtime config carries its provider
+   id, so this is the request-time path a runtime takes: provider-scoped lookup,
+   bare fallback off. The provider-scoped glm-4.6v row is what puts the model's
+   own ceiling on the wire, and the receipt names the catalog as its source. *)
+let test_glm_vision_runtime_row_clamps_to_the_models_ceiling () =
+  let model_id = "glm-4.6v" in
+  let requested = 65_536 in
+  let config =
+    PC.make
+      ~kind:Glm
+      ~provider_id:"glm-coding"
+      ~model_id
+      ~base_url:""
+      ~max_tokens:requested
+      ()
+  in
+  let artifact = Glm.build_request_artifact ~config ~messages:[] () in
+  let payload = Glm.request_payload artifact in
+  Alcotest.(check int)
+    "the wire carries the model's own ceiling, not the provider default"
+    32_768
+    (wire_int payload [ "max_tokens" ]);
+  check_receipt
+    ~envelope:Openai_chat_max_tokens
+    ~requested:(Some requested)
+    ~effective:(Some 32_768)
+    ~policy:Explicit_clamped
+    ~ceiling:(Some 32_768)
+    ~ceiling_source:(Some Catalog_model)
+    (Glm.request_output_token_receipt artifact)
+;;
+
 let test_glm_provider_default_clamp () =
   let model_id = "receipt-uncatalogued-glm-provider-default" in
   let provider_default_ceiling =
@@ -483,6 +517,10 @@ let () =
             "GLM provider-default clamp"
             `Quick
             test_glm_provider_default_clamp
+        ; Alcotest.test_case
+            "GLM vision runtime row clamps to the model's ceiling"
+            `Quick
+            test_glm_vision_runtime_row_clamps_to_the_models_ceiling
         ] )
     ; ( "required_messages_envelope"
       , [ Alcotest.test_case

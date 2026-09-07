@@ -2395,13 +2395,15 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               (publication_recovery_registry env root_sw config)
         }
       in
-      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      (* Keep the original lane idle through the bounded cancellation scenario.
+         [proactive.enabled = false] alone still permits its initial autonomous
+         turn; an elapsed sleep does not prove that turn has released its slot. *)
+      (match Masc.Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx meta with
        | Masc.Keeper_keepalive.Keepalive_started _ -> ()
        | outcome ->
          failf
            "cancelled-update fixture failed to start: %s"
            (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
-      Eio.Time.sleep clock 0.05;
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let release_librarian, resolve_release_librarian = Eio.Promise.create () in
       (match
@@ -2421,6 +2423,9 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
            "cancelled-update Librarian fixture was not submitted: %s"
            (memory_lane_outcome_name other));
       Eio.Promise.await librarian_started;
+      check bool "original lane has no admitted turn before the swap" true
+        (Option.is_none
+           (owner_turn_in_flight_exn ~base_path:config.base_path ~keeper_name:name));
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
@@ -2450,6 +2455,19 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; instructions_opt = profile_defaults.instructions
         }
       in
+      let owner =
+        match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
+        | Ok owner -> owner
+        | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
+      in
+      let fence_reached, resolve_fence_reached = Eio.Promise.create () in
+      Masc.Keeper_owner.For_testing.observe_state_changes ~sw:root_sw (fun () ->
+        match Masc.Keeper_owner.shutdown_operation_id owner with
+        | None -> ()
+        | Some operation_id ->
+          (* Further state notifications cannot replace the first exact fence. *)
+          (match Eio.Promise.try_resolve resolve_fence_reached operation_id with
+           | true | false -> ()));
       let update_switch, resolve_update_switch = Eio.Promise.create () in
       let update_done, resolve_update_done = Eio.Promise.create () in
       Eio.Fiber.fork ~sw:root_sw (fun () ->
@@ -2457,36 +2475,43 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
-            ignore
-              (Turn_up_update.update_keeper
-                 ~expected_config_revision:(config_revision_exn config name)
-                 ctx
-                 parsed
-                 meta);
-            `Returned
+            let result =
+              Turn_up_update.update_keeper
+                ~expected_config_revision:(config_revision_exn config name)
+                ctx
+                parsed
+                meta
+            in
+            `Returned result
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
         in
         Eio.Promise.resolve resolve_update_done disposition);
       let update_sw = Eio.Promise.await update_switch in
-      Eio.Time.with_timeout_exn clock 1.0 (fun () ->
-        let rec await_lane_swap_fence () =
-          match
-            owner_shutdown_operation_id_exn
-              ~base_path:config.base_path
-              ~keeper_name:name
-          with
-          | Some _ -> ()
-          | None ->
-            Eio.Fiber.yield ();
-            await_lane_swap_fence ()
-        in
-        await_lane_swap_fence ());
+      (* Await the actual Owner publication. The CI trace with the runnable yield loop
+         showed successive system-thread completions in roughly 50ms steps; the unchanged one-second test boundary then expired
+         before the writer finished. Promise waiting lets I/O drive progress. *)
+      let observed_fence = Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Promise.await fence_reached)
+          (fun () -> match Eio.Promise.await update_done with
+            | `Returned result ->
+              failf "update returned before its lane swap fence: %s"
+                (Tool_result.message result)
+            | `Cancelled -> fail "update was cancelled before the test cancelled it"))
+      in
+      check bool "the exact published fence is still held before cancellation" true
+        (match Masc.Keeper_owner.shutdown_operation_id owner with
+         | Some current ->
+           Masc.Keeper_shutdown_types.Operation_id.equal current observed_fence
+         | None -> false);
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
       Eio.Promise.resolve resolve_release_librarian ();
       (match Eio.Promise.await update_done with
        | `Cancelled -> ()
-       | `Returned -> fail "keeper update returned after its caller was cancelled");
+       | `Returned result ->
+         failf "keeper update returned after its caller was cancelled: %s"
+           (Tool_result.message result));
       check bool
         "cancelled update rolls back its temporary shutdown fence"
         true

@@ -184,6 +184,7 @@ function AssignmentSourceBadge({ assignment }: { assignment: RuntimeAssignment }
       data-assignment-target-kind=${assignment.resolved.kind}
     >
       ${assignment.assignment_source} → ${target}
+      ${assignment.resolved.kind === 'unavailable' ? html`<span role="status"> · 사용 불가: ${assignment.resolved.reason.message}</span>` : null}
     </span>
   `
 }

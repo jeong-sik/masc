@@ -37,6 +37,10 @@ val binding_to_provider_config
     - [binding.model_id] -> {!Runtime_schema.model_of_id}
     - provider transport + model spec -> {!Llm_provider.Provider_config.make}
 
+    An explicitly declared model output-token ceiling overrides the catalog
+    or provider-base ceiling. An absent declaration preserves the catalog;
+    neither ceiling becomes a request-side [max_tokens] default.
+
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
     concrete provider config. *)

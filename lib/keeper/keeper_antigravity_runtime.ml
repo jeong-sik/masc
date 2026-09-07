@@ -1027,6 +1027,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             ; trace_ref = None
             ; run_validation = None
             ; runtime_observation = Some runtime_observation
+            ; cooperative_boundary = None
             ; stop_reason = Completed
             }
       with

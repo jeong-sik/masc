@@ -1,15 +1,33 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body by its canonical exact reference.\n\n When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
+description = "Read one frozen instruction Skill body. Reach for it when the work matches what a Skill below says it is for.\n\n Pass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded."
 additional_properties = false
-# 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
-# (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
-# agent-core 5 keeper 의 도구-사용 턴 11,164 개와 표면 67,000 B 기준으로 이 도구는
-# 3,695 B 를 매 요청에 싣고 176 턴(1.6%)에서만 필요했다 — 3.5x 이다.
+# 이 도구는 조회를 겸한다. 그래서 지연하지 않는다.
 #
-# 조회 도구는 이 계산이 유리해도 지연하지 않는다. keeper_capability_search 와
-# keeper_tools_list 는 목록이 길 때 찾는 수단이라, 지연하면 찾는 일 자체가 한 홉
-# 멀어진다. 그 비용은 바이트로 잡히지 않는다. 이 도구는 조회가 아니다.
-defer_loading = true
+# 같은 주석이 원래 반대로 끝났다 — 지연 판단은 필요했던 턴 수로 하고(masc #32062),
+# 이 도구는 3,695 B 를 매 요청에 싣고 11,164 도구-사용 턴 중 176 턴(1.6%)에서만
+# 필요했으니 3.5x 라고. 그리고 "조회 도구는 지연하지 않는다"고 적은 뒤 이 도구를
+# 예외로 뒀다.
+#
+# 그 예외가 성립하지 않는다. 이 도구의 스키마 안에 읽을 수 있는 스킬 목록이 들어
+# 있다(tool_schemas_skill.mli: "the list of instruction skills it can read is
+# whatever the catalog found"). 도구를 미루면 목록도 같이 미뤄지고, 키퍼는 대조할
+# 목록 없이 앉는다. 그게 바로 같은 주석이 keeper_tools_list 에 대해 "지연하면 찾는
+# 일 자체가 한 홉 멀어진다"고 적은 그 비용이다.
+#
+# 1.6% 는 지금 없어진 계약 아래서 잰 값이다. 그때 Available 줄마다 64hex
+# content_revision 이 붙어 있었고 서술은 "names alone are never accepted"였다.
+# 쓰려면 그 digest 를 옮겨 적어야 했고, polisher 는 실패 한 번을 써서 그걸 배운
+# 뒤 메모리에 적어 매 턴 싣고 있었다(RFC-0411 §1.3). 그 계약은 §4.1·§4.2 로
+# 사라졌으므로, 그 아래서 잰 회수는 지금 상태를 정당화하지 못한다.
+#
+# 크기로도 정당화되지 않는다. §4.1 적용 후 표면은 4,207 B 이고, 지연을 결정할
+# 때의 3,695 B 보다 크다 — 카탈로그가 10개에서 14개로 자랐다. 다만 Anthropic
+# 공식 모델은 스킬당 ~100토큰(≈400 B)을 상정하므로 14개면 ≈5,600 B 이고, 그
+# 비용을 상주로 받아들이는 쪽을 택한다. masc 는 그 예산 안쪽이다.
+#
+# 되돌릴 조건: RFC-0411 §6 의 keeper_skill 호출/턴이 며칠 뒤에도 안 오르면 다시
+# 지연시킨다. 안 오르는데 4,207 B 를 매 요청 싣는 것은 근거 없는 비용이다.
+defer_loading = false
 
 [[params]]
 name = "identity"
@@ -40,11 +58,23 @@ min_length = 1
 # the handler, whose refusal carries the exact references this keeper does
 # carry. A schema-level gate answered those calls with a generic length
 # error that could not name the catalog (task-828).
+#
+# Optional since RFC-0411 §4.2. Omitted, the turn's frozen Skill list decides
+# which body is read — the same list a spelled-out revision is matched against,
+# so leaving it out reaches nothing new. Spelled out, it is still matched
+# exactly and refused on a mismatch: a revision the caller named is never
+# quietly replaced.
+#
+# It was required because the call was meant to pin what it read. That pin also
+# has to be typed, and nothing hands it to the caller outside this tool's own
+# Available list — of 292 tasks recorded on this workspace, 0 named a Skill,
+# and 126 of those were made through masc_add_task, which has carried a skills
+# parameter all along.
 [[params]]
 name = "content_revision"
 type = "string"
-required = true
-description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes: 64 lowercase hex characters, copied verbatim from the Task skill reference or this tool's Available list."
+required = false
+description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that identity; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
 
 [[params]]
 name = "file"

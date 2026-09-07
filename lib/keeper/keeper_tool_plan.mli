@@ -151,7 +151,10 @@ type schema_value_error =
 (** Structural error in the deliberately small composable-output schema
     language. The accepted keywords are [type], plus [properties], [required],
     and boolean [additionalProperties] for objects, and [items] for arrays.
-    Every nested schema is checked when the plan is created. *)
+    A type may also be a two-element array containing one non-null type and
+    [null], in either order. Other type unions remain unsupported. Every
+    nested schema is checked when the plan is created, even if its value
+    may be null. *)
 type schema_contract_error =
   | Expected_schema_object of
       { path : string list

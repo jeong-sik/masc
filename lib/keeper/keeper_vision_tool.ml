@@ -161,9 +161,22 @@ let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
-let terminal_policy_http_error = function
-  | Llm_provider.Http_client.AcceptRejected _ -> true
+(* A 400/422 (or a refused Accept) is this binding's verdict on this request:
+   a parameter range, a media type, a field it does not take. It says nothing
+   about the next candidate, which speaks a different wire -- glm-4.6v refused
+   max_tokens 40960 on 2026-09-07 while the local runtime behind it would have
+   taken the same pixels, and the walk stopped at the refusal. So this class
+   ends the candidate, not the walk; it still names the failure class when
+   every candidate has been tried. *)
+let candidate_policy_http_error = function
   | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
+  | _ -> false
+
+(* AcceptRejected is the caller's own transport wiring refused before dispatch
+   (a missing clock, an invalid deadline). Every candidate would refuse the
+   same wiring, so this one still ends the walk. *)
+let wiring_rejected = function
+  | Llm_provider.Http_client.AcceptRejected _ -> true
   | _ -> false
 
 (* Capacity belongs to the selected binding. A later image runtime may admit
@@ -180,7 +193,8 @@ let candidate_capacity_http_error = function
   | _ -> false
 
 let failure_class_of_http_error = function
-  | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
+  | err when wiring_rejected err || candidate_policy_http_error err ->
+    Tool_result.Policy_rejection
   | err when candidate_capacity_http_error err -> Tool_result.Runtime_failure
   | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
@@ -347,6 +361,10 @@ let run_candidates_outcome
   =
   let rec loop ~last_error ~attempt_index = function
     | [] ->
+      (* The walk's outcome is the last candidate's: what ended it. A verdict
+         an earlier candidate gave and the walk moved past (a 400, a capacity
+         refusal) is not the reason the image went unread, and it is already
+         on the candidate counter under that runtime's id. *)
       (match last_error with
        | None -> Vo_no_runtime "no schema-capable image runtime configured"
        | Some (`Timeout _runtime_id) -> Vo_timeout
@@ -399,7 +417,7 @@ let run_candidates_outcome
                 ~last_error:(Some (`Provider_error err))
                 ~attempt_index:(attempt_index + 1)
                 rest)
-            else if terminal_policy_http_error err
+            else if wiring_rejected err
             then (
               record_vision_candidate_attempt
                 ~runtime_id
@@ -409,6 +427,18 @@ let run_candidates_outcome
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
                 })
+            else if candidate_policy_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"candidate_policy_error";
+              (* The verdict is this binding's; waiting changes nothing about
+                 it, so advance without the transient-outage backoff. *)
+              loop
+                ~last_error:(Some (`Provider_error err))
+                ~attempt_index:(attempt_index + 1)
+                rest)
             else if Runtime_attempt_fsm.should_try_next err
             then (
               record_vision_candidate_attempt

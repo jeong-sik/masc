@@ -300,9 +300,7 @@ let run_command_with_status ?turn_sandbox_factory
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
     | Ok Docker_fallback ->
       let image =
-        match meta.sandbox_image with
-        | Some img when String.trim img <> "" -> img
-        | _ -> Env_config_sandbox.Runtime.docker_image ()
+        Env_config_sandbox.Runtime.image_declared_or_default meta.sandbox_image
       in
       if String.trim image = "" then
         Error "keeper sandbox docker image is not configured"

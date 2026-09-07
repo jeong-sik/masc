@@ -140,6 +140,20 @@ val chunks : traces:(string * string) list -> entry list -> chunk list
     before it becomes rows. A running turn's wire calls carry their start and,
     once returned, their duration. *)
 
+type chunk_projection
+(** Immutable event-derived chunks retaining one source entry list and its
+    ordered keeper/trace mapping. Time, health, approvals and selection are not
+    part of this projection. *)
+
+val refresh_projection :
+  previous:chunk_projection option -> traces:(string * string) list ->
+  entry list -> chunk_projection
+(** Reuse only the identical immutable entry list with structurally equal,
+    ordered traces. Append/trim/replacement and trace reassignment rebuild;
+    mapping order retains the first-match attribution of {!chunks}. *)
+
+val projection_chunks : chunk_projection -> chunk list
+
 val chunk_tools : chunk -> chunk_tool list
 (** The calls a chunk names: the ledger's when it reported, else the wire's. *)
 
@@ -170,3 +184,7 @@ val duration_of_completion :
 
 val elapsed_text : float -> string
 (** A duration in milliseconds as [32ms], [1.2s], or [2m05s]. *)
+
+val evidence_fields : entry -> (string * string option) list
+(** Producer references from one immutable observer event. Missing IDs and
+    input/output are explicit; no matching by name, time, or neighbouring row. *)

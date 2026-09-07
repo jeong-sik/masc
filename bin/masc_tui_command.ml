@@ -641,7 +641,7 @@ let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
     ; "  | |   | | | | /\\__/ / \\__/\\"
     ; "  \\_|   |_|_| |_\\____/ \\____/"
     ; " ╭────────────────────────────────────────────────────────╮"
-    ; " │  HORNED REAPER CORE · Multi-Agent Supervised Control   │"
+    ; " │  HORNED REAPER CORE · Multi-Agent Shared Context       │"
     ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13d │" theme_name active_keepers
     ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
     ; " ╰────────────────────────────────────────────────────────╯"

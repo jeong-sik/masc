@@ -6,11 +6,19 @@
     from a checkout. A host that installed a release had no image it could make
     and no image that fit work other than MASC's own.
 
-    This is the other one — bash, ripgrep and git on a Debian base, which is
-    what a turn needs to read, search and edit a repository. It is deliberately
-    not polyglot: a project's toolchain belongs in that project's image, named
-    per Keeper with [sandbox_image], because the container is read-only and a
-    turn cannot install what it finds missing. *)
+    This is the other one — what a turn needs to read, search and edit a
+    repository, and to hand the result back: bash, ripgrep and git on a
+    Debian base, plus [gh] and [python3].
+
+    Those last two are not a toolchain choice. MASC mounts a GitHub CLI
+    config into the guest and points [GH_CONFIG_DIR] at it, and MASC's own
+    repository-checkout probe runs [python3 -c] there. Shipping neither
+    program left a Keeper holding credentials it could not use and reporting
+    its own workspace as unreadable.
+
+    Which language toolchain a Keeper needs is the operator's, named per
+    Keeper with [sandbox_image] — the container is read-only, so a turn
+    cannot install what it finds missing. *)
 
 val default_tag : string
 (** ["masc-sandbox:general"] — the tag {!build_argv} uses when the caller names
@@ -24,6 +32,12 @@ val dockerfile : string
 val build_argv : tag:string -> string list
 (** Arguments after the docker command for [docker build -t <tag> -]. The
     trailing ["-"] is the context: the caller feeds {!dockerfile} to stdin. *)
+
+val write_recipe_into : dir:string -> string
+(** Write {!dockerfile} as [<dir>/Dockerfile] and answer that path. For the
+    runtimes that take a context directory rather than stdin. [dir] is the
+    caller's to create and to remove, and nothing else belongs in it: the
+    context stays what [-] gives docker, the recipe and nothing more. *)
 
 val context_directory_build_argv :
   tag:string -> dockerfile:string -> context:string -> string list

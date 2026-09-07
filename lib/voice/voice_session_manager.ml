@@ -1,4 +1,4 @@
-(** MASC Voice Session Manager - Multi-Agent Session Tracking
+(** MASC Voice Session Manager - one voice session per agent
 
     Implementation of multi-agent voice session management.
     Each agent can have one active voice session at a time.

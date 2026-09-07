@@ -45,6 +45,7 @@ let turn_complete_frame =
 let decode_all chunks =
   let reader = Observer.create () in
   List.concat_map (Observer.feed reader) chunks
+  |> List.map (fun (delivery : Observer.delivery) -> delivery.decoded)
 
 let summary = function
   | Observer.Event (Observer.Agent_core e) ->
@@ -330,14 +331,14 @@ let test_a_line_cut_by_the_chunk_boundary_is_held () =
   in
   let reader = Observer.create () in
   check (list string) "the cut line produces nothing yet" []
-    (List.map summary (Observer.feed reader head));
+    (List.map (fun (delivery : Observer.delivery) -> summary delivery.decoded) (Observer.feed reader head));
   check (list string) "and decodes whole once the rest arrives"
     [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
-    (List.map summary (Observer.feed reader tail))
+    (List.map (fun (delivery : Observer.delivery) -> summary delivery.decoded) (Observer.feed reader tail))
 
 let untaught_agent_core_frame =
   "data: {\"type\":\"agent_core:relay_dropped\",\"event_type\":\"relay_dropped\",\
-   \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n"
+   \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
 
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
@@ -347,8 +348,8 @@ let test_what_this_build_was_not_taught_keeps_its_name () =
     ]
     (List.map summary
        (decode_all
-          [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n"
-          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n"
+          [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n\n"
+          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
           ; untaught_agent_core_frame
           ]));
   match decode_all [ untaught_agent_core_frame ] with
@@ -365,16 +366,16 @@ let test_streaming_telemetry_names_no_agent () =
        (decode_all
           [ "data: {\"type\":\"agent_core:telemetry_event\",\"event_type\":\
              \"telemetry_event\",\"agent_name\":null,\"ts_unix\":1.0,\
-             \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n"
+             \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n\n"
           ]))
 
 let test_a_frame_this_cannot_read_says_why () =
   let reasons =
     decode_all
-      [ "data: nope\n"
-      ; "data: {\"ts_unix\":1.0}\n"
-      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"agent_name\":\"x\"}\n"
-      ; "data:{\"type\":\"keeper_heartbeat\"}\n"
+      [ "data: nope\n\n"
+      ; "data: {\"ts_unix\":1.0}\n\n"
+      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"agent_name\":\"x\"}\n\n"
+      ; "data:{\"type\":\"keeper_heartbeat\"}\n\n"
       ]
     |> List.map (function
          | Observer.Undecodable detail -> detail
@@ -391,6 +392,94 @@ let test_a_frame_this_cannot_read_says_why () =
         (String.starts_with ~prefix:"data line without" noncanonical)
   | _ -> failf "expected four reasons, got %d" (List.length reasons)
 
+let test_exact_event_references_and_keeper_io () =
+  let core =
+    "data: {\"type\":\"agent_core:tool_completed\",\"event_type\":\"tool_completed\",\"ts_unix\":100,\"event_id\":\"event-exact\",\"run_id\":\"run-exact\",\"caused_by\":\"cause-exact\",\"parent_event_id\":\"parent-exact\",\"correlation_id\":\"trace-exact\",\"payload\":{\"tool_use_id\":\"call-exact\",\"execution_id\":\"exec-exact\"}}\n\n" in
+  (match decode_all [core] with
+   | [Observer.Event (Observer.Agent_core event)] ->
+       check (option string) "event ID" (Some "event-exact") event.event_id;
+       check (option string) "run ID" (Some "run-exact") event.run_id;
+       check (option string) "causation" (Some "cause-exact") event.caused_by;
+       check (option string) "parent" (Some "parent-exact") event.parent;
+       check (option string) "correlation" (Some "trace-exact") event.correlation;
+       check (option string) "execution" (Some "exec-exact") event.execution_id
+   | _ -> fail "exact runtime event references were lost");
+  let keeper =
+    "data: {\"type\":\"keeper_tool_call\",\"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":100,\"tool_use_id\":\"skill-call-exact\",\"tool_args\":{\"skill\":\"read-plan\"},\"tool_result\":null,\"tool_args_preview\":\"safe input\",\"tool_output_preview\":\"safe output\"}\n\n" in
+  (match decode_all [keeper] with
+   | [Observer.Event (Observer.Keeper_tool_call event)] ->
+       check (option string) "provider call identity" (Some "skill-call-exact") event.kt_tool_use_id;
+       check bool "provided JSON null survives" true (event.kt_tool_result = Some `Null);
+       check bool "structured input survives" true
+         (event.kt_tool_args = Some (`Assoc ["skill", `String "read-plan"]));
+       check (option string) "redacted input preview" (Some "safe input") event.kt_tool_args_preview;
+       check (option string) "redacted output preview" (Some "safe output") event.kt_tool_output_preview
+   | _ -> fail "Keeper I/O observations were lost");
+  match decode_all ["data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"ts_unix\":100,\"event_id\":4}\n\n"] with
+  | [Observer.Undecodable _] -> ()
+  | _ -> fail "malformed identity became missing identity"
+
+let test_keeper_scheduling_keeps_io_when_metadata_is_invalid () =
+  let observe extra =
+    let json = `Assoc
+      ([ "type", `String "keeper_tool_call"; "name", `String "alpha"
+       ; "tool_name", `String "keeper_skill"; "ts_unix", `Int 100
+       ; "tool_result", `Assoc [ "receipt", `String "retained" ] ] @ extra)
+    in
+    match decode_all ["data: " ^ Yojson.Safe.to_string json ^ "\n\n"] with
+    | [Observer.Event (Observer.Keeper_tool_call event)] ->
+        check bool "call result survives scheduling metadata" true
+          (event.kt_tool_result = Some (`Assoc ["receipt", `String "retained"]));
+        event.kt_schedule
+    | _ -> fail "schedule metadata discarded the call evidence"
+  in
+  check bool "absent is not invented serial" true (observe [] = None);
+  List.iter
+    (fun mode ->
+      let schedule : Agent_core.Tool_contract.schedule =
+        { planned_index = 3; batch_index = 1; batch_size = 2; execution_mode = mode }
+      in
+      let fields = match Agent_core.Execution_tool_schedule.to_yojson schedule with
+        | `Assoc fields -> fields
+        | _ -> fail "schedule contract did not encode an object"
+      in
+      check bool "canonical schedule survives" true
+        (observe fields = Some (Ok schedule)))
+    [Agent_core.Tool_contract.Concurrent; Agent_core.Tool_contract.Serial];
+  List.iter
+    (fun fields ->
+      match observe fields with
+      | Some (Error _) -> ()
+      | Some (Ok _) | None -> fail "partial or invalid scheduling became missing or valid")
+    [ ["batch_index", `Int 0]
+    ; ["planned_index", `Int 0; "batch_index", `Int 0; "batch_size", `Int 1;
+       "execution_mode", `String "unknown"]
+    ]
+
+let test_cursor_commits_only_with_a_complete_event () =
+  let reader = Observer.create () in
+  check int "ID-only frame does not acknowledge an event" 0
+    (List.length (Observer.feed reader "id: 41\n\n"));
+  let partial =
+    "id: 42\ndata: {\"type\":\"keeper_tool_call\",\"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":1}\n"
+  in
+  check int "data line without frame terminator is not delivered" 0
+    (List.length (Observer.feed reader partial));
+  (match Observer.feed reader "\n" with
+   | [{ Observer.cursor = Some 42; decoded = Observer.Event (Observer.Keeper_tool_call call) }] ->
+       check string "complete frame retains exact call" "keeper_skill" call.kt_tool
+   | _ -> fail "expected one fully framed event with cursor 42");
+  check int "unfinished payload is not a delivered cursor" 0
+    (List.length (Observer.feed reader "id: 43\ndata: {"))
+
+let test_multiline_frame_preserves_payload_and_cursor () =
+  let reader = Observer.create () in
+  match Observer.feed reader
+    "id: 44\ndata: {\"type\":\"keeper_tool_call\",\ndata: \"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":1}\n\n" with
+  | [{ Observer.cursor = Some 44; decoded = Observer.Event (Observer.Keeper_tool_call call) }] ->
+      check string "multiline canonical SSE data preserved" "alpha" call.kt_keeper
+  | _ -> fail "expected one multiline event with cursor 44"
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -400,7 +489,11 @@ let () =
             test_the_initialize_body_names_the_method_and_the_client
         ] )
     ; ( "events"
-      , [ test_case "a tool call decodes with its turn and batch" `Quick
+      , [ test_case "Keeper scheduling preserves call evidence" `Quick
+            test_keeper_scheduling_keeps_io_when_metadata_is_invalid
+        ; test_case "exact event references and redacted Keeper I/O survive" `Quick
+            test_exact_event_references_and_keeper_io
+        ; test_case "a tool call decodes with its turn and batch" `Quick
             test_a_tool_call_decodes_with_its_turn_and_batch
         ; test_case "agent terminal frames keep their distinct kinds" `Quick
             test_agent_terminal_frames_keep_their_distinct_kinds
@@ -416,6 +509,10 @@ let () =
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
+        ; test_case "cursor commits only with a complete event" `Quick
+            test_cursor_commits_only_with_a_complete_event
+        ; test_case "multiline frame preserves payload and cursor" `Quick
+            test_multiline_frame_preserves_payload_and_cursor
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick

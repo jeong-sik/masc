@@ -1435,4 +1435,3 @@ val reset_fd_cache_for_testing : unit -> unit
     creation, HOME guards, and per-path write serialization stay composed
     at the public append boundary. *)
 val with_cached_writer_for_testing : string -> (out_channel -> 'a) -> 'a
-module Capability_head = Capability_head

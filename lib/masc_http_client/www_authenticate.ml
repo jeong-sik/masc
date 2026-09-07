@@ -230,11 +230,20 @@ let field_name = "www-authenticate"
 let bearer = "Bearer"
 let resource_metadata = "resource_metadata"
 
+(* Policy for a header this module cannot parse: it names no location, the
+   same answer an absent header gives. RFC 9728 5.1 makes the challenge the
+   place a client learns where the metadata lives, and a client that cannot
+   read it falls back to the computed well-known URL -- so a malformed header
+   and a missing one lead to the same next request. Stated here rather than
+   left to [Result.to_option] so every [fault] has one named
+   home, and [malformed header names no location] pins it. *)
+let location_of_parsed = function
+  | Ok challenges -> find_param challenges ~scheme:bearer ~name:resource_metadata
+  | Error (_ : fault) -> None
+;;
+
 let resource_metadata_of_headers headers =
   List.find_map
     (fun (key, value) ->
-      if same_name key field_name then
-        Option.bind (Result.to_option (parse value)) (fun challenges ->
-            find_param challenges ~scheme:bearer ~name:resource_metadata)
-      else None)
+      if same_name key field_name then location_of_parsed (parse value) else None)
     headers

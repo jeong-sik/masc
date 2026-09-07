@@ -1,8 +1,10 @@
-(* The MSX spectator screen (RFC-0439 §3.7). The machine lives in the server;
-   this screen only renders the frame it is handed. What is pinned here: an
-   empty frame draws a "no machine" line and never a machine, a real frame
-   draws a body, opening writes and sets the flag, and esc is the one key that
-   closes. *)
+(* The MSX screen (RFC-0439 §3.7). The machine lives in the server; this screen
+   renders the frame it is handed and, before a game is loaded, lets the human
+   pick one from the cartridge inventory. What is pinned here, all pure (no
+   HTTP): the spectator draws an empty frame as "no machine" and a real frame as
+   a body; esc closes the spectator; the load menu lists the inventory (plus a
+   "watch" row when a game is loaded), moves the highlight, and names the chosen
+   row so the executable can do the load. *)
 
 open Alcotest
 
@@ -15,6 +17,9 @@ let a_frame ?(cartridge = Some "xspelunker") () : Masc_tui_types.msx_frame =
   ; msx_cartridge = cartridge
   }
 
+let a_state () =
+  Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+
 let captured render =
   let buf = Buffer.create 4096 in
   render (fun text -> Buffer.add_string buf text);
@@ -25,6 +30,8 @@ let contains hay needle =
   let rec at i j = j = n || (hay.[i + j] = needle.[j] && at i (j + 1)) in
   let rec go i = i + n <= m && (at i 0 || go (i + 1)) in
   n = 0 || go 0
+
+(* --- The spectator ---------------------------------------------------- *)
 
 let test_empty_frame () =
   let out = captured (fun write -> Masc_tui_msx.render ~write None) in
@@ -39,27 +46,101 @@ let test_real_frame () =
   check bool "and the frame number" true (contains out "345");
   check bool "and draws a body (many rows)" true (String.length out > 2000)
 
-let test_open_and_close () =
-  let state =
-    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
-  in
+let test_spectator_close () =
+  let state = a_state () in
+  state.msx_open <- true;
   state.msx_frame <- Some (a_frame ());
-  let frames = ref [] in
-  let write text = frames := text :: !frames in
-  Masc_tui_msx.open_screen ~write state;
-  check bool "opening sets the flag" true state.msx_open;
-  check bool "opening draws" true (!frames <> []);
-  check bool "a non-esc key keeps the screen open" true
+  let write _ = () in
+  check bool "a non-esc key keeps the spectator open" true
     (Masc_tui_msx.consume ~write state "space");
   check bool "esc closes and returns false" false
     (Masc_tui_msx.consume ~write state "esc");
   check bool "the flag is cleared" false state.msx_open
 
+(* --- The load menu ---------------------------------------------------- *)
+
+let is_load name = function Masc_tui_msx.Load n -> String.equal n name | _ -> false
+
+let test_menu_lists_inventory () =
+  let state = a_state () in
+  state.msx_frame <- None;
+  state.msx_carts <- [ "dig-dug.rom"; "pac-man.rom" ];
+  let out = captured (fun write -> Masc_tui_msx.open_menu ~write state) in
+  check bool "opening sets the screen flag" true state.msx_open;
+  check bool "and the menu flag" true state.msx_menu_open;
+  check bool "the menu names itself" true (contains out "pick a game");
+  check bool "and lists the first cartridge" true (contains out "dig-dug.rom");
+  check bool "and the second" true (contains out "pac-man.rom")
+
+let test_menu_watch_row_when_loaded () =
+  let state = a_state () in
+  state.msx_frame <- Some (a_frame ());
+  state.msx_carts <- [ "dig-dug.rom" ];
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  (* A machine is loaded, so row 0 is "watch" and enter spectates it. *)
+  check bool "row 0 is watch" true
+    (match Masc_tui_msx.menu_consume ~write state "\r" with
+     | Masc_tui_msx.Watch -> true
+     | _ -> false);
+  (* Row 1 is the one cartridge. *)
+  state.msx_menu_index <- 1;
+  check bool "row 1 loads the cartridge" true
+    (is_load "dig-dug.rom" (Masc_tui_msx.menu_consume ~write state "\r"))
+
+let test_menu_navigation_and_select () =
+  let state = a_state () in
+  state.msx_frame <- None;
+  state.msx_carts <- [ "a.rom"; "b.rom"; "c.rom" ];
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  check int "selection starts at the top" 0 state.msx_menu_index;
+  ignore (Masc_tui_msx.menu_consume ~write state "down");
+  ignore (Masc_tui_msx.menu_consume ~write state "down");
+  check int "two downs move to row 2" 2 state.msx_menu_index;
+  ignore (Masc_tui_msx.menu_consume ~write state "down");
+  check int "down at the bottom stays clamped" 2 state.msx_menu_index;
+  ignore (Masc_tui_msx.menu_consume ~write state "up");
+  check int "up moves back to row 1" 1 state.msx_menu_index;
+  check bool "enter loads the highlighted cartridge" true
+    (is_load "b.rom" (Masc_tui_msx.menu_consume ~write state "\r"))
+
+let test_menu_esc_closes () =
+  let state = a_state () in
+  state.msx_frame <- None;
+  state.msx_carts <- [ "a.rom" ];
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  check bool "esc reports Closed" true
+    (match Masc_tui_msx.menu_consume ~write state "esc" with
+     | Masc_tui_msx.Closed -> true
+     | _ -> false)
+
+let test_menu_empty_inventory () =
+  let state = a_state () in
+  state.msx_frame <- None;
+  state.msx_carts <- [];
+  let out = captured (fun write -> Masc_tui_msx.open_menu ~write state) in
+  check bool "an empty inventory tells the operator where to put ROMs" true
+    (contains out "carts");
+  let write _ = () in
+  check bool "enter with nothing to pick just stays" true
+    (match Masc_tui_msx.menu_consume ~write state "\r" with
+     | Masc_tui_msx.Stay -> true
+     | _ -> false)
+
 let () =
-  run "MSX spectator"
-    [ ( "render"
+  run "MSX screen"
+    [ ( "spectator"
       , [ test_case "empty frame" `Quick test_empty_frame
         ; test_case "real frame" `Quick test_real_frame
-        ; test_case "open and close" `Quick test_open_and_close
+        ; test_case "close on esc" `Quick test_spectator_close
+        ] )
+    ; ( "load menu"
+      , [ test_case "lists the inventory" `Quick test_menu_lists_inventory
+        ; test_case "watch row when loaded" `Quick test_menu_watch_row_when_loaded
+        ; test_case "navigation and select" `Quick test_menu_navigation_and_select
+        ; test_case "esc closes" `Quick test_menu_esc_closes
+        ; test_case "empty inventory" `Quick test_menu_empty_inventory
         ] )
     ]

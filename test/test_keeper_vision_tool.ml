@@ -776,6 +776,142 @@ let test_retryable_provider_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
+(* 2026-09-07: glm-coding.glm-4.6v answered HTTP 400 (max_tokens out of its
+   range) and the walk stopped there, never reaching the local runtime behind
+   it that takes the same pixels. A 400 is one binding's verdict, so the walk
+   must advance -- and without the transient backoff, which is for outages. *)
+let test_candidate_policy_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let policy_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "candidate_policy_error"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_policy =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 400
+               ; body = "{\"error\":{\"code\":\"1210\",\"message\":\"max_tokens illegal\"}}"
+               ; retry_after_header = None
+               })
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert_metric_increment
+        "vision_candidate candidate_policy_error"
+        before_policy
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
+
+(* When every candidate answers 400 the walk still ends as a policy rejection
+   carrying the last verdict, so a keeper learns the field, not "no runtime". *)
+let test_policy_error_on_every_candidate_is_reported () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-exhausted" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 400; body = "field refused"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "policy_rejection");
+      assert (String_util.contains_substring (assoc_string "detail" json) "field refused")))
+
+(* Mixed order: a 400 the walk moved past, then a 500 on the last candidate.
+   The outcome is the last candidate's -- what ended the walk -- and the 400
+   verdict lives on the candidate counter, not in the tool result. *)
+let test_policy_error_then_transient_reports_the_last_candidate () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-then-transient" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 400; body = "field refused"; retry_after_header = None })
+        else
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 500; body = "down"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable");
+      assert (String_util.contains_substring (assoc_string "detail" json) "down")))
+
 let test_capacity_failover_preserves_image_and_declared_caps () =
   let errors =
     [ Llm_provider.Http_client.request_body_too_large_error
@@ -1426,7 +1562,100 @@ let test_truncated_structured_response_reads_as_truncation () =
   | Vt.Vo_ok text -> assert (text = "a red circle")
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
+let test_browser_screenshot_reaches_vision_reader () =
+  with_temp_base (fun _ ->
+    with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+      let meta = make_meta "browser-screenshot" in
+      let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let seen_image = ref false in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
+        seen_image := List.exists (fun (message : Agent_core.Types.message) ->
+          List.exists (function
+            | Agent_core.Types.Image {media_type="image/png";data;source_type=Base64} -> data=encoded
+            | _ -> false) message.content) messages;
+        Ok (ok_response "stored browser pixels reached vision") in
+      Eio_main.run (fun env ->
+        Time_compat.set_clock (Eio.Stdenv.clock env);
+        Eio.Switch.run (fun sw ->
+          Browser_lane.install_automation_executor (Some (function
+            | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
+                (`Assoc ["ok",`Bool true;"data",`Assoc [
+                  "tabId",`Int 73;"url",`String "https://example.org/form";
+                  "title",`String "Form";"mimeType",`String "image/png";"data",`String encoded]])
+            | _ -> failwith "unexpected screenshot command"));
+          Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+          let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+            ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+          assert (result.disposition = Tool_result.Completed ());
+          let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
+          assert (not (String_util.contains_substring result.raw_output encoded));
+          let handle = assoc_string "artifact" data in
+          let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args:(artifact_args handle) () |> json_of_output in
+          assert (!seen_image);
+          assert (assoc_string "text" reader = "stored browser pixels reached vision");
+          let connect suffix browser =
+            let raw = "30000000-0000-4000-8000-" ^ suffix in
+            let client_id = Result.get_ok (Browser_lane.client_id_of_string raw) in
+            let info : Browser_lane.client_info = {client_id;browser;version="fixture";engine_version="155.0.1"} in
+            Eio.Switch.on_release sw (fun () ->
+              ignore (Browser_lane.disconnect_client ~client_id));
+            let initial = Browser_lane.take_command ~client_info:info ~window_sec:0.001 in
+            assert (initial = Ok None);
+            info in
+          let first = connect "000000000001" Browser_lane.Firefox in
+          let second = connect "000000000002" Browser_lane.Zen in
+          let client_id = Browser_lane.client_id_to_string first.client_id in
+          List.iter (fun mode ->
+            let pending = Eio.Fiber.fork_promise ~sw (fun () ->
+              Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~meta
+                ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;
+                  "mode",`String mode;"tabId",`Int 73])) in
+            assert (Browser_lane.take_command ~client_info:second ~window_sec:0.001 = Ok None);
+            let command = match Browser_lane.take_command ~client_info:first ~window_sec:1. with
+              | Ok (Some command) -> command | _ -> failwith "selected live client received no command" in
+            let data = if mode = "screenshot" then `Assoc ["tabId",`Int 73;
+              "url",`String "https://example.org/form";"title",`String "Form";
+              "mimeType",`String "image/png";"data",`String encoded]
+              else `Assoc ["tabId",`Int 73;"elements",`List []] in
+            assert (Browser_lane.deliver_result ~client_id:first.client_id ~id:command.id
+              ~payload:(`Assoc ["ok",`Bool true;"data",data]) = Ok ());
+            let result = match Eio.Promise.await pending with
+              | Ok result -> result | Error exn -> raise exn in
+            assert (result.disposition = Tool_result.Completed ());
+            let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
+            assert (assoc_string "clientId" data = client_id)) ["elements";"screenshot"]))))
+
+let test_browser_screenshot_requires_keeper_owner () =
+  let result = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.
+      (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+  match result with
+  | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")
+  | _ -> failwith "generic caller invented a Keeper screenshot owner"
+
+let test_browser_screenshot_rejects_bad_pixels () =
+  with_temp_base (fun _ ->
+    List.iter (fun encoded ->
+      let result = Masc.Browser_screenshot.persist ~keeper_name:"bad-browser-pixels"
+        (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
+          "title",`String "Page";"data",`String encoded]) in
+      assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
+
+let test_browser_screenshot_rejects_invalid_client () =
+  List.iter (fun client_id ->
+    let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-browser-client"
+      (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
+        "title",`String "Page";"data",`String "";"clientId",client_id]) in
+    match result with
+    | Error ("invalid_client_id" | "invalid screenshot clientId") -> ()
+    | _ -> failwith "malformed routing identity must fail before pixel persistence")
+    [`String "not-a-client"; `Int 73]
+
 let () =
+  test_browser_screenshot_rejects_invalid_client ();
+  test_browser_screenshot_requires_keeper_owner ();
+  test_browser_screenshot_reaches_vision_reader ();
+  test_browser_screenshot_rejects_bad_pixels ();
   test_vision_output_tokens_default_and_env ();
   test_truncated_structured_response_reads_as_truncation ();
   test_truncated_of_stop_reason ();
@@ -1449,6 +1678,9 @@ let () =
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
   test_retryable_provider_error_tries_next_runtime ();
+  test_candidate_policy_error_tries_next_runtime ();
+  test_policy_error_on_every_candidate_is_reported ();
+  test_policy_error_then_transient_reports_the_last_candidate ();
   test_capacity_failover_preserves_image_and_declared_caps ();
   test_capacity_exhaustion_retains_size_failure ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();

@@ -103,16 +103,17 @@ return {url:location.href,title:document.title,total:visible.length,truncated:vi
   return {tabId,...page};
 }
 
-async function pageScreenshot(args) {
+async function pageCapture(args) {
   const tabId = args?.tabId;
-  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("screenshot_requires_tab_id");
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("tab_id_required");
   const before = await browser.tabs.get(tabId);
-  const dataUrl = await browser.tabs.captureTab(tabId, {format:"png"});
+  const dataUrl = await browser.tabs.captureTab(tabId, {format: "png"});
   const after = await browser.tabs.get(tabId);
-  if (before.url !== after.url) throw new Error("tab_navigated_during_screenshot");
+  if (before.url !== after.url) throw new Error("tab_navigated_during_capture");
   const prefix = "data:image/png;base64,";
-  if (!dataUrl.startsWith(prefix)) throw new Error("invalid_screenshot_format");
-  return {tabId,url:after.url,title:after.title,base64:dataUrl.slice(prefix.length)};
+  if (!dataUrl.startsWith(prefix)) throw new Error("capture_is_not_png");
+  return {tabId, title: after.title, url: after.url,
+    mimeType: "image/png", data: dataUrl.slice(prefix.length)};
 }
 
 async function onHostMessage(msg) {
@@ -123,16 +124,16 @@ async function onHostMessage(msg) {
         reply.data = await tabsList();
         reply.ok = true;
         break;
-      case "page.screenshot":
-        reply.data = await pageScreenshot(msg.args);
-        reply.ok = true;
-        break;
       case "page.elements":
         reply.data = await pageElements(msg.args);
         reply.ok = true;
         break;
       case "page.read":
         reply.data = await pageRead(msg.args);
+        reply.ok = true;
+        break;
+      case "page.capture":
+        reply.data = await pageCapture(msg.args);
         reply.ok = true;
         break;
       default:

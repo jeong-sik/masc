@@ -97,6 +97,11 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
+  let unknown_argument = match args with
+    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath"])) fields
+    | _ -> false in
+  if unknown_argument then make_workflow_err ~tool_name ~start_time "unknown browser read argument"
+  else
   match lane_of ~tool_name ~start_time args with
   | Error error -> error
   | Ok lane ->
@@ -128,9 +133,9 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
        | _, None -> make_workflow_err ~tool_name ~start_time "screenshot requires an observed tabId"
        | Some keeper_name, Some tab_id ->
-         let result = Browser_lane.issue ~lane_name:lane
-             ~verb:(Browser_lane.Page_screenshot {tab_id}) ~timeout_sec:default_timeout_sec
-           |> Browser_surface.decode_answer in
+         let result = Result.bind
+             (Browser_surface.parse_capture_request (`Assoc ["lane",`String lane;"tabId",`Int tab_id]))
+             Browser_surface.capture in
          let result = Result.bind result (Browser_screenshot.persist ~keeper_name) in
          match result with
          | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()

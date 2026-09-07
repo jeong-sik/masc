@@ -1442,10 +1442,10 @@ let test_browser_screenshot_reaches_vision_reader () =
         Time_compat.set_clock (Eio.Stdenv.clock env);
         Eio.Switch.run (fun sw ->
           Browser_lane.install_automation_executor (Some (function
-            | Browser_lane.Page_screenshot {tab_id=73} -> Browser_lane.Answered
+            | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
                 (`Assoc ["ok",`Bool true;"data",`Assoc [
                   "tabId",`Int 73;"url",`String "https://example.org/form";
-                  "title",`String "Form";"base64",`String encoded]])
+                  "title",`String "Form";"mimeType",`String "image/png";"data",`String encoded]])
             | _ -> failwith "unexpected screenshot command"));
           Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
@@ -1471,7 +1471,7 @@ let test_browser_screenshot_rejects_bad_pixels () =
     List.iter (fun encoded ->
       let result = Masc.Browser_screenshot.persist ~keeper_name:"bad-browser-pixels"
         (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
-          "title",`String "Page";"base64",`String encoded]) in
+          "title",`String "Page";"data",`String encoded]) in
       assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
 
 let () =

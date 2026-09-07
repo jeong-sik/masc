@@ -2997,6 +2997,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("added", `Int (ordinary_count 2))
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
+      ; ("updated_at", if present then `Float 1700000000. else `Null)
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -3033,7 +3034,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v3")
+      [ ("schema", `String "keeper.memory_os.current_health.v4")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
@@ -3215,7 +3216,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v3")
+    [ ("schema", `String "keeper.memory_os.current_health.v4")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ("cadence_counter_entries", `Int 0)
     ; ( "keepers"
@@ -3231,6 +3232,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("added", `Int 0)
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
+              ; ("updated_at", `Null)
               ; ("librarian_lane_busy", `Int 0)
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)

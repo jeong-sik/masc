@@ -2596,12 +2596,55 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
+let memory_state (k : memory_keeper_health) =
+  if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
+  then Memory_read_error
+  else if
+    (not k.mkh_snapshot_present)
+    && k.mkh_librarian_failures > 0
+    && not k.mkh_source_snapshot_present
+  then Memory_starving
+  else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
+  then Memory_source_only
+  else if not k.mkh_snapshot_present
+  then Memory_no_current
+  else if k.mkh_librarian_failures > 0
+  then Memory_degraded
+  else if
+    List.exists
+      (fun alert ->
+        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
+        | `Warn -> true
+        | `Error -> false)
+      k.mkh_alerts
+  then Memory_warning
+  else Memory_ordinary
+
+let memory_state_label = function
+  | Memory_ordinary -> "ok"
+  | Memory_warning -> "warning"
+  | Memory_degraded -> "degraded"
+  | Memory_no_current -> "no-current"
+  | Memory_source_only -> "source-only"
+  | Memory_starving -> "STARVING"
+  | Memory_read_error -> "read-error"
+
 type memory_overview_sort =
   | Mem_overview_facts
   | Mem_overview_size
   | Mem_overview_delta
   | Mem_overview_state
   | Mem_overview_name
+  | Mem_overview_updated
 
 let memory_overview_sort_label = function
   | Mem_overview_facts -> "Facts (Most)"
@@ -2609,13 +2652,15 @@ let memory_overview_sort_label = function
   | Mem_overview_delta -> "Delta (Recent changes)"
   | Mem_overview_state -> "State (Attention first)"
   | Mem_overview_name -> "Name (A-Z)"
+  | Mem_overview_updated -> "Updated (Newest first)"
 
 let next_memory_overview_sort = function
   | Mem_overview_facts -> Mem_overview_size
   | Mem_overview_size -> Mem_overview_delta
   | Mem_overview_delta -> Mem_overview_state
   | Mem_overview_state -> Mem_overview_name
-  | Mem_overview_name -> Mem_overview_facts
+  | Mem_overview_name -> Mem_overview_updated
+  | Mem_overview_updated -> Mem_overview_facts
 
 type metrics_section =
   | Section_fleet
@@ -5149,6 +5194,77 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
+let memory_overview_query (state : state) =
+    match state.search with
+    | Some q -> String.lowercase_ascii (String.trim q)
+    | None ->
+        if String.length (String.trim state.search_last) > 0 then
+          String.lowercase_ascii (String.trim state.search_last)
+        else ""
+
+
+let visible_memory_keepers (state : state) =
+  let raw_keepers =
+    match state.memory_health with
+    | None -> []
+    | Some s -> s.mhs_keepers
+  in
+  let sorted_keepers =
+    match state.memory_overview_sort with
+    | Mem_overview_facts ->
+        List.sort
+          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+            if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_size ->
+        List.sort
+          (fun a b ->
+            if a.mkh_snapshot_bytes <> b.mkh_snapshot_bytes then
+              Stdlib.compare b.mkh_snapshot_bytes a.mkh_snapshot_bytes
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_delta ->
+        List.sort
+          (fun a b ->
+            let da = a.mkh_added + a.mkh_removed in
+            let db = b.mkh_added + b.mkh_removed in
+            if da <> db then Stdlib.compare db da
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_state ->
+        List.sort
+          (fun a b ->
+            let sa = memory_state a in
+            let sb = memory_state b in
+            if sa <> sb then Stdlib.compare sb sa
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_updated ->
+        List.sort (fun a b ->
+            let by_time = Stdlib.compare b.mkh_updated_at a.mkh_updated_at in
+            if by_time <> 0 then by_time else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_name ->
+        List.sort
+          (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+  in
+  let query = memory_overview_query state in
+    if query = "" then sorted_keepers
+    else
+      List.filter
+        (fun k ->
+          palette_contains ~needle:query k.mkh_keeper_id
+          || palette_contains ~needle:query (memory_state_label (memory_state k)))
+        sorted_keepers
+
+
+
+let selected_memory_keeper (state : state) =
+  let rows = visible_memory_keepers state in
+  List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
+
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
    category, and hiding them under a category filter would read as the store
@@ -5712,10 +5828,9 @@ let surface_row_texts (state : state) : surface -> string list option = function
                   rows))
       else
         Option.map
-          (fun s ->
+          (fun _ ->
             List.map (fun k -> k.Tui_decode.mkh_keeper_id)
-              s.Tui_decode.mhs_keepers
-            @ [ "memory detail" ])
+              (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some state.browser_lane -> None
   | Connectors ->

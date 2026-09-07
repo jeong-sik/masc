@@ -18125,10 +18125,9 @@ and is loaded on demand through keeper_skill.
                        keeper's facts themselves. *)
                     match state.memory_health with
                     | None -> ()
-                    | Some snapshot -> (
+                    | Some _ -> (
                         match
-                          List.nth_opt snapshot.Masc.Tui_decode.mhs_keepers
-                            state.memory_health_cursor
+                          selected_memory_keeper state
                         with
                         | None -> ()
                         | Some keeper ->

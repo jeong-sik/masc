@@ -12901,11 +12901,12 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf
-          "%s (%d keepers · %d failed/no ordinary · %d ordinary facts [o%d/d%d] · %d support-invalidated · %d source facts)  %s  %s"
+        Printf.sprintf "%s · %d keepers · %d need memory · read %s (local)  %s"
           (screen_title " MASC Memory") shown s.mhs_starving_keepers
-          s.mhs_total_facts s.mhs_total_observed_facts s.mhs_total_derived_facts
-          s.mhs_total_support_invalidations s.mhs_total_source_facts timestamp
+          (let tm = Unix.localtime s.mhs_generated_at in
+           Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+             (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+             tm.Unix.tm_hour tm.Unix.tm_min)
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"

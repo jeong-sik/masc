@@ -158,6 +158,7 @@ let test_detail_lines_source_and_invalidation () =
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
+  ; mkh_updated_at = Some 1700000000.
   ; mkh_facts = facts
   ; mkh_observed_facts = facts
   ; mkh_derived_facts = 0
@@ -444,7 +445,22 @@ let test_render_memory_body_sorting () =
     ~push_selected:(fun s -> lines := s :: !lines)
     ~push_divider:(fun () -> ())
     ~push_empty:(fun () -> ());
-  check bool "render completed" true (List.length !lines > 0)
+  check bool "render completed" true (List.length !lines > 0);
+  let selected () = Option.map (fun k -> k.Decode.mkh_keeper_id) (Types.selected_memory_keeper state) in
+  check (option string) "Enter opens the first visible fact-sorted row" (Some "beta") (selected ());
+  check bool "total facts are readable" true (List.exists (contains "Total 60 facts") !lines);
+  check bool "ready state has a mark" true (List.exists (contains "+") !lines);
+  state.memory_overview_sort <- Types.Mem_overview_size;
+  check (option string) "size order and Enter agree" (Some "alpha") (selected ());
+  state.search_last <- "beta";
+  state.memory_health_cursor <- 99;
+  check (option string) "filter clamps Enter to the shown row" (Some "beta") (selected ());
+  state.search_last <- "";
+  state.memory_health_cursor <- 0;
+  state.memory_health <- Some { health with mhs_keepers =
+      [{ k1 with mkh_updated_at = None }; { k2 with mkh_updated_at = Some 1700000000. }] };
+  state.memory_overview_sort <- Types.Mem_overview_updated;
+  check (option string) "known dates sort before absent snapshots" (Some "beta") (selected ())
 ;;
 
 let () =

@@ -59,7 +59,7 @@
     "count": 48,
     "note": "",
     "source": "lib/keeper/keeper_librarian_runtime.ml",
-    "action": "Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI는 계정 결제/한도로 시작하지 못함. 배포·실제후속선택은 미검증.",
+    "action": "Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI 최초 attempt는 결제/한도로 미시작했으나 현재 재실행 중. 배포·실제후속선택은 미검증.",
     "status": "domain-failover-tested",
     "first": {
       "seq": 25990215,
@@ -275,7 +275,7 @@
     "count": 6,
     "note": "",
     "source": "lib/keeper/keeper_shutdown_finalize.ml",
-    "action": "원본 Finalized 증거 보존 ACK#33910 병합. #33926의662aa5ad4d에서103/103, HTTP#33920의daaf3bbfa8에서34/34 동작 테스트 PASS. 후속은 lint 설명 주석만 보완했으며 새 CI는 결제/한도로 미실행. 실제 ACK는 미실행.",
+    "action": "원본 Finalized 증거 보존 ACK#33910 병합. #33926의662aa5ad4d에서103/103, HTTP#33920의daaf3bbfa8에서34/34 동작 테스트 PASS. 후속은 lint 설명 주석만 보완했으며 최초 새 CI는 결제/한도로 미실행했으나 현재 필수 검사와103/34 대상 동작 검증을 재실행 중. 실제 ACK는 미실행.",
     "status": "acknowledgement-stack",
     "first": {
       "seq": 26080010,
@@ -356,7 +356,7 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "05:44Z 수동 복구 후 다시 다른 서버 커밋으로 stale. 배송#33914 Python11/11; resolver#33922의3d3695a1f3 fixture 수정은 원격 반영됐지만 CI가 결제/한도로 미시작. 실제 설치 smoke·배포 미완료.",
+    "action": "05:44Z 수동 복구 후 다시 다른 서버 커밋으로 stale. 배송#33914 Python11/11; resolver#33922의3d3695a1f3 fixture 수정은 원격 반영됐지만 첫 CI가 결제/한도로 미시작했으며 현재 focused 검증34095776029가 실행 중. 실제 설치 smoke·배포 미완료.",
     "status": "distribution-stack",
     "first": {
       "seq": 26156709,
@@ -491,7 +491,7 @@
     "count": 19,
     "note": "search6 + fetch13; one query may fail two providers",
     "source": "lib/tool_misc_web_search.ml",
-    "action": "SearXNG 복구 후 실제 Keeper WebSearch 성공 관측. WebFetch 원래13건은401 네 건·404 아홉 건을 내부 고장으로 오분류. #33936에서 HTTP 코드와 실패 상태·상태별 안내를 보존하도록 수정; 동작 테스트 미실행. 최근 성공1건은 원래 실패 URL 복구 증명이 아님.",
+    "action": "SearXNG 복구 후 실제 Keeper WebSearch 성공 관측. WebFetch 원래13건은401 네 건·404 아홉 건을 내부 고장으로 오분류. #33936에서 HTTP 코드와 실패 상태·상태별 안내를 보존하도록 수정; 동작 테스트34095824585 실행 중으로 결과 미확정. 최근 성공1건은 원래 실패 URL 복구 증명이 아님.",
     "status": "search-service-recovered",
     "first": {
       "seq": 25984475,
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다.",
+    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다. 원문 보존의 동작 테스트34095821638은 현재 실행 중이며 결과 미확정.",
     "status": "batch-drain-observed"
   }
 ]

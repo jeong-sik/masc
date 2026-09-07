@@ -52,7 +52,7 @@
 
 ### 3. Librarian exact 실패와 주간 한도
 
-- 조치: Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI는 계정 결제/한도로 시작하지 못함. 배포·실제후속선택은 미검증.
+- 조치: Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI 최초 attempt는 결제/한도로 미시작했으나 현재 재실행 중. 배포·실제후속선택은 미검증.
 - 관련 코드/경계: `lib/keeper/keeper_librarian_runtime.ml`
 - 최초 증거: `2026-09-06T21:21:58Z` / seq `25990215` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:272735`
 > memory os librarian failed lane=librarian_exact: librarian exact execution failed outward_effect=started cause=agent_core_execution_failed: slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":"you (yousleepwhen) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 329bef59-e725-4293-aa76-0e6556d9efec)"} ; flow=[slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219; slot=glm-coding.glm-5.3-flash call_id=66a83f8e233f25848cf44bbb48d40b33; advance=glm-coding.glm-5.3-flash->ollama_cloud.deepseek-v4-flash-0731 kind=execution_failed cause=provider refused (http_status=429 refusal=rate_limited) raw_response_sha256=41976dbd
@@ -118,7 +118,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: 원본 Finalized 증거 보존 ACK#33910 병합. #33926의662aa5ad4d에서103/103, HTTP#33920의daaf3bbfa8에서34/34 동작 테스트 PASS. 후속은 lint 설명 주석만 보완했으며 새 CI는 결제/한도로 미실행. 실제 ACK는 미실행.
+- 조치: 원본 Finalized 증거 보존 ACK#33910 병합. #33926의662aa5ad4d에서103/103, HTTP#33920의daaf3bbfa8에서34/34 동작 테스트 PASS. 후속은 lint 설명 주석만 보완했으며 최초 새 CI는 결제/한도로 미실행했으나 현재 필수 검사와103/34 대상 동작 검증을 재실행 중. 실제 ACK는 미실행.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 05:44Z 수동 복구 후 다시 다른 서버 커밋으로 stale. 배송#33914 Python11/11; resolver#33922의3d3695a1f3 fixture 수정은 원격 반영됐지만 CI가 결제/한도로 미시작. 실제 설치 smoke·배포 미완료.
+- 조치: 05:44Z 수동 복구 후 다시 다른 서버 커밋으로 stale. 배송#33914 Python11/11; resolver#33922의3d3695a1f3 fixture 수정은 원격 반영됐지만 첫 CI가 결제/한도로 미시작했으며 현재 focused 검증34095776029가 실행 중. 실제 설치 smoke·배포 미완료.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -186,7 +186,7 @@
 
 ### 19. WebSearch 전 provider 실패와 WebFetch HTTP 오류
 
-- 조치: SearXNG 복구 후 실제 Keeper WebSearch 성공 관측. WebFetch 원래13건은401 네 건·404 아홉 건을 내부 고장으로 오분류. #33936에서 HTTP 코드와 실패 상태·상태별 안내를 보존하도록 수정; 동작 테스트 미실행. 최근 성공1건은 원래 실패 URL 복구 증명이 아님.
+- 조치: SearXNG 복구 후 실제 Keeper WebSearch 성공 관측. WebFetch 원래13건은401 네 건·404 아홉 건을 내부 고장으로 오분류. #33936에서 HTTP 코드와 실패 상태·상태별 안내를 보존하도록 수정; 동작 테스트34095824585 실행 중으로 결과 미확정. 최근 성공1건은 원래 실패 URL 복구 증명이 아님.
 - 관련 코드/경계: `lib/tool_misc_web_search.ml`
 - 집계 주의: search6 + fetch13; one query may fail two providers
 - 최초 증거: `2026-09-06T21:02:53Z` / seq `25984475` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266995`
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다.
+- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다. 원문 보존의 동작 테스트34095821638은 현재 실행 중이며 결과 미확정.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 

@@ -1,0 +1,131 @@
+{
+  "schema": "masc.zen_operator_runtime_evidence.v1",
+  "measured_date_kst": "2026-09-07",
+  "result": "passed",
+  "scope": "one production automation session and installed TUI on an owned local fixture; single loaded-host run, not a benchmark",
+  "server": {
+    "source_commit": "0799f02f796a647b4ef1fac57f54a064d7d3c6db",
+    "executable_sha256": "7bb2bc118c0d56fe0f9c71e0920b60c16edcbd926dee36fab4c05423f16bd003",
+    "provenance": "self-observed installed server health; concurrent actor built/replaced the executable; CI provenance not established"
+  },
+  "automation": {
+    "headless": true,
+    "opened": true,
+    "reused": false,
+    "backend": "firefox-webdriver",
+    "observed_executable": "<user Applications>/Zen.app/Contents/MacOS/zen",
+    "tab_id": 1,
+    "session_closed": true,
+    "measurements": [
+      {
+        "operation": "session_open",
+        "elapsed_ms": 52060.4
+      },
+      {
+        "operation": "goto",
+        "elapsed_ms": 2802.6
+      },
+      {
+        "operation": "read",
+        "elapsed_ms": 211.3
+      },
+      {
+        "operation": "screenshot",
+        "elapsed_ms": 386.6
+      },
+      {
+        "operation": "session_close",
+        "elapsed_ms": 5613.1
+      }
+    ]
+  },
+  "tui": {
+    "result": "passed",
+    "executable_sha256": "a2324d99eca6971a6dd44ebc6a5aa3c8d869ae7f0ebcdb550c83dc2ae400b53f",
+    "source_commit": null,
+    "provenance": "installed executable hash verified by the private probe; source revision not established",
+    "source": "automation",
+    "transport": "real production MASC HTTP; only owned fixture page",
+    "terminal": "PTY with Kitty capability response and 140x42 cells",
+    "tty_override_applied": false,
+    "text_verified": [
+      "ZEN_OPERATOR_PROOF_20260907"
+    ],
+    "normal_exit_code": 0,
+    "termios_restoration_measured_here": false,
+    "image_verification": "PNG decoded from actual Kitty APC payload equals the browser capture byte for byte; not a desktop-compositor screenshot"
+  },
+  "image": {
+    "file": "zen-running.png",
+    "bytes": 45099,
+    "sha256": "ccbed964054be05507ca0ddf861756dc89662ca2339c5e48e3f1f16de295cc1f"
+  },
+  "deployment_gate": {
+    "result": "passed",
+    "observed_line": "[runtime-deployment-preflight] OK: base_path=<operator-base> schedule_ledgers=2 signal_files=13 signal_rows=2285 current_owners=19 keeper_meta=20 in_progress=0 helper=<CI-helper-binary> helper_commit=b8d66cb8bef37d27e1fee411a645a598ed5f8f24",
+    "gate_source_commit": "caed2eb2897461b753028f1c7327a8f4b9d6b0a7",
+    "gate_sha256": "2a0b8b469ec6a7f5044f35f8a539011a3515ffc574a5df9f0c01a48e6f4c427f",
+    "gate_pr": 34101,
+    "helper_ci_source": "b8d66cb8bef37d27e1fee411a645a598ed5f8f24"
+  },
+  "preserved_archive": {
+    "scope": "five dormant experimental schema-5 ledgers retained outside the active scan root",
+    "ledger_count": 5,
+    "rows": 581,
+    "pending": 17,
+    "converted": false,
+    "records_deleted": false,
+    "byte_hashes_verified_against_private_receipt": true,
+    "ledgers": [
+      {
+        "index": 1,
+        "sha256": "2bd6b23fccf2cfd5184f94c5c1329acd401d449b869039d4ffefe5ef38b0c1c9",
+        "rows": 275,
+        "pending": 0
+      },
+      {
+        "index": 2,
+        "sha256": "763ebcd8406f9ca38af1125ee7e128f238cb18655ef7fd920d34d0c88fc29cc1",
+        "rows": 19,
+        "pending": 12
+      },
+      {
+        "index": 3,
+        "sha256": "b1394c8c42fe5efb3a9442c7acc3a79675bb5a9afaa0ea67206f4180da68f21a",
+        "rows": 11,
+        "pending": 5
+      },
+      {
+        "index": 4,
+        "sha256": "1ac0532652db4a188e0735e811236e7be3bd710a7a9a46a148c1edebbe52d3a9",
+        "rows": 273,
+        "pending": 0
+      },
+      {
+        "index": 5,
+        "sha256": "44ac7636e9e08069cf91482171ffae3ff572afb18dcbbe6c1b50439f1abe63f9",
+        "rows": 3,
+        "pending": 0
+      }
+    ]
+  },
+  "limits": {
+    "prior_headed_attempt": {
+      "http_status": 400,
+      "response_body_captured": false,
+      "cause_established": false
+    },
+    "gui_extension_reloaded": false,
+    "gui_reload_constraint": "Accessibility windows unavailable",
+    "live_extension_manual_load_required": true,
+    "live_clients_at_final_check": 0,
+    "fleet_overall_status": "warning",
+    "fleet_healthy_claimed": false
+  },
+  "private_input_sha256": {
+    "operator_receipt": "358d93d8becd45feb1deee8dffe80fb767640e02bf00cbe2a1a6da573aeaccf6",
+    "archive_receipt": "af909874ea4b556712e82583e4ee66e9590e9052f53e50ac8037b4b1752ec265",
+    "prepared_source_receipt": "797ac424ed48eaf60acaf3c279cf71b908350d27e5ef76fab48f22443c6124b0"
+  },
+  "redaction": "explicit field allowlist; user Applications prefix replaced; private paths in the sole successful gate line replaced; ledger names omitted; no full health, raw TUI, environment or configuration payloads published"
+}

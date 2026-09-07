@@ -1018,8 +1018,80 @@ let tool_definition_fields definition =
   | None -> []
 ;;
 
+(* Provider-compat projection (#34033): OpenAI's function tools reject JSON-Schema
+   combinators (enum, oneOf, anyOf, allOf) inside parameter schemas. The
+   dispatcher's [[params]] validation remains the authority for what a tool
+   accepts, so the wire schema can carry the conformant subset without losing
+   enforcement: enum values fold into the description (the model still sees
+   the vocabulary), and a combinator keeps its first variant's shape (the
+   common nullable-optional pattern degrades to the plain member type). *)
+let conformant_schema_value json =
+  let vocabulary_note values =
+    let vocabulary =
+      List.map
+        (function
+         | `String s -> s
+         | other -> Yojson.Safe.to_string other)
+        values
+    in
+    "one of: " ^ String.concat " | " vocabulary
+  in
+  let rec walk value =
+    match value with
+    | `Assoc fields ->
+      (* Read the vocabulary BEFORE the filter drops it: the note keeps the
+         enum's information in prose, which conformant schemas still allow. *)
+      let enum_note =
+        match List.assoc_opt "enum" fields with
+        | Some (`List values) -> Some (vocabulary_note values)
+        | _ -> None
+      in
+      let fields =
+        List.filter_map
+          (fun (key, v) ->
+             match key with
+             | "enum" | "oneOf" | "anyOf" | "allOf" -> None
+             | _ -> Some (key, walk v))
+          fields
+      in
+      let fields =
+        match enum_note with
+        | Some note ->
+          (match List.assoc_opt "description" fields with
+           | Some (`String existing) when existing <> "" ->
+             ("description", `String (existing ^ "; " ^ note)) :: fields
+           | _ -> ("description", `String note) :: fields)
+        | None -> fields
+      in
+      `Assoc fields
+    | `List items -> `List (List.map walk items)
+    | other -> other
+  in
+  walk json
+;;
+
 let build_openai_tool_json tool =
   let definition = tool_definition_of_json tool in
   `Assoc
     [ "type", `String "function"; "function", `Assoc (tool_definition_fields definition) ]
 ;;
+let conformant_tool_json tool =
+  match build_openai_tool_json tool with
+  | `Assoc outer -> (
+    (* The wrapper's first field is ("type", "function") — a string — so the
+       function member is found by name, not by the head's shape. *)
+    match List.assoc_opt "function" outer with
+    | Some (`Assoc fields) -> (
+      match List.assoc_opt "parameters" fields with
+      | Some parameters ->
+        `Assoc
+          (( "function"
+           , `Assoc
+               (("parameters", conformant_schema_value parameters)
+                :: List.remove_assoc "parameters" fields) )
+           :: List.remove_assoc "function" outer)
+      | None -> `Assoc outer)
+    | _ -> `Assoc outer)
+  | other -> other
+;;
+

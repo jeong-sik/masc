@@ -1,0 +1,47 @@
+name = "masc_browser_interact"
+description = """
+Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Requires a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Returns the current URL and scroll position; read/capture again to verify the resulting page. No arbitrary JavaScript."""
+additional_properties = false
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["live", "automation"]
+default = "live"
+
+[[params]]
+name = "tabId"
+type = "integer"
+required = true
+minimum = 0
+
+[[params]]
+name = "expectedUrl"
+type = "string"
+description = "Reject if the tab URL changed since this observation."
+
+[[params]]
+name = "action"
+type = "string"
+required = true
+enum = ["click", "fill", "scroll"]
+
+[[params]]
+name = "selector"
+type = "string"
+description = "Required for click/fill. Must identify exactly one visible element in the top document."
+
+[[params]]
+name = "text"
+type = "string"
+description = "Required for fill; empty text clears the input. Never returned in the result."
+
+[[params]]
+name = "x"
+type = "integer"
+description = "Required for scroll: horizontal CSS-pixel delta."
+
+[[params]]
+name = "y"
+type = "integer"
+description = "Required for scroll: vertical CSS-pixel delta."

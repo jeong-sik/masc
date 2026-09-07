@@ -115,6 +115,7 @@ let keeper_strict_auth_regression_tools =
     "masc_browser_read";
     "masc_browser_session";
     "masc_browser_goto";
+    "masc_browser_interact";
     "masc_web_search";
     "masc_web_fetch";
     "masc_file_list";

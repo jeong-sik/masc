@@ -149,3 +149,15 @@ let handle_act_with_phase ~tool_name ~start_time args =
     answer_to_result ~tool_name ~start_time answer, phase
 ;;
 let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_name ~start_time args)
+
+let handle_interact ~tool_name ~start_time args : Tool_result.result =
+  match Browser_interaction.parse args with
+  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Ok request ->
+    let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
+    answer_to_result ~tool_name ~start_time
+      (Browser_lane.issue ~lane_name
+        ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
+          expected_url=request.expected_url; action=request.action})
+        ~timeout_sec:default_timeout_sec)
+;;

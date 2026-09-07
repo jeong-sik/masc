@@ -108,3 +108,10 @@ val tool_definition_fields : tool_definition -> (string * Yojson.Safe.t) list
 (** Lower a validated current tool object to the OpenAI-compatible function
     shape. *)
 val build_openai_tool_json : Yojson.Safe.t -> Yojson.Safe.t
+
+(** [conformant_tool_json tool] is {!build_openai_tool_json} with the
+    function's parameter schema projected to the conformant subset (enum
+    values folded into the description; oneOf/anyOf/allOf dropped) for
+    providers whose function-tool validation rejects those JSON-Schema
+    constructs. The dispatcher's [[params]] validation stays authoritative. *)
+val conformant_tool_json : Yojson.Safe.t -> Yojson.Safe.t

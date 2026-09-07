@@ -391,7 +391,7 @@ let sse_entries =
    "(none)" in the other. *)
 let telemetry_entries =
   [
-    entry ~default:"true" "MASC_OTEL_ENABLED"
+    entry ~default:Masc_network_defaults.otel_default_enabled_s "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]
 

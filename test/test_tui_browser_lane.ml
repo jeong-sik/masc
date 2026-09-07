@@ -63,6 +63,22 @@ let test_failed_refresh () =
   expect "failure stays visible" (refreshed.load = Failed "Firefox disconnected");
   expect "failure preserves last successful reading" (refreshed.reading = previous.reading)
 
+let test_live_slack_refresh_policy () =
+  let slack = create Slack in
+  expect "live Slack refreshes on existing tick" (should_refresh_on_tick slack);
+  expect "failed connection remains eligible for later retry"
+    (should_refresh_on_tick { slack with load = Failed "Firefox disconnected" });
+  List.iter (fun view -> expect "inactive or occupied reader does not poll"
+      (not (should_refresh_on_tick view)))
+    [create Browser; switch_source Automation slack;
+     switch_source Automation (create Browser);
+     { slack with url_draft = Some "" };
+     { slack with url_draft = Some "https://app.slack.com/client/T/C" };
+     { slack with load = Loading (1, Read) };
+     { slack with load = Loading (2, Open_session) };
+     { slack with load = Loading (3, Close_session) };
+     { slack with load = Loading (4, Goto "https://app.slack.com/") }]
+
 let test_source_switch () =
   let view = switch_source Automation { (loaded ()) with url_draft = Some "https://example.org" } in
   expect "switch clears content, selection and hidden URL input"
@@ -92,6 +108,7 @@ let () =
      "session generation", test_session_generation;
      "failed refresh preserves evidence", test_failed_refresh;
      "navigation failure preserves editable URL", test_navigation_failure_recovery;
+     "live Slack refresh policy", test_live_slack_refresh_policy;
      "source switch and Slack filter", test_source_switch;
      "malformed response", test_malformed_response;
      "empty tabs", test_empty_tabs]

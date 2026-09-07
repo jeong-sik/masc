@@ -2652,6 +2652,10 @@ module Browser_lane_view = struct
     in
     { t with load = Failed detail; url_draft }
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
+  let should_refresh_on_tick t =
+    match t.app, t.source, t.url_draft, t.load with
+    | Slack, Live, None, (Idle | Failed _) -> true
+    | _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source);
               "app", `String (app_name t.app) ]

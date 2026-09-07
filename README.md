@@ -94,6 +94,37 @@ export OLLAMA_CLOUD_API_KEY=...
 The exact compiler and Dune versions are defined in `dune-project`. The first
 source run builds the OCaml server and dashboard and can take several minutes.
 
+#### Reaching the TUI from a checkout
+
+`masc` hands over to the TUI by looking for a `masc-tui` next to itself and
+then on `PATH`. Dune builds it as `_build/default/bin/masc_tui.exe`, which is
+neither name nor place, so a bare `masc` in a checkout serves instead of
+handing over. That is the same rule that stops a container or a unit file from
+opening a TUI, and it costs a source checkout the one-word start.
+
+Run it by its built path:
+
+```bash
+./_build/default/bin/masc_tui.exe
+```
+
+Or give the two binaries the names an install uses, once, and `masc` behaves
+the way the rest of this README describes:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$PWD/_build/default/bin/main_eio.exe" ~/.local/bin/masc
+ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
+```
+
+Links rather than copies, so a rebuild is picked up without repeating this.
+
+Rebuild the two separately: `dune build bin/masc_tui.exe` is what refreshes the
+TUI, and `./start-masc.sh` builds and restarts `bin/main_eio.exe` alone. A
+server restart therefore leaves a running TUI on the binary it started with —
+quit and reopen it to pick up a rebuild.
+
+
 ### Published binaries
 
 Published releases can lag behind `main`. Choose a tag from

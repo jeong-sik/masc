@@ -4167,13 +4167,23 @@ let composing_for_keeper (state : state) keeper_name =
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
-    turn settles. A retained roster is not enough after a failed refresh:
-    switching is disabled until the roster is readable again. *)
+    turn settles — this pane's own, which is what the pin is for. A request
+    in flight to some other keeper used to disable the switch too, and the
+    pane draws exactly that request as an "(also sending to X …)" row: the
+    row being on screen meant the key that would take the operator to it was
+    refused, which is the one moment it is wanted (#33852). A retained roster
+    is not enough after a failed refresh: switching is disabled until the
+    roster is readable again. *)
 let next_keeper_message_target (state : state) =
+  let this_pane_has_a_request_in_flight =
+    match state.msg_target_keeper_name with
+    | None -> false
+    | Some current -> Option.is_some (inflight_for_keeper state current)
+  in
   if
     Option.is_some state.keepers_error
     || Option.is_some state.msg_live
-    || state.msg_inflight <> []
+    || this_pane_has_a_request_in_flight
   then
     Masc_tui_keeper_selection.No_alternative
   else

@@ -14,6 +14,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module Tui_types = Masc_tui_types
+module Keeper_selection = Masc_tui_keeper_selection
 
 let position =
   testable
@@ -683,6 +684,58 @@ let test_concurrent_turns_keep_request_owned_transcripts () =
           binding_name
           n)
     [ "settle_live_turn"; "apply_async_message" ]
+;;
+
+(* The pin is on the pane's own turn. A request in flight to another keeper
+   is drawn as an "(also sending to X ...)" row, and while that row was on
+   screen the switch was refused -- so the operator could read about a turn
+   and had no key that would take them to it (#33852). *)
+let test_a_request_to_another_keeper_does_not_pin_this_pane () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entry keeper_name =
+    let sent_request =
+      Keeper_chat.create_request ~keeper_name ~message:"hello" ()
+    in
+    ({ Tui_types.sent_request
+     ; submitted_at = 1.0
+     ; sent_at = 1.0
+     ; origin = Tui_types.Direct_submission
+     ; phase = Tui_types.Turn_streaming
+     ; log =
+         Tui_types.turn_log_create ~keeper_name
+           ~request_id:sent_request.request_id ~started_at:1.0
+     }
+      : Tui_types.inflight)
+  in
+  let has_target () =
+    match Tui_types.next_keeper_message_target state with
+    | Keeper_selection.No_alternative -> false
+    | Keeper_selection.Switch_to _ -> true
+  in
+  let roster_row name : Tui_types.keeper =
+    { k_name = name
+    ; k_trace_id = "trace-" ^ name
+    ; k_paused = false
+    ; k_current_task_id = None
+    ; k_total_turns = 0
+    ; k_total_tokens = 0
+    ; k_total_cost_usd = 0.0
+    ; k_last_turn_ts = ""
+    ; k_last_proactive_outcome = "never"
+    ; k_created_at = "2026-09-07T00:00:00Z"
+    ; k_updated_at = "2026-09-07T00:00:00Z"
+    }
+  in
+  state.keepers <- [ roster_row "alpha"; roster_row "beta" ];
+  state.msg_target_keeper_name <- Some "alpha";
+  check bool "with nothing in flight the pane can switch" true (has_target ());
+  state.msg_inflight <- [ entry "beta" ];
+  check bool "another keeper's request does not pin this pane" true
+    (has_target ());
+  state.msg_inflight <- [ entry "alpha" ];
+  check bool "this pane's own request pins it" false (has_target ())
 ;;
 
 let test_live_transcripts_are_kept_per_keeper () =
@@ -2313,6 +2366,8 @@ let () =
             test_steer_queues_then_interrupts_through_distinct_paths
         ; test_case "concurrent turns keep request-owned transcripts" `Quick
             test_concurrent_turns_keep_request_owned_transcripts
+        ; test_case "another keeper's request does not pin this pane" `Quick
+            test_a_request_to_another_keeper_does_not_pin_this_pane
         ; test_case "live transcripts are kept per Keeper" `Quick
             test_live_transcripts_are_kept_per_keeper
         ; test_case "a turn log folds each accepted delta once" `Quick

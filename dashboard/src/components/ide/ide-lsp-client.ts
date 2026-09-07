@@ -927,16 +927,13 @@ function languageIdFromPath(filePath: string): string | null {
 
 interface LspConfig { readonly filePath: string }
 
-const setLspConfig = StateEffect.define<LspConfig>()
-
+// Init-only. ide-editor rebuilds the whole EditorState when
+// document.file_path changes -- the mount effect lists it as a dependency and
+// its cleanup destroys the view -- so nothing ever swaps this field's value
+// under a live view, and there is no effect to dispatch.
 const lspConfigField = StateField.define<LspConfig>({
   create() { return { filePath: '' } },
-  update(state, tr) {
-    for (const eff of tr.effects) {
-      if (eff.is(setLspConfig)) return eff.value
-    }
-    return state
-  },
+  update(state) { return state },
 })
 
 // ── View Plugin ──────────────────────────────────────────────────
@@ -990,15 +987,6 @@ const lspViewPlugin = ViewPlugin.fromClass(
     update(update: ViewUpdate) {
       if (update.docChanged) this.hideTooltip()
       this.conn.refreshScopeIfStale()
-      const newFilePath = update.state.field(lspConfigField).filePath
-      if (newFilePath !== this.filePath) {
-        const oldFilePath = this.filePath
-        this.conn.notifyDidClose(oldFilePath)
-        clearLspDiagnosticSnapshot(oldFilePath)
-        this.filePath = newFilePath
-        this.conn.notifyDidOpen(newFilePath, languageIdFromPath(newFilePath) ?? DEFAULT_LANGUAGE_ID)
-        this.scheduleRefresh()
-      }
     }
 
     private scheduleRefresh(): void {
@@ -1143,6 +1131,3 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
   ]
 }
 
-export function updateLspFilePath(view: EditorView, filePath: string): void {
-  view.dispatch({ effects: [setLspConfig.of({ filePath })] })
-}

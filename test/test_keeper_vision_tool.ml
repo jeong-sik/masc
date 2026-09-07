@@ -922,6 +922,9 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       assert (String_util.contains_substring placeholder "[image artifact:");
       assert (String_util.contains_substring placeholder "media_type:image/png");
       assert (String_util.contains_substring placeholder "not yet read");
+      assert
+        (String_util.contains_substring placeholder
+           "call keeper_analyze_image to read it");
       let handle = artifact_handle_of_placeholder placeholder in
       (match
          Store.load

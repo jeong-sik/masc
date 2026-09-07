@@ -108,6 +108,8 @@ let all_surface_golden_names =
   ; "WebFetch"
   ; "WebSearch"
   ; "Write"
+  (* Unread artifact handles need a model-callable vision reader. *)
+  ; "keeper_analyze_image"
   ; "keeper_artifact_read"
   ; "keeper_broadcast"
   ; "keeper_code_query"

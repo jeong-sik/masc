@@ -2281,11 +2281,10 @@ let internal_descriptors : t list =
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
-      (* [Operator_only]: the model has its own analyze_image builtin and the
-         .masc/tool_calls log shows this keeper-facing name was never called;
-         hiding it takes its schema off every keeper turn. The handler and the
-         read-only sub-call stay available to operator entrypoints. *)
-      ~keeper_model_projection:Operator_only
+      (* Unread image placeholders carry a keeper-local artifact handle.
+         The model needs this reader to recover those pixels through the
+         existing vision sub-call, including on text-only runtime lanes. *)
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
       ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name

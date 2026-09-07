@@ -20,10 +20,11 @@ let image_read_placeholder ~handle ~media_type ~read_text =
 
 let image_unread_placeholder ~handle ~media_type ~reason =
   Printf.sprintf
-    "[image artifact:%s media_type:%s - %s; call analyze_image to read it]"
+    "[image artifact:%s media_type:%s - %s; call %s to read it]"
     (Store.to_string handle)
     media_type
     reason
+    Keeper_runtime_schemas_toml.keeper_analyze_image.name
 ;;
 
 (* Store failure keeps the invariant (no inline pixels in history) by emitting a

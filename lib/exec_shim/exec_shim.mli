@@ -236,6 +236,11 @@ val plan_for_mode : supported:bool -> Exec_ssh_protocol.mode -> execution_plan
     [Guest_local] denies sockets. Either box on an unsupported host is a
     refusal. Pure, so the decision is pinned by a test on every host. *)
 
+val child_boundary_of_ack : string -> Exec_ssh_protocol.execution_boundary
+(** Decode the fixed child-owned status-pipe protocol: setup acknowledgement,
+    exec failure after setup, or setup failure. Empty/invalid/incomplete bytes
+    mean unavailable evidence, never applied restrictions. *)
+
 val scratch_env : scratch:string -> (string * string) list -> (string * string) list
 (** The payload environment with HOME and TMPDIR pointing at the scratch. *)
 

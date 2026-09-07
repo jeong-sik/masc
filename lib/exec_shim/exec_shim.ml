@@ -419,14 +419,29 @@ let scratch_env ~scratch env =
   env |> upsert ("HOME", scratch) |> upsert ("TMPDIR", scratch)
 
 let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
-  let (stdin_r, stdin_w) = Unix.pipe () in
-  let (stdout_r, stdout_w) = Unix.pipe () in
-  let (stderr_r, stderr_w) = Unix.pipe () in
+  let opened = ref [] in
+  let pipe ?(cloexec = false) () =
+    match Unix.pipe ~cloexec () with
+    | (read_fd, write_fd) as pair ->
+      opened := read_fd :: write_fd :: !opened;
+      pair
+    | exception exn -> List.iter Unix.close !opened; raise exn
+  in
+  let (stdin_r, stdin_w) = pipe () in
+  let (stdout_r, stdout_w) = pipe () in
+  let (stderr_r, stderr_w) = pipe () in
+  let (boundary_r, boundary_w) = pipe ~cloexec:true () in
   match Unix.fork () with
+  | exception exn -> List.iter Unix.close !opened; raise exn
   | 0 ->
     (* Child: own session + process group (pgid = pid), pdeathsig set
        pre-exec, pipes wired to 0/1/2, then exec.  Any failure is reported
        on the child's stderr (which the parent streams) and exits 127. *)
+    Unix.close boundary_r;
+    let sandbox_applied = ref false in
+    let acknowledge byte =
+      try write_all boundary_w byte 0 1 with Unix.Unix_error _ -> ()
+    in
     (try
        ignore (Unix.setsid ());
        set_pdeathsig ();
@@ -445,10 +460,17 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        (* The box goes on last, after every path the shim itself needs is
           resolved, and before the payload has run one instruction. *)
        before_exec ();
+       (* This private pipe carries at most two bytes and never payload text.
+          Only the child can acknowledge applied restrictions. The write end
+          closes on exec; no acknowledgement is not evidence of success. *)
+       acknowledge "A";
+       sandbox_applied := true;
        Unix.execvpe (List.hd argv) (Array.of_list argv)
          (Array.of_list (List.map (fun (k, v) -> k ^ "=" ^ v) env))
      with
      | exn ->
+       acknowledge (if !sandbox_applied then "E" else "S");
+       Unix.close boundary_w;
        (try
           output_string stderr
             ("masc-exec-shim: " ^ Printexc.to_string exn ^ "\n");
@@ -457,13 +479,34 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        | _ -> ());
        exit 127)
   | pid ->
+    Unix.close boundary_w;
     Unix.close stdin_r;
     Unix.close stdout_w;
     Unix.close stderr_w;
     Unix.set_nonblock stdout_r;
     Unix.set_nonblock stderr_r;
     Unix.set_nonblock stdin_w;
-    (pid, stdin_w, stdout_r, stderr_r)
+    Unix.set_nonblock boundary_r;
+    (pid, stdin_w, stdout_r, stderr_r, boundary_r)
+
+let child_boundary_of_ack = function
+  | "A" -> Exec_ssh_protocol.Sandbox_applied
+  | "AE" -> Exec_failed
+  | "S" -> Setup_failed
+  | _ -> Child_ack_unavailable
+
+let read_child_boundary fd =
+  let bytes = Bytes.create 3 in
+  let rec read count =
+    if count = Bytes.length bytes then count
+    else
+      match Unix.read fd bytes count (Bytes.length bytes - count) with
+      | 0 -> count
+      | n -> read (count + n)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> read count
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> count
+  in
+  child_boundary_of_ack (Bytes.sub_string bytes 0 (read 0))
 
 (* Every instant in this loop is an interval's endpoint -- the timeout, the
    SIGKILL grace, the post-reap drain -- and none is reported as a time. So
@@ -655,18 +698,18 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     (kill_policy On_child_exit);
   trailer_of_status ~v ~timed_out:!timed_out st
 
-let emit_trailer_stderr (t : Exec_ssh_protocol.trailer) =
-  let s = Exec_ssh_protocol.render_trailer t in
+let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
+  let s = Exec_ssh_protocol.render_trailer ?execution_receipt t in
   try write_all Unix.stderr s 0 (String.length s) with
   | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
 
 (* [v] is the request's major once a request has been read; before that --
    a frame that did not decode -- there is no caller version to echo, and
    the newest one this build speaks is the only honest answer. *)
-let shim_fail ?(v = Exec_ssh_protocol.newest) msg =
+let shim_fail ?(v = Exec_ssh_protocol.newest) ?execution_receipt msg =
   (* Trailer to our stderr, then exit 1: a shim failure must never be
      indistinguishable from a payload exit 0. *)
-  emit_trailer_stderr
+  emit_trailer_stderr ?execution_receipt
     Exec_ssh_protocol.{ v
                       ; exit = None
                       ; signal = None
@@ -696,7 +739,10 @@ let run () =
   | Error e -> shim_fail e
   | Ok (req, stdin_payload) ->
     let v = req.Exec_ssh_protocol.v in
-    let shim_fail msg = shim_fail ~v msg in
+    let receipt boundary : Exec_ssh_protocol.execution_receipt =
+      { mode = req.Exec_ssh_protocol.mode; boundary }
+    in
+    let shim_fail msg = shim_fail ~v ~execution_receipt:(receipt Refused) msg in
     (match load_config () with
      | Error e -> shim_fail e
      | Ok config ->
@@ -746,18 +792,23 @@ let run () =
                  ( scratch_env ~scratch env
                  , (fun () -> restrict_self scratch deny_fs deny_net)
                  , (fun () -> remove_tree scratch) ) in
-             let (pid, stdin_w, stdout_r, stderr_r) =
+             let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =
                try spawn ~before_exec ~argv ~env ~cwd () with
                | exn ->
                  cleanup ();
                  shim_fail
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
-             let trailer =
-               supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
-                 ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
-             cleanup ();
-             emit_trailer_stderr trailer;
+             let trailer, boundary =
+               Fun.protect
+                 ~finally:(fun () -> Unix.close boundary_r; cleanup ())
+                 (fun () ->
+                   let trailer =
+                     supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+                       ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
+                   trailer, read_child_boundary boundary_r)
+             in
+             emit_trailer_stderr ~execution_receipt:(receipt boundary) trailer;
              exit 0)))
 
 (* Capabilities are what this host can do, read when asked, so a probe on a

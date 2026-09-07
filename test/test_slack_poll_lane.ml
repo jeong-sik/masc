@@ -167,7 +167,7 @@ let disk_save disk state =
 let history_source values requests ~oldest ~latest =
   requests := (oldest, latest) :: !requests;
   let low = float_of_string oldest and high = float_of_string latest in
-  let matching = List.filter (fun n -> float n > low && float n < high) values in
+  let matching = List.filter (fun n -> Float.of_int n > low && Float.of_int n < high) values in
   match matching with
   | [] -> Ok (page [] false)
   | n :: rest -> Ok (page [history_message ~ts:(ts n) ~text:(string_of_int n) ()] (rest <> []))

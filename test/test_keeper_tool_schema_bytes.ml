@@ -79,7 +79,10 @@ open Alcotest
 (* Downloads add 117 bytes measured with the production Tool_definition_toml
    renderer against contexts 21bfcdf89b: BrowserRead is 1493 -> 1610 bytes.
    No other schema changes in this unit; preserve the base surface headroom. *)
-let ceiling_bytes = 90_791
+(* Main adds BrowserInteract: production TOML rendering is 1,394 bytes,
+   or 1,388 with its public name, plus one list separator. BrowserGoto
+   guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
+let ceiling_bytes = 92_213
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -128,6 +131,7 @@ let measured () =
 let all_surface_golden_names =
   [ "BrowserAct"
   ; "BrowserGoto"
+  ; "BrowserInteract"
   ; "BrowserRead"
   ; "BrowserSession"
   ; "BrowserTabs"

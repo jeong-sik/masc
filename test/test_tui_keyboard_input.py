@@ -48,6 +48,13 @@ class RawHttpResponse:
         self.headers = headers
 
 
+class StreamingHttpResponse:
+    """SSE chunks released by the interaction while one connection stays open."""
+
+    def __init__(self, chunks: Callable[[], Iterator[bytes]]) -> None:
+        self.chunks = chunks
+
+
 class RequestHttpResponse:
     """A fixture whose JSON-RPC answer must echo fields from the POST body."""
 
@@ -61,6 +68,7 @@ class RequestHttpResponse:
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
+    | StreamingHttpResponse
     | RequestHttpResponse
     | Callable[[], HttpResponse]
 )
@@ -180,6 +188,18 @@ def test_http_endpoint(
                 resolved = fixture.resolve(request_body or b"")
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, StreamingHttpResponse):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                try:
+                    for chunk in resolved.chunks():
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             extra_headers: tuple[tuple[str, str], ...] = ()
             if isinstance(resolved, RawHttpResponse):
                 status = resolved.status
@@ -11678,6 +11698,108 @@ def observer_http_fixtures() -> HttpFixtures:
     }
 
 
+def run_acting_call_evidence_regression(executable: str) -> None:
+    release_next = threading.Event()
+    keep_open = threading.Event()
+    binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+
+    def emit_frame(phase: str, output: bytearray) -> None:
+        print("ACTING_PTY_EVIDENCE " + json.dumps({
+            "phase": phase, "fixture": "synthetic exact-event inspector",
+            "binary_sha256": binary_sha256, "rows": 35, "columns": 140,
+            "encoding": "base64", "pty": base64.b64encode(output).decode(),
+        }), flush=True)
+
+    def frame(value):
+        return b"event: message\ndata: " + json.dumps(value).encode() + b"\n\n"
+
+    keeper = {
+        "type": "keeper_tool_call", "name": "alpha", "tool_name": "keeper_skill",
+        "ts_unix": 100.0, "turn": 7, "tool_use_id": "skill-call-exact",
+        "tool_args": {"skill": "research-plan-exact"},
+        "tool_result": {"receipt_sha256": "receipt-exact", "status": "served"},
+        "tool_args_preview": "safe-input-preview-exact",
+        "tool_output_preview": "safe-output-preview-exact\n\n\x1b[2Jforged-preview-text",
+    }
+    core = {
+        "type": "agent_core:tool_completed", "event_type": "tool_completed",
+        "agent_name": "runtime-lane-exact", "tool_name": "masc_fusion", "ts_unix": 101.0,
+        "event_id": "event-exact", "run_id": "run-exact", "caused_by": "cause-exact",
+        "parent_event_id": "parent-exact", "correlation_id": "trace-exact",
+        "payload": {"turn": 7, "tool_use_id": "call-exact", "execution_id": "exec-exact"},
+    }
+    late = dict(core, event_id="new-event-must-not-replace", tool_name="other_tool")
+    late["payload"] = {"turn": 8, "tool_use_id": "new-call-must-not-replace"}
+
+    def chunks():
+        yield frame(keeper) + frame(core)
+        if release_next.wait(timeout=15):
+            yield frame(late)
+            keep_open.wait(timeout=15)
+
+    fixtures = observer_http_fixtures()
+    fixtures["/mcp?sse_kind=observer"] = StreamingHttpResponse(chunks)
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            resize_and_wait(process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview")
+            wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            # A folded turn is never silently opened as one of its calls.
+            aggregate_start = len(output)
+            os.write(master_fd, b"\r")
+            drain_until_quiet(process, master_fd, output)
+            if b"ACTING EVENT EVIDENCE" in output[aggregate_start:]:
+                raise AssertionError("Aggregated turn opened as an exact call")
+            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
+            # At 35 rows the complete I/O already fits: PgDn is a no-op and
+            # must not be expected to emit the same terminal bytes again.
+            # Narrow the viewport so this step actually exercises paging.
+            resize_and_wait(process, master_fd, output, rows=22, columns=140,
+                            needle=b"ACTING EVENT EVIDENCE")
+            io_tail = send_and_wait(process, master_fd, output, b"\x1b[6~", b"safe-output-preview-exact")
+            for needle in (b"skill-call-exact", b"research-plan-exact", b"receipt-exact", b"producer-redacted"):
+                if needle not in io_head + io_tail:
+                    raise AssertionError(f"Selected Keeper event lost I/O evidence {needle!r}: {bytes(output)!r}")
+            visible_io = screen_text(bytes(output))
+            if b"\x1b[2Jforged-preview-text" in io_head + io_tail:
+                raise AssertionError("Tool output preview emitted a terminal clear command")
+            for needle in (b"safe-output-preview-exact", b"[2Jforged-preview-text"):
+                if needle not in visible_io:
+                    raise AssertionError(f"Terminal-safe multiline preview lost text {needle!r}: {visible_io!r}")
+            resize_and_wait(process, master_fd, output, rows=35, columns=140,
+                            needle=b"safe-output-preview-exact")
+            emit_frame("redacted-io", output)
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+            detail = send_and_wait(process, master_fd, output, b"k\r", b"Execution ID: exec-exact")
+            for needle in (b"Event ID: event-exact", b"Run ID: run-exact", b"Parent event ID: parent-exact", b"Caused by: cause-exact", b"Correlation ID: trace-exact"):
+                if needle not in CSI_RE.sub(b"", detail):
+                    raise AssertionError(f"Selected runtime event lost exact reference {needle!r}: {detail!r}")
+            start = len(output)
+            release_next.set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 3", start=start, timeout=8)
+            drain_until_quiet(process, master_fd, output)
+            pinned = bytes(output[start:])
+            plain = screen_text(bytes(output))
+            if b"Execution ID: exec-exact" not in plain or b"new-call-must-not-replace" in plain:
+                raise AssertionError(f"New SSE event retargeted the open detail: {pinned!r}")
+            emit_frame("pinned-exact-event", output)
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+            # The newly arrived event is independently selectable after closing.
+            latest = send_and_wait(process, master_fd, output, b"g\r", b"new-call-must-not-replace")
+            if b"Execution ID: not carried" not in screen_text(bytes(output)):
+                raise AssertionError(f"Absent execution identity inherited the previous call: {latest!r}")
+            keep_open.set()
+            os.write(master_fd, b"q")
+        finally:
+            release_next.set()
+            keep_open.set()
+
+    run_terminal_scenario(executable, description="Acting exact event evidence stays pinned across SSE",
+                          interact=interact, http_fixtures=fixtures)
+
+
 def observer_feed_interaction(requests: HttpRequests) -> Interaction:
     """The TUI opens an MCP session after its first refresh reaches the
     server, subscribes to the observer feed with that session, and counts
@@ -12770,6 +12892,11 @@ def run_browser_screenshot_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
+        if hasattr(termios, "VDISCARD"):
+            cc = termios.tcgetattr(_slave_fd)[6][termios.VDISCARD]
+            discard = cc if isinstance(cc, int) else cc[0]
+            if discard != os.fpathconf(_slave_fd, "PC_VDISABLE"):
+                raise AssertionError("raw mode did not reclaim Ctrl-O from VDISCARD")
         palette_go(process, master_fd, output, b"go Browser Lane", b"second page body")
 
         def capture() -> None:
@@ -12799,8 +12926,8 @@ def run_browser_screenshot_regression(executable: str) -> None:
         wait_for_terminal_input_consumed(_slave_fd)
         drain_until_quiet(process, master_fd, output)
         retained = resize_and_wait(process, master_fd, output,
-            rows=31, columns=101, needle=draft + b"x", controls=(FULL_REDRAW,))
-        if b"Enter after completion" not in CSI_RE.sub(b"", retained):
+            rows=31, columns=101, needle=b"Enter after completion", controls=(FULL_REDRAW,))
+        if draft + b"x" not in CSI_RE.sub(b"", retained):
             raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
         read_available(master_fd, output)
         cancelled_from = len(output)
@@ -12813,7 +12940,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         restored = send_and_wait(process, master_fd, output, b" ", draft + b"x")
         if draft + b"x " in CSI_RE.sub(b"", restored).split(b"\xe2\x96\x8f")[0]:
             raise AssertionError("image dismissal typed into the retained URL draft")
-        send_and_wait(process, master_fd, output, b"\x1b", b"second page body")
+        send_and_wait(process, master_fd, output, b"\x1b", b"g:URL")
         send_and_wait(process, master_fd, output, b"]", b"first page body")
         send_and_wait(process, master_fd, output, b"\x0f", b"selected Firefox tab closed")
         if requests[-1] != {"lane": "automation", "tabId": 1}:
@@ -13522,6 +13649,10 @@ def main() -> None:
         run_skill_usage_coverage_regression(os.path.abspath(sys.argv[1]))
         run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
         print("tui Skill usage coverage regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "acting-call-evidence":
+        run_acting_call_evidence_regression(os.path.abspath(sys.argv[1]))
+        print("tui Acting call evidence regression: PASS")
         return
     if len(sys.argv) != 2:
         raise SystemExit(

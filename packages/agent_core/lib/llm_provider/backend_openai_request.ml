@@ -415,7 +415,16 @@ let build_request_assoc_artifact
     match tools with
     | [] -> body
     | ts ->
-      ("tools", `List (List.map Backend_openai_serialize.build_openai_tool_json ts))
+      ( "tools"
+      , `List
+          (List.map
+             (fun tool ->
+                match caps.Capabilities.tool_schema_conformance with
+                | Capabilities.Rich_json_schema ->
+                  Backend_openai_serialize.build_openai_tool_json tool
+                | Capabilities.Conformant_subset_required ->
+                  Backend_openai_serialize.conformant_tool_json tool)
+             ts) )
       :: body
   in
   let body =

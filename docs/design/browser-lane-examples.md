@@ -2,15 +2,16 @@
 
 Browser는 사이트 구분 없이 페이지를 읽는 공통 도구다. Keeper에 보이는
 이름은 `BrowserTabs`, `BrowserRead`, `BrowserSession`, `BrowserGoto`,
-`BrowserAct`이며, 등록 이름은 각각 `masc_browser_tabs`, `masc_browser_read`,
-`masc_browser_session`, `masc_browser_goto`, `masc_browser_act`다.
+`BrowserAct`, `BrowserInteract`이며, 등록 이름은 각각 `masc_browser_tabs`, `masc_browser_read`,
+`masc_browser_session`, `masc_browser_goto`, `masc_browser_act`,
+`masc_browser_interact`다.
 
 ## 연결
 
 운영자가 사용하는 Firefox/Zen은 `live`, Keeper가 URL을 열어 조사하는
-격리 Firefox는 `automation`이다. 두 브라우저는 로그인 세션을 공유하지 않는다.
+설정한 Gecko 브라우저의 격리 세션은 `automation`이다. 두 브라우저는 로그인 세션을 공유하지 않는다.
 
-Live 호스트를 설치하고 Firefox `about:debugging`에서 확장을 적재한다.
+Live 호스트를 설치하고 Firefox 또는 Zen의 `about:debugging`에서 확장을 적재한다.
 
 ```sh
 bash connectors/browser/install-host.sh \
@@ -97,6 +98,31 @@ keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 
 바이트를 넣지는 않는다. 스크린샷 저장에는 in-process Keeper 실행 문맥이 필요하다.
 일반 도구 호출자의 표시 이름을 Keeper 소유권으로 간주하지 않는다.
 
+## 화면과 상호작용
+
+선택한 탭의 화면을 보려면 `BrowserRead`에 `format=image`를 지정한다.
+Keeper는 반환된 `artifact`를 `analyze_image`에 전달한다. TUI에서는
+`Ctrl-O`로 같은 탭의 PNG를 미리 본다. 캡처 범위는 현재 viewport다.
+
+```json
+BrowserRead {"lane":"live","tabId":73,"format":"image"}
+BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
+```
+
+페이지에서 확인한 CSS selector가 있을 때 click 또는 fill을 사용한다.
+요소는 현재 문서에서 정확히 하나여야 한다. `expectedUrl`은 직전에
+읽은 URL을 전달하며, 페이지가 바뀌었으면 동작을 거부한다.
+
+```json
+BrowserInteract {"lane":"live","tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
+BrowserInteract {"lane":"live","tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
+```
+
+텍스트나 이미지에서 selector를 추측하지 않는다. 현재 도구는 자동으로
+DOM 요소 목록이나 좌표 기반 클릭 대상을 제공하지 않는다. fill은
+input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
+페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
+
 ## 반복 관측
 
 동일 페이지를 나중에 다시 확인하려면 `masc_schedule_create`로 후속 작업을
@@ -111,7 +137,8 @@ keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 
 | 탭 목록·텍스트·컨트롤 관측 | 지원 | 지원 |
 | 명시한 탭의 viewport 캡처 | 지원 | 지원 |
 | 탭 열기·이동·닫기 | 미지원 | 지원 |
-| 클릭·입력·키·선택·스크롤·히스토리 | 미지원 | 지원 |
+| 클릭·입력·스크롤 (`BrowserInteract`) | 지원 | 지원 |
+| 네이티브 키·선택·히스토리 (`BrowserAct`) | 미지원 | 지원 |
 | 중첩 iframe·JavaScript 대화상자·파일 업로드 | 미지원 | 지원 |
 | 다운로드 완료 관측·artifact 읽기 | 미지원 | 지원 |
 | shadow root 대상 지정 | 미지원 | 미지원 |

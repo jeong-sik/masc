@@ -391,6 +391,33 @@ let test_a_frame_this_cannot_read_says_why () =
         (String.starts_with ~prefix:"data line without" noncanonical)
   | _ -> failf "expected four reasons, got %d" (List.length reasons)
 
+let test_exact_event_references_and_keeper_io () =
+  let core =
+    "data: {\"type\":\"agent_core:tool_completed\",\"event_type\":\"tool_completed\",\"ts_unix\":100,\"event_id\":\"event-exact\",\"run_id\":\"run-exact\",\"caused_by\":\"cause-exact\",\"parent_event_id\":\"parent-exact\",\"correlation_id\":\"trace-exact\",\"payload\":{\"tool_use_id\":\"call-exact\",\"execution_id\":\"exec-exact\"}}\n\n" in
+  (match decode_all [core] with
+   | [Observer.Event (Observer.Agent_core event)] ->
+       check (option string) "event ID" (Some "event-exact") event.event_id;
+       check (option string) "run ID" (Some "run-exact") event.run_id;
+       check (option string) "causation" (Some "cause-exact") event.caused_by;
+       check (option string) "parent" (Some "parent-exact") event.parent;
+       check (option string) "correlation" (Some "trace-exact") event.correlation;
+       check (option string) "execution" (Some "exec-exact") event.execution_id
+   | _ -> fail "exact runtime event references were lost");
+  let keeper =
+    "data: {\"type\":\"keeper_tool_call\",\"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":100,\"tool_use_id\":\"skill-call-exact\",\"tool_args\":{\"skill\":\"read-plan\"},\"tool_result\":null,\"tool_args_preview\":\"safe input\",\"tool_output_preview\":\"safe output\"}\n\n" in
+  (match decode_all [keeper] with
+   | [Observer.Event (Observer.Keeper_tool_call event)] ->
+       check (option string) "provider call identity" (Some "skill-call-exact") event.kt_tool_use_id;
+       check bool "provided JSON null survives" true (event.kt_tool_result = Some `Null);
+       check bool "structured input survives" true
+         (event.kt_tool_args = Some (`Assoc ["skill", `String "read-plan"]));
+       check (option string) "redacted input preview" (Some "safe input") event.kt_tool_args_preview;
+       check (option string) "redacted output preview" (Some "safe output") event.kt_tool_output_preview
+   | _ -> fail "Keeper I/O observations were lost");
+  match decode_all ["data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"ts_unix\":100,\"event_id\":4}\n\n"] with
+  | [Observer.Undecodable _] -> ()
+  | _ -> fail "malformed identity became missing identity"
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -400,7 +427,9 @@ let () =
             test_the_initialize_body_names_the_method_and_the_client
         ] )
     ; ( "events"
-      , [ test_case "a tool call decodes with its turn and batch" `Quick
+      , [ test_case "exact event references and redacted Keeper I/O survive" `Quick
+            test_exact_event_references_and_keeper_io
+        ; test_case "a tool call decodes with its turn and batch" `Quick
             test_a_tool_call_decodes_with_its_turn_and_batch
         ; test_case "agent terminal frames keep their distinct kinds" `Quick
             test_agent_terminal_frames_keep_their_distinct_kinds

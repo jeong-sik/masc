@@ -4043,6 +4043,18 @@
  (name runtest)
  (deps (alias runtest-test_tui_frame_latency_verdict)))
 
+(rule
+ (alias runtest-test_response_latency_probe)
+ (deps
+  test_response_latency_probe.py
+  ../scripts/harness/perf/response_latency_probe.py)
+ (action
+  (run python3 %{dep:test_response_latency_probe.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_response_latency_probe)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_capture_tui_keeper_chat)))

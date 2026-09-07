@@ -37,6 +37,20 @@ NO_DURABLE_STORE = {
     "keeper_paused_work_operator_request": "decodes an operator request payload",
 }
 
+# A decoder can hold a field of a file another store already reads. The
+# preflight then exercises it without naming it, and a scan of the helper's
+# text alone calls it unregistered -- which is what it called
+# keeper_usage_resolution: keeper meta carries usage_cursor and
+# last_usage_resolution, and keeper_meta_store is in durable_stores.
+#
+# Each entry names the module in the middle, and that is checked rather than
+# taken on trust: the middle module must still mention the decoder, and the
+# store module must still be named in the preflight. Break either link and
+# this fails, so the entry cannot go stale quietly.
+COVERED_BY_STORE = {
+    "keeper_usage_resolution": ("keeper_meta_json_parse", "Keeper_meta_store"),
+}
+
 
 def modules_with_exact_field_decoders() -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
@@ -93,6 +107,22 @@ def main() -> int:
         module_ref = module[:1].upper() + module[1:]
         if re.search(rf"\b{re.escape(module_ref)}\b", preflight):
             state = "preflight"
+        elif module in COVERED_BY_STORE:
+            middle, store = COVERED_BY_STORE[module]
+            middle_path = REPO / "lib" / "keeper" / f"{middle}.ml"
+            middle_text = (
+                middle_path.read_text(encoding="utf-8", errors="replace")
+                if middle_path.exists()
+                else ""
+            )
+            if not re.search(rf"\b{re.escape(module_ref)}\b", middle_text):
+                state = f"BROKEN CHAIN — {middle}.ml no longer reads {module_ref}"
+                unregistered.append(module)
+            elif not re.search(rf"\b{re.escape(store)}\b", preflight):
+                state = f"BROKEN CHAIN — the preflight no longer reads {store}"
+                unregistered.append(module)
+            else:
+                state = f"via {store} through {middle}"
         elif module in NO_DURABLE_STORE:
             state = f"no store — {NO_DURABLE_STORE[module]}"
         else:

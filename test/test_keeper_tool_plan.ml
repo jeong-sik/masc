@@ -688,6 +688,99 @@ let test_plan_rejects_unsupported_output_schema_keywords () =
   | Error _ | Ok _ -> fail "schema-valued additionalProperties was accepted"
 ;;
 
+let test_nullable_lane_output_keeps_type_and_field_validation () =
+  let single = node ~id:"lane" ~tool_name:"keeper_lane_status" literal_object in
+  let plan =
+    match Plan.create ~descriptors:(descriptors ()) [ single ] with
+    | Ok plan -> plan
+    | Error _ -> fail "nullable lane status schema was rejected"
+  in
+  let fields =
+    [ "profile", `String "docker"
+    ; "lane", `Null
+    ; "endpoint", `Null
+    ; "operator_action", `Null
+    ; "probe", `Null
+    ; "last_dispatch", `Null
+    ]
+  in
+  let validate fields =
+    Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ())
+      ~node_id:(node_id "lane") (`Assoc fields)
+  in
+  let accepts fields =
+    match validate fields with
+    | Ok _ -> ()
+    | Error _ -> fail "valid nullable lane observation was rejected"
+  in
+  accepts fields;
+  accepts
+    [ "profile", `String "remote-ssh"
+    ; "lane", `String "ssh"
+    ; "endpoint", `String "declared"
+    ; "operator_action", `String "inspect the endpoint"
+    ; "probe", `Assoc [ "state", `String "not_asked" ]
+    ; "last_dispatch", `Assoc [ "outcome", `String "payload_finished" ]
+    ];
+  List.iter
+    (fun invalid ->
+       match validate invalid with
+       | Error (Plan.Output_validation_failed _) -> ()
+       | Error _ | Ok _ -> fail "nullable schema accepted an invalid observation")
+    [ ("lane", `Int 7) :: List.remove_assoc "lane" fields
+    ; ("probe", `String "not-an-object") :: List.remove_assoc "probe" fields
+    ; List.remove_assoc "lane" fields
+    ; ("undeclared", `Null) :: fields
+    ; ("lane", `Null) :: fields
+    ]
+;;
+
+let test_nullable_container_references_and_contracts () =
+  let leaf = `Assoc [ "type", `String "string" ] in
+  let schema =
+    `Assoc
+      [ "type", `List [ `String "null"; `String "object" ]
+      ; "properties", `Assoc
+          [ "rows", `Assoc
+              [ "type", `List [ `String "array"; `String "null" ]
+              ; "items", `Assoc
+                  [ "type", `String "object"
+                  ; "properties", `Assoc [ "value", leaf ]
+                  ]
+              ]
+          ]
+      ]
+  in
+  (match Plan.validate_composable_schema schema with
+   | Ok () -> ()
+   | Error _ -> fail "nullable container contract was rejected");
+  let path = pointer "/rows/0/value" in
+  (match Plan.Json_pointer.resolve_schema path schema with
+   | Ok actual -> check bool "nullable containers retain the declared leaf" true (actual = leaf)
+   | Error _ -> fail "nullable containers blocked a declared output reference");
+  (match Plan.Json_pointer.resolve path (`Assoc [ "rows", `Null ]) with
+   | Error (Plan.Json_pointer.Expected_container "0") -> ()
+   | Error _ | Ok _ -> fail "a null container invented a downstream value");
+  List.iter
+    (fun kind ->
+       match Plan.validate_composable_schema (`Assoc [ "type", kind ]) with
+       | Error (Plan.Unsupported_contract_type _) -> ()
+       | Error _ | Ok _ -> fail "unsupported nullable type contract was accepted")
+    [ `List []
+    ; `List [ `String "null"; `String "null" ]
+    ; `List [ `String "null"; `String "unknown" ]
+    ; `List [ `String "string"; `String "number" ]
+    ; `List [ `String "null"; `String "string"; `String "number" ]
+    ];
+  match Plan.validate_composable_schema
+          (`Assoc
+             [ "type", `List [ `String "object"; `String "null" ]
+             ; "properties", `Assoc [ "bad", `Assoc [ "type", `String "unknown" ] ]
+             ]) with
+  | Error (Plan.Unsupported_contract_type _) -> ()
+  | Error _ | Ok _ -> fail "nullable object hid an invalid nested schema"
+;;
+
 let test_terminal_node_is_unique_and_depends_on_every_prior_node () =
   let terminal = descriptor "keeper_surface_post" in
   let first = node ~id:"first" ~tool_name:"keeper_surface_post" literal_object in
@@ -765,6 +858,7 @@ let test_composable_output_registry_is_closed () =
     "explicit JSON-producing tools"
     [ "Execute"
     ; "keeper_artifact_read"
+    ; "keeper_lane_status"
     ; "keeper_tasks_list"
     ; "keeper_time_now"
       (* masc_agent_card and masc_agent_timeline left this list with #29681:
@@ -2331,6 +2425,10 @@ let () =
             "unsupported output schema keywords"
             `Quick
             test_plan_rejects_unsupported_output_schema_keywords
+        ; test_case "nullable lane output stays strict" `Quick
+            test_nullable_lane_output_keeps_type_and_field_validation
+        ; test_case "nullable container references and contracts" `Quick
+            test_nullable_container_references_and_contracts
         ; test_case
             "terminal dependency boundary"
             `Quick

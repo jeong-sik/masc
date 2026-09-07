@@ -226,6 +226,43 @@ let anthropic_config
     ()
 ;;
 
+(* 2026-09-07: the chat output-token budget's wire FIELD is model-scoped.
+   OpenAI's reasoning-era models reject [max_tokens] outright, so a model
+   declaring [chat_output_budget_field = max_completion_tokens] must carry its
+   resolved budget under that name and must NOT also emit the classic field —
+   a model receiving both would take the smaller and under-run. Default models
+   keep the classic field untouched. *)
+let chat_budget_config override model_id =
+  PC.make
+    ~kind:OpenAI_compat
+    ~model_id
+    ~base_url:"https://provider.example/v1"
+    ~max_tokens:64
+    ~model_capabilities_override:override
+    ()
+;;
+
+let test_chat_budget_field_max_completion_tokens () =
+  let override =
+    { CAP.default_capabilities with
+      chat_output_budget_field = CAP.Chat_max_completion_tokens
+    }
+  in
+  let config = chat_budget_config override "gpt-test" in
+  let json = BOR.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
+  check int "budget rides max_completion_tokens" 64
+    (json |> member "max_completion_tokens" |> to_int);
+  check_member_absent "max_tokens" json
+;;
+
+let test_chat_budget_field_default_is_classic () =
+  let config = chat_budget_config CAP.default_capabilities "classic-test" in
+  let json = BOR.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
+  check int "budget rides classic max_tokens" 64
+    (json |> member "max_tokens" |> to_int);
+  check_member_absent "max_completion_tokens" json
+;;
+
 let test_raw_qwen_openai_compat_does_not_infer_chat_template_kwargs () =
   let config =
     openai_compat_config
@@ -1561,6 +1598,14 @@ let () =
               "gemini reasoning dialect uses thinking config"
               `Quick
               test_gemini_reasoning_dialect_uses_thinking_config
+          ; test_case
+              "chat budget field max_completion_tokens"
+              `Quick
+              test_chat_budget_field_max_completion_tokens
+          ; test_case
+              "chat budget field default is classic max_tokens"
+              `Quick
+              test_chat_budget_field_default_is_classic
           ] )
       ])
 ;;

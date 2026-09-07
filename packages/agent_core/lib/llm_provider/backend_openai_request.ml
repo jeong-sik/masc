@@ -321,7 +321,18 @@ let build_request_assoc_artifact
   let body = [ "model", `String config.model_id; "messages", `List provider_messages ] in
   let body =
     match Types.output_token_receipt_effective output_token_receipt with
-    | Some mt -> body @ [ "max_tokens", `Int mt ]
+    | Some mt ->
+      (* Model-scoped field name (#3317 family): reasoning-era OpenAI models
+         reject [max_tokens] outright ("Use 'max_completion_tokens' instead",
+         gpt-5.5 live probe 2026-09-07) and count hidden reasoning tokens
+         inside the completion budget. The omit/clamp policy above is
+         unchanged — only which wire field carries the resolved value. *)
+      let field =
+        match caps.Capabilities.chat_output_budget_field with
+        | Capabilities.Chat_max_tokens -> "max_tokens"
+        | Capabilities.Chat_max_completion_tokens -> "max_completion_tokens"
+      in
+      body @ [ field, `Int mt ]
     | None -> body
   in
   let body =

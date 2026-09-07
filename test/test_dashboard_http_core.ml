@@ -4325,7 +4325,36 @@ let test_config_post_requires_expected_revision () =
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
 
+let with_direct_assignment_model_catalog f =
+  let module Catalog = Llm_provider.Model_catalog in
+  (* Assignment publication validates the configured provider/model against
+     AGENT_CORE. Declare the synthetic model used by config_sync_runtime_toml
+     for the whole fixture, including its Keeper fiber cleanup. *)
+  let previous = Catalog.global () in
+  let catalog =
+    match
+      Catalog.of_toml_string ~source:"direct-assignment-fixture"
+        {|[[models]]
+id_prefix = "test-model"
+provider_name = "test_provider"
+base = "openai_chat"
+max_context_tokens = 8192
+|}
+    with
+    | Ok catalog -> catalog
+    | Error detail -> failf "direct assignment model catalog: %s" detail
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Catalog.set_global catalog
+      | None -> Catalog.clear_global ())
+    (fun () ->
+      Catalog.set_global catalog;
+      f ())
+
 let test_direct_assignment_route_rejects_stale_revision_without_write () =
+  with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let name = "direct-assignment-cas" in
   prepare_config_sync_keeper ~sw config name;
@@ -4364,6 +4393,7 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
        ~base_path:config.base_path name)
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =
+  with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "direct-assignment-fences-config" in
   prepare_config_sync_keeper ~sw config name;
@@ -4412,6 +4442,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
        ~base_path:config.base_path name)
 
 let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
+  with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let name = "direct-assignment-release-warning" in
   prepare_config_sync_keeper ~sw config name;

@@ -203,7 +203,11 @@ let write config t =
   |> Result.map_error (fun e -> Write_failed e)
 let put config bytes mime =
   try Ok (Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:config.Workspace.base_path) ~bytes ~mime)
-  with Sys_error e -> Error (Artifact_write_failed e)
+  with
+  | Sys_error e -> Error (Artifact_write_failed e)
+  | Unix.Unix_error (code, operation, argument) ->
+    Error (Artifact_write_failed
+      (Printf.sprintf "%s (%s %s)" (Unix.error_message code) operation argument))
 let create ~config ~keeper_name ~admission_id ~source:snapshot ~failures
     ~pending_stimulus_ids ~required_source_refs ~source_watermark =
   let source = Keeper_checkpoint_store.exact_snapshot_reference snapshot in

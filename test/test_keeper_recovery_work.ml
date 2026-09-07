@@ -47,14 +47,14 @@ let with_fixture f =
     let source = save "original tool bytes" in
     let canonical_path = Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id:"recovery-trace" in
     f config canonical_path source save))
-let create config source admission =
+let create_result config source admission =
   Work.create ~config ~keeper_name:(Keeper_id.Keeper_name.of_string "recovery" |> Result.get_ok)
     ~admission_id:admission ~source
     ~failures:["fixture.one", Agent_core.Error.Api
       (Agent_core.Retry.ContextOverflow {message="observed provider refusal";limit=Some 8192})]
     ~pending_stimulus_ids:["stimulus-a";"stimulus-b"]
     ~required_source_refs:["task:required";"user:direct"] ~source_watermark:"queue-revision-1"
-  |> ok |> changed
+let create config source admission = create_result config source admission |> ok |> changed
 let claim config t instance =
   Work.claim ~config ~id:(Work.id t) ~expected_revision:(Work.revision t) ~instance_id:instance
   |> ok |> changed
@@ -147,9 +147,22 @@ let test_corrupt_source_can_be_cancelled () = with_fixture (fun config path sour
     ~expected_revision:(Work.revision running) ~reason:"operator cancelled unavailable recovery" |> ok |> changed in
   (match Work.status (read config (Work.id cancelled)) with Work.Cancelled _ -> () | _ -> fail "cancel was hidden");
   check string "cancellation preserves canonical bytes" canonical (Fs_compat.load_file path))
+let test_blob_directory_failure_is_typed () = with_fixture (fun config path source _ ->
+  let canonical = Fs_compat.load_file path in
+  let blob_root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:config.base_path) in
+  (match Fs_compat.save_file_atomic blob_root "this regular file prevents shard creation" with
+   | Ok () -> () | Error e -> fail e);
+  create_result config source "blocked-artifact-directory"
+  |> reject "actual Unix directory failure remains typed"
+    (function Work.Artifact_write_failed _ -> true | _ -> false);
+  let records = Fs_compat.read_dir (Filename.concat (Workspace.masc_root_dir config) "keeper-recovery-work")
+    |> List.filter (fun path -> Filename.extension path = ".json") in
+  check (list string) "failed artifact publication creates no work reference" [] records;
+  check string "artifact write failure preserves canonical bytes" canonical (Fs_compat.load_file path))
 let () = Alcotest.run "Keeper recovery durable work"
   ["lifecycle",[
     test_case "reload and fenced proposal preserve canonical history" `Quick test_resume_publish_preserves_source;
     test_case "changed source rejects publication" `Quick test_changed_source_does_not_publish;
     test_case "missing artifact permits typed failure" `Quick test_missing_source_keeps_terminal_evidence;
-    test_case "corrupt artifact permits cancellation" `Quick test_corrupt_source_can_be_cancelled]]
+    test_case "corrupt artifact permits cancellation" `Quick test_corrupt_source_can_be_cancelled;
+    test_case "filesystem artifact failure stays typed" `Quick test_blob_directory_failure_is_typed]]

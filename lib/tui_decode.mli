@@ -1835,8 +1835,16 @@ type presets_snapshot = {
       (** directory name, why its manifest did not read *)
 }
 
+type preset_settings_match =
+  | Preset_settings_match
+  | Preset_settings_differ
+  | Preset_settings_unavailable of string
+
 type preset_detail = {
   pd_name : string;
+  pd_directory : string;
+  pd_settings_match : preset_settings_match;
+  pd_prompt_files : (string * string option * prompt_source) list;
   pd_overrides : (string * int) list;  (** prompt key, bytes *)
   pd_instructions : (string * int) list;  (** keeper TOML file name, bytes *)
   pd_assignments : (string * string) list;  (** keeper, runtime id *)

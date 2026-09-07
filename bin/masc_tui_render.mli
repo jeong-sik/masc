@@ -206,3 +206,6 @@ val render :
 val browser_lane_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int ->
   Masc_tui_types.Browser_lane_view.t -> int
+
+val ask_question_scroll_limit : Masc_tui_types.state -> int
+val ask_question_page_size : Masc_tui_types.state -> int

@@ -1,0 +1,2736 @@
+{
+  "status": "ok",
+  "server": "masc",
+  "version": "0.33.0",
+  "release_version": "0.33.0",
+  "build": {
+    "release_version": "0.33.0",
+    "binary_version": "0.33.0",
+    "commit": "362f55b1dc17d2f8fbdf8b393d7c05a90596e16f",
+    "commit_source": "embedded",
+    "binary_commit": "362f55b1dc17d2f8fbdf8b393d7c05a90596e16f",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "878ce9b9bb1779f62207c0d00017839688e713d20cfa59214d73335a2be4b507",
+    "repo_head_commit": "9663c83d78",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788482547.0,
+    "repo_head_commit_age_seconds": 277351,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me",
+    "runtime_instance_id": "01a07a5b-3b73-7000-a06c-cf4db178c9c2",
+    "started_at": "2026-09-07T05:33:14Z",
+    "uptime_seconds": 704
+  },
+  "health_detail": "full",
+  "protocol": {
+    "default": "2025-11-25",
+    "listener": "http/1.1",
+    "supported": [
+      "2026-07-28",
+      "DRAFT-2026-v1",
+      "2024-11-05",
+      "2025-03-26",
+      "2025-06-18",
+      "2025-11-25"
+    ]
+  },
+  "transport": {
+    "streamable_http_default": true,
+    "http": {
+      "configured": true,
+      "enabled": true,
+      "protocol_capable": true,
+      "auth_policy_present": false,
+      "base_url": "http://127.0.0.1:8935",
+      "mcp_url": "http://127.0.0.1:8935/mcp",
+      "sse_url": "http://127.0.0.1:8935/mcp?sse_kind=observer"
+    },
+    "grpc": {
+      "enabled": false,
+      "configured": false,
+      "listening": false,
+      "reachable": false,
+      "listen_status": "disabled",
+      "port": 8936,
+      "service": "masc.workspace.v1.MascWorkspace",
+      "health_service": "grpc.health.v1.Health"
+    },
+    "websocket": {
+      "enabled": true,
+      "configured": true,
+      "listening": true,
+      "reachable": true,
+      "mode": "same_origin",
+      "discovery_path": "/ws",
+      "upgrade_path": "/ws",
+      "request_host": "127.0.0.1",
+      "session_count": 0,
+      "ws_url": "ws://127.0.0.1:8935/ws",
+      "same_origin_upgrade_enabled": true,
+      "same_origin_upgrade_path": "/ws",
+      "same_origin_ws_url": "ws://127.0.0.1:8935/ws"
+    },
+    "total_sessions": 16,
+    "enabled_protocols": [
+      "json-rpc",
+      "sse",
+      "ws"
+    ]
+  },
+  "http_listener": {
+    "mode": "auto",
+    "status": "listening",
+    "active_connections": 27,
+    "accepted_total": 1544,
+    "accept_errors_total": 0,
+    "rate_limit_responses_total": 26,
+    "rate_limit_responses": [
+      {
+        "protocol": "h1",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h1",
+        "scope": "agent",
+        "total": 26
+      },
+      {
+        "protocol": "h1",
+        "scope": "sse_connection",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "agent",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "sse_connection",
+        "total": 0
+      }
+    ],
+    "last_accept_unix": 1788759898.56814,
+    "last_accept_age_seconds": 0.0007450580596923828,
+    "last_error": null
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me",
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "current_task_path": "/Users/dancer/me/.masc/current_task",
+    "current_task_shape": "regular",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me",
+    "env_masc_base_path": "/Users/dancer/me",
+    "resolution_source": "explicit_env"
+  },
+  "internal_mcp_auth": {
+    "schema": "masc.internal_mcp_auth.v1",
+    "status": "ok",
+    "source": "running_process_env_and_auth_hash",
+    "env_key": "MASC_INTERNAL_MCP_TOKEN",
+    "env_token_present": true,
+    "token_hash_file_present": true,
+    "env_token_verifies": true,
+    "keeper_internal_runtime_mcp_ready": true,
+    "missing": [],
+    "operator_action_required": false,
+    "operator_next_action": "none"
+  },
+  "otel": {
+    "enabled": false,
+    "status": "disabled",
+    "endpoint": "http://127.0.0.1:4318",
+    "service_name": "masc",
+    "exporter_active": false,
+    "exporter_degraded": false,
+    "consecutive_failures": 0,
+    "last_successful_export_unix": null,
+    "last_degradation_error": null
+  },
+  "uptime": "11m 43s",
+  "sse_clients": 16,
+  "startup": {
+    "phase": "ready",
+    "state_ready": true,
+    "pending_lazy_tasks": [],
+    "last_error": null,
+    "path_diagnostics": {
+      "cwd": "/Users/dancer/me",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "regular",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_env"
+    },
+    "config_resolution": {
+      "status": "ready",
+      "warnings": [],
+      "config_root": {
+        "path": "/Users/dancer/me/.masc/config",
+        "exists": true,
+        "source": "local_masc"
+      },
+      "prompts": {
+        "path": "/Users/dancer/me/.masc/config/prompts",
+        "exists": true,
+        "source": "local_masc"
+      },
+      "keepers": {
+        "path": "/Users/dancer/me/.masc/config/keepers",
+        "exists": true,
+        "source": "local_masc"
+      }
+    },
+    "elapsed_sec": 702.021730184555,
+    "watchdog_timeout_sec": 240.0,
+    "product": {
+      "lifecycle": "serving",
+      "lazy_tasks": "complete",
+      "readiness": "ready",
+      "last_error": null,
+      "flat_phase": "ready"
+    }
+  },
+  "schedule_runner": {
+    "schema": "masc.schedule.runner_status.v1",
+    "status": "ok",
+    "tick_in_flight": false,
+    "tick_count": 46,
+    "success_count": 46,
+    "failure_count": 0,
+    "crash_count": 0,
+    "last_tick_started_at": 1788759894.982515,
+    "last_tick_finished_at": 1788759895.016609,
+    "last_success_at": 1788759895.016609,
+    "last_error_at": null,
+    "last_error": null,
+    "last_duration_sec": 0.03409385681152344,
+    "last_counts": {
+      "due_changed": 0,
+      "emitted": 0,
+      "rescheduled": 0,
+      "dispatch_succeeded": 0,
+      "dispatch_failed": 0,
+      "dispatch_unsupported": 0,
+      "dispatch_start_rejected": 0,
+      "wake_enqueued": 0,
+      "wake_skipped_no_keeper": 0,
+      "wake_skipped_missing_schedule": 0,
+      "wake_skipped_non_keeper_actor": 0,
+      "wake_skipped_unregistered_keeper": 0,
+      "wake_failed": 0
+    },
+    "totals": {
+      "due_changed": 1,
+      "emitted": 1,
+      "rescheduled": 0,
+      "dispatch_succeeded": 1,
+      "dispatch_failed": 0,
+      "dispatch_unsupported": 0,
+      "dispatch_start_rejected": 0,
+      "wake_enqueued": 1,
+      "wake_skipped_no_keeper": 0,
+      "wake_skipped_missing_schedule": 0,
+      "wake_skipped_non_keeper_actor": 0,
+      "wake_skipped_unregistered_keeper": 0,
+      "wake_failed": 0
+    },
+    "stale_after_sec": 60.0,
+    "last_tick_age_sec": 3.552225112915039,
+    "last_success_age_sec": 3.552225112915039,
+    "last_error_age_sec": null
+  },
+  "runtime_startup_degradation": {
+    "schema": "masc.runtime_startup_degradation.v1",
+    "status": "ok",
+    "degraded": false,
+    "operator_action_required": false,
+    "terminal_reason": "none",
+    "missing_catalog_model_count": 0,
+    "disabled_runtime_ids": []
+  },
+  "dashboard_surface": {
+    "schema": "masc.dashboard_surface.v1",
+    "status": "ok",
+    "index_present": true,
+    "assets_root": "/Users/dancer/me/assets",
+    "dashboard_asset_root": "/Users/dancer/me/assets/dashboard",
+    "dashboard_manifest_root": null,
+    "build_stamp_path": "/Users/dancer/me/assets/dashboard/.build-stamp",
+    "index_sha256": "8e3b1f76c3619a1ea72494125e462bd1b3b4c49d72ba8fd5cf5c0870b35adb61",
+    "asset_tree_sha256": null,
+    "asset_file_count": null,
+    "build_input_sha256": null,
+    "build_source_commit": null,
+    "build_head_tree": null,
+    "build_index_tree": null,
+    "build_input_file_count": null,
+    "build_input_matches_head": null,
+    "build_lock_sha256": null,
+    "build_environment_profile_sha256": null,
+    "build_environment_path_identity_sha256": null,
+    "build_environment_path_executable_sha256": null,
+    "build_environment_path_executable_count": null,
+    "build_producer": null,
+    "build_runtime": null,
+    "recovery": {
+      "kind": "none",
+      "reason": "surface_ready",
+      "restart_required": false
+    },
+    "build_stamp_at": "2026-09-07T05:38:47Z"
+  },
+  "subsystems": {
+    "discord_presence": {
+      "status": "alive"
+    },
+    "keeper_autoboot": {
+      "status": "alive"
+    },
+    "keeper_shutdown_recovery": {
+      "status": "alive"
+    },
+    "session_cleanup": {
+      "status": "alive"
+    }
+  },
+  "logs": {
+    "status": "active",
+    "capacity": 50000,
+    "total_entries": 53333,
+    "retained_entries": 50000,
+    "recent_window": 200,
+    "recent_errors": 4,
+    "recent_warnings": 30,
+    "latest": {
+      "seq": 26833653,
+      "ts": "2026-09-07T05:44:57Z",
+      "level": "INFO",
+      "source": "structured",
+      "module": "Discord",
+      "keeper_name": "system",
+      "turn_id": null
+    },
+    "file_sink": {
+      "enabled": true,
+      "dir": "/Users/dancer/me/.masc/logs",
+      "current_date": "2026-09-07"
+    }
+  },
+  "gc": {
+    "compactions": 0,
+    "heap_words": 319788896,
+    "live_words": 302264032,
+    "minor_heap_size": 4194304,
+    "space_overhead": 100,
+    "minor_collections": 1999,
+    "major_collections": 171,
+    "forced_major_collections": 0,
+    "minor_words": 10771815358.0,
+    "promoted_words": 573457022.0,
+    "major_words": 6921177554.0
+  },
+  "scheduler": {
+    "pool_domains": 14,
+    "probe": "running",
+    "interval_ms": 100.0,
+    "window_s": 60.0,
+    "stall_threshold_ms": 1000.0,
+    "samples": 600,
+    "p50_ms": 1.0535419999999907,
+    "p95_ms": 3.4552919999999987,
+    "p99_ms": 24.900665999999987,
+    "max_ms": 140.75199999999998,
+    "mean_ms": 2.0765276316666608,
+    "stalls": 0
+  },
+  "feature_flags": {
+    "total_features": 18,
+    "healthy_count": 9,
+    "warning_count": 1,
+    "inactive_count": 8,
+    "enabled_count": 10,
+    "overridden_count": 2
+  },
+  "overall_status": "degraded",
+  "operator_action_required": true,
+  "operator_action_reasons": [
+    "keeper_reaction_ledger:durable_event_queue_stale",
+    "keeper_event_queue:runnable_backlog=17",
+    "keeper_event_queue:runnable_backlog_stale"
+  ],
+  "keeper_fibers": 10,
+  "fd_observation": {
+    "active_keepers": 10,
+    "nofile_soft_limit": 245760,
+    "process_open_fds": 172,
+    "process_remaining_fds": 245588,
+    "nofile_probe_supported": true,
+    "system_open_files": 95360,
+    "system_max_files": 491520,
+    "system_remaining_files": 396160,
+    "system_max_files_per_process": 245760,
+    "mode": "observation_only",
+    "process_fd_exhaustion_observations_total": 0,
+    "system_fd_exhaustion_observations_total": 0,
+    "last_fd_exhaustion_ts": null,
+    "external_warn_total": 0,
+    "external_crit_total": 0,
+    "last_external_signal_ts": null,
+    "last_external_signal_reason": null
+  },
+  "fd_accountant": {
+    "fd_open": 172,
+    "fd_limit": 245760,
+    "per_kind": [
+      {
+        "kind": "docker_spawn",
+        "active_operations": 0
+      },
+      {
+        "kind": "provider_http",
+        "active_operations": 2
+      },
+      {
+        "kind": "provider_cli",
+        "active_operations": 0
+      },
+      {
+        "kind": "sandbox_exec",
+        "active_operations": 0
+      },
+      {
+        "kind": "log_writer",
+        "active_operations": 0
+      }
+    ],
+    "resource_errors": [
+      {
+        "kind": "docker_spawn",
+        "error": "process_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "docker_spawn",
+        "error": "system_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "docker_spawn",
+        "error": "storage_space_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "provider_http",
+        "error": "process_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "provider_http",
+        "error": "system_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "provider_http",
+        "error": "storage_space_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "provider_cli",
+        "error": "process_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "provider_cli",
+        "error": "system_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "provider_cli",
+        "error": "storage_space_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "sandbox_exec",
+        "error": "process_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "sandbox_exec",
+        "error": "system_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "sandbox_exec",
+        "error": "storage_space_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "log_writer",
+        "error": "process_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "log_writer",
+        "error": "system_fd_exhausted",
+        "count": 0
+      },
+      {
+        "kind": "log_writer",
+        "error": "storage_space_exhausted",
+        "count": 0
+      }
+    ]
+  },
+  "disk_observation": {
+    "masc_root": "/Users/dancer/me/.masc",
+    "snapshot_ttl_sec": 30.0,
+    "filesystem": {
+      "path": "/Users/dancer/me/.masc",
+      "filesystem": "/dev/disk3s5",
+      "mounted_on": "/System/Volumes/Data",
+      "total_bytes": 3996329328640,
+      "used_bytes": 3275149119488,
+      "available_bytes": 672338853888,
+      "capacity_percent": 83.0,
+      "available_percent": 16.823910108449574
+    },
+    "mode": "observation_only",
+    "storage_space_exhaustion_observations_total": 0,
+    "last_storage_space_exhaustion_ts": null
+  },
+  "keeper_fleet_safety": {
+    "schema": "masc.keeper_fleet_operator.v1",
+    "status": "ok",
+    "blocker": null,
+    "keeper_bootstrap_enabled": true,
+    "keeper_bootstrap_blocker": null,
+    "bootable_keeper_count": 16,
+    "bootable_keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "jazz-developer",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox"
+    ],
+    "autoboot_enabled_keeper_count": 16,
+    "autoboot_enabled_keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "jazz-developer",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox"
+    ],
+    "autoboot_enabled_read_errors": [],
+    "running_keeper_fiber_count": 10,
+    "running_keeper_names": [
+      "code-reviewer",
+      "critic",
+      "edgar.a.poe",
+      "kidsnote-pr-jira-checker",
+      "msb-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox"
+    ],
+    "failing_keeper_fiber_count": 6,
+    "recovering_keeper_fiber_count": 6,
+    "recovering_keeper_names": [
+      "analyst",
+      "docker-probe",
+      "geek-scout",
+      "jazz-developer",
+      "lane-smith",
+      "openai-probe"
+    ],
+    "configuration_blocked_keeper_count": 0,
+    "configuration_blocked_keeper_names": [],
+    "all_target_keepers_configuration_blocked": false,
+    "executable_keeper_fiber_count": 16,
+    "executable_keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "jazz-developer",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox"
+    ],
+    "target_reaction_capacity_count": 16,
+    "no_executable_keeper_fibers": false,
+    "active_task_owner_without_executable_fiber": false,
+    "active_task_owner_without_executable_fiber_count": 0,
+    "active_task_owner_without_executable_fiber_names": [],
+    "active_task_owner_without_executable_fiber_tasks": [],
+    "completion_authority_pending": true,
+    "completion_authority_pending_task_count": 19,
+    "completion_authority_pending_tasks": [
+      {
+        "producer_agent_name": "code-reviewer",
+        "task_id": "task-1372",
+        "submitted_at": "2026-09-06T04:46:01Z",
+        "verification_id": "vrf-bdca4722c8617084033c4f83ea51cb70",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "edgar.a.poe",
+        "task_id": "task-1282",
+        "submitted_at": "2026-09-04T02:13:29Z",
+        "verification_id": "vrf-2ddc81ed2e088ec79f92894d7b2d9284",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "edgar.a.poe",
+        "task_id": "task-1303",
+        "submitted_at": "2026-09-04T21:25:08Z",
+        "verification_id": "vrf-2a57aeaafed4c2d9930b54593ef515b2",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "edgar.a.poe",
+        "task_id": "task-1306",
+        "submitted_at": "2026-09-05T11:23:20Z",
+        "verification_id": "vrf-754256c6c38f9236c4dd9bfd994873d5",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "edgar.a.poe",
+        "task_id": "task-1322",
+        "submitted_at": "2026-09-05T11:26:19Z",
+        "verification_id": "vrf-f17d67e9dc909c82a9b0463fedf76ad6",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "edgar.a.poe",
+        "task_id": "task-1344",
+        "submitted_at": "2026-09-05T17:16:52Z",
+        "verification_id": "vrf-2bba594d5e2f856b63889c2ed0d946b4",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "edgar.a.poe",
+        "task_id": "task-1357",
+        "submitted_at": "2026-09-05T19:04:22Z",
+        "verification_id": "vrf-e8487801581ec158701104c37fac7aba",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "jazz-developer",
+        "task_id": "task-1331",
+        "submitted_at": "2026-09-05T12:03:25Z",
+        "verification_id": "vrf-e29a6e9a9a0eedeac5a4f433200f267e",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "jazz-developer",
+        "task_id": "task-1356",
+        "submitted_at": "2026-09-05T17:04:49Z",
+        "verification_id": "vrf-139809b38b30b8d36ec058860e5da990",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "jazz-developer",
+        "task_id": "task-1360",
+        "submitted_at": "2026-09-05T18:16:56Z",
+        "verification_id": "vrf-0075fe2f9c7dead1722de35949fc386a",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "lane-smith",
+        "task_id": "task-1428",
+        "submitted_at": "2026-09-07T05:32:22Z",
+        "verification_id": "vrf-f5b9d8aa29a7d905df90f79c0e13381c",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "rondo",
+        "task_id": "task-564",
+        "submitted_at": "2026-09-07T03:54:50Z",
+        "verification_id": "vrf-22ba7410e11bdf27d7dd696b05b8362e",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "rondo",
+        "task_id": "task-569",
+        "submitted_at": "2026-09-07T03:55:25Z",
+        "verification_id": "vrf-ec7d0afc01b2cf6ea8d8e043ce019730",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "rondo",
+        "task_id": "task-572",
+        "submitted_at": "2026-09-07T05:00:04Z",
+        "verification_id": "vrf-cfd71cd076101d911b0bf9ac41f112b5",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "rondo",
+        "task_id": "task-573",
+        "submitted_at": "2026-09-07T05:41:56Z",
+        "verification_id": "vrf-050357c09704d4ed08b5e0322221c8a3",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "sangsu",
+        "task_id": "task-1316",
+        "submitted_at": "2026-09-04T16:39:43Z",
+        "verification_id": "vrf-a789b35593a5e3ebb51fde8e29134548",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "sangsu",
+        "task_id": "task-1431",
+        "submitted_at": "2026-09-07T05:43:07Z",
+        "verification_id": "vrf-a84f40153c86c9cf3a7962e6a9c2bec2",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "sangsu",
+        "task_id": "task-576",
+        "submitted_at": "2026-09-05T22:37:21Z",
+        "verification_id": "vrf-5fe7fd3a5e9e9821d57180f095adf296",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      },
+      {
+        "producer_agent_name": "sangsu",
+        "task_id": "task-579",
+        "submitted_at": "2026-09-05T22:32:09Z",
+        "verification_id": "vrf-76bffa15c8dc79f9e7989ca118088571",
+        "owner_kind": "system_llm_completion_authority",
+        "fleet_blocking": false
+      }
+    ],
+    "completion_authority_pending_semantics": "AwaitingVerification obligations awaiting a verdict from the system LLM completion-authority lane; producer ownership is retained for task identity but this row is never a Keeper fleet blocker",
+    "non_keeper_active_task_owner_count": 1,
+    "non_keeper_active_task_owners": [
+      {
+        "agent_name": "codex-mcp-client",
+        "task_id": "task-1430",
+        "task_status": "in_progress",
+        "owner_kind": "non_keeper_client",
+        "fleet_blocking": false
+      }
+    ],
+    "non_keeper_active_task_owner_semantics": "active tasks owned by credentialed non-keeper clients; visible for operators but not keeper fleet blockers",
+    "active_task_owner_fiber_scan_semantics": "reports keeper-shaped active task owners without executable keeper fibers; disabled keepers are excluded; matching keeper rows can degrade fleet status; AwaitingVerification obligations are reported separately as system-LLM completion-authority pending rows and never as Keeper blockers; credentialed non-keeper client task owners are reported separately as advisory rows",
+    "active_task_owner_scan_error_count": 0,
+    "active_task_owner_scan_errors": [],
+    "reaction_capacity_below_target": false,
+    "reaction_capacity_shortfall_count": 0,
+    "paused_keeper_count": 1,
+    "paused_autoboot_enabled_keeper_count": 0,
+    "operator_action_required": false
+  },
+  "keeper_identity_drift": {
+    "schema": "masc.keeper_identity_drift.v1",
+    "status": "ok",
+    "blocking": false,
+    "terminal_reason": "none",
+    "operator_action_required": false,
+    "configured_keeper_count": 19,
+    "configured_keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "gondolin-probe",
+      "jazz-developer",
+      "k3think-probe",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "vision-probe"
+    ],
+    "materializable_configured_keeper_count": 16,
+    "materializable_configured_keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "jazz-developer",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox"
+    ],
+    "persisted_meta_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "gondolin-probe",
+      "jazz-developer",
+      "k3think-probe",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "vision-probe"
+    ],
+    "configured_without_meta_count": 0,
+    "configured_without_meta_names": [],
+    "meta_without_config_count": 0,
+    "meta_without_config_names": [],
+    "next_action": "none"
+  },
+  "publication_recovery_activation": {
+    "schema": "masc.publication_recovery_activation.v4",
+    "status": "ok",
+    "global_blocking": false,
+    "operator_action_required": false,
+    "discovery_phase": "complete",
+    "discovery_row_count": 44,
+    "demanded_owner_count": 0,
+    "in_progress_count": 0,
+    "attention_count": 0,
+    "status_reasons": [],
+    "row_counts": {
+      "discovered_owner": 44,
+      "invalid_owner_name": 0,
+      "owner_identity_rejected": 0,
+      "owner_reconciliation_pending": 0,
+      "owner_reconciliation_running": 0,
+      "owner_ready": 0,
+      "owner_ready_without_obligation": 0,
+      "owner_blocked": 0,
+      "owner_lane_store_failure": 0
+    }
+  },
+  "keeper_reaction_ledger": {
+    "schema": "keeper.reaction_ledger.fleet_summary.v2",
+    "status": "degraded",
+    "status_reasons": [
+      "durable_event_queue_stale"
+    ],
+    "operator_action_required": true,
+    "keeper_count": 20,
+    "keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "gondolin-probe",
+      "jazz-developer",
+      "k3think-probe",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "taskmaster",
+      "vision-probe"
+    ],
+    "scanned_row_count": 319,
+    "row_count": 312,
+    "stimulus_count": 15,
+    "reaction_count": 297,
+    "turn_started_count": 33,
+    "turn_finished_count": 29,
+    "event_queue_ack_count": 229,
+    "event_queue_cancelled_count": 6,
+    "quarantined_row_count": 0,
+    "quarantine_reason_counts": [],
+    "quarantined_rows_by_keeper": [],
+    "cursor_swept_stimulus_count": 0,
+    "pending_stimulus_count": 0,
+    "durable_event_queue_count": 17,
+    "durable_event_queue_pending_count": 17,
+    "durable_event_queue_discovered_keeper_count": 18,
+    "durable_event_queue_discovered_keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "jazz-developer",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "taskmaster",
+      "vision-probe"
+    ],
+    "durable_event_queue_discovery_error": null,
+    "durable_event_queue_discovery_error_count": 0,
+    "durable_event_queue_stale_after_sec": 600.0,
+    "durable_event_queue_stale_count": 12,
+    "durable_event_queue_stale_keeper_count": 6,
+    "durable_event_queue_read_error_count": 0,
+    "durable_event_queue_read_errors_by_keeper": [],
+    "durable_event_queue_by_keeper": [
+      {
+        "keeper_name": "code-reviewer",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788750522.760726,
+        "oldest_age_sec": 9372,
+        "newest_arrived_at_unix": 1788759726.66585,
+        "newest_age_sec": 168,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 1
+          },
+          {
+            "payload_kind": "hitl_resolved",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "critic",
+        "durable_event_queue_count": 1,
+        "durable_event_queue_pending_count": 1,
+        "immediate_count": 0,
+        "oldest_arrived_at_unix": 1788759532.631271,
+        "oldest_age_sec": 362,
+        "newest_arrived_at_unix": 1788759532.631271,
+        "newest_age_sec": 362,
+        "stale_after_sec": 600.0,
+        "stale": false,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "docker-probe",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788758326.085394,
+        "oldest_age_sec": 1568,
+        "newest_arrived_at_unix": 1788758679.886883,
+        "newest_age_sec": 1214,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          },
+          {
+            "payload_kind": "bootstrap",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "edgar.a.poe",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 0,
+        "oldest_arrived_at_unix": 1788759532.015641,
+        "oldest_age_sec": 362,
+        "newest_arrived_at_unix": 1788759532.095102,
+        "newest_age_sec": 362,
+        "stale_after_sec": 600.0,
+        "stale": false,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 1
+          },
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "geek-scout",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788758325.146726,
+        "oldest_age_sec": 1569,
+        "newest_arrived_at_unix": 1788758683.459229,
+        "newest_age_sec": 1211,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          },
+          {
+            "payload_kind": "bootstrap",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "jazz-developer",
+        "durable_event_queue_count": 4,
+        "durable_event_queue_pending_count": 4,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788750608.298707,
+        "oldest_age_sec": 9286,
+        "newest_arrived_at_unix": 1788758449.201072,
+        "newest_age_sec": 1445,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 3
+          },
+          {
+            "payload_kind": "hitl_resolved",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "openai-probe",
+        "durable_event_queue_count": 1,
+        "durable_event_queue_pending_count": 1,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788758323.351995,
+        "oldest_age_sec": 1571,
+        "newest_arrived_at_unix": 1788758323.351995,
+        "newest_age_sec": 1571,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "polisher",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 2,
+        "oldest_arrived_at_unix": 1788759630.34448,
+        "oldest_age_sec": 264,
+        "newest_arrived_at_unix": 1788759655.957565,
+        "newest_age_sec": 238,
+        "stale_after_sec": 600.0,
+        "stale": false,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "hitl_resolved",
+            "count": 2
+          }
+        ]
+      },
+      {
+        "keeper_name": "sangsu",
+        "durable_event_queue_count": 1,
+        "durable_event_queue_pending_count": 1,
+        "immediate_count": 0,
+        "oldest_arrived_at_unix": 1788752609.017588,
+        "oldest_age_sec": 7285,
+        "newest_arrived_at_unix": 1788752609.017588,
+        "newest_age_sec": 7285,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 1
+          }
+        ]
+      }
+    ],
+    "durable_event_queue_stale_by_keeper": [
+      {
+        "keeper_name": "code-reviewer",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788750522.760726,
+        "oldest_age_sec": 9372,
+        "newest_arrived_at_unix": 1788759726.66585,
+        "newest_age_sec": 168,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 1
+          },
+          {
+            "payload_kind": "hitl_resolved",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "docker-probe",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788758326.085394,
+        "oldest_age_sec": 1568,
+        "newest_arrived_at_unix": 1788758679.886883,
+        "newest_age_sec": 1214,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          },
+          {
+            "payload_kind": "bootstrap",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "geek-scout",
+        "durable_event_queue_count": 2,
+        "durable_event_queue_pending_count": 2,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788758325.146726,
+        "oldest_age_sec": 1569,
+        "newest_arrived_at_unix": 1788758683.459229,
+        "newest_age_sec": 1211,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          },
+          {
+            "payload_kind": "bootstrap",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "jazz-developer",
+        "durable_event_queue_count": 4,
+        "durable_event_queue_pending_count": 4,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788750608.298707,
+        "oldest_age_sec": 9286,
+        "newest_arrived_at_unix": 1788758449.201072,
+        "newest_age_sec": 1445,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 3
+          },
+          {
+            "payload_kind": "hitl_resolved",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "openai-probe",
+        "durable_event_queue_count": 1,
+        "durable_event_queue_pending_count": 1,
+        "immediate_count": 1,
+        "oldest_arrived_at_unix": 1788758323.351995,
+        "oldest_age_sec": 1571,
+        "newest_arrived_at_unix": 1788758323.351995,
+        "newest_age_sec": 1571,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_signal",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "keeper_name": "sangsu",
+        "durable_event_queue_count": 1,
+        "durable_event_queue_pending_count": 1,
+        "immediate_count": 0,
+        "oldest_arrived_at_unix": 1788752609.017588,
+        "oldest_age_sec": 7285,
+        "newest_arrived_at_unix": 1788752609.017588,
+        "newest_age_sec": 7285,
+        "stale_after_sec": 600.0,
+        "stale": true,
+        "read_error_count": 0,
+        "read_errors": [],
+        "payload_kind_counts": [
+          {
+            "payload_kind": "board_attention",
+            "count": 1
+          }
+        ]
+      }
+    ],
+    "durable_event_queue_payload_counts": [
+      {
+        "payload_kind": "board_attention",
+        "count": 7
+      },
+      {
+        "payload_kind": "board_signal",
+        "count": 4
+      },
+      {
+        "payload_kind": "hitl_resolved",
+        "count": 4
+      },
+      {
+        "payload_kind": "bootstrap",
+        "count": 2
+      }
+    ],
+    "pending_by_keeper": [],
+    "read_error_count": 0,
+    "keepers": [
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "analyst",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 2,
+        "reaction_count": 18,
+        "turn_started_count": 3,
+        "turn_finished_count": 3,
+        "event_queue_ack_count": 12,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759770.499808,
+        "latest_stimulus_id": "board:p-007b66e548f8bfd3ae6284142ec20bff",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "code-reviewer",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 0,
+        "reaction_count": 20,
+        "turn_started_count": 4,
+        "turn_finished_count": 3,
+        "event_queue_ack_count": 13,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759827.203765,
+        "latest_stimulus_id": "stimulus:5227fccd4dcea75740097a4a0968b0a5723a3f726d3a3dfcefbc5a9c8ff5660f",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "critic",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 0,
+        "reaction_count": 20,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 20,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759749.241578,
+        "latest_stimulus_id": "board:p-007b66e548f8bfd3ae6284142ec20bff",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "docker-probe",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 0,
+        "reaction_count": 20,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 20,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788754478.973481,
+        "latest_stimulus_id": "board-attention:2e49f12c6edc5ca2f4c785e9fdab327af4065eacf62504b3fb981a94fc8196a6",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "edgar.a.poe",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 1,
+        "reaction_count": 19,
+        "turn_started_count": 1,
+        "turn_finished_count": 1,
+        "event_queue_ack_count": 17,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759784.310518,
+        "latest_stimulus_id": "board-attention:700aa3038ea70d30cee3ee728bdef0d99bc762789800f849981c8e83be99cabc",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "geek-scout",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 0,
+        "reaction_count": 20,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 20,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788753684.174457,
+        "latest_stimulus_id": "board:p-294a96e46865dce71af69f69d890ecf0",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "gondolin-probe",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 5,
+        "row_count": 5,
+        "stimulus_count": 0,
+        "reaction_count": 5,
+        "turn_started_count": 2,
+        "turn_finished_count": 1,
+        "event_queue_ack_count": 2,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788501117.906632,
+        "latest_stimulus_id": "stimulus:73c9277f554c3c78faac175e1b6ece4f36e8ba28d7bd54e6069586ee15d1b060",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "jazz-developer",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 17,
+        "stimulus_count": 0,
+        "reaction_count": 17,
+        "turn_started_count": 4,
+        "turn_finished_count": 3,
+        "event_queue_ack_count": 10,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788758918.116136,
+        "latest_stimulus_id": "stimulus:7a1b04608527066308b8ee8aa5f5e56526ed89b66cf0332d853c8f73815ba0f0",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "k3think-probe",
+        "status": "empty",
+        "operator_action_required": false,
+        "scanned_row_count": 0,
+        "row_count": 0,
+        "stimulus_count": 0,
+        "reaction_count": 0,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 0,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": null,
+        "latest_stimulus_id": null,
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "kidsnote-pr-jira-checker",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 2,
+        "reaction_count": 18,
+        "turn_started_count": 2,
+        "turn_finished_count": 2,
+        "event_queue_ack_count": 14,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759515.154345,
+        "latest_stimulus_id": "4220fd7a8d73e0484fc8679296239e1c786e46567fafb748c82702742d292eae",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "lane-smith",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 0,
+        "reaction_count": 20,
+        "turn_started_count": 1,
+        "turn_finished_count": 1,
+        "event_queue_ack_count": 18,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759603.279857,
+        "latest_stimulus_id": "board:p-007b66e548f8bfd3ae6284142ec20bff",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "msb-probe",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 2,
+        "reaction_count": 18,
+        "turn_started_count": 2,
+        "turn_finished_count": 2,
+        "event_queue_ack_count": 14,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788758748.213579,
+        "latest_stimulus_id": "stimulus:50126139b4ba4fae24e8eb890b9b4bcde4ac8736a5047405b97c369e128596f2",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "openai-probe",
+        "status": "empty",
+        "operator_action_required": false,
+        "scanned_row_count": 0,
+        "row_count": 0,
+        "stimulus_count": 0,
+        "reaction_count": 0,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 0,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": null,
+        "latest_stimulus_id": null,
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "polisher",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 18,
+        "stimulus_count": 0,
+        "reaction_count": 18,
+        "turn_started_count": 5,
+        "turn_finished_count": 4,
+        "event_queue_ack_count": 9,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759844.029468,
+        "latest_stimulus_id": "stimulus:3ba5ffe5a2a09aa938e69dac0fc6c5f9dd54a37e81d4bf5d36e141a79597e693",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "pr-updater",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 18,
+        "stimulus_count": 0,
+        "reaction_count": 18,
+        "turn_started_count": 4,
+        "turn_finished_count": 4,
+        "event_queue_ack_count": 10,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759860.77446,
+        "latest_stimulus_id": "stimulus:4dbb073b3a9ddb621b4dc183a83e240396d9e1eea260abe5ce98d31058a268b3",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "rondo",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 1,
+        "reaction_count": 19,
+        "turn_started_count": 3,
+        "turn_finished_count": 3,
+        "event_queue_ack_count": 13,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759890.252731,
+        "latest_stimulus_id": "completion-authority-rejected:task-571:vrf-66c0e86fab6e37c757e7d22b001ff200",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "sangsu",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 1,
+        "reaction_count": 19,
+        "turn_started_count": 2,
+        "turn_finished_count": 2,
+        "event_queue_ack_count": 15,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788759812.676562,
+        "latest_stimulus_id": "board-attention:3ece4f28746e734cec09aae7e8b2236e755f42eb9460a3ef259ade1bf7c2184c",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "slack-inbox",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 20,
+        "row_count": 20,
+        "stimulus_count": 0,
+        "reaction_count": 20,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 20,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788758496.231526,
+        "latest_stimulus_id": "board:p-c57bbcc164d01ac13d983bf6f31bd735",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "taskmaster",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 12,
+        "row_count": 12,
+        "stimulus_count": 6,
+        "reaction_count": 6,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 0,
+        "event_queue_cancelled_count": 6,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788739267.712523,
+        "latest_stimulus_id": "bf7ff9e415eac15e9669376ec4a0e89c150e025c9933fbf0d7c46d8608c5d5ef",
+        "read_error": null
+      },
+      {
+        "schema": "keeper.reaction_ledger.summary.v2",
+        "keeper_name": "vision-probe",
+        "status": "ok",
+        "operator_action_required": false,
+        "scanned_row_count": 2,
+        "row_count": 2,
+        "stimulus_count": 0,
+        "reaction_count": 2,
+        "turn_started_count": 0,
+        "turn_finished_count": 0,
+        "event_queue_ack_count": 2,
+        "event_queue_cancelled_count": 0,
+        "quarantined_row_count": 0,
+        "quarantine_reason_counts": [],
+        "cursor_swept_stimulus_count": 0,
+        "pending_stimulus_count": 0,
+        "pending_stimulus_ids": [],
+        "latest_recorded_at_unix": 1788751282.954881,
+        "latest_stimulus_id": "board:p-35364177233e1b66c2a154fc7ea925b1",
+        "read_error": null
+      }
+    ]
+  },
+  "keeper_owner": {
+    "schema": "masc.keeper_owner.v1",
+    "status": "ok",
+    "operator_action_required": false,
+    "status_reasons": [],
+    "keeper_count": 19,
+    "keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "gondolin-probe",
+      "jazz-developer",
+      "k3think-probe",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "vision-probe"
+    ],
+    "in_flight_keeper_count": 12,
+    "shutdown_keeper_count": 0,
+    "queued_operation_count": 0,
+    "running_operation_count": 0,
+    "terminal_operation_count": 1073,
+    "interrupted_operation_count": 7,
+    "keepers": [
+      {
+        "keeper_name": "analyst",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 143,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "code-reviewer",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759827.046729
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 86,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "critic",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759878.177669
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 3,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "docker-probe",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 0,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "edgar.a.poe",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759784.336516
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 185,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "geek-scout",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759555.804663
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 18,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "gondolin-probe",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 1,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "jazz-developer",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759299.065632
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 26,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "k3think-probe",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 1,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "kidsnote-pr-jira-checker",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759864.642065
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 77,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "lane-smith",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759868.668466
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 89,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "msb-probe",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759875.893565
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 2,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "openai-probe",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 2,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "polisher",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759843.953115
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 85,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "pr-updater",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759866.812185
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 54,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "rondo",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 142,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "sangsu",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759874.557652
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 145,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "slack-inbox",
+        "status": "ok",
+        "turn": {
+          "lane": "autonomous",
+          "started_at_unix": 1788759873.781755
+        },
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 8,
+        "interrupted_operation_count": 1,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "vision-probe",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 6,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      }
+    ]
+  },
+  "keeper_board_event_collection": {
+    "schema": "masc.keeper_board_event_collection.v1",
+    "status": "ok",
+    "operator_action_required": false,
+    "status_reasons": [],
+    "keeper_count": 19,
+    "keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "gondolin-probe",
+      "jazz-developer",
+      "k3think-probe",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "vision-probe"
+    ],
+    "failure_count": 0,
+    "failures": []
+  },
+  "keeper_event_queue": {
+    "schema": "masc.keeper_event_queue.fleet_summary.v4",
+    "status": "degraded",
+    "operator_action_required": true,
+    "status_reasons": [
+      "runnable_backlog=17",
+      "runnable_backlog_stale"
+    ],
+    "backlog_clean": false,
+    "storage_integrity": {
+      "schema": "masc.keeper_event_queue.storage_integrity.v1",
+      "status": "ok",
+      "counts_complete": true,
+      "read_error_count": 0,
+      "transition_outbox_count": 0,
+      "operator_action_required": false
+    },
+    "work_liveness": {
+      "schema": "masc.keeper_event_queue.work_liveness.v1",
+      "status": "degraded",
+      "state": "stalled",
+      "runnable_backlog_count": 17,
+      "runnable_oldest_age_seconds": 9372.040069103241,
+      "stale_after_seconds": 600.0,
+      "operator_action_required": true
+    },
+    "base_path": "/Users/dancer/me",
+    "keepers_runtime_dir": "/Users/dancer/me/.masc/keepers",
+    "keeper_count": 18,
+    "keeper_names": [
+      "analyst",
+      "code-reviewer",
+      "critic",
+      "docker-probe",
+      "edgar.a.poe",
+      "geek-scout",
+      "jazz-developer",
+      "kidsnote-pr-jira-checker",
+      "lane-smith",
+      "msb-probe",
+      "openai-probe",
+      "polisher",
+      "pr-updater",
+      "rondo",
+      "sangsu",
+      "slack-inbox",
+      "taskmaster",
+      "vision-probe"
+    ],
+    "pending_count": 17,
+    "total_count": 17,
+    "transition_outbox_count": 0,
+    "counts_complete": true,
+    "oldest_arrived_at_unix": 1788750522.760726,
+    "oldest_age_seconds": 9372.040069103241,
+    "runnable_backlog_count": 17,
+    "runnable_oldest_arrived_at_unix": 1788750522.760726,
+    "runnable_oldest_age_seconds": 9372.040069103241,
+    "runnable_by_keeper": [
+      {
+        "keeper_name": "code-reviewer",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_age_seconds": 9372.040069103241
+      },
+      {
+        "keeper_name": "critic",
+        "pending_count": 1,
+        "total_count": 1,
+        "oldest_age_seconds": 362.16952419281006
+      },
+      {
+        "keeper_name": "docker-probe",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_age_seconds": 1568.715401172638
+      },
+      {
+        "keeper_name": "edgar.a.poe",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_age_seconds": 362.7851541042328
+      },
+      {
+        "keeper_name": "geek-scout",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_age_seconds": 1569.654069185257
+      },
+      {
+        "keeper_name": "jazz-developer",
+        "pending_count": 4,
+        "total_count": 4,
+        "oldest_age_seconds": 9286.502088069916
+      },
+      {
+        "keeper_name": "openai-probe",
+        "pending_count": 1,
+        "total_count": 1,
+        "oldest_age_seconds": 1571.448800086975
+      },
+      {
+        "keeper_name": "polisher",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_age_seconds": 264.4563150405884
+      },
+      {
+        "keeper_name": "sangsu",
+        "pending_count": 1,
+        "total_count": 1,
+        "oldest_age_seconds": 7285.783207178116
+      }
+    ],
+    "recoverable_backlog_count": 0,
+    "recoverable_oldest_arrived_at_unix": null,
+    "recoverable_oldest_age_seconds": null,
+    "recoverable_by_keeper": [],
+    "retained_disabled_backlog_count": 0,
+    "retained_disabled_oldest_arrived_at_unix": null,
+    "retained_disabled_oldest_age_seconds": null,
+    "retained_disabled_by_keeper": [],
+    "paused_dead_backlog_count": 0,
+    "paused_dead_oldest_arrived_at_unix": null,
+    "paused_dead_oldest_age_seconds": null,
+    "paused_dead_by_keeper": [],
+    "shutdown_fenced_backlog_count": 0,
+    "shutdown_fenced_oldest_arrived_at_unix": null,
+    "shutdown_fenced_oldest_age_seconds": null,
+    "shutdown_fenced_by_keeper": [],
+    "unclassified_count": 0,
+    "unclassified_oldest_arrived_at_unix": null,
+    "unclassified_oldest_age_seconds": null,
+    "unclassified_by_keeper": [],
+    "pending_by_keeper": [
+      {
+        "keeper_name": "code-reviewer",
+        "pending_count": 2,
+        "oldest_age_seconds": 9372.040069103241
+      },
+      {
+        "keeper_name": "critic",
+        "pending_count": 1,
+        "oldest_age_seconds": 362.16952419281006
+      },
+      {
+        "keeper_name": "docker-probe",
+        "pending_count": 2,
+        "oldest_age_seconds": 1568.715401172638
+      },
+      {
+        "keeper_name": "edgar.a.poe",
+        "pending_count": 2,
+        "oldest_age_seconds": 362.7851541042328
+      },
+      {
+        "keeper_name": "geek-scout",
+        "pending_count": 2,
+        "oldest_age_seconds": 1569.654069185257
+      },
+      {
+        "keeper_name": "jazz-developer",
+        "pending_count": 4,
+        "oldest_age_seconds": 9286.502088069916
+      },
+      {
+        "keeper_name": "openai-probe",
+        "pending_count": 1,
+        "oldest_age_seconds": 1571.448800086975
+      },
+      {
+        "keeper_name": "polisher",
+        "pending_count": 2,
+        "oldest_age_seconds": 264.4563150405884
+      },
+      {
+        "keeper_name": "sangsu",
+        "pending_count": 1,
+        "oldest_age_seconds": 7285.783207178116
+      }
+    ],
+    "read_error_count": 0,
+    "read_errors": [],
+    "keepers": [
+      {
+        "keeper_name": "analyst",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "code-reviewer",
+        "owner_lifecycle": "runnable",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_arrived_at_unix": 1788750522.760726,
+        "oldest_age_seconds": 9372.040069103241,
+        "pending_oldest_arrived_at_unix": 1788750522.760726,
+        "pending_oldest_age_seconds": 9372.040069103241,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "critic",
+        "owner_lifecycle": "runnable",
+        "pending_count": 1,
+        "total_count": 1,
+        "oldest_arrived_at_unix": 1788759532.631271,
+        "oldest_age_seconds": 362.16952419281006,
+        "pending_oldest_arrived_at_unix": 1788759532.631271,
+        "pending_oldest_age_seconds": 362.16952419281006,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "docker-probe",
+        "owner_lifecycle": "runnable",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_arrived_at_unix": 1788758326.085394,
+        "oldest_age_seconds": 1568.715401172638,
+        "pending_oldest_arrived_at_unix": 1788758326.085394,
+        "pending_oldest_age_seconds": 1568.715401172638,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "edgar.a.poe",
+        "owner_lifecycle": "runnable",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_arrived_at_unix": 1788759532.015641,
+        "oldest_age_seconds": 362.7851541042328,
+        "pending_oldest_arrived_at_unix": 1788759532.015641,
+        "pending_oldest_age_seconds": 362.7851541042328,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "geek-scout",
+        "owner_lifecycle": "runnable",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_arrived_at_unix": 1788758325.146726,
+        "oldest_age_seconds": 1569.654069185257,
+        "pending_oldest_arrived_at_unix": 1788758325.146726,
+        "pending_oldest_age_seconds": 1569.654069185257,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "jazz-developer",
+        "owner_lifecycle": "runnable",
+        "pending_count": 4,
+        "total_count": 4,
+        "oldest_arrived_at_unix": 1788750608.298707,
+        "oldest_age_seconds": 9286.502088069916,
+        "pending_oldest_arrived_at_unix": 1788750608.298707,
+        "pending_oldest_age_seconds": 9286.502088069916,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "kidsnote-pr-jira-checker",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "lane-smith",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "msb-probe",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "openai-probe",
+        "owner_lifecycle": "runnable",
+        "pending_count": 1,
+        "total_count": 1,
+        "oldest_arrived_at_unix": 1788758323.351995,
+        "oldest_age_seconds": 1571.448800086975,
+        "pending_oldest_arrived_at_unix": 1788758323.351995,
+        "pending_oldest_age_seconds": 1571.448800086975,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "polisher",
+        "owner_lifecycle": "runnable",
+        "pending_count": 2,
+        "total_count": 2,
+        "oldest_arrived_at_unix": 1788759630.34448,
+        "oldest_age_seconds": 264.4563150405884,
+        "pending_oldest_arrived_at_unix": 1788759630.34448,
+        "pending_oldest_age_seconds": 264.4563150405884,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "pr-updater",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "rondo",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "sangsu",
+        "owner_lifecycle": "runnable",
+        "pending_count": 1,
+        "total_count": 1,
+        "oldest_arrived_at_unix": 1788752609.017588,
+        "oldest_age_seconds": 7285.783207178116,
+        "pending_oldest_arrived_at_unix": 1788752609.017588,
+        "pending_oldest_age_seconds": 7285.783207178116,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "slack-inbox",
+        "owner_lifecycle": "runnable",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "taskmaster",
+        "owner_lifecycle": "unclassified",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      },
+      {
+        "keeper_name": "vision-probe",
+        "owner_lifecycle": "retained_disabled",
+        "pending_count": 0,
+        "total_count": 0,
+        "oldest_arrived_at_unix": null,
+        "oldest_age_seconds": null,
+        "pending_oldest_arrived_at_unix": null,
+        "pending_oldest_age_seconds": null,
+        "transition_outbox_count": 0,
+        "counts_complete": true,
+        "read_errors": []
+      }
+    ]
+  },
+  "keeper_terminal_effect_policy": [
+    {
+      "effect": "checkpoint_store",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "execution_receipt",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "owner_meta",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "lifecycle_projection",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "metrics_snapshot",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "activity_graph",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "decision_record",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "usage_metrics",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "terminal_fsm_projection",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    }
+  ],
+  "keeper_observability_artifacts": {
+    "schema": "masc.keeper_observability_artifacts.v1",
+    "status": "ok",
+    "command_authority": false,
+    "validation_errors": [],
+    "artifacts": [
+      {
+        "artifact": "execution_receipt",
+        "producer": "Keeper_agent_run_receipt",
+        "authority_source": "exact provider/tool terminal result",
+        "truth_role": "execution_evidence",
+        "command_authority": false,
+        "consumers": [
+          "Telemetry_unified",
+          "Dashboard_http_keeper_execution_receipt",
+          "Workspace_task_receipts"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "turn_record",
+        "producer": "Keeper_turn_record_writer",
+        "authority_source": "execution receipt cadence + admitted turn identity",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_dashboard_http_keeper_api",
+          "Keeper_context_observation_projection",
+          "Keeper_raw_trace_retention"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "runtime_manifest",
+        "producer": "Keeper_runtime_manifest",
+        "authority_source": "turn/provider/checkpoint event writers",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_dashboard_http_keeper_runtime_manifest_scan",
+          "Server_dashboard_http_keeper_runtime_lens_swimlane"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS flat-file mtime pruning"
+      },
+      {
+        "artifact": "activity_event",
+        "producer": "Activity_graph.emit",
+        "authority_source": "typed terminal/tool/board observations",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_activity_http",
+          "Dashboard_snapshot"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "metrics_snapshot",
+        "producer": "Keeper_unified_metrics_snapshot",
+        "authority_source": "normalized execution outcome + lifecycle projection",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Dashboard_http_keeper_metrics",
+          "Keeper_status_metrics",
+          "Telemetry_unified"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "raw_trace",
+        "producer": "Agent_core.Raw_trace",
+        "authority_source": "exact provider request/event stream",
+        "truth_role": "execution_evidence",
+        "command_authority": false,
+        "consumers": [
+          "Turn_record.raw_trace_run_ref",
+          "Keeper_raw_trace_reader"
+        ],
+        "retention_owner": "Keeper_raw_trace_retention",
+        "retention_policy": "TurnRecord reachability window, plus MASC_JSONL_RETENTION_DAYS mtime fallback"
+      }
+    ]
+  },
+  "paused_keepers": {
+    "count": 1,
+    "names": [
+      "k3think-probe"
+    ],
+    "registry_paused_count": 0,
+    "registry_paused_names": [],
+    "registry_paused_semantics": "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running",
+    "durable_count": 1,
+    "durable_names": [
+      "k3think-probe"
+    ],
+    "autoboot_enabled_count": 0,
+    "autoboot_enabled_names": [],
+    "details": [
+      {
+        "name": "k3think-probe",
+        "autoboot_enabled": false,
+        "pause_kind": "operator_paused",
+        "paused_elapsed_sec": 250984.75880789757,
+        "missing_pause_root_cause": false
+      }
+    ],
+    "read_error_count": 0,
+    "read_errors": []
+  },
+  "keeper_config_error_count": 0,
+  "keeper_config_errors": [],
+  "keeper_config_probe_error": null,
+  "keeper_config_unknown_key_count": 0,
+  "keeper_config_unknown_keys": [],
+  "keeper_config_schema_status": "ok",
+  "keeper_config_schema_blocking": false,
+  "keeper_config_schema_terminal_reason": "none",
+  "keeper_config_operator_action_required": false,
+  "lazy_task_boot_guard_fires_total": 0,
+  "full_health_snapshot": {
+    "status": "ready",
+    "snapshot_age_ms": 3754,
+    "stale_reason": null,
+    "stale_age_ms": null,
+    "computed_at_unix": 1788759894.813331,
+    "duration_ms": 58,
+    "ttl_ms": 60000,
+    "refresh_in_flight": false,
+    "refresh_requested": false,
+    "refresh_worker_active": false,
+    "refresh_worker_submissions_total": 142,
+    "refresh_worker_joins_total": 1,
+    "invalidation_generation": 367,
+    "refresh_wakeup_coalesce_ms": 100,
+    "refresh_started_at_unix": null,
+    "refresh_timeout_ms": 20000,
+    "component_timed_out": false,
+    "error": null,
+    "last_good_available": true,
+    "section_timings": [
+      {
+        "name": "keeper_identity_drift",
+        "ms": 5
+      },
+      {
+        "name": "publication_recovery_activation",
+        "ms": 0
+      },
+      {
+        "name": "paused_keepers",
+        "ms": 0
+      },
+      {
+        "name": "keeper_reaction_ledger",
+        "ms": 15
+      },
+      {
+        "name": "keeper_owner",
+        "ms": 0
+      },
+      {
+        "name": "keeper_board_event_collection",
+        "ms": 0
+      },
+      {
+        "name": "keeper_event_queue",
+        "ms": 1
+      },
+      {
+        "name": "fd_accountant",
+        "ms": 0
+      },
+      {
+        "name": "disk_observation",
+        "ms": 0
+      },
+      {
+        "name": "keeper_fleet_safety",
+        "ms": 10
+      }
+    ],
+    "stale_since_ts": null
+  }
+}

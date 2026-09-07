@@ -191,6 +191,97 @@ let test_finalization_does_not_reuse_distinct_message_state () =
     ((not source_already_persisted) && selected == rebuilt)
 ;;
 
+let test_finalization_persists_context_only_progress () =
+  let open Agent_core.Types in
+  let history = [ message User [ Text "question" ] ] in
+  let persisted =
+    checkpoint ~working_context:None
+      (history @ [ message Assistant [ Text "final" ] ])
+  in
+  let updated =
+    { persisted with context = Agent_core.Context.copy persisted.context }
+  in
+  let observation = `Assoc [ "tool", `String "Execute"; "observed", `Bool true ] in
+  Agent_core.Context.set_scoped updated.context Agent_core.Context.Session
+    "tool_observation" observation;
+  with_temp_dir (fun session_dir ->
+    let save checkpoint =
+      match
+        Masc.Keeper_checkpoint_store.save_agent_core_classified ~session_dir checkpoint
+        |> expect_ok
+      with
+      | Masc.Keeper_checkpoint_store.Saved _ -> ()
+      | Stale_noop _ -> Alcotest.fail "current checkpoint must be saved"
+    in
+    save persisted;
+    let selected, source_already_persisted =
+      Finalize.select_finalization_checkpoint
+        ~last_persisted_checkpoint:(Some persisted) updated
+    in
+    let patched, replay_suffix_pruned =
+      Finalize.checkpoint_for_replay_persistence ~history_messages:history
+        ~session_id:persisted.session_id ~response_text:"final"
+        ~exclude_thought_from_replay:false selected
+      |> expect_ok
+    in
+    if not
+         (Finalize.finalization_checkpoint_already_persisted
+            ~source_already_persisted ~source:selected ~patched ~replay_suffix_pruned)
+    then save patched;
+    let restored =
+      Masc.Keeper_checkpoint_store.load_agent_core ~session_dir
+        ~session_id:persisted.session_id
+      |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_load_error_to_string
+      |> expect_ok
+    in
+    Alcotest.(check bool) "context-only tool observation survives disk restore" true
+      (Agent_core.Context.get_scoped restored.context Agent_core.Context.Session
+         "tool_observation" = Some observation);
+    Alcotest.(check bool) "earlier checkpoint remains unchanged" true
+      (Agent_core.Context.get_scoped persisted.context Agent_core.Context.Session
+         "tool_observation" = None))
+;;
+
+let test_finalization_preserves_updated_execution_state () =
+  let persisted = checkpoint ~working_context:None [] in
+  let updated =
+    { persisted with
+      system_prompt = Some "new instructions"
+    ; temperature = Some 0.2
+    ; working_context = Some (`Assoc [ "current", `Bool true ])
+    }
+  in
+  let selected, reused =
+    Finalize.select_finalization_checkpoint
+      ~last_persisted_checkpoint:(Some persisted) updated
+  in
+  Alcotest.(check bool) "changed execution state requires save" false reused;
+  Alcotest.(check bool) "new state selected" true (selected == updated);
+  let patched =
+    { persisted with context = Agent_core.Context.copy persisted.context }
+  in
+  Agent_core.Context.set_scoped patched.context Agent_core.Context.Session
+    "tool_observation" (`String "new");
+  Alcotest.(check bool) "post-selection context change requires save" false
+    (Finalize.finalization_checkpoint_already_persisted
+       ~source_already_persisted:true ~source:persisted ~patched
+       ~replay_suffix_pruned:None)
+;;
+
+let test_finalization_cannot_hide_unencodable_state () =
+  let persisted = checkpoint ~working_context:None [] in
+  let invalid =
+    { persisted with context = Agent_core.Context.copy persisted.context }
+  in
+  Agent_core.Context.set invalid.context "invalid_number" (`Float Float.nan);
+  let selected, reused =
+    Finalize.select_finalization_checkpoint
+      ~last_persisted_checkpoint:(Some persisted) invalid
+  in
+  Alcotest.(check bool) "invalid new state is not replaced by prior success" true
+    ((not reused) && selected == invalid)
+;;
+
 let test_contract_observation_preserves_current_turn_suffix () =
   let open Agent_core.Types in
   let history =
@@ -763,6 +854,15 @@ let () =
             "finalization rejects distinct message state"
             `Quick
             test_finalization_does_not_reuse_distinct_message_state
+        ; Alcotest.test_case
+            "context-only progress survives finalization and disk restore"
+            `Quick test_finalization_persists_context_only_progress
+        ; Alcotest.test_case
+            "finalization preserves changed execution state"
+            `Quick test_finalization_preserves_updated_execution_state
+        ; Alcotest.test_case
+            "finalization does not hide unencodable state"
+            `Quick test_finalization_cannot_hide_unencodable_state
         ; Alcotest.test_case
             "contract observation rejects prefix mismatch"
             `Quick

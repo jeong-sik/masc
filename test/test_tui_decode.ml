@@ -7821,6 +7821,28 @@ let test_decode_file_change_reads_an_insert () =
      | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
 ;;
 
+let test_required_display_renders_numeric_epoch_as_date () =
+  (* A server too old to carry [created_at_iso] sends a bare numeric epoch.
+     The pane must show a date, not the raw number. [Time_codec.rfc3339_of_unix]
+     renders UTC whole seconds, so 1788000000.0 is the exact text a numeric
+     field has to produce here (2026-08-29T10:40:00Z, checked the way the
+     dedicated time-codec tests check their fixed points). *)
+  let epoch = 1788000000.0 in
+  let fixture = `Assoc [ ("created_at", `Float epoch) ] in
+  match Tui_decode.required_display_any_field fixture [ "created_at_iso"; "created_at" ] with
+  | Error detail -> Alcotest.failf "unexpected error: %s" detail
+  | Ok rendered ->
+    Alcotest.(check string) "a numeric epoch renders as its UTC date"
+      "2026-08-29T10:40:00Z" rendered
+
+let test_required_display_keeps_rfc3339_string_verbatim () =
+  let fixture = `Assoc [ ("created_at", `String "2026-08-29T10:40:00Z") ] in
+  match Tui_decode.required_display_any_field fixture [ "created_at_iso"; "created_at" ] with
+  | Error detail -> Alcotest.failf "unexpected error: %s" detail
+  | Ok rendered ->
+    Alcotest.(check string) "a present ISO twin is kept verbatim"
+      "2026-08-29T10:40:00Z" rendered
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -8411,6 +8433,12 @@ let () =
           test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation
       ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
           test_decode_skill_evidence_tie_compares_rfc3339_instants
+      ] );
+    ( "decode_timestamp_display",
+      [ Alcotest.test_case "renders a numeric epoch as a date, not a bare number" `Quick
+          test_required_display_renders_numeric_epoch_as_date
+      ; Alcotest.test_case "keeps a present ISO twin verbatim" `Quick
+          test_required_display_keeps_rfc3339_string_verbatim
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );

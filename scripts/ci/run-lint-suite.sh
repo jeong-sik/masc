@@ -166,6 +166,12 @@ blocking_pr_lints() {
     scripts/ci/check-wildcard-only-match.py \
     python3 scripts/ci/test_check_wildcard_only_match.py
   run_lint "Wildcard-only match" python3 scripts/ci/check-wildcard-only-match.py
+  # Drawing a frame is meant to be a function of the state, not a step that
+  # edits it. The guard for that was written with a budget of zero and then
+  # never run by any workflow, so two modal scroll clamps went back to writing
+  # from inside the renderer and main sat red on a check nobody was checking.
+  # Same shape as the cancel-guard lint above.
+  run_lint "TUI renderer writes no state" bash scripts/ci/check-tui-render-purity.sh
 }
 
 advisory_lints() {

@@ -220,9 +220,10 @@ let for_surface = function
           ~help:"only when the blocked row is safely rearmable"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "w" "Workspace Gate mode"
+          ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
       ; b Act "e" "external Gate lane"
-          ~help:"cycle manual / auto_judge / always_allow for calls into \
-                 attached outside services"
+          ~help:"choose how calls into outside services are reviewed; Enter applies"
       ]
       @ listing_meta
   | Planning ->

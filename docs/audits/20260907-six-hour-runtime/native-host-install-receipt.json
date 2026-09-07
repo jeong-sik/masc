@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-07T04:55:37.126164+00:00",
+  "source_commit": "c3a85dac8e6606767af47aadcb9b46d3bdf37c6a",
+  "manifest_path": "/Users/dancer/Library/Application Support/Mozilla/NativeMessagingHosts/masc_browser_host.json",
+  "installed_launcher": "/Users/dancer/Library/Application Support/Mozilla/NativeMessagingHosts/masc_browser_host/masc-browser-host",
+  "files_match_reviewed_source": true,
+  "source_file_sha256": {
+    "host/masc-browser-host.js": "a8a10233fe03a64a6f4fe0d3ac0989bed377ebae3269f3b15732b2ed10b10d49",
+    "lane-config.js": "4c4cf8164b1281c6b6169c9c9460521189dc4aaab5bae1f02d343389c4d0a06f"
+  },
+  "existing_token_preserved": true,
+  "token_mode": "0600",
+  "actual_extension_connection_verified": false,
+  "actual_browser_tabs_read": false
+}

@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-07T06:11:09.817092+00:00",
+  "pid": 54584,
+  "binary": "/Users/dancer/.local/bin/masc",
+  "base_path": "/Users/dancer/me",
+  "port": 8935,
+  "log": "/private/tmp/masc-goal-repair-20260907/server-recovery-start.log",
+  "reason": "listener absent and prior serving process terminal; no active MASC process found"
+}

@@ -3275,6 +3275,7 @@ type state = {
   mutable ask_answer_mode: ask_answer_mode;
   mutable ask_cursor: int;
   mutable ask_question_cursor: int;
+  mutable ask_question_scroll: int;
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
@@ -4602,6 +4603,7 @@ let create_state
   ask_answer_mode = Ask_browsing;
   ask_cursor = 0;
   ask_question_cursor = 0;
+  ask_question_scroll = 0;
   ask_draft = None;
   ask_text_entry = None;
   pending_ask_submit = None;
@@ -5155,6 +5157,14 @@ type clamped_scroll =
      end. Same report the diff already makes. *)
   | Resource_scroll of int
   | Approval_detail_scroll of int
+  (* Both modals draw over a surface rather than being one, and both counted
+     their rows the same way the diff does: the patch modal out of the recorded
+     diff, the link preview out of the card the drawing formats. Neither count
+     is knowable at the keypress, which steps by one or jumps to 9999 and lets
+     the frame say where that landed. They wrote the answer back from inside
+     the drawing instead, which is the one thing the renderer must not do. *)
+  | Patch_modal_scroll of int
+  | Link_modal_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -5178,6 +5188,8 @@ let apply_clamped_scroll (state : state) = function
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
+  | Patch_modal_scroll value -> state.patch_modal_scroll <- value
+  | Link_modal_scroll value -> state.link_modal_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
@@ -6235,10 +6247,22 @@ let keeper_message_support_status_rows state ~status_rows =
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
+type gate_lane = Workspace_gate | External_gate
+
+let gate_lane_label = function
+  | Workspace_gate -> "Workspace"
+  | External_gate -> "Outside services"
+
+let gate_mode_label = function
+  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
+
 type palette_action =
   | Palette_browser_lane of Browser_lane_view.app
   | Palette_goto of surface
   | Palette_config of config_pane
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_hearth of string option
@@ -6323,6 +6347,12 @@ let lsp_question_prefixes =
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
+  @ List.concat_map (fun lane ->
+      List.map (fun mode ->
+        ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
+         Palette_gate_mode (lane, mode)))
+        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
+      [Workspace_gate; External_gate]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]

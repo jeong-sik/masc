@@ -67,6 +67,9 @@ class Plan:
     packages: list[str] = field(default_factory=list)
     stubs: list[tuple[str, str]] = field(default_factory=list)
     link_flags: list[str] = field(default_factory=list)
+    # (library name, its modules) for each wrapped library that needs the
+    # alias module dune generates. See [write_alias_module].
+    aliases: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
 
 def strip_comments(text: str) -> str:
@@ -273,8 +276,13 @@ def collect_libraries(root: str) -> dict[str, Library]:
     # as masc.agent_core. Unread, they were blocked on a name the index did
     # not carry; read, the report says the library is wrapped, which is the
     # thing that would have to change.
-    library_dunes = sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True)) + sorted(
-        glob.glob(os.path.join(root, "packages/**/dune"), recursive=True)
+    library_dunes = (
+        sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True))
+        + sorted(glob.glob(os.path.join(root, "packages/**/dune"), recursive=True))
+        # proto/ holds masc_proto, which 319 suites link. Unread, they were
+        # all blocked on a name the index did not carry, which reads as "the
+        # library is missing" rather than what it is.
+        + sorted(glob.glob(os.path.join(root, "proto/dune")))
     )
     for path in library_dunes:
         directory = os.path.relpath(os.path.dirname(path), root)
@@ -284,9 +292,14 @@ def collect_libraries(root: str) -> dict[str, Library]:
 
 
 class Resolver:
-    def __init__(self, libraries: dict[str, Library]):
+    def __init__(self, libraries: dict[str, Library], root: str):
         self.libraries = libraries
+        self.root = root
         self._findlib: dict[str, bool] = {}
+        self._archives: dict[str, str] = {}
+        # Virtual findlib package -> the implementation this run linked.
+        self.substitutions: dict[str, str] = {}
+        self._package_list: list[str] | None = None
 
     def installed(self, name: str) -> bool:
         if name not in self._findlib:
@@ -295,6 +308,50 @@ class Resolver:
             )
             self._findlib[name] = probe.returncode == 0
         return self._findlib[name]
+
+    def archive_of(self, name: str) -> str:
+        """The native archive [name] provides, empty when it provides none.
+
+        A findlib package with no archive is a virtual one: digestif declares
+        `archive(native) = ""` and ships `digestif.c` and `digestif.ocaml`
+        beside it. Linking the bare name compiles and then fails at the link
+        with "No implementation provided for Digestif", which names the
+        modules that wanted it rather than the package that is missing.
+        """
+        if name not in self._archives:
+            probe = subprocess.run(
+                ["ocamlfind", "query", "-format", "%(archive)", "-predicates",
+                 "native", name],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self._archives[name] = probe.stdout.strip() if probe.returncode == 0 else ""
+        return self._archives[name]
+
+    def _installed_packages(self) -> list[str]:
+        """Every findlib package name, read once. `ocamlfind list` takes about
+        a second here and the caller asks per dependency per suite; without
+        this a --list over 1200 suites spent minutes in it."""
+        if self._package_list is None:
+            probe = subprocess.run(
+                ["ocamlfind", "list"], capture_output=True, text=True, check=False
+            )
+            self._package_list = (
+                [line.split()[0] for line in probe.stdout.splitlines() if line.split()]
+                if probe.returncode == 0
+                else []
+            )
+        return self._package_list
+
+    def implementations_of(self, name: str) -> list[str]:
+        """[name]'s subpackages that do provide an archive."""
+        prefix = name + "."
+        return [
+            candidate
+            for candidate in self._installed_packages()
+            if candidate.startswith(prefix) and self.archive_of(candidate)
+        ]
 
     def plan(self, suite: str, deps: list[str]) -> tuple[Plan | None, str | None]:
         ordered: list[str] = []
@@ -306,15 +363,45 @@ class Resolver:
             if name in ordered:
                 return True
             library = self.libraries.get(name)
-            if library is not None and library.wrapped:
-                blocker = blocker or f"{name} (wrapped)"
-                return False
             if library is None:
                 if self.installed(name):
-                    if name not in packages:
-                        packages.append(name)
+                    resolved = name
+                    if not self.archive_of(name):
+                        # Virtual: an implementation has to be named. Taken in
+                        # sorted order rather than declared, and printed once
+                        # per run so the choice is visible if it ever starts to
+                        # matter. Measured 2026-09-07 on the only virtual
+                        # package this tree links: with digestif.c and with
+                        # digestif.ocaml, test_fs_compat_capability_head gives
+                        # 18 failures over 19 cases either way -- the verdict
+                        # the dune lane reports.
+                        #
+                        # No archive is not the same as no implementation.
+                        # threads.posix and mtime.clock.os declare none and
+                        # resolve through findlib predicates and requires;
+                        # only a package that ships archive-carrying
+                        # subpackages is the virtual shape this substitutes
+                        # for. Anything else passes through as written.
+                        candidates = sorted(self.implementations_of(name))
+                        if candidates:
+                            resolved = candidates[0]
+                            self.substitutions[name] = resolved
+                    if resolved not in packages:
+                        packages.append(resolved)
                     return True
                 blocker = blocker or name
+                return False
+            # A library whose modules are not on disk is generated by a dune
+            # rule -- masc_proto's masc_workspace.ml comes out of protoc --
+            # and there is no source here to compile. Running the generator
+            # would make this a build tool rather than a way to run what is
+            # already written, and protoc is not installed everywhere this
+            # runs.
+            if library.modules and not any(
+                os.path.exists(os.path.join(self.root, library.directory, module + ".ml"))
+                for module in library.modules
+            ):
+                blocker = blocker or f"{name} (generated by a dune rule)"
                 return False
             for dependency in library.deps:
                 if not visit(dependency):
@@ -332,6 +419,8 @@ class Resolver:
                 plan.modules.append((library.directory, module))
             for stub in library.stubs:
                 plan.stubs.append((library.directory, stub))
+            if library.wrapped:
+                plan.aliases.append((library.name, library.modules))
             for flag in library.c_library_flags:
                 # -lncurses reaches the C linker through the OCaml driver.
                 plan.link_flags += ["-cclib", flag]
@@ -347,6 +436,73 @@ class Outcome:
     built: bool | None
     summary: str
     detail: str = ""
+
+
+def write_alias_module(workdir: str, library: str, modules: tuple[str, ...]) -> str | None:
+    """The module dune generates for a wrapped library, written out.
+
+    dune renames a wrapped library's modules to `<lib>__<Module>` and adds a
+    `<lib>` module binding each one, so a consumer writes `Lib.Module`. The
+    renaming is not needed here -- one build directory, one suite -- but the
+    binding is: without it every `Lib.Module` in a consumer is unbound.
+    `module Module = Module` gives exactly that binding.
+
+    A wrapped library whose only module carries the library's own name has no
+    generated alias in dune either: that module is the namespace. Writing one
+    would collide with it, so this returns None.
+    """
+    if list(modules) == [library]:
+        return None
+    path = os.path.join(workdir, library + ".ml")
+    with open(path, "w", encoding="utf-8") as out:
+        for module in modules:
+            if os.path.exists(os.path.join(workdir, module + ".ml")):
+                out.write(f"module {module[:1].upper()}{module[1:]} = "
+                          f"{module[:1].upper()}{module[1:]}\n")
+    return library + ".ml"
+
+
+def sort_sources_by_dependency(
+    workdir: str, sources: list[str], packages: list[str]
+) -> list[str]:
+    """[sources] with the .ml files in dependency order, .mli kept ahead of
+    its own .ml, and the .c files left where they are.
+
+    ocamldep answers over whatever is in the directory, so this sorts across
+    libraries as well as within one. A failure to sort is returned as the
+    original order rather than raised: the compile below reports what is
+    wrong with more context than this could.
+    """
+    modules = [name for name in sources if name.endswith(".ml")]
+    if len(modules) < 2:
+        return sources
+    # The .mli files go in as well. A module can name another only in its
+    # interface -- fs_compat's atomic_write.mli reaches
+    # Capability_recovery_reconciler where its .ml does not -- and a sort that
+    # sees only the implementations puts them the wrong way round, which
+    # arrives as ocamlopt's "Wrong link order".
+    interfaces = [name for name in sources if name.endswith(".mli")]
+    probe = subprocess.run(
+        ["ocamlfind", "ocamldep", "-package", ",".join(["alcotest"] + packages),
+         "-sort"] + interfaces + modules,
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return sources
+    ordered = [name for name in probe.stdout.split() if name in set(modules)]
+    if len(ordered) != len(modules):
+        return sources
+    out = [name for name in sources if name.endswith(".c")]
+    interfaces = {name for name in sources if name.endswith(".mli")}
+    for module in ordered:
+        interface = module + "i"
+        if interface in interfaces:
+            out.append(interface)
+        out.append(module)
+    return out
 
 
 def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> Outcome:
@@ -377,8 +533,21 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
             sources.append(stub + ".c")
     for directory, module in plan.modules:
         stage(directory, module)
+    for library, modules in plan.aliases:
+        alias = write_alias_module(workdir, library, modules)
+        if alias is not None:
+            sources.append(alias)
     shutil.copy(os.path.join(root, "test", plan.suite + ".ml"), workdir)
     sources.append(plan.suite + ".ml")
+
+    # dune compiles a library's modules in dependency order; a stanza's
+    # (modules ...) is a set written for people to read. Ordering by the
+    # stanza worked while every library here was a leaf with a handful of
+    # modules and broke on the first sixteen-module one, where
+    # capability_exact_read uses eio_resource_scope listed after it. Ask
+    # ocamldep, which answers across libraries too -- the same question the
+    # command line asks, since everything is staged flat.
+    sources = sort_sources_by_dependency(workdir, sources, plan.packages)
 
     # Some suites read a path relative to the working directory rather than
     # through DUNE_SOURCEROOT -- test_tool_name_prefix_boundary opens
@@ -411,8 +580,20 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         # Reported apart from a test failure: a suite that will not build says
         # nothing about the code it tests, and counting it as red would put a
         # gap in this harness on the same line as a real defect.
+        # The whole error, bounded, not its last line. ocamlopt writes a
+        # "No implementation provided for the following modules:" over three
+        # lines, and reporting the last one alone printed the continuation --
+        # "Capability_recovery_reconciler (…cmx)" -- which reads as a link
+        # order complaint and sent one reader after the sort instead of after
+        # the missing package (#33799).
         detail = compile.stderr.strip().splitlines()
-        return Outcome(None, detail[-1] if detail else "build failed")
+        detail = [line for line in detail if "[WARNING] Package" not in line]
+        if not detail:
+            return Outcome(None, "build failed")
+        head = detail[:BUILD_DETAIL_LINES]
+        if len(detail) > BUILD_DETAIL_LINES:
+            head.append("  ... (truncated)")
+        return Outcome(None, head[0], "\n".join(head[1:]))
 
     # Run inside its own directory: alcotest writes its per-case output under
     # the working directory, and a shared one has suites overwriting each other.
@@ -445,6 +626,7 @@ DETAIL_LINES = 40
 # Alcotest prints the pair a couple of blank lines under the FAIL line, then a
 # backtrace. Stop at the backtrace: it names alcotest's own frames, not the
 # assertion, and it is the longest part of the block.
+BUILD_DETAIL_LINES = 8
 SKIP_REASONS_SHOWN = 10
 DETAIL_STOP = ("Raised at", "ASSERT", "FAIL", "Logs saved to", "Testing ")
 
@@ -506,7 +688,7 @@ def main() -> int:
     source_root = os.path.abspath(args.source_root or root)
 
     suites = read_suites(root)
-    resolver = Resolver(collect_libraries(root))
+    resolver = Resolver(collect_libraries(root), root)
 
     if args.all_matching:
         wanted = sorted(
@@ -566,6 +748,8 @@ def main() -> int:
     # suites, each because a library it links is wrapped. Name them
     # individually only when the caller asked for particular suites; otherwise
     # count them by reason, which is also the list of what to unblock first.
+    for package, implementation in sorted(resolver.substitutions.items()):
+        print(f"note  {package} is virtual; linked {implementation}")
     if args.suites:
         for name, why in blocked:
             print(f"skip  {name}: {why}")

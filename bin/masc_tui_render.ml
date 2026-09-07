@@ -2602,7 +2602,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
              (if picked then Ansi.bold else Ansi.dim)
              (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
              Ansi.reset)
-        ~style:(if picked then Ansi.bold else Ansi.dim)
+        ~style:(if picked then Ansi.bold ^ Theme.ok () else Theme.info ())
         choice.Masc.Tui_decode.ac_label;
       (* What picking this commits to. The wire carries it, the dashboard
          draws it under the label, and this pane dropped it -- so the operator
@@ -2722,7 +2722,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
       let open_rows = Ask_projection.open_rows snapshot in
       box_divider buf cols;
       box_line buf cols
-        (Printf.sprintf "%sQuestions waiting on you (%d)%s" Ansi.bold
+        (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
            (List.length open_rows) Ansi.reset);
       match open_rows with
       | [] ->
@@ -2917,6 +2917,59 @@ let approval_detail_rows line =
   String.iter (fun c -> if c = '\n' then incr n) line;
   !n
 
+let question_hints (state : state) =
+    (* One name for the key in both modes. [ and ] call the same function
+       either way -- they walk the asks -- and the surface used to call that
+       "question" while browsing and "ask" while answering, which is the same
+       key asking the operator to learn it twice. Named once here so the two
+       footers cannot drift apart again.
+
+       The vocabulary is the repository's: [/] walks the container a surface
+       is a list of. Board says post, Changes says keeper, this says ask. *)
+    let walk_asks = "[/]:ask" in
+    match state.ask_answer_mode with
+    | Ask_browsing ->
+        Printf.sprintf
+          "j/k:move  y/n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
+           r:refresh  Tab:next"
+          walk_asks
+    | Ask_answering { aam_ask_id } -> (
+        match state.ask_text_entry with
+        (* Typing owns the keyboard, so the footer stops offering the keys it
+           has taken: the digits are text here, not choices. *)
+        | Some _ -> "Enter:save  Esc:cancel"
+        | None ->
+            (* Say when the next Enter sends. The approval queue two panes up
+               already draws its armed state; this one announced itself only as
+               an event, on a surface that draws no events, so the first Enter
+               looked like a key that had not landed. *)
+            (match state.pending_ask_submit with
+             | Some armed when String.equal armed aam_ask_id ->
+                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
+             | Some _ | None ->
+                 (* Only the keys the selected question answers to. A question
+                    can arrive with no choices at all -- the server accepts one
+                    as long as it welcomes free text -- and there [1-9] does
+                    nothing, which reads as a pane that has stopped listening
+                    rather than as a key that was never for this question. *)
+                 let question = selected_ask_question state in
+                 let has_choices =
+                   match question with
+                   | Some (q : Masc.Tui_decode.ask_question) ->
+                       q.Masc.Tui_decode.aq_choices <> []
+                   | None -> false
+                 in
+                 let takes_text =
+                   match question with
+                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
+                   | None -> false
+                 in
+                 Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \
+                                 Enter:answer  Esc:back"
+                   walk_asks
+                   (if has_choices then "1-9:pick  " else "")
+                   (if takes_text then "t:write  " else "")))
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3027,10 +3080,12 @@ let render_approvals (state : state) =
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ ->
          Printf.sprintf
-           "  %sGate workspace:%s  ·  outside services:%s%s"
-           Ansi.dim
-           modes.Tui_decode.glm_workspace
-           modes.Tui_decode.glm_external
+           "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
+           (Theme.info ())
+           (match Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
+            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+           (match Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
+            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
      | None, None ->
@@ -3289,63 +3344,78 @@ let render_approvals (state : state) =
 
   Buffer.add_buffer buf ask_buf;
 
-  let hints =
-    (* One name for the key in both modes. [ and ] call the same function
-       either way -- they walk the asks -- and the surface used to call that
-       "question" while browsing and "ask" while answering, which is the same
-       key asking the operator to learn it twice. Named once here so the two
-       footers cannot drift apart again.
-
-       The vocabulary is the repository's: [/] walks the container a surface
-       is a list of. Board says post, Changes says keeper, this says ask. *)
-    let walk_asks = "[/]:ask" in
-    match state.ask_answer_mode with
-    | Ask_browsing ->
-        Printf.sprintf
-          "j/k:move  y/n:decide  e:outside lane  %s  a:answer a question  \
-           r:refresh  Tab:next"
-          walk_asks
-    | Ask_answering { aam_ask_id } -> (
-        match state.ask_text_entry with
-        (* Typing owns the keyboard, so the footer stops offering the keys it
-           has taken: the digits are text here, not choices. *)
-        | Some _ -> "Enter:save  Esc:cancel"
-        | None ->
-            (* Say when the next Enter sends. The approval queue two panes up
-               already draws its armed state; this one announced itself only as
-               an event, on a surface that draws no events, so the first Enter
-               looked like a key that had not landed. *)
-            (match state.pending_ask_submit with
-             | Some armed when String.equal armed aam_ask_id ->
-                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-             | Some _ | None ->
-                 (* Only the keys the selected question answers to. A question
-                    can arrive with no choices at all -- the server accepts one
-                    as long as it welcomes free text -- and there [1-9] does
-                    nothing, which reads as a pane that has stopped listening
-                    rather than as a key that was never for this question. *)
-                 let question = selected_ask_question state in
-                 let has_choices =
-                   match question with
-                   | Some (q : Masc.Tui_decode.ask_question) ->
-                       q.Masc.Tui_decode.aq_choices <> []
-                   | None -> false
-                 in
-                 let takes_text =
-                   match question with
-                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
-                   | None -> false
-                 in
-                 Printf.sprintf "j/k:question  %s  %s%ss:skip  c:clear  \
-                                 Enter:answer  Esc:back"
-                   walk_asks
-                   (if has_choices then "1-9:pick  " else "")
-                   (if takes_text then "t:write  " else "")))
+  let hints = question_hints state
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
+
+let question_asks (state : state) =
+  match state.asks_snapshot with
+  | None -> []
+  | Some snapshot -> Ask_projection.open_rows snapshot
+
+let ask_question_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let lines =
+    match List.nth_opt (question_asks state) state.ask_cursor with
+    | None -> ["  No questions waiting"]
+    | Some row ->
+        let draft = Ask_projection.draft_for state.ask_draft ~row in
+        (match List.nth_opt row.ar_questions state.ask_question_cursor with
+         | None -> ["  No question selected"]
+         | Some question ->
+             let text, _ = ask_block (fun b ->
+               draw_ask_question b cols state ~row ~draft ~question
+                 ~answering:true ~selected_question:true;
+               draw_ask_context b cols ~row) in
+             String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))
+  in
+  (* title, progress, help, two dividers, outer edges and footer *)
+  let room = max 1 (rows - 9) in
+  (lines, room)
+
+let ask_question_page_size state = snd (ask_question_viewport state)
+
+let ask_question_scroll_limit state =
+  let lines, room = ask_question_viewport state in
+  max 0 (List.length lines - room)
+
+let render_question_reader (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+  let asks = question_asks state in
+  let selected = List.nth_opt asks state.ask_cursor in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Approvals / Questions");
+  box_line buf cols
+    (match selected with
+     | None -> "  No questions waiting"
+     | Some row ->
+         let draft = Ask_projection.draft_for state.ask_draft ~row in
+         let answered = List.filter (fun question ->
+             Option.is_some (Ask_projection.response_for draft ~question)) row.ar_questions |> List.length in
+         Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d answered%s"
+           (Theme.warn ()) (Terminal_text.single_line row.ar_keeper)
+           (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
+           (List.length row.ar_questions) answered Ansi.reset);
+  box_line buf cols "  Left/Right: previous/next question · [/]: previous/next ask · Esc: approvals";
+  box_divider buf cols;
+  let lines, room = ask_question_viewport state in
+  let scroll = max 0 (min state.ask_question_scroll (max 0 (List.length lines - room))) in
+  for i = 0 to room - 1 do
+    match List.nth_opt lines (scroll + i) with
+    | Some line -> Buffer.add_string buf (line ^ "\n")
+    | None -> box_empty buf cols
+  done;
+  box_divider buf cols;
+  box_line buf cols (Printf.sprintf "  Lines %d-%d/%d · PgUp/PgDn or wheel to read"
+      (if lines = [] then 0 else scroll + 1) (min (List.length lines) (scroll + room)) (List.length lines));
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
+  finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf
 
 (* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
    posts and 588 are automation; the 22 a person wrote are what an operator is
@@ -16673,6 +16743,8 @@ let render_surface (state : state) =
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
+  | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
+      render_question_reader state
   | Approvals ->
       (* Open on the row the cursor is on. An ask that resolves while it is
          open takes the row with it, so the detail closes rather than showing

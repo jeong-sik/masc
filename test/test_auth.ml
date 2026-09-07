@@ -110,6 +110,16 @@ let keeper_strict_auth_regression_tools =
     "masc_board_search";
     "keeper_tools_list";
     "keeper_capability_search";
+    "keeper_analyze_image";
+    "masc_browser_tabs";
+    "masc_browser_read";
+    "masc_browser_session";
+    "masc_browser_goto";
+    "masc_web_search";
+    "masc_web_fetch";
+    "masc_file_list";
+    "masc_file_upload";
+    "masc_file_delete";
   ]
 
 (* ============================================ *)

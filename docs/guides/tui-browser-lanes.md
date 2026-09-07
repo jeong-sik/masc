@@ -7,6 +7,10 @@ and show Browser/Slack source context in the bottom row. Keeper fleet/changes
 panels and the Keeper composer return when the operator leaves the reader. Slack asks the server to filter matching
 Slack tabs; it does not send Slack messages or change channel bindings.
 
+Entering a reader ends continuous voice mode and discards any capture still in
+flight, including a transcript awaiting delivery. An existing Keeper draft is
+preserved; voice can be started again after returning to the composer.
+
 | Key | Action |
 | --- | --- |
 | `B` / `S` | Browser / Slack, starting with live Firefox |

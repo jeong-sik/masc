@@ -3797,6 +3797,36 @@ type state = {
 let browser_lane_on_screen (state : state) =
   match state.view with Connectors -> state.browser_lane | _ -> None
 
+(* Discard belongs to this capture until it settles. A later stop/keep key
+   must not revive a transcript whose recording the operator abandoned. *)
+let request_voice_stop (state : state) request =
+  match state.voice_stop_requested with
+  | Some Masc.Voice_bridge.Discard -> ()
+  | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
+      state.voice_stop_requested <- Some request
+
+let release_composer_for_browser_reader (state : state) =
+  state.composer_focused <- false;
+  state.voice_continuous <- None;
+  state.voice_floor <- None;
+  state.voice_level_db <- None;
+  (* Keep the occupied capture until its callback, so returning to the
+     composer cannot start a second microphone while this one shuts down. *)
+  if Option.is_some state.voice_capture then
+    request_voice_stop state Masc.Voice_bridge.Discard
+
+(* The transcript may already be in the mailbox when the reader opens.
+   Settle ownership before deciding whether its text can reach the draft. *)
+let settle_voice_transcript (state : state) ~keeper =
+  if state.voice_capture <> Some keeper then None
+  else begin
+    let disposition = Option.value state.voice_stop_requested
+        ~default:Masc.Voice_bridge.Keep_what_was_heard in
+    state.voice_capture <- None;
+    state.voice_level_db <- None;
+    Some disposition
+  end
+
 type text_input_target =
   | Text_browser_url
   | Text_preset_name

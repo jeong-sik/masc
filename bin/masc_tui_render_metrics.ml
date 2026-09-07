@@ -91,6 +91,9 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
 let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
   let card_w = max 18 ((inner_width - 10) / 4) in
+  (* Reserve readable text cells inside the border and padding. Below this
+     width use the compact summaries, not four boxes of clipped labels. *)
+  let minimum_card_text_cells = 32 in
   let format_card title line1 line2 tone_style =
     let h_rule = repeat_glyph "\xe2\x94\x80" (max 0 (card_w - 2)) in
     let box_t = "\xe2\x94\x8c" ^ h_rule ^ "\xe2\x94\x90" in
@@ -126,7 +129,6 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
        Printf.sprintf "%s workers · minor %s" domains (format_words gc.sgc_minor_heap_size))
     | None -> "GC not observed", "Workers " ^ domains
   in
-  let c1 = format_card "ENGINE" c1_l1 c1_l2 (Theme.info ()) in
   let c2_l1, c2_l2, c2_tone = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       "No latency samples", "Probe: " ^ scheduler_probe_text s.ssch_probe, Theme.recede ()
@@ -136,20 +138,17 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
        if s.ssch_stalls > 0 then Theme.warn () else Theme.recede ())
     | None -> "Lag not observed", "Probe unavailable", Theme.recede ()
   in
-  let c2 = format_card "SCHEDULER LAG" c2_l1 c2_l2 c2_tone in
   let c3_l1, c3_l2 = match kpis.tasks with
     | Some count ->
       (Printf.sprintf "%d open · %d verifying" (Task_flow.open_count count) count.awaiting_verification,
        Printf.sprintf "%d done · %d cancelled" count.completed count.cancelled)
     | None -> "Task snapshot unavailable", "No outcome count inferred"
   in
-  let c3 = format_card "TASK SNAPSHOT" c3_l1 c3_l2 (Theme.info ()) in
   let c4_l1 = Printf.sprintf "%d Gate · %d tool holds"
       kpis.gate_pending_count kpis.held_approvals_count in
   let c4_l2 = "Visible approval queues" in
   let c4_tone = if kpis.gate_pending_count + kpis.held_approvals_count > 0
       then Theme.warn () else Theme.recede () in
-  let c4 = format_card "ATTENTION" c4_l1 c4_l2 c4_tone in
 
   let combine (t1, lt1, l11, l21, b1)
               (t2, lt2, l12, l22, b2)
@@ -162,8 +161,12 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     ; "  " ^ b1 ^ "  " ^ b2 ^ "  " ^ b3 ^ "  " ^ b4
     ]
   in
-  if inner_width >= 80 then
-    combine c1 c2 c3 c4
+  if card_w - 4 >= minimum_card_text_cells then
+    combine
+      (format_card "ENGINE" c1_l1 c1_l2 (Theme.info ()))
+      (format_card "SCHEDULER LAG" c2_l1 c2_l2 c2_tone)
+      (format_card "TASK SNAPSHOT" c3_l1 c3_l2 (Theme.info ()))
+      (format_card "ATTENTION" c4_l1 c4_l2 c4_tone)
   else
     [ Printf.sprintf "  %s[ENGINE]%s %s · %s[SCHED]%s %s"
         (Theme.info ()) Ansi.reset c1_l1

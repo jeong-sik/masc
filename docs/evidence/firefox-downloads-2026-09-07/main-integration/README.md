@@ -1,7 +1,8 @@
 # Main integration regression
 
 The production source interpreter passed 89 Firefox assertions after
-merging the BrowserInteract and explicit Gecko binary changes from main.
+merging BrowserInteract, explicit Gecko binary selection, and native client
+routing from main.
 PNG structure and pixel-stream validation also passed in the Python harness.
 The run used stock Firefox 155.0.1 and geckodriver 0.37.1.
 

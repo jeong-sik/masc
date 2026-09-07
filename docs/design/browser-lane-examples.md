@@ -45,7 +45,7 @@ TUI에서는 `:` → `go Browser Lane`, `l` / `a`로 source를 선택한다.
 
 ```json
 BrowserTabs {"lane":"live"}
-BrowserRead {"lane":"live","tabId":73,"maxChars":12000}
+BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"maxChars":12000}
 ```
 
 위 `73`은 예시이며 실제 첫 호출이 반환한 id를 사용한다. 읽은 URL과
@@ -98,6 +98,10 @@ keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 
 바이트를 넣지는 않는다. 스크린샷 저장에는 in-process Keeper 실행 문맥이 필요하다.
 일반 도구 호출자의 표시 이름을 Keeper 소유권으로 간주하지 않는다.
 
+`live`는 `BrowserTabs`에서 받은 `clientId`와 `tabId`를 한 쌍으로 유지한다.
+Firefox와 Zen이 동시에 연결된 경우 읽기·캡처·조작마다 해당 `clientId`를
+전달한다. 아래 예제의 `clientId`는 실제 관측한 연결 UUID로 채운다.
+
 ## 화면과 상호작용
 
 선택한 탭의 화면을 보려면 `BrowserRead`에 `mode=screenshot`를 지정한다.
@@ -105,8 +109,8 @@ Keeper는 반환된 `artifact`를 `keeper_analyze_image`에 전달한다. TUI에
 `Ctrl-O`로 같은 탭의 PNG를 미리 본다. 캡처 범위는 현재 viewport다.
 
 ```json
-BrowserRead {"lane":"live","tabId":73,"mode":"screenshot"}
-BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
+BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"mode":"screenshot"}
+BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"scroll","x":0,"y":640}
 ```
 
 페이지에서 확인한 CSS selector가 있을 때 click 또는 fill을 사용한다.
@@ -114,8 +118,8 @@ BrowserInteract {"lane":"live","tabId":73,"action":"scroll","x":0,"y":640}
 읽은 URL을 전달하며, 페이지가 바뀌었으면 동작을 거부한다.
 
 ```json
-BrowserInteract {"lane":"live","tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
-BrowserInteract {"lane":"live","tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
+BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
+BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
 ```
 
 텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로

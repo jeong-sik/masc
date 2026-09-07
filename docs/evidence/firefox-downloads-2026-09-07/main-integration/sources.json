@@ -4,12 +4,12 @@
   "lib/browser_bidi_downloads.ml": "2d692a60edd7cbf15a8f354899c678540287d4a22f4cd7724f796118a9d1010b",
   "lib/browser_download_artifact.ml": "57830f811f268e0af9529d9e901fe592b8f0df71a90b4227949dba0910ebf5cc",
   "lib/browser_lane/browser_action.ml": "580d65c052bc9499147adf1b4630d5ad391bc9869b9111fcc41772722776f7cd",
-  "lib/browser_lane/browser_lane.ml": "a7d944d2006cd3b120387d5c10fd244ac2c4296025d1f7d648cf7bfe83f8efaa",
+  "lib/browser_lane/browser_lane.ml": "adb491f0a00389109511643208ad3b61fdb5b4f90fbd909c5cece3a34dbdacee",
   "lib/browser_lane/browser_upload_lease.ml": "f067d2716b0534bde8c754b7184f7662fe83cf8ac95c1720f641eb69091c70f7",
-  "lib/browser_interaction.ml": "90d81318bcc31296e2bf794b36ab4e1ef18519863e30e026075f90c2d2510299",
+  "lib/browser_interaction.ml": "3d360772dac9bc7b0298a789e855d53d673d4bb432298cca7d3b4c70016f853d",
   "lib/browser_page_script.ml": "02f048be62f09631821d4a820b577106b0f570b6907c9125583586751d5ce822",
   "scripts/fixtures/firefox_download_artifact_probe.ml": "2984a96cbfee38cb1ad43c2890f2d59f12061db2e7d37090bc82c59c0320dd9e",
   "scripts/fixtures/firefox_controls_probe.ml": "4ee49609a587784fbafc9bbc8c26eac893626a453dd58a50d1de599c2b98d112",
-  "scripts/probe-firefox-controls.py": "f7a6ce674a48713af7335ea7d0c8b8e94f13db6fcfb1f528827f9a9d76888bf6",
+  "scripts/probe-firefox-controls.py": "cc01c431a54cc2cc42c17329687dac61b7a584815a197e8d6dcf47ae9ca9685c",
   "test/dune": "f7d9388483929a2be25bcd77b4d316c005cdf51ade4a23db6ed8d4e496f6677a"
 }

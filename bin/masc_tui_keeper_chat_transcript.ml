@@ -650,15 +650,33 @@ let skill_activity_of_tool (activity : tool_activity) =
         (make_skill_activity ?skill_tool_use_id:activity.call_id
            ~skill_name ~state ~actions:[] ())
 
+(* One phrase per state, and no interpunct inside one.
+
+   The separator on this row does three jobs at once: it parts the state from
+   the skill name, the name from the action count, and it used to part a
+   state's own two words from each other. So "SERVED ONLY · DELIVERY NOT
+   RECORDED" gave a reader no way to tell, from the row, whether that was one
+   state or two.
+
+   The row answers one question -- was it handed over, and did anything come
+   of it -- so the phrases answer that question in the words someone would
+   use out loud. Two earlier passes wrote them as nouns instead (쓰임, 도착함,
+   전달됨) and a noun is not what a person says here.
+
+   [Skill_delivered] and [Skill_used] differ by one syllable, 안, which is
+   what makes a column of them scannable. Naming it costs a word and is worth
+   it: the alternative was to leave the action count absent and let the reader
+   notice the absence, and noticing what is not there is not a thing a label
+   may ask for. *)
 let skill_state_label = function
-  | Skill_calling -> "CALLING"
-  | Skill_served_pending -> "SERVED \xc2\xb7 DELIVERY PENDING"
-  | Skill_served_only -> "SERVED ONLY \xc2\xb7 DELIVERY NOT RECORDED"
-  | Skill_delivered -> "DELIVERED \xc2\xb7 NO ACTION OBSERVED"
-  | Skill_used -> "DELIVERED \xc2\xb7 USED"
-  | Skill_failed -> "FAILED"
-  | Skill_evidence_missing -> "EVIDENCE MISSING"
-  | Skill_evidence_unavailable -> "EVIDENCE UNAVAILABLE"
+  | Skill_calling -> "부르는 중"
+  | Skill_served_pending -> "보냈고 확인 중"
+  | Skill_served_only -> "보냈는데 기록 없음"
+  | Skill_delivered -> "받고 안 씀"
+  | Skill_used -> "받아서 씀"
+  | Skill_failed -> "실패"
+  | Skill_evidence_missing -> "증거 없음"
+  | Skill_evidence_unavailable -> "증거 못 읽음"
 
 let short_proof value =
   let value = safe_line value in
@@ -669,10 +687,15 @@ let short_proof value =
 
 let skill_rows ~full (activity : skill_activity) =
   let action_count = List.length activity.actions in
+  (* State, then which skill, then what came of it -- the Gate row's order,
+     because the pane should not read left to right one way on one kind of row
+     and the other way on the next. The name led before, and a skill name is
+     the part a reader can already see repeated down the column; the state is
+     the part that differs, so it is the part a narrow pane keeps. *)
   let summary =
     Printf.sprintf "**%s** \xc2\xb7 **%s**%s"
-      activity.skill_name
       (skill_state_label activity.state)
+      activity.skill_name
       (if action_count = 0 then ""
        else Printf.sprintf " \xc2\xb7 %s" (plural action_count "action"))
   in

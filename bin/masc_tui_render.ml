@@ -15812,7 +15812,8 @@ let config_pane_strip (state : state) =
       Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
     else Ansi.dim ^ " " ^ label ^ Ansi.reset
   in
-  String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
+  Ansi.dim ^ "9:Runtime  p:next  " ^ Ansi.reset
+  ^ String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
     [ name Config_runtime "runtime.toml"
     ; name Config_models "models"
     ; name Config_params "params"
@@ -15821,7 +15822,6 @@ let config_pane_strip (state : state) =
     ; name Config_themes "themes"
     ; name Config_voice "voice"
     ]
-  ^ Ansi.dim ^ "  p:next  9:Runtime" ^ Ansi.reset
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this

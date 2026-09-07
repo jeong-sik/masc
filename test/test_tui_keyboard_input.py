@@ -10757,11 +10757,14 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            # The trailing Runtime shortcut can be clipped at 99 columns.
-            # Verify the selected parent pane, which remains visible.
+            # Verify the selected parent pane and its Runtime entry remain
+            # visible at 99 columns, even when later pane names are clipped.
+            config_start = len(output)
             send_and_wait(
                 process, master_fd, output, b"\x1b", "▸runtime.toml".encode()
             )
+            if b"9:Runtime" not in CSI_RE.sub(b"", bytes(output[config_start:])):
+                raise AssertionError("Config hides its Runtime entry at 99 columns")
             os.write(master_fd, b"q")
             completed = True
         finally:

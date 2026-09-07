@@ -277,6 +277,11 @@ val load_retained_exact_snapshot :
   (exact_checkpoint_snapshot, checkpoint_cas_error) result
 
 module For_testing : sig
+  val with_before_history_link : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Pause the accepted history-link syscall job. The hook must not perform
+      Eio effects; the caller retains its checkpoint transaction until the
+      syscall job completes. *)
+
   val retain_exact_snapshot_with_writer :
     write_checkpoint_bytes:
       (on_durable_commit:(unit -> unit) -> ownership_root:string ->

@@ -1266,11 +1266,110 @@ let test_summary_follows_a_checkpoint_replaced_behind_it () =
   | Error _ -> fail "a removed checkpoint was reported as an error"
 ;;
 
+let test_history_link_keeps_transaction_until_cancelled_job_finishes () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let clock = Eio.Stdenv.clock env in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let session_id = "history-cancel" in
+  let checkpoint turn_count = make_checkpoint ~session_id ~turn_count ~marker:(string_of_int turn_count) in
+  save_ok ~session_dir (checkpoint 1) "seed";
+  let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let history = Keeper_checkpoint_store.agent_core_history_path ~session_dir
+    ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 1)) in
+  let turn path =
+    match Agent_core.Checkpoint.of_string (Fs_compat.load_file path) with
+    | Ok checkpoint -> checkpoint.turn_count
+    | Error _ -> fail "checkpoint bytes were corrupted"
+  in
+  let caller_thread = Thread.id (Thread.self ()) in
+  let entered = Atomic.make false in
+  let observed_thread = Atomic.make None in
+  let mutex = Mutex.create () in
+  let condition = Condition.create () in
+  let released = ref false in
+  let release () =
+    Mutex.lock mutex;
+    released := true;
+    Condition.broadcast condition;
+    Mutex.unlock mutex
+  in
+  let before_link () =
+    if Atomic.compare_and_set entered false true then (
+      Atomic.set observed_thread (Some (Thread.id (Thread.self ())));
+      if Thread.id (Thread.self ()) = caller_thread then
+        fail "history link blocked the caller thread";
+      Mutex.lock mutex;
+      Fun.protect ~finally:(fun () -> Mutex.unlock mutex) (fun () ->
+        while not !released do Condition.wait condition mutex done))
+  in
+  let context, context_u = Eio.Promise.create () in
+  let first_done, first_done_u = Eio.Promise.create () in
+  let next_done, next_done_u = Eio.Promise.create () in
+  Keeper_checkpoint_store.For_testing.with_before_history_link before_link @@ fun () ->
+  Fun.protect ~finally:release @@ fun () ->
+  Eio.Fiber.fork ~sw (fun () ->
+    let result = try
+      Eio.Cancel.sub (fun cc ->
+        Eio.Promise.resolve context_u cc;
+        save_ok ~session_dir (checkpoint 2) "cancelled writer");
+      Ok ()
+    with Eio.Cancel.Cancelled _ -> Ok () | exn -> Error exn in
+    Eio.Promise.resolve first_done_u result);
+  Eio.Time.with_timeout_exn clock 2. (fun () ->
+    while Option.is_none (Atomic.get observed_thread) do Eio.Time.sleep clock 0.001 done);
+  check bool "history link runs on another system thread" true
+    (Option.get (Atomic.get observed_thread) <> caller_thread);
+  check int "canonical commit precedes history link" 2 (turn canonical);
+  check int "previous history still exists while replacement pauses" 1 (turn history);
+  Eio.Cancel.cancel (Eio.Promise.await context) (Failure "cancel history writer");
+  Eio.Fiber.fork ~sw (fun () ->
+    let result = try save_ok ~session_dir (checkpoint 3) "next writer"; Ok ()
+      with exn -> Error exn in
+    Eio.Promise.resolve next_done_u result);
+  Eio.Time.sleep clock 0.01;
+  check bool "cancelled writer waits for accepted link job" false (Eio.Promise.is_resolved first_done);
+  check bool "next writer cannot leave transaction early" false (Eio.Promise.is_resolved next_done);
+  check int "next writer cannot replace canonical during accepted link" 2 (turn canonical);
+  release ();
+  List.iter (fun promise ->
+    match Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await promise) with
+    | Ok () -> () | Error exn -> raise exn) [ first_done; next_done ];
+  check int "next writer persists after lock release" 3 (turn canonical);
+  check int "history follows the serialized next writer" 3 (turn history);
+  check int "history remains a hardlink to committed bytes"
+    (Unix.stat canonical).Unix.st_ino (Unix.stat history).Unix.st_ino
+
+let test_history_retention_after_syscall_offload () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let retained = 12 in
+  let checkpoint turn_count =
+    { (make_checkpoint ~session_id:"history-retention" ~turn_count ~marker:"history")
+      with created_at = 1000. +. float_of_int turn_count }
+  in
+  for turn = 1 to retained + 2 do save_ok ~session_dir (checkpoint turn) "history save" done;
+  let files = Keeper_checkpoint_store.list_agent_core_history_files ~session_dir in
+  check int "rolling history retains its exact existing window" retained (List.length files);
+  let snapshot turn = Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint (checkpoint turn) in
+  check bool "oldest snapshot was pruned" false (List.mem (snapshot 1) files);
+  check bool "second expired snapshot was pruned" false (List.mem (snapshot 2) files);
+  check bool "oldest retained snapshot survives" true (List.mem (snapshot 3) files);
+  check bool "newest snapshot survives" true (List.mem (snapshot (retained + 2)) files)
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
       ( "checkpoint transaction",
         [
+          test_case "history syscall retains transaction through cancellation" `Quick
+            test_history_link_keeps_transaction_until_cancelled_job_finishes;
+          test_case "history syscall retains exact rolling window" `Quick
+            test_history_retention_after_syscall_offload;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
           test_case "forward and equal saves pass, stale save is no-op" `Quick

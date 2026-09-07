@@ -19,6 +19,8 @@ let agent_core_checkpoint_path ~(session_dir : string) ~(session_id : string) =
 let agent_core_history_prefix = "agent-core-snapshot-"
 let agent_core_history_suffix = ".json"
 
+let before_history_link_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
 let is_agent_core_history_file (filename : string) : bool =
   let len = String.length filename in
   len > String.length agent_core_history_prefix + String.length agent_core_history_suffix
@@ -29,10 +31,11 @@ let is_agent_core_history_file (filename : string) : bool =
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
   else
+    Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.list" (fun () ->
     Sys.readdir session_dir
     |> Array.to_list
     |> List.filter is_agent_core_history_file
-    |> List.sort (fun a b -> compare b a)
+    |> List.sort (fun a b -> compare b a))
 
 let max_agent_core_history_retained = 12
 
@@ -91,7 +94,10 @@ let prune_agent_core_history ~(session_dir : string) : unit =
     |> List.filteri (fun index _ -> index >= max_agent_core_history_retained)
     |> List.iter (fun filename ->
          let path = agent_core_history_path ~session_dir ~snapshot_id:filename in
-         try Sys.remove path with
+         try
+           Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.unlink"
+             (fun () -> Sys.remove path)
+         with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Log.Keeper.warn "AGENT_CORE snapshot cleanup failed for %s: %s"
@@ -111,8 +117,11 @@ let hardlink_agent_core_history_from_canonical
     Error "canonical AGENT_CORE checkpoint is missing"
   else
     try
-      if Fs_compat.file_exists snapshot_path then Sys.remove snapshot_path;
-      Unix.link canonical_path snapshot_path;
+      let snapshot_exists = Fs_compat.file_exists snapshot_path in
+      Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.link" (fun () ->
+        Option.iter (fun hook -> hook ()) (Atomic.get before_history_link_hook);
+        if snapshot_exists then Sys.remove snapshot_path;
+        Unix.link canonical_path snapshot_path);
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1042,6 +1051,10 @@ let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
 
 module For_testing = struct
+  let with_before_history_link hook f =
+    let previous = Atomic.exchange before_history_link_hook (Some hook) in
+    Fun.protect ~finally:(fun () -> Atomic.set before_history_link_hook previous) f
+
   let retain_exact_snapshot_with_writer = retain_exact_snapshot_with
 
   let save_agent_core_if_source_with_observer

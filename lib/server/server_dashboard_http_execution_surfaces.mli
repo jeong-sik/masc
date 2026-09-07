@@ -195,6 +195,21 @@ val dashboard_execution_cached_http_representation :
     initializing or stale/error requests. No serialization or compression on
     cache hits. *)
 
+type execution_http_response =
+  | Execution_json of Yojson.Safe.t
+  | Execution_payload of Dashboard_cache.cached_payload
+
+val dashboard_execution_http_response :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Httpun.Request.t ->
+  execution_http_response
+(** Parameterized requests retain the decorated snapshot's bytes and ETag in
+    the SWR cache, scoped by workspace, query and publication generation.
+    Default light reads (including forced refresh) and cache-generated timeout
+    envelopes return JSON. *)
+
 val dashboard_execution_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->

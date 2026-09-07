@@ -1462,7 +1462,7 @@ def board_detail_isolation_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
     return fixtures, b_failure
 
 
-def board_missing_target_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+def board_paginated_detail_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     posts = [
         board_selection_post("a", "Alpha", "list-body-a"),
         board_selection_post("b", "Bravo", "list-body-b"),
@@ -4210,7 +4210,7 @@ def board_detail_authority_interaction(
     return interact
 
 
-def board_missing_target_interaction(
+def board_paginated_detail_interaction(
     fixtures: HttpFixtures,
     late_b: GatedHttpResponse,
 ) -> Interaction:
@@ -4233,34 +4233,38 @@ def board_missing_target_interaction(
             )
             send_and_wait(process, master_fd, output, b"\r", b"b-initial-comment")
 
-            fixtures["/api/v1/board?sort_by=hot"] = (
-                200,
-                {"posts": [board_selection_post("a", "Alpha", "list-body-a")]},
-            )
+            # An empty recent page is not an exact-ID deletion response.
+            fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": []})
             fixtures["/api/v1/board/post-b?format=flat"] = late_b
-            board_update = send_and_wait(
-                process, master_fd, output, b"r", screen_header(b"MASC Board", b" (1)")
-            )
-            board = frame_containing(board_update, screen_header(b"MASC Board", b" (1)"))
+            os.write(master_fd, b"R")
             if not wait_for_fixture_event(
                 process, master_fd, output, late_b.requested, timeout=10.0
             ):
                 raise AssertionError("late Board B request did not reach its fixture")
-            for expected in (
-                selected_row(b"post-a"),
-                b"Enter:read",
-            ):
-                if find_needle(board, expected) < 0:
-                    raise AssertionError(
-                        f"missing Board target did not restore list mode: {board!r}"
-                    )
-            for stale in (b"b-initial-comment", b"Esc:back"):
-                if stale in board:
-                    raise AssertionError(
-                        f"missing Board target retained detail state: {board!r}"
-                    )
+            refreshing = resize_and_wait(
+                process, master_fd, output, rows=30, columns=179,
+                needle=b"b-initial-comment", controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            if b"b-initial-comment" not in refreshing:
+                raise AssertionError("page omission cleared the refreshing exact detail")
 
-            send_and_wait(process, master_fd, output, b"\r", b"a-recovered-detail")
+            release_and_wait_for_frame(
+                process, master_fd, output, late_b, b"b-late-comment"
+            )
+            # Prove the page is still empty after the exact detail becomes ready.
+            # It must not insert the historical detail into the ranked feed.
+            fixtures["/api/v1/board/post-b?format=flat"] = (
+                404, {"error": "fixture-exact-post-not-found"}
+            )
+            failed = send_and_wait(
+                process, master_fd, output, b"R", b"fixture-exact-post-not-found"
+            )
+            if b"Board post load failed" not in CSI_RE.sub(b"", failed):
+                raise AssertionError("the exact lookup failure was not shown")
+            send_and_wait(
+                process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (0)")
+            )
             os.write(master_fd, b"q")
             completed = True
         finally:
@@ -11892,7 +11896,7 @@ def run_keyboard_regression(executable: str) -> None:
     board_selection_fixtures = board_selection_http_fixtures()
     board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
-    missing_target_fixtures, late_b = board_missing_target_http_fixtures()
+    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
     chat_visibility_fixtures = chat_clarity_http_fixtures()
     lanes_fixtures = keeper_runtime_http_fixtures()
@@ -12436,8 +12440,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Board missing target recovery",
-        interact=board_missing_target_interaction(missing_target_fixtures, late_b),
+        description="Board exact detail survives page omission",
+        interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
         http_fixtures=missing_target_fixtures,
     )
     run_terminal_scenario(

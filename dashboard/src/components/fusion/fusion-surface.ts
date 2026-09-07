@@ -10,12 +10,15 @@ import {
   fusionEvidenceRequests,
   loadFusionRunEvidence,
   fusionRuns,
+  fusionRunObservation,
+  fusionRunsError,
   fusionRunsLoading,
   refreshFusionBoard,
   refreshFusionRuns,
 } from '../../store'
 import { registerFusionBoardRefresh } from '../../sse-store'
 import { FusionRunForm } from './fusion-run-form'
+import { FusionHistoricalDetail, FusionReplayNotice } from './fusion-historical-evidence'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { RichContent } from '../common/rich-content'
@@ -1313,11 +1316,20 @@ export function FusionSurface() {
   // button makes (#21822).
   useEffect(() => registerFusionBoardRefresh(() => { void refreshFusionBoard() }), [])
   const posts = fusionBoardPosts.value
-  const runs = useMemo(() => buildFusionRuns(posts), [posts])
+  const observation = fusionRunObservation.value
+  const history = observation?.historicalEvidence ?? []
+  // A historical Board reference is not a recovered run. Even if its post is
+  // also in the recent Board window, keep it out of lifecycle projections.
+  const runs = useMemo(() => buildFusionRuns(posts).filter(run =>
+    !history.some(evidence => evidence.runId === run.runId)), [posts, history])
   const registryRuns = fusionRuns.value
   const merged = useMemo(() => buildMergedRuns(runs, registryRuns), [runs, registryRuns])
   const boardError = fusionBoardError.value
   const selectedRunId = route.value.params.run_id ?? route.value.params.run
+  const selectedPostId = route.value.params.post_id
+  const selectedHistory = history.find(row => row.runId === selectedRunId
+    && (selectedPostId === undefined || row.postId === selectedPostId))
+    ?? (merged.length === 0 && selectedRunId === undefined ? history[0] : undefined)
   // A registry-only record proves lifecycle state, but it cannot populate the
   // panel/judge evidence workspace. Without an explicit routed selection,
   // open the newest board-backed run so the default detail pane is useful;
@@ -1338,7 +1350,7 @@ export function FusionSurface() {
   //
   // Runs once per run id, and the store drops that record when the list is
   // refetched, so a deliberation that lands its post later is asked again.
-  const unresolvedRunId = selected?.kind === 'registry' ? selected.runId : null
+  const unresolvedRunId = !selectedHistory && selected?.kind === 'registry' ? selected.runId : null
   const evidenceRequested = unresolvedRunId !== null
     && fusionEvidenceRequests.value.has(unresolvedRunId)
   useEffect(() => {
@@ -1361,9 +1373,15 @@ export function FusionSurface() {
   return html`
     <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
       <div class="fus-reality-notice" data-testid="fusion-reality-notice" role="status">
-        <strong>부분 지원</strong>
-        <span>보드 sink + registry 관측 · live JoJ judges 미구성 시 fail-closed</span>
+        <strong>Fusion 관측</strong>
+        <span>패널과 Judge의 결과 및 보드 원문</span>
       </div>
+      <details class="fus-block"><summary>호출 방식</summary><p>Keeper는 도구 <code>masc_fusion</code>을 호출해 preset의 패널과 심판을 실행합니다.
+        별도의 instruction Skill이 아니며, 결과는 비동기로 도착해 보드 원문과 연결됩니다.
+        토큰과 비용은 제공된 관측값만 표시합니다.</p></details>
+      ${observation ? html`<${FusionReplayNotice} replay=${observation.replay} />` : null}
+      ${fusionRunsError.value ? html`<div class="fus-board-error" role="alert">
+        레지스트리 읽기 실패 · ${fusionRunsError.value} · 표시된 기록은 이전 읽기입니다.</div>` : null}
       <details class="fus-block" data-testid="fusion-run-form-disclosure">
         <summary>심의 실행</summary>
         <${FusionRunForm} />
@@ -1393,7 +1411,7 @@ export function FusionSurface() {
               : null}
             <span
               class="fus-list-truth"
-              title="보드 sink · registry 관측 — judges 미구성 시 live JoJ는 fail-closed"
+              title="레지스트리 실행 기록과 보드 원문 관측"
             >관측</span>
             <button
               type="button"
@@ -1408,7 +1426,7 @@ export function FusionSurface() {
                 : '↻'}
             </button>
           </div>
-          ${merged.length === 0
+          ${merged.length === 0 && history.length === 0
             ? html`<div class="fus-list-scroll"><div class="ov-empty">심의 런이 없습니다</div></div>`
             : html`
                 <div class="fus-list-scroll">
@@ -1417,13 +1435,24 @@ export function FusionSurface() {
                         key=${run.runId}
                         run=${run.view}
                         startedAt=${run.startedAt}
-                        active=${selected?.runId === run.runId}
+                        active=${!selectedHistory && selected?.runId === run.runId}
                       />`
                     : html`<${FusionRegistryRow}
                         key=${run.runId}
                         record=${run.record}
-                        active=${selected?.runId === run.runId}
+                        active=${!selectedHistory && selected?.runId === run.runId}
                       />`)}
+                  ${history.length > 0 ? html`<div class="fus-list-h"><h4>보드에 남은 원문</h4>
+                      <span>${history.length}</span></div>` : null}
+                  ${history.map(evidence => html`<button key=${evidence.postId} type="button"
+                    class=${`fus-run-row fus-row ${selectedHistory?.postId === evidence.postId ? 'active sel' : ''} ${ringFocusClasses()}`}
+                    aria-current=${selectedHistory?.postId === evidence.postId ? 'true' : undefined}
+                    data-testid="fusion-historical-row" data-post-id=${evidence.postId}
+                    onClick=${() => replaceRoute('fusion', { run_id: evidence.runId, post_id: evidence.postId })}>
+                    <span class="fus-row-h"><span class="fus-run-id mono">${evidence.runId}</span></span>
+                    <strong class="fus-row-prompt">${evidence.title}</strong>
+                    <span>원문 보존 · 실행 상태 미확인</span>
+                  </button>`)}
                   ${hiddenCount > 0
                     ? html`<button
                         type="button"
@@ -1441,7 +1470,9 @@ export function FusionSurface() {
               `}
         </aside>
 
-        ${merged.length === 0
+        ${selectedHistory
+          ? html`<${FusionHistoricalDetail} key=${selectedHistory.postId} evidence=${selectedHistory} />`
+          : merged.length === 0
           ? html`
               <div class="fus-run-scroll" data-testid="fusion-empty">
                 <div class="fus-block">

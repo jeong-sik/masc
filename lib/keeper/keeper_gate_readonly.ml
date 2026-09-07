@@ -1,33 +1,57 @@
-(** Deterministic observation-only classification for Keeper tool_execute
-    gate requests.
+(** Pure static observation classification for the external-effect Gate.
 
-    The configured contextual judge's authority is "the concrete effect's
-    safety" — never why the Keeper chose the request
-    (config/prompts/judge.md, slot effect). For one closed class that question has
-    a deterministic answer: a shell-less argv (no redirection, pipe, or
-    command substitution is expressible) whose command is observation-only,
-    running inside a per-keeper disposable guest (docker container or
-    microvm). Those requests are allowed without a
-    judgment call and without queueing; everything else — every write-capable
-    command, every unknown command, every host-sandbox request, every
-    non-tool_execute operation — falls through to the configured gate mode
-    unchanged.
+    A missing static proof sends the request to the existing boxed execution
+    or configured Judge path. Git diff-family commands may run configured
+    helpers or write an output file, and a global configuration override can
+    change the effect of an otherwise observational command. Their reasons
+    remain typed through argv, Shell IR and the request projection.
 
-    The tables are closed on purpose: admitting a command is a reviewed code
-    change, not a configuration knob. When classification is uncertain the
-    answer is always [false] — the request goes to the configured path.
+    This bounded Git correction retains the established policy for other
+    commands; it is not a complete effect proof for every Unix/Git option. *)
 
-    The sandbox question is answered by the typed [sandbox_profile] the gate
-    request carries, through
-    [Keeper_types_profile_sandbox.runs_in_disposable_guest] — never by
-    comparing wire strings. Only per-keeper disposable guests qualify. A
-    microvm guest runs its own Linux kernel behind the hypervisor with
-    --cap-drop ALL, --read-only and Network_none by default, and the exec
-    shim spawns the payload with [Unix.execvpe] — argv, no shell — so the
-    premise "shell-less observation-only argv inside a disposable guest"
-    holds at least as strongly as under docker. Remote_ssh is transport-only
-    (its container knobs are not reproduced and the network is inherited),
-    so it stays with the judge. *)
+type git_command = Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
+
+type observation_reason =
+  | Git_configuration_override
+  | Git_command_requires_execution of git_command
+  | Unproven_request
+
+type classification =
+  | Static_observation
+  | Needs_observation of observation_reason
+
+let git_command_name = function
+  | Diff -> "diff"
+  | Log -> "log"
+  | Show -> "show"
+  | Grep -> "grep"
+  | Reflog -> "reflog"
+  | Whatchanged -> "whatchanged"
+  | Blame -> "blame"
+  | Annotate -> "annotate"
+;;
+
+let classification_to_yojson = function
+  | Static_observation -> `Assoc [ "kind", `String "static_observation" ]
+  | Needs_observation reason ->
+    let reason_fields =
+      match reason with
+      | Git_configuration_override -> [ "kind", `String "git_configuration_override" ]
+      | Git_command_requires_execution command ->
+        [ "kind", `String "git_command_requires_execution"
+        ; "command", `String (git_command_name command)
+        ]
+      | Unproven_request -> [ "kind", `String "unproven_request" ]
+    in
+    `Assoc
+      [ "kind", `String "needs_observation"
+      ; "reason", `Assoc reason_fields
+      ]
+;;
+
+let static_if proven =
+  if proven then Static_observation else Needs_observation Unproven_request
+;;
 
 (* ── Command tables ──────────────────────────────────────────────────── *)
 
@@ -50,18 +74,32 @@ let observation_commands =
   ; "true"; "false"; "base64"; "jq"; "id"; "uptime"
   ]
 
-(* git subcommands that read only, in every argument shape they accept.
-   [merge-base], [rev-list] and [cherry] were added 2026-09-05: over the two
-   days before, 21 judged requests carried one of them as a stage, and
-   [git -C clone-probe rev-list --count HEAD..origin/main] was the first call
-   a microvm keeper sent to the judge after the RFC-0421 restart. None of the
-   three has a flag that writes. *)
+(* The existing static Git policy outside this correction. Diff-family,
+   helper-capable and reflog commands are handled separately below, never
+   admitted by this table merely because their command name sounds like a read. *)
 let git_read_subcommands =
-  [ "status"; "diff"; "log"; "show"; "blame"; "annotate"; "reflog"
-  ; "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
-  ; "ls-files"; "ls-remote"; "ls-tree"
-  ; "whatchanged"; "cat-file"; "name-rev"; "grep"
+  [ "status"; "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
+  ; "ls-files"; "ls-remote"; "ls-tree"; "cat-file"; "name-rev"
   ]
+
+(* git-diff/git-log document --output and external helpers. git-grep may
+   invoke a pager; reflog includes write/delete/expire actions. Whatchanged
+   shares log's machinery, and builtin/blame.c enables textconv for both
+   blame and annotate. Absence of a flag on this argv proves none of those
+   repository-configured effects absent.
+   Sources: git-scm.com/docs/{git-diff,git-log,git-grep,git-reflog,git-whatchanged};
+   github.com/git/git/blob/v2.50.1/builtin/blame.c (allow_textconv). *)
+let git_command_requiring_execution = function
+  | "diff" -> Some Diff
+  | "log" -> Some Log
+  | "show" -> Some Show
+  | "grep" -> Some Grep
+  | "reflog" -> Some Reflog
+  | "whatchanged" -> Some Whatchanged
+  | "blame" -> Some Blame
+  | "annotate" -> Some Annotate
+  | _ -> None
+;;
 
 (* gh subcommands that only read, keyed by their family. A family is listed
    with the exact verbs that read; every other verb of that family — and every
@@ -133,7 +171,7 @@ let gh_argv_is_read argv =
 
 (* git global options that consume the next argv slot before the
    subcommand. *)
-let git_global_flag_with_value = [ "-C"; "-c"; "--git-dir"; "--work-tree" ]
+let git_global_flag_with_value = [ "-C"; "--git-dir"; "--work-tree" ]
 
 let git_global_standalone =
   [ "--no-pager"; "--no-optional-locks"; "--literal-pathspecs"; "--no-replace-objects" ]
@@ -177,41 +215,61 @@ let sets_system_time flag =
 
 (* ── argv classification ─────────────────────────────────────────────── *)
 
-let git_argv_is_read argv =
-  let rec skip_globals = function
+(* Decode a long-option token at '=' before comparing its exact name.
+   This is Git's --config-env=<name>=<envvar> syntax, not a substring search
+   over a command or the configuration value. Unknown option spellings stay
+   unproven. In particular, Git does not accept global -cVALUE. *)
+let option_name token =
+  match String.index_opt token '=' with
+  | None -> token
+  | Some index -> String.sub token 0 index
+;;
+
+let classify_git_argv argv =
+  let rec globals = function
+    | "-c" :: _ -> Needs_observation Git_configuration_override
+    | flag :: _ when String.equal (option_name flag) "--config-env" ->
+      Needs_observation Git_configuration_override
     | flag :: rest when List.mem flag git_global_flag_with_value ->
-      (match rest with [] -> None | _ :: tail -> skip_globals tail)
-    | flag :: rest when List.mem flag git_global_standalone -> skip_globals rest
-    | sub :: rest -> Some (sub, rest)
-    | [] -> None
+      (match rest with
+       | [] -> Needs_observation Unproven_request
+       | _value :: tail -> globals tail)
+    | flag :: rest when List.mem flag git_global_standalone -> globals rest
+    | sub :: rest ->
+      (match git_command_requiring_execution sub with
+       | Some command -> Needs_observation (Git_command_requires_execution command)
+       | None ->
+         static_if
+           (match sub with
+            | "branch" -> List.for_all (fun flag -> List.mem flag git_branch_listing_flags) rest
+            | "tag" ->
+              List.for_all (fun flag -> String.equal flag "-l" || String.equal flag "--list" || String.starts_with ~prefix:"-n" flag) rest
+            | "remote" -> rest = [] || rest = [ "-v" ] || rest = [ "--verbose" ]
+            | sub -> List.mem sub git_read_subcommands))
+    | [] -> Needs_observation Unproven_request
   in
-  match skip_globals argv with
-  | None -> false
-  | Some ("branch", rest) -> List.for_all (fun flag -> List.mem flag git_branch_listing_flags) rest
-  | Some ("tag", rest) ->
-    List.for_all (fun flag -> String.equal flag "-l" || String.equal flag "--list" || String.starts_with ~prefix:"-n" flag) rest
-  | Some ("remote", rest) -> rest = [] || rest = [ "-v" ] || rest = [ "--verbose" ]
-  | Some (sub, _) -> List.mem sub git_read_subcommands
+  globals argv
 ;;
 
 let classify_argv argv =
   match argv with
-  | [] | "" :: _ -> false
+  | [] | "" :: _ -> Needs_observation Unproven_request
+  | "git" :: rest -> classify_git_argv rest
   | command :: rest ->
     let rejected predicate = List.exists predicate rest in
-    (match command with
-     | "env" -> rest = [] (* [env CMD …] executes CMD; only bare [env] prints. *)
-     | "find" -> not (rejected find_flag_writes_or_execs)
-     | "sort" | "diff" -> not (rejected writes_to_file)
-     | "rg" -> not (rejected rg_flag_runs_preprocessor)
-     | "date" -> not (rejected sets_system_time)
-     | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && String.sub flag 0 1 = "-") rest
-     (* uniq writes its second operand to a file; one operand is a read. *)
-     | "uniq" ->
-       List.length (List.filter (fun arg -> String.length arg = 0 || String.sub arg 0 1 <> "-") rest) <= 1
-     | "git" -> git_argv_is_read rest
-     | "gh" -> gh_argv_is_read rest
-     | command -> List.mem command observation_commands)
+    static_if
+      (match command with
+       | "env" -> rest = [] (* [env CMD …] executes CMD; only bare [env] prints. *)
+       | "find" -> not (rejected find_flag_writes_or_execs)
+       | "sort" | "diff" -> not (rejected writes_to_file)
+       | "rg" -> not (rejected rg_flag_runs_preprocessor)
+       | "date" -> not (rejected sets_system_time)
+       | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && String.sub flag 0 1 = "-") rest
+       (* uniq writes its second operand to a file; one operand is a read. *)
+       | "uniq" ->
+         List.length (List.filter (fun arg -> String.length arg = 0 || String.sub arg 0 1 <> "-") rest) <= 1
+       | "gh" -> gh_argv_is_read rest
+       | command -> List.mem command observation_commands)
 ;;
 
 (* ── Gate request decoding ───────────────────────────────────────────── *)
@@ -289,8 +347,8 @@ let shell_directory_step = "cd"
 
    Stripping is sound only for names on a closed list. Arbitrary names are
    not inert: PATH=. swaps interpreter lookup; LD_PRELOAD injects code;
-   BASH_ENV/ENV run shell startup scripts; GIT_EXTERNAL_DIFF makes an
-   in-table [git diff] exec a chosen program; GIT_CONFIG_COUNT with
+   BASH_ENV/ENV run shell startup scripts; GIT_EXTERNAL_DIFF makes a
+   [git diff] exec a chosen program; GIT_CONFIG_COUNT with
    GIT_CONFIG_KEY_n/VALUE_n injects arbitrary config (core.pager exec);
    GIT_INDEX_FILE redirects the stat cache [git status] refreshes;
    PAGER/GH_PAGER spawn a process; GIT_SSH_COMMAND swaps the transport. A
@@ -332,24 +390,31 @@ let env_assignments_inert (env : (string * Ir.arg) list) : bool =
 ;;
 
 let classify_simple (simple : Ir.simple) =
-  env_assignments_inert simple.Ir.env
-  && List.for_all redirect_is_observation simple.Ir.redirects
-  &&
-  match literals_of_args simple.Ir.args with
-  | None -> false
-  | Some args ->
-    let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
-    String.equal bin shell_directory_step || classify_argv (bin :: args)
+  if not (env_assignments_inert simple.Ir.env)
+     || not (List.for_all redirect_is_observation simple.Ir.redirects)
+  then Needs_observation Unproven_request
+  else
+    match literals_of_args simple.Ir.args with
+    | None -> Needs_observation Unproven_request
+    | Some args ->
+      let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
+      if String.equal bin shell_directory_step then Static_observation
+      else classify_argv (bin :: args)
 ;;
 
-(* Every stage of a pipeline and every command of a sequence must classify:
-   [a && b], [a; b], [a || b] and [a | b] each run every named command in
-   some path, and the connector decides nothing about effects. *)
+(* Every stage must have a static proof; the first missing proof supplies
+   the execution reason instead of collapsing it to a boolean. *)
 let rec classify_ir = function
   | Ir.Simple simple -> classify_simple simple
-  | Ir.Pipeline stages -> stages <> [] && List.for_all classify_ir stages
-  | Ir.Sequence { head; tail } ->
-    classify_ir head && List.for_all (fun (_, part) -> classify_ir part) tail
+  | Ir.Pipeline [] -> Needs_observation Unproven_request
+  | Ir.Pipeline stages -> classify_stages stages
+  | Ir.Sequence { head; tail } -> classify_stages (head :: List.map snd tail)
+and classify_stages = function
+  | [] -> Static_observation
+  | stage :: rest ->
+    (match classify_ir stage with
+     | Static_observation -> classify_stages rest
+     | Needs_observation _ as classification -> classification)
 ;;
 
 (* The dispatcher's own syntax policy: pipes and redirects are representable,
@@ -366,7 +431,8 @@ let classify_script script =
       ~sandbox:Shell_gate.host_sandbox
   with
   | Shell_gate.Allow { Shell_gate.ast; _ } -> classify_ir ast
-  | Shell_gate.Reject _ | Shell_gate.Cannot_parse _ | Shell_gate.Too_complex _ -> false
+  | Shell_gate.Reject _ | Shell_gate.Cannot_parse _ | Shell_gate.Too_complex _ ->
+    Needs_observation Unproven_request
 ;;
 
 (* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: the command
@@ -377,7 +443,7 @@ let classify_script script =
    level of the envelope are display/audit data only — the sandbox decision
    reads the typed [sandbox_profile] the request carries, never these
    strings. *)
-let command_is_observation input =
+let classify_command input =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "input" fields with
@@ -389,17 +455,18 @@ let command_is_observation input =
               (function `String value when value <> "" -> Some value | _ -> None)
               items
           in
-          List.length strings = List.length items
-          &&
-          (match Keeper_tooling.Shell_costume.of_argv strings with
-           | Some costume -> classify_script costume.Keeper_tooling.Shell_costume.script
-           | None -> classify_argv strings)
+          if List.length strings <> List.length items
+          then Needs_observation Unproven_request
+          else
+            (match Keeper_tooling.Shell_costume.of_argv strings with
+             | Some costume -> classify_script costume.Keeper_tooling.Shell_costume.script
+             | None -> classify_argv strings)
         | _ ->
           (match List.assoc_opt "script" inner with
            | Some (`String script) -> classify_script script
-           | _ -> false))
-     | _ -> false)
-  | _ -> false
+           | _ -> Needs_observation Unproven_request))
+     | _ -> Needs_observation Unproven_request)
+  | _ -> Needs_observation Unproven_request
 ;;
 
 (* ── network_read ────────────────────────────────────────────────────── *)
@@ -435,26 +502,23 @@ let network_capability_of_gate_input input =
   | _ -> None
 ;;
 
-(* [sandbox_profile = None] reaching this check is not a tool_execute
-   escape hatch. Measured over lib/ (2026-09-05): every gate_request
-   carrying profile None originates from exactly four places — the
-   identity_call in keeper_identity_gate, keeper_tool_in_process_runtime,
-   the write path in keeper_tool_filesystem_runtime, and the empty
-   defaults record in keeper_types_profile_defaults — while the
-   tool_execute origin in keeper_tool_execute_runtime always sends Some
-   dispatch_bundle.sandbox_profile, so None cannot describe a
-   disposable-guest command today. [None -> false] stays as fail-closed:
-   a future origin that forgets its profile must lose, not win, the
-   observation fast path. *)
-let observation_only_request ~operation ~sandbox_profile ~input =
-  (String.equal operation "tool_execute"
-   && (match sandbox_profile with
-       | Some profile -> Keeper_types_profile_sandbox.runs_in_disposable_guest profile
-       | None -> false)
-   && command_is_observation input)
-  || (String.equal operation "network_read"
-      && (match network_capability_of_gate_input input with
-          | Some capability ->
-            List.mem capability observation_network_capabilities
+(* A missing/remote profile cannot turn a static command into an unboxed
+   observation request. A command-specific reason still survives that
+   profile check, so execution records can say why Git needed the box. *)
+let classify_request ~operation ~sandbox_profile ~input =
+  match operation with
+  | "tool_execute" ->
+    (match classify_command input with
+     | Needs_observation _ as classification -> classification
+     | Static_observation ->
+       static_if
+         (match sandbox_profile with
+          | Some profile -> Keeper_types_profile_sandbox.runs_in_disposable_guest profile
           | None -> false))
+  | "network_read" ->
+    static_if
+      (match network_capability_of_gate_input input with
+       | Some capability -> List.mem capability observation_network_capabilities
+       | None -> false)
+  | _ -> Needs_observation Unproven_request
 ;;

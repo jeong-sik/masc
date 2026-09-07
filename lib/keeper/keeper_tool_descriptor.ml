@@ -607,6 +607,13 @@ let execute_output_schema =
           ; "output_artifact", normalized_artifact_ref_schema
           ; "stdout_artifact", normalized_artifact_ref_schema
           ; "stderr_artifact", normalized_artifact_ref_schema
+          ; ( "output_completeness"
+            , `Assoc
+                [ "type", `String "string"
+                ; "enum", `List [ `String "complete"; `String "capture_only" ]
+                ; "description", `String
+                    "complete means both streams reached EOF and were preserved; capture_only means the producer supplied retained output without that proof."
+                ] )
           ; "typed", `Assoc [ "type", `String "boolean" ]
           ; "execution_time_ms", `Assoc [ "type", `String "integer" ]
           ] )

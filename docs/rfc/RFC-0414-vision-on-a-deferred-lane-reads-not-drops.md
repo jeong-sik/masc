@@ -12,7 +12,7 @@ Relates to: RFC-0265 (graceful media degrade), RFC-keeper-vision-delegation, #33
 ## Problem
 
 A text-only keeper (`ollama_cloud.ollama-cloud-deepseek-v4-flash-0731`,
-`kidsnote-pr-jira-checker`) received a pasted image and could not use it. The
+`exampleorg-pr-jira-checker`) received a pasted image and could not use it. The
 first symptom was a crash (#33034): the image reached the text-only judgement
 model `glm:glm-5.3` and the multimodal gate rejected it. #33037 stopped the
 crash by degrading — stripping the image and running text-only — but that

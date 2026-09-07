@@ -848,6 +848,106 @@ let test_transition_wal_commit_observer_exactly_once () =
          Alcotest.(check int) "WAL replay does not notify" 1 !notifications))
 ;;
 
+let test_primary_replacement_cannot_poison_cache () =
+  with_temp_dir "keeper-primary-cache-replacement" (fun base_path ->
+    let keeper_name = "cache-replacement" in
+    Persistence.update_result ~base_path ~keeper_name (fun q ->
+      Queue.enqueue q (stimulus "original" 1.0)) |> require_ok "seed snapshot";
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    let primary = Filename.concat dir Persistence.snapshot_filename in
+    let replacement = Filename.concat dir "replacement" in
+    let bytes = {|{"schema":"unsupported-replacement","pending":["retain"]}|} in
+    Out_channel.with_open_bin replacement (fun oc -> output_string oc bytes);
+    let interleaved = ref false in
+    let result = Persistence.For_testing.load_state_with_read_interleave
+      ~base_path ~keeper_name
+      ~after_read:(fun () -> interleaved := true; Unix.rename replacement primary) in
+    Alcotest.(check bool) "replacement occurred after decode" true !interleaved;
+    (match result with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "replacement was cached as original state");
+    (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+       (stimulus "new" 2.0) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "cache bypass overwrote replacement evidence");
+    Alcotest.(check string) "replacement bytes retained" bytes
+      (In_channel.with_open_bin primary In_channel.input_all))
+;;
+
+let test_dangling_primary_is_not_absence () =
+  with_temp_dir "keeper-primary-dangling" (fun base_path ->
+    let keeper_name = "dangling-primary" in
+    Persistence.update_result ~base_path ~keeper_name (fun q ->
+      Queue.enqueue q (stimulus "retained" 1.0)) |> require_ok "seed primary";
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    let primary = Filename.concat dir Persistence.snapshot_filename in
+    Unix.unlink primary;
+    let missing_target = Filename.concat dir "missing-target" in
+    Unix.symlink missing_target primary;
+    (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+       (stimulus "replacement" 2.0) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "dangling primary link treated as first boot");
+    Alcotest.(check string) "primary link retained" missing_target (Unix.readlink primary);
+    Alcotest.(check bool) "missing target not created" false (Sys.file_exists missing_target))
+;;
+
+let test_undecodable_primary_retains_wal_and_absence_recovers () =
+  with_temp_dir "keeper-primary-wal-authority" (fun base_path ->
+    let keeper_name = "primary-wal-authority" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      pending |> fun q -> Queue.enqueue q (stimulus "completed" 1.0)
+              |> fun q -> Queue.enqueue q (stimulus "sibling" 2.0))
+    |> require_ok "seed sibling sources";
+    let selection = Persistence.select_when_result ~base_path ~keeper_name
+      ~now:3.0 ~ready:(fun _ -> true)
+      |> require_ok "select" |> require_some "selection" in
+    Persistence.terminalize_pending_turn_completed_result
+      ~base_path ~keeper_name ~applied_at:4.0 ~selection ()
+    |> require_ok "durably record completion" |> fun _ ->
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    let primary = Filename.concat dir Persistence.snapshot_filename in
+    let wal = Filename.concat dir Persistence.transition_wal_filename in
+    let read path = In_channel.with_open_bin path In_channel.input_all in
+    let wal_bytes = read wal in
+    Alcotest.(check bool) "real transition WAL exists" true (String.length wal_bytes > 0);
+    let invalid = match Yojson.Safe.from_file primary with
+      | `Assoc fields -> Yojson.Safe.to_string
+          (`Assoc (("schema", `String "unsupported-schema") :: List.remove_assoc "schema" fields))
+      | _ -> Alcotest.fail "primary was not an object" in
+    Out_channel.with_open_bin primary (fun channel -> output_string channel invalid);
+    (match Persistence.load_state_result ~base_path ~keeper_name with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "valid WAL replaced undecodable primary authority");
+    (match Persistence.validate_state_read_only_result ~base_path ~keeper_name with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "read-only validation ignored undecodable primary");
+    (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+       (stimulus "new-source" 5.0) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "new source overwrote undecodable primary");
+    Alcotest.(check string) "primary bytes retained" invalid (read primary);
+    Alcotest.(check string) "WAL bytes retained" wal_bytes (read wal);
+    (* Physical absence is the separate recovery contract. The complete WAL
+       pre-state must recover the sibling and the exact completion receipt. *)
+    Unix.unlink primary;
+    let recovered = Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "WAL-only recovery after physical absence" in
+    Alcotest.(check (list string)) "sibling recovered" ["sibling"]
+      (post_ids (State.pending recovered));
+    Alcotest.(check int) "completion outbox recovered" 1
+      (List.length (State.transition_outbox recovered));
+    let replay = Persistence.terminalize_pending_turn_completed_result
+      ~base_path ~keeper_name ~applied_at:6.0 ~selection ()
+      |> require_ok "completion replay after WAL-only recovery" in
+    (match replay with
+     | Persistence.Transition_already_applied _ -> ()
+     | Persistence.Transition_applied _ | Persistence.Transition_committed_followup_failed _ ->
+         Alcotest.fail "completion replay lost its disposition evidence");
+    Alcotest.(check string) "unprojected recovery keeps WAL" wal_bytes (read wal))
+;;
+
 let test_durable_peek_ack_restart () =
   with_temp_dir "keeper-pending-v12" (fun base_path ->
     let keeper_name = "fresh-keeper" in
@@ -1388,17 +1488,21 @@ let test_unchanged_snapshot_is_not_reparsed () =
       "a write is visible through the cache"
       true
       (post_ids (State.pending third) <> post_ids (State.pending second));
-    (* And it is visible without paying for the parse: the writer holds the
-       state it wrote, so the read after a write is a hit rather than a
-       decode of bytes this process just produced. *)
+    (* A write has no read-bound file identity. The first read decodes it,
+       and subsequent unchanged reads may reuse that observed snapshot. *)
     Alcotest.(check int)
-      "the read after a write is a hit"
-      (hits_before + 1)
+      "the first read after a write decodes"
+      hits_before
       (Persistence.For_testing.snapshot_cache_hits ());
     Alcotest.(check int)
       "and it was one read"
       (reads_before + 1)
-      (Persistence.For_testing.snapshot_cache_reads ()))
+      (Persistence.For_testing.snapshot_cache_reads ());
+    let fourth = read () in
+    Alcotest.(check int) "the next unchanged read hits"
+      (hits_before + 1) (Persistence.For_testing.snapshot_cache_hits ());
+    Alcotest.(check (list string)) "cached state matches the decoded write"
+      (post_ids (State.pending third)) (post_ids (State.pending fourth)))
 ;;
 
 let () =
@@ -1461,6 +1565,12 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
+        ; Alcotest.test_case "undecodable primary retains WAL; absence recovers"
+            `Quick test_undecodable_primary_retains_wal_and_absence_recovers
+        ; Alcotest.test_case "dangling primary is not absence"
+            `Quick test_dangling_primary_is_not_absence
+        ; Alcotest.test_case "primary replacement cannot poison cache"
+            `Quick test_primary_replacement_cannot_poison_cache
         ; Alcotest.test_case
             "checkpoint retention spends the caller snapshot"
             `Quick

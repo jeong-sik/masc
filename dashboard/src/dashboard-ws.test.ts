@@ -1029,7 +1029,7 @@ describe('dashboard websocket route subscriptions', () => {
     const socket = await connectReadyDashboard()
     const event = {
       type: 'keeper_chat_appended',
-      name: 'kidsnote',
+      name: 'exampleorg',
       source: 'autonomous_turn',
     }
 

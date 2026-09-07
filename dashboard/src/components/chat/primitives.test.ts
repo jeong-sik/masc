@@ -298,7 +298,7 @@ describe('ChatTranscript', () => {
             id: 'slack-thread-post-done',
             role: 'assistant',
             source: 'direct_assistant',
-            label: 'kidsnote',
+            label: 'exampleorg',
             text: '',
             rawText: '',
             details: {

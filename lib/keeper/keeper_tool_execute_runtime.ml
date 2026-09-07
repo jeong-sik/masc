@@ -294,6 +294,8 @@ let handle_tool_execute_typed
                    ~actual:Remote_ssh)
           | Runtime binding ->
             guest_sandbox_target
+              ~capture_dir:(Keeper_execute_output_files.capture_directory
+                ~base_path:config.base_path)
               ~binding
               ~meta
               ~cwd
@@ -919,34 +921,42 @@ let handle_tool_execute_typed
               exit_report.Keeper_tool_execute_exit_report.error_fields
             in
             let output_fields =
-              if succeeded
-              then
+              match result.output_files with
+              | Some files ->
+                Keeper_execute_output_files.publish
+                  ~base_path:config.base_path ~redaction:output_redaction files
+              | None ->
                 composable_output_fields
-                  ~base_path:config.base_path
-                  ~stdout
-                  ~stderr
-                  ~output
-              else Ok [ "output", `String output ]
+                  ~base_path:config.base_path ~stdout ~stderr ~output
+                |> Result.map (fun fields ->
+                  { Keeper_execute_output_files.fields =
+                      ("output_completeness", `String "capture_only") :: fields
+                  ; release_sources = (fun () -> ())
+                  })
+                |> Result.map_error (fun message ->
+                  Keeper_execute_output_files.Persistence_failed message)
             in
             (match output_fields with
              | Error detail ->
                Log.Keeper.warn
                  ~keeper_name:meta.name
                  "execute output artifact persistence failed after process completion: %s"
-                 detail;
+                 (Keeper_execute_output_files.error_to_string detail);
                authorized
                  (Keeper_tool_execution.failure
                     ~effect_disposition:Tool_result.Proven_post_effect
                     (error_json
                        ~fields:
                          ([ "typed", `Bool true
-                          ; "code", `String "execute_output_externalization_failed"
+                          ; "code", `String (Keeper_execute_output_files.error_code detail)
                           ; "status", status_json
+                          ; "output", `String output
                           ; "execution_time_ms", `Int elapsed_ms
                           ]
                           @ dispatched_model_location_fields)
-                       "Execute completed, but its oversized output artifact could not be persisted."))
-             | Ok output_fields ->
+                       "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
+             | Ok publication ->
+               let output_fields = publication.Keeper_execute_output_files.fields in
                let timeout_fields =
                  exit_report.Keeper_tool_execute_exit_report.timeout_fields
                in
@@ -989,7 +999,9 @@ let handle_tool_execute_typed
                        in
                        answered)
                   with
-                  | Ok result -> Keeper_tool_execution.of_tool_result result
+                  | Ok result ->
+                    publication.release_sources ();
+                    Keeper_tool_execution.of_tool_result result
                   | Error _ ->
                     Keeper_tool_execution.failure
                       ~effect_disposition:Tool_result.Proven_post_effect
@@ -998,6 +1010,7 @@ let handle_tool_execute_typed
                            ([ "typed", `Bool true
                             ; "code", `String "execute_result_manifest_failed"
                             ; "status", status_json
+                            ; "output", `String output
                             ; "execution_time_ms", `Int elapsed_ms
                             ]
                             @ dispatched_model_location_fields)

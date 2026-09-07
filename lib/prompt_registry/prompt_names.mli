@@ -39,6 +39,10 @@ val verification_evidence_posture_note_only : string
 val verification_evidence_posture_usable : string
 (** Rendered into a completion question whose snapshot holds [n] readable,
     untruncated artifacts. Variable: [usable_artifact_count]. *)
+val verification_image_evidence : string
+(** RFC-0436: rendered into a completion question whose goal blocks carry
+    binary image artifacts. Variable: [image_evidence_lines]. The lines are
+    data assembled in code; the header prose lives in the template. *)
 val keeper_observation_recovered_current_task : string
 val keeper_observation_current_task_absent : string
 val keeper_observation_current_task_absent_in_recovery : string

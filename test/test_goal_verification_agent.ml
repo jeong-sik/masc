@@ -189,7 +189,7 @@ type stub_behavior =
   | Stub_unavailable
 
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_
       ~on_tool_result ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     let answer verdict_json verdict =
@@ -303,7 +303,7 @@ let test_goal_proof_reads_the_workspace_playground () =
      agree, the way a real reviewer's do. *)
   let stated_reason = "measured pass rate 100% reaches the target" in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
       match lookup with
       | AR.No_lookup_surface ->
@@ -372,7 +372,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
      round trip is stubbed — the same reviewer answers both times. *)
   let verdicts = ref [] in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
       let dispatch =
         match lookup with
@@ -475,7 +475,7 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
   let reached = ref false in
   let layout_seen = ref [] in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
       (match lookup with
        | AR.No_lookup_surface -> fail "the crowded root produced no lookup surface"

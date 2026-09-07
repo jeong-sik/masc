@@ -306,7 +306,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
@@ -397,6 +397,7 @@ let install () =
           ~runtime_id:evaluator_runtime
           ~base_path
           ~goal:prompt
+          ?goal_blocks
           (* This reviewer carries its whole instruction in the goal; the
              review prose lives in config/prompts/verification.md and reaches
              [prompt]. Empty was the old default, so this is what has been

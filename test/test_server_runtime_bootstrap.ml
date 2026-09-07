@@ -2822,21 +2822,11 @@ let test_health_json_reaction_ledger_unavailable_shape () =
           |> to_int);
        Alcotest.(check bool) "unavailable durable discovery error null" true
          (reaction_ledger |> member "durable_event_queue_discovery_error" = `Null);
-       ignore
-         (reaction_ledger
-          |> member "durable_event_queue_stale_after_sec"
-          |> to_float);
-       Alcotest.(check int) "unavailable durable stale count" 0
-         (reaction_ledger |> member "durable_event_queue_stale_count" |> to_int);
-       Alcotest.(check int) "unavailable durable stale keeper count" 0
-         (reaction_ledger
-          |> member "durable_event_queue_stale_keeper_count"
-          |> to_int);
-       Alcotest.(check int) "unavailable durable stale rows empty" 0
-         (reaction_ledger
-          |> member "durable_event_queue_stale_by_keeper"
-          |> to_list
-          |> List.length))
+       let residence = reaction_ledger |> member "durable_event_queue_residence" in
+       Alcotest.(check bool) "unavailable queue residence is null" true
+         (residence |> member "oldest_age_seconds" = `Null);
+       Alcotest.(check string) "unavailable queue residence reason"
+         "queue_observation_incomplete" (residence |> member "reason" |> to_string))
 
 let test_health_json_owner_unavailable_shape () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in

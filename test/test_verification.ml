@@ -1097,7 +1097,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -1331,7 +1331,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some (Masc.Task.Anti_rationalization.Approve "")));
@@ -3253,6 +3253,77 @@ let test_a_binary_payload_is_adopted_and_filed () =
       Alcotest.(check bool) "without a request id there is no body field"
         false (bare |> member "body" != `Null))
 
+(* RFC-0436 §4.3: the judge reads a filed binary body back as base64, and
+   only an image format counts as an attached image. A body that was never
+   filed is an error, not a guess. *)
+let test_a_filed_binary_body_reads_back_and_only_images_attach () =
+  with_temp_dir (fun base_path ->
+      let png_bytes = "\x89PNG\r\n\x1a\n" in
+      let body =
+        VS.persist_binary_body
+          ~base_path ~request_id:"vrf-readback" ~index:0 png_bytes
+      in
+      let image_item =
+        VS.Evidence_artifact_binary
+          { reference = "artifact:shot.png"
+          ; bytes = String.length png_bytes
+          ; sha256 = "e3b0c442"
+          ; format = "png"
+          ; body
+          }
+      in
+      (match VS.read_binary_body_base64 ~base_path image_item with
+       | Ok encoded ->
+         Alcotest.(check string)
+           "the body reads back as base64"
+           (Base64.encode_string png_bytes) encoded
+       | Error detail -> Alcotest.failf "read failed: %s" detail);
+      (match
+         VS.read_binary_body_base64 ~base_path
+           (VS.Evidence_artifact_binary
+              { reference = "artifact:gone.bin"
+              ; bytes = 1
+              ; sha256 = "x"
+              ; format = "bin"
+              ; body = None
+              })
+       with
+       | Ok _ -> Alcotest.fail "a bodyless item must not read back"
+       | Error _ -> ());
+      (* A body above the capture ceiling is not delivered — the judge falls
+         back to the reference-and-hash line (RFC-0436 §4.5). *)
+      let oversized =
+        String.make (VS.verification_evidence_max_bytes + 1) 'x'
+      in
+      let big_body =
+        VS.persist_binary_body
+          ~base_path ~request_id:"vrf-readback" ~index:1 oversized
+      in
+      (match
+         VS.read_binary_body_base64 ~base_path
+           (VS.Evidence_artifact_binary
+              { reference = "artifact:big.png"
+              ; bytes = String.length oversized
+              ; sha256 = "y"
+              ; format = "png"
+              ; body = big_body
+              })
+       with
+       | Ok _ -> Alcotest.fail "an oversized body must not be delivered"
+       | Error detail ->
+         Alcotest.(check bool)
+           "the refusal names the ceiling" true
+           (Astring.String.is_infix ~affix:"delivery" detail));
+      Alcotest.(check (option string))
+        "png attaches as an image" (Some "image/png")
+        (VS.image_media_type_of_binary_format "png");
+      Alcotest.(check (option string))
+        "jpg attaches as image/jpeg" (Some "image/jpeg")
+        (VS.image_media_type_of_binary_format "jpg");
+      Alcotest.(check (option string))
+        "a markdown diff does not attach" None
+        (VS.image_media_type_of_binary_format "md"))
+
 let test_checkout_relative_artifact_is_not_guessed () =
   with_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -3587,5 +3658,7 @@ let () =
         test_an_injected_reader_answers_under_the_text_line;
       Alcotest.test_case "a binary payload is adopted and filed" `Quick
         test_a_binary_payload_is_adopted_and_filed;
+      Alcotest.test_case "a filed body reads back and only images attach" `Quick
+        test_a_filed_binary_body_reads_back_and_only_images_attach;
     ];
   ]

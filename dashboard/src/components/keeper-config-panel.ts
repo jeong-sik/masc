@@ -1452,7 +1452,7 @@ function ConfigRow({
    the tools do not say it. `gh` cannot reach github.com to check a token, so it
    reports the token as invalid; a Keeper reads that literally and tells its
    owner to re-authenticate, which changes nothing. Seen on
-   kidsnote-pr-jira-checker, 2026-09-03: a valid token, the right hosts.yml
+   exampleorg-pr-jira-checker, 2026-09-03: a valid token, the right hosts.yml
    mounted into the guest, and three rounds of re-authentication. */
 function NoNetworkCallout() {
   return html`

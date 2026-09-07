@@ -15,6 +15,10 @@ replaced Keeper names, absolute home paths, and long numeric channel ids with
 documentation-safe placeholders before saving. Every frame carries a badge
 saying so. No write action was performed.
 
+The IDE and Repositories frames were removed because organization-specific
+repository labels remained visible in their pixels. The retained frames are
+unchanged.
+
 ## Primary navigation
 
 | # | Screen | Route | Screenshot |
@@ -29,7 +33,7 @@ saying so. No write action was performed.
 | 8 | Board | `#board` | [PNG](08-board.png) |
 | 9 | Fusion | `#fusion` | [PNG](09-fusion.png) |
 | 10 | Logs | `#logs` | [PNG](10-logs.png) |
-| 11 | IDE | `#code?section=ide-shell` | [PNG](11-ide.png) |
+| 11 | IDE | `#code?section=ide-shell` | Removed: organization identifiers |
 | 12 | Connectors | `#connectors?section=connector-status` | [PNG](12-connectors.png) |
 | 13 | Settings | `#settings` | [PNG](13-settings.png) |
 
@@ -42,7 +46,7 @@ saying so. No write action was performed.
 | 16 | Runtime | `#monitoring?section=runtime` | [PNG](16-monitor-runtime.png) |
 | 17 | Observatory | `#monitoring?section=observatory` | [PNG](17-monitor-observatory.png) |
 | 18 | Plans & Goals | `#workspace?section=planning` | [PNG](18-work-plans-goals.png) |
-| 19 | Repositories | `#workspace?section=repositories` | [PNG](19-work-repositories.png) |
+| 19 | Repositories | `#workspace?section=repositories` | Removed: organization identifiers |
 | 20 | Verification | `#workspace?section=verification` | [PNG](20-work-verification.png) |
 
 ## Lab sections

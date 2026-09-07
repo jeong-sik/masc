@@ -144,6 +144,32 @@ val scan_utf8 : string -> utf8_scan
     reader classifies its bytes with the same scan the store applies, rather
     than a second opinion ({#33816}, RFC-0436 §4.1). *)
 
+val image_media_type_of_binary_format : string -> string option
+(** Whether a binary artifact's [format] is an image a runtime accepts as
+    attached input, and as which media type (RFC-0436 §4.3). The format
+    taxonomy stays with the store that produced it. *)
+
+val persist_binary_body :
+  base_path:string ->
+  ?request_id:string ->
+  ?index:int ->
+  string ->
+  string option
+(** File a binary artifact's bytes as the evidence body and answer the
+    masc-dir-relative path recorded on the item (RFC-0436 §4.2). [None] when
+    no request id was given — the hash still stands, the body is simply not
+    filed. Exposed so a test builds a filed item through the same filing the
+    capture path uses. *)
+
+val read_binary_body_base64 :
+  base_path:string -> submitted_evidence_item -> (string, string) result
+(** The filed body of a binary artifact read back as base64 for an attached
+    media block. [Error] when the item is not a binary artifact, filed no
+    body (decoded from persistence, not captured), the body file cannot be
+    read, or the body exceeds the capture ceiling
+    {!verification_evidence_max_bytes} — the judge then rests on the
+    reference-and-hash line in the prompt (RFC-0436 §4.4/§4.5). *)
+
 val snapshot_submitted_evidence_json :
   ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
   ?request_id:string ->

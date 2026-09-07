@@ -288,6 +288,45 @@ let evidence_posture_of_snapshot
   else Task.Anti_rationalization.Usable_artifacts usable
 ;;
 
+(* RFC-0436 §4.3: the binary image artifacts the judge receives as attached
+   blocks. An image whose format the runtimes do not take as attached input,
+   or whose filed body cannot be read back, stays out of the list — its
+   reference and hash remain in the prompt text, which is the §4.4 posture
+   for it. A failed read is not fatal to the review: the artifact is still
+   judgeable on the recorded hash and size. *)
+let evidence_images_of_snapshot ~base_path
+      (snapshot : Workspace_verification_store.submitted_evidence_access) :
+      Task.Anti_rationalization.evidence_image list =
+  let module Store = Workspace_verification_store in
+  match snapshot with
+  | Store.Evidence_unavailable _ -> []
+  | Store.Evidence_available { request = _; items } ->
+    List.filter_map
+      (fun (item : Store.submitted_evidence_item) ->
+         match item with
+         | Store.Evidence_artifact_binary
+             { reference; bytes; sha256; format; body = _ } ->
+           (match Store.image_media_type_of_binary_format format with
+            | None -> None
+            | Some media_type -> (
+              match Store.read_binary_body_base64 ~base_path item with
+              | Error _reason -> None
+              | Ok body_base64 ->
+                Some
+                  Task.Anti_rationalization.
+                    { image_reference = reference
+                    ; image_sha256 = sha256
+                    ; image_bytes = bytes
+                    ; image_media_type = media_type
+                    ; image_body_base64 = body_base64
+                    }))
+         | Store.Evidence_note _ -> None
+         | Store.Evidence_artifact _ -> None
+         | Store.Evidence_invalid_reference -> None
+         | Store.Evidence_artifact_unreadable _ -> None)
+      items
+;;
+
 type prepared_review =
   { request : Verification.verification_request
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
@@ -430,6 +469,8 @@ let prepare_review
               ; agent_name = assignee
               ; task_id = task.id
               ; evidence_refs
+              ; evidence_images =
+                  evidence_images_of_snapshot ~base_path:config.base_path evidence_access
               }
           ; question
           }

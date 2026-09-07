@@ -1166,7 +1166,7 @@ let test_fusion_columns_hold_their_offsets () =
     in
     check_left_cell "STARTED" "A" ~header ~row ~inner_width;
     check_right_cell "AGE" "B" ~header ~row ~inner_width;
-    check_left_cell "STATE" "C" ~header ~row ~inner_width;
+    check_left_cell "ST" "C" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
     if columns.fcol_show_preset then
       check_left_cell "PRESET" "E" ~header ~row ~inner_width;

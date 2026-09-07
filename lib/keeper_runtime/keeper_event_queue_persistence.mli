@@ -1,17 +1,22 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes go to [event-queue-v18.json] with the exact
-    [keeper.event_queue.state.v17] compact-witness schema. The envelope holds
+    Current writes go to [event-queue-v19.json] with the exact
+    [keeper.event_queue.state.v18] compact-witness schema. The envelope holds
     revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v7.jsonl] WAL are queue authority. Every WAL row
+    [event-queue-transitions-v8.jsonl] WAL are queue authority. Every WAL row
     carries the complete pre-transition state needed for snapshot-independent
     recovery. The WAL accepts at most one row and is retired after projection,
     so its retained size is bounded by one complete state. Serializing that
     state on each transition is the intentional cost of recovery that does not
-    infer missing sibling work from a delta. *)
+    infer missing sibling work from a delta.
+
+    Only an absent primary snapshot permits WAL-only reconstruction. A present
+    snapshot that cannot be decoded returns a read error; reads and mutations
+    preserve its bytes and the transition WAL. It cannot authorize an empty
+    queue, a state transform, publication, or WAL compaction. *)
 
 (** The durable filenames this binary reads and writes. Callers outside
     OCaml — the deployment preflight script builds fixtures at these exact
@@ -212,6 +217,14 @@ val observe_snapshot_with_errors :
     rather than a healthy empty projection. *)
 
 module For_testing : sig
+  val load_state_with_read_interleave
+    : after_read:(unit -> unit)
+    -> base_path:string
+    -> keeper_name:string
+    -> (Keeper_event_queue_state.t, string) result
+  (** Call-scoped interleave between decoding bytes and validating their file
+      identity. Exercises the production loader without a global test hook. *)
+
   val observe_snapshot_with_errors_with_interleave :
     between_samples:(unit -> unit) ->
     base_path:string ->
@@ -406,6 +419,19 @@ val drop_by_post_id :
   post_id:string ->
   unit ->
   (Keeper_event_queue.stimulus list, string) result
+
+type queue_residence_unknown_reason =
+  | First_admission_not_recorded
+  | Queue_observation_incomplete
+      (** Queue storage or owner-lifecycle observation is unavailable/incomplete. *)
+
+type queue_residence = Unknown of queue_residence_unknown_reason
+(** Diagnostic evidence only. Persisted queue entries do not record their first
+    admission time. Source timestamps, revisions and file mtimes cannot supply
+    it, including for an empty queue or a newly observed pending entry. *)
+
+val queue_residence_to_yojson : queue_residence -> Yojson.Safe.t
+(** The unknown residence duration is JSON null, with an explicit reason. *)
 
 type owner_lifecycle =
   | Runnable

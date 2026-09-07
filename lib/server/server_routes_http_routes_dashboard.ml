@@ -14,6 +14,8 @@ include Server_routes_http_routes_dashboard_setup
 module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
+module Keeper_shutdown_reconciliation =
+  Server_dashboard_http_keeper_shutdown_reconciliation
 module Official_client_session = Server_dashboard_official_client_session
 module Official_client_probe = Server_dashboard_official_client_probe
 
@@ -2993,6 +2995,13 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
+       | Some target ->
+         with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission
+           (fun state _actor req reqd ->
+             Keeper_shutdown_reconciliation.handle_get state req reqd target)
+           request reqd
+       | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
@@ -3076,6 +3085,14 @@ let add_routes ~sw ~clock router =
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
+       | Some target ->
+         with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission
+           (fun state actor req reqd ->
+             Http.Request.read_body_async reqd (fun body ->
+               Keeper_shutdown_reconciliation.handle_post state ~actor req reqd target body))
+           request reqd
+       | None ->
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth

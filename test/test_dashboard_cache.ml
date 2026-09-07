@@ -1134,6 +1134,136 @@ let test_payload_swr_publishes_prepared_bytes ~clock ~sw ~dm () =
           Alcotest.(check int) "first read after SWR does not prepare again" 1
             (Atomic.get preparations))))
 
+let test_worker_seed_refresh_survives_reader_switch ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "worker-seeded-swr" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  let seeded = Option.get (Dashboard_cache.peek_payload key) in
+  let root_domain = (Domain.self () :> int) in
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let prepared, prepared_u = Eio.Promise.create () in
+  let calls = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload -> Eio.Promise.resolve prepared_u payload)
+      (fun () ->
+        Fun.protect
+          ~finally:(fun () ->
+            if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ())
+          (fun () ->
+            let stale = Eio.Time.with_timeout_exn clock 2. (fun () ->
+              Executor_pool_ref.submit_or_inline (fun () ->
+                (* The only worker is occupied by the reader while fork
+                   registration is dispatched. Waiting for the refresh itself
+                   here would deadlock; attaching it to reader_sw would lose
+                   its independent lifetime. *)
+                Eio.Switch.run (fun reader_sw ->
+                  Eio_context.with_turn_switch reader_sw (fun () ->
+                    Dashboard_cache.get_or_compute_payload_with_timeout key
+                      ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+                        Atomic.incr calls;
+                        Eio.Promise.resolve started_u (Domain.self () :> int);
+                        Eio.Promise.await release;
+                        `String "ready"))))) in
+            Alcotest.(check bool) "worker returns warming bytes before refresh finishes" true
+              (stale.raw_json == seeded.raw_json);
+            let compute_domain = Eio.Time.with_timeout_exn clock 2.
+              (fun () -> Eio.Promise.await started) in
+            Alcotest.(check bool) "refresh computation remains off the root domain" true
+              (compute_domain <> root_domain);
+            let concurrent = Dashboard_cache.get_or_compute_payload_with_timeout key
+              ~ttl:60. ~clock ~timeout_sec:2.
+              (fun () -> Alcotest.fail "in-flight refresh was duplicated") in
+            Alcotest.(check bool) "other readers retain the same stale bytes" true
+              (concurrent.raw_json == seeded.raw_json);
+            Eio.Promise.resolve release_u ();
+            let ready = Eio.Time.with_timeout_exn clock 2.
+              (fun () -> Eio.Promise.await prepared) in
+            let rec await_publication () =
+              match Dashboard_cache.peek_payload key with
+              | Some current when current.json = `String "ready" -> current
+              | _ -> Eio.Fiber.yield (); await_publication ()
+            in
+            let published = Eio.Time.with_timeout_exn clock 2. await_publication in
+            Alcotest.(check bool) "worker refresh publishes its prepared bytes" true
+              (published.raw_json == ready.raw_json);
+            Alcotest.(check int) "one refresh after the worker reader exits" 1
+              (Atomic.get calls);
+            check_payload_consistent published)))
+
+let test_registered_refresh_survives_reader_cancellation ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "registered-swr-reader-cancel" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  let registered, registered_u = Eio.Promise.create () in
+  let acknowledge, acknowledge_u = Eio.Promise.create () in
+  let cancel_reader, cancel_reader_u = Eio.Promise.create () in
+  let reader_done, reader_done_u = Eio.Promise.create () in
+  let compute_started, compute_started_u = Eio.Promise.create () in
+  let release_compute, release_compute_u = Eio.Promise.create () in
+  let calls = Atomic.make 0 in
+  let registrations = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  let await promise = Eio.Time.with_timeout_exn clock 2.
+      (fun () -> Eio.Promise.await promise) in
+  let release promise resolver =
+    if not (Eio.Promise.is_resolved promise) then Eio.Promise.resolve resolver ()
+  in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_refresh_registered_hook
+      (fun () ->
+        if Atomic.fetch_and_add registrations 1 = 0 then (
+          Eio.Promise.resolve registered_u ();
+          Eio.Promise.await acknowledge))
+      (fun () ->
+        Fun.protect
+          ~finally:(fun () ->
+            release cancel_reader cancel_reader_u;
+            release acknowledge acknowledge_u;
+            release release_compute release_compute_u)
+          (fun () ->
+            Eio.Fiber.fork ~sw (fun () ->
+              Executor_pool_ref.submit_or_inline (fun () ->
+                Eio.Fiber.first
+                  (fun () ->
+                    ignore (Dashboard_cache.get_or_compute_payload_with_timeout key
+                      ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+                        Atomic.incr calls;
+                        Eio.Promise.resolve compute_started_u ();
+                        Eio.Promise.await release_compute;
+                        `String "ready")))
+                  (fun () -> Eio.Promise.await cancel_reader));
+              Eio.Promise.resolve reader_done_u ());
+            (* The root has forked the refresh, but its acknowledgement is
+               deliberately held. Cancel the worker's actual cache call here,
+               not just the main fiber awaiting an executor result. *)
+            await registered;
+            Eio.Promise.resolve cancel_reader_u ();
+            await reader_done;
+            await compute_started;
+            Alcotest.(check int) "reader cancellation preserves registered Computing slot" 1
+              Yojson.Safe.Util.(Dashboard_cache.stats () |> member "computing" |> to_int);
+            let stale = Dashboard_cache.get_or_compute_payload_with_timeout key
+              ~ttl:60. ~clock ~timeout_sec:2.
+              (fun () -> Alcotest.fail "cancelled reader started a duplicate refresh") in
+            check_json "other readers still receive warming while refresh runs"
+              (`String "warming") stale.json;
+            Alcotest.(check int) "no duplicate root registration" 1
+              (Atomic.get registrations);
+            Eio.Promise.resolve acknowledge_u ();
+            Eio.Promise.resolve release_compute_u ();
+            let rec await_publication () =
+              match Dashboard_cache.peek_payload key with
+              | Some payload when payload.json = `String "ready" -> payload
+              | _ -> Eio.Fiber.yield (); await_publication ()
+            in
+            let published = Eio.Time.with_timeout_exn clock 2. await_publication in
+            check_payload_consistent published;
+            Alcotest.(check int) "original refresh publishes after reader cancellation" 1
+              (Atomic.get calls))))
+
 let test_payload_preparation_replacement_token ~clock () =
   Executor_pool_ref.For_testing.with_pool_option None (fun () ->
     List.iter (fun fail_preparation ->
@@ -1340,6 +1470,12 @@ let () =
                ~dm:(Eio.Stdenv.domain_mgr env));
           test_case "SWR publishes prepared payload bytes" `Quick
             (test_payload_swr_publishes_prepared_bytes ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "worker seeded SWR survives reader switch with one worker" `Quick
+            (test_worker_seed_refresh_survives_reader_switch ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "registered SWR survives reader cancellation before acknowledgement" `Quick
+            (test_registered_refresh_survives_reader_cancellation ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
           test_case "prepared result respects replacement token" `Quick
             (test_payload_preparation_replacement_token ~clock);

@@ -2312,12 +2312,46 @@ let with_execution_payload_env f =
 let execution_payload ~state ~sw ~clock req =
   match
     Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
-      ~state ~sw ~clock req
+      ~sw ~clock
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state req)
   with
   | Server_dashboard_http_execution_surfaces.Execution_payload payload -> payload
   | Server_dashboard_http_execution_surfaces.Execution_json json ->
     failf "expected cached execution bytes, received JSON: %s"
       (Yojson.Safe.to_string json)
+
+let test_execution_request_resolves_actor_once () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Metrics = Masc.Otel_metric_store in
+  let labels = [ "outcome", "error"; "err_kind", "unauthorized" ] in
+  let count () = Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels () in
+  (* The real resolver records a typed fallback for this credential. It is
+     an observation of resolution, not a mocked call counter. HTTP admission
+     remains outside these surface helpers and is covered by wire/auth tests. *)
+  let req = request_with_headers
+      "/api/v1/dashboard/execution?fixture=execution_smoke&full=1"
+      [ "authorization", "Basic invalid" ] in
+  let before = count () in
+  let context = Surface.execution_http_request ~state req in
+  check (float 0.0) "request resolves actor once" (before +. 1.0) (count ());
+  check bool "parameterized request falls through prepared default lookup" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+  let payload = match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) context with
+    | Surface.Execution_payload payload -> payload
+    | Surface.Execution_json _ -> fail "expected parameterized fixture payload"
+  in
+  check (float 0.0) "fallback reuses resolved identity" (before +. 1.0) (count ());
+  let next_context = Surface.execution_http_request ~state req in
+  check (float 0.0) "next request resolves its own identity" (before +. 2.0) (count ());
+  match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) next_context with
+  | Surface.Execution_payload next ->
+    check bool "same query retains prepared cache bytes" true
+      (payload.raw_json == next.raw_json)
+  | Surface.Execution_json _ -> fail "expected warm parameterized fixture payload"
 
 let execution_payload_key (payload : Dashboard_cache.cached_payload) =
   Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
@@ -2328,8 +2362,9 @@ let test_execution_default_response_remains_json () =
     Server_dashboard_http_execution_surfaces.execution_cache
     (`Assoc [ "default_marker", `String "last-success" ]) @@ fun () ->
   match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
-      ~state ~sw ~clock:(Eio.Stdenv.clock env)
-      (request "/api/v1/dashboard/execution") with
+      ~sw ~clock:(Eio.Stdenv.clock env)
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
+         (request "/api/v1/dashboard/execution")) with
   | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
     fail "the default light route must return its cached-surface JSON"
   | Server_dashboard_http_execution_surfaces.Execution_json json ->
@@ -2481,7 +2516,8 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   done;
   let json =
     match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
-        ~state ~sw ~clock req with
+        ~sw ~clock
+        (Server_dashboard_http_execution_surfaces.execution_http_request ~state req) with
     | Server_dashboard_http_execution_surfaces.Execution_json json -> json
     | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
       fail "a circuit timeout must remain an uncached JSON response"
@@ -2519,10 +2555,10 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
   @@ fun () ->
   let json =
     match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
-      ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
-      (request "/api/v1/dashboard/execution?force=1") with
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
+         (request "/api/v1/dashboard/execution?force=1")) with
     | Server_dashboard_http_execution_surfaces.Execution_json json -> json
     | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
       fail "default force refresh must return its JSON response"
@@ -5256,6 +5292,8 @@ let () =
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
             test_execution_actor_for_request_canonicalizes_token_owner;
+          test_case "execution request resolves actor once" `Quick
+            test_execution_request_resolves_actor_once;
           test_case "execution default response remains JSON" `Quick
             test_execution_default_response_remains_json;
           test_case "execution parameterized response reuses decorated bytes" `Quick

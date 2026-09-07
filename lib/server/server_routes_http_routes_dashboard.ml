@@ -2345,15 +2345,19 @@ let add_routes ~sw ~clock router =
          (* The producer prepares all encodings once per snapshot. Requests
             select bytes and validate the identity ETag without recompression. *)
          let timing = Server_timing.create () in
-         match Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
-           dashboard_execution_cached_http_representation ~state request) with
+         let context, cached =
+           Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
+             let context = execution_http_request ~state request in
+             context, dashboard_execution_cached_http_representation context)
+         in
+         match cached with
          | Some (body, etag, extra_headers) ->
            Http.Response.json_lazy ~compress:false ~request:req ~etag
              ~extra_headers:(extra_headers @ Server_timing.extra_header timing)
              (fun () -> body) reqd
          | None ->
            let response = Server_timing.measure timing Server_timing.Cache_compute
-             (fun () -> dashboard_execution_http_response ~state ~sw ~clock request) in
+             (fun () -> dashboard_execution_http_response ~sw ~clock context) in
            (match response with
             | Execution_json json ->
               Http.Response.json_value ~compress:false ~request:req

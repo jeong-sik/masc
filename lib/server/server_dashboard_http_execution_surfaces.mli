@@ -187,8 +187,16 @@ val start_execution_trust_refresh_loop :
 
 (** {1 HTTP route entries} *)
 
+type execution_http_request
+(** Immutable, request-local actor/query resolution tied to its server state
+    and workspace. Created after HTTP admission and shared by the prepared
+    response lookup and fallback path; never cached across requests. *)
+
+val execution_http_request :
+  state:Mcp_server.server_state -> Httpun.Request.t -> execution_http_request
+
 val dashboard_execution_cached_http_representation :
-  state:Mcp_server.server_state -> Httpun.Request.t ->
+  execution_http_request ->
   (string * string * (string * string) list) option
 (** Negotiated pre-compressed body, weak ETag of the identity JSON, and
     representation headers. Returns [None] for actor, fixture, full, force,
@@ -200,10 +208,9 @@ type execution_http_response =
   | Execution_payload of Dashboard_cache.cached_payload
 
 val dashboard_execution_http_response :
-  state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Httpun.Request.t ->
+  execution_http_request ->
   execution_http_response
 (** Parameterized requests retain the decorated snapshot's bytes and ETag in
     the SWR cache, scoped by workspace, query and publication generation.

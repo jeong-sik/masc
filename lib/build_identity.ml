@@ -117,6 +117,7 @@ let string_of_process_status = function
 let git_probe_from_root repo_root =
   let output =
     try git_capture_output ~repo_root [ "rev-parse"; "--short"; "HEAD" ] with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Sys_error msg ->
       Log.Identity.warn "git_probe_from_root read failed: %s" msg;
       None
@@ -159,17 +160,14 @@ let pick_repo_candidates ~exe_dir ~cwd =
   if String.equal exe_dir cwd then [ exe_dir ] else [ exe_dir; cwd ]
 ;;
 
-let probe_git_commit () =
-  pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(runtime_cwd ())
-  |> List.find_map (fun dir ->
+let probe_git_commit candidates =
+  candidates |> List.find_map (fun dir ->
     match find_git_root dir with
     | Some root -> git_probe_from_root root
     | None -> None)
 ;;
 
-let probe_repo_root () =
-  pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(runtime_cwd ())
-  |> List.find_map find_git_root
+let probe_repo_root candidates = List.find_map find_git_root candidates
 ;;
 
 let parse_dune_project_version raw =
@@ -229,25 +227,15 @@ let parse_commit_unix_ts_output raw =
      | _ -> None)
 ;;
 
-(** Probe the unix timestamp of [commit] from the same git repo we
-    resolved [commit] against.  Best-effort: returns [None] if [commit]
-    is [None], the repo cannot be located, or git fails / output is
-    not a sane integer Unix timestamp.
-
-    Why we run this: a 2026-05-05 fleet-stuck recurrence boiled down
-    to a deploy gap — the server kept running an 8-hour-old binary
-    while every fix-PR shipped to main.  Health endpoint had no signal
-    that the running binary was behind, so the operator (rightly)
-    re-asked the same diagnostic prompt 7 times before noticing.
-    Surfacing [binary_commit_unix_ts] on /health closes that loop without
-    requiring the dashboard to fetch anything from the git remote. *)
-let probe_commit_unix_ts commit_hash_opt =
+(** Observe a runtime checkout commit's timestamp. The embedded binary's
+    timestamp comes from its build stamp instead. Missing repositories,
+    failed Git commands and invalid timestamp output remain [None]. *)
+let probe_commit_unix_ts_from_candidates candidates commit_hash_opt =
   match commit_hash_opt with
   | None -> None
   | Some commit_hash ->
     let repo_roots =
-      pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(runtime_cwd ())
-      |> List.filter_map find_git_root
+      candidates |> List.filter_map find_git_root
       |> List.fold_left
            (fun roots repo_root ->
               if List.exists (String.equal repo_root) roots
@@ -290,6 +278,12 @@ let probe_commit_unix_ts commit_hash_opt =
            None)
     in
     List.find_map probe_one repo_roots
+;;
+
+let probe_commit_unix_ts commit =
+  probe_commit_unix_ts_from_candidates
+    (pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(runtime_cwd ()))
+    commit
 ;;
 
 let resolve_commit ~embedded ~probe =
@@ -349,6 +343,9 @@ let started_at_iso = Masc_domain.iso8601_of_unix_seconds started_at_unix
 let runtime_instance_id = Random_id.uuid_v7 ()
 let resolved_executable_path = executable_path ()
 let resolved_executable_dir = Filename.dirname resolved_executable_path
+let runtime_repository_candidates =
+  pick_repo_candidates ~exe_dir:resolved_executable_dir ~cwd:(runtime_cwd ())
+;;
 
 (* Worktrees live under <repo>/.worktrees/ by workspace convention
    (instructions/workflow-git.md); an executable resolved from inside one is
@@ -364,13 +361,47 @@ let path_is_in_worktree path =
 
 let resolved_executable_in_worktree = path_is_in_worktree resolved_executable_path
 
-(** Commit hashes — eagerly resolved at startup.
-    Not using [Eio.Lazy] because this is called from tests without Eio context.
-    Embedded stamp + git probe are fast and side-effect-free. *)
-let commit_resolution =
-  resolve_commit_details
-    ~embedded:Build_commit_generated.commit
-    ~probe:probe_git_commit
+let embedded_commit =
+  Option.bind Build_commit_generated.commit String_util.trim_nonempty
+;;
+
+let binary_commit_unix_ts =
+  Option.bind Build_commit_generated.commit_unix_ts (fun timestamp ->
+    if Int64.compare timestamp 0L >= 0
+       && Int64.compare timestamp max_reasonable_commit_unix_ts <= 0
+    then Some (Int64.to_float timestamp)
+    else None)
+;;
+
+type runtime_repository_observation =
+  { commits : commit_resolution
+  ; repo_head_unix_ts : float option
+  }
+
+let runtime_repository_observation : runtime_repository_observation option Atomic.t =
+  Atomic.make None
+;;
+
+(* Process_eio may yield, and current() also supports synchronous callers.
+   Compute outside any lock and publish only a completed immutable snapshot.
+   A cancelled observation leaves the cache uninitialized. Concurrent first
+   readers may observe independently; every reader returns the published winner. *)
+let rec observe_runtime_repository () =
+  match Atomic.get runtime_repository_observation with
+  | Some observation -> observation
+  | None ->
+    let commits =
+      resolve_commit_details
+        ~embedded:embedded_commit
+        ~probe:(fun () -> probe_git_commit runtime_repository_candidates)
+    in
+    let repo_head_unix_ts =
+      probe_commit_unix_ts_from_candidates runtime_repository_candidates commits.repo_head_commit
+    in
+    let observation = { commits; repo_head_unix_ts } in
+    if Atomic.compare_and_set runtime_repository_observation None (Some observation)
+    then observation
+    else observe_runtime_repository ()
 ;;
 
 type executable_provenance =
@@ -1069,7 +1100,7 @@ let dashboard_asset_index provenance =
 let bind_executable_provenance ~path ~sha256 ~device ~inode =
   let ( let* ) = Result.bind in
   let* expected_binary_commit =
-    match commit_resolution.binary_commit with
+    match embedded_commit with
     | Some value -> Ok value
     | None -> Error "running executable has no embedded commit"
   in
@@ -1113,7 +1144,7 @@ let bind_executable_provenance ~path ~sha256 ~device ~inode =
   publish ()
 ;;
 
-let resolved_repo_root = probe_repo_root ()
+let resolved_repo_root = probe_repo_root runtime_repository_candidates
 
 let launch_source_root_state () =
   match Atomic.get executable_provenance_binding with
@@ -1210,14 +1241,11 @@ let dashboard_manifest_identity () =
 ;;
 
 
-let binary_commit_unix_ts = probe_commit_unix_ts commit_resolution.binary_commit
-let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_commit
-
-let embedded_commit = commit_resolution.binary_commit
-
 let embedded_commit_age_seconds ~now = age_seconds ~now binary_commit_unix_ts
 
 let current () =
+  let observation = observe_runtime_repository () in
+  let commit_resolution = observation.commits in
   let now = Unix.gettimeofday () in
   let provenance_binding = Atomic.get executable_provenance_binding in
   let active_repo_root = repo_root () in
@@ -1231,7 +1259,7 @@ let current () =
     | None ->
       ( commit_resolution.repo_head_commit
       , commit_resolution.repo_head_commit_source
-      , repo_head_commit_unix_ts )
+      , observation.repo_head_unix_ts )
   in
   { release_version = Runtime_build_version.current
   ; binary_version = Runtime_build_version.current

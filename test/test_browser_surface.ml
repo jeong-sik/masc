@@ -124,13 +124,13 @@ let test_keeper_discovers_clients_without_dispatch () =
         ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001)) clients;
       let result = Masc.Tool_misc_browser_lane.handle_tabs
         ~tool_name:"BrowserTabs" ~start_time:0.0 (`Assoc []) in
-      let data = Masc.Tool_result.data result in
+      let data = Tool_result.data result in
       check bool "ambiguous failure stays actionable" true
         (Yojson.Safe.Util.member "error" data = `String "ambiguous_browser_clients");
       check int "both browser identities discoverable" 2
         (Yojson.Safe.Util.(data |> member "clients" |> to_list |> List.length));
       check bool "model-facing error preserves the same discovery payload" true
-        (Yojson.Safe.from_string (Masc.Tool_result.message result) = data);
+        (Yojson.Safe.from_string (Tool_result.message result) = data);
       List.iter (fun info -> check bool "no dispatch before explicit selection" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
 

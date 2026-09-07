@@ -63,6 +63,13 @@ let test_failed_refresh () =
   expect "failure stays visible" (refreshed.load = Failed "Firefox disconnected");
   expect "failure preserves last successful reading" (refreshed.reading = previous.reading)
 
+let test_operator_reader_context () =
+  expect "browser context identifies source without keeper prerequisite"
+    (context_label (switch_source Automation (create Browser)) =
+     "Browser Lane · automation · Firefox page reader");
+  expect "Slack context identifies live source"
+    (context_label (create Slack) = "Slack Lane · live · Firefox page reader")
+
 let test_live_slack_refresh_policy () =
   let slack = create Slack in
   expect "live Slack refreshes on existing tick" (should_refresh_on_tick slack);
@@ -108,6 +115,7 @@ let () =
      "session generation", test_session_generation;
      "failed refresh preserves evidence", test_failed_refresh;
      "navigation failure preserves editable URL", test_navigation_failure_recovery;
+     "operator reader context", test_operator_reader_context;
      "live Slack refresh policy", test_live_slack_refresh_policy;
      "source switch and Slack filter", test_source_switch;
      "malformed response", test_malformed_response;

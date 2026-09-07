@@ -26,6 +26,30 @@ let configured_endpoint () =
             Ok (Some (Uri.to_string (Uri.with_path uri "")))
           | _ -> Error "browser.webdriver_url must be a loopback HTTP origin"
 
+let request ~pool ~clock ~endpoint ~method_ ~path ~body =
+  match Masc_http_client.Pool.request pool ~clock ~timeout_seconds:60.
+    ~method_ ~url:(endpoint ^ path)
+    ~headers:["Content-Type", "application/json"]
+    ?body:(Option.map Yojson.Safe.to_string body) () with
+  | Error detail -> Error (Browser_webdriver.Transport detail)
+  | Ok response -> Browser_webdriver.decode_response ~status:response.status response.body
+
+let close_with_fresh_pool ~env ~endpoint driver =
+  let clock = Eio.Stdenv.clock env in
+  let result, finished = Eio.Promise.create () in
+  (* The root switch is already releasing its sockets. This worker owns a
+     fresh switch; after DELETE finishes, [first] cancels its pool's eviction
+     fiber and releases all connections before returning the result. *)
+  Eio.Fiber.first
+    (fun () ->
+      Eio.Switch.run (fun sw ->
+        let pool = Masc_http_client.Pool.create ~sw ~env () in
+        let outcome = Browser_webdriver.close driver
+            ~request:(request ~pool ~clock ~endpoint) in
+        Eio.Promise.resolve finished outcome;
+        Eio.Fiber.await_cancel ()))
+    (fun () -> Eio.Promise.await result)
+
 let start ~sw ~env =
   match configured_endpoint () with
   | Error detail -> Log.Server.error "browser-lane: %s" detail
@@ -33,19 +57,11 @@ let start ~sw ~env =
   | Ok (Some endpoint) ->
     let pool = Masc_http_client.Pool.create ~sw ~env () in
     let clock = Eio.Stdenv.clock env in
-    let request ~method_ ~path ~body =
-      match Masc_http_client.Pool.request pool ~clock ~timeout_seconds:60.
-        ~method_ ~url:(endpoint ^ path)
-        ~headers:["Content-Type", "application/json"]
-        ?body:(Option.map Yojson.Safe.to_string body) () with
-      | Error detail -> Error (Browser_webdriver.Transport detail)
-      | Ok response -> Browser_webdriver.decode_response ~status:response.status response.body
-    in
-    let driver = Browser_webdriver.create ~request in
+    let driver = Browser_webdriver.create ~request:(request ~pool ~clock ~endpoint) in
     Browser_lane.install_automation_executor (Some (Browser_webdriver.execute driver));
     Eio.Switch.on_release sw (fun () ->
       Browser_lane.install_automation_executor None;
-      match Browser_webdriver.close driver with
+      match close_with_fresh_pool ~env ~endpoint driver with
       | Ok () -> ()
       | Error error -> Log.Server.warn "browser-lane: close failed: %s"
           (Browser_webdriver.error_message error));

@@ -202,5 +202,8 @@ let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor
 let issue ~lane_name ~verb ~timeout_sec =
   match lane_name, Atomic.get automation_executor with
-  | "automation", Some execute -> execute verb
+  | "automation", Some execute ->
+    Eio.Fiber.first
+      (fun () -> execute verb)
+      (fun () -> Time_compat.sleep timeout_sec; Timed_out)
   | _ -> issue_queued ~lane_name ~verb ~timeout_sec

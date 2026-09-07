@@ -21,8 +21,12 @@ integer tab IDs, reports WebDriver failures, and forgets invalid sessions so
 an explicit open can recover after Firefox exits. A session opens an isolated
 Firefox profile; it does not borrow the operator's authenticated profile.
 Browser text is capped by Unicode code points. Remote requests have a 60-second
-I/O deadline. Server shutdown attempts to close its session before releasing
-the HTTP pool. geckodriver is a vendor browser driver, not application logic.
+I/O deadline, while the lane's overall deadline includes lock acquisition and
+every request in a tab scan. Cancellation releases the session lock so the
+next command can run. A closed current tab does not prevent discovering the
+remaining windows. Server shutdown deletes its owned session through a fresh
+transport scope after the normal server connections have been released.
+geckodriver is a vendor browser driver, not application logic.
 
 Sources checked 2026-09-07:
 

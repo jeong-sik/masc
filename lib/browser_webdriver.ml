@@ -29,14 +29,23 @@ let call t session method_ suffix body =
    | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None
    | Ok _ | Error _ -> ());
   result
-let close_unlocked t = match t.session with
+(* State changes below never yield: cancellation can interrupt remote I/O but
+   cannot leave a half-written local session. Explicit ownership releases the
+   lock on cancellation without poisoning it as [use_rw] would. *)
+let with_session_lock t f =
+  Eio.Switch.run (fun sw ->
+    Eio.Mutex.lock t.mutex;
+    Eio.Switch.on_release sw (fun () -> Eio.Mutex.unlock t.mutex);
+    f ())
+let close_unlocked ?request t = match t.session with
   | None -> Ok ()
   | Some session ->
-    let result = call t session `DELETE "" None in
+    let request = Option.value ~default:t.request request in
+    let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
     | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; Ok ()
     | Error error -> Error error
-let close t = Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> close_unlocked t)
+let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
   | Some session -> Ok session
   | None -> Error (Protocol "Firefox session is closed; open a browser session first")
@@ -94,10 +103,18 @@ let execute_unlocked t = function
         [`Int cap])
   | Browser_lane.Tabs_list ->
     let* session = session t in
-    let* current = call t session `GET "/window" None in
     let* handles = call t session `GET "/window/handles" None in
+    let* current = match call t session `GET "/window" None with
+      | Error (Remote { code = "no such window"; _ }) -> Ok `Null
+      | result -> result in
     match current, handles with
-    | `String original, `List handles ->
+    | (`String _ | `Null), `List handles ->
+      let original = match current with `String handle -> Some handle | _ -> None in
+      (* A window can close while others survive; discovery must remain
+         usable even when WebDriver's current window no longer exists. *)
+      let target = match original with
+        | Some handle when List.mem (`String handle) handles -> Some handle
+        | _ -> (match handles with `String handle :: _ -> Some handle | _ -> None) in
       let rec read acc = function
         | [] -> Ok (`List (List.rev acc))
         | `String handle :: rest ->
@@ -106,19 +123,24 @@ let execute_unlocked t = function
           (match summary with
            | `Assoc fields ->
              let tab = `Assoc (("id", `Int (tab_id session handle)) ::
-               ("active", `Bool (handle = original)) :: fields) in
+               ("active", `Bool (Some handle = target)) :: fields) in
              read (tab :: acc) rest
            | _ -> Error (Protocol "invalid page summary"))
         | _ -> Error (Protocol "invalid WebDriver window handle")
       in
       let result = read [] handles in
-      let restored = select t session original in
+      let restored = match target with
+        | None -> Ok `Null
+        | Some handle ->
+          (match select t session handle with
+           | Error (Remote { code = "no such window"; _ }) -> Ok `Null
+           | result -> result) in
       (match result, restored with
        | Error error, _ | _, Error error -> Error error
        | Ok tabs, Ok _ -> Ok tabs)
     | _ -> Error (Protocol "invalid WebDriver windows response")
 let execute t verb =
-  Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+  with_session_lock t (fun () ->
     match execute_unlocked t verb with
     | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
     | Error error -> Browser_lane.Refused (error_message error))

@@ -1039,6 +1039,21 @@ let handle_keeper_task_tool_with_outcome
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
+    (* task-1426: the schema (config/tools/keeper_task_done.toml) declares a
+       [notes] parameter ("Verification handoff notes"), but the handler used
+       to drop it and inject [result_text] into the transition's notes field
+       instead — a schema-behavior mismatch that silently discarded whatever
+       the submitter wrote in notes (live case: geek-scout's 767B and
+       polisher's 876B notes both vanished from every record). Parse the
+       declared parameter and pass it through; [result_text] stays on
+       handoff_context.summary, where the result summary belongs. When the
+       caller omits notes, fall back to [result_text] so pre-existing callers
+       that relied on the old injection keep a non-empty transition notes
+       field. *)
+    let notes_text =
+      let supplied = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
+      if supplied = "" then result_text else supplied
+    in
     if task_id = ""
     then
       Keeper_tool_execution.failure
@@ -1101,7 +1116,10 @@ let handle_keeper_task_tool_with_outcome
         [
           "task_id", `String task_id;
           "action", `String action;
-          "notes", `String result_text;
+          (* task-1426: pass the declared [notes] parameter through instead of
+             overwriting it with [result_text]. The result summary still lands
+             on handoff_context.summary below. *)
+          "notes", `String notes_text;
           ( "handoff_context",
             `Assoc
               [ "summary", `String result_text

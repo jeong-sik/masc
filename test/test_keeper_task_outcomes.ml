@@ -969,6 +969,164 @@ let test_default_done_is_terminal () =
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+(* task-1426: the keeper_task_done schema declares a [notes] parameter, but
+   the handler used to drop it and inject [result] into the transition's
+   notes field instead, so the submitter's handoff notes vanished from every
+   record (live case: a 767B and an 876B notes payload both disappeared).
+   The declared parameter must reach the transition record — the audit entry
+   for the submission carries it in details — while handoff_context.summary
+   keeps the result summary. *)
+let test_done_passes_declared_notes_to_transition () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       (* The submission audit entry (task_submit_for_verification) is written
+          by the workspace metric hooks; this file does not install them
+          globally, so enable them here for the transition-record assertion. *)
+       Masc.Workspace_metric_hooks.install ();
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Notes parameter passthrough"
+            ~priority:2
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
+       (match
+          Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               [ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+               ; "notes", `String "handoff notes for the next keeper"
+               ; "evidence_refs", `List [ `String "note:commit abc123" ]
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () ->
+          fail "notes passthrough completion was deferred"
+        | Tool_result.Failed _ ->
+          fail ("notes passthrough completion failed: " ^ execution.raw_output));
+       (match Masc.Workspace.get_tasks_raw config with
+        | [ { task_status = Masc_domain.AwaitingVerification _;
+              handoff_context = Some handoff;
+              _ } ] ->
+          check string "result still preserved as summary"
+            "implementation complete" handoff.summary
+        | [ t ] ->
+          failf
+            "keeper_task_done did not submit for verification: %s"
+            (Masc_domain.show_task_status t.task_status)
+        | tasks ->
+          failf "expected exactly one persisted task, got %d"
+            (List.length tasks));
+       let audit_entries = Masc.Audit_log.read_entries ~n:50 config in
+       let submission_notes =
+         List.find_map
+           (fun (entry : Masc.Audit_log.audit_entry) ->
+              match entry.action with
+              | Masc.Audit_log.Custom "task_submit_for_verification" ->
+                (match entry.details with
+                 | `Assoc kvs ->
+                   (match List.assoc_opt "notes" kvs with
+                    | Some (`String notes) -> Some notes
+                    | _ -> None)
+                 | _ -> None)
+              | _ -> None)
+           audit_entries
+       in
+       (match submission_notes with
+        | Some notes ->
+          check string "declared notes reach the transition record"
+            "handoff notes for the next keeper" notes
+        | None ->
+          fail
+            "no task_submit_for_verification audit entry carries a notes field"))
+
+(* task-1426 fallback: a caller that omits notes keeps the pre-repair
+   behavior — the result text falls back into the transition's notes field,
+   so the transition's non-empty-notes requirement stays satisfied for
+   existing callers that never passed notes. *)
+let test_done_without_notes_falls_back_to_result () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       Masc.Workspace_metric_hooks.install ();
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Notes fallback"
+            ~priority:2
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
+       (match
+          Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               [ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+               ; "evidence_refs", `List [ `String "note:commit abc123" ]
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () ->
+          fail "notes fallback completion was deferred"
+        | Tool_result.Failed _ ->
+          fail ("notes fallback completion failed: " ^ execution.raw_output));
+       let audit_entries = Masc.Audit_log.read_entries ~n:50 config in
+       let submission_notes =
+         List.find_map
+           (fun (entry : Masc.Audit_log.audit_entry) ->
+              match entry.action with
+              | Masc.Audit_log.Custom "task_submit_for_verification" ->
+                (match entry.details with
+                 | `Assoc kvs ->
+                   (match List.assoc_opt "notes" kvs with
+                    | Some (`String notes) -> Some notes
+                    | _ -> None)
+                 | _ -> None)
+              | _ -> None)
+           audit_entries
+       in
+       (match submission_notes with
+        | Some notes ->
+          check string "omitted notes fall back to the result text"
+            "implementation complete" notes
+        | None ->
+          fail
+            "no task_submit_for_verification audit entry carries a notes field"))
+
 (* task-540: an oversized artifact: evidence list must be refused at the
    keeper_task_done boundary with the byte count and the note: escape hatch,
    not submitted as a truncated prefix that stalls the completion authority.
@@ -1254,5 +1412,11 @@ let () =
         ; test_case
             "release without a summary is refused and keeps the task held"
             `Quick test_release_without_summary_is_refused
+        ; test_case
+            "done passes the declared notes parameter to the transition (task-1426)"
+            `Quick test_done_passes_declared_notes_to_transition
+        ; test_case
+            "done without notes falls back to the result text (task-1426)"
+            `Quick test_done_without_notes_falls_back_to_result
         ] )
     ]

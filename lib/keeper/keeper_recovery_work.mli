@@ -36,6 +36,8 @@ type error =
   | Artifact_missing of string
   | Artifact_write_failed of string
   | Directory_prepare_failed of string
+  | Directory_read_failed of string
+  | Directory_rejected of Fs_compat.owned_directory_chain_rejection
   | Lock_failed of File_lock_eio.durable_lock_error
   | Write_failed of Keeper_fs.durable_write_error
 
@@ -53,6 +55,7 @@ type 'a mutation =
     exception nor an error alone proves that nothing was written. *)
 
 val id : t -> string
+val keeper_name : t -> string
 val revision : t -> string
 val status : t -> status
 val source : t -> Keeper_checkpoint_ref.t
@@ -89,6 +92,20 @@ val load : config:Workspace.config -> id:string -> (t option, error) result
 (** Reads the validated ledger only. Missing/corrupt source artifacts do not
     hide owner/status evidence or prevent fail/cancel. This is not proof that
     source bytes are available. No process-local cache is authoritative. *)
+
+type inventory_item =
+  | Available of t
+  | Unavailable of { file_name : string; error : error }
+
+val inventory : config:Workspace.config -> (inventory_item list, error) result
+(** Read-only, filename-sorted enumeration of durable work records. Missing
+    storage is an empty inventory and is not created by this read. Directory
+    failures are errors; malformed, vanished or unreadable records are visible
+    per item without hiding healthy work. Source artifacts are not fetched.
+    Terminal states remain visible. This is a per-record observation, not an
+    atomic cross-record snapshot: callers must reload and use revision/owner
+    CAS before claiming or changing work. A record created after enumeration
+    may first appear on the next inventory. *)
 
 val verify_artifacts : Workspace.config -> t -> (unit, error) result
 (** Separately verifies actual source bytes/digest/checkpoint identity and any

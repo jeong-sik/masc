@@ -159,10 +159,62 @@ let test_blob_directory_failure_is_typed () = with_fixture (fun config path sour
     |> List.filter (fun path -> Filename.extension path = ".json") in
   check (list string) "failed artifact publication creates no work reference" [] records;
   check string "artifact write failure preserves canonical bytes" canonical (Fs_compat.load_file path))
+let test_inventory_discovers_states_and_isolates_damage () = with_fixture (fun config path source _ ->
+  let canonical = Fs_compat.load_file path in
+  let pending = create config source "inventory-pending" in
+  let running, owner = claim config (create config source "inventory-failed") "process-a" in
+  let failed = Work.fail ~config ~id:(Work.id running) ~owner
+    ~expected_revision:(Work.revision running) (Work.Worker_failed "retained failure") |> ok |> changed in
+  let directory = Filename.concat (Workspace.masc_root_dir config) "keeper-recovery-work" in
+  let bad_name = String.make 64 'a' ^ ".json" in
+  (match Fs_compat.save_file_atomic (Filename.concat directory bad_name) "{broken" with
+   | Ok () -> () | Error e -> fail e);
+  Unix.unlink (artifact_path config pending);
+  let items = Work.inventory ~config:(Workspace.default_config config.base_path) |> ok in
+  check int "records only; lock files are not work" 3 (List.length items);
+  let available = List.filter_map (function Work.Available t -> Some t | Work.Unavailable _ -> None) items in
+  check (list string) "pending and terminal work rediscovered in filename order"
+    (List.sort String.compare [Work.id pending; Work.id failed]) (List.map Work.id available);
+  List.iter (fun t -> check string "validated keeper identity remains discoverable" "recovery" (Work.keeper_name t)) available;
+  (match List.find (fun t -> Work.id t = Work.id failed) available |> Work.status with
+   | Work.Failed (Work.Worker_failed "retained failure") -> () | _ -> fail "terminal state hidden by inventory");
+  (match List.filter_map (function Work.Unavailable item -> Some item.file_name | Work.Available _ -> None) items with
+   | [file_name] -> check string "damaged ledger has its exact file identity" bad_name file_name
+   | _ -> fail "damaged record was dropped or poisoned other work");
+  Work.verify_artifacts config pending
+  |> reject "inventory did not turn missing source into available bytes" (function Work.Artifact_missing _ -> true | _ -> false);
+  let restarted = Work.inventory ~config |> ok in
+  check int "fresh inventory reads actual damaged ledger" 3 (List.length restarted);
+  check string "enumeration leaves canonical bytes untouched" canonical (Fs_compat.load_file path))
+
+let test_inventory_missing_and_wrong_directory () = with_fixture (fun config _ _ _ ->
+  let directory = Filename.concat (Workspace.masc_root_dir config) "keeper-recovery-work" in
+  check int "missing work store is cold, not an error" 0 (Work.inventory ~config |> ok |> List.length);
+  check bool "read does not create storage" false (Sys.file_exists directory);
+  (match Fs_compat.save_file_atomic directory "not a work directory" with Ok () -> () | Error e -> fail e);
+  Work.inventory ~config
+  |> reject "invalid storage is not healthy empty inventory" (function Work.Directory_rejected _ -> true | _ -> false))
+
+let test_inventory_rejects_linked_records () = with_fixture (fun config path source _ ->
+  let pending = create config source "inventory-links" in
+  let directory = Filename.concat (Workspace.masc_root_dir config) "keeper-recovery-work" in
+  let file_name = String.make 64 'b' ^ ".json" in
+  Unix.symlink path (Filename.concat directory file_name);
+  let items = Work.inventory ~config |> ok in
+  check int "linked record remains visible beside valid work" 2 (List.length items);
+  (match List.find_opt (function Work.Unavailable x -> x.file_name=file_name | Work.Available _ -> false) items with
+   | Some (Work.Unavailable {error=Work.Read_failed _; _}) -> ()
+   | _ -> fail "record symlink was followed or silently hidden");
+  check bool "healthy work remains available" true
+    (List.exists (function Work.Available t -> Work.id t=Work.id pending | Work.Unavailable _ -> false) items))
+
 let () = Alcotest.run "Keeper recovery durable work"
   ["lifecycle",[
     test_case "reload and fenced proposal preserve canonical history" `Quick test_resume_publish_preserves_source;
     test_case "changed source rejects publication" `Quick test_changed_source_does_not_publish;
     test_case "missing artifact permits typed failure" `Quick test_missing_source_keeps_terminal_evidence;
     test_case "corrupt artifact permits cancellation" `Quick test_corrupt_source_can_be_cancelled;
-    test_case "filesystem artifact failure stays typed" `Quick test_blob_directory_failure_is_typed]]
+    test_case "filesystem artifact failure stays typed" `Quick test_blob_directory_failure_is_typed;
+    test_case "inventory restores states and reports damaged records" `Quick test_inventory_discovers_states_and_isolates_damage;
+    test_case "inventory separates absent from invalid storage" `Quick test_inventory_missing_and_wrong_directory;
+    test_case "inventory reports linked records without following" `Quick test_inventory_rejects_linked_records]]

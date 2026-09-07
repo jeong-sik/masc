@@ -82,7 +82,8 @@ open Alcotest
 (* Main adds BrowserInteract: production TOML rendering is 1,394 bytes,
    or 1,388 with its public name, plus one list separator. BrowserGoto
    guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
-let ceiling_bytes = 92_213
+(* Explicit native client selection adds 1004 measured browser schema bytes. *)
+let ceiling_bytes = 93_217
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

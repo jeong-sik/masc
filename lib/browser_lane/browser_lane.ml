@@ -124,141 +124,145 @@ type answer =
   | Refused of string
   | Rejected_before_effect of string
 
-(* The public tool surface also accepts "automation", but external transports
-   can only register the operator's live browser. *)
+(* The public source stays live/automation. Native-process identity owns each
+   live command queue; browser-local tab IDs never select a different client. *)
 let external_lane_name = "live"
-
-type lane =
-  { name : string
-  ; commands : issued Eio.Stream.t
-  ; mutex : Eio.Mutex.t
-  ; waiters : (string, Yojson.Safe.t Eio.Promise.t * Yojson.Safe.t Eio.Promise.u) Hashtbl.t
-  (* When the lane stops counting as connected, rather than when it last
-     polled. The predicate subtracted the wall clock from the stored reading,
-     so an NTP step decided whether a live lane existed. *)
-  ; mutable connected_until : Monotonic_deadline.t
-  }
-
-let lanes : (string, lane) Hashtbl.t = Hashtbl.create 4
-let lanes_mutex = Eio.Mutex.create ()
-
-let lane_named ~name =
-  if not (String.equal name external_lane_name) then None
-  else
-  Eio.Mutex.use_rw ~protect:true lanes_mutex (fun () ->
-      match Hashtbl.find_opt lanes name with
-      | Some lane -> Some lane
-      | None ->
-          let lane =
-            { name
-            ; commands = Eio.Stream.create 16
-            ; mutex = Eio.Mutex.create ()
-            ; waiters = Hashtbl.create 8
-            ; connected_until = Monotonic_deadline.after ~seconds:0.
-            }
-          in
-          Hashtbl.replace lanes name lane;
-          Some lane)
-;;
-
-(* The poll side: carry one command to the browser, or [None] after the
-   window — the host loops and polls again. *)
-(* How long a poll keeps the lane connected. Long enough that a lane between
-   polls still counts, short enough that a lane that stopped polling drops. *)
+type browser = Firefox | Zen
+let browser_name = function Firefox -> "firefox" | Zen -> "zen"
+let browser_of_string = function
+  | "firefox" -> Ok Firefox | "zen" -> Ok Zen | _ -> Error "unsupported_browser"
+type client_id = Uuidm.t
+let client_id_to_string = Uuidm.to_string
+let client_id_of_string value =
+  match Uuidm.of_string value with
+  | Some id when String.equal (Uuidm.to_string id) value -> Ok id
+  | _ -> Error "invalid_client_id"
+type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string }
+type client = { info : client_info; commands : issued Eio.Stream.t;
+  mutex : Eio.Mutex.t;
+  waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
+  mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
+type target = Automation | Live_client of client
+let clients : (string, client) Hashtbl.t = Hashtbl.create 4
+let clients_mutex = Eio.Mutex.create ()
+(* Retain only IDs after disconnect; queues and page payloads must be reclaimed. *)
+let retired_clients : (string, unit) Hashtbl.t = Hashtbl.create 4
+let command_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
 let lane_connected_window_sec = 120.
-
-let take_command ~lane_name ~window_sec =
-  match lane_named ~name:lane_name with
-  | None -> Error "unknown_lane"
-  | Some lane ->
-    lane.connected_until <-
-      Monotonic_deadline.after ~seconds:lane_connected_window_sec;
-    Ok
-      (Eio.Fiber.first
-         (fun () -> Some (Eio.Stream.take lane.commands))
-         (fun () ->
-            Time_compat.sleep window_sec;
-            None))
-;;
-
-(* The result side: resolve the tool call waiting on this id. *)
-let deliver_result ~lane_name ~id ~payload =
-  if not (String.equal lane_name external_lane_name) then Error "unknown_lane"
+let connected client = not client.closed && not (Monotonic_deadline.passed client.connected_until)
+let same_info left right = left.browser = right.browser
+  && String.equal left.version right.version && String.equal left.engine_version right.engine_version
+let retire_unlocked key client =
+  client.closed <- true;
+  Hashtbl.remove clients key;
+  Hashtbl.replace retired_clients key ();
+  Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+    Hashtbl.iter (fun _ resolver -> Eio.Promise.resolve resolver
+      (`Assoc ["ok", `Bool false; "error", `String "client_disconnected"])) client.waiters;
+    Hashtbl.clear client.waiters);
+  while Option.is_some (Eio.Stream.take_nonblocking client.commands) do () done
+let prune_unlocked () =
+  Hashtbl.fold (fun key client acc -> if connected client then acc else (key,client)::acc) clients []
+  |> List.iter (fun (key,client) -> retire_unlocked key client)
+let active_clients () =
+  Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
+    prune_unlocked ();
+    Hashtbl.fold (fun _ client acc -> client.info :: acc) clients [])
+  |> List.sort (fun left right -> String.compare
+       (client_id_to_string left.client_id) (client_id_to_string right.client_id))
+let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
+  "browser", `String (browser_name info.browser); "version", `String info.version;
+  "engineVersion", `String info.engine_version]
+let target_client_id = function Automation -> None | Live_client client -> Some client.info.client_id
+let resolve_target ~lane_name ~client_id =
+  match lane_name, client_id with
+  | "automation", None -> Ok Automation
+  | "automation", Some _ -> Error "client_id_requires_live"
+  | "live", selected ->
+    Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
+      prune_unlocked ();
+      match selected with
+      | Some id ->
+        (match Hashtbl.find_opt clients (client_id_to_string id) with
+         | Some client when connected client -> Ok (Live_client client)
+         | Some _ | None -> Error "client_not_connected")
+      | None ->
+        match Hashtbl.fold (fun _ client acc -> if connected client then client :: acc else acc) clients [] with
+        | [client] -> Ok (Live_client client)
+        | [] -> Error "client_not_connected"
+        | _ :: _ -> Error "ambiguous_browser_clients")
+  | _ -> Error "unknown_lane"
+let register info =
+  Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
+    prune_unlocked ();
+    let key = client_id_to_string info.client_id in
+    if Hashtbl.mem retired_clients key then Error "client_disconnected"
+    else match Hashtbl.find_opt clients key with
+    | Some client when client.closed -> Error "client_disconnected"
+    | Some client when not (same_info client.info info) -> Error "client_identity_changed"
+    | Some client ->
+      client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec;
+      Ok client
+    | None ->
+      let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
+        waiters=Hashtbl.create 8; closed=false;
+        connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
+      Hashtbl.add clients key client; Ok client)
+let take_command ~client_info ~window_sec =
+  match register client_info with
+  | Error _ as error -> error
+  | Ok client ->
+    let rec take () =
+      let issued = Eio.Stream.take client.commands in
+      if not (connected client) then None
+      else if Eio.Mutex.use_ro client.mutex (fun () -> Hashtbl.mem client.waiters issued.id)
+      then Some issued else take () in
+    Ok (Eio.Fiber.first take (fun () -> Time_compat.sleep window_sec; None))
+let deliver_result ~client_id ~id ~payload =
+  match Eio.Mutex.use_ro clients_mutex (fun () ->
+    Hashtbl.find_opt clients (client_id_to_string client_id)) with
+  | None -> Error "unknown_client"
+  | Some client when not (connected client) -> Error "client_not_connected"
+  | Some client ->
+    let waiter = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+      let found = Hashtbl.find_opt client.waiters id in
+      Hashtbl.remove client.waiters id; found) in
+    match waiter with
+    | None -> Error "request_not_owned_by_client"
+    | Some resolver -> Eio.Promise.resolve resolver payload; Ok ()
+let disconnect_client ~client_id =
+  Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
+    let key = client_id_to_string client_id in
+    match Hashtbl.find_opt clients key with
+    | None when Hashtbl.mem retired_clients key -> Ok ()
+    | None -> Error "unknown_client"
+    | Some client -> retire_unlocked key client; Ok ())
+let issue_live client ~verb ~timeout_sec =
+  if not (connected client) then Refused "client_not_connected"
+  else if not (verb_allowed_on_live verb) then
+    Refused "session ownership and direct navigation belong to the automation lane"
   else
-  match Hashtbl.find_opt lanes lane_name with
-  | None -> Error "unknown_lane"
-  | Some lane ->
-    let waiter =
-      Eio.Mutex.use_rw ~protect:true lane.mutex (fun () ->
-          match Hashtbl.find_opt lane.waiters id with
-          | Some promise ->
-            Hashtbl.remove lane.waiters id;
-            Some promise
-          | None -> None)
-    in
-    (match waiter with
-    | Some (_, resolver) -> Eio.Promise.resolve resolver payload
-    | None -> ());
-    Ok ()
-;;
-
-let unregister_waiter lane id =
-  Eio.Mutex.use_rw ~protect:true lane.mutex (fun () ->
-      Hashtbl.remove lane.waiters id)
-;;
-
-(* The tool side: issue one verb and await its answer, bounded by the
-   timeout. A lane that has never polled does not exist yet and the call
-   says so instead of timing out into silence. *)
-let lane_connected ~lane_name =
-  match Hashtbl.find_opt lanes lane_name with
-  | Some lane -> not (Monotonic_deadline.passed lane.connected_until)
-  | None -> false
-;;
-
-(* The operator already owns the live session. Explicit-tab interactions may
-   activate page controls, including links; creating or closing the session and
-   direct URL navigation remain automation-only. Both backends enforce this
-   closed verb distinction. *)
-let live_lane_refused =
-  Refused
-    "session ownership and direct navigation belong to the \
-     automation lane"
-;;
-
-let issue_queued ~lane_name ~verb:v ~timeout_sec =
-  match Hashtbl.find_opt lanes lane_name with
-  | Some lane when not (lane_connected ~lane_name) -> Lane_absent
-  | None -> Lane_absent
-  | Some { name = "live"; _ } when not (verb_allowed_on_live v) -> live_lane_refused
-  | Some lane ->
-    let id =
-      Printf.sprintf "bl%d-%06d" (Unix.time () |> int_of_float) (Random.int 1_000_000)
-    in
-    let promise, resolver = Eio.Promise.create () in
-    Eio.Mutex.use_rw ~protect:true lane.mutex (fun () ->
-        Hashtbl.replace lane.waiters id (promise, resolver));
-    Eio.Stream.add lane.commands { id; verb_json = verb_json v };
-    let outcome =
+    Eio.Switch.run (fun sw ->
+      let id = Uuidm.to_string (command_uuid ()) in
+      let promise, resolver = Eio.Promise.create () in
+      Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.add client.waiters id resolver);
+      Eio.Switch.on_release sw (fun () ->
+        Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id));
       Eio.Fiber.first
-        (fun () -> Answered (Eio.Promise.await promise))
-        (fun () ->
-           Time_compat.sleep timeout_sec;
-           Timed_out)
-    in
-    unregister_waiter lane id;
-    outcome
-;;
-
-(* Installed by server bootstrap. Native automation owns its session directly;
-   the live extension continues to use the command queue. *)
+        (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
+          Answered (Eio.Promise.await promise))
+        (fun () -> Time_compat.sleep timeout_sec; Timed_out))
 let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor
+let issue_for ~target ~verb ~timeout_sec =
+  match target with
+  | Live_client client -> issue_live client ~verb ~timeout_sec
+  | Automation ->
+    match Atomic.get automation_executor with
+    | None -> Lane_absent
+    | Some execute -> Eio.Fiber.first (fun () -> execute verb)
+        (fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let issue ~lane_name ~verb ~timeout_sec =
-  match lane_name, Atomic.get automation_executor with
-  | "automation", Some execute ->
-    Eio.Fiber.first
-      (fun () -> execute verb)
-      (fun () -> Time_compat.sleep timeout_sec; Timed_out)
-  | "automation", None -> Lane_absent
-  | _ -> issue_queued ~lane_name ~verb ~timeout_sec
+  match resolve_target ~lane_name ~client_id:None with
+  | Error error -> Refused error
+  | Ok target -> issue_for ~target ~verb ~timeout_sec

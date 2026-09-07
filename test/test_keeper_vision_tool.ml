@@ -1457,7 +1457,38 @@ let test_browser_screenshot_reaches_vision_reader () =
           let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in
           assert (!seen_image);
-          assert (assoc_string "text" reader = "stored browser pixels reached vision")))))
+          assert (assoc_string "text" reader = "stored browser pixels reached vision");
+          let connect suffix browser =
+            let raw = "30000000-0000-4000-8000-" ^ suffix in
+            let client_id = Result.get_ok (Browser_lane.client_id_of_string raw) in
+            let info : Browser_lane.client_info = {client_id;browser;version="fixture";engine_version="155.0.1"} in
+            Eio.Switch.on_release sw (fun () ->
+              ignore (Browser_lane.disconnect_client ~client_id));
+            let initial = Browser_lane.take_command ~client_info:info ~window_sec:0.001 in
+            assert (initial = Ok None);
+            info in
+          let first = connect "000000000001" Browser_lane.Firefox in
+          let second = connect "000000000002" Browser_lane.Zen in
+          let client_id = Browser_lane.client_id_to_string first.client_id in
+          List.iter (fun mode ->
+            let pending = Eio.Fiber.fork_promise ~sw (fun () ->
+              Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~meta
+                ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;
+                  "mode",`String mode;"tabId",`Int 73])) in
+            assert (Browser_lane.take_command ~client_info:second ~window_sec:0.001 = Ok None);
+            let command = match Browser_lane.take_command ~client_info:first ~window_sec:1. with
+              | Ok (Some command) -> command | _ -> failwith "selected live client received no command" in
+            let data = if mode = "screenshot" then `Assoc ["tabId",`Int 73;
+              "url",`String "https://example.org/form";"title",`String "Form";
+              "mimeType",`String "image/png";"data",`String encoded]
+              else `Assoc ["tabId",`Int 73;"elements",`List []] in
+            assert (Browser_lane.deliver_result ~client_id:first.client_id ~id:command.id
+              ~payload:(`Assoc ["ok",`Bool true;"data",data]) = Ok ());
+            let result = match Eio.Promise.await pending with
+              | Ok result -> result | Error exn -> raise exn in
+            assert (result.disposition = Tool_result.Completed ());
+            let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
+            assert (assoc_string "clientId" data = client_id)) ["elements";"screenshot"]))))
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.

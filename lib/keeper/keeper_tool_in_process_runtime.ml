@@ -454,8 +454,9 @@ let handle_memory_retract_with_outcome
     ~args
 ;;
 
-(* Browser lane readers (docs/design/browser-lane.md): one queue hop, no
-   gate — the verb set is closed and read-only at the state layer. *)
+(* Browser lane tools preserve selected native-client identity. The closed
+   state-layer verb set distinguishes reads from explicit-tab interactions;
+   session ownership and direct navigation remain automation-only. *)
 let handle_browser_tabs_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
@@ -2111,7 +2112,10 @@ let masc_file_failure message =
 
 let handle_masc_file_with_outcome ~name ~args () =
   let require_env key =
-    match Sys.getenv_opt key with
+    (* The key is the caller's, but the floor is the same: a value set in
+       runtime.toml has to answer here too, or masc_file refuses a variable the
+       deployment did declare. *)
+    match Env_config_core.raw_value_opt key with
     | Some v when v <> "" -> Ok v
     | _ -> Error ("masc_file requires the " ^ key ^ " environment variable")
   in

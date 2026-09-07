@@ -36,3 +36,8 @@ name = "framePath"
 type = "array"
 items = { type = "string" }
 description = "Automation only: outer-to-inner iframe/frame selectors for text/elements/frames. Requires tabId. Omit for top-level."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."

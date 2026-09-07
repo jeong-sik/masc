@@ -231,7 +231,7 @@ actor 는 `authority = {kind: system_llm_agent, actor: "verifier_exact"}` 이고
 한 keeper 로 깨끗하게 귀속되는 것               0개
 ```
 
-태스크 6개짜리 골은 `keeper-kidsnote-agent` 와 `keeper-rondo-agent` **둘로 갈린다.** 나머지
+태스크 6개짜리 골은 `keeper-exampleorg-agent` 와 `keeper-rondo-agent` **둘로 갈린다.** 나머지
 넷은 태스크가 아카이브에 없어서 담당자를 못 읽는다(§3.1.1 의 `tasks-archive.json` 정지와 같은
 원인일 수 있다).
 

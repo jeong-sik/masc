@@ -33,7 +33,7 @@ constitution의 Goal 규칙 B1–B3는 문서만 있고 코드가 없었다. 이
   **사람 확인 축은 철회한다 (2026-08-20).** 초안은 `Awaiting_confirmation` phase 와
   `human_confirm` / `human_reject` 를 두어 완료를 사람의 확인 뒤에 놓으려 했다. 실측이
   그 전제를 반증한다: 완료된 Goal 18건의 종결 주체는 Keeper 자신 8건(rondo·sangsu·
-  kidsnote·analyst), admin 4건, operator·probe·mcp-client 6건이고 **"사람이 확인했다"는
+  exampleorg·analyst), admin 4건, operator·probe·mcp-client 6건이고 **"사람이 확인했다"는
   사건은 `goal_events.jsonl` 어디에도 없다**. 확인할 표면도 이 RFC 범위 밖으로 빠져 있다.
 
   게다가 action enum 은 `List.map action_to_string Goal_phase.all_actions` 로 생성되므로

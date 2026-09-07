@@ -32,10 +32,10 @@ masc 는 keeper 의 체크아웃이 `<playground_root>/repos/<repo_name>/` 에 �
 |---|---|---|
 | `code-reviewer/.masc/repos/vp-tempo-cli/` | 주 체크아웃 | 안 보임 |
 | `sangsu/.masc/repos/vp-slugify-lib/` | 주 체크아웃 | 안 보임 |
-| `kidsnote/.tmp/task136-fix/` (외 2건) | worktree | 안 보임 |
+| `exampleorg/.tmp/task136-fix/` (외 2건) | worktree | 안 보임 |
 | `analyst/repos/masc/` (외 14건) | 주 체크아웃 | 보임 |
 
-규정 밖 6건은 전부 `git rev-parse --show-toplevel` 이 자기 자신을 반환하는 진짜 체크아웃이다. `kidsnote/.tmp/task136-fix` 의 origin 은 `github.com/kidsnote/kidsnote_web_inapp.git` 이다.
+규정 밖 6건은 전부 `git rev-parse --show-toplevel` 이 자기 자신을 반환하는 진짜 체크아웃이다. `exampleorg/.tmp/task136-fix` 의 origin 은 `github.example.invalid/exampleorg/exampleorg_web_inapp.git` 이다.
 
 **이 RFC 를 채택하지 않는 것은 현상 유지가 아니라 손실 누적이다.**
 
@@ -175,7 +175,7 @@ RFC-0312 (**Accepted**, PR #23359) 가 "keeper repo 매핑은 advisory default s
 
 ### 3.4 마이그레이션이 필요 없다
 
-구조를 규정하지 않는다는 것은 **기존 구조도 허용한다**는 뜻이다. 기존 `<root>/repos/masc/` 체크아웃은 git 실측 발견으로 그대로 잡힌다. 대시보드 개수 변화는 실측 기준 `code-reviewer` +1, `kidsnote` +3, `sangsu` +1, 나머지 9개 0 이며 전부 "못 보던 것을 보게 된다" 방향이다.
+구조를 규정하지 않는다는 것은 **기존 구조도 허용한다**는 뜻이다. 기존 `<root>/repos/masc/` 체크아웃은 git 실측 발견으로 그대로 잡힌다. 대시보드 개수 변화는 실측 기준 `code-reviewer` +1, `exampleorg` +3, `sangsu` +1, 나머지 9개 0 이며 전부 "못 보던 것을 보게 된다" 방향이다.
 
 이것이 RFC-0364 와의 결정적 차이다. 그 RFC 는 레이아웃을 **다른 레이아웃으로 교체**하려 했으므로 hard cut 과 playground 재생성이 필요했다.
 
@@ -276,7 +276,7 @@ RFC-0364 는 같은 문제(§1.3, §1.4)를 진단했으나 해법이 **레이�
 세 가지가 그 조항을 발동시켰다:
 
 1. **다중 체크아웃 계획이 확인됐다.** 사용자가 keeper 가 저장소 여러 개를 다룰 것임을 확정했다.
-2. **§1.2 의 근거 데이터가 틀린 authority 를 쟀다.** RFC-0364 §1.2 는 `repositories.toml` 카탈로그(5개 repo)를 재고 "keeper 하나가 저장소 둘 이상을 갖는 사례 0건" 이라 결론했다. 파일시스템은 정반대다 — kidsnote 12개, sangsu 7개, rondo 3개, code-reviewer 3개, analyst 2개.
+2. **§1.2 의 근거 데이터가 틀린 authority 를 쟀다.** RFC-0364 §1.2 는 `repositories.toml` 카탈로그(5개 repo)를 재고 "keeper 하나가 저장소 둘 이상을 갖는 사례 0건" 이라 결론했다. 파일시스템은 정반대다 — exampleorg 12개, sangsu 7개, rondo 3개, code-reviewer 3개, analyst 2개.
 3. **조항이 제시한 대안도 채택 불가다.** `repository_scope` 강제는 RFC-0312 (Accepted) 를 뒤집는 것이다.
 
 세 번째 길이 이 RFC 다: 강제하지도 않고 규정하지도 않되, **관측은 정확히 한다.**

@@ -54,20 +54,13 @@ sources=$( { printf '%s\n' "${changed}" \
 #
 # Measured 2026-09-06: #33472 added keeper_lane_status.toml and #33639 added
 # the three masc_file_* tools. Neither ran the guard, neither updated the
-# manifest, and every boot since printed the half-built-binary WARN with
-# those four stranded out of the runtime directory.
-#
-# So map the guarded input back to its guard.
+# manifest, and every boot since printed the mismatch WARN with those four
+# stranded out of the runtime directory.
 assets=$( { printf '%s\n' "${changed}" \
   | grep -E '^config/(prompts|tools|mcp)/' || [ $? -eq 1 ]; } | head -1)
-if [ -n "${assets}" ]; then
-  echo "this pull request changes managed config assets; adding their guard"
-  sources=$(printf '%s\n%s\n' "${sources}" \
-    "test/test_managed_assets_sync_from_binary.ml" \
-    | grep -v '^[[:space:]]*$' | sort -u)
-fi
+asset_guard="test/test_managed_assets_sync_from_binary.ml"
 
-if [ -z "${sources}" ]; then
+if [ -z "${sources}" ] && [ -z "${assets}" ]; then
   echo "no test source in this pull request; nothing to run"
   exit 0
 fi
@@ -79,6 +72,17 @@ printf '%s\n' "${sources}" | sed 's/^/  /'
 if [ "${count}" -gt "${max_suites}" ]; then
   echo "NOT RUN: more than ${max_suites} suites, which reads as a wrong list"
   exit 0
+fi
+
+# After the cap, not before. The cap is a heuristic against a wrong
+# changed-file list; this guard is one named suite added for one stated
+# reason, so counting it toward that heuristic would let a pull request that
+# edits max_suites tests and one config asset run nothing at all -- worse
+# than before this mapping existed.
+if [ -n "${assets}" ]; then
+  echo "this pull request changes managed config assets; adding ${asset_guard}"
+  sources=$(printf '%s\n%s\n' "${sources}" "${asset_guard}" \
+    | grep -v '^[[:space:]]*$' | sort -u)
 fi
 
 ran=0

@@ -329,5 +329,9 @@ val error_to_string : error -> string
 val operation_error_kind : Keeper_chat_operation_store.error -> operation_error_kind
 
 module For_testing : sig
+  val observe_state_changes : sw:Eio.Switch.t -> (unit -> unit) -> unit
+  (** Compose a non-yielding test observer with the installed observer until
+      switch release. For serial test scopes; preserves the prior observer. *)
+
   val mailbox_depth : t -> int
 end

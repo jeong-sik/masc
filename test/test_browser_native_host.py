@@ -133,11 +133,42 @@ class NativeHost(unittest.TestCase):
             self.assertEqual(self.server.results.get(timeout=5), reply)
 
     def test_unsupported_verb_is_not_forwarded(self):
-        self.server.commands.put({"id": "rejected", "verb": "page.goto", "args": {"url": "https://example.com"}})
-        reply = self.server.results.get(timeout=5)
-        self.assertFalse(reply["ok"])
-        self.assertEqual(reply["id"], "rejected")
-        self.assertFalse(select.select([self.process.stdout], [], [], 0)[0])
+        for verb, args in [
+            ("page.goto", {"url": "https://example.com"}),
+            ("page.act", {"action": "click", "tabId": 73, "selector": "button"}),
+        ]:
+            with self.subTest(verb=verb):
+                self.server.commands.put({"id": "rejected", "verb": verb, "args": args})
+                reply = self.server.results.get(timeout=5)
+                self.assertFalse(reply["ok"])
+                self.assertEqual(reply["id"], "rejected")
+                self.assertFalse(select.select([self.process.stdout], [], [], 0)[0])
+
+    def test_elements_roundtrip_preserves_target_and_control_observation(self):
+        for index, args in enumerate([{}, {"tabId": 73}]):
+            with self.subTest(args=args):
+                command = {"id": f"elements-{index}", "verb": "page.elements", "args": args}
+                self.server.commands.put(command)
+                self.assertEqual(read_frame(self.process.stdout), command)
+                reply = {
+                    "id": command["id"], "ok": True,
+                    "data": {
+                        "tabId": 73, "url": "https://example.org/form", "title": "폼",
+                        "total": 1, "truncated": False,
+                        "elements": [{
+                            "selector": "html > body > select:nth-of-type(1)",
+                            "tag": "select", "value": "draft-id", "multiple": False,
+                            "options": [{"value": "draft-id", "label": "초안",
+                                         "selected": True, "disabled": False}],
+                        }],
+                    },
+                }
+                framed = encode_frame(reply)
+                self.process.stdin.write(framed[:3])
+                self.process.stdin.flush()
+                self.process.stdin.write(framed[3:])
+                self.process.stdin.flush()
+                self.assertEqual(self.server.results.get(timeout=5), reply)
 
     def test_eof_cancels_waiting_http(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))

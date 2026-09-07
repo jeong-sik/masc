@@ -209,8 +209,9 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
     in
     (* Both ids classify as official clients only when configured; the walk
        still records the refusal of the unknown one and advances. *)
+    let observed = ref [] in
     match
-      Cli_oneshot.walk
+      Cli_oneshot.walk ~validate:Result.ok ~on_failure:(fun failure -> observed := !observed @ [failure])
         ~runner
         ~base_dir:"/tmp"
         ~cli_slots:[ "nope.not-configured"; official_client_runtime ]
@@ -224,6 +225,10 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
         "the walk must land on the second slot: %s"
         (String.concat "; " (List.map Cli_oneshot.failure_to_string failures))
     | Ok (runtime_id, value) ->
+      (match !observed with
+       | [Cli_oneshot.Not_an_official_client { runtime_id = rejected_id }] ->
+         check string "prior rejection is observed before success" "nope.not-configured" rejected_id
+       | _ -> fail "success must retain one prior refusal observation");
       check string "second slot answered" official_client_runtime runtime_id;
       check string "value parsed" {|{"verdict":"pass"}|} (Yojson.Safe.to_string value))
 ;;
@@ -232,7 +237,7 @@ let test_walk_exhaustion_returns_every_failure () =
   with_runtime (fun () ->
     let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Error "quota" in
     match
-      Cli_oneshot.walk
+      Cli_oneshot.walk ~validate:Result.ok ~on_failure:ignore
         ~runner
         ~base_dir:"/tmp"
         ~cli_slots:[ official_client_runtime; "nope.not-configured" ]
@@ -256,7 +261,7 @@ let test_walk_exhaustion_returns_every_failure () =
 let test_an_empty_walk_is_an_empty_error () =
   with_runtime (fun () ->
     match
-      Cli_oneshot.walk
+      Cli_oneshot.walk ~validate:Result.ok ~on_failure:ignore
         ~runner:unreachable_runner
         ~base_dir:"/tmp"
         ~cli_slots:[]
@@ -434,7 +439,7 @@ let calls marker =
 ;;
 
 let walk_real ~dir slots =
-  Cli_oneshot.walk ~base_dir:dir ~cli_slots:slots ~system_prompt:""
+  Cli_oneshot.walk ~validate:Result.ok ~on_failure:ignore ~base_dir:dir ~cli_slots:slots ~system_prompt:""
     ~requirement ~prompt:"Judge this." ()
 ;;
 

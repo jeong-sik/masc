@@ -84,12 +84,6 @@ val prepare :
 type cli_tail_error =
   | No_cli_slots
   | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
-  | Cli_output_invalid of
-      { slot_id : string
-      ; detail : string
-      }
-
-val cli_tail_error_to_string : cli_tail_error -> string
 
 val cli_slots : prepared -> string list
 (** The lane's declared official-client tail, in declaration order. Empty when

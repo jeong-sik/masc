@@ -1320,6 +1320,14 @@ to the same list row.
 Config is five views over the runtime's settings. Press `p` to move through
 `runtime.toml`, `models`, typed `params`, prompt overrides, and themes.
 
+The `runtime.toml` view shows the source revision, validation result, and routing
+and Keeper application status returned with that source. `v` opens the complete
+read status: individual validation issues, restart requirements, pending keys,
+and settings preempted by environment variables. Use `j/k` or `PgUp/PgDn` to
+scroll, `v` or `Esc` to return, and `r` to reload. A failed reload remains visible
+and labels retained metadata as a previous read. Invalid TOML remains readable
+with its parse error; a read status does not claim a write committed.
+
 The `runtime.toml` view keeps comments and section headings on screen, while
 `j`/`k` select only rows that contain actual assignments. `PgUp`/`PgDn` jump
 by a visible page and land on the nearest assignment. The selected row is a

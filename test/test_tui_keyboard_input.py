@@ -10263,6 +10263,26 @@ RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
 RUNTIME_CONFIG_RAW_PATH = "/api/v1/runtime/config/raw"
 
 
+def runtime_config_read_metadata() -> dict[str, object]:
+    return {
+        "ok": True,
+        "source_revision": "fixture-read-revision",
+        "validation": {
+            "valid": True, "schema_version": 1, "current_schema_version": 1,
+            "forward_schema": False, "issues": [],
+        },
+        "application": {
+            "operation": "read",
+            "routing": {"status": "active", "requires_restart": False},
+            "keeper_overlay": {
+                "status": "pending_restart", "configured_count": 1,
+                "requires_restart": True, "pending_keys": ["keeper.pending"],
+                "applied_keys": [], "preempted_keys": [],
+            },
+        },
+    }
+
+
 def config_navigation_source() -> str:
     lines = [
         "# operator notes stay visible",
@@ -10302,6 +10322,15 @@ def config_navigation_interaction() -> Interaction:
             start=0,
             timeout=3.0,
         )
+
+        status = send_and_wait(
+            process, master_fd, output, b"v", b"Pending restart: keeper.pending"
+        )
+        status_plain = CSI_RE.sub(b"", status)
+        for needle in (b"fixture-read-revision", b"Validation: valid", b"Keeper restart: required"):
+            if needle not in status_plain:
+                raise AssertionError(f"Config status omitted {needle!r}: {status_plain!r}")
+        send_and_wait(process, master_fd, output, b"v", b"first-value = ")
 
         next_field = send_and_wait(
             process, master_fd, output, b"j", b"second-value = "
@@ -12581,6 +12610,7 @@ def run_config_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
+            **runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": config_navigation_source(),
         },
@@ -12884,6 +12914,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = (
         200,
         {
+            **runtime_config_read_metadata(),
             "path": "/workspace/config/runtime.toml",
             "source_text": "\n".join(
                 [

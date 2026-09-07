@@ -384,6 +384,8 @@ let for_surface = function
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "v" "runtime.toml read status"
+          ~help:"source revision, validation issues, and application/restart details"
       ; b Navigate "9" "Runtime"
           ~help:"runtime status, lane routing, probes and connected clients"
       ; b Navigate "s" "resources"

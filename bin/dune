@@ -978,6 +978,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_runtime_config_view
   masc_tui_frame
   masc_tui_image_preview
   ocaml-msx.msx
@@ -1041,6 +1042,12 @@
  (wrapped false)
  (modules masc_tui_terminal_title)
  (libraries masc_tui_types))
+
+(library
+ (name masc_tui_runtime_config_view)
+ (wrapped false)
+ (modules masc_tui_runtime_config_view)
+ (libraries yojson))
 
 (library
  (name masc_tui_runtime_config_receipt)
@@ -1181,6 +1188,7 @@
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
+  masc_tui_runtime_config_view
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc.runtime

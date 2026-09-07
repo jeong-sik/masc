@@ -2458,8 +2458,8 @@ let test_missing_summary_earns_failed () =
    runner; the runtime table below is what lets [is_official_client] admit
    the cli ids, exactly like the fusion panel fixture. *)
 
-let cli_runtime_fixture =
-  {|
+let cli_runtime_fixture ~oauth_source =
+  Printf.sprintf {|
 [runtime]
 default = "stub-http.stub-model"
 
@@ -2504,11 +2504,13 @@ turn-timeout-s = 0
 protocol = "antigravity-cli"
 command = "/usr/bin/true"
 is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
 [models.gemini]
 api-name = "gemini-fixture"
 max-context = 128000
 [agy.gemini]
-|}
+|} oauth_source
 ;;
 
 let cli_primary = "claude_code.claude-sonnet-5"
@@ -2516,13 +2518,16 @@ let cli_secondary = "claude_code.claude-haiku-4-5"
 
 let with_cli_runtimes f =
   let path = Filename.temp_file "hitl-cli-runtime" ".toml" in
+  let oauth_source = Filename.temp_file "hitl-cli-oauth" ".json" in
   Fun.protect
-    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    ~finally:(fun () ->
+      List.iter (fun path -> try Sys.remove path with Sys_error _ -> ())
+        [path; oauth_source])
     (fun () ->
        let channel = open_out path in
        Fun.protect
          ~finally:(fun () -> close_out channel)
-         (fun () -> output_string channel cli_runtime_fixture);
+         (fun () -> output_string channel (cli_runtime_fixture ~oauth_source));
        match Runtime.init_default ~config_path:path with
        | Error detail -> failf "cli runtime fixture must initialize: %s" detail
        | Ok () -> f ())

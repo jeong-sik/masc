@@ -4750,6 +4750,7 @@
  (libraries masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_webdriver.inc)
+(include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
 
@@ -4778,3 +4779,15 @@
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
  (libraries alcotest masc masc_tui_types))
+
+(rule
+ (alias runtest-test_browser_elements)
+ (deps
+  test_browser_elements.cjs
+  ../lib/browser_page_script.ml
+  ../connectors/browser/extension/background.js)
+ (action (run node --test %{dep:test_browser_elements.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_elements)))

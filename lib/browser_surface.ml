@@ -20,7 +20,7 @@ let parse_request = function
 let decode_answer = function
   | Browser_lane.Lane_absent -> Error "browser lane is disconnected"
   | Browser_lane.Timed_out -> Error "browser lane timed out"
-  | Browser_lane.Refused error -> Error error
+  | Browser_lane.Refused error | Browser_lane.Rejected_before_effect error -> Error error
   | Browser_lane.Answered json ->
     match field "ok" json, field "data" json with
     | Some (`Bool true), Some data -> Ok data

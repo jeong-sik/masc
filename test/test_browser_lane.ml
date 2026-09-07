@@ -36,7 +36,7 @@ let test_issue_poll_deliver_roundtrip () =
       | Ok (Lane.Answered _) -> fail "answered with an unexpected payload"
       | Ok Lane.Timed_out -> fail "the round trip timed out"
       | Ok Lane.Lane_absent -> fail "the lane was absent inside the same scheduler"
-      | Ok (Lane.Refused _) -> fail "a read verb was refused"))
+      | Ok (Lane.Refused _ | Lane.Rejected_before_effect _) -> fail "a read verb was refused"))
 ;;
 
 let test_unknown_lane_is_refused () =
@@ -88,7 +88,7 @@ let test_automation_uses_native_executor () =
 let test_live_lane_refuses_act_verbs () =
   with_eio (fun () ->
     ignore (Lane.take_command ~lane_name:"live" ~window_sec:0.01);
-    (match Lane.issue ~lane_name:"live" ~verb:(Lane.Page_goto { url = "https://x" }) ~timeout_sec:0.1 with
+    (match Lane.issue ~lane_name:"live" ~verb:(Lane.Page_goto { url = "https://x"; tab_id = None }) ~timeout_sec:0.1 with
     | Lane.Refused _ -> ()
     | _ -> fail "expected Refused for a navigation on the live lane");
     (match Lane.issue ~lane_name:"live" ~verb:(Lane.Session_open { headless = None }) ~timeout_sec:0.1 with

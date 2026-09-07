@@ -42,6 +42,7 @@ val browser_tabs_schema : Masc_domain.tool_schema
 val browser_read_schema : Masc_domain.tool_schema
 val browser_session_schema : Masc_domain.tool_schema
 val browser_goto_schema : Masc_domain.tool_schema
+val browser_act_schema : Masc_domain.tool_schema
 val browser_lane_schemas : Masc_domain.tool_schema list
 (** Browser-lane reader tools (docs/design/browser-lane.md). *)
 (** Canonical input schemas owned by the Tool_misc web handlers. *)
@@ -98,6 +99,7 @@ type misc_operation =
   | Misc_browser_read
   | Misc_browser_session
   | Misc_browser_goto
+  | Misc_browser_act
   | Misc_slack_read
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)

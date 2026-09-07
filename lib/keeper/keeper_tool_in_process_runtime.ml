@@ -476,6 +476,12 @@ let handle_browser_goto_with_outcome ~args =
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
 ;;
 
+let handle_browser_act_with_outcome ~args =
+  let result, failure_effect_disposition =
+    Tool_misc_browser_lane.handle_act_with_phase ~tool_name:"masc_browser_act" ~start_time:0.0 args in
+  Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
+;;
+
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_library.handle_search

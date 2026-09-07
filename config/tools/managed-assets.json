@@ -77,6 +77,7 @@
     "masc_board_sub_board_update.toml",
     "masc_board_vote.toml",
     "masc_broadcast.toml",
+    "masc_browser_act.toml",
     "masc_browser_goto.toml",
     "masc_browser_read.toml",
     "masc_browser_session.toml",

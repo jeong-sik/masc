@@ -1,7 +1,7 @@
 name = "masc_browser_goto"
 description = """
 Navigate the automation lane's browser to one http(s) URL and answer with \
-the landing url, title and status. The automation browser keeps its own \
+the landing url and title. The automation browser keeps its own \
 profile with no operator logins. The live lane refuses navigation verbs — \
 it is read-only. Read the page afterwards with masc_browser_read \
 lane=automation."""
@@ -16,5 +16,5 @@ description = "Full http or https URL. Example: \"https://ocaml.org\"."
 [[params]]
 name = "tabId"
 type = "integer"
-description = "Page index from masc_browser_tabs to navigate. Default: the newest page."
+description = "Tab id from BrowserTabs to navigate. Default: the current tab."
 minimum = 0

@@ -132,6 +132,7 @@ type runtime_handler =
   | Tool_browser_read
   | Tool_browser_session
   | Tool_browser_goto
+  | Tool_browser_act
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -258,6 +259,7 @@ let runtime_handler_to_string = function
   | Tool_browser_read -> "tool_browser_read"
   | Tool_browser_session -> "tool_browser_session"
   | Tool_browser_goto -> "tool_browser_goto"
+  | Tool_browser_act -> "tool_browser_act"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
@@ -472,6 +474,7 @@ let descriptor
       | Tool_browser_read
       | Tool_browser_session
       | Tool_browser_goto
+  | Tool_browser_act
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
@@ -886,6 +889,22 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_browser_goto
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_act"
+      ~public_name:"BrowserAct"
+      ~internal_name:Tool_schemas_misc.browser_act_schema.name
+      ~description:Tool_schemas_misc.browser_act_schema.description
+      ~input_schema:Tool_schemas_misc.browser_act_schema.input_schema
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_act
       ~input_translation:(Identity Validate_once_before_translation)
       ()
   ]

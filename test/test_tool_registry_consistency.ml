@@ -300,6 +300,28 @@ let test_every_registered_schema_has_catalog_permission () =
     missing
 ;;
 
+let test_browser_actions_have_mutating_dispatch_authority () =
+  init ();
+  List.iter (fun name ->
+    Alcotest.(check bool) (name ^ " resolves to browser misc dispatch") true
+      (Unified_tool_registry.tag_of_name name = Some Tool_dispatch.Mod_misc))
+    [ "BrowserAct"; "masc_browser_act" ];
+  let meta =
+    Tool_catalog.registered_metadata "masc_browser_act"
+    |> expect_some ~label:"BrowserAct catalog permission"
+  in
+  Alcotest.(check bool) "browser actions require mutation authority" true
+    (meta.required_permission = Masc_domain.CanBroadcast);
+  let descriptor =
+    Keeper_tool_descriptor.find_public "BrowserAct"
+    |> expect_some ~label:"BrowserAct execution descriptor"
+  in
+  Alcotest.(check (option bool)) "browser actions are not read-only"
+    (Some false) (Keeper_tool_descriptor.readonly_static_hint descriptor);
+  Alcotest.(check bool) "browser actions preserve serial execution" true
+    (descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
+;;
+
 (* HTTP routes that authorize through [with_tool_auth] need a catalog entry
    under the name they pass as ~tool_name. The approval routes used to borrow
    "masc_keeper_delegate_cancel", which made the permission a dispatchable
@@ -381,6 +403,10 @@ let () =
             "every registered schema has catalog permission"
             `Quick
             test_every_registered_schema_has_catalog_permission
+        ; test_case
+            "BrowserAct has mutating dispatch authority"
+            `Quick
+            test_browser_actions_have_mutating_dispatch_authority
         ; test_case
             "approval routes own dedicated hidden auth keys"
             `Quick

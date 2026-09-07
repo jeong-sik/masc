@@ -35,12 +35,14 @@ let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
 
 let browser_session_schema : tool_schema = Tool_schemas_misc_toml.browser_session
 let browser_goto_schema : tool_schema = Tool_schemas_misc_toml.browser_goto
+let browser_act_schema : tool_schema = Tool_schemas_misc_toml.browser_act
 
 let browser_lane_schemas =
   [ browser_tabs_schema
   ; browser_read_schema
   ; browser_session_schema
   ; browser_goto_schema
+  ; browser_act_schema
   ]
 
 (* [schemas] is the public misc schema set, now read from
@@ -112,6 +114,7 @@ type misc_operation =
   | Misc_browser_read
   | Misc_browser_session
   | Misc_browser_goto
+  | Misc_browser_act
   | Misc_slack_read
 [@@deriving enumerate]
 
@@ -132,6 +135,7 @@ let misc_tool_name = function
   | Misc_browser_read -> "masc_browser_read"
   | Misc_browser_session -> "masc_browser_session"
   | Misc_browser_goto -> "masc_browser_goto"
+  | Misc_browser_act -> "masc_browser_act"
   | Misc_slack_read -> "masc_slack_read"
 ;;
 
@@ -152,7 +156,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_browser_tabs
   | Misc_browser_read
   | Misc_browser_session
-  | Misc_browser_goto -> None
+  | Misc_browser_goto
+  | Misc_browser_act -> None
   | Misc_slack_read
   | Misc_ask
   | Misc_ask_status

@@ -63,7 +63,10 @@ open Alcotest
    The figure is a reading, not a constant. What the ceiling holds is the
    slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
    the numbers here say where it came from. *)
-let ceiling_bytes = 85_000
+(* Firefox controls: the production TOML loader measured BrowserAct at 1,628
+   bytes, BrowserRead mode growth at 202, and BrowserGoto shrinkage at 18.
+   Preserve the previous ceiling's headroom: 85,000 + 1,628 + 202 - 18. *)
+let ceiling_bytes = 86_812
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -110,7 +113,8 @@ let measured () =
 
    A tool added or removed still fails here, and now says which one. *)
 let all_surface_golden_names =
-  [ "BrowserGoto"
+  [ "BrowserAct"
+  ; "BrowserGoto"
   ; "BrowserRead"
   ; "BrowserSession"
   ; "BrowserTabs"

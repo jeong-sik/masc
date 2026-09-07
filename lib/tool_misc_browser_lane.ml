@@ -21,12 +21,13 @@ let make_workflow_err ~tool_name ~start_time message =
 (* The lane names are the closed set the state module admits; anything else
    is refused here rather than queued into a lane that cannot exist. *)
 let lane_of ~tool_name ~start_time args =
-  match get_string args "lane" "live" with
-  | "live" | "automation" as lane -> Ok lane
-  | other ->
-    Error
-      (make_workflow_err ~tool_name ~start_time
-         ("lane must be one of: live, automation (got: " ^ other ^ ")"))
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "lane" fields with
+     | None -> Ok "live"
+     | Some (`String ("live" | "automation" as lane)) -> Ok lane
+     | _ -> Error (make_workflow_err ~tool_name ~start_time "lane must be live or automation"))
+  | _ -> Error (make_workflow_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
 
 let answer_to_result ~tool_name ~start_time = function
@@ -47,7 +48,7 @@ let answer_to_result ~tool_name ~start_time = function
        running with the browser-lane extension and host (connectors/browser)"
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
-  | Browser_lane.Refused reason ->
+  | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->
     make_workflow_err ~tool_name ~start_time reason
 ;;
 
@@ -91,7 +92,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
     answer_to_result ~tool_name ~start_time
       (Browser_lane.issue
          ~lane_name:"automation"
-         ~verb:(Browser_lane.Page_goto { url })
+         ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" })
          ~timeout_sec:45.0)
 ;;
 
@@ -100,9 +101,31 @@ let handle_read ~tool_name ~start_time args : Tool_result.result =
   | Error error -> error
   | Ok lane ->
     let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue
-         ~lane_name:lane
-         ~verb:(Browser_lane.Page_read { tab_id = get_int_opt args "tabId"; max_chars = Some max_chars })
-         ~timeout_sec:default_timeout_sec)
+    let verb = match get_string args "mode" "text" with
+      | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
+      | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
+      | _ -> Error "mode must be text or elements" in
+    match verb with
+    | Error detail -> make_workflow_err ~tool_name ~start_time detail
+    | Ok verb -> answer_to_result ~tool_name ~start_time
+        (Browser_lane.issue ~lane_name:lane ~verb ~timeout_sec:default_timeout_sec)
 ;;
+
+let handle_act_with_phase ~tool_name ~start_time args =
+  let pre_error detail =
+    make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
+  let args = match args with
+    | `Assoc fields when not (List.mem_assoc "lane" fields) -> `Assoc (("lane",`String "automation") :: fields)
+    | _ -> args in
+  match lane_of ~tool_name ~start_time args, Browser_lane.Action.parse args with
+  | Error error, _ -> error, Tool_result.Proven_pre_effect
+  | _, Error detail -> pre_error detail
+  | Ok lane, Ok action ->
+    let answer = Browser_lane.issue ~lane_name:lane ~verb:(Browser_lane.Page_act action) ~timeout_sec:60. in
+    let phase = match answer with
+      | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent -> Tool_result.Proven_pre_effect
+      | Browser_lane.Refused _ when lane = "live" -> Tool_result.Proven_pre_effect
+      | Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Answered _ -> Tool_result.Effect_outcome_unknown in
+    answer_to_result ~tool_name ~start_time answer, phase
+;;
+let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_name ~start_time args)

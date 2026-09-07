@@ -181,6 +181,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_session ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_goto ->
       Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_browser_act ->
+      Some (Tool_misc_browser_lane.handle_act ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_slack_read ->
       Some (Tool_misc_slack_lane.handle_read ~tool_name:name ~start_time:start args)
 
@@ -209,6 +211,7 @@ let is_read_only = function
   | (* A navigation reaches the web from a keeper-owned profile — the same
        classification the web fetch carries. *)
     Tool_schemas_misc.Misc_browser_goto
+  | Tool_schemas_misc.Misc_browser_act
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> false
 

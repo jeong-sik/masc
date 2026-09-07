@@ -1,0 +1,60 @@
+name = "masc_browser_act"
+description = """
+Interact with automation Firefox; live refuses actions. Discover selectors with BrowserRead mode=elements. Existing-tab actions require its returned tabId; open_tab returns a new tabId. Actions may submit forms or change external state. Read the page after acting; a failed/timed-out action may already have taken effect, so observe before retrying."""
+additional_properties = false
+
+[[params]]
+name = "action"
+type = "string"
+enum = ["open_tab", "close_tab", "click", "fill", "press", "select", "scroll", "back", "forward", "reload"]
+required = true
+description = "Operation. fill replaces text; select picks an option by exact value."
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["automation"]
+default = "automation"
+description = "Browser source. Default: automation."
+
+[[params]]
+name = "tabId"
+type = "integer"
+minimum = 0
+description = "Required except for open_tab. Use the observed tab id."
+
+[[params]]
+name = "selector"
+type = "string"
+description = "CSS selector for click/fill/press/select; must match exactly one element."
+
+[[params]]
+name = "text"
+type = "string"
+description = "Replacement text for fill. Empty clears."
+
+[[params]]
+name = "key"
+type = "string"
+enum = ["Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]
+description = "Key for press."
+
+[[params]]
+name = "value"
+type = "string"
+description = "Exact option value for select."
+
+[[params]]
+name = "url"
+type = "string"
+description = "Absolute HTTP(S) URL for open_tab."
+
+[[params]]
+name = "x"
+type = "integer"
+description = "Horizontal pixel delta for scroll; required with y."
+
+[[params]]
+name = "y"
+type = "integer"
+description = "Vertical pixel delta for scroll; required with x."

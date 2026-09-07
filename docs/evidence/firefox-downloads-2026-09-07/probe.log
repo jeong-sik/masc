@@ -47,12 +47,19 @@ PASS blocked tab scan reports its exact id
 PASS native action confirms its target tab
 PASS load-time dialog recovery leaves page readable
 PASS native action confirms its target tab
+PASS upload uses a private snapshot instead of caller source
 PASS native action confirms its target tab
+PASS selected snapshots survive staging callback return
+PASS later File text read preserves staged bytes
 PASS native action confirms its target tab
 PASS real multipart upload preserves file bytes
 PASS native action confirms its target tab
+PASS download 1 reached terminal completion
 PASS native action confirms its target tab
+PASS download 2 reached terminal completion
 PASS native action confirms its target tab
+PASS download 3 reached terminal completion
+PASS frame download click confirms its tab and effect
 PASS distinct UUIDs correlate identical URLs and null navigation
 PASS iframe downloads belong to their observed top-level tab
 PASS another tab cannot see these downloads
@@ -67,9 +74,12 @@ PASS download publication returned metadata
 PASS native action confirms its target tab
 PASS completed downloads remain readable after their tab closes
 PASS native action confirms its target tab
+PASS closing one tab retains session-owned files
 PASS native action confirms its target tab
 PASS closed tab cannot be clicked
 PASS session close is confirmed
+PASS confirmed session teardown removes private snapshots
+PASS session cleanup never deletes caller source file
 PASS probe owns a newly opened session
 PASS reopened sessions never reuse tab IDs
 PASS old session target rejected

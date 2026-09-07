@@ -6,7 +6,11 @@ and Browser_bidi_downloads with the installed native ws-direct-eio transport.
 The HTTP fixture adapter runs curl in a system thread so BiDi can process
 messages while Classic commands are pending. No repository build ran locally.
 
-The final canonical Page_capture run completed successfully, including session close and reopen.
+The final canonical Page_capture and upload-lease run completed successfully,
+including session close and reopen. Upload snapshots survived the staging
+callback, a later File read, and multipart submission; closing one tab retained
+them, and confirmed session teardown removed snapshots without deleting caller
+source files.
 `execution.json` records exit status; `sources.json` hashes every sampled source.
 `probe.log` records native interaction assertions; `downloads.json` preserves
 session/download UUIDs, descendant-frame correlation, filenames, verified paths

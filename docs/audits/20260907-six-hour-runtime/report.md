@@ -12,30 +12,30 @@
 |---|---|---:|---|
 | 1 | Claude quota 반복과 잘못된 effect fence | 1698 | quota-tested |
 | 2 | GLM 요청 제한 | 617 | investigate |
-| 3 | Librarian exact 실패와 주간 한도 | 48 | config-applied |
+| 3 | Librarian exact 실패와 주간 한도 | 48 | domain-failover-tested |
 | 4 | DeepSeek tool-call 응답 누락 | 224 | code-fix |
 | 5 | 중첩 tool-cycle checkpoint 저장 실패 | 21 | related-code-fix |
 | 6 | 복합 도구는 성공하지만 실행 증거 저장 실패 | 5 | code-fix |
-| 7 | 재개 후 반복 도구 루프 | 231 | partial-code-fix |
+| 7 | 재개 후 반복 도구 루프 | 231 | scope-design-required |
 | 8 | Provider 연결 장애 | 51 | tested-code-fix |
 | 9 | 일반 문장의 @check·lint를 ID 오류로 기록 | 362 | code-fix |
 | 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
-| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | data-reconciliation |
-| 12 | Board candidate ledger schema 불일치 | 12 | pending-preserved |
+| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | acknowledgement-stack |
+| 12 | Board candidate ledger schema 불일치 | 12 | retention-merged-tested |
 | 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-merged |
-| 14 | Dashboard build-stamp 누락 | 5 | deployed-verified |
+| 14 | Dashboard build-stamp 누락 | 5 | distribution-stack |
 | 15 | microVM sweep가 전체 Keeper 부팅을 막음 | 68 | tested-code-fix |
 | 16 | microsandbox가 요구 격리 보장을 표현 못함 | 5 | backend-capability |
 | 17 | 브라우저 live lane 미연결 | 12 | host-installed-connected |
 | 18 | Discord 삭제·권한 없는 channel 바인딩 | 28 | external-binding |
 | 19 | WebSearch 전 provider 실패와 WebFetch HTTP 오류 | 19 | search-service-recovered |
-| 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | queue-root-cause-fix |
+| 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | batch-drain-observed |
 
 ## 항목별 증거와 다음 완료 조건
 
 ### 1. Claude quota 반복과 잘못된 effect fence
 
-- 조치: API diagnostic와 exact CLI quota 수정은 현재 binary fe702d71da에 포함. 후속 #33873 exact CLI11/11, HITL46/47; 기존1개 실패로 전체 CI는 FAIL. 실제 failover 연속성은 별도 검증 필요.
+- 조치: API diagnostic와 exact CLI quota 수정은 이전에 관측한 binary fe702d71da에 포함. 후속 #33873 exact CLI11/11, HITL46/47; 기존1개 실패로 전체 CI는 FAIL. 실제 failover 연속성은 별도 검증 필요.
 - 관련 코드/경계: `lib/runtime/runtime_claude_code.ml`
 - 집계 주의: 1698 quota events; propagated fences are overlapping observations
 - 최초 증거: `2026-09-06T21:05:47Z` / seq `25985026` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267546`
@@ -52,7 +52,7 @@
 
 ### 3. Librarian exact 실패와 주간 한도
 
-- 조치: Librarian/Board/HITL CLI 후보에 Codex luna 추가. 04:25:28Z durable 적용 영수증과 파일 재조회 일치. Codex schema2/2 성공; 실제 lane의 Codex 선택은 미확인.
+- 조치: Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI는 계정 결제/한도로 시작하지 못함. 배포·실제후속선택은 미검증.
 - 관련 코드/경계: `lib/keeper/keeper_librarian_runtime.ml`
 - 최초 증거: `2026-09-06T21:21:58Z` / seq `25990215` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:272735`
 > memory os librarian failed lane=librarian_exact: librarian exact execution failed outward_effect=started cause=agent_core_execution_failed: slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":"you (yousleepwhen) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 329bef59-e725-4293-aa76-0e6556d9efec)"} ; flow=[slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219; slot=glm-coding.glm-5.3-flash call_id=66a83f8e233f25848cf44bbb48d40b33; advance=glm-coding.glm-5.3-flash->ollama_cloud.deepseek-v4-flash-0731 kind=execution_failed cause=provider refused (http_status=429 refusal=rate_limited) raw_response_sha256=41976dbd
@@ -84,7 +84,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: #33857: 과거 도구 이력을 현재 실행 증거와 분리, 39/39 테스트 통과. 반복 판정 자체는 여전히 전체 이력을 사용하므로 Fresh/Resume의 명시적 영속 scope가 남음.
+- 조치: 현재 실행 영수증과 과거 도구 증거는 분리됐지만 반복 감지는 전체 checkpoint를 사용. 06:13:07Z Execute count934 재관측. 명시적 Fresh/Resume 작업 식별·지속 상태 설계 완료, 구현은 남음.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -118,7 +118,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: operation은 retain_meta인데 실제 owner/meta 부재. Remove_meta용 기존 성공 경로를 재사용하면 계약 위반. 명시적인 retired-owner reconciliation 절차 필요.
+- 조치: 원본 Finalized 증거 보존 관리자 ACK 구현#33910 병합. 후속#33926 head662aa5ad4d는103/103, 인증 HTTP#33920 headdaaf3bbfa8는34/34 원격 동작 테스트 PASS. 필수 lint 실패 조사 중이며 실제 종료 기록 변경은 미실행.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -126,7 +126,7 @@
 
 ### 12. Board candidate ledger schema 불일치
 
-- 조치: 해석 불가 원문2파일30행을0600 복구 증거로 해시 검증 보존. 다음 쓰기가 거부 행을 삭제하던 결함 수정#33906, 원격 CI 중. 원래17Pending 및 기존 파티션 재접수는 별도 미완료.
+- 조치: 원본2파일30행 보존. 거부 행 자동 삭제를 막는 #33906은76/76 PASS 후11aa475082로 병합됐으며 잠시 실행한9c81559b에 포함. 원래17Pending·기존 파티션 재접수는 별도 미완료.
 - 관련 코드/경계: `lib/keeper/keeper_board_attention_candidate.ml`
 - 집계 주의: 2 files across 6 boots; not 12 distinct corrupted files
 - 최초 증거: `2026-09-06T23:26:05Z` / seq `26080097` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312617`
@@ -135,7 +135,7 @@
 
 ### 13. Dashboard snapshot 장시간 갱신
 
-- 조치: 선언 TOML을 요청당 한 번 읽어 fleet에 공유하는 #33877 병합. 새4개 포함90/91 PASS, 기존 identity scan 실패. 현재 fe702d71da에는 아직 없으므로 성능 개선 미측정.
+- 조치: 선언 TOML을 요청당 한 번 읽어 fleet에 공유하는 #33877 병합. 새4개 포함90/91 PASS, 기존 identity scan 실패. 05:15Z 당시 fe702d71da에는 아직 없으므로 성능 개선 미측정.
 - 관련 코드/경계: `lib/dashboard/dashboard_snapshot.ml`
 - 집계 주의: shell_light70 among111; other18 slow render not added
 - 최초 증거: `2026-09-06T23:26:05Z` / seq `26080100` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312620`
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 서버362f55b1 배포로 assets 경로가 ~/me/assets로 변경되어 missing 재발. 동일 커밋 artifact34087501979를642파일 검증 후05:44:58Z 적용해 dashboard=ok·새 화면 확인. 설치본 dashboard 배송 누락 근본 수정은 진행 중.
+- 조치: 실행 경로 변경 후05:44Z 수동 복구. #33914가 binary/dashboard 함께 설치, #33922가 receipt 자동 검증 구현 중. 9c81559b용642파일 원격 artifact 준비됐으나 서버 외부 종료로 적용 보류.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -152,7 +152,7 @@
 
 ### 15. microVM sweep가 전체 Keeper 부팅을 막음
 
-- 조치: #33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 현재 fe702d71da에 병합 커밋57ca6d5399 포함을 확인. 성공 VM 생성은 미검증.
+- 조치: #33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 05:15Z 당시 fe702d71da에 병합 커밋57ca6d5399 포함을 확인. 성공 VM 생성은 미검증.
 - 관련 코드/경계: `lib/server/server_runtime_bootstrap.ml`
 - 집계 주의: 68 wait lines, 23 WARN, max119.4s
 - 최초 증거: `2026-09-06T23:26:08Z` / seq `26080169` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312689`
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: 후보 판정→전달에 첨부 표본에서 최대 약111분 지연: owner turn당 relevant1개만 전달하던 #33890 원격40+21+15=76개 PASS. 배포 후 지연 검증은 남음. pr-updater 원래2개는 정확한 incarnation과 terminal ACK로 소비 확인. 공급자 실패·큐 실제 입장시각 분리는 남음.
+- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -280,7 +280,7 @@ fe702d71da의 Git ancestry에 병합 커밋 기준으로 startup57ca6d5399, netw
 
 05:02Z pending30은 글로벌 FIFO deadlock을 뜻하지 않는다. pr-updater의 첨부 증거의 기존 incarnation1213/1214 두 건은04:50:25Z terminal ACK와 성공에 정확히 결합되고, polisher의 원래 항목도04:58:57Z terminal ACK가 있다. 새 schedule/HITL 유입은 구분했다. jazz는 timeout 뒤 다음 턴을 수행 중이고 provider 실패는 항목을 보존한다.
 
-별도 병목은 Board 판정 완료 후 전달이다. code-reviewer 후보는02:59:55Z 판정 완료,04:48:30Z 전달로 약109분이 걸렸다. owner turn당 첫 Relevant 뒤 중단하는 정책을 제거하고 시작 시점의 completed snapshot을 FIFO로 처리하는 #33890을 작성했다. 첫 targeted34085985444는 비공개 yield helper 참조로 컴파일 실패하여 행동 테스트는 실행되지 않았다. 다른 작업 주체가 동일 공개 helper 수정ac8005c3를 반영했고, [34086843337](https://github.com/jeong-sik/masc/actions/runs/34086843337)에서 worker40/40, candidate21/21, partition15/15 총76개가 통과했다. 아직 live 개선으로 주장하지 않는다.
+별도 병목은 Board 판정 완료 후 전달이다. code-reviewer 후보는02:59:55Z 판정 완료,04:48:30Z 전달로 약109분이 걸렸다. owner turn당 첫 Relevant 뒤 중단하는 정책을 제거하고 시작 시점의 completed snapshot을 FIFO로 처리하는 #33890을 작성했다. 첫 targeted34085985444는 비공개 yield helper 참조로 컴파일 실패하여 행동 테스트는 실행되지 않았다. 다른 작업 주체가 동일 공개 helper 수정ac8005c3를 반영했고, [34086843337](https://github.com/jeong-sik/masc/actions/runs/34086843337)에서 worker40/40, candidate21/21, partition15/15 총76개가 통과했다. 그 검증 시점에는 live 개선을 관측하지 않았다. 이후 짧은 실행 관측은 아래에 별도로 기록했다.
 
 health의 oldest 값은 후보 source timestamp를 사용해 실제 큐 입장 전 지연도 포함한다. queue-owned first_admitted_at을 영속해 두 시간을 구분하는 변경은 아직 없다. 감소한 수치만으로 나머지 pending 전체의 소비와 효과 전달을 완료 처리하지 않는다.
 
@@ -295,10 +295,37 @@ health의 oldest 값은 후보 source timestamp를 사용해 실제 큐 입장 �
 
 소스 조사에서 release는 dashboard를 빌드하지만 설치 패키지에 배송하지 않고, 설치 binary의 unbound 실행은 cwd에서assets를 추측하는 결함을 확인했다. 이 반복 문제는 바이너리와 대시보드의 함께 배포 및 검증된 설치 바인딩으로 수정 중이다. 이번 수동 복구를 설치 경로의 근본 수정 완료로 계산하지 않는다.
 
-#33890은 다른 작업 주체가21889e3253으로05:34Z 병합했다. 현재362f55b1 바이너리는 그 이전 커밋이므로 Board drain 배포를 주장하지 않는다.
+#33890은 다른 작업 주체가21889e3253으로05:34Z 병합했다. 당시362f55b1 바이너리는 그 이전 커밋이므로 해당 시점의 Board drain 배포를 주장하지 않는다.
 
 ## 05:40Z 해석 불가 후보의 원본 보존
 
 원래 gondolin-probe11행과k3think-probe19행은 schema5이고17Pending을 포함한다. 다음 정상 쓰기에서 해석 가능한 후보만 압축하면서 거부 행을 삭제하는 데이터 유실 경로를 발견했다. 먼저 두 원본을 runtime recovery 디렉터리에0600으로 보존하고 원문SHA256이 일치함을 확인했다. liveledger는 변경하지 않았다. [원문 없이 해시·경로만 담은 영수증](candidate-schema-backup-receipt.json).
 
-[수정#33906](https://github.com/jeong-sik/masc/pull/33906) head30a3b7500c은 거부 행이 있는 ledger의 압축을 보류하고 정상 append는 유지한다. 새 schema를 수용하거나Pending을Consumed로 변경하지 않는다. [원격CI34087951889](https://github.com/jeong-sik/masc/actions/runs/34087951889)는 실행 중이다. 기존 Ready/Running/Completed 파티션과17Pending의 재접수는 별도 조정이 필요하다.
+[수정#33906](https://github.com/jeong-sik/masc/pull/33906) head30a3b7500c은 거부 행이 있는 ledger의 압축을 보류하고 정상 append는 유지한다. 새 schema를 수용하거나Pending을Consumed로 변경하지 않는다. [원격CI34087951889](https://github.com/jeong-sik/masc/actions/runs/34087951889)는76/76 PASS로 완료됐다. 기존 Ready/Running/Completed 파티션과17Pending의 재접수는 별도 조정이 필요하다.
+
+
+## 추가 도메인 실패와 exact-head 검증
+
+Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으면 기존 CLI walk는 나머지 후보를 시도하지 않았다. 오늘5건의 거부 로그, 마지막05:41:34Z claim_schema_mismatch를 [별도 원문](librarian-domain-failover-before.json)으로 보존했다. #33913은 후보 내부에서 도메인 검증을 수행하고 실패를 한 번 관측한 뒤 다음 후보로 간다. [34089352622](https://github.com/jeong-sik/masc/actions/runs/34089352622) head15b554f7a8: CLI11/11, Librarian3/3, Board exact9/9, worker40/40 총63/63 PASS. 최초7a8360300a CI는 public formatter 선언 누락으로 컴파일 실패했으며 수정 후 결과와 구분한다.
+
+후보 원문 보존#33906의 [34087951889](https://github.com/jeong-sik/masc/actions/runs/34087951889), head30a3b7500c: candidate21/21, worker40/40, partition15/15 총76/76 PASS. 다른 작업 주체가11aa475082로05:52:45Z 병합했다. 두 CI summary는 검증 로그의 실제 suite 결과만 추출했다.
+
+## 06:11–06:14Z 실제 서버 시작과 외부 종료
+
+8935listener와 기존 servingPID가 없고 다른 MASC 프로세스도 없는 것을 확인해 이 세션이 설치된9c81559b를 같은 base path~/me로06:11:09Z 시작했다. PID54584, health warming·정확한root를 확인했다. 바이너리 파일 교체는 이 세션이 수행하지 않았다.9c81559b에는 병합 커밋 기준으로 Boarddrain21889e3253와 원문보존11aa475082가 모두 포함된다.
+
+해당3분 동안 completed_snapshot_settled 로그7개가 있고 일부count2를 포함한다. 실제 후보 ledger에는pr-updater b26569ab… 전달이 기록됐다. 이것만으로 전체 pending 소비·provider 턴 완료·장기 연속성을 증명하지 않는다. 같은 창에 반복 도구 yield2개, 마지막 Execute count934가 있어 원래7번은 미해결이다.
+
+06:14:10Z 서버가 외부SIGTERM을 수신해 종료 절차를 시작했고, 이후 PID54584의 부재를 확인했다. [프로세스 전환 관측](server-process-transition-observation.json). 종료 완료 로그나 exit code는 확보하지 못했으므로 graceful completion까지 증명하지 않는다. [종료 원문](external-sigterm-evidence.txt), [시작 영수증](server-recovery-start.json), [3분 관측](root-recovery-three-minute-observation.json). 누가 신호를 보냈는지는 미확인이다. 다른 세션의 의도적 중지와 충돌하지 않도록 사용자에게 운영 의도를 질문했고 추가 시작은 보류했다. 그 종료 뒤 관측과 이후 새 프로세스의 시작은 아래에 구분한다.
+
+#33914 설치 배송과 #33922 자동 receipt 검증은 별도 stack이다. 형식·소스 검토와 Python 배송11/11검증은 있으나 실제 설치 binary의 원격 smoke 완료는 아직 미측정이다.9c81559b용 [artifact34089782304](https://github.com/jeong-sik/masc/actions/runs/34089782304)는 성공했고642파일을 해시 검증해 준비했지만 서버 종료 후에는 적용하지 않았다.
+
+종료 기록 관리자 ACK는 #33910 이후 follow-up#33926(662aa5ad4d)과 HTTP#33920(daaf3bbfa8)으로 검증 중이다. 앞선 원격 실행에서 actual HTTPauth2/2와 chatHTTP9/9는 통과했지만 공통 경쟁 fixture1개가 실패했다. 실제 잠금 획득 callback으로 fixture를 고쳤다. [34091021247](https://github.com/jeong-sik/masc/actions/runs/34091021247)는 head662aa5ad4d에서 ownerless23·settlement4·purge4·heartbeat61·chatstore11 총103/103 PASS, [34091040339](https://github.com/jeong-sik/masc/actions/runs/34091040339)는 headdaaf3bbfa8에서 HTTP2·ownerless23·chatHTTP9 총34/34 PASS다. 두 PR의 별도 필수 lint 실패는 조사 중이므로 전체 필수 검증 완료로 표시하지 않는다. 원래new-keeper 종료 파일은 수정하지 않았다.
+
+
+06:36:53Z 추가 재조회: 다른 작업이 시작한 PID21975 서버가06:32:35Z부터 응답하고 있다. commit17077da501, cwd는다시repo, effective_base_path는~/me, dashboardstale·overallwarming이다. 이 재시작과 바이너리 교체는 이 세션이 수행하지 않았다. 앞선PID54584의종료와 새PID의가동을 하나의 연속운영으로 계산하지 않는다. [현재 재조회](health-external-return.json). 준비한9c용artifact는 이 새커밋의 배포 증거가 아니며 적용하지 않았다.
+
+
+## 최신 CLI 소비자와 CI 실행 거절
+
+#33913의 targeted63개가 통과한15b554f7a8 뒤, 전체 @check는 별도 bin/masc_lane_cli_probe.ml의 새 failure variant 분류 누락을 발견했다.31213cbd8c20a8165fb9664e48eabc3686c9fdb9에서 해당 소비자를 수정했다. 라이브러리와 테스트 구현은63개 통과 head와 동일하다. 최신 [34092089284](https://github.com/jeong-sik/masc/actions/runs/34092089284)는 세 job 모두 steps가 없고, GitHub annotation이 계정 결제 실패 또는 spending limit 때문에 시작하지 못했다고 명시한다. 새 head의 컴파일 성공은 미검증이며 이는 실행된 코드 실패와 구분한다. 사용자에게 계정 상태 확인을 요청했고 동일 CI 재시도는 보류했다.

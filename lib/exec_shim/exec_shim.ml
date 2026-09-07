@@ -479,40 +479,43 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        | _ -> ());
        exit 127)
   | pid ->
-    (try
-       Unix.close boundary_w;
-       Unix.close stdin_r;
-       Unix.close stdout_w;
-       Unix.close stderr_w;
-       Unix.set_nonblock stdout_r;
-       Unix.set_nonblock stderr_r;
-       Unix.set_nonblock stdin_w;
-       Unix.set_nonblock boundary_r;
-       (pid, stdin_w, stdout_r, stderr_r, boundary_r)
-     with exn ->
-       (* fork has succeeded: an error preparing the parent's descriptors is
-          not proof the child refused to run. Terminate the child and any
-          process group it established before dropping supervision handles. *)
-       Fun.protect
-         ~finally:(fun () ->
-           List.iter
-             (fun fd -> try Unix.close fd with
-               | Unix.Unix_error (Unix.EBADF, _, _) -> ())
-             !opened)
-         (fun () ->
-           let kill target =
-             try Unix.kill target Sys.sigkill with
-             | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
-           in
-           kill (-pid);
-           kill pid;
-           let rec reap () =
-             match Unix.waitpid [] pid with
-             | _ -> ()
-             | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
-           in
-           reap ());
-       raise exn)
+    let prepared = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not !prepared then
+          (* fork succeeded, so descriptor preparation failure is not proof
+             the child refused to run. Reap before dropping its handles. *)
+          Fun.protect
+            ~finally:(fun () ->
+              List.iter
+                (fun fd -> try Unix.close fd with
+                  | Unix.Unix_error (Unix.EBADF, _, _) -> ())
+                !opened)
+            (fun () ->
+              let kill target =
+                try Unix.kill target Sys.sigkill with
+                | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+              in
+              kill (-pid);
+              kill pid;
+              let rec reap () =
+                match Unix.waitpid [] pid with
+                | _ -> ()
+                | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+              in
+              reap ()))
+      (fun () ->
+        Unix.close boundary_w;
+        Unix.close stdin_r;
+        Unix.close stdout_w;
+        Unix.close stderr_w;
+        Unix.set_nonblock stdout_r;
+        Unix.set_nonblock stderr_r;
+        Unix.set_nonblock stdin_w;
+        Unix.set_nonblock boundary_r;
+        let handles = (pid, stdin_w, stdout_r, stderr_r, boundary_r) in
+        prepared := true;
+        handles)
 
 let child_boundary_of_ack = function
   | "A" -> Exec_ssh_protocol.Sandbox_applied

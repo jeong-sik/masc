@@ -6,12 +6,14 @@ import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
+import * as boardApi from '../../api/board'
 import { declarationsForSelector } from '../../styles/css-test-utils'
 import {
   fusionBoardError,
   fusionBoardLoading,
   fusionBoardPosts,
   fusionRuns,
+  fusionRunObservation,
   fusionRunsLoading,
   refreshFusionBoard,
   refreshFusionRuns,
@@ -86,6 +88,7 @@ describe('FusionSurface', () => {
     fusionBoardLoading.value = false
     fusionBoardPosts.value = []
     fusionRuns.value = []
+    fusionRunObservation.value = null
     fusionRunsLoading.value = false
     vi.mocked(refreshFusionBoard).mockClear()
     vi.mocked(refreshFusionRuns).mockClear()
@@ -98,9 +101,62 @@ describe('FusionSurface', () => {
     fusionBoardLoading.value = false
     fusionBoardPosts.value = []
     fusionRuns.value = []
+    fusionRunObservation.value = null
     fusionRunsLoading.value = false
     route.value = { tab: 'overview', params: {}, postId: null }
     window.location.hash = '#overview'
+    vi.restoreAllMocks()
+  })
+
+  it('shows surviving Board originals when replay yielded zero runs and reads by exact post ID', async () => {
+    fusionRunObservation.value = {
+      replay: { status: 'complete', linesRead: 68, malformedLines: 34, droppedRunning: 0 },
+      historicalEvidence: [
+        { runId: 'old-run-a', postId: 'post-a', title: 'Preserved panel A', createdAt: 100 },
+        { runId: 'old-run-b', postId: 'post-b', title: 'Preserved panel B', createdAt: 200 },
+      ],
+    }
+    fusionBoardPosts.value = [boardPost({ id: 'post-a',
+      origin: { source: 'fusion', fusion_run_id: 'old-run-a' },
+      meta: { question: 'Historical question', panel: [], judge: { status: 'synthesized', resolved_answer: 'Historical answer' } },
+    })]
+    const fetch = vi.spyOn(boardApi, 'fetchBoardPost').mockImplementation(async id => ({
+      ...boardPost({ id, meta: { observed_usage: { input_tokens: 9321, output_tokens: 17721 } }, body: `Original evidence ${id}`,
+        origin: { source: 'fusion', fusion_run_id: id === 'post-a' ? 'old-run-a' : 'old-run-b' } }),
+      comments: [],
+    }))
+    render(html`<${FusionSurface} />`, container)
+    expect(container.querySelector('[data-testid="fusion-replay-notice"]')?.textContent).toContain('해석 실패 34')
+    expect(container.querySelectorAll('[data-testid="fusion-historical-row"]')).toHaveLength(2)
+    expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
+    await waitFor(() => expect(container.textContent).toContain('Original evidence post-a'))
+    expect(container.querySelector('[data-testid="fusion-historical-usage"]')?.textContent).toContain('9,321')
+    expect(container.querySelector('[data-testid="fusion-historical-usage"]')?.textContent).toContain('17,721')
+    expect(container.querySelector('[data-testid="fusion-historical-usage"]')?.textContent).toContain('비용 (관측)미관측')
+    expect(container.querySelector('.fus-run-row.st-complete')).toBeNull()
+    expect(fetch).toHaveBeenCalledWith('post-a')
+    const second = container.querySelector('[data-post-id="post-b"]') as HTMLButtonElement
+    second.click()
+    await waitFor(() => expect(container.textContent).toContain('Original evidence post-b'))
+    expect(fetch).toHaveBeenCalledWith('post-b')
+    expect(container.querySelector('[data-testid="fusion-historical-detail"]')?.textContent).toContain('성공·실패와 시작·완료 시각은 확인할 수 없습니다')
+    expect(fusionRuns.value).toEqual([])
+    expect(container.querySelector('[data-testid="fusion-registry-detail"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fusion-run-detail"]')).toBeNull()
+  })
+
+  it('rejects an unrelated Board post instead of presenting it as historical Fusion evidence', async () => {
+    fusionRunObservation.value = { replay: { status: 'absent' }, historicalEvidence: [
+      { runId: 'old-run', postId: 'post-a', title: 'Original', createdAt: 100 },
+    ] }
+    vi.spyOn(boardApi, 'fetchBoardPost').mockResolvedValue({
+      ...boardPost({ id: 'post-a', meta: {}, body: 'Unrelated private content',
+        origin: { source: 'fusion', fusion_run_id: 'another-run' } }), comments: [],
+    })
+    render(html`<${FusionSurface} />`, container)
+    await waitFor(() => expect(container.textContent).toContain('선택한 기록과 일치하지 않습니다'))
+    expect(container.textContent).not.toContain('Unrelated private content')
+    expect(fusionRuns.value).toEqual([])
   })
 
   it('renders live top-level fusion board metadata', () => {

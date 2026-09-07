@@ -5157,6 +5157,14 @@ type clamped_scroll =
      end. Same report the diff already makes. *)
   | Resource_scroll of int
   | Approval_detail_scroll of int
+  (* Both modals draw over a surface rather than being one, and both counted
+     their rows the same way the diff does: the patch modal out of the recorded
+     diff, the link preview out of the card the drawing formats. Neither count
+     is knowable at the keypress, which steps by one or jumps to 9999 and lets
+     the frame say where that landed. They wrote the answer back from inside
+     the drawing instead, which is the one thing the renderer must not do. *)
+  | Patch_modal_scroll of int
+  | Link_modal_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -5180,6 +5188,8 @@ let apply_clamped_scroll (state : state) = function
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
+  | Patch_modal_scroll value -> state.patch_modal_scroll <- value
+  | Link_modal_scroll value -> state.link_modal_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

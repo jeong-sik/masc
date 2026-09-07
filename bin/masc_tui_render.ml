@@ -18385,7 +18385,6 @@ let render_patch_modal (state : state) =
   let content_height = max 1 (rows - fixed_chrome) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
-  state.patch_modal_scroll <- scroll;
   if total = 0 then begin
     let msg =
       match state.patch_modal_error with
@@ -18424,7 +18423,8 @@ let render_patch_modal (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:(Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close" total scroll));
-  finish_surface state ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Patch_modal_scroll scroll)
+    ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
 ;;
 
 let render_link_preview_modal (state : state) =
@@ -18489,7 +18489,6 @@ let render_link_preview_modal (state : state) =
       let total = List.length content_lines in
       let max_scroll = max 0 (total - content_height) in
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
-      state.link_modal_scroll <- scroll;
       let lines_array = Array.of_list content_lines in
       for i = 0 to content_height - 1 do
         let idx = i + scroll in
@@ -18512,7 +18511,8 @@ let render_link_preview_modal (state : state) =
         (footer_line state ~max_cells:cols
            ~hints:(Printf.sprintf "[%s] o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
                      (Masc_tui_link_preview.site_label preview)));
-      finish_surface state ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
+      finish_surface state ~clamped:(Link_modal_scroll scroll)
+        ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
 ;;
 
 let render_help (state : state) =

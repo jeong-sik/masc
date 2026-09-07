@@ -1071,6 +1071,161 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
       "expected one swept runtime, got %d"
       (List.length rows)
 
+(* Exercise the production boot entrypoint against the sweep's paused CLI
+   inventory. A fake CLI permits the boot's stop/delete/probe calls, then
+   refuses its image. This tests the actual lifecycle without guest
+   credentials, a shim binary, or a container daemon. *)
+
+let test_startup_sweep_serializes_inventory_with_boot () =
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let bin_dir = temp_dir "microvm-sweep-cli-" in
+  let cli = Filename.concat bin_dir "container" in
+  let oc = open_out cli in
+  output_string oc
+    "#!/bin/sh\ncase \"$1\" in\nstop|delete) exit 0;;\ninspect) exit 1;;\nimage) exit 2;;\n*) exit 99;;\nesac\n";
+  close_out oc;
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (bin_dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_spawn_guard_for_testing ();
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      Unix.unlink cli;
+      Unix.rmdir bin_dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let config = Masc.Workspace.default_config sweep_base_path in
+  let meta = { (microvm_meta ~name:"sweep-race") with
+               sandbox_image = Some "test-image" } in
+  let runtime = Turn.For_testing.create_minimal ~config ~meta
+      ~state:Turn.Not_started in
+  let name = Turn.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name:meta.name ~network_mode:Profile.Network_none in
+  let listing_started, listing_started_r = Eio.Promise.create () in
+  let release_listing, release_listing_r = Eio.Promise.create () in
+  let delete_started, delete_started_r = Eio.Promise.create () in
+  let release_delete, release_delete_r = Eio.Promise.create () in
+  let boot_attempted, boot_attempted_r = Eio.Promise.create () in
+  let boot_finished, boot_finished_r = Eio.Promise.create () in
+  let guest_removed = ref false in
+  let boot_command_ran = ref false in
+  Process_eio.set_spawn_guard
+    { run = (fun run ->
+        boot_command_ran := true;
+        Alcotest.(check bool) "boot cannot touch the guest before sweep removal"
+          true !guest_removed;
+        run ()) };
+  let run_argv ~timeout_sec:_ argv =
+    match argv with
+    | [ "container"; "list"; "-a"; "--format"; "json" ] ->
+      Eio.Promise.resolve listing_started_r ();
+      Eio.Promise.await release_listing;
+      Unix.WEXITED 0,
+      Yojson.Safe.to_string
+        (`List [ entry ~keeper:meta.name ~owner_pid:(string_of_int dead_pid) name ])
+    | [ "container"; "delete"; "--force"; target ] ->
+      Alcotest.(check string) "delete the name from the inventory" name target;
+      Eio.Promise.resolve delete_started_r ();
+      Eio.Promise.await release_delete;
+      guest_removed := true;
+      Unix.WEXITED 0, ""
+    | argv -> Alcotest.failf "unexpected sweep command: %s" (String.concat " " argv)
+  in
+  Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
+    ~sweep:(fun () ->
+      ignore (Turn.sweep_abandoned_microvm_guests
+        ~base_path:sweep_base_path
+        ~command_available:(String.equal "container")
+        ~timeout_sec:1.0 ~is_pid_alive ~run_argv));
+  Eio.Promise.await listing_started;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve boot_attempted_r ();
+    (match Turn.microvm_remote_endpoint runtime with
+     | Error _ -> () (* Fake CLI refuses the image after the lifecycle calls. *)
+     | Ok _ -> Alcotest.fail "fake CLI should refuse the image");
+    Eio.Promise.resolve boot_finished_r ());
+  Eio.Promise.await boot_attempted;
+  (* Yield to the boot fiber before observing the absence of its command.
+     The parent fiber is unrelated lane work and continues at both holds. *)
+  Eio.Fiber.yield ();
+  Alcotest.(check bool) "boot waits while listing is held" false !boot_command_ran;
+  Eio.Promise.resolve release_listing_r ();
+  Eio.Promise.await delete_started;
+  Eio.Fiber.yield ();
+  Alcotest.(check bool) "boot waits until deletion finishes" false !boot_command_ran;
+  Eio.Promise.resolve release_delete_r ();
+  Eio.Promise.await boot_finished;
+  Alcotest.(check bool) "boot proceeds after deletion" true !boot_command_ran
+;;
+
+let test_runtime_sweep_preserves_live_owner () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let commands = ref [] in
+  let outcomes =
+    Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:sweep_base_path
+      ~command_available:(String.equal "container")
+      ~timeout_sec:1.0 ~is_pid_alive
+      ~run_argv:(fun ~timeout_sec:_ argv ->
+        commands := argv :: !commands;
+        Unix.WEXITED 0,
+        Yojson.Safe.to_string
+          (`List [ entry ~owner_pid:(string_of_int live_pid) "reused-live-name" ]))
+  in
+  Alcotest.(check int) "a live owner triggers only the listing" 1 (List.length !commands);
+  Alcotest.(check int) "runtime inventory observed" 1 (List.length outcomes);
+  List.iter (fun (_, (outcome : M.sweep_outcome)) ->
+    Alcotest.(check (list string)) "live guest survives" [] outcome.removed)
+    outcomes
+;;
+
+let test_sweep_failure_does_not_poison_lifecycle () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let sweep run_argv =
+    Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:sweep_base_path
+      ~command_available:(String.equal "container")
+      ~timeout_sec:1.0 ~is_pid_alive ~run_argv
+  in
+  (try
+     ignore (sweep (fun ~timeout_sec:_ _ -> raise Exit));
+     Alcotest.fail "CLI exception must remain visible"
+   with Exit -> ());
+  let outcomes = sweep (fun ~timeout_sec:_ _ -> Unix.WEXITED 0, "[]") in
+  Alcotest.(check int) "the lifecycle lock is reusable after a CLI failure"
+    1 (List.length outcomes)
+;;
+
+let test_startup_maintenance_is_owned_by_its_switch () =
+  Eio_main.run @@ fun _ ->
+  let started, started_r = Eio.Promise.create () in
+  let cancelled = ref false in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
+       ~sweep:(fun () ->
+         Eio.Promise.resolve started_r ();
+         try Eio.Fiber.await_cancel () with
+         | Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn);
+     Eio.Promise.await started;
+     Eio.Switch.fail sw Exit
+   with Exit -> ());
+  Alcotest.(check bool) "shutdown cancels owned maintenance" true !cancelled
+;;
+
 let live_entry ~base_path ~keeper_name ~id =
   let label key value = key, `String value in
   let labels =
@@ -1952,6 +2107,14 @@ let () =
             test_leaves_foreign_base_guest_untouched
         ; Alcotest.test_case "leaves guests it cannot account for" `Quick
             test_leaves_guests_it_cannot_account_for
+        ; Alcotest.test_case "startup sweep serializes inventory with boot" `Quick
+            test_startup_sweep_serializes_inventory_with_boot
+        ; Alcotest.test_case "sweep failure does not poison lifecycle" `Quick
+            test_sweep_failure_does_not_poison_lifecycle
+        ; Alcotest.test_case "startup maintenance is owned by its switch" `Quick
+            test_startup_maintenance_is_owned_by_its_switch
+        ; Alcotest.test_case "runtime sweep preserves a live owner" `Quick
+            test_runtime_sweep_preserves_live_owner
         ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick
             test_sweep_skips_listing_when_cli_is_unavailable
         ] )

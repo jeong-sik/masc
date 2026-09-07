@@ -240,9 +240,15 @@ let test_attachment_blob_failure_does_not_commit_chat () =
     Unix.mkdir masc_root 0o700;
     let blocker = open_out (Filename.concat masc_root "tool_blobs") in
     close_out blocker;
-    let result = K.append_turn_result ~base_dir ~keeper_name:"blocked-image"
-        ~user_content:"look" ~assistant_content:"done"
-        ~user_attachments:[{K.id="blocked-att"; att_type="image"; name="image.png";
+    let request_id =
+      match Keeper_chat_delivery_identity.Request_id.of_string "blocked-image-request" with
+      | Ok id -> id
+      | Error detail -> Alcotest.fail detail
+    in
+    let result = K.append_user_message_once ~base_dir ~keeper_name:"blocked-image"
+        ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
+        ~content:"look"
+        ~attachments:[{K.id="blocked-att"; att_type="image"; name="image.png";
           size=3; mime_type="image/png"; data="UE5H"; width=None; height=None}] () in
     Alcotest.(check bool) "unretained attachment cannot be committed" true (Result.is_error result);
     Alcotest.(check int) "no chat row points at missing bytes" 0

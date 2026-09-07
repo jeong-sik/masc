@@ -127,7 +127,7 @@ let test_pollable_filter () =
     Poll.For_testing.pollable ~bot_user_id:bot
       (history_message ?user ?bot_id ?subtype ~ts ~text ())
   in
-  check bool "plain human message" true (yes ~user:Some "U1" ~ts:"1" ~text:"hi" ());
+  check bool "plain human message" true (yes ~user:(Some "U1") ~ts:"1" ~text:"hi" ());
   check bool "bot author excluded" false
     (yes ~user:None ~bot_id:(Some "B1") ~ts:"2" ~text:"app post" ());
   check bool "subtype excluded" false

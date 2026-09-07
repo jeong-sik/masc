@@ -47,7 +47,39 @@ let poll_config_error_to_string = function
 
 (* A present-but-invalid value is a typed error, never a silent default —
    the same fail-closed stance [load_trigger_policy_from_toml] applies to
-   the sibling gateway knob. *)
+   the sibling gateway knob. The TOML plane is resolved one step per
+   function so the nesting stays flat. *)
+let poll_interval_of_toml ~path ~toml : (poll_config, poll_config_error) result =
+  match
+    Field_resolution.resolve_int toml [ "slack"; "poll_interval_sec" ]
+  with
+  | Field_resolution.Missing ->
+    Ok { interval_sec = float default_poll_interval_sec }
+  | Field_resolution.Type_mismatch { expected; message } ->
+    Error
+      (Poll_interval_invalid
+         { path; detail = Printf.sprintf "expected %s: %s" expected message })
+  | Field_resolution.Present n when n >= 60 -> Ok { interval_sec = float n }
+  | Field_resolution.Present n ->
+    Error
+      (Poll_interval_invalid
+         { path
+         ; detail = Printf.sprintf "must be an int >= 60 seconds, got %d" n
+         })
+;;
+
+let poll_config_of_toml ~path ~toml : (poll_config_load, poll_config_error) result =
+  match
+    Field_resolution.resolve_bool toml [ "slack"; "poll_enabled" ]
+  with
+  | Field_resolution.Missing -> Ok Poll_disabled
+  | Field_resolution.Type_mismatch { expected; message } ->
+    Error (Poll_enabled_not_bool { path; expected; message })
+  | Field_resolution.Present false -> Ok Poll_disabled
+  | Field_resolution.Present true ->
+    Result.map Poll_enabled (poll_interval_of_toml ~path ~toml)
+;;
+
 let load_poll_config ~path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Poll_disabled
@@ -59,37 +91,7 @@ let load_poll_config ~path =
      | Ok content ->
        (match Otoml.Parser.from_string_result content with
         | Error detail -> Error (Runtime_toml_invalid { path; detail })
-        | Ok toml ->
-          (match
-             Field_resolution.resolve_bool toml [ "slack"; "poll_enabled" ]
-           with
-           | Field_resolution.Missing -> Ok Poll_disabled
-           | Field_resolution.Type_mismatch { expected; message } ->
-             Error (Poll_enabled_not_bool { path; expected; message })
-           | Field_resolution.Present false -> Ok Poll_disabled
-           | Field_resolution.Present true ->
-             (match
-                Field_resolution.resolve_int toml
-                  [ "slack"; "poll_interval_sec" ]
-              with
-              | Field_resolution.Missing ->
-                Ok (Poll_enabled { interval_sec = float default_poll_interval_sec })
-              | Field_resolution.Type_mismatch { expected; message } ->
-                Error
-                  (Poll_interval_invalid
-                     { path
-                     ; detail = Printf.sprintf "expected %s: %s" expected message
-                     })
-              | Field_resolution.Present n when n >= 60 ->
-                Ok (Poll_enabled { interval_sec = float n })
-              | Field_resolution.Present n ->
-                Error
-                  (Poll_interval_invalid
-                     { path
-                     ; detail =
-                       Printf.sprintf
-                         "must be an int >= 60 seconds, got %d" n
-                     }))))
+        | Ok toml -> poll_config_of_toml ~path ~toml))
 ;;
 
 (* ── cursor ────────────────────────────────────────────────────── *)
@@ -124,8 +126,11 @@ let write_cursors ~path (cursors : (string * string) list) =
   let () =
     match Unix.lstat dir with
     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-      ignore (Unix.mkdir dir 0o755);
-      ()
+      (try Unix.mkdir dir 0o755 with
+       | Unix.Unix_error _ ->
+         (* lost a create race; the write below fails loudly if the dir is
+            genuinely unusable *)
+         ())
     | _ -> ()
   in
   let json =

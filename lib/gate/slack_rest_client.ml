@@ -422,7 +422,7 @@ let parse_conversations_history_response ~status ~body =
                | _ -> None
              in
              Ok
-               { messages = List.filter_map Result.get_ok parsed
+               { messages = List.map Result.get_ok parsed
                ; has_more
                ; next_cursor
                })

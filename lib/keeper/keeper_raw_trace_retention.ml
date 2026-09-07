@@ -2,6 +2,14 @@ module String_set = Set.Make (String)
 
 let history_limit = 200
 
+let before_scan_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
+module For_testing = struct
+  let with_before_scan hook f =
+    let previous = Atomic.exchange before_scan_hook (Some hook) in
+    Fun.protect ~finally:(fun () -> Atomic.set before_scan_hook previous) f
+end
+
 type deletion_failure =
   { path : string
   ; detail : string
@@ -107,28 +115,30 @@ let prune ~config ~keeper_name () =
   match protected_references ~config ~keeper_name ~dir with
   | Error _ as error -> error
   | Ok references ->
-    (match regular_trace_files dir with
-     | Error _ as error -> error
-     | Ok files ->
-       let candidates =
-         List.filter (fun path -> not (String_set.mem path references)) files
-       in
-       let removed, deletion_failures =
-         List.fold_left
-           (fun (removed, failures) path ->
-             try
-               Sys.remove path;
-               removed + 1, failures
-             with
-             | Sys_error detail ->
-               removed, { path; detail } :: failures)
-           (0, [])
-           candidates
-       in
-       Ok
-         { removed
-         ; retained_references = String_set.cardinal references
-         ; candidate_files = List.length candidates
-         ; deletion_failures = List.rev deletion_failures
-         })
+    Eio_guard.run_in_systhread ~label:"keeper.raw_trace_retention.syscalls" (fun () ->
+      Option.iter (fun hook -> hook ()) (Atomic.get before_scan_hook);
+      (match regular_trace_files dir with
+       | Error _ as error -> error
+       | Ok files ->
+         let candidates =
+           List.filter (fun path -> not (String_set.mem path references)) files
+         in
+         let removed, deletion_failures =
+           List.fold_left
+             (fun (removed, failures) path ->
+               try
+                 Sys.remove path;
+                 removed + 1, failures
+               with
+               | Sys_error detail ->
+                 removed, { path; detail } :: failures)
+             (0, [])
+             candidates
+         in
+         Ok
+           { removed
+           ; retained_references = String_set.cardinal references
+           ; candidate_files = List.length candidates
+           ; deletion_failures = List.rev deletion_failures
+           }))
 ;;

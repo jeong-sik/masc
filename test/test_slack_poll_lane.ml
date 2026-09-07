@@ -215,7 +215,7 @@ poll_interval_sec = 300
       | Ok loaded ->
         (match loaded with
          | Poll.Poll_enabled { Poll.interval_sec } ->
-           check float "interval from toml" 300.0 interval_sec
+           check bool "interval from toml" (interval_sec = 300.0) true
          | Poll.Poll_disabled ->
            failwith "expected enabled"));
   with_temp_toml
@@ -234,7 +234,7 @@ poll_enabled = true
       (* No interval: the documented 900-second default. *)
       match Poll.load_poll_config ~path with
       | Ok (Poll.Poll_enabled { Poll.interval_sec }) ->
-        check float "default interval" 900.0 interval_sec
+        check bool "default interval" (interval_sec = 900.0) true
       | _ -> failwith "expected enabled with default interval");
   with_temp_toml
     (Some {| [slack]

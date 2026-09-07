@@ -77,7 +77,9 @@ let poll_config_of_toml ~path ~toml : (poll_config_load, poll_config_error) resu
     Error (Poll_enabled_not_bool { path; expected; message })
   | Field_resolution.Present false -> Ok Poll_disabled
   | Field_resolution.Present true ->
-    Result.map Poll_enabled (poll_interval_of_toml ~path ~toml)
+    (match poll_interval_of_toml ~path ~toml with
+     | Ok config -> Ok (Poll_enabled config)
+     | Error error -> Error error)
 ;;
 
 let load_poll_config ~path =

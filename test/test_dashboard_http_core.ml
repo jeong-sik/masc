@@ -3712,6 +3712,9 @@ let prepare_config_sync_keeper ~sw config name =
   | Error error ->
     fail (Masc.Keeper_owner_registry.install_error_to_string error)
 
+(* These fixtures exercise config publication with a valid profile.
+   test/dune disables sandbox preflight, so Docker daemon/image readiness is
+   not part of these transaction tests. Profile validation still applies. *)
 let write_config_sync_toml config name =
   let dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
@@ -3720,7 +3723,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"local\"\ninstructions = \"%s config-sync fixture instructions\"\nautoboot_enabled = false\nproactive_enabled = false\n"
+       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nautoboot_enabled = false\nproactive_enabled = false\n"
        name);
   path
 
@@ -3921,8 +3924,7 @@ let test_config_post_requires_expected_revision () =
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"proactive_enabled":true}|}
   in
-  check bool "missing revision HTTP 400" true
-    (String.starts_with ~prefix:"HTTP/1.1 400" raw);
+  expect_http_status "missing revision HTTP 400" 400 raw;
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -4004,8 +4006,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state ~name keeper_body
   in
-  check bool "stale Keeper config POST HTTP 409" true
-    (String.starts_with ~prefix:"HTTP/1.1 409" keeper_raw);
+  expect_http_status "stale Keeper config POST HTTP 409" 409 keeper_raw;
   let open Yojson.Safe.Util in
   check string "Keeper POST observes composite conflict"
     "keeper_config_revision_conflict"
@@ -4093,13 +4094,11 @@ let test_config_post_rejects_second_writer_with_same_revision () =
   let winner_raw, _ =
     post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body true)
   in
-  check bool "winner HTTP 200" true
-    (String.starts_with ~prefix:"HTTP/1.1 200" winner_raw);
+  expect_http_status "winner HTTP 200" 200 winner_raw;
   let loser_raw, loser_json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body false)
   in
-  check bool "loser HTTP 409" true
-    (String.starts_with ~prefix:"HTTP/1.1 409" loser_raw);
+  expect_http_status "loser HTTP 409" 409 loser_raw;
   let open Yojson.Safe.Util in
   check string "typed conflict code" "keeper_config_revision_conflict"
     (loser_json |> member "error" |> member "code" |> to_string);
@@ -4144,11 +4143,12 @@ let test_config_post_restarts_from_atomic_toml () =
            ~base_path:config.base_path name))
     (fun () ->
       let toml_path = write_config_sync_toml config name in
-      let _, response =
+      let raw, response =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
            ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
            ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
       in
+      expect_http_status "atomic config restart HTTP 200" 200 raw;
       check string "readback carries manifest SHA-256 revision" "sha256"
         Yojson.Safe.Util.
           (response |> member "config_revision" |> member "manifest"
@@ -4190,9 +4190,9 @@ let test_config_post_materializes_missing_toml () =
       let raw, json =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-          ~name {|{"proactive_enabled":true}|}
+          ~name {|{"proactive_enabled":true,"sandbox_profile":"docker"}|}
       in
-      check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+      expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
       check bool "runtime projection applied proactive config" true
         (json |> member "proactive" |> member "enabled" |> to_bool);
@@ -4210,6 +4210,8 @@ let test_config_post_materializes_missing_toml () =
       match parsed with
       | Error error -> fail error
       | Ok doc ->
+        check (option string) "materialized sandbox profile" (Some "docker")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
         check (option bool) "materialized proactive config" (Some true)
           (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
 
@@ -4228,7 +4230,7 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"proactive_enabled":true,"runtime_id":"missing.runtime"}|}
   in
-  check bool "HTTP 503" true (String.starts_with ~prefix:"HTTP/1.1 503" raw);
+  expect_http_status "HTTP 503" 503 raw;
   let open Yojson.Safe.Util in
   check bool "TOML rolled back" false (json |> member "config_applied" |> to_bool);
   check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool);
@@ -4257,7 +4259,7 @@ let test_config_post_prevalidates_mixed_request () =
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"proactive_enabled":true,"allowed_paths":["*"]}|}
   in
-  check bool "HTTP 400" true (String.starts_with ~prefix:"HTTP/1.1 400" raw);
+  expect_http_status "HTTP 400" 400 raw;
   let doc =
     match
       Keeper_toml_loader.parse_toml
@@ -4295,7 +4297,7 @@ let test_config_post_round_trips_typed_tools_patch () =
            ~name
            {|{"tools":{"native":"full"}}|}
        in
-       check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+       expect_http_status "HTTP 200" 200 raw;
        let open Yojson.Safe.Util in
        check string "readback native" "full"
          (json |> member "tools" |> member "native" |> to_string);
@@ -4346,8 +4348,7 @@ let test_config_post_round_trips_typed_tools_patch () =
            ~name
            {|{"tools":{"native":"full"}}|}
        in
-       check bool "Yolo preview HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" yolo_raw);
+       expect_http_status "Yolo preview HTTP 200" 200 yolo_raw;
        check string "Yolo allows full preview" "allowed"
          Yojson.Safe.Util.(
            yolo_json
@@ -4369,8 +4370,7 @@ let test_config_post_round_trips_typed_tools_patch () =
            ~name
            {|{"tools":{"native":"yolo"}}|}
        in
-       check bool "invalid native is HTTP 400" true
-         (String.starts_with ~prefix:"HTTP/1.1 400" invalid_raw))
+       expect_http_status "invalid native is HTTP 400" 400 invalid_raw)
 ;;
 
 let test_config_post_round_trips_typed_skills_patch () =
@@ -4412,8 +4412,7 @@ let test_config_post_round_trips_typed_skills_patch () =
            ~name
            {|{"skills":{"names":["ocaml-coding","proof-harness"]}}|}
        in
-       check bool "exact selection HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" exact_raw);
+       expect_http_status "exact selection HTTP 200" 200 exact_raw;
        check (list string) "exact selection reads back"
          [ "ocaml-coding"; "proof-harness" ]
          (exact_json
@@ -4441,8 +4440,7 @@ let test_config_post_round_trips_typed_skills_patch () =
            ~name
            {|{"skills":{"names":[]}}|}
        in
-       check bool "empty selection HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" none_raw);
+       expect_http_status "empty selection HTTP 200" 200 none_raw;
        check (list string) "empty selection reads back" []
          (none_json
           |> member "skills"
@@ -4473,8 +4471,7 @@ let test_config_post_round_trips_typed_skills_patch () =
            ~name
            {|{"skills":{}}|}
        in
-       check bool "all selection HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" all_raw);
+       expect_http_status "all selection HTTP 200" 200 all_raw;
        check bool "all selection reads back as null" true
          (all_json |> member "skills" |> member "names" = `Null);
        let all_doc = parse_toml "parse all selection TOML" in

@@ -155,6 +155,10 @@ val exact_snapshot_reference :
 
 val exact_snapshot_canonical_bytes : exact_checkpoint_snapshot -> string
 
+(** Immutable message values decoded from these same canonical bytes. No second
+    file read or re-encoding participates in their source identity. *)
+val exact_snapshot_messages : exact_checkpoint_snapshot -> Agent_core.Types.message list
+
 (** Strictly decode exact canonical bytes and derive their reference without
     re-encoding. *)
 val exact_snapshot_of_canonical_bytes :

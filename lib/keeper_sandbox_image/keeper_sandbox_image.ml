@@ -64,5 +64,13 @@ CMD ["bash", "-l"]
 
 let build_argv ~tag = [ "build"; "-t"; tag; "-" ]
 
+let write_recipe_into ~dir =
+  let path = Filename.concat dir "Dockerfile" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc dockerfile);
+  path
+
 let context_directory_build_argv ~tag ~dockerfile ~context =
   [ "build"; "-t"; tag; "-f"; dockerfile; context ]

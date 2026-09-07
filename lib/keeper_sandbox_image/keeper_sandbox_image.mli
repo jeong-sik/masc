@@ -25,6 +25,12 @@ val build_argv : tag:string -> string list
 (** Arguments after the docker command for [docker build -t <tag> -]. The
     trailing ["-"] is the context: the caller feeds {!dockerfile} to stdin. *)
 
+val write_recipe_into : dir:string -> string
+(** Write {!dockerfile} as [<dir>/Dockerfile] and answer that path. For the
+    runtimes that take a context directory rather than stdin. [dir] is the
+    caller's to create and to remove, and nothing else belongs in it: the
+    context stays what [-] gives docker, the recipe and nothing more. *)
+
 val context_directory_build_argv :
   tag:string -> dockerfile:string -> context:string -> string list
 (** Arguments after a runtime command that takes a directory rather than

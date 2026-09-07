@@ -13785,11 +13785,7 @@ let runtime_probe_badge = function
         | Runtime_provider_invalid_endpoint
         | Runtime_provider_invalid_execution_transport -> (Theme.bad ())
       in
-      let label =
-        match probe.rpp_status with
-        | Runtime_provider_skipped_cli -> "CLI not probed"
-        | status -> runtime_provider_status_to_string status
-      in
+      let label = runtime_probe_status_label probe.rpp_status in
       style ^ label ^ Ansi.reset
 
 let runtime_route_probe_badge runtime probe =
@@ -13948,7 +13944,7 @@ let runtime_detail_lines state target ~width =
               | Runtime_probe_cli -> "cli"
             in
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
-              (runtime_provider_status_to_string row.rpp_status)
+              (runtime_probe_status_label row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
             @ runtime_detail_field ~width ~style:Ansi.reset "Checked at" row.rpp_checked_at
             @ (match row.rpp_reachable with
@@ -13966,9 +13962,11 @@ let runtime_detail_lines state target ~width =
                | Some value ->
                    runtime_detail_field ~width ~style:Ansi.reset "Latency"
                      (Printf.sprintf "%.0fms" value))
-            @ (match row.rpp_error with
+            @ (match runtime_probe_annotation ~status:row.rpp_status row.rpp_error with
                | None -> []
-               | Some error ->
+               | Some (Runtime_probe_note note) ->
+                   runtime_detail_field ~width ~style:Ansi.dim "Probe note" note
+               | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
       fields @ candidate @ blocker @ sticky @ probe_lines

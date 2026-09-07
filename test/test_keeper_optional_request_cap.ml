@@ -52,7 +52,7 @@ let test_optional_cap_reaches_real_http_and_explicit_cap_stops_before_io () =
   (* An exact, long model ID keeps the final wire envelope larger than the
      short message's internal projection. The explicit-cap case therefore
      reaches final serialization instead of failing the history window. *)
-  let model_id = "optional-cap-" ^ String.make 256 'm' in
+  let model_id = "optional-cap-" ^ String.make 1024 'm' in
   let catalog_path = Filename.concat base_path "models.toml" in
   let catalog_row provider = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"

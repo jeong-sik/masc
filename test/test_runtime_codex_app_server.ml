@@ -2223,6 +2223,25 @@ let test_keeper_partial_write_retains_transport_evidence () =
         | Error detail -> fail detail))
 ;;
 
+let test_keeper_post_write_observer_failure_cannot_retry () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun cli_path ->
+      let calls = ref 0 in
+      let result = run_keeper_turn ~cli_path ~model:"gpt-fixture"
+        ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ ->
+          incr calls; failwith "fixture attribution failed after dispatch") () in
+      check int "one completed write reached the observer" 1 !calls;
+      match result with
+      | Error error ->
+        (match Keeper_internal_error.classify_masc_internal_error error with
+         | Some (Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+           check bool "observer failure cannot replay the dispatched input" false
+             (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+         | _ -> fail (Agent_core.Error.to_string error))
+      | Ok _ -> fail "failed attribution completed a Keeper turn")
+;;
+
 let test_keeper_projects_codex_live_stream () =
   let stream_events = ref [] in
   let tool =
@@ -4165,6 +4184,8 @@ let () =
             test_keeper_spawn_failure_has_no_transmitted_input
         ; test_case "Keeper partial write retains transport evidence" `Quick
             test_keeper_partial_write_retains_transport_evidence
+        ; test_case "post-write observer failure cannot retry" `Quick
+            test_keeper_post_write_observer_failure_cannot_retry
         ; test_case
             "Keeper maps official context error to typed core error"
             `Quick

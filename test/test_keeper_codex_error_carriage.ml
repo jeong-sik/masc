@@ -60,6 +60,8 @@ let test_every_variant_lands_in_its_class () =
   (* Effectful failed turns are fenced out of same-turn retry by
      [Keeper_provider_attempt_effect] at the driver level; the mapping itself
      stays descriptive. *)
+  check "turn input write failure"
+    (Codex.Turn_input_write_failed "pipe closed") "provider:unavailable";
   check "turn_failed"
     (Codex.Turn_failed "stream disconnected before completion")
     "provider:reported:turn_failed";
@@ -111,11 +113,28 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
       true
 ;;
 
+let test_transport_uncertainty_preserves_stronger_evidence () =
+  let module Effect = Masc.Keeper_provider_attempt_effect in
+  List.iter (fun (before, expected) ->
+    let observation = Atomic.make before in
+    Map.note_transport_uncertainty observation;
+    Map.note_transport_uncertainty observation;
+    Alcotest.(check string) "uncertainty joins without losing effect evidence"
+      (Effect.to_string expected) (Effect.to_string (Atomic.get observation));
+    Alcotest.(check bool) "uncertainty cannot reopen same-run retry" false
+      (Effect.allows_same_turn_retry (Atomic.get observation)))
+    Effect.[ No_effect_observed, Observation_unavailable;
+             Observation_unavailable, Observation_unavailable;
+             Effect_attempted, Effect_attempted ]
+;;
+
 let () =
   Alcotest.run
     "keeper_codex_error_carriage"
     [ ( "carriage"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "transport uncertainty preserves prior effects" `Quick
+            test_transport_uncertainty_preserves_stronger_evidence
+        ; Alcotest.test_case
             "every variant lands in its class"
             `Quick
             test_every_variant_lands_in_its_class

@@ -626,11 +626,19 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        below reports it only after the complete turn/start write, not when
        this prepared composition becomes available. *)
     let report_transmitted_input () =
-      on_transmitted_model_input
-        (match thread_mode with
-         | Runtime_codex_app_server.Start ->
-           Host.Whole_input_transmitted prepared.messages
-         | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session)
+      match
+        on_transmitted_model_input
+          (match thread_mode with
+           | Runtime_codex_app_server.Start -> Host.Whole_input_transmitted prepared.messages
+           | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session)
+      with
+      | () -> ()
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        (* This callback is entered only after a complete turn/start write.
+           Losing its observation cannot restore pre-dispatch retry safety. *)
+        observe_transport_uncertain ();
+        Printexc.raise_with_backtrace exn backtrace
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
@@ -1132,6 +1140,15 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
      | Error _ -> ())
   | Ok _ -> ()
 ;;
+(* Uncertainty cannot erase stronger evidence from an earlier attempt. The
+   compare-and-set also preserves an effect observed concurrently. *)
+let note_transport_uncertainty effect_disposition =
+  match Atomic.compare_and_set effect_disposition
+          Keeper_provider_attempt_effect.No_effect_observed
+          Keeper_provider_attempt_effect.Observation_unavailable with
+  | true | false -> ()
+;;
+
 let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -1149,7 +1166,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
   let observe_transport_uncertain () =
-    Atomic.set effect_disposition Keeper_provider_attempt_effect.Observation_unavailable
+    note_transport_uncertainty effect_disposition
   in
   let successful_tool_completion = Atomic.make No_successful_tool_completion in
   let observe_successful_tool_completion () =
@@ -1246,6 +1263,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 ;;
 
 module For_testing = struct
+  let note_transport_uncertainty = note_transport_uncertainty
   let observe_stream_native_action ~turn_count ~observe event =
     match
       codex_stream_callback

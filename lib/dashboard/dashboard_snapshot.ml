@@ -110,7 +110,7 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
     when should_reuse_projection ~now:(now ()) ~ttl ~refreshed_at:entry.refreshed_at ->
     entry.value
   | _ ->
-    let started_at = Unix.gettimeofday () in
+    let started_at = now () in
     let allocated_before = Gc.allocated_bytes () in
     let retain_or_prepare transient json =
       match previous, transient with
@@ -136,7 +136,7 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
        Atomic.set cache (Some (Ready_tools { refreshed_at = now (); value }));
        value
      in
-     let elapsed_s = Unix.gettimeofday () -. started_at in
+     let elapsed_s = now () -. started_at in
      let allocated_mb = (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0 in
      if elapsed_s >= 5.0 || allocated_mb >= 256.0 then
        Log.Dashboard.warn
@@ -303,7 +303,7 @@ let refresh_loop
         (fun () -> (!dashboard_shell_payload_json_ref) ~light:true config)
     in
     let tools =
-      refresh_tools_projection ~now:Unix.gettimeofday ~ttl:60.0 ~cache:tools_cache
+      refresh_tools_projection ~now:(fun () -> Eio.Time.now clock) ~ttl:60.0 ~cache:tools_cache
         ~config (fun () -> (!dashboard_tools_http_result_ref) config)
     in
     let telemetry_summary =

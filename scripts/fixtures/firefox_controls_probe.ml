@@ -130,6 +130,16 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     act first (Browser_action.Click "button[aria-label=prompt]");
     act first (Browser_action.Accept_dialog (Some "대화상자 입력"));
     check "prompt input reaches the page" (contains (member "text" (read first) |> string) "대화상자 입력");
+    let load_dialog = success (run (Browser_lane.Page_act (Browser_action.Open_tab (fixture_url ^ "/load-dialog")))) in
+    let load_tab = member "tabId" load_dialog |> integer in
+    check "load-time dialog retains its new tab id" (member "navigation" load_dialog = `String "blocked_by_dialog");
+    check "load-time prompt can be inspected by returned id" (member "text" (context load_tab [] `Dialog) = `String "Load-time dialog");
+    (match run Browser_lane.Tabs_list with
+     | Browser_lane.Refused detail -> check "blocked tab scan reports its exact id" (contains detail ("tabId=" ^ string_of_int load_tab))
+     | _ -> failwith "expected blocked page observation");
+    act load_tab (Browser_action.Accept_dialog None);
+    check "load-time dialog recovery leaves page readable" (contains (member "text" (read load_tab) |> string) "Firefox fixture");
+    act load_tab Browser_action.Close_tab;
     let upload = open_tab "/upload" in
     act upload (Browser_action.Upload {selector="#upload";paths=[Sys.getenv "MASC_PROBE_UPLOAD_PATH"]});
     act upload (Browser_action.Click "#send-upload");

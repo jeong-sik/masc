@@ -476,10 +476,21 @@ let handle_browser_goto_with_outcome ~args =
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
 ;;
 
-let handle_browser_act_with_outcome ~args =
-  let result, failure_effect_disposition =
-    Tool_misc_browser_lane.handle_act_with_phase ~tool_name:"masc_browser_act" ~start_time:0.0 args in
-  Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
+let handle_browser_act_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+  let invoke ?upload_paths () =
+    let result, failure_effect_disposition =
+      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths
+        ~tool_name:"masc_browser_act" ~start_time:0.0 args in
+    Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
+  match Browser_lane.Action.parse args with
+  | Ok (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) ->
+    (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
+       ~config ~meta ~paths (fun upload_paths -> invoke ~upload_paths ()) with
+     | Ok outcome -> outcome
+     | Error message -> Keeper_tool_execution.failure
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json message))
+  | _ -> invoke ()
 ;;
 
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =

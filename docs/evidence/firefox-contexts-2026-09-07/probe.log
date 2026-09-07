@@ -1,0 +1,59 @@
+PASS probe owns a newly opened session
+PASS element observation names its tab
+PASS password values are absent
+PASS opaque option values are observable
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS native fill select and click changed page
+PASS live DOM value reflects native fill
+PASS native action confirms its target tab
+PASS native Enter submits the filled form
+PASS native action confirms its target tab
+PASS second tab remains independently readable
+PASS ambiguous selector rejected before effect
+PASS native action confirms its target tab
+PASS targeted navigation reaches the requested URL
+PASS native action confirms its target tab
+PASS native back returns to previous URL
+PASS native action confirms its target tab
+PASS native forward restores URL
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS screenshot target is the first fixture page
+PASS another tab is selected before screenshot
+PASS native screenshot carries the selected tab
+PASS native screenshot switches to the requested page
+PASS iframe discovery returns a selectable frame
+PASS nested cross-origin frame controls are readable
+PASS nested fill executed
+PASS nested click executed
+PASS nested frame contains submitted input
+PASS top-level read resets the frame context
+PASS missing frame rejected before effect
+PASS native action confirms its target tab
+PASS alert text remains available
+PASS native action confirms its target tab
+PASS accepted alert closes
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS dismiss reaches the page as false
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS prompt input reaches the page
+PASS load-time dialog retains its new tab id
+PASS load-time prompt can be inspected by returned id
+PASS blocked tab scan reports its exact id
+PASS native action confirms its target tab
+PASS load-time dialog recovery leaves page readable
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS real multipart upload preserves file bytes
+PASS native action confirms its target tab
+PASS native action confirms its target tab
+PASS closed tab cannot be clicked
+PASS session close is confirmed
+PASS probe owns a newly opened session
+PASS reopened sessions never reuse tab IDs
+PASS old session target rejected

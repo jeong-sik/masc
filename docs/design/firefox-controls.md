@@ -110,11 +110,24 @@ and an empty framePath. They cover JavaScript alert/confirm/prompt dialogs, not
 arbitrary operating-system dialogs.
 
 `BrowserAct upload` requires `tabId`, a unique file-input `selector` and a nonempty
-array of absolute `paths` on the automation host. Optional framePath targets an
+array of Keeper-readable `paths` (playground-relative or visible absolute paths).
+Optional framePath targets an
 input inside a frame. Native WebDriver clears the existing selection and sends
 these files; clicking the site's submit control remains a separate action.
-Paths refer to the host running geckodriver, not a remote Keeper's filesystem.
+The Keeper file resolver validates every path before issuing any browser command.
+The selected sandbox backend reads the bytes, including endpoint-owned trees;
+backend errors never fall back to a same-named host file. Files are privately
+staged with their basenames until the browser has accepted the selection, then
+the snapshots are removed. A 16 MiB per-file resource limit rejects oversized
+files before browser effects, without uploading truncated prefixes. Generic
+tool callers without authoritative Keeper context cannot upload.
 
 The real Firefox scenario covers nested cross-origin frame input, top-level
 recovery, missing-frame rejection before mutation, alert/confirm/prompt outcomes,
 and multipart upload with server-side file-byte verification.
+
+A page may open a prompt during navigation. `open_tab` then returns its tabId
+with `navigation=blocked_by_dialog` and the requested URL, without claiming a
+completed page read. Inspect/answer that tab's dialog and read it again. If a tab
+scan is blocked, its error also identifies the exact tabId. Opening a new task
+tab can recover after the previously current tab was closed.

@@ -15,10 +15,15 @@
     domain and survive the requesting fiber or turn switch. Computation still
     uses the executor pool. *)
 
+type payload_origin = Seeded | Computed | Timeout
+(** The producer of this exact payload, independent of its JSON contents and
+    of any later replacement in the cache. *)
+
 type cached_payload = {
   json : Yojson.Safe.t;
   raw_json : string;
   etag : string;
+  origin : payload_origin;
 }
 (** Cached dashboard payload carrying the Yojson AST, pre-serialized JSON string,
     and weak entity tag. Payload computation prepares all three together before

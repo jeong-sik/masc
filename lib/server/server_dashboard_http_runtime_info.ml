@@ -2495,7 +2495,7 @@ let dashboard_tools_warming_json () =
 ;;
 
 
-let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojson.Safe.t =
+let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
   let ctx : Tool_misc.context =
     { config
     ; agent_name = "dashboard"
@@ -2579,14 +2579,25 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
   let cached =
     match timing with
     | None ->
-      Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
+      Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_tools_cache_ttl_sec
         compute
     | Some t ->
       Server_timing.measure t Cache_lookup (fun () ->
-        Dashboard_cache.get_or_compute cache_key
+        Dashboard_cache.get_or_compute_payload cache_key
           ~ttl:dashboard_tools_cache_ttl_sec compute)
   in
-  attach_live_tools_projections cached
+  let json = attach_live_tools_projections cached.json in
+  match cached.origin with
+  | Dashboard_cache.Seeded -> Dashboard_snapshot.Tools_pending json
+  | Dashboard_cache.Computed -> Dashboard_snapshot.Tools_ready json
+  | Dashboard_cache.Timeout -> Dashboard_snapshot.Tools_error json
+;;
+
+let dashboard_tools_http_json ?keeper ?timing config =
+  match dashboard_tools_http_result ?keeper ?timing config with
+  | Dashboard_snapshot.Tools_pending json
+  | Dashboard_snapshot.Tools_ready json
+  | Dashboard_snapshot.Tools_error json -> json
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

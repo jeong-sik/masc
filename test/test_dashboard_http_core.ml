@@ -2994,6 +2994,80 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
    [Server_dashboard_snapshot_select.select_tools_json] and
    [..._telemetry_summary_json]. *)
 
+let test_tools_worker_promotes_seed_before_component_ttl () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  Eio_guard.enable ();
+  let clock = Eio.Stdenv.clock env in
+  let key = "tools:" ^ config.Workspace.base_path in
+  Dashboard_cache.invalidate key;
+  let seed_json = `Assoc [ "status", `String "warming"; "tool_inventory", `List [] ] in
+  let ready_json = `Assoc [ "tool_inventory", `List [] ] in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. seed_json;
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  let await promise = Eio.Time.with_timeout_exn clock 2.
+      (fun () -> Eio.Promise.await promise) in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ();
+        Dashboard_cache.invalidate key)
+      (fun () ->
+        (* Keep the inventory fill pending while the real Tools producer and
+           snapshot component run on another worker. No HTTP request warms it. *)
+        let returned_seed = Dashboard_cache.get_or_compute_payload_with_timeout key
+          ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+            Eio.Promise.resolve started_u ();
+            Eio.Promise.await release;
+            ready_json) in
+        await started;
+        let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
+        let now_value = ref 100. in
+        let producer_calls = Atomic.make 0 in
+        let owner_domain = (Domain.self () :> int) in
+        let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
+          Executor_pool_ref.submit_or_inline (fun () ->
+            Dashboard_snapshot.For_testing.refresh_tools
+              ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
+                check bool "tools producer remains on a worker" true
+                  ((Domain.self () :> int) <> owner_domain);
+                Atomic.incr producer_calls;
+                Server_dashboard_http_runtime_info.dashboard_tools_http_result config))) in
+        let pending = refresh () in
+        now_value := 102.;
+        let still_pending = refresh () in
+        check bool "pending cycles reuse identity and all encodings" true
+          (pending == still_pending);
+        check int "pending producer is retried without waiting sixty seconds" 2
+          (Atomic.get producer_calls);
+        Eio.Promise.resolve release_u ();
+        let rec await_computed () =
+          match Dashboard_cache.peek_payload key with
+          | Some payload when payload.origin = Dashboard_cache.Computed -> payload
+          | _ -> Eio.Fiber.yield (); await_computed ()
+        in
+        let computed = Eio.Time.with_timeout_exn clock 2. await_computed in
+        check bool "returned seed keeps its origin after concurrent publication" true
+          (returned_seed.origin = Dashboard_cache.Seeded);
+        check bool "completed empty inventory has computed origin" true
+          (computed.origin = Dashboard_cache.Computed);
+        now_value := 104.;
+        let ready = refresh () in
+        check bool "ready promotes on the next cycle before the old TTL" true
+          (ready != pending);
+        check int "empty inventory remains empty after promotion" 0
+          Yojson.Safe.Util.(ready.json |> member "tool_inventory" |> to_list |> List.length);
+        check bool "promotion keeps the real producer's final decoration" true
+          (Yojson.Safe.Util.(ready.json |> member "keeper_waiting_inventory") <> `Null);
+        check string "promoted bytes describe the decorated JSON"
+          (Yojson.Safe.to_string ready.json) ready.encoded.identity;
+        now_value := 106.;
+        let ready_again = refresh () in
+        check bool "ready cycles reuse all prepared encodings" true (ready == ready_again);
+        check int "ready component TTL avoids another producer call" 3
+          (Atomic.get producer_calls)))
+
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
@@ -5100,6 +5174,8 @@ let () =
             test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
+          test_case "worker Tools seed promotes before component TTL with empty inventory" `Quick
+            test_tools_worker_promotes_seed_before_component_ttl;
           test_case "tools prepared selector scopes bytes and preserves exact keeper" `Quick
             test_tools_prepared_selector_scope_and_keeper_contract;
           test_case "tools routes serve prepared encodings and conditional responses" `Quick

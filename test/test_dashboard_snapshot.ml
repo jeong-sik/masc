@@ -175,7 +175,8 @@ let test_tools_component_reuses_complete_representations () =
     ; "effective_keeper_surface", `Null
     ; "skill_activations", `Null ] in
   let refresh f = Dashboard_snapshot.For_testing.refresh_tools
-    ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config f in
+    ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config
+      (fun () -> Dashboard_snapshot.Tools_ready (f ())) in
   let first = refresh (fun () -> incr calls; json 1) in
   let raw = Yojson.Safe.to_string (json 1) in
   Alcotest.(check string) "final decorated AST retains exact identity bytes"
@@ -213,6 +214,45 @@ let test_tools_component_reuses_complete_representations () =
   Alcotest.(check string) "new bytes match new AST" (Yojson.Safe.to_string (json 2)) second.encoded.identity
 ;;
 
+let test_tools_pending_and_errors_do_not_renew_ready_ttl () =
+  let now_value = ref 100. in
+  let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
+  let refresh result = Dashboard_snapshot.For_testing.refresh_tools
+    ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () -> result) in
+  let open Dashboard_snapshot in
+  let pending = refresh (Tools_pending (`String "seed")) in
+  now_value := 102.;
+  let again = refresh (Tools_pending (`String "new seed timestamp")) in
+  Alcotest.(check bool) "pending cycles reuse all prepared representations" true
+    (pending == again);
+  let failed = refresh (Tools_error (`String "timeout")) in
+  Alcotest.(check string) "cold failure is visible" "timeout"
+    (Yojson.Safe.Util.to_string failed.json);
+  let recovered = refresh (Tools_ready (`Assoc [ "tool_inventory", `List [] ])) in
+  Alcotest.(check bool) "empty computed inventory promotes immediately" true
+    (recovered != failed);
+  now_value := 161.9;
+  let calls = ref 0 in
+  let retained = For_testing.refresh_tools ~now:(fun () -> !now_value)
+    ~ttl:60. ~cache ~config (fun () -> incr calls; Tools_pending `Null) in
+  Alcotest.(check int) "ready TTL skips the producer" 0 !calls;
+  Alcotest.(check bool) "ready TTL retains the exact projection" true (retained == recovered);
+  now_value := 162.;
+  List.iter (fun result ->
+    let retained = refresh result in
+    Alcotest.(check bool) "pending/error at expiry retains last ready encodings" true
+      (retained == recovered))
+    [ Tools_pending (`String "seed after eviction"); Tools_error (`String "timeout") ];
+  let retained = For_testing.refresh_tools ~now:(fun () -> !now_value)
+    ~ttl:60. ~cache ~config (fun () -> failwith "producer failed") in
+  Alcotest.(check bool) "producer failure retains ready encodings" true
+    (retained == recovered);
+  now_value := 164.;
+  let replacement = refresh (Tools_ready (`String "replacement")) in
+  Alcotest.(check string) "failures did not renew successful TTL" "replacement"
+    (Yojson.Safe.Util.to_string replacement.json)
+;;
+
 let () =
   Alcotest.run "Dashboard_snapshot"
     [
@@ -237,6 +277,8 @@ let () =
             `Quick test_activity_defaults_cache_retains_last_good;
           Alcotest.test_case "tools component reuses final HTTP representations"
             `Quick test_tools_component_reuses_complete_representations;
+          Alcotest.test_case "tools pending and errors never renew the ready TTL"
+            `Quick test_tools_pending_and_errors_do_not_renew_ready_ttl;
         ] );
     ]
 ;;

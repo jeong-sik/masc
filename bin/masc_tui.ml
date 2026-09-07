@@ -10209,6 +10209,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
+              (match state.acting_filter with
+               | Masc_tui_acting.Turns -> ()
+               | Actions | Everything ->
+                   if Masc_tui_acting.visible state.acting_filter event
+                      && (state.acting_cursor > 0 || Option.is_some state.acting_detail)
+                   then state.acting_cursor <- state.acting_cursor + 1);
               (* A row arriving at the top pushes every row down one. An
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
@@ -16039,6 +16045,42 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some ("esc" | "left")
+         when state.view = Acting && Option.is_some state.acting_detail ->
+           state.acting_detail <- None;
+           state.acting_detail_scroll <- 0
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
+         when state.view = Acting && Option.is_some state.acting_detail ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           (match move with
+            | "g" -> state.acting_detail_scroll <- 0
+            | "G" ->
+                (* Rendering clamps this to the final wrapped evidence page. *)
+                state.acting_detail_scroll <- max_int
+            | _ ->
+                let delta = match move with
+                  | "j" | "down" -> 1 | "k" | "up" -> -1
+                  | "pageup" -> -page | _ -> page in
+                state.acting_detail_scroll <- max 0 (state.acting_detail_scroll + delta))
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
+         when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           let delta = match move with
+             | "j" | "down" -> 1 | "k" | "up" -> -1
+             | "pageup" -> -page | _ -> page in
+           state.acting_cursor <- max 0 (min (List.length (acting_flat_entries state) - 1)
+               (state.acting_cursor + delta));
+           if state.acting_cursor = 0 then state.acting_unseen <- 0
+       | Some ("\r" | "\n" | "enter") when state.view = Acting ->
+           (match state.acting_detail, state.acting_filter with
+            | Some _, _ -> ()
+            | None, Masc_tui_acting.Turns ->
+                add_event state "system" "Turns are aggregates; press f for Actions, then Enter for exact event evidence"
+            | None, (Actions | Everything) ->
+                state.acting_detail <- selected_acting_entry state;
+                state.acting_detail_scroll <- 0)
        | Some "1" when state.view = Acting || state.view = System_logs ->
            goto_surface state ~mailbox:async_messages Acting
        | Some "2" when state.view = Acting || state.view = System_logs ->
@@ -18509,7 +18551,10 @@ and is loaded on demand through keeper_skill.
            state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
-           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter;
+           state.acting_cursor <- 0;
+           state.acting_scroll <- 0;
+           state.acting_unseen <- 0
        | Some "f" | Some "F"
          when state.view = Config && state.config_pane = Config_themes ->
             let next =
@@ -18590,6 +18635,7 @@ and is loaded on demand through keeper_skill.
              | None ->
                  state.planning_cursor <- 0)
         | Some "g" when state.view = Acting ->
+           state.acting_cursor <- 0;
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
        | Some "g"
@@ -18678,7 +18724,8 @@ and is loaded on demand through keeper_skill.
             (* Past the end on purpose; the frame clamps it to the last page.
                The held count rather than max_int, because an event arriving
                before that frame adds one to it. *)
-            state.acting_scroll <- List.length state.acting
+            state.acting_scroll <- List.length state.acting;
+            state.acting_cursor <- max 0 (List.length (acting_flat_entries state) - 1)
         | Some "t" | Some "T" when state.repository_changes_open ->
             let path_opt =
               match state.repository_changes_diff_path with

@@ -3765,6 +3765,9 @@ type state = {
   mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
   mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
   mutable acting_filter: Masc_tui_acting.filter;
+  mutable acting_cursor: int;
+  mutable acting_detail: Masc_tui_acting.entry option;
+  mutable acting_detail_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -4340,6 +4343,16 @@ let keeper_reading (state : state) (keeper : keeper) :
       Masc_tui_keeper_control.liveness_of_roster state.keeper_roster
         keeper.k_name
   }
+
+let acting_flat_entries state =
+  List.filter
+    (fun entry -> Masc_tui_acting.visible state.acting_filter entry.Masc_tui_acting.ae_event)
+    state.acting
+
+let selected_acting_entry state =
+  match state.acting_filter with
+  | Masc_tui_acting.Turns -> None
+  | Actions | Everything -> List.nth_opt (acting_flat_entries state) state.acting_cursor
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
@@ -4937,6 +4950,9 @@ let create_state
   acting_scroll = 0;
   acting_unseen = 0;
   acting_filter = Masc_tui_acting.Turns;
+  acting_cursor = 0;
+  acting_detail = None;
+  acting_detail_scroll = 0;
   verification = None;
   verification_error = None;
   verification_scroll = 0;
@@ -5240,6 +5256,8 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Acting_selection of int * int
+  | Acting_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -5281,6 +5299,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
+  | Acting_detail_scroll value -> state.acting_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value

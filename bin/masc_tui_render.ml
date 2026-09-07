@@ -14613,7 +14613,73 @@ let render_keeper_calls (state : state) =
    duration. Scrolling away from the newest row freezes the view and counts
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
+let render_acting_evidence (state : state) entry =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " ACTING EVENT EVIDENCE");
+  box_line_styled buf cols ~style:Ansi.dim " Selected event snapshot; new arrivals do not replace this reading";
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
+  box_divider buf cols;
+  let lines =
+    Masc_tui_acting.evidence_fields entry
+    |> List.concat_map (fun (label, value) ->
+        let prefix = "  " ^ label ^ ": " in
+        let text = match value with
+          | None -> "not carried"
+          | Some "" -> "(empty string)"
+          | Some value -> Terminal_text.single_line value in
+        let continuation = String.make (Message_layout.display_width prefix) ' ' in
+        match Message_layout.wrap_words
+                ~max_cells:(max 1 (cols - 4 - Message_layout.display_width prefix)) text with
+        | [] -> [prefix]
+        | first :: rest -> (prefix ^ first) :: List.map (fun line -> continuation ^ line) rest)
+  in
+  let io_lines =
+    match entry.Masc_tui_acting.ae_event with
+    | Masc_tui_observer.Keeper_tool_call call ->
+        let json label = function
+          | None -> ["  " ^ label ^ ": not carried"]
+          | Some value ->
+              ("  " ^ label ^ " (producer-redacted JSON)")
+              :: (document_markdown ~width:(max 1 (cols - 6))
+                    ("```json\n" ^ Yojson.Safe.pretty_to_string value ^ "\n```")
+                  |> List.map (fun line -> "  " ^ line)) in
+        let preview label = function
+          | None -> ["  " ^ label ^ ": not carried"]
+          | Some text ->
+              ("  " ^ label ^ " (producer-redacted preview)")
+              :: (document_markdown ~width:(max 1 (cols - 6)) text
+                  |> List.map (fun line -> "  " ^ line)) in
+        [""; "  INPUT / OUTPUT OBSERVATIONS"]
+        @ json "Input" call.kt_tool_args
+        @ preview "Input preview" call.kt_tool_args_preview
+        @ json "Output" call.kt_tool_result
+        @ preview "Output preview" call.kt_tool_output_preview
+    | _ -> []
+  in
+  let lines = lines @ io_lines in
+  let content_height = max 1 (rows - count_frame_lines buf - listing_rows_below_the_body) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = min max_scroll (max 0 state.acting_detail_scroll) in
+  for i = 0 to content_height - 1 do
+    match List.nth_opt lines (scroll + i) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols line
+  done;
+  box_line_styled buf cols ~style:Ansi.dim (Printf.sprintf "  [%d evidence rows, scroll %d]" (List.length lines) scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+      ~hints:"j/k:scroll  PgUp/PgDn:page  Esc:back to events");
+  finish_surface state ~clamped:(Acting_detail_scroll scroll)
+    ~surface_key:"acting-evidence" ~rows:terminal_rows ~cols buf
+
 let render_acting (state : state) =
+  match state.acting_detail with
+  | Some entry -> render_acting_evidence state entry
+  | None ->
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -14735,7 +14801,16 @@ let render_acting (state : state) =
   let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.acting_scroll max_scroll) in
+  let cursor = max 0 (min state.acting_cursor (shown - 1)) in
+  let scroll =
+    let previous = max 0 (min state.acting_scroll max_scroll) in
+    match state.acting_filter with
+    | Acting.Turns -> previous
+    | Actions | Everything ->
+        if cursor < previous then cursor
+        else if cursor >= previous + content_height then cursor - content_height + 1
+        else previous
+  in
   if shown = 0 then begin
     let empty =
       match state.observer with
@@ -14795,7 +14870,9 @@ let render_acting (state : state) =
                 (Acting.glyph_text row.Acting.glyph)
                 (fit_width label 16) detail
           in
-          box_line_styled buf cols ~style line
+          let selected = state.acting_filter <> Acting.Turns && idx = cursor in
+          let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
+          box_line_styled buf cols ~style:(if selected then Theme.selection else style) line
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
@@ -14805,8 +14882,11 @@ let render_acting (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:scroll  g:newest  G:oldest  f:turns/actions/everything  Tab:next  q:quit");
-  finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
+         "j/k:select/scroll  Enter:evidence  g:newest  G:oldest  f:turns/actions/everything");
+  let clamped = match state.acting_filter with
+    | Acting.Turns -> Acting scroll
+    | Actions | Everything -> Acting_selection (scroll, cursor) in
+  finish_surface state ~clamped ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

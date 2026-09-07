@@ -73,7 +73,9 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
-      ; b Navigate "j/k" "scroll"
+      ; b Navigate "j/k" "select / scroll"
+      ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      ; b Act "Esc" "back" ~help:"close event evidence"
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"

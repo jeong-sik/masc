@@ -960,12 +960,33 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          so the snapshot fast path and exact Keeper projection both apply. *)
       | `GET, "/api/v1/dashboard/tools" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json =
-              Server_dashboard_snapshot_select.select_tools_json
+            let timing = Server_timing.create () in
+            let response =
+              Server_dashboard_snapshot_select.select_tools_response
+                ~timing
                 ?keeper:(Server_utils.query_param httpun_request "keeper")
                 (Mcp_server.workspace_config state)
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            let extra_headers = cors @ Server_timing.extra_header timing in
+            match response with
+            | Server_dashboard_snapshot_select.Tools_json json ->
+              h2_respond_json_value h2_reqd json ~extra_headers
+            | Tools_prepared tools ->
+              let body, headers = Http_response_payload.select_prepared
+                ~accept_encoding:(Httpun.Headers.get httpun_request.headers "accept-encoding")
+                tools.encoded in
+              let extra_headers = extra_headers @ headers
+                @ [ "etag", tools.etag;
+                    "cache-control", Http_server_eio.Response.json_revalidate_cache_control ] in
+              let unchanged =
+                match Httpun.Headers.get httpun_request.headers "if-none-match" with
+                | Some client_tag ->
+                  Http_server_eio.Response.client_tag_matches ~etag:tools.etag ~client_tag
+                | None -> false
+              in
+              if unchanged then
+                h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
+              else h2_respond_json h2_reqd body ~compress:false ~extra_headers)
 
       | `GET, "/api/v1/dashboard/skill-activations" ->
           with_h2_public_read h2_reqd (fun state ->

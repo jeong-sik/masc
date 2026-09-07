@@ -51,8 +51,17 @@ class RawHttpResponse:
 class StreamingHttpResponse:
     """SSE chunks released by the interaction while one connection stays open."""
 
-    def __init__(self, chunks: Callable[[], Iterator[bytes]]) -> None:
+    def __init__(self, chunks: Callable[[], Iterator[bytes]], *,
+                 headers: tuple[tuple[str, str], ...] = ()) -> None:
         self.chunks = chunks
+        self.headers = headers
+
+
+class HeadersHttpResponse:
+    """A streaming protocol fixture whose response depends on request headers."""
+
+    def __init__(self, resolve: Callable[[dict[str, str]], RawHttpResponse | StreamingHttpResponse]) -> None:
+        self.resolve = resolve
 
 
 class RequestHttpResponse:
@@ -70,6 +79,7 @@ HttpFixture = (
     | RawHttpResponse
     | StreamingHttpResponse
     | RequestHttpResponse
+    | HeadersHttpResponse
     | Callable[[], HttpResponse]
 )
 HttpFixtures = dict[str, HttpFixture]
@@ -186,12 +196,16 @@ def test_http_endpoint(
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
+            elif isinstance(fixture, HeadersHttpResponse):
+                resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
             if isinstance(resolved, StreamingHttpResponse):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Connection", "close")
+                for key, value in resolved.headers:
+                    self.send_header(key, value)
                 self.end_headers()
                 try:
                     for chunk in resolved.chunks():
@@ -11698,6 +11712,127 @@ def observer_http_fixtures() -> HttpFixtures:
     }
 
 
+def run_observer_reconnect_regression(executable: str) -> None:
+    releases = [threading.Event() for _ in range(8)]
+    seen: list[dict[str, str]] = []
+    requests: HttpRequests = []
+
+    def frame(event_id: int, call: str) -> bytes:
+        value = {
+            "type": "keeper_tool_call", "name": "alpha", "tool_name": "keeper_skill",
+            "ts_unix": 100.0, "turn": 7, "tool_use_id": call,
+            "tool_args": {"skill": "input-" + call},
+            "tool_result": {"receipt": "output-" + call},
+        }
+        return f"id: {event_id}\ndata: ".encode() + json.dumps(value).encode() + b"\n\n"
+
+    def respond(headers: dict[str, str]) -> StreamingHttpResponse:
+        index = len(seen)
+        seen.append(headers)
+        handshake = [
+            (("x-masc-sse-instance-id", "epoch-a"), ("x-masc-sse-replay", "fresh")),
+            (("x-masc-sse-instance-id", "epoch-a"), ("x-masc-sse-replay", "resumed")),
+            (("x-masc-sse-instance-id", "epoch-a"), ("x-masc-sse-replay", "resumed")),
+            (("x-masc-sse-instance-id", "epoch-b"), ("x-masc-sse-replay", "reset-instance-changed")),
+            (("x-masc-sse-instance-id", "epoch-c"),),  # malformed: no replay contract
+            (("x-masc-sse-instance-id", "epoch-c"), ("x-masc-sse-replay", "fresh")),
+            (),  # peer no longer implements scoped replay
+            (),
+        ][min(index, 7)]
+
+        def chunks():
+            if index == 0:
+                yield frame(41, "before-disconnect")
+                releases[0].wait(timeout=20)
+                yield b"id: 42\n"  # an ID-only partial frame was never delivered
+            elif index == 1:
+                yield frame(41, "before-disconnect") + frame(42, "during-disconnect")
+                releases[1].wait(timeout=20)
+            elif index == 2:
+                return  # same epoch EOF with zero new events must retain session/cursor
+            elif index == 3:
+                yield frame(1, "after-restart")
+                releases[3].wait(timeout=20)
+            elif index in (4, 6):
+                # No data: an old peer may suppress all events under our old
+                # high numeric cursor. The client must close after headers.
+                releases[index].wait(timeout=20)
+            elif index == 5:
+                yield frame(1, "after-malformed")
+                releases[5].wait(timeout=20)
+            else:
+                yield frame(1, "unsupported-live-only")
+                releases[7].wait(timeout=20)
+
+        return StreamingHttpResponse(chunks, headers=handshake)
+
+    fixtures = observer_http_fixtures()
+    fixtures["/mcp?sse_kind=observer"] = HeadersHttpResponse(respond)
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
+            wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
+            releases[0].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 2", start=0, timeout=10)
+            drain_until_quiet(process, master_fd, output)
+            plain = screen_text(bytes(output))
+            for needle in (b"Tool use ID: before-disconnect", b"output-before-disconnect",
+                           b"retained window resumed; history completeness unknown"):
+                if needle not in plain:
+                    raise AssertionError(f"Replayed call retargeted selection or lost replay coverage: {plain!r}")
+            releases[1].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 3", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"disconnected history not recovered", start=0, timeout=10)
+            releases[3].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 4", start=0, timeout=10)
+            releases[5].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 5", start=0, timeout=10)
+            drain_until_quiet(process, master_fd, output)
+            plain = screen_text(bytes(output))
+            if b"Replay unavailable (live only)" not in plain or b"before-disconnect" not in plain:
+                raise AssertionError(f"Unsupported peer claimed replay or changed pinned evidence: {plain!r}")
+            expected = [(None, None), ("epoch-a", "41"), ("epoch-a", "42"),
+                        ("epoch-a", "42"), ("epoch-b", "1"), (None, None),
+                        ("epoch-c", "1"), (None, None)]
+            actual = [(h.get("x-masc-sse-instance-id"), h.get("last-event-id")) for h in seen]
+            if actual != expected:
+                raise AssertionError(f"HTTP cursor/epoch sequence differs: {actual!r}")
+            if len([path for path, _ in requests if path == "/mcp"]) != 1:
+                raise AssertionError("Transient zero-event close replaced the MCP session")
+            if any(h.get("mcp-session-id") != "mcp_fixture_session" for h in seen):
+                raise AssertionError("Reconnect did not retain the initialized MCP session")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+            detail = send_and_wait(process, master_fd, output, b"g\r", b"Tool use ID: unsupported-live-only")
+            if b"output-unsupported-live-only" not in screen_text(bytes(output)):
+                raise AssertionError(f"Live-only call did not expose its I/O: {detail!r}")
+            captured = bytes(output)
+            end = captured.rfind(FRAME_END) + len(FRAME_END)
+            redraw = captured.rfind(FULL_REDRAW, 0, end)
+            start = captured.rfind(FRAME_START, 0, redraw)
+            if end < len(FRAME_END) or start < 0:
+                raise AssertionError("Reconnect evidence has no completed redraw frame")
+            print("OBSERVER_RECONNECT_EVIDENCE " + json.dumps({
+                "fixture": "actual HTTP disconnect/restart/capability negotiation with canonical Keeper I/O",
+                "requests": actual, "retained_unique_events": 5,
+                "binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+                "pre_open_history_tested": False, "replay_completeness_proven": False,
+                "rows": 38, "columns": 150, "encoding": "base64",
+                "pty": base64.b64encode(captured[start:end]).decode(),
+            }), flush=True)
+            os.write(master_fd, b"q")
+        finally:
+            for release in releases:
+                release.set()
+
+    run_terminal_scenario(executable, description="Observer reconnect preserves scoped exact-call I/O",
+                          interact=interact, refresh=0.5, http_fixtures=fixtures,
+                          http_requests=requests)
+
+
 def run_acting_call_evidence_regression(executable: str) -> None:
     release_next = threading.Event()
     keep_open = threading.Event()
@@ -13488,6 +13623,55 @@ def run_theme_scheme_regression(executable: str) -> None:
     )
 
 
+def run_msx_palette_regression(executable: str) -> None:
+    """The command palette opens the MSX screen by name.
+
+    [&] opens the MSX spectator, but a key is found only by someone who
+    already knows it; the palette is where an operator looks for a screen by
+    name. This drives the typed path end to end: `:` then `go msx` must take
+    the terminal over with the MSX screen, and Esc must hand it back.
+
+    The harness serves no machine, so the screen opens on its "no machine
+    loaded" line. That line is the proof the palette reached the screen at
+    all; the Overview header afterwards is the proof Esc left it.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The MSX screen paints the whole terminal itself, outside the frame
+        # presenter, so no frame-end marker follows it. Wait on the raw
+        # output for its title line, the way the Browser screenshot
+        # regression waits for its overlay.
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b":go msx\r")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"no machine loaded",
+            start=start,
+            timeout=3.0,
+        )
+        # Esc hands the terminal back to the presenter, whose frame ends the
+        # normal way, so the plain helper serves from here on.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="the palette opens the MSX screen by name",
+        interact=interact,
+    )
+
+
 def held_back_prompts_http_fixtures() -> HttpFixtures:
     """One prompt whose override the registry declined to restore.
 
@@ -13698,6 +13882,10 @@ def main() -> None:
         run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
         print("tui theme scheme regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-palette":
+        run_msx_palette_regression(os.path.abspath(sys.argv[1]))
+        print("tui MSX palette regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
         print("tui chat clarity regression: PASS")
@@ -13731,6 +13919,9 @@ def main() -> None:
         run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
         print("tui Skill usage coverage regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "observer-reconnect":
+        run_observer_reconnect_regression(os.path.abspath(sys.argv[1]))
+        sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[2] == "acting-call-evidence":
         run_acting_call_evidence_regression(os.path.abspath(sys.argv[1]))
         print("tui Acting call evidence regression: PASS")

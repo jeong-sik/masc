@@ -45,6 +45,7 @@ let turn_complete_frame =
 let decode_all chunks =
   let reader = Observer.create () in
   List.concat_map (Observer.feed reader) chunks
+  |> List.map (fun (delivery : Observer.delivery) -> delivery.decoded)
 
 let summary = function
   | Observer.Event (Observer.Agent_core e) ->
@@ -330,14 +331,14 @@ let test_a_line_cut_by_the_chunk_boundary_is_held () =
   in
   let reader = Observer.create () in
   check (list string) "the cut line produces nothing yet" []
-    (List.map summary (Observer.feed reader head));
+    (List.map (fun (delivery : Observer.delivery) -> summary delivery.decoded) (Observer.feed reader head));
   check (list string) "and decodes whole once the rest arrives"
     [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
-    (List.map summary (Observer.feed reader tail))
+    (List.map (fun (delivery : Observer.delivery) -> summary delivery.decoded) (Observer.feed reader tail))
 
 let untaught_agent_core_frame =
   "data: {\"type\":\"agent_core:relay_dropped\",\"event_type\":\"relay_dropped\",\
-   \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n"
+   \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
 
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
@@ -347,8 +348,8 @@ let test_what_this_build_was_not_taught_keeps_its_name () =
     ]
     (List.map summary
        (decode_all
-          [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n"
-          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n"
+          [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n\n"
+          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
           ; untaught_agent_core_frame
           ]));
   match decode_all [ untaught_agent_core_frame ] with
@@ -365,16 +366,16 @@ let test_streaming_telemetry_names_no_agent () =
        (decode_all
           [ "data: {\"type\":\"agent_core:telemetry_event\",\"event_type\":\
              \"telemetry_event\",\"agent_name\":null,\"ts_unix\":1.0,\
-             \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n"
+             \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n\n"
           ]))
 
 let test_a_frame_this_cannot_read_says_why () =
   let reasons =
     decode_all
-      [ "data: nope\n"
-      ; "data: {\"ts_unix\":1.0}\n"
-      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"agent_name\":\"x\"}\n"
-      ; "data:{\"type\":\"keeper_heartbeat\"}\n"
+      [ "data: nope\n\n"
+      ; "data: {\"ts_unix\":1.0}\n\n"
+      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"agent_name\":\"x\"}\n\n"
+      ; "data:{\"type\":\"keeper_heartbeat\"}\n\n"
       ]
     |> List.map (function
          | Observer.Undecodable detail -> detail
@@ -455,6 +456,30 @@ let test_keeper_scheduling_keeps_io_when_metadata_is_invalid () =
        "execution_mode", `String "unknown"]
     ]
 
+let test_cursor_commits_only_with_a_complete_event () =
+  let reader = Observer.create () in
+  check int "ID-only frame does not acknowledge an event" 0
+    (List.length (Observer.feed reader "id: 41\n\n"));
+  let partial =
+    "id: 42\ndata: {\"type\":\"keeper_tool_call\",\"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":1}\n"
+  in
+  check int "data line without frame terminator is not delivered" 0
+    (List.length (Observer.feed reader partial));
+  (match Observer.feed reader "\n" with
+   | [{ Observer.cursor = Some 42; decoded = Observer.Event (Observer.Keeper_tool_call call) }] ->
+       check string "complete frame retains exact call" "keeper_skill" call.kt_tool
+   | _ -> fail "expected one fully framed event with cursor 42");
+  check int "unfinished payload is not a delivered cursor" 0
+    (List.length (Observer.feed reader "id: 43\ndata: {"))
+
+let test_multiline_frame_preserves_payload_and_cursor () =
+  let reader = Observer.create () in
+  match Observer.feed reader
+    "id: 44\ndata: {\"type\":\"keeper_tool_call\",\ndata: \"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":1}\n\n" with
+  | [{ Observer.cursor = Some 44; decoded = Observer.Event (Observer.Keeper_tool_call call) }] ->
+      check string "multiline canonical SSE data preserved" "alpha" call.kt_keeper
+  | _ -> fail "expected one multiline event with cursor 44"
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -484,6 +509,10 @@ let () =
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
+        ; test_case "cursor commits only with a complete event" `Quick
+            test_cursor_commits_only_with_a_complete_event
+        ; test_case "multiline frame preserves payload and cursor" `Quick
+            test_multiline_frame_preserves_payload_and_cursor
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick

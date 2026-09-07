@@ -73,6 +73,10 @@ let test_the_palette_lists_tasks_and_posts () =
     ["go Browser Lane"]
     (List.filter_map (function label, Palette_browser_lane -> Some label | _ -> None)
        (palette_entries state));
+  Alcotest.(check (list string)) "one MSX destination"
+    ["go MSX"]
+    (List.filter_map (function label, Palette_msx -> Some label | _ -> None)
+       (palette_entries state));
   check_bool "Slack is not a separate destination" false (List.mem "go Slack Lane" labels);
   check_bool "settings is a direct entry" true
     (List.exists
@@ -288,6 +292,24 @@ let test_a_label_starting_with_the_query_leads () =
     (List.length (palette_matches state) = List.length (palette_entries state))
 ;;
 
+(* The [&] key opens the MSX screen, but a key is found only by someone who
+   already knows it. The palette is where an operator looks for a screen by
+   name, so "msx" typed there must reach the action the key reaches. *)
+let test_msx_is_reached_by_its_name () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.palette_query <- "msx";
+  check_bool "typing msx offers the MSX screen" true
+    (List.exists
+       (function _, Palette_msx -> true | _ -> false)
+       (palette_matches state));
+  state.palette_query <- "go msx";
+  (match palette_matches state with
+   | ("go MSX", Palette_msx) :: _ -> ()
+   | _ -> Alcotest.fail "the label spelled out must lead its own matches")
+;;
+
 let () =
   Alcotest.run
     "masc-tui-palette-matching"
@@ -310,6 +332,8 @@ let () =
             test_a_choice_lists_the_names_and_nothing_else
         ; Alcotest.test_case "friendly runtime parameter editing" `Quick
             test_friendly_runtime_param_editing
+        ; Alcotest.test_case "msx is reached by its name" `Quick
+            test_msx_is_reached_by_its_name
         ] )
     ]
 ;;

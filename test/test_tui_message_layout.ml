@@ -282,8 +282,9 @@ let test_scroll_hint_says_how_far_back () =
   in
   check string "an unscrolled pane names the key that scrolls" "PgUp:scroll back" (hint 0);
   check string "a clamped position is not scrolled" "PgUp:scroll back" (hint (-1));
-  check string "a scrolled pane says how far back"
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (3 back)" (hint 3);
+  check string "a scrolled pane says how far back and that more history loads"
+    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (3 back \xc2\xb7 more\xe2\x86\x91)"
+    (hint 3);
   check string "at the start, that is said instead of the distance"
     "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
     (hint ~older_exist:false 3);

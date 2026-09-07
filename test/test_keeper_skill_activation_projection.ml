@@ -149,21 +149,27 @@ let summary_count field json =
 
 let test_dashboard_projection_is_live_outside_inventory_cache () =
   with_workspace @@ fun config ->
+  Fun.protect ~finally:Dashboard_snapshot.reset_for_test @@ fun () ->
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test ~config ~shell:`Null
+       ~tools:(`Assoc [ "snapshot_only", `Bool true ])
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let keeper_name = "projection-keeper" in
   let meta = persist_session config keeper_name in
+  let live_tools () =
+    match Server_dashboard_snapshot_select.select_tools_response ~keeper:keeper_name config with
+    | Tools_json json -> json
+    | Tools_prepared _ -> fail "exact Keeper reused default snapshot bytes"
+  in
   let before =
-    Server_dashboard_http_runtime_info.dashboard_tools_http_json
-      ~keeper:keeper_name
-      config
+    live_tools ()
   in
   check int "empty live ledger" 0 (activation_count before);
   check int "empty invocation summary" 0
     (summary_count "instruction_invocations" before);
   record_one config meta;
   let after =
-    Server_dashboard_http_runtime_info.dashboard_tools_http_json
-      ~keeper:keeper_name
-      config
+    live_tools ()
   in
   check int "same cached inventory gets fresh activation ledger" 1
     (activation_count after);

@@ -1502,6 +1502,23 @@ type observer_status =
       events : int;  (** frames the stream delivered before it closed *)
     }
 
+type observer_replay_status =
+  | Observer_replay_unobserved
+  | Observer_replay_scoped of Sse_wire.observer_handshake
+  | Observer_replay_unavailable of string
+
+let observer_replay_description = function
+  | Observer_replay_unobserved -> "Replay: not negotiated"
+  | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
+      "Replay: live from connection; earlier history not loaded"
+  | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
+      "Replay: retained window resumed; history completeness unknown"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
+      "Replay reset: server instance changed; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
+      "Replay reset: previous cursor had no instance; disconnected history not recovered"
+
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
    about four events a second, so this is a few minutes of scrollback; what
@@ -3852,7 +3869,10 @@ type state = {
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
           tools reuse it rather than minting one per attempt. Cleared when
-          the server refuses it. *)
+          the server explicitly reports it missing or conflicting. *)
+  mutable observer_cursor: Sse_wire.observer_cursor option;
+      (** Last applied complete event, scoped to the responding process. *)
+  mutable observer_replay: observer_replay_status;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -5054,6 +5074,8 @@ let create_state
   fusion_historical_inflight = None;
   observer = Observer_off;
   mcp_session = None;
+  observer_cursor = None;
+  observer_replay = Observer_replay_unobserved;
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -6540,6 +6562,7 @@ let gate_mode_label = function
 type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
+  | Palette_msx
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6644,6 +6667,7 @@ let palette_entries (state : state) =
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
+  @ [ "go MSX", Palette_msx ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

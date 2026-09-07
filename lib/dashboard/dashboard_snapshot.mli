@@ -19,6 +19,17 @@
     OCaml 5 [Atomic] holds an immutable record reference; readers see a
     consistent snapshot per call (no torn reads). *)
 
+type tools_projection = private {
+  base_path : string;
+  workspace_path : string;
+  masc_root : string;
+  json : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+(** One final tools projection and its HTTP representations, prepared together
+    inside the tools component refresh. No request timing is retained. *)
+
 type t = private {
   generated_at : float;          (** Unix.gettimeofday at publish.  *)
   shell : Yojson.Safe.t;
@@ -28,7 +39,7 @@ type t = private {
       from the snapshot instead of recomputing.  Different shape from
       [shell] (light skips belief/tension and uses the light agent-count /
       runtime projections), hence stored, not derived. *)
-  tools : Yojson.Safe.t;
+  tools : tools_projection;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
@@ -87,6 +98,7 @@ val publish_for_test : t -> unit
 (** Test-only injection.  No production caller may use this. *)
 
 val make_for_test :
+  config:Workspace.config ->
   shell:Yojson.Safe.t ->
   ?shell_light:Yojson.Safe.t ->
   tools:Yojson.Safe.t ->
@@ -114,9 +126,15 @@ val register_namespace_truth_snapshot :
 
 module For_testing : sig
   type cache
+  type tools_cache
   type activity_cache
 
   val make_cache : unit -> cache
+
+  val make_tools_cache : unit -> tools_cache
+  val refresh_tools :
+    now:(unit -> float) -> ttl:float -> cache:tools_cache ->
+    config:Workspace.config -> (unit -> Yojson.Safe.t) -> tools_projection
 
   val refresh_projection :
     now:(unit -> float) ->

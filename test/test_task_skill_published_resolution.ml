@@ -254,6 +254,78 @@ let test_unregistered_snapshot_is_typed () =
     (rejection_code result)
 ;;
 
+(* A Task may name a Skill without pinning a revision, and the catalogue at
+   creation supplies one. What the Task stores is unchanged -- an exact
+   reference, revision included -- so the durable record does not move; only the
+   asking does. Before this, of 292 Tasks recorded on this workspace, 0 named a
+   Skill, because naming one meant typing a 64-hex digest. RFC-0411 §4.2. *)
+let test_a_task_may_name_a_skill_without_its_revision () =
+  with_workspace @@ fun base_path config ctx ->
+  write_skill base_path ~source:"skills" ~package:"review" ~name:"review"
+    ~description:"Review" "body";
+  let _workspace, snapshot, _observations =
+    publish_once base_path (config_text (source_row "workspace" "skills"))
+  in
+  let published =
+    match Snapshot.entries snapshot with
+    | [ entry ] -> Snapshot.entry_reference entry
+    | _ -> fail "expected one published Skill"
+  in
+  let result =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc
+        [ "title", `String "Named"
+        ; ( "skills"
+          , `List [ `Assoc [ "identity", Reference.identity_to_yojson published.identity ] ]
+          )
+        ])
+  in
+  check bool "an unpinned Skill is accepted" true
+    (Tool_result.failure_class result = None);
+  (* The stored reference carries the catalogue's revision, not a blank: the
+     Task pins exactly what a pinned request would have pinned. *)
+  let text = Tool_result.data result |> Yojson.Safe.to_string in
+  let needle = Reference.content_revision_to_string published.content_revision in
+  let rec contains index =
+    index + String.length needle <= String.length text
+    && (String.equal (String.sub text index (String.length needle)) needle
+        || contains (index + 1))
+  in
+  check bool "the task pinned the published revision" true (contains 0)
+;;
+
+(* Naming a Skill the catalogue does not carry is refused, and refused as its
+   own thing: there is no revision to build a reference from, so the error
+   names the identity rather than inventing a digest for one. *)
+let test_an_unpinned_name_the_catalog_lacks_is_refused () =
+  with_workspace @@ fun base_path config ctx ->
+  write_skill base_path ~source:"skills" ~package:"review" ~name:"review"
+    ~description:"Review" "body";
+  let _workspace, snapshot, _observations =
+    publish_once base_path (config_text (source_row "workspace" "skills"))
+  in
+  let known =
+    match Snapshot.entries snapshot with
+    | [ entry ] -> Snapshot.entry_reference entry
+    | _ -> fail "expected one published Skill"
+  in
+  let absent =
+    Reference.make_identity
+      ~source_id:known.identity.source_id
+      ~package_id:(package_id "absent")
+      ~name:"absent"
+  in
+  let result =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc
+        [ "title", `String "Absent"
+        ; "skills", `List [ `Assoc [ "identity", Reference.identity_to_yojson absent ] ]
+        ])
+  in
+  check string "an unpinned name the catalog lacks is typed"
+    "skill_identity_not_in_catalog" (rejection_code result)
+;;
+
 let test_unknown_identity_and_revision_mismatch_are_typed () =
   with_workspace @@ fun base_path config ctx ->
   write_skill
@@ -363,6 +435,14 @@ let () =
             "uninitialized snapshot is typed"
             `Quick
             test_uninitialized_snapshot_is_typed
+        ; test_case
+            "a task may name a skill without its revision"
+            `Quick
+            test_a_task_may_name_a_skill_without_its_revision
+        ; test_case
+            "an unpinned name the catalog lacks is refused"
+            `Quick
+            test_an_unpinned_name_the_catalog_lacks_is_refused
         ; test_case
             "unknown identity and revision mismatch are typed"
             `Quick

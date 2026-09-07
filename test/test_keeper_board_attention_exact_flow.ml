@@ -654,6 +654,36 @@ let test_cli_tail_judges_with_its_own_provenance () =
              (String.length prompt > 0)))))
 ;;
 
+let test_cli_tail_advances_after_wrong_candidate () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock:_ ->
+      let candidate = candidate "board-attention-cli-domain-failover" in
+      let prepared = prepared_with_cli_tail ~net:(Some net)
+          ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime]
+          candidate in
+      let attempted = ref [] in
+      let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        attempted := !attempted @ [runtime_id];
+        let candidate_id =
+          if String.equal runtime_id Fixture.cli_primary_runtime then "another-candidate"
+          else candidate.Candidate.candidate_id in
+        Ok (Yojson.Safe.to_string (judgment_output ~candidate_id))
+      in
+      match Exact_flow.run_cli_tail ~runner ~base_path:cli_base_path prepared with
+      | Error error -> Alcotest.fail (Exact_flow.cli_tail_error_to_string error)
+      | Ok (slot_id, judgment) ->
+        Alcotest.(check (list string)) "wrong identity advances to next slot"
+          [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempted;
+        Alcotest.(check string) "accepted slot owns the judgment"
+          Fixture.cli_secondary_runtime slot_id;
+        Alcotest.(check string) "durable judgment identifies accepted slot"
+          slot_id judgment.Candidate.slot_id;
+        (match judgment.Candidate.source with
+         | Candidate.Cli_lane_slot -> ()
+         | Candidate.Exact_attempt _ -> Alcotest.fail "CLI answer forged HTTP provenance"))))
+;;
+
 let test_cli_tail_without_declared_slots_is_typed () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
@@ -690,7 +720,8 @@ let test_cli_tail_rejects_a_verdict_for_another_candidate () =
                (judgment_output ~candidate_id:"some-other-candidate")))
       in
       match Exact_flow.run_cli_tail ~runner ~base_path:cli_base_path prepared with
-      | Error (Exact_flow.Cli_output_invalid { slot_id; detail }) ->
+      | Error (Exact_flow.Cli_slots_exhausted
+          [Masc.Keeper_lane_cli_oneshot.Invalid_domain_output { runtime_id = slot_id; detail }]) ->
         Alcotest.(check string)
           "the rejecting slot is named"
           Fixture.cli_primary_runtime
@@ -712,6 +743,9 @@ let () =
     "Keeper Board-attention exact flow"
     [ ( "production adapter"
       , [ Alcotest.test_case
+            "CLI domain mismatch advances with correct provenance"
+            `Quick test_cli_tail_advances_after_wrong_candidate
+        ; Alcotest.test_case
             "resumable status gate requires durable requeue authorization"
             `Quick
             test_prepare_resumable_status_gate

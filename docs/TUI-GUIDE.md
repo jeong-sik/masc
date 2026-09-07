@@ -8,14 +8,14 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Workspace, Runtime, Config.
+Board, Planning, Fusion, Workspace, Config.
 Eleven more surfaces hang off parents instead of holding Tab stops:
 Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
-Config reaches Resources with `s` and Tools with `t`, and Activity
+Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
 Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
 entries;
@@ -1349,7 +1349,7 @@ effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 
 ### System Logs
 
-The log browser hangs off Activity under `l`; Esc returns there.
+Activity combines Events and Logs: `1` opens Events and `2` opens Logs from either view. `l` also opens Logs from Events; Esc returns there.
 
 The server's log ring, the same source the dashboard `logs` tab reads.
 
@@ -1561,3 +1561,9 @@ recorded in Recent Events.
 Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
 
 Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+### Workspace activity
+
+On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
+
+Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.

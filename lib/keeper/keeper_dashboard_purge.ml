@@ -225,6 +225,7 @@ let existing_operation (config : Workspace.config) requested_name =
               | Cleanup_ready _
               | Reconciliation_required _
               | Finalized _
+              | Operator_absence_acknowledged _
               | Superseded _ -> Ok (Some operation))
            | Operator_stop_retain_meta
            | Operator_stop_remove_meta

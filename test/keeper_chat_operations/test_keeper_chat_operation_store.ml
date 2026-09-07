@@ -416,11 +416,37 @@ let test_statement_finalize_survives_gc_pressure () =
     (Result.is_ok (Store.inventory store))
 ;;
 
+let test_read_only_inspection_preserves_absence_and_refuses_uninitialized_store () =
+  let directory = Filename.temp_dir "keeper-chat-operations-inspect" "" in
+  let path = Filename.concat directory Store.database_file in
+  (match store_ok (Store.inspect_outstanding ~path) with
+   | Store.Missing_store -> ()
+   | _ -> fail "missing store must be explicit");
+  check bool "inspection never creates the database" false (Sys.file_exists path);
+  Out_channel.with_open_bin path (fun _ -> ());
+  (match Store.inspect_outstanding ~path with
+   | Error _ -> () | Ok _ -> fail "empty uninitialized database accepted");
+  check int "empty file remains uninitialized" 0 (Unix.stat path).st_size;
+  Unix.unlink path;
+  Out_channel.with_open_bin (path ^ "-journal") (fun channel -> output_string channel "orphaned journal");
+  (match Store.inspect_outstanding ~path with
+   | Error (Store.Integrity_error _) -> ()
+   | _ -> fail "orphaned journal treated as absent evidence");
+  check bool "orphaned journal preserved" true (Sys.file_exists (path ^ "-journal"));
+  Unix.unlink (path ^ "-journal");
+  Unix.symlink (Filename.concat directory "missing-target") path;
+  (match Store.inspect_outstanding ~path with
+   | Error (Store.Integrity_error _) -> ()
+   | _ -> fail "dangling database link treated as absence")
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
     [ ( "store"
-      , [ test_case "schema identity and budget" `Quick test_schema_identity_and_budget
+      , [ test_case "read-only inspection preserves absence and refuses uninitialized evidence" `Quick
+            test_read_only_inspection_preserves_absence_and_refuses_uninitialized_store
+        ; test_case "schema identity and budget" `Quick test_schema_identity_and_budget
         ; test_case "direct message digest matches proof collector" `Quick
             test_direct_message_digest_matches_proof_collector
         ; test_case "close is idempotent and refuses later operations" `Quick

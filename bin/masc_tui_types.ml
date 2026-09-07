@@ -2081,7 +2081,6 @@ let surface_ring : (surface * string) list =
     (Planning, "Planning");
     (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Runtime, "Runtime");
     (Config, "Config");
   ]
 
@@ -2104,8 +2103,7 @@ let surface_ring_index (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -2813,6 +2811,12 @@ let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
   "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
+type workspace_activity_read = {
+  war_at : float;
+  war_hours : float;
+  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3453,6 +3457,9 @@ type state = {
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
+  mutable workspace_activity_repo: string option;
+  mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
+  mutable workspace_activity_cursor: int;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_scroll: int;
@@ -4210,6 +4217,27 @@ let selected_keeper_run (state : state) =
 
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
+let workspace_activity_rows (state : state) =
+  match state.workspace_activity_repo with
+  | None -> []
+  | Some repo_id ->
+      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+      | Masc_tui_fetched.Ready reading ->
+          List.concat_map (fun (_, result) -> match result with
+            | Error _ -> []
+            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
+                List.filter_map (fun (change : Tui_decode.file_change) ->
+                  match change.fc_location with
+                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                      Some (change, location.relative_path)
+                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+                  snapshot.fcs_changes) reading.war_keepers
+          |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
+              Float.compare b.fc_at a.fc_at)
+
+let workspace_activity_page_rows ~surface_rows = max 1 (surface_rows - 12)
+
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
   | Some snapshot ->
@@ -4605,6 +4633,9 @@ let create_state
   repositories_error = None;
   repositories_scroll = 0;
   repositories_cursor = 0;
+  workspace_activity_repo = None;
+  workspace_activity = Masc_tui_fetched.initial;
+  workspace_activity_cursor = 0;
   memory_health = None;
   memory_health_error = None;
   memory_health_scroll = 0;
@@ -5624,8 +5655,7 @@ let visible_surface_ring_index (state : state) (view : surface) =
     | Verification | Harness -> Planning
     | Connectors when Option.is_some (browser_lane_on_screen state) -> Runtime
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting

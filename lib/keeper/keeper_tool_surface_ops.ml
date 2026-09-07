@@ -882,6 +882,7 @@ let complete_keeper_msg_stream_result result =
   end
 
 let handle_keeper_msg_stream_admitted
+      ~operation_id
       ~admission_token
       ?on_text_delta
       ?on_event
@@ -903,6 +904,7 @@ let handle_keeper_msg_stream_admitted
   | Ok message ->
     let event_bus = Event_bus_slots.get_keeper () in
     Turn.handle_keeper_msg_admitted
+      ~operation_id
       ~admission_token
       ?on_text_delta
       ?on_event

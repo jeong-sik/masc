@@ -967,7 +967,77 @@ let save_agent_core_if_source ~session_dir ~expected_source_ref candidate =
     candidate
 ;;
 
+(* Accepted continuations are not observational rolling history. Their
+   content address is private to this store and has no expiry or prune path. *)
+let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =
+  Filename.concat (Filename.concat session_dir "accepted-checkpoints")
+    (reference.sha256 ^ ".json")
+
+let read_retained_locked ~session_dir ~reference =
+  match Fs_compat.load_owned_regular_file
+          ~ownership_root:(Filename.dirname session_dir)
+          (retained_checkpoint_path ~session_dir reference) with
+  | Error error ->
+      Error (Source_unavailable (Ref_read_failed
+        (Store_error (Fs_compat.owned_regular_file_read_error_to_string error))))
+  | Ok None -> Ok None
+  | Ok (Some bytes) ->
+      (match exact_snapshot_of_canonical_bytes
+               ~expected_session_id:reference.Keeper_checkpoint_ref.trace_id bytes with
+       | Error error -> Error (Source_unavailable error)
+       | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference ->
+           Ok (Some snapshot)
+       | Ok snapshot -> Error (Source_changed snapshot.reference))
+
+let load_retained_exact_snapshot ~session_dir ~reference =
+  match with_session_lock ~session_dir (fun session_dir ->
+    match read_retained_locked ~session_dir ~reference with
+    | Error _ as error -> error
+    | Ok None -> Error (Source_unavailable Ref_not_found)
+    | Ok (Some snapshot) -> Ok snapshot) with
+  | Ok result -> result
+  | Error detail -> Error (Source_unavailable (Ref_lock_failed detail))
+
+let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
+  let installed = ref None in
+  let publish auxiliary =
+    let value = { installed_ref = snapshot.reference; auxiliary } in
+    installed := Some value;
+    Installed value
+  in
+  (* This observer runs after all fsyncs but before pending cancellation. It
+     preserves the committed fact if cancellation interrupts the lock unwind. *)
+  let observe_commit () = ignore (publish []) in
+  try
+    with_checkpoint_cas_lock ~session_dir (fun session_dir ->
+      match read_retained_locked ~session_dir ~reference:snapshot.reference with
+      | Error cause -> not_installed cause
+      | Ok (None | Some _) ->
+          match write_checkpoint_bytes
+                  ~on_durable_commit:observe_commit
+                  ~ownership_root:(Filename.dirname session_dir)
+                  ~path:(retained_checkpoint_path ~session_dir snapshot.reference)
+                  ~bytes:snapshot.canonical_bytes with
+          | Error error when error.Keeper_fs.renamed ->
+              publish [Commit_durability_unknown error]
+          | Error error -> not_installed (Commit_not_installed error)
+          | Ok Keeper_fs.Committed -> publish []
+          | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
+              publish [Commit_observer_failed failure])
+  with exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    match !installed with
+    | None -> Printexc.raise_with_backtrace exn backtrace
+    | Some value -> Installed
+        { value with auxiliary = value.auxiliary @
+            [Post_commit_unwind_interrupted (exn, backtrace)] }
+
+let retain_exact_snapshot ~session_dir snapshot =
+  retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
+
 module For_testing = struct
+  let retain_exact_snapshot_with_writer = retain_exact_snapshot_with
+
   let save_agent_core_if_source_with_observer
       ~on_checkpoint_commit_observer
       ~session_dir

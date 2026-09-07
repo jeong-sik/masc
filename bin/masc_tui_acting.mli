@@ -118,6 +118,14 @@ type wire_tool = {
 type chunk = {
   ck_keeper : string;
   ck_turn : int option;
+      (** What the row shows: the settle's number once the turn settled, the
+          agent session's before that. *)
+  ck_session_turn : int option;
+      (** The same turn as the agent session numbers it. The turn markers,
+          the wire and the keeper ledger all write this plane; only the
+          settle is on the keeper's own lifetime plane. One live turn was
+          1157 here and 719 on its settle (2026-09-07), so a member is only
+          ever matched against the plane it was written on. *)
   ck_at : float;  (** newest member's arrival — the chunk's feed position *)
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
@@ -145,10 +153,10 @@ val chunk_rows : traces:(string * string) list -> entry list -> row list
     (composite pushes, heartbeats, stream frames, waiting-queue changes,
     snapshots) stays hidden here too; the fold never readmits it as a
     pass-through row. Rows come back newest
-    first by latest activity. Events that carry a turn number key their
-    chunk; the keeper-ledger events carry none and attach to the keeper's
-    most recent chunk, which can misfile a ledger row that arrives after the
-    next turn's ready - a display blemish, never a stored fact. A settled
+    first by latest activity. Every member that carries a turn number keys its
+    chunk, the keeper-ledger events included: they state the turn they ran
+    in, so a row reported after the next turn opened still goes to the turn
+    that made it. A settled
     chunk names its tools (ledger plane preferred, wire plane standing in
     when the ledger is silent), tokens, and cost; a running one shows the
     calls so far. *)

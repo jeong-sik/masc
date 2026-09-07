@@ -210,6 +210,11 @@ def collect_libraries(root: str) -> dict[str, Library]:
     # one of them was reported as blocked on a library this index had never
     # heard of, which says nothing about what to unblock first.
     libraries.update(read_libraries(os.path.join(root, "test/deps/dune"), "test/deps"))
+    # test/dune and its includes declare libraries of their own beside the
+    # suites -- exact_output_fixture is one -- and their modules sit in test/.
+    libraries.update(read_libraries(os.path.join(root, "test/dune"), "test"))
+    for included in sorted(glob.glob(os.path.join(root, "test/stanzas/*.inc"))):
+        libraries.update(read_libraries(included, "test"))
     # Libraries under lib/ as well. Whether one can be built from source is
     # decided per library below -- a wrapped one cannot -- rather than by
     # keeping only the leaves here, which used to exclude fs_compat and every

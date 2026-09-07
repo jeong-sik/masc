@@ -35,8 +35,8 @@ let test_required_candidate_delivery () =
   (match Llm_provider.Model_catalog.load_file catalog_path with
    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog | Error e -> fail e);
   let config_path = Filename.concat root "runtime.toml" in
-  write config_path (Printf.sprintf {|[runtime]
-default = "good.sample"
+  let config_text default = Printf.sprintf {|[runtime]
+default = %S
 [providers.binding]
 protocol = "openai-compatible-http"
 endpoint = %S
@@ -63,7 +63,8 @@ tools-support = false
 candidates = ["native.no_tools", "binding.sample", "good.sample"]
 [runtime.lanes.unsupported_tools_fixture]
 candidates = ["native.no_tools", "binding.sample"]
-|} unsupported.base_url supported.base_url native_command);
+|} default unsupported.base_url supported.base_url native_command in
+  write config_path (config_text "good.sample");
   (match Runtime.init_default_degraded_report ~config_path with
    | Ok Runtime.Initialized -> ()
    | Ok (Runtime.Initialized_degraded _) -> fail "fixture must resolve every candidate"
@@ -103,8 +104,16 @@ candidates = ["native.no_tools", "binding.sample"]
        | None -> fail (Agent_core.Error.to_string error));
       check bool "rendered prose is not a retry authority" false
         (Required.should_try_next (Agent_core.Error.Internal (Agent_core.Error.to_string error))) in
+  (match Runtime.save_config_text ~runtime_config_path:config_path (config_text "binding.sample") with
+   | Ok _ -> () | Error e -> fail e);
+  (match Runtime.get_lane_by_id "unsupported_tools_fixture" with
+   | Some lane -> check (list string) "all resolved candidates are actually unsupported"
+       ["native.no_tools";"binding.sample"] (Runtime_lane.ordered_candidates lane)
+   | None -> fail "unsupported fixture lane disappeared");
   run ~tool_requirement:Required.Required ~tools:[tool] "unsupported_tools_fixture"
   |> expect Required.Binding_tools_unsupported;
+  (match Runtime.save_config_text ~runtime_config_path:config_path (config_text "good.sample") with
+   | Ok _ -> () | Error e -> fail e);
   run ~tool_requirement:Required.Required ~tools:[] "good.sample" |> expect Required.No_tools_supplied;
   let transform (cfg:Llm_provider.Provider_config.t) =
     Ok {cfg with model_id="no-tools-model";model_capabilities_override=None} in

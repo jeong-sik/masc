@@ -12672,7 +12672,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         requests.append(request)
         if len(requests) == 2:
             requested.set()
-            if not release.wait(timeout=5):
+            if not release.wait(timeout=10):
                 return 504, {"ok": False, "error": "fixture timeout"}
         if len(requests) == 4:
             return 404, {"ok": False, "error": "selected Firefox tab closed"}
@@ -12706,7 +12706,14 @@ def run_browser_screenshot_regression(executable: str) -> None:
         if not wait_for_fixture_event(process, master_fd, output, requested, timeout=3.0):
             raise AssertionError("screenshot request never reached the fixture")
         send_and_wait(process, master_fd, output, b"x", draft + b"x")
-        retained = send_and_wait(process, master_fd, output, b"\r", draft + b"x")
+        # Enter intentionally does not change this busy frame. Observe its
+        # state after a real resize, rather than requiring unchanged rows to
+        # be emitted again by the differential frame presenter.
+        os.write(master_fd, b"\r")
+        wait_for_terminal_input_consumed(_slave_fd)
+        drain_until_quiet(process, master_fd, output)
+        retained = resize_and_wait(process, master_fd, output,
+            rows=31, columns=101, needle=draft + b"x", controls=(FULL_REDRAW,))
         if b"Enter after completion" not in CSI_RE.sub(b"", retained):
             raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
         read_available(master_fd, output)

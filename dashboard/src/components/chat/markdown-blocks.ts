@@ -166,8 +166,9 @@ function parseCode(token: Tokens.Code): ChatBlock {
 }
 
 // WORKAROUND: render an unterminated fence's absorbed body as prose instead of a
-// code box. The root cause is upstream — the LLM keeper opened a fence and never
-// closed it — and the front-end cannot recover the author's intent, so it
+// code box. No removal target, and it is the one marker in this repository
+// without one: the root cause is upstream — the LLM keeper opened a fence and
+// never closed it — and the front-end cannot recover the author's intent, so it
 // renders ambiguous input in the most readable way. We do not inject a synthetic
 // closing fence: that would still trap the prose in a code box, which is the
 // exact complaint. Trade-off: genuinely truncated code (a real snippet cut off

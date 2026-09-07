@@ -1,6 +1,11 @@
 ; Test Environment Configuration
 
 (test
+ (name test_sse_observer_epoch)
+ (modules test_sse_observer_epoch)
+ (libraries alcotest masc masc.sse_wire masc_test_deps eio))
+
+(test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
  (libraries alcotest masc masc.runtime masc.server masc.tool_types yojson))
@@ -1735,6 +1740,7 @@
   masc.skill_config
   masc.skill_reference
   bigstringaf
+  h2
   terminal_size
   masc.jsonl_writer
   decompress.de
@@ -4076,6 +4082,18 @@
  (name runtest)
  (deps (alias runtest-test_tui_frame_latency_verdict)))
 
+(rule
+ (alias runtest-test_response_latency_probe)
+ (deps
+  test_response_latency_probe.py
+  ../scripts/harness/perf/response_latency_probe.py)
+ (action
+  (run python3 %{dep:test_response_latency_probe.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_response_latency_probe)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_capture_tui_keeper_chat)))
@@ -4363,11 +4381,6 @@
 (include stanzas/test_fs_compat_capability_write.inc)
 
 (include stanzas/test_file_kind_vocabulary.inc)
-
-(test
- (name test_fs_compat_capability_head)
- (modules test_fs_compat_capability_head)
- (libraries alcotest cstruct fs_compat eio eio_main unix))
 
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)
@@ -4901,4 +4914,13 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-fusion-history)))
 
+(rule
+ (alias runtest-test_tui_keyboard_input-observer-reconnect)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} observer-reconnect)))
 
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-observer-reconnect)))

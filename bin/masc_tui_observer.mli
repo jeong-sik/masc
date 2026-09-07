@@ -161,6 +161,13 @@ type decoded =
   | Event of event
   | Undecodable of string
 
+type delivery = {
+  cursor : int option;
+  decoded : decoded;
+}
+(** Transport identity from the SSE [id:] line, independent of the payload's
+    event/run/tool identities. [None] means the frame carried no replay ID. *)
+
 val chat_appended_keeper : event -> string option
 (** The keeper whose chat just gained a turn — [Some] only for
     {!Keeper_chat_appended}. The chat pane reloads its history on this
@@ -176,8 +183,8 @@ type t
 
 val create : unit -> t
 
-val feed : t -> string -> decoded list
+val feed : t -> string -> delivery list
 (** Hand the reader the next chunk. Returns the frames completed by it, in
-    order. A line the chunk cut in half is held until the rest arrives;
-    [retry:], [id:], [event:], and comment lines are the stream's framing
-    and produce nothing. *)
+    order. Both a cut line and an unterminated frame remain pending. A replay
+    cursor travels only with its completed data frame; an ID-only frame does
+    not acknowledge an event. *)

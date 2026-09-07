@@ -47,6 +47,16 @@ val select_shell_json :
     [~timing] so the [Server-Timing] header lets us measure the p99
     retire criterion ("snapshot_read;dur~0ms p99 for /shell"). *)
 
+type tools_response =
+  | Tools_json of Yojson.Safe.t
+  | Tools_prepared of Dashboard_snapshot.tools_projection
+
+val select_tools_response :
+  ?keeper:string -> ?timing:Server_timing.t -> Workspace.config -> tools_response
+(** Select prepared final tools bytes only for an omitted keeper and the exact
+    published base/workspace/MASC-root scope. Cold, other-scope, and exact-keeper reads
+    retain live JSON projection. Each hit records its own snapshot_read timing. *)
+
 val select_tools_json :
   ?keeper:string ->
   ?timing:Server_timing.t ->
@@ -54,7 +64,7 @@ val select_tools_json :
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/tools read path
     selector.  Returns [Dashboard_snapshot.current ()].tools when the
-    refresh fiber has published AND [~keeper] is omitted (the snapshot
+    refresh fiber has published for the same base/workspace/MASC-root scope AND [~keeper] is omitted (the snapshot
     stores the canonical full registry view, not per-agent filtered
     catalogues or per-Keeper effective surfaces).  Falls back to
     [Server_dashboard_http_runtime_info.dashboard_tools_http_json]
@@ -62,6 +72,12 @@ val select_tools_json :
 
     The retired actor argument never filtered the catalog and therefore is
     not part of this API or its cache key. *)
+
+module For_testing : sig
+  val select_tools_response :
+    fallback:(keeper:string option -> timing:Server_timing.t -> Workspace.config -> Yojson.Safe.t) ->
+    ?keeper:string -> ?timing:Server_timing.t -> Workspace.config -> tools_response
+end
 
 val select_telemetry_summary_json :
   ?timing:Server_timing.t ->

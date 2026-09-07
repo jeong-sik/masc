@@ -71,7 +71,11 @@ let test_subscription_models_resolve_their_own_rows () =
    whatever the catalog happens to say, including a row that admits nothing. *)
 let subscription_model_efforts =
   [ "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+    (* Probed on /v1/responses 2026-09-07: sol, terra and luna each answer 400
+       for "minimal" -- the message names the model -- and 200 for none, low,
+       medium, high, xhigh and max. The list this replaces came from the
+       2026-06-29 gpt-5.1 reference and was wrong at both ends. *)
+  ; "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
   ; "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]

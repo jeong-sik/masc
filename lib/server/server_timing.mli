@@ -67,5 +67,6 @@ val to_header_value : t -> string
     three fractional digits. *)
 
 val extra_header : t -> (string * string) list
-(** [\[("Server-Timing", v)\]] when non-empty, otherwise [\[\]].
-    Use directly with [Http.Response.json ~extra_headers]. *)
+(** [\[("server-timing", v)\]] when non-empty, otherwise [\[\]].
+    The lowercase name is valid on both H1 and H2. Use directly with
+    [Http.Response.json ~extra_headers]. *)

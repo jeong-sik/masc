@@ -984,6 +984,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc.sse_wire
   masc_tui_task_flow
   masc_tui_runtime_config_view
   masc_tui_frame
@@ -1158,6 +1159,7 @@
  (libraries
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit
+  masc.sse_wire
   masc_tui_task_flow
   masc.masc_tool_blob_store
   masc_tui_agenda

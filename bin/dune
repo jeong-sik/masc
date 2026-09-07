@@ -499,11 +499,6 @@
  (libraries masc_tui_types))
 
 (library
- (name masc_tui_mode)
- (wrapped false)
- (modules masc_tui_mode))
-
-(library
  (name masc_tui_esc_interrupt)
  (wrapped false)
  (modules masc_tui_esc_interrupt)

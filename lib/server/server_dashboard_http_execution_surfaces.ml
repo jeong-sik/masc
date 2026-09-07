@@ -1158,7 +1158,7 @@ let execution_http_request ~state request =
   { state; config; request; parameters }
 
 let execution_cached_http_representation ~(config : Workspace.config)
-      ~(parameters : execution_parameters) request =
+      ~(parameters : execution_parameters) (request : Httpun.Request.t) =
   let { fixture; actor; full_mode; force } = parameters in
   match fixture, actor, full_mode, force with
   | None, None, false, false ->

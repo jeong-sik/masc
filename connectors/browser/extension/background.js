@@ -103,6 +103,19 @@ return {url:location.href,title:document.title,total:visible.length,truncated:vi
   return {tabId,...page};
 }
 
+async function pageCapture(args) {
+  const tabId = args?.tabId;
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("tab_id_required");
+  const before = await browser.tabs.get(tabId);
+  const dataUrl = await browser.tabs.captureTab(tabId, {format: "png"});
+  const after = await browser.tabs.get(tabId);
+  if (before.url !== after.url) throw new Error("tab_navigated_during_capture");
+  const prefix = "data:image/png;base64,";
+  if (!dataUrl.startsWith(prefix)) throw new Error("capture_is_not_png");
+  return {tabId, title: after.title, url: after.url,
+    mimeType: "image/png", data: dataUrl.slice(prefix.length)};
+}
+
 async function onHostMessage(msg) {
   const reply = { id: msg?.id, ok: false };
   try {
@@ -119,6 +132,10 @@ async function onHostMessage(msg) {
         reply.data = await pageRead(msg.args);
         reply.ok = true;
         break;
+      case "page.capture":
+        reply.data = await pageCapture(msg.args);
+        reply.ok = true;
+        break;
       default:
         reply.error = `unknown_verb:${msg?.verb}`;
     }
@@ -126,6 +143,13 @@ async function onHostMessage(msg) {
     reply.error = String(e?.message ?? e);
   }
   try {
+    // Match the OCaml host's inbound frame bound before sending. Oversized
+    // captures fail explicitly without disconnecting the user's browser lane.
+    if (new TextEncoder().encode(JSON.stringify(reply)).length > 1024 * 1024) {
+      delete reply.data;
+      reply.ok = false;
+      reply.error = "capture_exceeds_native_frame_limit";
+    }
     port?.postMessage(reply);
   } catch {
     // Port died mid-answer; the reconnect path owns the next attempt.

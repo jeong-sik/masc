@@ -45,7 +45,21 @@ masc sandbox-image
 툴체인은 그 프로젝트 이미지에 있어야 하고, Keeper 마다 `sandbox_image` 로 가리킵니다.
 
 레시피는 바이너리 안에 있고 빌드 컨텍스트 없이 `docker build -` 로 넘어갑니다. 그래서
-저장소를 받아본 적 없는 기계에서도 똑같이 만들어집니다. `masc sandbox-image --print`
+저장소를 받아본 적 없는 기계에서도 똑같이 만들어집니다.
+
+**microVM 키퍼는 Docker 스토어를 보지 않습니다.** 런타임마다 자기 이미지 스토어가
+따로라, 위 명령으로 만든 이미지는 microVM 게이트에 안 보입니다. 그 스토어에 만들려면
+런타임을 지목합니다.
+
+```bash
+masc sandbox-image --runtime apple_container
+```
+
+`apple_container` 는 `container build` 가 `-` 를 안 받고 컨텍스트 디렉터리를 받으므로
+레시피를 임시 디렉터리에 파일로 써서 `-f` 로 지목합니다. `nerdctl` 은 Docker 문법이라
+같은 stdin 경로를 씁니다. `microsandbox`(`msb`)는 `build` 자체가 없어서 — `pull`,
+`load`, `save` 뿐입니다 — 다른 데서 만들어 OCI 아카이브로 `msb load` 해야 하고,
+이 명령이 그렇게 알려줍니다. `masc sandbox-image --print`
 는 빌드 대신 Dockerfile 을 표준출력으로 내보냅니다. `MASC_KEEPER_SANDBOX_DOCKER_IMAGE`
 로 기본 태그를 바꾸면 `docker` 와 `microvm` 양쪽 게스트 경로가 같이 따릅니다.
 

@@ -2794,12 +2794,18 @@ type skill_catalog_config =
       }
   | Skill_config_unreadable
 
+type skill_usage_coverage = {
+  suc_ledgers_loaded : int;
+  suc_unavailable : string list;
+}
+
 type skills_catalog =
   { sc_state : skills_catalog_state
   ; sc_config : skill_catalog_config option
   ; sc_sources : skill_catalog_source list
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
+  ; sc_usage_coverage : skill_usage_coverage option
   }
 
 let skills_catalog_state_to_string = function
@@ -3250,6 +3256,21 @@ let decode_skill_catalog_config json =
   | unknown ->
     Error (Printf.sprintf "skill snapshot config has unknown kind %S" unknown)
 
+let decode_skill_usage_coverage json =
+  let* coverage = required_object_field json "usage_coverage" in
+  let* suc_ledgers_loaded =
+    required_nonnegative_int_field coverage "ledgers_loaded"
+  in
+  let* unavailable = required_list_field coverage "unavailable" in
+  let* suc_unavailable =
+    decode_list "usage_coverage.unavailable"
+      (function
+        | `String detail -> Ok detail
+        | bad -> field_type_error "usage_coverage.unavailable" "a string" bad)
+      unavailable
+  in
+  Ok { suc_ledgers_loaded; suc_unavailable }
+
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
@@ -3264,6 +3285,7 @@ let decode_skills_catalog json =
           ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
           json
       in
+      let* coverage = decode_skill_usage_coverage json in
       let* snapshot = required_object_field json "snapshot" in
       let* sc_rejections = decode_skill_snapshot_rejections snapshot in
       let* config_json = required_object_field snapshot "config" in
@@ -3282,6 +3304,7 @@ let decode_skills_catalog json =
         ; sc_sources
         ; sc_surfaces
         ; sc_rejections
+        ; sc_usage_coverage = Some coverage
         }
     | "not_registered" ->
       let* () =
@@ -3296,6 +3319,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_usage_coverage = None
         }
     | "uninitialized" ->
       let* () =
@@ -3310,6 +3334,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_usage_coverage = None
         }
     | "invalid_workspace" ->
       let* () =
@@ -3335,6 +3360,7 @@ let decode_skills_catalog json =
           ; sc_sources = []
           ; sc_surfaces = []
           ; sc_rejections = []
+          ; sc_usage_coverage = None
           }
     | unknown ->
       Error (Printf.sprintf "skills catalog has unknown state %S" unknown)

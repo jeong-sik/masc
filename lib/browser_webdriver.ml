@@ -182,6 +182,20 @@ let execute_unlocked t = function
       else script t session
         "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
         [`Int cap])
+  | Browser_lane.Page_capture { tab_id } ->
+    let* session = session t in
+    with_tab t session (Some tab_id) (fun () ->
+      let* before = page_summary t session in
+      let* url = string_field "url" before in
+      let* image = call t session `GET "/screenshot" None in
+      let* after = page_summary t session in
+      let* after_url = string_field "url" after in
+      if not (String.equal url after_url) then Error (Protocol "tab navigated during capture")
+      else match image, field "title" after with
+      | `String data, Some (`String title) ->
+        Ok (`Assoc ["tabId", `Int tab_id; "title", `String title; "url", `String url;
+          "mimeType", `String "image/png"; "data", `String data])
+      | _ -> Error (Protocol "invalid screenshot response"))
   | Browser_lane.Tabs_list ->
     let* session = session t in
     let* handles = call t session `GET "/window/handles" None in

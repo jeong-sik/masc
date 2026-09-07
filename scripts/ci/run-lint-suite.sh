@@ -137,6 +137,14 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  # A guard nobody runs is a document. Twice a guard sat red on untouched main
+  # because nothing reached it -- the cancel-guard lint and
+  # check-tui-render-purity.sh -- and a sweep on 2026-09-07 found four more in
+  # the same state. This asks the question those answered too late: is every
+  # check script reached from something CI runs. It reads no diff base, so it
+  # belongs here rather than beside the PR-only guards.
+  run_lint "Every check script is reached" \
+    python3 scripts/ci/check-guards-are-wired.py
 }
 
 blocking_pr_lints() {

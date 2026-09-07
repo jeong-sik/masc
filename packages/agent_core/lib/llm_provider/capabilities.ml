@@ -63,6 +63,10 @@ type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
+  | Rich_json_schema
+  | Conformant_subset_required
+
 type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
@@ -140,6 +144,11 @@ type capabilities =
         classic [max_tokens] or the reasoning-era [max_completion_tokens]
         OpenAI's gpt-5 family requires. Emission-side field name only; the
         #2517 receipt policy (omit/clamp) is unchanged. *)
+  ; tool_schema_conformance : tool_schema_conformance
+    (** Whether this model's provider rejects enum/oneOf/anyOf/allOf inside
+        function parameter schemas. When conformant-only, the request
+        serializer projects tool schemas down to the allowed subset; the
+        dispatcher's [[params]] validation remains the authority. *)
   ; (* ── Thinking / reasoning ──────────────────────────── *)
     supports_reasoning : bool (** Any form of reasoning/thinking *)
   ; supports_extended_thinking : bool (** budget_tokens / reasoning_effort *)
@@ -249,6 +258,7 @@ let default_capabilities =
   ; supports_parallel_tool_calls = false
   ; assistant_tool_content_format = Assistant_tool_content_null
   ; chat_output_budget_field = Chat_max_tokens
+  ; tool_schema_conformance = Rich_json_schema
   ; supports_reasoning = false
   ; supports_extended_thinking = false
   ; supports_reasoning_budget = false
@@ -866,6 +876,9 @@ let assistant_tool_content_format_of_catalog_string raw =
 
 let chat_output_budget_field_of_catalog_string raw =
   Capability_vocab.chat_output_budget_field_of_string raw
+
+let tool_schema_conformance_of_catalog_string raw =
+  Capability_vocab.tool_schema_conformance_of_string raw
 ;;
 
 let content_inline_reasoning_of_catalog_string raw =
@@ -927,6 +940,7 @@ type declarative_capability_overrides =
   ; supports_parallel_tool_calls : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
   ; supports_reasoning_budget : bool option
@@ -972,6 +986,7 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
   ; assistant_tool_content_format = entry.assistant_tool_content_format
   ; chat_output_budget_field = entry.chat_output_budget_field
+  ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; supports_extended_thinking = entry.supports_extended_thinking
   ; supports_reasoning_budget = entry.supports_reasoning_budget
@@ -1081,6 +1096,15 @@ let apply_declarative_capability_overrides overrides =
             warn_unknown_capability_value ~field:"chat_output_budget_field" s;
             base.chat_output_budget_field)
        | None -> base.chat_output_budget_field)
+  ; tool_schema_conformance =
+      (match overrides.tool_schema_conformance with
+       | Some s ->
+         (match tool_schema_conformance_of_catalog_string s with
+          | Some c -> c
+          | None ->
+            warn_unknown_capability_value ~field:"tool_schema_conformance" s;
+            base.tool_schema_conformance)
+       | None -> base.tool_schema_conformance)
   ; supports_reasoning =
       override_bool base.supports_reasoning overrides.supports_reasoning
   ; supports_extended_thinking =
@@ -1288,6 +1312,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
   ; assistant_tool_content_format = entry.assistant_tool_content_format
   ; chat_output_budget_field = entry.chat_output_budget_field
+  ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; supports_extended_thinking = entry.supports_extended_thinking
   ; supports_reasoning_budget = entry.supports_reasoning_budget
@@ -1550,6 +1575,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; supports_parallel_tool_calls = None
   ; assistant_tool_content_format = None
   ; chat_output_budget_field = None
+  ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
   ; supports_reasoning_budget = None
@@ -1600,6 +1626,7 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; supports_parallel_tool_calls = None
   ; assistant_tool_content_format = None
   ; chat_output_budget_field = None
+  ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
   ; supports_reasoning_budget = None

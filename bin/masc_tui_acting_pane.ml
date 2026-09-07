@@ -236,24 +236,23 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
 
 (* ── Lines ─────────────────────────────────────────────────────────────── *)
 
-let width spans =
-  List.fold_left (fun acc span -> acc + Layout.display_width span.text) 0 spans
-
 (* Exactly [cols] cells: cut the spans that overflow, pad what falls short.
-   A span cut to nothing is dropped so a tone does not open on empty text. *)
+   Retained spans keep their measured cells; only a clipped span is remeasured. *)
 let fit_line ~cols spans =
   let rec cut used acc = function
-    | [] -> List.rev acc
+    | [] -> List.rev acc, used
     | span :: rest ->
         let cells = Layout.display_width span.text in
         if used + cells <= cols then cut (used + cells) (span :: acc) rest
         else
           let room = cols - used in
-          if room <= 0 then List.rev acc
-          else List.rev ({ span with text = Layout.take_cells span.text room } :: acc)
+          if room <= 0 then List.rev acc, used
+          else
+            let text = Layout.take_cells span.text room in
+            List.rev ({ span with text } :: acc), used + Layout.display_width text
   in
-  let spans = cut 0 [] spans in
-  let short = cols - width spans in
+  let spans, used = cut 0 [] spans in
+  let short = cols - used in
   if short > 0 then spans @ [ { text = String.make short ' '; tone = Plain } ]
   else spans
 

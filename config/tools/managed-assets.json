@@ -79,6 +79,7 @@
     "masc_broadcast.toml",
     "masc_browser_act.toml",
     "masc_browser_goto.toml",
+    "masc_browser_interact.toml",
     "masc_browser_read.toml",
     "masc_browser_session.toml",
     "masc_browser_tabs.toml",

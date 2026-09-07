@@ -108,10 +108,13 @@ try:
   source='#use "topfind";;\n#require "eio_main,yojson,uri";;\nmodule Masc_http_client = struct module Pool = struct type http_method = [ `GET | `POST | `DELETE | `PUT | `PATCH | `HEAD ] end end;;\n'
   action=(repo/'lib/browser_lane/browser_action.ml').read_text()
   lane=(repo/'lib/browser_lane/browser_lane.ml').read_text()
-  verbs=lane[lane.index('type verb ='):lane.index('\nlet verb_to_string')]
+  verbs=lane[lane.index('type interaction ='):lane.index('\nlet verb_to_string')]
+  verbs+=lane[lane.index('let interaction_args'):lane.index('\nlet verb_json')]
   answer=lane[lane.index('type answer ='):lane.index('(* The public tool surface')]
   source+='module Browser_upload_lease = struct\n'+(repo/'lib/browser_lane/browser_upload_lease.ml').read_text()+'\nend;;\n'
   source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\nmodule Upload_lease = Browser_upload_lease\n'+verbs+answer+'\nend;;\n'
+  interaction=(repo/'lib/browser_interaction.ml').read_text()
+  source+='module Browser_interaction = struct\n'+interaction[interaction.index('let script ='):]+'\nend;;\n'
   for module,path in [('Browser_page_script','lib/browser_page_script.ml'),('Driver','lib/browser_webdriver.ml')]:
    source+='module '+module+' = struct\n'+(repo/path).read_text()+'\nend;;\n'
   source+=(repo/'scripts/fixtures/firefox_controls_probe.ml').read_text()

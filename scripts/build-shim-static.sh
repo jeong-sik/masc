@@ -43,6 +43,34 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Every file the scratch project is built from, repo-relative. One list, so
+# that a caller deciding whether the artifact is stale asks rather than
+# repeats: scripts/test-ssh-fixture.sh kept its own copy naming four of
+# these eight, so a change to observe_stub.c, to either .mli, or to
+# shim_build_id.mli left the fixture exercising the previous binary and
+# reporting it as this one's behaviour.
+shim_sources=(
+  lib/exec_ssh_protocol/exec_ssh_protocol.ml
+  lib/exec_ssh_protocol/exec_ssh_protocol.mli
+  lib/exec_shim/exec_shim.ml
+  lib/exec_shim/exec_shim.mli
+  lib/exec_shim/prctl_stub.c
+  lib/exec_shim/observe_stub.c
+  lib/exec_shim/shim_build_id.mli
+  bin/masc_exec_shim.ml
+)
+
+# --print-sources answers with absolute paths and builds nothing. Answered
+# before the docker checks below, because a caller asking what the artifact
+# depends on does not need a daemon.
+if [ "${1:-}" = "--print-sources" ]; then
+  for source in "${shim_sources[@]}"; do
+    printf '%s/%s\n' "$repo_root" "$source"
+  done
+  exit 0
+fi
+
 out_path="${1:-"$repo_root/artifacts/masc-exec-shim"}"
 image="${SHIM_BUILD_IMAGE:-ocaml/opam:alpine-3.24-ocaml-5.5}"
 
@@ -71,15 +99,9 @@ stage="$(mktemp -d "$repo_root/dist/shim-static.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/src" "$stage/out"
 
-cp "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.ml" \
-   "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.mli" \
-   "$repo_root/lib/exec_shim/exec_shim.ml" \
-   "$repo_root/lib/exec_shim/exec_shim.mli" \
-   "$repo_root/lib/exec_shim/prctl_stub.c" \
-   "$repo_root/lib/exec_shim/observe_stub.c" \
-   "$repo_root/lib/exec_shim/shim_build_id.mli" \
-   "$repo_root/bin/masc_exec_shim.ml" \
-   "$stage/src/"
+for source in "${shim_sources[@]}"; do
+  cp "$repo_root/$source" "$stage/src/"
+done
 
 # Write the build identity this artifact reports through its probe. In the
 # repo a dune rule generates this module (the release comes from

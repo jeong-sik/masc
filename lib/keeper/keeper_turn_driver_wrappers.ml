@@ -23,7 +23,7 @@ let run_named_with_masc_tools
     ?(keeper_name = "")
     ~goal
     ~base_path
-    ?(system_prompt = "")
+    ~system_prompt
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s

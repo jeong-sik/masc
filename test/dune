@@ -3082,7 +3082,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries
+ (libraries masc_tui_image_preview
   alcotest
   ast_grep
   astring
@@ -3104,7 +3104,7 @@
 (test
  (name test_tui_chat_rows_memo)
  (modules test_tui_chat_rows_memo)
- (libraries
+ (libraries masc_tui_image_preview
   alcotest
   masc
   masc.masc_types
@@ -3117,7 +3117,7 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries alcotest masc_tui_keeper_chat_transcript masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript masc_tui_types))
 
 (test
  (name test_tui_text_input_target)
@@ -3174,6 +3174,7 @@
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries
+  masc_tui_image_preview
   alcotest
   masc
   masc_tui_keeper_chat_history
@@ -3234,7 +3235,7 @@
 (test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
- (libraries alcotest masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_types))
 
 (test
  (name test_tui_gate_text)
@@ -3286,7 +3287,7 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries alcotest masc masc_tui_types masc_tui_gate_text
+ (libraries masc_tui_image_preview alcotest masc masc_tui_types masc_tui_gate_text
    masc_tui_message_layout))
 
 (test
@@ -3329,7 +3330,7 @@
 (test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
- (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection))
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store))
 
 (test
  (name test_tui_keeper_chat_projection)
@@ -4667,6 +4668,8 @@
  (modules test_browser_lane)
  (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
 
+(include stanzas/test_browser_native_host.inc)
+
 (test
  (name test_shell_ir_with_sandbox)
  (modules test_shell_ir_with_sandbox)
@@ -4722,4 +4725,16 @@
  (modules test_monotonic_deadline)
  (libraries alcotest masc.monotonic_deadline unix))
 
+(test
+ (name test_tui_browser_lane)
+ (modules test_tui_browser_lane)
+ (libraries masc_tui_types))
+
+(test
+ (name test_tui_browser_lane_text)
+ (modules test_tui_browser_lane_text)
+ (libraries masc_tui_types masc_tui_message_layout))
+
 (include stanzas/test_browser_webdriver.inc)
+
+(include stanzas/test_browser_surface.inc)

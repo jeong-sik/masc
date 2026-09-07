@@ -80,6 +80,7 @@ let add_routes router =
       (error_json "lane token required")
   in
   router
+  |> Server_routes_http_browser_surface.add_routes
   |> Http.Router.post "/browser-lane/poll" (fun request reqd ->
        if not (lane_authorized request) then refuse request reqd
        else

@@ -371,6 +371,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
                       ~goal:"Call masc_probe once"
+                      ~system_prompt:"pre-dispatch fixture system prompt"
                       ~tools:[ tool ]
                       ~agent_core_tools:[ tool ]
                       ~initial_messages:large_history
@@ -491,6 +492,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~keeper_name:"antigravity-fixture"
                         ~base_path
                         ~goal:"Call masc_probe once"
+                        ~system_prompt:"pre-dispatch fixture system prompt"
                         ~tools:[ tool ]
                         ~agent_core_tools:[ tool ]
                         ~initial_messages:large_history
@@ -682,6 +684,7 @@ let test_blank_success_requires_fresh_conversation () =
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
                       ~goal:"Return a non-empty completion"
+                      ~system_prompt:"pre-dispatch fixture system prompt"
                       ~agent_core_tools:[]
                       ~context:(Agent_core.Context.create ())
                       ~sw

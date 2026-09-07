@@ -26,10 +26,10 @@ type attachment = {
   size : int;
   mime_type : string;
   data : string;
-  (** Pixel size, measured once when the payload is swapped for its
-      [masc://] reference -- after that swap the bytes are gone and this
-      field is the only record of them. [None] for WebP, non-images, and
-      rows written before the field existed. *)
+  (** Pixel dimensions measured before externalizing the attachment payload.
+      [None] when the supported image headers do not provide dimensions.
+      Persisted [data] is a canonical blob marker; the retained blob contains
+      the original wire payload (base64 or data URI). *)
   width : int option;
   height : int option;
 }

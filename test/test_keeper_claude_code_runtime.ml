@@ -298,6 +298,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~keeper_name:"claude-fixture"
                            ~base_path
                            ~goal
+                           ~system_prompt:"pre-dispatch fixture system prompt"
                            ~tools
                            ~agent_core_tools:tools
                            ~initial_messages

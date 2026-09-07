@@ -1630,7 +1630,7 @@ let bytes_only n = Printf.sprintf "%dB" n
 let test_a_captionless_file_has_no_blank_line_above_it () =
   let notes =
     [ { History.att_name = "shot.png"; att_mime = "image/png"; att_bytes = 12
-    ; att_width = None; att_height = None } ]
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } ]
   in
   let body =
     History.text_with_attachments ~format_bytes:bytes_only ~text:"" ~notes
@@ -1648,7 +1648,7 @@ let test_a_captionless_file_has_no_blank_line_above_it () =
 let test_a_blank_caption_is_treated_as_none () =
   let notes =
     [ { History.att_name = "shot.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None } ]
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } ]
   in
   let body =
     History.text_with_attachments ~format_bytes:bytes_only ~text:"   \n  " ~notes
@@ -1660,9 +1660,9 @@ let test_a_blank_caption_is_treated_as_none () =
 let test_a_caption_stays_above_its_files () =
   let notes =
     [ { History.att_name = "a.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None }
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
     ; { History.att_name = "b.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None }
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
     ]
   in
   let body =
@@ -1690,10 +1690,10 @@ let test_a_measured_image_names_its_pixels_and_index () =
   let notes =
     [ { History.att_name = "shot.png"; att_mime = "image/png"
       ; att_bytes = 2129
-      ; att_width = Some 3456; att_height = Some 2168 }
+      ; att_width = Some 3456; att_height = Some 2168; att_image = Masc_tui_image_preview.No_image }
     ; { History.att_name = "notes.md"; att_mime = "text/markdown"
       ; att_bytes = 40
-      ; att_width = None; att_height = None }
+      ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
     ]
   in
   let body =
@@ -1731,6 +1731,21 @@ let sized_attachment_row =
     ]
   }]|json}
 
+let test_stored_attachment_history_decodes_preview_reference () =
+  let sha = String.make 64 'a' in
+  let marker = Printf.sprintf "[masc:blob sha256=%s bytes=4 mime=text/plain preview=%S]" sha "attachment payload" in
+  let wire = `List [`Assoc ["id", `String "sent-image"; "role", `String "user";
+    "content", `String "look"; "ts", `Float 1787650428.;
+    "attachments", `List [`Assoc ["id", `String "image"; "type", `String "image";
+      "name", `String "image-1.png"; "mime_type", `String "image/png"; "data", `String marker]]]] in
+  match History.rows_of_json wire with
+  | Ok { rows = [{ attachments = [note]; _ }]; _ } ->
+      (match note.History.att_image with
+       | Masc_tui_image_preview.Stored_attachment { name; _ } ->
+           Alcotest.(check string) "sent image remains a readable typed reference" "image-1.png" name
+       | _ -> Alcotest.fail "history lost the durable preview reference")
+  | _ -> Alcotest.fail "sent image history failed to decode"
+
 let test_a_sized_row_decodes_its_pixels () =
   match History.rows_of_json (Yojson.Safe.from_string sized_attachment_row) with
   | Error msg -> Alcotest.failf "sized row did not decode: %s" msg
@@ -1740,7 +1755,10 @@ let test_a_sized_row_decodes_its_pixels () =
        (match row.History.attachments with
         | [ att ] ->
           Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
-          Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height
+          Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height;
+          (match att.History.att_image with
+           | Masc_tui_image_preview.Unavailable_attachment "shot.png" -> ()
+           | _ -> Alcotest.fail "hash-only history has no readable payload")
         | other ->
           Alcotest.failf "expected one attachment, got %d" (List.length other))
      | other -> Alcotest.failf "expected one row, got %d" (List.length other))

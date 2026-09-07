@@ -13286,6 +13286,39 @@ def run_theme_scheme_regression(executable: str) -> None:
     )
 
 
+def run_msx_palette_regression(executable: str) -> None:
+    """The command palette opens the MSX screen by name.
+
+    [&] opens the MSX spectator, but a key is found only by someone who
+    already knows it; the palette is where an operator looks for a screen by
+    name. This drives the typed path end to end: `:` then `go msx` must take
+    the terminal over with the MSX screen, and Esc must hand it back.
+
+    The harness serves no machine, so the screen opens on its "no machine
+    loaded" line. That line is the proof the palette reached the screen at
+    all; the Overview header afterwards is the proof Esc left it.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        palette_go(process, master_fd, output, b"go msx", b"no machine loaded")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="the palette opens the MSX screen by name",
+        interact=interact,
+    )
+
+
 def held_back_prompts_http_fixtures() -> HttpFixtures:
     """One prompt whose override the registry declined to restore.
 
@@ -13494,6 +13527,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
         run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
         print("tui theme scheme regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-palette":
+        run_msx_palette_regression(os.path.abspath(sys.argv[1]))
+        print("tui MSX palette regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))

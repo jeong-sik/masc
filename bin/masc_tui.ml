@@ -6480,6 +6480,16 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+(* The MSX spectator takes the whole terminal, like the image overlay: it
+   draws the server's frame and the loop yields until [esc], re-fetching on a
+   timer. Fetch once now so it opens on a picture. The [&] key and the
+   palette's "go MSX" both land here, so the two doors open one screen. *)
+let open_msx_screen (state : Masc_tui_types.state) =
+  state.msx_frame <-
+    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+  Masc_tui_msx.open_screen ~write:write_to_terminal state
+
 (* Where a reference lands, and what it opens when it gets there.
 
    The surfaces already print [masc://] references beside what they name and
@@ -15258,6 +15268,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
+                 | Some (_, Masc_tui_types.Palette_msx) ->
+                     open_msx_screen state
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
@@ -16433,15 +16445,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" ->
-           (* The MSX spectator takes the whole terminal, like the image
-              overlay: it draws the server's frame and the loop yields until
-              [esc], re-fetching on a timer. Fetch once now so it opens on a
-              picture. *)
-           state.msx_frame <-
-             Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
-           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-           Masc_tui_msx.open_screen ~write:write_to_terminal state
+      | Some "&" -> open_msx_screen state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0

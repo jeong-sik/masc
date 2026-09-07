@@ -1,5 +1,5 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body by its canonical exact reference.\n\n When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
+description = "Read one frozen instruction Skill body. Reach for it when the work matches what a Skill below says it is for.\n\n Pass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded."
 additional_properties = false
 # 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
 # (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
@@ -40,11 +40,23 @@ min_length = 1
 # the handler, whose refusal carries the exact references this keeper does
 # carry. A schema-level gate answered those calls with a generic length
 # error that could not name the catalog (task-828).
+#
+# Optional since RFC-0411 §4.2. Omitted, the turn's frozen Skill list decides
+# which body is read — the same list a spelled-out revision is matched against,
+# so leaving it out reaches nothing new. Spelled out, it is still matched
+# exactly and refused on a mismatch: a revision the caller named is never
+# quietly replaced.
+#
+# It was required because the call was meant to pin what it read. That pin also
+# has to be typed, and nothing hands it to the caller outside this tool's own
+# Available list — of 292 tasks recorded on this workspace, 0 named a Skill,
+# and 126 of those were made through masc_add_task, which has carried a skills
+# parameter all along.
 [[params]]
 name = "content_revision"
 type = "string"
-required = true
-description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes: 64 lowercase hex characters, copied verbatim from the Task skill reference or this tool's Available list."
+required = false
+description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that identity; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
 
 [[params]]
 name = "file"

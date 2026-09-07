@@ -126,17 +126,33 @@ type task_skill_authoring_error =
   | Snapshot_not_registered
   | Snapshot_uninitialized
   | Reference_identity_not_found of Skill_reference.t
+  | Skill_identity_not_in_catalog of Skill_reference.identity
+      (** A Task named a Skill without pinning a revision and the catalogue
+          carries no Skill under that identity. Separate from
+          [Reference_identity_not_found] because there is no revision to build
+          a reference from. *)
   | Reference_revision_mismatch of
       { reference : Skill_reference.t
       ; observed : Skill_reference.content_revision
       }
 
+(* Each item is a request, not yet a reference: it may pin a revision or leave
+   it to the catalogue. Resolution needs the snapshot, which this function does
+   not have — [resolve_task_skills] does. RFC-0411 §4.2. *)
 let parse_task_skills args =
   match Json_util.assoc_member_opt "skills" args with
   | None -> Ok []
-  | Some value ->
-    Skill_reference.list_of_yojson value
-    |> Result.map_error (fun error -> Invalid_reference_payload error)
+  | Some (`List values) ->
+    let rec decode decoded = function
+      | [] -> Ok (List.rev decoded)
+      | value :: rest ->
+        (match Skill_reference.request_of_yojson value with
+         | Error error -> Error (Invalid_reference_payload error)
+         | Ok request -> decode (request :: decoded) rest)
+    in
+    decode [] values
+  | Some _ ->
+    Error (Invalid_reference_payload (Skill_reference.Expected_list { field = "skills" }))
 ;;
 
 let package_id_error_to_yojson = function
@@ -233,6 +249,9 @@ let task_skill_authoring_error_projection = function
   | Reference_identity_not_found reference ->
     ( "skill_reference_identity_not_found"
     , [ "reference", Skill_reference.to_yojson reference ] )
+  | Skill_identity_not_in_catalog identity ->
+    ( "skill_identity_not_in_catalog"
+    , [ "identity", Skill_reference.identity_to_yojson identity ] )
   | Reference_revision_mismatch { reference; observed } ->
     ( "skill_reference_revision_mismatch"
     , [ "reference", Skill_reference.to_yojson reference
@@ -264,8 +283,16 @@ let task_skill_rejection ~tool_name ~start_time error =
     message
 ;;
 
-let resolve_task_skills ~base_path references =
-  match references with
+(* The Task stores exact references, and it still does: what a request left
+   open is filled in here, from the catalogue as it stands at creation, and the
+   Task carries the resolved revision from then on. So the durable record is
+   unchanged — only the asking is. RFC-0411 §4.2, §5.
+
+   A pinned request is still checked against the catalogue and refused on a
+   mismatch, so a revision someone spelled out is never replaced by the one the
+   catalogue happens to hold. *)
+let resolve_task_skills ~base_path requests =
+  match requests with
   | [] -> Ok []
   | _ :: _ ->
     (match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
@@ -275,17 +302,31 @@ let resolve_task_skills ~base_path references =
        (match Skill_catalog_snapshot_service.current ~workspace with
         | None -> Error Snapshot_uninitialized
         | Some snapshot ->
-          let rec resolve = function
-            | [] -> Ok references
-            | reference :: rest ->
+          let rec resolve resolved = function
+            | [] -> Ok (List.rev resolved)
+            | Skill_reference.Pinned reference :: rest ->
               (match Skill_catalog_snapshot.resolve_reference snapshot reference with
-               | Ok _entry -> resolve rest
+               | Ok _entry -> resolve (reference :: resolved) rest
                | Error (Skill_catalog_snapshot.Identity_not_found _) ->
                  Error (Reference_identity_not_found reference)
                | Error (Content_revision_mismatch { observed; _ }) ->
                  Error (Reference_revision_mismatch { reference; observed }))
+            | Skill_reference.By_identity identity :: rest ->
+              (match Skill_catalog_snapshot.find_exact snapshot identity with
+               (* Its own error rather than [Reference_identity_not_found]:
+                  that one carries a reference, and there is no revision to put
+                  in one here. Inventing a placeholder would put a digest that
+                  names no bytes into an error message. *)
+               | None -> Error (Skill_identity_not_in_catalog identity)
+               | Some entry ->
+                 resolve
+                   (Skill_reference.make
+                      ~identity
+                      ~content_revision:entry.Skill_catalog_snapshot.content_revision
+                    :: resolved)
+                   rest)
           in
-          resolve references))
+          resolve [] requests))
 ;;
 
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =

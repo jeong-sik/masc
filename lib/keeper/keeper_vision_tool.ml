@@ -511,15 +511,14 @@ let run_candidates_outcome
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
           }
-      | Ok declared_cap ->
-        (* A candidate that declares no cap (#34163) has nothing to fit to;
-           it gets the image as it is. *)
-        let fitted =
-          match declared_cap with
-          | None -> Ok req
-          | Some cap_bytes -> fit_request_to_cap ~req ~cache ~cap_bytes
-        in
-        (match fitted with
+      | Ok cap_bytes ->
+        (* [fit_request_to_cap] takes the option and answers absence with the
+           request unchanged, so the cap is handed over as it came. Unwrapping
+           it here as well -- which two fixes for the same #34163 breakage each
+           added, and together stopped the tree compiling -- puts the same rule
+           in two places and makes the next caller decide which one is the
+           contract. *)
+        (match fit_request_to_cap ~req ~cache ~cap_bytes with
          | Error (actual_bytes, limit_bytes) ->
            record_vision_candidate_attempt
              ~runtime_id

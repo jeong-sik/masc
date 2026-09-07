@@ -85,10 +85,6 @@ export function bundleStaleBannerModel(
 
 const worktreeBannerDismissed = signal(false)
 
-export function __resetWorktreeBannerForTests(): void {
-  worktreeBannerDismissed.value = false
-}
-
 /** The one-line warning, or null when the server runs the root build — or
  *  when an older server carries no verdict (unknown is neither lane). */
 export function worktreeServerBannerModel(

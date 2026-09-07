@@ -31,7 +31,7 @@ server URL validation errors remain visible on the lane view.
 
 Requests use the existing authenticated TUI HTTP client. The read deadline is
 45 seconds for the server's tab-list and page-read phases; automation session
-startup allows 65 seconds. Both run in switch-owned Eio daemon fibers and deliver
+startup and navigation allow 65 seconds. Both run in switch-owned Eio daemon fibers and deliver
 results through the TUI mailbox. Cancellation is propagated to the switch.
 See the [Eio fiber reference](https://ocaml.org/p/eio/1.0/doc/eio/Eio/Fiber/index.html).
 
@@ -39,8 +39,9 @@ See the [Eio fiber reference](https://ocaml.org/p/eio/1.0/doc/eio/Eio/Fiber/inde
 
 `test/test_tui_browser_lane.ml` exercises tab selection, strict schema decoding,
 late responses, source identity, failed-refresh retention and empty Slack tabs.
-For this change its seven scenarios were executed using the OCaml interpreter
+For this change its nine state scenarios were executed using the OCaml interpreter
 with the production pure module extracted verbatim. All changed OCaml files
-passed parser checks. These checks do not establish full executable typechecking,
+passed parser checks. Multiline projection, URL input ownership and Unicode URL
+viewport tests are committed for CI; they were not executed locally. These checks do not establish full executable typechecking,
 CI success, Firefox connectivity, or a rendered live TUI; deployment and live
 capture must be measured separately.

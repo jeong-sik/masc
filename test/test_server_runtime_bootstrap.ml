@@ -3372,13 +3372,12 @@ let test_lazy_startup_plan_groups_independent_tasks () =
       check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
         ~tasks:[ "restore_sessions" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"parallel"
-        ~tasks:[ "jsonl_prune"; "microvm_guest_sweep" ];
+        ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
           "restore_sessions";
           "jsonl_prune";
-          "microvm_guest_sweep";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"

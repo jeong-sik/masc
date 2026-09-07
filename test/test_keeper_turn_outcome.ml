@@ -742,6 +742,37 @@ let test_tool_io_digest_survives_eviction () =
     (digest "masc_status" input body)
 ;;
 
+(* Restoring history for the repetition detector must not replay those calls
+   into the new invocation's receipt, visible result, or librarian evidence. *)
+let test_checkpoint_history_is_not_current_tool_execution () =
+  let module Acc = Masc.Keeper_run_tools_hook_accumulator in
+  let prior = tool_call "Execute" in
+  let meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "history-probe" ]) |> Result.get_ok
+  in
+  let acc =
+    Acc.create ~meta ~historical_tool_calls:[ prior; prior ]
+      ~tool_surface:
+        { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
+        ; config_root = "fixture"
+        ; runtime_config_path = Some "fixture/runtime.toml"
+        }
+  in
+  check int "a resumed no-tool invocation has no executed calls" 0
+    (List.length (Acc.freeze acc).out_tool_calls);
+  let actual = tool_call "Execute" in
+  acc.tool_calls <- [ actual ];
+  check int "only the new execution reaches outputs" 1
+    (List.length (Acc.freeze acc).out_tool_calls);
+  check (option (pair string int)) "cross-resume loop detection is preserved"
+    (Some ("Execute", 3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+       (Acc.tool_calls_for_repetition acc));
+  check int "historical evidence remains immutable" 2
+    (List.length acc.historical_tool_calls)
+;;
+
 let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   let open Agent_core.Types in
   let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
@@ -1368,6 +1399,8 @@ let () =
             test_repeated_exact_tool_call_boundary;
           test_case "repeated exact tool call reset across checkpoint restart" `Quick
             test_repeated_exact_tool_call_reset_across_checkpoint_restart;
+          test_case "checkpoint history is not current execution" `Quick
+            test_checkpoint_history_is_not_current_tool_execution;
           test_case "repeated exact tool call seeded from checkpoint history" `Quick
             test_repeated_exact_tool_call_seeded_from_checkpoint_history;
           test_case "tool io digest is keyed on the bytes" `Quick

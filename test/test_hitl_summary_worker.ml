@@ -2458,8 +2458,8 @@ let test_missing_summary_earns_failed () =
    runner; the runtime table below is what lets [is_official_client] admit
    the cli ids, exactly like the fusion panel fixture. *)
 
-let cli_runtime_fixture =
-  {|
+let cli_runtime_fixture ~oauth_source =
+  Printf.sprintf {|
 [runtime]
 default = "stub-http.stub-model"
 
@@ -2499,7 +2499,18 @@ streaming = true
 turn-timeout-s = 0
 
 [claude_code."claude-haiku-4-5"]
-|}
+
+[providers.agy]
+protocol = "antigravity-cli"
+command = "/usr/bin/true"
+is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+[agy.gemini]
+|} oauth_source
 ;;
 
 let cli_primary = "claude_code.claude-sonnet-5"
@@ -2507,13 +2518,16 @@ let cli_secondary = "claude_code.claude-haiku-4-5"
 
 let with_cli_runtimes f =
   let path = Filename.temp_file "hitl-cli-runtime" ".toml" in
+  let oauth_source = Filename.temp_file "hitl-cli-oauth" ".json" in
   Fun.protect
-    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    ~finally:(fun () ->
+      List.iter (fun path -> try Sys.remove path with Sys_error _ -> ())
+        [path; oauth_source])
     (fun () ->
        let channel = open_out path in
        Fun.protect
          ~finally:(fun () -> close_out channel)
-         (fun () -> output_string channel cli_runtime_fixture);
+         (fun () -> output_string channel (cli_runtime_fixture ~oauth_source));
        match Runtime.init_default ~config_path:path with
        | Error detail -> failf "cli runtime fixture must initialize: %s" detail
        | Ok () -> f ())
@@ -2695,6 +2709,64 @@ let test_cli_walk_advances_past_domain_invalid_output () =
            cli_secondary
            slot_id
        | _ -> fail "the advancing cli walk did not complete the durable attempt")
+;;
+
+let test_cli_quota_order_keeps_durable_dispatch_identity () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-quota-order" @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () ->
+      Q.For_testing.reset_runtime_state ();
+      Runtime_quota_window.reset_for_testing ())
+    (fun () ->
+       Runtime_quota_window.reset_for_testing ();
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       let separate = "agy.gemini" in
+       publish_unreachable_lane_with_cli
+         ~cli_slot_ids:[cli_primary; cli_secondary; separate]
+         ~source:"hitl-cli-quota-order";
+       let calls = ref [] in
+       let dispatched_call_ids = ref [] in
+       let execute input_tag =
+         let entry = pending_entry ~base_path ~input_tag () in
+         let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+           (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+            | Some { exact_attempt = QT.Exact_bound { slot_id; call_id; _ }; _ } ->
+              check string "dispatch names the durable bound slot" runtime_id slot_id;
+              check bool "each dispatch has a fresh durable call id" false
+                (List.mem call_id !dispatched_call_ids);
+              dispatched_call_ids := call_id :: !dispatched_call_ids
+            | _ -> fail "CLI dispatch has no durable identity");
+           calls := !calls @ [runtime_id];
+           if String.equal runtime_id cli_primary then (
+             let scope = match Runtime.quota_scope_of_runtime_id runtime_id with
+               | Some scope -> scope | None -> fail "missing fixture scope" in
+             Runtime_quota_window.note_observed_exhausted ~scope;
+             Error "typed adapter quota already recorded")
+           else if String.equal runtime_id separate then
+             Ok (Yojson.Safe.to_string (judgment_json "require_human"))
+           else fail "same-account sibling must follow the separate candidate"
+         in
+         let summary = ref None in
+         Worker.For_testing.execute_prepared_flow_with_queue_ops
+           ~queue_ops:(exact_queue_ops ()) ~cli_runner:runner ~net ~clock
+           ~on_summary:(fun value -> summary := Some value) (prepare_exn entry)
+         |> require_executed;
+         check bool "separate account produced summary" true (Option.is_some !summary);
+         match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+         | Some { exact_attempt = QT.Exact_bound { slot_id; status = QT.Exact_completed; _ }; _ } ->
+           check string "completion keeps successful CLI identity" separate slot_id
+         | _ -> fail "CLI summary must durably complete"
+       in
+       execute "first";
+       check (list string) "failure reorders before release and next bind"
+         [cli_primary; separate] !calls;
+       execute "second";
+       check (list string) "prior quota reorders initial CLI dispatch"
+         [cli_primary; separate; separate] !calls)
 ;;
 
 let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
@@ -2977,6 +3049,10 @@ let () =
             "the cli walk advances past domain-invalid output"
             `Quick
             test_cli_walk_advances_past_domain_invalid_output
+        ; test_case
+            "quota ordering preserves durable CLI dispatch identities"
+            `Quick
+            test_cli_quota_order_keeps_durable_dispatch_identity
         ; test_case
             "cli exhaustion quarantines the last cli identity"
             `Quick

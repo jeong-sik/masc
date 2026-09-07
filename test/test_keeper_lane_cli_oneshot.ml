@@ -280,7 +280,7 @@ let a1 = official_client_runtime
 let a2 = "claude_code.claude-haiku-4-5"
 let b = "agy.gemini"
 
-let quota_fixture ~claude_cli ~agy_cli =
+let quota_fixture ~claude_cli ~agy_cli ~oauth_source =
   let base = fixture ~claude_cli () in
   base ^ Printf.sprintf {|
 [models."claude-haiku-4-5"]
@@ -291,11 +291,13 @@ max-context = 200000
 protocol = "antigravity-cli"
 command = %S
 is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
 [models.gemini]
 api-name = "gemini-fixture"
 max-context = 128000
 [agy.gemini]
-|} agy_cli
+|} agy_cli oauth_source
 ;;
 
 let scope runtime_id =
@@ -323,7 +325,7 @@ for arg in "$@"; do
   esac
 done
 printf '%%s\n' "A:$model" >> %s
-emit() { printf '%%s\n' "$1" | sed "s/__SESSION__/$session/g"; }
+emit() { printf '%%s\n' "$1" | sed "s/__SESSION__/$session/g; s/__MODEL__/$model/g"; }
 IFS= read -r initialize
 request_id=$(printf '%%s' "$initialize" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
 printf '{"type":"control_response","response":{"subtype":"success","request_id":"%%s","response":{}}}\n' "$request_id"
@@ -347,10 +349,24 @@ let rejection ?resets_at () =
 ;;
 
 let claude_answer answer =
-  "emit " ^ shell_quote (Yojson.Safe.to_string
+  let emit frame = "emit " ^ shell_quote (Yojson.Safe.to_string frame) in
+  (* The adapter requires a measured assistant model before a successful
+     result can complete. The script fills it from the actual --model argv. *)
+  emit
+    (`Assoc
+       [ "type", `String "assistant"
+       ; "session_id", `String "__SESSION__"
+       ; "uuid", `String "answer-assistant"
+       ; "message", `Assoc
+           [ "role", `String "assistant"
+           ; "model", `String "__MODEL__"
+           ; "content", `List [`Assoc ["type", `String "text"; "text", `String answer]]
+           ]
+       ])
+  ^ "\n" ^ emit
     (`Assoc [ "type", `String "result"; "subtype", `String "success";
               "is_error", `Bool false; "session_id", `String "__SESSION__";
-              "uuid", `String "answer-result"; "result", `String answer ]))
+              "uuid", `String "answer-result"; "result", `String answer ])
 ;;
 
 let with_quota_fixture f =
@@ -359,6 +375,7 @@ let with_quota_fixture f =
   let marker = path "calls" in
   let claude_cli = path "claude" in
   let agy_cli = path "agy" in
+  let oauth_source = path "oauth.json" in
   let config_path = path "runtime.toml" in
   let load_config text =
     write_file ~path:config_path ~perm:0o600 text;
@@ -374,16 +391,28 @@ let with_quota_fixture f =
     (fun () ->
       Runtime_quota_window.reset_for_testing ();
       write_file ~path:marker ~perm:0o600 "";
+      write_file ~path:oauth_source ~perm:0o600 "{}";
       write_file ~path:claude_cli ~perm:0o700 (claude_script ~marker ~body:(rejection ()));
       write_file ~path:agy_cli ~perm:0o700
         (Printf.sprintf {|#!/bin/sh
 set -eu
 cat >/dev/null
 printf 'B\n' >> %s
-printf '%%s\n' '{"event":"init","conversation_id":"quota-b","init":{"model":"gemini-fixture","cwd":"/tmp","tools":[],"permission_mode":"always-proceed"}}'
+printf '%%s\n' %s
 printf '%%s\n' '{"event":"result","result":{"conversation_id":"quota-b","status":"SUCCESS","response":"{\"verdict\":\"pass\"}","num_turns":1,"usage":{"input_tokens":100,"output_tokens":7,"thinking_tokens":3,"cache_read_tokens":50,"total_tokens":107}}}'
-|} (shell_quote marker));
-      let catalog = quota_fixture ~claude_cli ~agy_cli in
+|} (shell_quote marker)
+          (shell_quote (Yojson.Safe.to_string
+            (`Assoc
+              [ "event", `String "init"
+              ; "conversation_id", `String "quota-b"
+              ; "init", `Assoc
+                  [ "model", `String "gemini-fixture"
+                  ; "cwd", `String dir
+                  ; "tools", `List []
+                  ; "permission_mode", `String "always-proceed"
+                  ]
+              ]))));
+      let catalog = quota_fixture ~claude_cli ~agy_cli ~oauth_source in
       load_config catalog;
       Eio_main.run (fun env ->
         Eio_context.set_env env;

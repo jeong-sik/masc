@@ -919,13 +919,13 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
            by hand every time. Silent when either side cannot testify. *)
-        (let self = Masc.Build_identity.current () in
-         match
+        (match
            Masc_tui_footer.build_mismatch_item
-             ~tui_commit:self.Masc.Build_identity.binary_commit
+             ~tui_commit:Masc.Build_identity.embedded_commit
              ~tui_age_s:
                (Option.map float_of_int
-                  self.Masc.Build_identity.binary_commit_age_seconds)
+                  (Masc.Build_identity.embedded_commit_age_seconds
+                     ~now:(Unix.gettimeofday ())))
              ~server_commit:identity.Tui_decode.sid_binary_commit
              ~server_age_s:identity.Tui_decode.sid_binary_commit_age_s
          with

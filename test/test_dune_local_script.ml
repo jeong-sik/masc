@@ -910,6 +910,88 @@ let test_pin_check_accepts_what_it_asks_for () =
     if code <> 0 then failf "check rejected its own expectations: %s%s" stdout stderr;
     check_contains "the report says the pins are in place" stdout "pins are in place")
 
+(* Drift and a local checkout are opposite situations and the check used to
+   report them as one. Drift means the switch quietly holds a build nobody
+   chose; a path pin means somebody is editing that dependency. Failing on the
+   second one sent people to a repair (--install) that throws their working
+   copy out of the build -- to fix a different package. *)
+let test_pin_check_tells_a_local_checkout_from_drift () =
+  with_temp_dir "opam-pin-check-local" (fun dir ->
+    let bin_dir, table_path = setup_repo_for_pin_check dir in
+    let _code, _stdout, stderr = run_pin_check dir bin_dir in
+    let expectations =
+      String.split_on_char '\n' stderr |> List.filter_map expectation_of_line
+    in
+    check bool "the empty run stated some expectations" true (expectations <> []);
+    (* One package answered with a checkout on this machine, every other one
+       answered as asked. So the path pin is all that is left to fail on. *)
+    let local_package, _ = List.hd expectations in
+    let checkout = Filename.concat dir "a-checkout" in
+    let rows =
+      List.map
+        (fun (package, target) ->
+          if String.equal package local_package then
+            Printf.sprintf "%s.dev    rsync    file://%s" package checkout
+          else
+            Printf.sprintf "%s.0.0    git    git+%s    (at deadbeef)" package target)
+        expectations
+    in
+    write_file table_path (String.concat "\n" rows ^ "\n");
+    let code, stdout, stderr = run_pin_check dir bin_dir in
+    check int "a checkout is not a failure" 0 code;
+    check_contains "the report still says the pins are in place" stdout
+      "pins are in place";
+    check_contains "it names the package" stderr local_package;
+    check_contains "it names the directory" stderr checkout;
+    check_contains "it says what actually links" stderr
+      "whatever is in that directory right now")
+
+(* The wiring for the passing case. dune-local reads the check's stderr and
+   used to throw it away unless the check failed, so a build linking somebody's
+   working copy looked exactly like a build of the commit this repo names. *)
+let test_a_local_pin_reaches_the_screen_on_a_passing_build () =
+  with_temp_dir "dune-local-pin-local" (fun dir ->
+    let bin_dir, dune_log = setup_fake_repo dir in
+    (* This is the only test here that expects the run to reach dune, so it is
+       the only one that has to satisfy the findlib guard standing after the
+       pin guard. Replacing the fake opam means keeping what that one
+       answered: `var prefix` for the read-lease wrapper, `list --installed`
+       for the deps guard. *)
+    write_executable (Filename.concat bin_dir "opam")
+      (Printf.sprintf
+         {|#!/bin/sh
+if [ "$1" = "exec" ] && [ "$3" = "ocamlfind" ] && [ "$4" = "query" ]; then
+  printf '/fake/lib/%%s\n' "$5"; exit 0
+fi
+if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.0\n'; exit 0; fi
+if [ "$1" = "list" ] && [ "$2" = "--installed" ] && [ -n "$4" ]; then
+  printf '%%s\n' "$4"; exit 0
+fi
+if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
+if [ "$1" = "var" ] && [ "$2" = "prefix" ]; then printf '%%s\n' %s; exit 0; fi
+exit 0
+|}
+         (quote dir));
+    write_executable
+      (Filename.concat (Filename.concat dir "scripts") "opam-pin-external-deps.sh")
+      {|#!/bin/sh
+echo "[opam-pin] built from a checkout on this machine, not the named commit:" >&2
+echo "[opam-pin]   ocaml-msx: your checkout at file:///tmp/ocaml-msx" >&2
+echo "[opam-pin] all 1 pins are in place"
+exit 0
+|};
+    let code, _stdout, stderr =
+      run_dune_local dir bin_dir
+        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_DEPS_CHECK" ]
+        "build"
+    in
+    check int "the build runs" 0 code;
+    check_contains "the note reaches the caller" stderr
+      "your checkout at file:///tmp/ocaml-msx";
+    check bool "the settled line is not repeated every build" false
+      (String_util.contains_substring stderr "pins are in place");
+    check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_pin_drift_aborts_build () =
   with_temp_dir "dune-local-pin-drift" (fun dir ->
     let bin_dir, dune_log = setup_fake_repo dir in
@@ -1131,6 +1213,10 @@ let () =
             test_pin_check_accepts_what_it_asks_for;
           test_case "pin drift aborts the build" `Quick
             test_pin_drift_aborts_build;
+          test_case "a local checkout is told from drift" `Quick
+            test_pin_check_tells_a_local_checkout_from_drift;
+          test_case "a local pin reaches the screen on a passing build" `Quick
+            test_a_local_pin_reaches_the_screen_on_a_passing_build;
         ] );
       ( "ocaml_version_guard",
         [

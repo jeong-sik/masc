@@ -6931,9 +6931,16 @@ type runtime_prompt_asset = {
   pra_file_exists : bool;
 }
 
+type held_back_override = {
+  hbo_key : string;
+  hbo_bytes : int;
+  hbo_contract_revision : string;
+}
+
 type prompts_snapshot = {
   ps_rows : prompt_row list;
   ps_runtime_assets : runtime_prompt_asset list;
+  ps_held_back : held_back_override list;
 }
 
 let prompt_rows_for_operator ~show_fragments snapshot =
@@ -7004,6 +7011,13 @@ let decode_runtime_prompt_asset json =
   Ok { pra_path; pra_file_path; pra_value; pra_file_exists }
 ;;
 
+let decode_held_back_override json =
+  let* hbo_key = required_string_field json "key" in
+  let* hbo_bytes = required_int_field json "bytes" in
+  let* hbo_contract_revision = required_string_field json "contract_revision" in
+  Ok { hbo_key; hbo_bytes; hbo_contract_revision }
+;;
+
 let decode_prompts json =
   let* rows_json = required_list_field json "prompts" in
   let* reversed =
@@ -7028,9 +7042,26 @@ let decode_prompts json =
          Ok (asset :: acc))
       (Ok []) runtime_assets_json
   in
+  (* Absent is empty, not an error: a server that predates the field and a
+     server with nothing held back say the same thing to a reader. *)
+  let* held_back_json =
+    match member "held_back" json with
+    | `Null -> Ok []
+    | `List entries -> Ok entries
+    | value -> field_type_error "held_back" "a list" value
+  in
+  let* reversed_held_back =
+    List.fold_left
+      (fun result entry_json ->
+         let* acc = result in
+         let* entry = decode_held_back_override entry_json in
+         Ok (entry :: acc))
+      (Ok []) held_back_json
+  in
   Ok
     { ps_rows = List.rev reversed
     ; ps_runtime_assets = List.rev reversed_runtime_assets
+    ; ps_held_back = List.rev reversed_held_back
     }
 ;;
 

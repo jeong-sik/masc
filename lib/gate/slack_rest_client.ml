@@ -335,7 +335,7 @@ type conversations_history_ok = {
   next_cursor : string option;      (* response_metadata.next_cursor. *)
 }
 
-let build_conversations_history_request ~token ~channel_id ?oldest ?limit ?cursor () =
+let build_conversations_history_request ~token ~channel_id ?oldest ?latest ?limit ?cursor () =
   let url = "https://slack.com/api/conversations.history" in
   let headers =
     ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
@@ -344,6 +344,9 @@ let build_conversations_history_request ~token ~channel_id ?oldest ?limit ?curso
   let parts = [ "channel=" ^ channel_id ] in
   let parts =
     match oldest with Some oldest -> parts @ [ "oldest=" ^ oldest ] | None -> parts
+  in
+  let parts =
+    match latest with Some latest -> parts @ [ "latest=" ^ latest ] | None -> parts
   in
   let parts =
     match limit with Some limit -> parts @ [ "limit=" ^ string_of_int limit ] | None -> parts
@@ -403,15 +406,15 @@ let parse_conversations_history_response ~status ~body =
                       }
                   | None -> Error "message without ts")
                 items
-            | _ -> []
+            | _ -> [Error "messages must be an array"]
           in
           (match List.find_opt Result.is_error parsed with
            | Some (Error msg) -> Error (Other msg)
            | Some (Ok _) | None ->
              let has_more =
                match List.assoc_opt "has_more" fields with
-               | Some (`Bool b) -> b
-               | _ -> false
+               | Some (`Bool b) -> Ok b
+               | _ -> Error (Other "has_more must be a boolean")
              in
              let next_cursor =
                match List.assoc_opt "response_metadata" fields with
@@ -421,17 +424,17 @@ let parse_conversations_history_response ~status ~body =
                   | _ -> None)
                | _ -> None
              in
-             Ok
+             Result.map (fun has_more ->
                { messages = List.map Result.get_ok parsed
                ; has_more
                ; next_cursor
-               })
+               }) has_more)
         | _ -> Error (Other "ok=true but response is not an object")
 
 let conversations_history ?clock ?(timeout_sec = default_http_timeout_sec) ~token
-    ~channel_id ?oldest ?limit ?cursor () =
+    ~channel_id ?oldest ?latest ?limit ?cursor () =
   let (url, headers, body) =
-    build_conversations_history_request ~token ~channel_id ?oldest ?limit ?cursor ()
+    build_conversations_history_request ~token ~channel_id ?oldest ?latest ?limit ?cursor ()
   in
   match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)

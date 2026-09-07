@@ -960,6 +960,18 @@ val fold_appended_lines
   -> f:('acc -> string -> 'acc)
   -> 'acc * int
 
+val fold_appended_lines_with_offsets
+  :  path:string
+  -> from:int
+  -> init:'acc
+  -> f:('acc -> offset:int -> string -> 'acc)
+  -> 'acc * int
+(** {!fold_appended_lines} with the byte offset each line starts at. A caller
+    building an index records [offset] and the line's length, and reads the
+    row back with [read_slice ~from:offset ~len]. Same skipping and boundary
+    rules: blank lines advance the boundary without being folded, bytes after
+    the last newline are excluded, and a [from] past EOF rescans from zero. *)
+
 module Private_jsonl_slice : sig
   type t =
     { bytes : string

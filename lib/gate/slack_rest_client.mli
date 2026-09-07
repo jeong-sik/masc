@@ -197,20 +197,22 @@ val conversations_history :
   token:string ->
   channel_id:string ->
   ?oldest:string ->
+  ?latest:string ->
   ?limit:int ->
   ?cursor:string ->
   unit ->
   (conversations_history_ok, error) result
-(** [conversations.history] for one channel after [oldest] (exclusive, a
-    message ts). Needs [channels:history] (public) or [groups:history]
+(** [conversations.history] for one channel after [oldest] and before
+    [latest] (both exclusive message timestamps). Needs [channels:history] (public) or [groups:history]
     (private) on the token; a missing scope surfaces as [Slack_api], not a
-    crash. One page per call — pagination belongs to the caller via
-    {!conversations_history_ok.next_cursor}. *)
+    crash. One page per call. Pagination belongs to the caller, using
+    [next_cursor] or the final message timestamp as the next [latest]. *)
 
 val build_conversations_history_request :
   token:string ->
   channel_id:string ->
   ?oldest:string ->
+  ?latest:string ->
   ?limit:int ->
   ?cursor:string ->
   unit ->

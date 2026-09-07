@@ -47,11 +47,42 @@ let test_unknown_lane_is_refused () =
 
 let test_absent_lane_answers_absent () =
   with_eio (fun () ->
-    (* "automation" is allowed but has never polled: a tool call says so
-       instead of timing out into silence. *)
+    (* Automation needs its in-process executor. An external poll cannot
+       create an automation backend in its absence. *)
+    Lane.install_automation_executor None;
     (match Lane.issue ~lane_name:"automation" ~verb:Lane.Tabs_list ~timeout_sec:0.1 with
     | Lane.Lane_absent -> ()
-    | _ -> fail "expected Lane_absent for a never-polled lane"))
+    | _ -> fail "expected Lane_absent without a native executor"))
+;;
+
+let test_automation_rejects_external_transport () =
+  with_eio (fun () ->
+    check bool "automation has no external queue" true
+      (Option.is_none (Lane.lane_named ~name:"automation"));
+    (match Lane.take_command ~lane_name:"automation" ~window_sec:0.01 with
+     | Error _ -> ()
+     | Ok _ -> fail "external automation poll must be refused");
+    (match Lane.deliver_result ~lane_name:"automation" ~id:"forged"
+       ~payload:(`Assoc [ "ok", `Bool true ]) with
+     | Error _ -> ()
+     | Ok () -> fail "external automation result must be refused"))
+;;
+
+let test_automation_uses_native_executor () =
+  with_eio (fun () ->
+    Eio.Switch.run (fun sw ->
+      let received = ref [] in
+      Lane.install_automation_executor (Some (fun verb ->
+        received := verb :: !received;
+        Lane.Answered (`Assoc [ "source", `String "native" ])));
+      Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+      (match Lane.issue ~lane_name:"automation" ~verb:Lane.Tabs_list ~timeout_sec:0.1 with
+       | Lane.Answered (`Assoc [ "source", `String "native" ]) -> ()
+       | _ -> fail "configured automation must execute in process");
+      check int "one native invocation" 1 (List.length !received);
+      (match Lane.take_command ~lane_name:"automation" ~window_sec:0.01 with
+       | Error _ -> ()
+       | Ok _ -> fail "installed native executor must not admit external polling")))
 ;;
 
 let test_live_lane_refuses_act_verbs () =
@@ -71,8 +102,12 @@ let () =
                    test_issue_poll_deliver_roundtrip
                ; test_case "unknown lane is refused" `Quick
                    test_unknown_lane_is_refused
-               ; test_case "never-polled lane answers absent" `Quick
+               ; test_case "unconfigured automation answers absent" `Quick
                    test_absent_lane_answers_absent
+               ; test_case "automation refuses external poll and result" `Quick
+                   test_automation_rejects_external_transport
+               ; test_case "automation dispatches only to its native executor" `Quick
+                   test_automation_uses_native_executor
                ; test_case "the live lane refuses session and navigation verbs" `Quick
                    test_live_lane_refuses_act_verbs ] ]
 ;;

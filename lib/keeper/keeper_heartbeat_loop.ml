@@ -46,10 +46,8 @@ let record_event_queue_stimulus_turn_started =
 
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
-  consumed_stimulus_count : int;
-  consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue_state.pending_selection option;
-  consumed_selections : Keeper_event_queue_state.pending_selection list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -512,25 +510,8 @@ let run_keepalive_unified_turn
         ~keeper_name:meta_after_triage.name
         (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
-    let consumed_stimuli = ref [] in
-    let pending_selection
-      : Keeper_event_queue_state.pending_selection option ref
-      =
-      ref None
-    in
-    (* RFC-0377: [pending_selection] above stays the single primary entry
-       (transient-board-withdrawal reporting and pre-dispatch validation are
-       unchanged by batching). [consumed_selections] is the full admitted
-       batch — [[]], a singleton mirroring [pending_selection], or the
-       primary plus every same-conversation Connector_attention companion.
-       Turn completion/failure disposition acks or defers every entry in
-       this list, not just the primary, so a companion is never left
-       durably stuck once its turn has already run. *)
-    let consumed_selections
-      : Keeper_event_queue_state.pending_selection list ref
-      =
-      ref []
-    in
+    let source_batch = ref Keeper_heartbeat_source_batch.empty in
+    let diagnostic_selection = ref None in
     let cycle_outcome_ref = ref None in
     let hitl_resolution_for_cycle = ref None in
     let hitl_continuation_projection_ok = ref true in
@@ -583,9 +564,8 @@ let run_keepalive_unified_turn
           ~meta_after_triage
           ~pending_board_events
       in
-      consumed_stimuli := event_intake.consumed_stimuli;
-      pending_selection := event_intake.pending_selection;
-      consumed_selections := event_intake.consumed_selections;
+      source_batch := event_intake.source_batch;
+      diagnostic_selection := event_intake.diagnostic_selection;
       let selected_source_authority () =
         match
           Keeper_meta_store.read_effective_meta
@@ -598,28 +578,14 @@ let run_keepalive_unified_turn
         | Ok (Some current) when current.paused ->
           Error "keeper paused before dispatch"
         | Ok (Some _) ->
-          (* Batch case: validate every admitted selection, not only the
-             primary, so a companion whose durable entry changed out from
-             under this turn is caught before dispatch instead of only at
-             ack time. Falls back to the pre-batch single [pending_selection]
-             when nothing was consumed as a batch (e.g. the transient-board
-             withdrawal case, which never populates [consumed_selections]). *)
-          let selections_to_validate =
-            match !consumed_selections with
-            | [] -> Option.to_list !pending_selection
-            | (_ :: _) as selections -> selections
-          in
-          List.fold_left
-            (fun result selection ->
-               match result with
-               | Error _ as error -> error
-               | Ok () ->
-                 Keeper_registry_event_queue.validate_pending_selection_result
-                   ~base_path:ctx.config.base_path
-                   meta_after_triage.name
-                   ~selection)
-            (Ok ())
-            selections_to_validate
+          Keeper_heartbeat_source_batch.validate
+            ~diagnostic:!diagnostic_selection
+            ~validate_selection:(fun selection ->
+              Keeper_registry_event_queue.validate_pending_selection_result
+                ~base_path:ctx.config.base_path
+                meta_after_triage.name
+                ~selection)
+            !source_batch
       in
       (match
          Keeper_turn_dispatch_authority.install
@@ -659,7 +625,7 @@ let run_keepalive_unified_turn
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
-          ~consumed_stimulus_count:event_intake.consumed_stimulus_count
+          ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count event_intake.source_batch)
           ~event_queue_intake_error:event_intake.event_queue_intake_error
       in
       let verdict_strs =
@@ -786,7 +752,7 @@ let run_keepalive_unified_turn
           record_replay_owned_turn_started_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
-            !consumed_stimuli;
+            (Keeper_heartbeat_source_batch.stimuli !source_batch);
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
@@ -797,7 +763,7 @@ let run_keepalive_unified_turn
                   match stim.Keeper_event_queue.payload with
                   | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
                   | _ -> None)
-                !consumed_stimuli
+                (Keeper_heartbeat_source_batch.stimuli !source_batch)
             with
             | Some resolution -> Some resolution
             | None ->
@@ -825,20 +791,8 @@ let run_keepalive_unified_turn
                  Some resolution)
           in
           hitl_resolution_for_cycle := hitl_resolution;
-          (* The event intake is the exact turn input. Keep its attribution in
-             the existing wake record even when the cadence, rather than a
-             direct wake signal, discovered it. An empty [Woken] still means a
-             reactive wake with no selected event. *)
-          let wake : Keeper_registry.wake_reason =
-            match !consumed_stimuli, reactive_wake with
-            | _ :: _, _ ->
-              Keeper_registry.Woken
-                (List.map
-                   (fun (stim : Keeper_event_queue.stimulus) ->
-                      stim.Keeper_event_queue.payload)
-                   !consumed_stimuli)
-            | [], true -> Keeper_registry.Woken []
-            | [], false -> Keeper_registry.Proactive_tick
+          let turn_input =
+            Keeper_heartbeat_source_batch.for_turn ~reactive:reactive_wake !source_batch
           in
           let run_fresh_cycle () =
             run_keeper_cycle
@@ -853,7 +807,7 @@ let run_keepalive_unified_turn
               ~obs
               ~turn_decision
               ~shared_context
-              ~wake
+              ~turn_input
               ()
           in
           let run_cycle () = run_fresh_cycle () in
@@ -874,7 +828,7 @@ let run_keepalive_unified_turn
             ~ctx
             ~keeper_name:meta_after_triage.name
             ~disposition:(Cycle.disposition_token cycle_outcome)
-            !consumed_stimuli;
+            (Keeper_heartbeat_source_batch.stimuli !source_batch);
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
@@ -952,7 +906,7 @@ let run_keepalive_unified_turn
          turn completion acks all of them; a turn failure applies the same
          quarantine/defer/preserve disposition to all of them, so a
          companion is never silently left un-acked while the primary is. *)
-      (match !consumed_selections with
+      (match Keeper_heartbeat_source_batch.selections !source_batch with
        | [] -> ()
        | (_ :: _) as selections ->
            let remove_completed_selections ~should_ack =

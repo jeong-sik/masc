@@ -191,10 +191,8 @@ let record_event_queue_stimulus_turn_started
 
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
-  consumed_stimulus_count : int;
-  consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue_state.pending_selection option;
-  consumed_selections : Keeper_event_queue_state.pending_selection list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -857,13 +855,11 @@ let heartbeat_event_intake
     in
     let rec loop
           observations_rev
-          stimuli_rev
           selections_rev
           first_withdrawn
           = function
       | [] ->
         ( List.rev observations_rev
-        , List.rev stimuli_rev
         , List.rev selections_rev
         , first_withdrawn
         , None )
@@ -876,7 +872,6 @@ let heartbeat_event_intake
          with
          | Error message ->
            ( List.rev observations_rev
-           , List.rev stimuli_rev
            , List.rev selections_rev
            , first_withdrawn
            , Some (selection, Pending_selection_failed message) )
@@ -885,7 +880,7 @@ let heartbeat_event_intake
              "turn entry: acknowledged spent Gate grant replay without a turn \
               keeper=%s"
              keeper_name;
-           loop observations_rev stimuli_rev selections_rev first_withdrawn rest
+           loop observations_rev selections_rev first_withdrawn rest
          | Ok (Absent_grant_retired { approval_id; absence }) ->
            Log.Keeper.warn
              "turn entry: retired approved Gate resolution without a durable \
@@ -893,7 +888,7 @@ let heartbeat_event_intake
              keeper_name
              approval_id
              (Keeper_approval_queue.resolution_absence_to_string absence);
-           loop observations_rev stimuli_rev selections_rev first_withdrawn rest
+           loop observations_rev selections_rev first_withdrawn rest
          | Ok Selection_actionable ->
            (match
               consume_single_heartbeat_stimulus
@@ -914,7 +909,7 @@ let heartbeat_event_intake
                 | None -> Some (selection, unavailable)
                 | Some _ as kept -> kept
               in
-              loop observations_rev stimuli_rev selections_rev first_withdrawn rest
+              loop observations_rev selections_rev first_withdrawn rest
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable
@@ -932,7 +927,7 @@ let heartbeat_event_intake
                     observation stimulus_id=%s keeper=%s"
                    selection.source.post_id
                    keeper_name;
-                 loop observations_rev stimuli_rev selections_rev first_withdrawn rest
+                 loop observations_rev selections_rev first_withdrawn rest
                | Error message ->
                  let detail =
                    "failed to acknowledge Board stimulus with no remaining \
@@ -940,22 +935,19 @@ let heartbeat_event_intake
                    ^ message
                  in
                  ( List.rev observations_rev
-                 , List.rev stimuli_rev
                  , List.rev selections_rev
                  , first_withdrawn
                  , Some (selection, Pending_selection_failed detail) ))
             | Stimulus_consumed observations ->
               loop
                 (List.rev_append observations observations_rev)
-                (selection.source :: stimuli_rev)
                 (selection :: selections_rev)
                 first_withdrawn
                 rest))
     in
-    loop [] [] [] None selections
+    loop [] [] None selections
   in
   let ( queued_observations
-      , consumed_stimuli
       , consumed_selections
       , first_withdrawn
       , hard_error )
@@ -970,24 +962,23 @@ let heartbeat_event_intake
         "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
-      [], [], [], None, Some (None, Pending_selection_failed message)
+      [], [], None, Some (None, Pending_selection_failed message)
     | Ok selections ->
       let batch = ready_batch selections in
-      let observations, stimuli, selections, withdrawn, error =
+      let observations, selections, withdrawn, error =
         consume_batch batch
       in
       ( observations
-      , stimuli
       , selections
       , withdrawn
       , Option.map (fun (selection, error) -> Some selection, error) error )
   in
-  let pending_selection =
-    match consumed_selections, hard_error, first_withdrawn with
-    | selection :: _, _, _ -> Some selection
-    | [], Some (Some selection, _), _ -> Some selection
-    | [], _, Some (selection, _) -> Some selection
-    | [], (None | Some (None, _)), None -> None
+  let source_batch = Keeper_heartbeat_source_batch.of_selections consumed_selections in
+  let diagnostic_selection =
+    match hard_error, first_withdrawn with
+    | Some (Some selection, _), _ -> Some selection
+    | _, Some (selection, _) -> Some selection
+    | (None | Some (None, _)), None -> None
   in
   let event_queue_intake_error =
     match hard_error, first_withdrawn with
@@ -995,9 +986,9 @@ let heartbeat_event_intake
     | None, Some (_, unavailable) -> Some (Transient_board_read unavailable)
     | None, None -> None
   in
-  let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers =
-    List.filter_map event_queue_trigger_of_stimulus consumed_stimuli
+    List.filter_map event_queue_trigger_of_stimulus
+      (Keeper_heartbeat_source_batch.stimuli source_batch)
     |> List.sort_uniq compare
   in
   let pending_board_events =
@@ -1040,10 +1031,8 @@ let heartbeat_event_intake
       (List.rev queued_observations)
   in
   { pending_board_events
-  ; consumed_stimulus_count
-  ; consumed_stimuli
-  ; pending_selection
-  ; consumed_selections
+  ; source_batch
+  ; diagnostic_selection
   ; event_queue_intake_error
   ; event_queue_triggers
   }

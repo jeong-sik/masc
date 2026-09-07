@@ -56,7 +56,7 @@ let ollama_cloud_seed_cases =
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
     ; api_name = "deepseek-v4-pro"
-    ; context = 524288
+    ; context = 1048576
     ; tools = true
     ; thinking = true
     ; vision = false
@@ -77,7 +77,7 @@ let ollama_cloud_seed_cases =
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-2"
     ; api_name = "glm-5.2"
-    ; context = 1000000
+    ; context = 1048576
     ; tools = true
     ; thinking = true
     ; vision = false
@@ -140,7 +140,7 @@ let ollama_cloud_seed_cases =
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m3"
     ; api_name = "minimax-m3"
-    ; context = 524288
+    ; context = 512000
     ; tools = true
     ; thinking = true
     ; vision = true
@@ -593,7 +593,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
      check string "deepseek pro exact model" "deepseek-v4-pro" entry.id_prefix;
      check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
-     check (option int) "deepseek pro context" (Some 524288)
+     check (option int) "deepseek pro context" (Some 1048576)
        entry.max_context_tokens;
      check (option bool) "deepseek pro tools" (Some true) entry.supports_tools;
      check (option bool) "deepseek pro reasoning" (Some true)
@@ -1009,6 +1009,35 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    (* Shared seed model descriptions must resolve these windows from their
+       provider binding, including both MiniMax aliases. Operator overrides
+       remain covered separately by the below-cap and above-cap scenarios. *)
+    List.iter
+      (fun (runtime_id, provider_stated_context) ->
+        match find_runtime runtimes runtime_id with
+        | None -> failf "expected catalog-derived seed runtime: %s" runtime_id
+        | Some runtime ->
+          check (option int) (runtime_id ^ " has no duplicated seed override")
+            None runtime.model.max_context;
+          let catalog_context =
+            match Llm_provider.Provider_config.capabilities_for_config_model
+                (agent_core_provider_config runtime) with
+            | Some caps -> caps.max_context_tokens
+            | None -> failf "missing provider catalog entry: %s" runtime_id
+          in
+          check (option int) (runtime_id ^ " matches provider metadata")
+            (Some provider_stated_context) catalog_context;
+          check (option (pair int string)) (runtime_id ^ " uses its provider catalog")
+            (Option.map (fun n -> n, "capability") catalog_context)
+            (Runtime.resolve_max_context_of_runtime runtime
+             |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source)))
+      [ "deepseek.deepseek-v4-flash", 1048576
+      ; "ollama_cloud.deepseek-v4-flash", 1048576
+      ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
+      ; "ollama_cloud.ollama-cloud-glm-5-2", 1048576
+      ; "ollama_cloud.minimax-m3", 512000
+      ; "ollama_cloud.ollama-cloud-minimax-m3", 512000
+      ];
     let clamped =
       List.filter_map
         (fun (rt : Runtime.t) ->
@@ -1393,7 +1422,10 @@ List.iter
      | None -> fail "expected MiniMax M3 Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
-       check (option int) "MiniMax M3 context" (Some 524288) runtime.model.max_context;
+       check (option (pair int string)) "MiniMax M3 provider-derived context"
+         (Some (512000, "capability"))
+         (Runtime.resolve_max_context_of_runtime runtime
+          |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source));
        (match runtime.model.capabilities with
        | Some caps ->
           check bool "MiniMax M3 response_format json disabled" false

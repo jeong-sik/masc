@@ -314,6 +314,7 @@ let descriptions_owned_elsewhere =
   ; "masc_board_list"
   ; "masc_board_post"
   ; "masc_board_search"
+  ; "masc_board_stats"
   ; "masc_board_vote"
     (* Shard runtime tools: declared directly, not through the cluster path *)
   ; "tool_edit_file"
@@ -760,8 +761,8 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
       [ "name"; "timeout_sec" ]
   in
   Alcotest.(check (list string))
-    "sandbox start network modes match the owning keeper contract"
-    Masc.Keeper_schema.network_mode_enum_strings
+    "managed Docker start offers only its supported network modes"
+    [ "none"; "inherit" ]
     (schema_property_enum_strings start_schema "network_mode");
   check_json
     "sandbox start ttl has no default"
@@ -1079,36 +1080,35 @@ let test_read_descriptor_spells_out_path_basis () =
     (string_contains ~sub:"does not inherit Execute cwd" file_path_description)
 ;;
 
-let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
-  let descriptor = required_public_descriptor "Execute" in
-  let argv_description =
-    schema_property_description descriptor.input_schema "argv"
-    |> Option.value ~default:""
-  in
-  check_contains
-    "Execute description states argv is the sole process vector"
-    ~sub:"one non-empty argv process vector"
-    descriptor.description;
-  check_contains
-    "Execute description treats invocation as opaque"
-    ~sub:"never interprets program or subcommand meaning"
-    descriptor.description;
-  check_contains
-    "Execute description says a call has no background lifecycle"
-    ~sub:"there is no background task lifecycle"
-    descriptor.description;
-  Alcotest.(check bool)
-    "Execute description has no forge-specific product knowledge"
-    false
-    (string_contains ~sub:"git" (String.lowercase_ascii descriptor.description));
-  check_contains
-    "Execute argv schema defines argv[0] as the executable"
-    ~sub:"argv[0] is the executable"
-    argv_description;
-  check_contains
-    "Execute argv schema preserves opaque arguments"
-    ~sub:"passed verbatim"
-    argv_description
+let test_execute_descriptor_validates_process_forms () =
+  let argv = `List [ `String "printf"; `String "%s"; `String "a;$(literal)"; `String "" ] in
+  let direct = `Assoc [ "argv", argv; "cwd", `String "repos/masc" ] in
+  let shell = `Assoc [ "script", `String "printf x | cat"; "shell", `String "sh" ] in
+  List.iter
+    (fun input ->
+      match Resolution.validated_descriptor_and_input_for_tool_call
+              ~tool_name:"Execute" ~input with
+      | Some (Ok (descriptor, translated)) ->
+        Alcotest.(check string) "Execute reaches the process handler"
+          "tool_execute" descriptor.internal_name;
+        Alcotest.(check bool) "process input passes through without interpretation"
+          true (Yojson.Safe.equal input translated)
+      | Some (Error result) -> Alcotest.fail (Tool_result.message result)
+      | None -> Alcotest.fail "Execute public descriptor did not resolve")
+    [ direct; shell ];
+  List.iter
+    (fun (label, input) ->
+      match Resolution.validated_descriptor_and_input_for_tool_call
+              ~tool_name:"Execute" ~input with
+      | Some (Error _) -> ()
+      | Some (Ok _) -> Alcotest.fail ("Execute accepted " ^ label)
+      | None -> Alcotest.fail "Execute public descriptor did not resolve")
+    [ "an empty vector", `Assoc [ "argv", `List [] ]
+    ; "a non-string argument", `Assoc [ "argv", `List [ `String "printf"; `Int 1 ] ]
+    ; "both process forms", `Assoc [ "argv", argv; "script", `String "printf x" ]
+    ; "neither process form", `Assoc [ "cwd", `String "." ]
+    ; "an unknown process field", `Assoc [ "argv", argv; "background", `Bool true ]
+    ]
 ;;
 
 let test_grep_descriptor_documents_multiline () =
@@ -1330,15 +1330,30 @@ let test_masc_board_registry_has_descriptor_projection () =
            (schema.name ^ " descriptor readonly follows typed resource projection")
            (Some expected_readonly)
            descriptor.policy.readonly_hint;
-         Alcotest.(check bool)
-           (schema.name ^ " is the single Keeper model projection")
-           true
-           (descriptor.keeper_model_projection = Descriptor.Internal_name);
-         let expected_schema_source =
-           match Tool_shard_types.keeper_board_schema board_name with
-           | Some _ -> Descriptor.Keeper_projection
-           | None -> Descriptor.Canonical_registry
+         let operator_only =
+           match board_name with
+           | Tool_name.Board_name.Board_sub_board_create
+           | Board_sub_board_update | Board_sub_board_delete
+           | Board_sub_board_get | Board_sub_board_list -> true
+           | _ -> false
          in
+         Alcotest.(check bool)
+           (schema.name ^ " has the declared operator or Keeper exposure")
+           true
+           (descriptor.keeper_model_projection =
+              if operator_only then Descriptor.Operator_only else Descriptor.Internal_name);
+         Alcotest.(check (list string))
+           (schema.name ^ " exposes exactly its supported Keeper names")
+           (if operator_only then [] else [ schema.name ])
+           (Descriptor.keeper_model_names descriptor);
+         let expected_schema_source, expected_description =
+           match Tool_shard_types.keeper_board_schema board_name with
+           | Some projection -> Descriptor.Keeper_projection, projection.description
+           | None -> Descriptor.Canonical_registry, schema.description
+         in
+         Alcotest.(check string)
+           (schema.name ^ " description comes from its declared schema owner")
+           expected_description descriptor.description;
          Alcotest.(check bool)
            (schema.name ^ " schema source is truthful")
            true
@@ -2051,9 +2066,9 @@ let () =
             `Quick
             test_read_descriptor_spells_out_path_basis
         ; test_case
-            "Execute argv/filesystem basis is explicit"
+            "Execute validates process forms and preserves opaque input"
             `Quick
-            test_execute_descriptor_spells_out_argv_and_filesystem_basis
+            test_execute_descriptor_validates_process_forms
         ; test_case
             "Grep documents single-line match and rg -U"
             `Quick

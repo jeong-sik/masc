@@ -244,3 +244,5 @@ http_client 및 exact_output_measurement_transport가 getaddrinfo 첫 주소만 
 03:32Z 재조회 binary148a773ff8의 Git ancestry에는 #33829/#33833/#33834/#33839 네 변경이 실제 포함된다. 이 배포와 merge는 다른 작업 주체가 진행했으며 본 세션이 실행하지 않았다. 03:22:10Z–03:32:26Z 약10분, 4,391행에서 insufficient-tool-message cycle error0, overlapping checkpoint0, composition evidence failure0, check·lint warning0, Claude quota13이 관측됐다. 전체6시간 대비 단순 감소율이나 완치율로 비교할 수 없다. 해당 경로가 실제 충분히 실행됐는지와 concurrent 변경 영향이 남는다.
 
 가장 최근 health는 runnable pending61, oldest2292초(약38분)이며 여전히 stalled/degraded이다. 직전 관측 pending115/oldest6471초에서 줄었지만 감소만으로 FIFO 소비·효과 전달 성공을 판정하지 않는다. dashboard stamp는 여전히 missing. 최신 health-final.json과 post-deployment-observation.json 참고.
+
+동일한 새 배포 관측 창에서 started_at이 배포 이후이고 recorded_at이 창 종료 이전인 영수증도 별도 조회했다. polisher1, rondo7, geek-scout12, pr-updater6개의 receipt_done이 있었다. jazz-developer는 같은 조건의 완료 영수증0개여서 재개 완료로 선언하지 않는다. 이 결과는 응답 품질·기억 연속성·모든 pending event 소비 증명과 다르다. post-deployment-receipts.json에 원본 파일/행과 terminal 필드를 기록했다.

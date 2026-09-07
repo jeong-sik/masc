@@ -10,7 +10,7 @@ let navigated = false;
 let oversized = false;
 let queried = 0;
 const browser = {
-  runtime: {connectNative: () => ({
+  runtime: {getBrowserInfo: async () => ({name: "Firefox", version: "155.0.1", zen: {version: "1.22b"}}), connectNative: () => ({
     onMessage: {addListener() {}}, onDisconnect: {addListener() {}},
     postMessage: value => replies.push(value),
   })},
@@ -56,3 +56,9 @@ assert.equal('data' in large, false);
 oversized = false;
 assert.equal((await command({tabId: 7})).ok, true, 'oversized capture must not disconnect the lane');
 console.log('PASS: explicit target, PNG, closed tab, navigation race, frame bound, recovery');
+
+context.command = {id: 'metadata-fixture', verb: 'browser.info', args: {}};
+await vm.runInContext('onHostMessage(command)', context);
+assert.equal(replies.at(-1).data.zen.version, '1.22b');
+assert.equal(replies.at(-1).data.version, '155.0.1');
+console.log('PASS: actual browser info is forwarded including explicit Zen metadata');

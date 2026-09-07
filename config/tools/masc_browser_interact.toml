@@ -45,3 +45,8 @@ description = "Required for scroll: horizontal CSS-pixel delta."
 name = "y"
 type = "integer"
 description = "Required for scroll: vertical CSS-pixel delta."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."

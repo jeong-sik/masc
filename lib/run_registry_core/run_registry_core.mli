@@ -81,6 +81,18 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type replay_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; dropped_running : int
+  ; reached_end : bool
+  }
+
+type replay_status =
+  | Not_replayed
+  | Log_absent
+  | Replayed of replay_report
+
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
@@ -106,6 +118,9 @@ module Make (Payload : Payload) : sig
 
   val max_completed_retained : int
   val create : ?path:string -> unit -> t
+  val replay_status : t -> replay_status
+  (** Immutable diagnostics from this registry instance's startup read. *)
+
   val replay : string -> t
   (** Retains a lightweight in-memory projection while compaction streams the
       selected original register/complete rows. Dropped payload fields are

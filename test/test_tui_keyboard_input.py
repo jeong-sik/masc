@@ -10928,6 +10928,8 @@ def fusion_run(
         "started_at": 1787557669.715736,
         "finished_at": None if status == "running" else 1787557684.715736,
         "status": status,
+        "stage": "accepted" if status == "running" else status,
+        "progress": {} if status == "running" else None,
     }
 
 
@@ -10943,6 +10945,8 @@ def fusion_runs_response(runs: list[dict[str, object]]) -> HttpResponse:
         {
             "generated_at": "2026-08-24T09:00:00Z",
             "count": len(runs),
+            "replay": {"status": "not_replayed"},
+            "historical_evidence": [],
             "runs": runs,
         },
     )
@@ -11291,7 +11295,7 @@ def fusion_list_detail_interaction(
                 )
         footer = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
-            b"K:calling Keeper  B:Board evidence  Enter:detail  "
+            b"K:calling Keeper  B:Board evidence  Enter:open  "
             b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
         footer_frame = resize_and_wait(

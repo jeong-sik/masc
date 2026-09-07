@@ -289,11 +289,37 @@ let test_replay_preserves_unterminated_tail () =
   check string "partial tail preserved" content (Fs_compat.load_file path)
 ;;
 
+let test_startup_replay_diagnostics () =
+  let path = fresh_path "-diagnostics.jsonl" in
+  Fun.protect ~finally:(fun () -> remove_if_exists path) @@ fun () ->
+  check bool "new instance is distinct from a startup read" true
+    (R.replay_status (R.create ()) = Run_registry_core.Not_replayed);
+  check bool "missing log is explicit" true
+    (R.replay_status (R.replay path) = Run_registry_core.Log_absent);
+  let initial = R.create ~path () in
+  R.register_running initial ~run_id:"complete" ~keeper:"k" ~preset:"p"
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  R.mark_completed initial ~run_id:"complete" ~outcome:R.Succeeded;
+  (match R.replay_status (R.replay path) with
+   | Run_registry_core.Replayed { lines_read = 2; malformed_lines = 0;
+                                  dropped_running = 0; reached_end = true } -> ()
+   | _ -> fail "healthy completed replay must be explicit");
+  let channel = open_out_gen [Open_append; Open_binary] 0o600 path in
+  output_string channel "{unterminated";
+  close_out channel;
+  let before = Fs_compat.load_file path in
+  (match R.replay_status (R.replay path) with
+   | Run_registry_core.Replayed { reached_end = false; _ } -> ()
+   | _ -> fail "a partial read must not appear healthy");
+  check string "partial input was not compacted" before (Fs_compat.load_file path)
+;;
+
 let () =
   run
     "fusion_run_registry_persist"
     [ ( "rfc-0266-phase-d"
-      , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
+      , [ test_case "startup replay diagnostics" `Quick test_startup_replay_diagnostics
+        ; test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
         ; test_case "reprojection preserves first completion after restart" `Quick
             test_reprojection_preserves_first_completion_after_restart

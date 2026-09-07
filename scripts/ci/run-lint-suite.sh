@@ -143,6 +143,24 @@ blocking_lints() {
   # the same state. This asks the question those answered too late: is every
   # check script reached from something CI runs. It reads no diff base, so it
   # belongs here rather than beside the PR-only guards.
+  # Ten guards this repository already wrote and no workflow reached. Each was
+  # run on untouched main on 2026-09-07 and passed, which is the cheapest
+  # moment to wire one: nothing to fix first, and the next time it goes red
+  # somebody sees it. Together they take about 10s of the job.
+  #
+  # check-boundary-guard-mli-pairs.sh is deliberately not here. It reads a
+  # diff against origin/main itself rather than taking a base, so where it
+  # belongs is a question this change does not answer (#34018).
+  run_lint "Agent-core package shape" bash scripts/check-agent-core-boundary.sh
+  run_lint "Execute async surface" bash scripts/check-execute-async-surface.sh
+  run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
+  run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
+  run_lint "Feature flag consistency" bash scripts/check-feature-flag-consistency.sh
+  run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
+  run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
+  run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh
+  run_lint "TLA variant sync" bash scripts/ci/check-tla-variant-sync.sh
+  run_lint "Model prefix inheritance" python3 scripts/ci/check_model_prefix_inheritance.py
   run_lint "Every check script is reached" \
     python3 scripts/ci/check-guards-are-wired.py
 }

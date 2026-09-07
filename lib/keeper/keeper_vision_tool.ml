@@ -169,8 +169,14 @@ let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
    ends the candidate, not the walk; it still names the failure class when
    every candidate has been tried. *)
 let candidate_policy_http_error = function
-  | Llm_provider.Http_client.AcceptRejected _ -> true
   | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
+  | _ -> false
+
+(* AcceptRejected is the caller's own transport wiring refused before dispatch
+   (a missing clock, an invalid deadline). Every candidate would refuse the
+   same wiring, so this one still ends the walk. *)
+let wiring_rejected = function
+  | Llm_provider.Http_client.AcceptRejected _ -> true
   | _ -> false
 
 (* Capacity belongs to the selected binding. A later image runtime may admit
@@ -187,7 +193,8 @@ let candidate_capacity_http_error = function
   | _ -> false
 
 let failure_class_of_http_error = function
-  | err when candidate_policy_http_error err -> Tool_result.Policy_rejection
+  | err when wiring_rejected err || candidate_policy_http_error err ->
+    Tool_result.Policy_rejection
   | err when candidate_capacity_http_error err -> Tool_result.Runtime_failure
   | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
@@ -406,6 +413,16 @@ let run_candidates_outcome
                 ~last_error:(Some (`Provider_error err))
                 ~attempt_index:(attempt_index + 1)
                 rest)
+            else if wiring_rejected err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"terminal_provider_error";
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
             else if candidate_policy_http_error err
             then (
               record_vision_candidate_attempt

@@ -2995,6 +2995,14 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
    [..._telemetry_summary_json]. *)
 
 let test_tools_worker_promotes_seed_before_component_ttl () =
+  let guard_was_ready = Eio_guard.is_ready () in
+  (* Restore after the fixture's entire Eio runtime and worker pool close,
+     including exceptional exits. Later synchronous fixtures must not inherit
+     this test's process-wide mutex guard. *)
+  Fun.protect
+    ~finally:(fun () ->
+      if guard_was_ready then Eio_guard.enable () else Eio_guard.disable ())
+  @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   Eio_guard.enable ();
   let clock = Eio.Stdenv.clock env in

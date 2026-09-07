@@ -1026,7 +1026,8 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 // WORKAROUND: this allow-list is the exact N-of-M pattern surface-header.ts set
 // out to delete (a list the compiler cannot keep in sync with reality). Root fix:
 // drop SurfaceLead/SURFACE_OWN_LEAD_IDS entirely and give every surface its own
-// header. Tracked as a follow-up; corrected here so live surfaces stop double-rendering.
+// header. Removal target: #34094. Corrected here so live surfaces stop
+// double-rendering.
 const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
   'overview',
   'approvals',

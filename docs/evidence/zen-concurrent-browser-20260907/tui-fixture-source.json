@@ -2,5 +2,10 @@
   "product_source": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
   "harness_adjustment": "cff2c44c8c test-only current-inventory wait",
   "harness_sha256": "b4dc33028dbb067f5fa2b71a6dc78a67f3145e1a6c47ad6e3792a2fc54a28577",
-  "binary_execution": "not yet run"
+  "binary_execution": {
+    "status": "passed",
+    "product_source_commit": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
+    "tui_sha256": "13558430a836a90344bcd00d668a0a7e6a082e025edda71772e6b160a16a8e98",
+    "result_log": "tui-fixture-tests.log"
+  }
 }

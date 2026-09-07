@@ -124,10 +124,12 @@ require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
 
 require_contains README.md 'docs/RELEASE-EVIDENCE.md'
 require_not_contains README.md '/api/v1/command-plane'
-require_contains README.md 'dashboard#monitoring?section=journey'
-require_contains README.md 'dashboard#command?section=operations'
-require_contains README.md 'dashboard#connectors?section=connector-status'
-require_contains README.md 'dashboard#workspace?section=verification'
+# The dashboard route contract lives with the dashboard doc, not the README:
+# the README names the dashboard in one section and the TUI is the front door.
+require_contains docs/DASHBOARD-INTEGRATION.md '#monitoring?section=journey'
+require_contains docs/DASHBOARD-INTEGRATION.md '#command?section=operations'
+require_contains docs/DASHBOARD-INTEGRATION.md '#connectors?section=connector-status'
+require_contains docs/DASHBOARD-INTEGRATION.md '#workspace?section=verification'
 require_not_contains README.md 'dashboard#monitoring/sessions'
 require_not_contains README.md 'dashboard#command/intervene'
 

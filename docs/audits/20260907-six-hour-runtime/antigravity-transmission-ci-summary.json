@@ -1,0 +1,22 @@
+{
+  "head": "f97d8de9c8fe65a8afa693e91f619e075bd89fe3",
+  "run": "https://github.com/jeong-sik/masc/actions/runs/34107935061",
+  "conclusion": "success",
+  "tests_total": 94,
+  "suites": {
+    "runtime_antigravity": 37,
+    "keeper_antigravity_runtime": 11,
+    "official_client_host": 46
+  },
+  "prior_run": {
+    "head_prefix": "ac6ce1657d",
+    "passed": 93,
+    "failed": 1,
+    "failure": "New rejection fixture included nonempty successful response; corrected to actual empty-response rejection. No production behavior was weakened."
+  },
+  "boundary": "Input observation occurs after complete client-stdin copy and EOF, not during preparation. Spawn/partial write reports zero; rejection after transmission retains report.",
+  "limits": [
+    "Local process fixtures do not establish upstream provider acceptance or live execution.",
+    "Required merge checks not complete at this capture; no deployment performed."
+  ]
+}

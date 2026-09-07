@@ -1,0 +1,54 @@
+{
+  "observed_at": "2026-09-07T12:54:35.388555+00:00",
+  "fresh_window_start": "2026-09-07T11:54:35.388555+00:00",
+  "limits": [
+    "Literal aggregates; provider request and candidate-attempt denominators are not measured.",
+    "No raw messages, inputs or credentials retained.",
+    "Header-profile and request-shape rows are paired diagnostics for one HTTP rejection, not independent attempts.",
+    "Current HTTP diagnostics omit Retry-After and failure ownership; no absence-of-hint, concurrency-limit, hard-quota, or successful-fallback claim follows from them.",
+    "Literal error classes examine only the error payload after the error= marker; remaining errors are not classified."
+  ],
+  "source_findings": {
+    "actual_http_path": "Provider_failure_attribution.core_error_of_http_error -> Error.Api(Retry.RateLimited); projected unchanged by Agent and Runtime_agent",
+    "ordering_gap": "Keeper_turn_driver quota observer only matches Error.Provider(RateLimit|HardQuota)",
+    "fixture_gap": "rate_limit_error_from_a_429 explicitly converts classify_error via Error.of_retry_api_error and constructs Error.Provider",
+    "raw_http_429_ownership": "Failure_scope_unknown; optional retry_after resolves body before Retry-After header",
+    "provider_glm_codes": "Backend_glm separates rate/load from quota but complete_sync flattens both classes to HTTP429",
+    "runtime_verification": "No model request, operational mutation, account/config inspection, or live candidate-selection proof."
+  },
+  "original_diagnostic_shapes": {
+    "http_client_4xx_request_header_profile": 617,
+    "http_client_4xx_request_shape": 617
+  },
+  "last_hour": {
+    "rows": 6328,
+    "levels": {
+      "INFO": 5765,
+      "WARN": 489,
+      "ERROR": 74
+    },
+    "exact_glm_429_http_events": {
+      "counts": {
+        "http_client_4xx_request_header_profile": 33,
+        "http_client_4xx_request_shape": 33
+      },
+      "request_shape_models": {},
+      "first": {
+        "http_client_4xx_request_header_profile": "2026-09-07T12:37:37Z",
+        "http_client_4xx_request_shape": "2026-09-07T12:37:37Z"
+      },
+      "last": {
+        "http_client_4xx_request_header_profile": "2026-09-07T12:54:27Z",
+        "http_client_4xx_request_shape": "2026-09-07T12:54:27Z"
+      }
+    },
+    "error_level_classes": {
+      "other_not_classified": 62,
+      "provider_effect_fenced_literal": 4,
+      "rate_limited_literal": 8
+    },
+    "provider_code_occurrences": {
+      "1302": 3
+    }
+  }
+}

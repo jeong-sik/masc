@@ -18,17 +18,17 @@
 | 4 | DeepSeek tool-call 응답 누락 | 224 | code-fix |
 | 5 | 중첩 tool-cycle checkpoint 저장 실패 | 21 | related-code-fix |
 | 6 | 복합 도구는 성공하지만 실행 증거 저장 실패 | 5 | code-fix |
-| 7 | 재개 후 반복 도구 루프 | 231 | scope-design-required |
+| 7 | 재개 후 반복 도구 루프 | 231 | direct-scope-tested-autonomous-pending |
 | 8 | Provider 연결 장애 | 51 | tested-code-fix |
 | 9 | 일반 문장의 @check·lint를 ID 오류로 기록 | 362 | code-fix |
 | 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
-| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | live-acknowledged |
+| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | live-ack-restart-observed |
 | 12 | Board candidate ledger schema 불일치 | 12 | retention-merged-tested |
 | 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-merged |
 | 14 | Dashboard build-stamp 누락 | 5 | distribution-stack |
 | 15 | microVM sweep가 전체 Keeper 부팅을 막음 | 68 | tested-code-fix |
 | 16 | microsandbox가 요구 격리 보장을 표현 못함 | 5 | backend-capability |
-| 17 | 브라우저 live lane 미연결 | 12 | host-installed-connected |
+| 17 | 브라우저 live lane 미연결 | 12 | live-roundtrip-observed |
 | 18 | Discord 삭제·권한 없는 channel 바인딩 | 28 | external-binding |
 | 19 | WebSearch 전 provider 실패와 WebFetch HTTP 오류 | 19 | search-service-recovered |
 | 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | batch-drain-observed |
@@ -46,7 +46,7 @@
 
 ### 2. GLM 요청 제한
 
-- 조치: provider 반환 Retry-After·reset과 실제 후보 선택을 대조. 동시 호출/queued wake에 의한 재시도 증폭을 별도 재현해야 함.
+- 조치: 실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 14:05Z 현재 운영 바이너리에 이 병합은 없으며 최근1시간 GLM429 diagnostic87건이 남아 있다. 운영 fallback 성공은 미검증.
 - 관련 코드/경계: `lib/keeper/keeper_runtime_attempt.ml`
 - 최초 증거: `2026-09-06T21:05:50Z` / seq `25985072` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267592`
 > [agent_core:http_client] {"event":"http_client_4xx_request_header_profile","url":"https://api.z.ai/api/coding/paas/v4/chat/completions","status":429,"response_server":null,"cf_ray":null,"request_header_count":4,"total_request_header_bytes":148,"max_single_header_bytes":73,"cdn_per_header_limit_bytes":8192,"header_sizes":[{"name":"Authorization","bytes":73},{"name":"Content-Type","bytes":32},{"name":"content-length","bytes":24},{"name":"connection","bytes":19}],"note":"4xx from an LLM endpoint. Header VALUES omitted (may carry credentials); sizes only. A cloudflare/RunPod edge rejects a single header line over cdn_per_header_limit_bytes with an opaque 400 before the origin — compare max_single_header_bytes."}
@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 08:03Z Execute count959로 반복 문제 미해결. #33950 기반6/6 PASS·필수 검사 PASS 후 이 세션이cf63fd467d로 병합. Context-only 저장 유실 수정 #33953도21/21·필수 검사 PASS 후8685db2478로 병합했다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.
+- 조치: semantic journal #34021은114/114 PASS 후b388b11414 병합. 원래입력 보존 #34062는108/108 PASS 후3c353d75b5, 정확한 checkpoint 보존 #34036은수정bd0 기준55/55 PASS·최종3ac 필수 검사 PASS 후521773e7e8 병합. source-batch fixture #34012는busy polling을 실제 Owner fence 신호 대기로 고쳐같은1초 deadline에서115/115 PASS 후438689dc53 병합. SDK 경계 #34041은117/118 PASS로 별도 output probe1건 실패. 최신 공유 대화를 유지하는 native 재개·자식/세션 소유권·중단 effect 복구는 미연결이며 최근1시간 반복 신호21건으로 운영 해결은 미완료.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -120,7 +120,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: 도메인103/103·HTTP34/34 PASS와 외부 병합 후, 운영6db68b4bea에서 이 세션이08:27:04Z 부재 ACK를 적용했다. 재조회 revision4→5·operator_absence_acknowledged, 이전 종료 증거·정리 의도 보존 확인. 새 서버 시작에서의 재발 여부는 미측정.
+- 조치: 도메인103/103·HTTP34/34 PASS 후08:27:04Z 실제 부재 ACK 적용. 외부08:37:36Z 재시작 뒤09:06:48Z revision5·operator_absence_acknowledged 유지, 시작 이후 해당 복구 오류0건. 09:39:25Z에도 ACK 유지 확인. 이 세션이 재시작한 것은 아니다.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -146,7 +146,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다.
+- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다. 09:35Z 외부 바이너리 변경 후 다시 stale/unbound이며 실행·디스크 바이너리 hash도 불일치했다.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -171,7 +171,7 @@
 
 ### 17. 브라우저 live lane 미연결
 
-- 조치: #33881 Node5/5 PASS. native host 실제 설치·원본 토큰 보존 확인. 사용자 확장 추가 뒤 Firefox 자식86997→8935 TCP 연결. 탭/본문 왕복 및 두 live 브라우저 구분은 미확인.
+- 조치: native host 설치 후09:40:03Z 실제 live 확장으로 tabs.list와 page.read 왕복 성공: HTTP200, 탭9개, 본문515자. 본문·URL·제목은 증거에서 제외. 정확한 응답 host PID 및 여러 브라우저 구분은 미측정.
 - 관련 코드/경계: `connectors/browser`
 - 최초 증거: `2026-09-06T22:12:34Z` / seq `26003629` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:286149`
 > keeper:analyst tool_call tool=BrowserTabs source=- params=[lane] input_shape=[lane=string:4] outcome=error out_len=341 failed_params={"lane":"live"} error_preview=no browser lane connected: the live lane needs the operator's browser running with the browser-lane extension and host (connectors/browser) failure_class=workflow_rejection — The current state does not admit this action; it is a rule, ...
@@ -410,3 +410,109 @@ Release34098251245의 macOS 실제 job도 SUCCESS이며 공개 release job은 SK
 실제 브라우저에서도08:30:43Z MASC Overview가 렌더됐고 실행 중 Keeper13/19가 표시됐다. 캡처 구간 page error0·HTTP4xx/5xx0을 관측했다. [화면](dashboard-6db-dashboard.png) · [브라우저 관측](dashboard-6db-browser-proof.json). 전체 런타임은 warning이며 probe와 paused Keeper 항목이 남아 있어 대시보드 자산 정상화와 fleet 전체 정상화를 구별한다.
 
 ACK 이후08:32:41Z까지5분37초의 로그에서 해당 new-keeper shutdown recovery 오류0건을 확인했다. [후속 로그 관측](absence-ack-post-apply-observation.json). 같은 프로세스의 짧은 구간이며 재시작 성공 증거로 확대하지 않는다.
+
+
+## 09:40Z 검증 갱신: 실제 브라우저 왕복과 재시작 뒤 ACK
+
+[실측 증거](runtime-readonly-refresh-20260907T0940Z.json)는 읽기 전용 관측이다. 09:40:03Z live 확장 route가 탭 9개와 본문 515자를 반환했다. host 연결 여부만 확인하던 단계를 넘어 실제 tabs.list → page.read 왕복을 측정했다. 본문·URL·제목·자격증명 값은 저장하지 않았다. 응답한 정확한 host PID는 프로토콜에 없으므로 두 Firefox의 구분까지 증명하지 않는다.
+
+[재시작 이후 증거](absence-ack-after-external-restart.json)에서 외부 08:37:36Z 시작 후 09:06:48Z에도 ACK revision5가 유지되고, 해당 shutdown recovery 오류는 0건이다. 09:39:25Z 파일 재조회도 ACK 상태를 확인했다. 이 세션의 재시작은 없었다.
+
+09:35Z 실행 바이너리는 embedded a4e6603311, 대시보드는 다시 stale/unbound다. 09:37Z 제공 index·디스크 index·health index hash는 일치하지만, 실행 health와 디스크 바이너리 hash는 다르다. 08:30Z 자산 복구 성공은 당시 관측이며 현재 일치하는 설치 릴리스의 증거로 확대하지 않는다.
+
+[직접 scope CI](direct-repetition-ci-summary.json)는 exact 97e3c224ad의 125개 중124 PASS/1 FAIL이다. #33967은 외부 세션이 필수 검사 후 병합했다. 새 scope/host 테스트는 통과했고, 실패는 Antigravity가 spawn 전 입력을 전달했다고 보고하는 기존 source 불일치다. 별도 baseline 실행은 하지 않았다. #33982는 전체 stdin 쓰기·EOF 후에만 보고하도록 고치며, #33984는 큐 식별자 보존 및 불확실한 rename 이후 동기화 재확인을 보강한다. 두 후속의 원격 동작 검증과 자율 실행 연결은 아직 완료 증거가 아니다.
+
+
+09:43:44Z에 추가로 [후속 로그 구간](runtime-pattern-followup-0940.json)을 동결했다. 외부 시작08:37:36Z 이후22,486행(INFO20,726/WARN1,483/ERROR277)에서 원래 exact-tool 반복 경고는11건이 남았다. 선택한 기존 누락 tool-results·중첩 checkpoint·composition 증거 실패·new-keeper 종료 복구·browser lane 부재·Librarian 실패·Claude quota 문자열은0건이다. 각 경로의 실제 실행 횟수를 측정하지 않았으므로0건을 해결이나 통제된 전후 개선율로 해석하지 않는다.
+
+
+큐 binding의 [원격77/77 PASS 증거](queue-binding-ci-summary.json)는 b9f30528ff의 queue36/scope11/cancellation7/source-terminal11/transfer12다. 실제 After_rename 실패 후 재시도의 동기화 확인 테스트도 통과했다. 필수 lint가 지적한 새 ignore 호출 설명은9f79ffbb72에서 주석1줄로 보완했으며, 그 후속 head에서77개를 다시 실행했다고 주장하지 않는다. 자율 실행 연결은 별도 작업이다.
+
+
+Antigravity #33982의 [수정 head f97d8de9c8 증거](antigravity-transmission-ci-summary.json)는 runtime37/Keeper11/host46=94/94 PASS다. 입력을 준비한 시점이 아니라 CLI stdin 전체 쓰기와 EOF 뒤에만 전송을 보고한다. 첫 추가 fixture는 ERROR와 성공 본문을 동시에 구성한 탓에 실패했으며, 실제 빈 본문의 거절로 바로잡은 후 통과했다. provider 수락·운영 실행 및 최종 필수 검사 완료를 뜻하지 않는다.
+
+
+## 10:52Z 실행 수명과 Stuck 방지 요구 반영
+
+사용자는 새 구조가 Stuck이나 추가 제약을 만들지 않고 건강한 복구 시나리오를 갖춰야 한다고 명시했다. [#34021](https://github.com/jeong-sik/masc/pull/34021)은 대기 중인 모든 작업을 잠그던 초안을 수정해 실제 Running만 하나로 제한하고, recovery 이전 상태와 정확한 checkpoint를 보존한다. Preparing/Ready 재확인, queue generation 갱신, A 대기 중 B 완료 후 A의 동일 scope 재개를 포함한 SQLite20개 사례를 정의했다. 이 시점에는 원격 검증 중이며 실제 자동 스케줄러/Owner admission, HITL·자식·official session 연결과 interrupted effect witness는 아직 연결되지 않았다. 빈 frame이나 checkpoint 존재만으로 재실행을 허용하지 않는다.
+
+[운영 읽기 전용 사전 점검](journal-live-readonly-preflight.json)은21개 파일 후보 중 읽은20개 journal의1,013행에서 입력 digest/시간 값 오류0건을 관측했다. tool_usage 아래1개는0바이트·schema없는 파일이어서 정상 journal로 세지 않았다. 원문 input·operation ID는 공개하지 않았으며, full schema 또는 실제 migration 통과를 측정한 것은 아니다.
+
+[#33994 정확한 head 검증](official-transmission-ci-summary.json)은563bc3492d의205/205 PASS다. Codex70/Claude63/Keeper Claude23/carriage3/host46이며, 필수 검사 후 외부 세션이10:11:09Z82cf770d12로 병합했다. 전송 전·후 실패를 구분하고 callback 관측 실패가 같은 작업 재실행을 허가하지 않도록 보강했다. 배포나 실제 provider 사용의 증거는 아니다.
+
+[#33990 원격 실행](heartbeat-source-batch-ci-summary.json)은b73711aa27의122/124 PASS다. 새 mixed-binding 검증은 통과했지만 실제 Gate 승인이 없는 HITL fixture와 초기 lane의 idle 전제를 검증하지 않은 cancellation fixture가 실패했다. #34012의71d0a43e8a는 실제 HITL connector9/9 PASS지만 heartbeat60/61 PASS로 fence 대기 실패가 남았다. idle 전제를 실제 확인한 뒤에도 실패하므로 초기 startup race 추정만으로 설명할 수 없으며 현재 원인을 조사 중이다. #33990의 외부 병합은 전체 동작 PASS와 구분한다.
+
+
+## 후속 검증에서 확인된 미해결 경계
+
+#34021의 e14cd2f9ee [34113305320](https://github.com/jeong-sik/masc/actions/runs/34113305320)은 컴파일 단계의 fatal warning 4로 실패했다. 새 SQLite20개 사례의 실행 성공 증거가 아니다. domain과 SQLite 결과의 exhaustive pattern matching을 보완하고 있으며, 동시에 journal identity를 기존 Direct_operation / Autonomous_admission으로 일반화한다. 직접 요청의 응답 완료 뒤 승인·자식 작업이 남는 경우를 자율 UUID 별칭으로 연결하면 부모 실행을 잘못 재개할 수 있기 때문이다.
+
+현재 Gate deferral은 해당 호출을 보류하고 같은 턴은 계속 진행한다. Awaiting_gate_approval outcome에는 현재 producer가 없으므로 이 outcome만 보고 부모 대기를 결정할 수 없다. durable child acceptance의 명시적 부모 binding, 실제 턴 종료, 정확한 checkpoint·session·effect receipt를 연결해야 한다. 대기 중인 A가 다른 B의 실행을 막지 않고, B 완료 후 A가 동일한 실행으로 돌아오는 시나리오의 전체 런타임 검증은 아직 남아 있다.
+
+
+11:04Z [새 읽기 전용 관측](runtime-stuck-followup-1104.json)의 직전1시간28,225행에서 exact-tool 반복10건, browser lane 부재2건, Claude quota1건이 다시 관측됐다. 이전09:40Z 실제 브라우저 왕복 성공은 당시 성공이며 지속 가용성을 보장하지 않는다. 현재 실행 binary는2fc09f02d9, 외부 재시작10:41:44Z, runtime root는~/me/.masc이며 overall degraded·dashboard stale다. 이 세션은 해당 재시작이나 자산 교체를 수행하지 않았다. 관측 구간에 배포가 섞여 있어 전후 개선율로 해석하지 않는다.
+
+
+## 실행 기록·checkpoint 보존 검증과 공유 대화 경계
+
+[#34021 exact87243](semantic-journal-87243-ci-summary.json)의 [34115337665](https://github.com/jeong-sik/masc/actions/runs/34115337665)는 semantic23/chat11/scope12/shutdown23/Owner45=114/114 PASS이며 같은 head의 필수 검사도 통과했다. 초기 e14의 컴파일 실패를 고친 후의 결과다. 관측 당시 draft/open이며 native admission·scheduler·HITL 연결과 운영 배포는 하지 않았다.
+
+[#34036 exact58f590](owned-checkpoint-58f590-ci-summary.json)의 [34123162730](https://github.com/jeong-sik/masc/actions/runs/34123162730)는 owned checkpoint10/stale guard27/purge18=55/55 PASS다. 실제20회 B 저장과12개 rolling history 정리 후에도 A의 정확한 bytes를 읽었다. 손상 bytes 보존, 잘못된 reference, 쓰기 실패·fsync 불확실성·취소를 검증했다. 당시 필수 lint는 실패했고 @check는 진행 중이므로 merge-ready로 표시하지 않는다. 전체 session 삭제에 대한 journal 소유권 보호는 아직 연결되지 않았다.
+
+공유 Keeper에서 A의 옛 checkpoint 전체를 복원하면 B 이후 대화와 전역 turn watermark를 되돌릴 수 있다. SDK Advanced.continue는 checkpoint의 messages·turn_count·usage를 그대로 이어가므로, 보존된 A는 정확한 당시 증거로 쓰되 다음 호출의 공유 대화는 최신 상태를 유지해야 한다. A의 원래 입력·scope와 완료된 도구 경계의 typed witness를 별도로 연결한다. #34041 exact797b117d2a는 runtime이 버리던 SDK turn/stage를 Keeper 결과까지 전달하며 [34124088524](https://github.com/jeong-sik/masc/actions/runs/34124088524) 검증 중이다. 이 boundary 자체는 fsync나 재실행 승인이 아니다.
+
+#34012 exact e650의 진단도 heartbeat60/61 PASS이며 실패 지점은 before_profile_publication, Owner mailbox0·metadata미게시·실행중turn없음·shutdown예약없음이다. 모델이나 Librarian 대기까지 도달하지 않았다. 독립 소스 검토로 lock inversion을 증명하지 못해 실제 publication 단계별 관측을 추가하며, deadline을 늘리거나 해결로 표시하지 않는다.
+
+
+#34041의 [exact797b 결과](cooperative-boundary-797b117-ci-summary.json)는 dispatch66/67·advanced5/5·official host46/46=117/118 PASS다. 새 SDK 경계3개와 Gate 보류 후 정상 완료 사례는 실제 통과했다. 전체 run은 keeper_lane_status의 composable output producer probe가 없는 검사1건 때문에 실패다. 해당 등록·출력 계약은 이번 diff에 없으며 별도 baseline 실행은 하지 않았다. #34036의 lint2건은 bd0f2ebe5a에서 observer 반환값 처리와 취소 catch를 명시적으로 고쳐 재검증 중이며, 기존55 PASS를 새 head 결과로 옮기지 않는다.
+
+
+## GLM429 실제 오류 전달 경로 재검토
+
+[집계와 소스 근거](glm429-source-and-live-followup.json)에서 원래617은 header-profile617행과 request-shape617행의 diagnostic pair이며1,234개의 독립 호출이 아니다. 11:54:35–12:54:35Z6,328행에는33쌍이 남았다. 실제 rawHTTP429는 SDK에서 Api(Retry.RateLimited)로 전달되지만 Keeper driver의 순서 관측은 Provider(RateLimit|HardQuota)만 처리해 이 경로를 놓친다. 기존 테스트는 중간에 Provider variant로 직접 변환해 결함을 가렸다. 원래2번의 수정 대상으로 삼는다.
+
+raw429의 실패 소유권은 unknown이고 Retry-After는 존재할 때 보존된다. 현재 로그로 hint 부재·동시성 제한·hard quota를 확정할 수 없다. 수정은 unknown backpressure와 계정 소유 quota를 구분해야 하며, 실제 다른 후보 성공이나 새 운영 반영은 아직 검증하지 않았다.
+
+
+## 14:05Z 후속 병합과 운영 재검증
+
+- [설정 전환115/115](lane-fence-1b3143-ci-summary.json): #34012의1b3143은 실제 Owner shutdown 게시로 promise를 깨워 같은1초 deadline을 통과했다. busy yield polling과 임시 production 계측을 제거했다. 13:55:05Z438689dc53으로 병합했다. 생산 writer의 교착이 증명되었다거나 deadline을 늘려 수리했다고 해석하지 않는다.
+- [원래 입력108/108](semantic-input-9092-ci-summary.json): #34062의9092는 semantic29/chat11/Owner45/shutdown23 및 필수 검사 PASS. Direct 응답 완료 후에도 의미상 작업이 대기 중이면 입력을 보존하고, 다른 Auto 작업 뒤 재개하며, semantic 종결에서만 본문을 해제한다. 14:04:19Z3c353d75b5로 병합했다.
+- [정확한 checkpoint55/55](owned-checkpoint-bd0f2ebe-ci-summary.json): #34036의 수정bd0에서 owned10/stale guard27/purge18 PASS. 이후 외부 main merge3ac는 대상 코드·테스트 변경 없음과 필수 검사 PASS를 확인했다. 14:04:28Z521773e7e8로 병합했다. bd0의 동작 결과와 최종3ac의 필수 검사 결과를 구분한다.
+- [HTTP429139/139](http429-033899-ci-summary.json): #34059의033899는 driver59/lane18/quota13/routing49 및 필수 검사 PASS. 실제 transport Api variant로 진입하며 변경 없는 reload·credential 교체·모든 후보가 낮은 순위일 때 진행까지 검증했다. 최초e3fa의 fixture 타입 컴파일 실패를 수정한 후 결과다. 14:04:35Z76a1988288로 병합했다.
+- [journal114/114](semantic-journal-87243-ci-summary.json)은13:13:21Zb388b11414로 병합됐다. 이 저장소 원리만으로 native lifecycle 연결 완료를 주장하지 않는다.
+
+[14:05:26Z 운영 읽기 전용 실측](runtime-recovery-followup-1405.json): 바이너리116b6d13f2, 외부 시작13:44:23Z, 전체warning·dashboard ok다. journal 병합만 포함하며 이번 입력·checkpoint·429·fence 후속 병합은 아직 포함하지 않는다. dashboard의 릴리스 receipt/source binding은 여전히 없음이며 이번 관측은 브라우저 동작 검증이 아니다. 최근1시간13,065행(INFO11,805/WARN1,094/ERROR166) 중 반복 exact-tool 신호21건, GLM429 header-profile87건이 남았다. 다른 선택 신호0건은 해당 경로 실행이나 완치를 증명하지 않는다. 이번 세션은 배포·재시작하지 않았다.
+
+다음 연결은 A의 원래 입력/반복 frame을 선택하면서 B가 갱신한 공유 대화를 유지해야 한다. Direct 응답 종결과 부모 작업 종결을 구분하고, physical child 취소를 정확한 실행 identity에 묶어야 한다. 대기·불확실한 A 때문에 무관한 B를 막는 gate나 임의 만료는 추가하지 않는다.
+
+
+## 추가 운영 오류와 native 연결 검토
+
+[OpenAI 오류 분리](openai-request-failure-followup.json): 같은1시간의 openai.gpt-5.5 오류는 추론·도구/API 조합49건, 모델 접근권52건, 도구 스키마description 중복3건이다. 중복은 기존description 앞에 같은key를 추가하던 serializer 결함이며 #34075의96061에서 수정했다. 실제request codec46/46 PASS, broader provider-complete63/66 PASS로 합계109/112이며 실패3건은 tool을 넘기지 않는 별도 thinking-contract 검사다. 전체 run은 실패로 기록하고, 별도baseline 실행은 하지 않았다. 필수 검사와 codec 독립실행은 진행 중이다.
+
+[OpenAI 공식 GPT-5.5 안내](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.5)의 API/model parameters는 추론·도구·여러 턴 용도로 Responses를 안내한다. 운영의 openai provider는 openai-compatible-http이고 registry의 Chat Completions 경로를 사용한다. Responses를 명시적으로 선택하는 설정 표현을 보강하고 있으며, 추론을 끄거나 권한복구 완료로 표시하지 않는다.
+
+[독립 native 연결 소스 검토](native-continuation-source-review.json)는 전체 snapshot캐시로 인한 B 덮어쓰기/충돌, 늦은 provider callback의 실행 소유권, CAS commit불확실성에서의 중복 관측, historical baseline재주입에 따른 false yield를 확인했다. 각각 scope한정 projection, 정확한 physical attempt소유권, pre/post재조회 확인, attempt시작baseline고정으로 다뤄야 한다. 이번 결과를 native 구현 완료나 운영에서 네 가지 모두 재현한 증거로 사용하지 않는다.
+
+
+## 14:25Z 스키마 수정 병합과 후보 접근 오류
+
+[#34075 스키마 증거](schema-description-96061-ci-summary.json):96061의독립 codec 실행34131894565는46/46 PASS이며 필수 검사34131560210도전부PASS다. 14:25:25Z57f5a74ea6으로병합을독립확인했다. 기존넓은실행109/112 실패는보존하고새수정이그경로를사용하지않음을소스로구분한다. 운영요청성공은아직미검증이다.
+
+[#34087](https://github.com/jeong-sik/masc/pull/34087)은후보의권한오류가다른선언후보까지막는문제를수정한다. actualHTTP401/403은ApiAuth/Authorization으로전달되지만기존FSM에서는재시도대상이아니었다. namedKeeper lane에서이두typed오류만다음후보로보내며caller거부·effectattempted/unknown·후보소진·HTTP400종결을유지한다. a0e412d45b의parser3개·독립소스리뷰PASS, remote34132833533은진행중이며운영권한복구완료로표시하지않는다.
+
+Responses는다른세션의#34055가이미catalog행으로표현하므로새protocol추가안은게시하지않았다. 해당PR9c98에root원격검사를실행했으며최초34132427456은존재하지않는test_runtime_toml을root가선택한harness오류로테스트전실패했다. 실제있는catalog/header2개로바꾼34132861473은진행중, ci34132430603은SUCCESS다. 현재테스트는실제TOML→binding→HTTP경로증명이약해별도검증stack을추가하고있다.
+
+정확한[gpt-5.5 공식모델페이지](https://developers.openai.com/api/docs/models/gpt-5.5)는context1,050,000과effort none/low/medium/high/xhigh를명시한다. 다른오류400/429가그context수락을증명하는것은아니다. scoped행이none/xhigh를빠뜨리고bare행이minimal을허용하는불일치도함께고친다. 사용자설정을none으로낮추는변경은하지않는다.
+
+
+권한 failover의 a0e412 원격 실행은 [93/93 PASS](candidate-access-a0e412-ci-summary.json)(driver62/lane18/quota13)로 완료됐다. 신규3개 시나리오도 실제 실행했다. 필수 @check는 이 관측에서 진행 중이다. 기존 Responses PR9c98의 올바른 대상 실행은 [71/71 PASS](openai-responses-9c98-ci-summary.json)(catalog14/header57)이며, 별도 CI workflow도 SUCCESS다. 이 결과는 아직 추가 중인 전체 runtime HTTP 시나리오를 포함하지 않는다.
+
+
+[#34093](https://github.com/jeong-sik/masc/pull/34093)은 기존#34055에 의존하는 작은 수정이다. [stack 정보](openai-responses-effort-stack.json)의0d7dcbd555는 GPT-5.5 세 행의 effort 목록만 공식5값으로 맞추고, 실제 TOML→binding→완료 API→로컬 HTTP를 통과하는 시나리오를 추가했다. Responses6조합, Chat none2조합, minimal의 실제 완료 호출 거절과 HTTP0을 정의했다. source review와 parser PASS이며 remote34133788720은 진행 중이다. 운영 권한이나 OpenAI 서버 수락을 로컬 응답으로 대신 증명하지 않는다.
+
+
+14:38:29Z #34087은 모든 필수 검사와93/93 동작 테스트를 통과한 a0e412에서656d1493d5로 병합됐다. [후속 운영 확인](runtime-health-followup-connection.json)에서는 잠시8935 연결이 거절됐다가14:39:08Z 새 바이너리3a3968edce의 health가warming으로 응답했다. 로그에는14:36:33Z SIGTERM/정상 종료, 새 프로세스 시작은14:39:00Z다. 이 세션은 배포·재시작하지 않았으며 신호 발신자는 확인하지 않았다. 최신 상태를 앞선14:05Z warning 관측과 구분한다.
+
+사용자가 요청한 비정체 복구 조건은 [복구 시나리오 표](recovery-scenarios.md)에 테스트 범위와 남은 native 연결을 나누어 정리했다.

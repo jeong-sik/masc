@@ -568,9 +568,13 @@ let test_keeper_operations_are_not_top_level_tabs () =
 let test_lanes_is_a_runtime_child () =
   Alcotest.(check bool) "Lanes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  Alcotest.(check int) "Lanes highlights Runtime"
-    (surface_ring_index Runtime)
-    (surface_ring_index Lanes);
+  (* No ring assertion here on purpose. Runtime left the ring when it moved
+     under Config, so [surface_ring_index Runtime] and [surface_ring_index
+     Lanes] are now the same match arm resolving to Config -- comparing them
+     cannot fail, and would keep passing if Lanes were moved to hang off
+     Resources instead. What Lanes highlights is claimed with teeth in
+     [test_logs_is_an_activity_child], against Config's own index. The label
+     below is what still records whose child Lanes is. *)
   Alcotest.(check bool) "and the help sheet files it under Runtime" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Runtime / Lanes")

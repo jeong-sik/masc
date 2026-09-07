@@ -13285,7 +13285,97 @@ def run_held_back_override_regression(executable: str) -> None:
     )
 
 
+def run_fusion_history_regression(executable: str) -> None:
+    """Historical evidence remains inspectable without a retained run or recent Board row."""
+    fixtures = overview_event_http_fixtures()
+    run = fusion_run("history-701", keeper="not-a-proven-caller")
+    post = fusion_detail_response(run, "historical-judge-synthesis-701")[1]["evidence"]["post"]
+    post.update(author="board-author-701", body="original-board-body-701")
+    post["meta"]["observed_usage"] = {"input_tokens": 101, "output_tokens": 202}
+    refreshed = json.loads(json.dumps(post))
+    refreshed["meta"]["observed_usage"]["input_tokens"] = 303
+    wrong_post = json.loads(json.dumps(refreshed))
+    wrong_post["origin"]["fusion_run_id"] = "different-run-702"
+    response = fusion_runs_response([])
+    response[1]["replay"] = {
+        "status": "complete", "lines_read": 68,
+        "malformed_lines": 34, "dropped_running": 34,
+    }
+    response[1]["historical_evidence"] = [{
+        "run_id": "history-701", "post_id": post["id"],
+        "title": post["title"], "created_at": 1787557684.0,
+    }]
+    second_post = json.loads(json.dumps(post))
+    second_post.update(id="post-history-702", title="Second historical Fusion", author="board-author-702")
+    second_post["origin"]["fusion_run_id"] = "history-702"
+    response[1]["historical_evidence"].append({
+        "run_id": "history-702", "post_id": second_post["id"],
+        "title": second_post["title"], "created_at": 1787557600.0,
+    })
+    fixtures[FUSION_RUNS_PATH] = response
+    fixtures[f"/api/v1/board/{second_post['id']}"] = (200, second_post)
+    fixtures[f"/api/v1/board/{post['id']}"] = SequencedHttpResponse([
+        (200, post), (200, refreshed), (200, wrong_post), (200, refreshed),
+    ])
+
+    def interact(process, master_fd, output):
+        palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
+        send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
+        frame = resize_and_wait(
+            process, master_fd, output, rows=110, columns=170,
+            needle=b"BOARD ORIGINAL", controls=(FULL_REDRAW,),
+        )
+        visible = CSI_RE.sub(b"", frame)
+        for marker in (
+            b"Execution status and finish time: not retained",
+            b"Board author: board-author-701", b"Run reference: history-701",
+            b"Observed tokens: 101 input / 202 output", b"Observed cost: not recorded",
+            b"question-proof-501", b"panel-answer-first-501",
+            b"historical-judge-synthesis-701", b"TOOL EXECUTIONS",
+            b"original-board-body-701",
+        ):
+            if marker not in visible:
+                raise AssertionError(f"historical inspector missing {marker!r}: {visible!r}")
+        if b"not-a-proven-caller" in visible:
+            raise AssertionError("historical evidence invented a retained run caller")
+        print("FUSION_HISTORY_PTY_FRAME=" + json.dumps({
+            "rows": 110, "columns": 170,
+            "ansi_base64": base64.b64encode(frame).decode("ascii"),
+        }), flush=True)
+        send_and_wait(
+            process, master_fd, output, b"r",
+            b"Observed tokens: 303 input / 202 output",
+        )
+        send_and_wait(
+            process, master_fd, output, b"r",
+            b"historical Fusion Board identity does not match the selected run and post",
+        )
+        stale = resize_and_wait(
+            process, master_fd, output, rows=111, columns=170,
+            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+        )
+        if b"different-run-702" in CSI_RE.sub(b"", stale):
+            raise AssertionError("mismatched Board origin replaced selected evidence")
+        send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
+        send_and_wait(process, master_fd, output, b"]", b"Board author: board-author-702")
+        send_and_wait(process, master_fd, output, b"[", b"Board author: board-author-701")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
+        send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+    run_terminal_scenario(
+        executable, description="historical Fusion evidence inspection and refresh",
+        interact=interact, http_fixtures=fixtures,
+    )
+
+
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[2] == "fusion-history":
+        run_fusion_history_regression(os.path.abspath(sys.argv[1]))
+        print("tui historical Fusion inspection: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
         print("tui CLI base-path regression: PASS")

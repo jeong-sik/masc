@@ -698,7 +698,14 @@ let complete_cleanup
      runtime booted -- or, since the teardown refuses an unnamed runtime,
      remove nothing at all and leave the guest running. *)
   let sandbox_backend =
-    match read_operation_meta ~config operation with
+    (* The exact owner projection carries durable metadata. Its decoder leaves
+       the TOML-owned microvm_backend unset; use the canonical profile resolution
+       used at boot before choosing the teardown runtime. *)
+    match
+      Result.bind
+        (read_operation_meta ~config operation)
+        (Keeper_meta_contract.effective_meta_result ~base_path:config.base_path)
+    with
     | Error detail -> Error detail
     | Ok meta ->
       Ok

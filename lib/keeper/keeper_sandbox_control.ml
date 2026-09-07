@@ -480,13 +480,24 @@ type freshness_row = {
   row_freshness : checkout_freshness;
 }
 
+(* The row is what an operator reads, and every field on it is already an
+   option. So the policy is: any git probe that did not answer shows as no
+   branch. It is one policy for every error the probe can return -- a detached
+   HEAD, a command that failed, a checkout that vanished mid-read -- because
+   the row has nowhere to put the difference and [row_freshness] is what says
+   the probe is not to be trusted. *)
+let row_branch_of_probe = function
+  | Ok branch -> Some branch
+  | Error (_ : string) -> None
+;;
+
 let freshness_row_of_inspection (inspection : checkout_inspection) =
   (* [relative_path], not [name]: it is the cwd the keeper passes to its
      tools, and basenames collide (a live playground held two [poc-repo]
      checkouts at different paths, 2026-09-01 field probe). *)
   { row_checkout_path =
       inspection.inspected.Keeper_playground_checkouts.relative_path
-  ; row_branch = Result.to_option inspection.branch
+  ; row_branch = row_branch_of_probe inspection.branch
   ; row_changed_files =
       (match inspection.dirty with
        | Ok (_, changed_files) -> Some changed_files

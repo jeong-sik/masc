@@ -1805,7 +1805,9 @@ let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file
     path
-    (Printf.sprintf "[keeper]\nsandbox_profile = %S\n" sandbox_profile)
+    (Printf.sprintf
+       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n"
+       sandbox_profile)
 
 let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
   let config = W.default_config base_path in
@@ -2927,6 +2929,93 @@ let test_verification_evidence_decode_requires_both_keys () =
 
    The miss is now typed and travels to the judge, which holds Read/Grep on
    this root and a root_layout naming every checkout under it. *)
+(* The injected artifact read: where the producer's sandbox keeps the file,
+   the snapshot records what the reader answered -- content, bytes, truncated
+   on Ok, the typed reason on Error -- instead of reading the host bundle the
+   store can reach (#33745). *)
+let test_injected_artifact_read_answers_the_snapshot () =
+  with_temp_dir (fun base_path ->
+      let artifact_read =
+        Some
+          (fun ~worker ~relative ->
+             if
+               String.equal worker "endpoint-worker"
+               && String.equal relative "evidence.txt"
+             then Ok ("captured-by-backend", 20, false)
+             else Error (VS.Evidence_read_error "backend: not found"))
+      in
+      let json =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:evidence.txt"; "artifact:missing.txt" ]
+      in
+      let open Yojson.Safe.Util in
+      let items = json |> to_list in
+      let kind_of item = item |> member "kind" |> to_string in
+      Alcotest.(check string) "the reader's artifact is recorded"
+        "artifact" (kind_of (List.nth items 0));
+      Alcotest.(check string) "with the reader's content"
+        "captured-by-backend"
+        (List.nth items 0 |> member "content" |> to_string);
+      Alcotest.(check string) "the reader's failure is typed"
+        "artifact_unreadable" (kind_of (List.nth items 1));
+      Alcotest.(check string) "carrying the reader's reason code"
+        "read_error"
+        (List.nth items 1 |> member "reason" |> member "code" |> to_string))
+
+let test_artifact_reference_size_uses_the_injected_reader () =
+  with_temp_dir (fun base_path ->
+      let artifact_read =
+        Some
+          (fun ~worker ~relative ->
+             ignore worker;
+             if String.equal relative "big.log" then Ok ("", 90_000, true)
+             else Error (VS.Evidence_read_error "backend: not found"))
+      in
+      Alcotest.(check (option int))
+        "size comes from the reader, not the host bundle"
+        (Some 90_000)
+        (VS.artifact_reference_size
+           ?artifact_read
+           ~base_path
+           ~worker:"endpoint-worker"
+           "artifact:big.log");
+      Alcotest.(check (option int))
+        "a reader failure is not a size"
+        None
+        (VS.artifact_reference_size
+           ?artifact_read
+           ~base_path
+           ~worker:"endpoint-worker"
+           "artifact:gone.log"))
+
+(* Endpoint-owned trees (microvm, remote-ssh) read through the backend;
+   a shared-mount (Docker) tree keeps the store's direct host read. The
+   returned closure is not called here -- the routing is the unit. *)
+let test_reader_routes_by_where_the_tree_lives () =
+  with_temp_dir (fun base_path ->
+      let config = W.default_config base_path in
+      ignore (W.init config ~agent_name:None);
+      let route profile =
+        ensure_keeper_meta config "route-worker";
+        write_keeper_profile
+          ~base_path
+          ~keeper_name:"route-worker"
+          ~sandbox_profile:profile;
+        match Masc.Keeper_meta_store.read_effective_meta config "route-worker" with
+        | Ok (Some meta) ->
+            Option.is_some
+              (Masc.Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ())
+        | Ok None -> Alcotest.fail "meta did not load (none)"
+        | Error detail -> Alcotest.failf "meta did not load: %s" detail
+      in
+      Alcotest.(check bool) "microvm reads through the backend" true
+        (route "microvm");
+      Alcotest.(check bool) "docker keeps the direct host read" false
+        (route "docker"))
+
 let test_checkout_relative_artifact_is_not_guessed () =
   with_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -3243,5 +3332,11 @@ let () =
         test_unreadable_artifacts_reach_the_judge;
       Alcotest.test_case "a checkout-relative artifact path is not guessed" `Quick
         test_checkout_relative_artifact_is_not_guessed;
+      Alcotest.test_case "an injected artifact read answers the snapshot" `Quick
+        test_injected_artifact_read_answers_the_snapshot;
+      Alcotest.test_case "the size pre-check uses the injected reader" `Quick
+        test_artifact_reference_size_uses_the_injected_reader;
+      Alcotest.test_case "the reader routes by where the tree lives" `Quick
+        test_reader_routes_by_where_the_tree_lives;
     ];
   ]

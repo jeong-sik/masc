@@ -81,9 +81,14 @@ let lock_for_key key =
 let with_key_lock ~base_path ~keeper_name f =
   let key = canonical_key ~base_path ~keeper_name in
   let entry = lock_for_key key in
-  Cross_context_mutex.with_lock entry.mutex (fun () ->
-    ignore entry.key;
-    f ())
+  (* A use before [f] is not sufficient: [f] can suspend through a major GC.
+     Retain the ephemeron key until the mutex has actually been released. *)
+  match Cross_context_mutex.with_lock entry.mutex f with
+  | value -> ignore (Sys.opaque_identity entry.key); value
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    ignore (Sys.opaque_identity entry.key);
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let acquire ~base_path ~keeper_name ~purpose =

@@ -4,7 +4,8 @@
     {
       "pid": 66854,
       "ppid": 66780,
-      "executable": "/tmp/masc-browser-fixed-host-macos/masc-browser-host-macos-arm64"
+      "executable": "/tmp/masc-browser-fixed-host-macos/masc-browser-host-macos-arm64",
+      "parent_executable": "/Applications/Firefox.app/Contents/MacOS/firefox"
     }
   ]
 }

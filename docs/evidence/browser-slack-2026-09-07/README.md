@@ -50,7 +50,9 @@ and Slack live empty state at **2.1 ms**, both HTTP 200.
 
 The server reports its embedded commit through `/health`. The TUI source is
 artifact provenance supplied to the capture script; the script independently
-hashes its executable. The host source and checksum were checked against its
+hashes its executable. Both came from the
+[server/TUI artifact run](https://github.com/jeong-sik/masc/actions/runs/34085955481).
+The host source and checksum were checked against its
 downloaded `SOURCE_COMMIT` and `SHA256SUMS`; see [host-artifact.json](host-artifact.json).
 [Process evidence](fixed-host-process.json) identifies the fixed executable
 running as Firefox's child without collecting argv or environment values.

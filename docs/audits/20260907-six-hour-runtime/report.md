@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 직접 요청 scope #33967은 97e3c224ad에서 scope11·host46·replay21·Codex2·Claude23·invocation11 PASS. 전체125개 중124 PASS/Antigravity 기존 전송 관측1 FAIL이며 외부8fd39e0069로 병합됐다. 그 실패 수정 #33982와 큐 binding #33984는 원격 검증 중. 자율 실행·자식 부모 연결·official-client 재시작 영속화는 남아 있다.
+- 조치: 직접 요청 scope #33967은 97e3c224ad에서 scope11·host46·replay21·Codex2·Claude23·invocation11 PASS. 전체125개 중124 PASS/Antigravity 기존 전송 관측1 FAIL이며 외부8fd39e0069로 병합됐다. 그 실패 수정 #33982는 검증 중. 큐 binding #33984의 b9f30528ff는77/77 PASS, 후속9f79ffbb72는 lint용 주석1줄만 수정했다. 자율 실행·자식 부모 연결·official-client 재시작 영속화는 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -424,3 +424,6 @@ ACK 이후08:32:41Z까지5분37초의 로그에서 해당 new-keeper shutdown re
 
 
 09:43:44Z에 추가로 [후속 로그 구간](runtime-pattern-followup-0940.json)을 동결했다. 외부 시작08:37:36Z 이후22,486행(INFO20,726/WARN1,483/ERROR277)에서 원래 exact-tool 반복 경고는11건이 남았다. 선택한 기존 누락 tool-results·중첩 checkpoint·composition 증거 실패·new-keeper 종료 복구·browser lane 부재·Librarian 실패·Claude quota 문자열은0건이다. 각 경로의 실제 실행 횟수를 측정하지 않았으므로0건을 해결이나 통제된 전후 개선율로 해석하지 않는다.
+
+
+큐 binding의 [원격77/77 PASS 증거](queue-binding-ci-summary.json)는 b9f30528ff의 queue36/scope11/cancellation7/source-terminal11/transfer12다. 실제 After_rename 실패 후 재시도의 동기화 확인 테스트도 통과했다. 필수 lint가 지적한 새 ignore 호출 설명은9f79ffbb72에서 주석1줄로 보완했으며, 그 후속 head에서77개를 다시 실행했다고 주장하지 않는다. 자율 실행 연결은 별도 작업이다.

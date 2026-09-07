@@ -803,11 +803,17 @@ let change_row ~op_style ~result_style ~summary_width values =
    fourteen in the row, so the column had no end where it was named and an
    invisible one where it was filled. *)
 
-let fusion_time_width = 8
+let fusion_time_width = 16
 let fusion_age_width = 7
 let fusion_state_width = 18
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
+
+type fusion_columns = {
+  fcol_keeper : int;
+  fcol_run : int;
+  fcol_show_preset : bool;
+}
 
 type fusion_row_values = {
   frow_time : string;
@@ -827,31 +833,42 @@ let fusion_no_values =
   ; frow_run = ""
   }
 
-let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
-  [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
+let fusion_cells ?(state_style = "") columns values =
+  [ Table.cell ~header:"STARTED" ~width:fusion_time_width values.frow_time
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
       values.frow_age
   ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
       values.frow_state
-  ; Table.cell ~header:"KEEPER" ~width:keeper_width values.frow_keeper
-  ; Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset
-  ; Table.cell ~header:"RUN" ~width:run_width values.frow_run
+  ; Table.cell ~header:"KEEPER" ~width:columns.fcol_keeper values.frow_keeper
   ]
+  @ (if columns.fcol_show_preset then
+       [Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset]
+     else [])
+  @ [Table.cell ~header:"RUN" ~width:columns.fcol_run values.frow_run]
 
-let fusion_run_width ~inner_width ~keeper_width =
+let allocate_fusion_columns ~inner_width ~keeper_width =
+  let full = { fcol_keeper = keeper_width; fcol_run = fusion_minimum_run_width;
+               fcol_show_preset = true } in
+  let fcol_show_preset =
+    Table.used_width (fusion_cells full fusion_no_values) <= inner_width
+  in
   let named =
     Table.used_width
-      (fusion_cells ~keeper_width ~run_width:0 fusion_no_values)
+      (fusion_cells { fcol_keeper = 0; fcol_run = 0; fcol_show_preset } fusion_no_values)
   in
-  max fusion_minimum_run_width (inner_width - named)
+  (* Keep dates and state intact. The detail shows the omitted preset and
+     complete identities; narrow tables first give those cells to the row. *)
+  let fcol_keeper = min keeper_width (max 6 (inner_width - named - fusion_minimum_run_width)) in
+  let fcol_run = max 3 (inner_width - named - fcol_keeper) in
+  { fcol_keeper; fcol_run; fcol_show_preset }
 
-let fusion_header_row ~keeper_width ~run_width =
+let fusion_header_row columns =
   Table.header_row
-    (fusion_cells ~keeper_width ~run_width fusion_no_values)
+    (fusion_cells columns fusion_no_values)
 
-let fusion_row ~state_style ~keeper_width ~run_width values =
+let fusion_row ~state_style columns values =
   Table.row
-    (fusion_cells ~state_style ~keeper_width ~run_width values)
+    (fusion_cells ~state_style columns values)
 
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id

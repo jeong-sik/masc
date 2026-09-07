@@ -14697,6 +14697,8 @@ let render_acting_evidence (state : state) entry =
   box_line_styled buf cols ~style:Ansi.dim " Selected event snapshot; new arrivals do not replace this reading";
   box_line_styled buf cols ~style:Ansi.dim
     (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
+  box_line_styled buf cols ~style:Ansi.dim
+    (" " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_divider buf cols;
   let lines =
     Masc_tui_acting.evidence_fields entry
@@ -14865,6 +14867,8 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;

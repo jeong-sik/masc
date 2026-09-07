@@ -125,6 +125,11 @@ type decoded =
   | Event of event
   | Undecodable of string
 
+type delivery = {
+  cursor : int option;
+  decoded : decoded;
+}
+
 (* The keeper whose chat just gained a turn, when the event says so.
    The chat pane reloads its history on this and on nothing else, so
    the arms are spelled out: a new variant has to decide here whether
@@ -403,27 +408,63 @@ let event_of_json (json : Yojson.Safe.t) =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "event is not a JSON object"
 
-type t = { pending : Buffer.t }
+type t = {
+  pending : Buffer.t;
+  mutable frame_cursor : (int option, string) result;
+  mutable frame_data : string list;
+  mutable frame_error : string option;
+}
 
-let create () = { pending = Buffer.create 4096 }
+let create () =
+  { pending = Buffer.create 4096; frame_cursor = Ok None; frame_data = []; frame_error = None }
 
-let decoded_of_line raw_line =
+let decode_payload payload =
+  match Yojson.Safe.from_string payload with
+  | json -> (
+      match event_of_json json with
+      | Ok event -> Event event
+      | Error detail -> Undecodable detail)
+  | exception Yojson.Json_error detail ->
+      Undecodable ("invalid JSON: " ^ detail)
+
+let finish_frame t =
+  let decoded =
+    match t.frame_error, t.frame_data with
+    | Some reason, _ -> Some (Undecodable reason)
+    | None, [] -> None
+    | None, lines -> Some (decode_payload (String.concat "\n" (List.rev lines)))
+  in
+  let delivery =
+    Option.map
+      (fun decoded ->
+        match t.frame_cursor with
+        | Ok cursor -> { cursor; decoded }
+        | Error reason -> { cursor = None; decoded = Undecodable reason })
+      decoded
+  in
+  t.frame_cursor <- Ok None;
+  t.frame_data <- [];
+  t.frame_error <- None;
+  Option.to_list delivery
+
+let feed_line t raw_line =
   match Projection.classify_sse_line raw_line with
-  | Projection.Sse_ignored | Projection.Sse_id _ | Projection.Sse_frame_end -> []
+  | Projection.Sse_frame_end -> finish_frame t
+  | Projection.Sse_ignored -> []
+  | Projection.Sse_id cursor ->
+      t.frame_cursor <-
+        (if cursor >= 0 then Ok (Some cursor)
+         else Error "observer replay ID must be non-negative");
+      []
   | Projection.Sse_noncanonical_data ->
-      [ Undecodable "data line without the canonical \"data: \" prefix" ]
-  | Projection.Sse_data payload -> (
-      match Yojson.Safe.from_string payload with
-      | json -> (
-          match event_of_json json with
-          | Ok event -> [ Event event ]
-          | Error detail -> [ Undecodable detail ])
-      | exception Yojson.Json_error detail ->
-          [ Undecodable ("invalid JSON: " ^ detail) ])
+      t.frame_error <- Some "data line without the canonical \"data: \" prefix";
+      []
+  | Projection.Sse_data payload ->
+      t.frame_data <- payload :: t.frame_data;
+      []
 
-(* Same cut as the live chat reader: everything up to the last newline is
-   complete, the rest is held. The server writes one event per data line,
-   so a line is a frame here. *)
+(* A cursor is committed with its frame, not when an id/data line happens to
+   end a network chunk. A disconnect before the blank line must replay it. *)
 let feed t chunk =
   Buffer.add_string t.pending chunk;
   let buffered = Buffer.contents t.pending in
@@ -437,4 +478,4 @@ let feed t chunk =
       in
       Buffer.clear t.pending;
       Buffer.add_string t.pending remainder;
-      String.split_on_char '\n' complete |> List.concat_map decoded_of_line
+      String.split_on_char '\n' complete |> List.concat_map (feed_line t)

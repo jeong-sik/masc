@@ -39,7 +39,6 @@
 # --- assertions that fail -------------------------------------------------
 test/test_fs_compat                               # save_file_atomic: strict payload cancellation
 test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation
-test/test_fs_compat_capability_head               # authority: absent publish
 test/test_fs_compat_capability_write              # publication: replace fatal and cancellation
 test/test_keeper_fs_directory_durability          # durable commit observer: observer exception
 test/test_keeper_board_attention_exact_flow       # production adapter: resumable status gate

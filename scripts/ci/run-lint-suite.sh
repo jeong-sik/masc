@@ -188,6 +188,10 @@ blocking_lints() {
   # Both were red on main until today, which is the proof they can fail:
   # audit-path-ssot for one expanduser site (#34080), audit-odoc-refs for two
   # references its own field pattern could not resolve (#34081).
+  # The last of the nine. It was red until #34106 showed the red was the
+  # guard's: keeper meta carries the fields, and keeper_meta_store reads them.
+  run_lint "Exact-field decoders have a preflight" \
+    python3 scripts/ci/check_exact_field_decoder_preflight.py
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
   run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh

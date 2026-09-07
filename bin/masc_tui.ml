@@ -269,11 +269,16 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
       in
+      let scrolled =
+        if state.view = Memory && Option.is_none state.memory_facts_keeper then
+          memory_overview_scrolled ~cursor state
+        else scrolled
+      in
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the
@@ -11805,8 +11810,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         launch_runtime_surface_load state ~mailbox ~force:true
       end
   | Workspace_activity_loaded (request, result) ->
-      state.workspace_activity <- Masc_tui_fetched.complete ~equal:String.equal
-        state.workspace_activity request result
+      apply_workspace_activity_read state request result
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -15479,21 +15483,14 @@ and is loaded on demand through keeper_skill.
              (state.workspace_activity_cursor + delta))
        | Some ("\r" | "\n" | "right")
          when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           (match List.nth_opt (workspace_activity_rows state) state.workspace_activity_cursor with
-            | None -> ()
-            | Some (change, path) ->
-                state.code_scope <- Code_scope_keeper change.Tui_decode.fc_keeper;
-                state.code_dir <- "";
-                state.code_cursor <- 0;
-                state.code_entries <- [];
-                state.code_entries_error <- None;
-                state.code_file <- Masc_tui_fetched.clear state.code_file;
-                state.code_focus_file <- Right_pane;
-                state.followed_from <- Some (state.view, None);
-                state.view <- Code;
-                Option.iter (fun repo_id -> launch_code_file_load state ~mailbox:async_messages
-                    ~path:(Playground_paths.bundle_relative_repo_path ~repo_id path))
-                  state.workspace_activity_repo)
+           let _, _, selected = workspace_activity_selection state in
+           (match state.workspace_activity_repo, selected with
+            | Some repo_id, Some (change, relative_path) ->
+                let path = Playground_paths.bundle_relative_repo_path ~repo_id relative_path in
+                enter_keeper_code_file state ~keeper:change.Tui_decode.fc_keeper ~path;
+                launch_code_entries_load state ~mailbox:async_messages;
+                launch_code_file_load state ~mailbox:async_messages ~path
+            | None, _ | _, None -> ())
        | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "/"
@@ -18232,10 +18229,9 @@ and is loaded on demand through keeper_skill.
                        keeper's facts themselves. *)
                     match state.memory_health with
                     | None -> ()
-                    | Some snapshot -> (
+                    | Some _ -> (
                         match
-                          List.nth_opt snapshot.Masc.Tui_decode.mhs_keepers
-                            state.memory_health_cursor
+                          selected_memory_keeper state
                         with
                         | None -> ()
                         | Some keeper ->

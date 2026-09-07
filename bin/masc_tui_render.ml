@@ -12331,8 +12331,7 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = workspace_activity_rows state in
-  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  let rows, cursor, selected = workspace_activity_selection state in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
     ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
@@ -12371,7 +12370,7 @@ let render_workspace_activity (state : state) repo_id =
                 if first + i = cursor then c.push_selected line else c.push line
           done;
           c.push_divider ();
-          c.push (match List.nth_opt rows cursor with
+          c.push (match selected with
             | None -> "  Task and file links appear when a recorded change names them"
             | Some (change, path) ->
                 "  " ^ Terminal_text.single_line path ^ " · " ^
@@ -12972,11 +12971,12 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf
-          "%s (%d keepers · %d failed/no ordinary · %d ordinary facts [o%d/d%d] · %d support-invalidated · %d source facts)  %s  %s"
+        Printf.sprintf "%s · %d keepers · %d need memory · read %s (local)  %s"
           (screen_title " MASC Memory") shown s.mhs_starving_keepers
-          s.mhs_total_facts s.mhs_total_observed_facts s.mhs_total_derived_facts
-          s.mhs_total_support_invalidations s.mhs_total_source_facts timestamp
+          (let tm = Unix.localtime s.mhs_generated_at in
+           Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+             (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+             tm.Unix.tm_hour tm.Unix.tm_min)
           (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"

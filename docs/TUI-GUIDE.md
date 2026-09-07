@@ -1562,6 +1562,12 @@ Board `s` stores the chosen order in `[tui].board_sort` in the resolved `runtime
 
 Planning shows net changes in completed Goals, completed Tasks, and pending Goal reviews since the first successful Planning reading in this TUI session. The displayed baseline timestamp defines the window. These are changes in snapshot counts, not a durable completion history or operator-approval throughput.
 
+### Memory overview
+
+The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
+
+Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
+
 ### Workspace activity
 
 On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.

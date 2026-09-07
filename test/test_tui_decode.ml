@@ -2997,6 +2997,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("added", `Int (ordinary_count 2))
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
+      ; ("updated_at", if present then `Float 1700000000. else `Null)
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -3033,7 +3034,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v3")
+      [ ("schema", `String "keeper.memory_os.current_health.v4")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
@@ -3170,11 +3171,24 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; "duplicate keeper identity rejects", duplicate_keeper
     ; "alert target mismatch rejects", wrong_alert_target
     ; "duplicate vision reason rejects", duplicate_vision_reason
+    ; "timestamp without readable snapshot rejects",
+      map_keeper 0 (replace_field "updated_at" (`Float 1700000000.)) json
+    ; "readable snapshot without timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" `Null) json
+    ; "negative snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float (-1.))) json
+    ; "nonfinite snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float infinity)) json
+    ; "text snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`String "1700000000")) json
     ];
   match Tui_decode.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
+      Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
+        [None; Some 1700000000.]
+        (List.map (fun keeper -> keeper.Tui_decode.mkh_updated_at) snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2
@@ -3215,7 +3229,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v3")
+    [ ("schema", `String "keeper.memory_os.current_health.v4")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ("cadence_counter_entries", `Int 0)
     ; ( "keepers"
@@ -3231,6 +3245,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("added", `Int 0)
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
+              ; ("updated_at", `Null)
               ; ("librarian_lane_busy", `Int 0)
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)

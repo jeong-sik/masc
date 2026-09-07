@@ -117,8 +117,11 @@ these files; clicking the site's submit control remains a separate action.
 The Keeper file resolver validates every path before issuing any browser command.
 The selected sandbox backend reads the bytes, including endpoint-owned trees;
 backend errors never fall back to a same-named host file. Files are privately
-staged with their basenames until the browser has accepted the selection, then
-the snapshots are removed. A 16 MiB per-file resource limit rejects oversized
+staged with their basenames. Once WebDriver may expose a snapshot to a File
+object, the owning browser session retains it through later reads/submissions,
+tab closure and uncertain action outcomes. Only confirmed session teardown
+releases these files; pre-effect rejection removes unclaimed snapshots.
+Caller source files are never owned or removed. A 16 MiB per-file resource limit rejects oversized
 files before browser effects, without uploading truncated prefixes. Generic
 tool callers without authoritative Keeper context cannot upload.
 

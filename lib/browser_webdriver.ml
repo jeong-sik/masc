@@ -1,6 +1,6 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
-type session = { id : string; mutable handles : (string * int) list }
+type session = { id : string; mutable handles : (string * int) list; uploads : Browser_lane.Upload_lease.owner }
 type t = { request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -34,7 +34,8 @@ let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None
+   | Error (Remote { code = "invalid session id"; _ }) ->
+     t.session <- None; Browser_lane.Upload_lease.release_owner session.uploads
    | Ok _ | Error _ -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
@@ -51,7 +52,8 @@ let close_unlocked ?request t = match t.session with
     let request = Option.value ~default:t.request request in
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
-    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; Ok ()
+    | Ok _ | Error (Remote { code = "invalid session id"; _ }) ->
+      t.session <- None; Browser_lane.Upload_lease.release_owner session.uploads; Ok ()
     | Error error -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
@@ -136,6 +138,7 @@ let interact t session ~perform_effect = function
     let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
     let* is_file = script t session "return arguments[0].localName==='input' && arguments[0].type==='file';" [element] in
     let* () = if is_file = `Bool true then Ok () else Error (Protocol "upload requires a file input") in
+    Browser_lane.Upload_lease.claim ~owner:session.uploads ~paths;
     let* _ = element_call perform_effect id "/clear" (`Assoc []) in
     element_call perform_effect id "/value" (`Assoc ["text",`String (String.concat "\n" paths)])
   | Browser_lane.Action.Accept_dialog text ->
@@ -190,7 +193,9 @@ let execute_action t action =
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
-        (match result with `List [] -> t.session <- None | _ -> ());
+        (match result with `List [] ->
+          t.session <- None; Browser_lane.Upload_lease.release_owner session.uploads
+         | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | _ ->
         (* Do not issue another fallible browser request after an effect.
@@ -209,7 +214,7 @@ let execute_unlocked t = function
           "moz:firefoxOptions", `Assoc ["args", `List args]]]] in
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
-       t.session <- Some { id; handles = [] };
+       t.session <- Some { id; handles = []; uploads = Browser_lane.Upload_lease.create_owner () };
        Ok (`Assoc ["opened", `Bool true; "reused", `Bool false; "backend", `String "firefox-webdriver"]))
   | Browser_lane.Session_close ->
     let* () = close_unlocked t in Ok (`Assoc ["closed", `Bool true])

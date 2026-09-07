@@ -46,33 +46,10 @@ let with_staged_paths ?read_file ?turn_sandbox_factory ~config ~meta ~paths f =
       let* path = Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path in
       resolve ((raw_path,path) :: acc) rest in
   let* resolved = resolve [] paths in
-  let* directory =
-    try Ok (Filename.temp_dir ~perms:0o700 "masc-browser-upload-" "")
-    with Sys_error message -> Error ("upload staging failed: " ^ message) in
-  let staged = ref [] in
-  let subdirs = ref [] in
-  Eio_guard.protect ~finally:(fun () ->
-    List.iter Unix.unlink !staged;
-    List.iter Unix.rmdir !subdirs;
-    Unix.rmdir directory) (fun () ->
-      let rec stage index acc = function
-        | [] -> Ok (List.rev acc)
-        | (raw_path,host_path) :: rest ->
-          let* bytes = read_file ~host_path ~max_bytes:(max_file_bytes + 1) in
-          if String.length bytes > max_file_bytes then
-            Error (Printf.sprintf "upload file exceeds %d bytes: %s" max_file_bytes raw_path)
-          else
-            let subdir = Filename.concat directory (string_of_int index) in
-            Unix.mkdir subdir 0o700;
-            subdirs := subdir :: !subdirs;
-            let target = Filename.concat subdir (Filename.basename host_path) in
-            let oc = open_out_gen [Open_wronly;Open_creat;Open_excl;Open_binary] 0o600 target in
-            staged := target :: !staged;
-            Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc bytes);
-            stage (index+1) (target :: acc) rest in
-      let* staged_paths =
-        try stage 0 [] resolved with
-        | Sys_error message -> Error ("upload staging failed: " ^ message)
-        | Unix.Unix_error (error,operation,_) ->
-          Error ("upload staging failed: " ^ operation ^ ": " ^ Unix.error_message error) in
-      Ok (f staged_paths))
+  let files = List.map (fun (raw_path,host_path) ->
+    Filename.basename host_path, (fun () ->
+      let* bytes = read_file ~host_path ~max_bytes:(max_file_bytes + 1) in
+      if String.length bytes > max_file_bytes then
+        Error (Printf.sprintf "upload file exceeds %d bytes: %s" max_file_bytes raw_path)
+      else Ok bytes)) resolved in
+  Browser_lane.Upload_lease.with_staged_files ~files f

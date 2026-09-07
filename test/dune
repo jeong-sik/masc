@@ -4762,6 +4762,7 @@
  (modules test_tui_browser_lane_text)
  (libraries masc_tui_types masc_tui_message_layout))
 
+(include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_controls.inc)
 
@@ -4818,14 +4819,15 @@
 ; MASC interfaces for the CI-owned native Firefox run.
 (rule
  (targets firefox_controls_probe.ml)
- (deps ../scripts/fixtures/firefox_controls_probe.ml)
+ (deps ../scripts/fixtures/firefox_controls_probe.ml ../scripts/fixtures/firefox_download_artifact_probe.ml)
  (action
   (with-stdout-to %{targets}
    (progn
-    (echo "module Driver = Masc.Browser_webdriver\nmodule Browser_action = Browser_lane.Action\n")
+    (echo "module Driver = Masc.Browser_webdriver\nmodule Browser_action = Browser_lane.Action\nmodule Browser_bidi_downloads = Masc.Browser_bidi_downloads\n")
+    (cat %{dep:../scripts/fixtures/firefox_download_artifact_probe.ml})
     (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))
 
 (executable
  (name firefox_controls_probe)
  (modules firefox_controls_probe)
- (libraries masc masc.browser_lane eio eio_main yojson unix))
+ (libraries masc masc.browser_lane eio eio_main yojson unix base64))

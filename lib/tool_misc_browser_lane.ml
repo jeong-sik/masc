@@ -123,6 +123,12 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
     else
     let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
     match get_string args "mode" "text" with
+    | "downloads" ->
+      if lane <> "automation" then make_workflow_err ~tool_name ~start_time "downloads require automation"
+      else (match get_int_opt args "tabId" with
+        | Some tab_id when tab_id >= 0 -> answer_to_result ~tool_name ~start_time
+            (Browser_lane.issue ~lane_name:lane ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
+        | _ -> make_workflow_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
     | "screenshot" ->
       (match keeper_name, get_int_opt args "tabId" with
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
@@ -139,7 +145,7 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
       let verb = match mode with
         | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
         | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
-        | _ -> Error "mode must be text, elements or screenshot" in
+        | _ -> Error "mode must be text, elements, screenshot, frames, dialog or downloads" in
       match verb with
       | Error detail -> make_workflow_err ~tool_name ~start_time detail
       | Ok verb -> answer_to_result ~tool_name ~start_time

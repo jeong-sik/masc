@@ -27,9 +27,9 @@ default = "live"
 [[params]]
 name = "mode"
 type = "string"
-enum = ["text", "elements", "screenshot", "frames", "dialog"]
+enum = ["text", "elements", "screenshot", "frames", "dialog", "downloads"]
 default = "text"
-description = "frames lists iframe selectors; dialog reads the pending prompt (automation, explicit tabId). text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
+description = "downloads lists authoritative pending/completed/canceled/interrupted files (automation, explicit tabId); frames lists iframe selectors; dialog reads the pending prompt (automation, explicit tabId). text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
 
 [[params]]
 name = "framePath"

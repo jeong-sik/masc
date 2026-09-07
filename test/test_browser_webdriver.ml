@@ -1,19 +1,23 @@
 open Alcotest
 module Driver = Masc.Browser_webdriver
 module Lane = Browser_lane
+let start_downloads ~session_id:_ ~websocket_url:_ =
+  Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+    check=(fun () -> Ok ());close=(fun () -> ())}
+
 let test_session_lifecycle () =
   Eio_main.run (fun _ ->
     let calls = ref [] in
     let request ~method_ ~path ~body:_ =
       calls := (method_, path) :: !calls;
       match method_, path with
-      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned"])
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | `DELETE, "/session/owned" -> Ok `Null
       | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/url" -> Error (Driver.Remote {code="invalid session id";message="Firefox exited"})
       | _ -> fail ("unexpected request: " ^ path)
     in
-    let driver = Driver.create ~request in
+    let driver = Driver.create ~start_downloads ~request in
     (match Driver.execute driver Lane.Tabs_list with
      | Lane.Refused _ -> () | _ -> fail "closed session must refuse reads");
     check int "closed read never contacted driver" 0 (List.length !calls);
@@ -48,7 +52,7 @@ let test_closed_current_window () =
   Eio_main.run (fun _ ->
     let selected = ref [] in
     let request ~method_ ~path ~body = match method_, path with
-      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned"])
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | `GET, "/session/owned/window/handles" -> Ok (`List [`String "remaining"])
       | `GET, "/session/owned/window" ->
         Error (Driver.Remote {code="no such window";message="current tab closed"})
@@ -57,7 +61,7 @@ let test_closed_current_window () =
       | `POST, "/session/owned/execute/sync" ->
         Ok (`Assoc ["url", `String "https://example.org"; "title", `String "Remaining"])
       | _ -> fail ("unexpected request: " ^ path) in
-    let driver = Driver.create ~request in
+    let driver = Driver.create ~start_downloads ~request in
     ignore (Driver.execute driver (Lane.Session_open {headless=None}));
     (match Driver.execute driver Lane.Tabs_list with
      | Lane.Answered (`Assoc fields) ->
@@ -75,7 +79,7 @@ let test_timeout_releases_session () =
     let cancelled = ref false in
     let blocked = ref true in
     let request ~method_ ~path ~body:_ = match method_, path with
-      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned"])
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/execute/sync" when !blocked ->
         Eio.Switch.run (fun sw ->
@@ -83,7 +87,7 @@ let test_timeout_releases_session () =
           Eio.Fiber.await_cancel ())
       | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["text", `String "recovered"])
       | _ -> fail ("unexpected request: " ^ path) in
-    let driver = Driver.create ~request in
+    let driver = Driver.create ~start_downloads ~request in
     ignore (Driver.execute driver (Lane.Session_open {headless=None}));
     Eio.Switch.run (fun sw ->
       Lane.install_automation_executor (Some (Driver.execute driver));
@@ -105,9 +109,9 @@ let test_shutdown_transport_lifetime () =
     let request ~method_ ~path ~body:_ =
       if not !transport_live then fail "released normal transport used during shutdown";
       match method_, path with
-      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned"])
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | _ -> fail ("unexpected normal request: " ^ path) in
-    let driver = Driver.create ~request in
+    let driver = Driver.create ~start_downloads ~request in
     Eio.Switch.run (fun root ->
       Eio.Switch.on_release root (fun () ->
         Eio.Switch.run_protected (fun cleanup ->
@@ -126,7 +130,44 @@ let test_shutdown_transport_lifetime () =
     (match Driver.execute driver Lane.Tabs_list with
      | Lane.Refused _ -> () | _ -> fail "deleted session still appears open"))
 
+let test_download_setup_rollback () =
+  Eio_main.run (fun _ ->
+    let deleted = ref 0 in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" ->
+        check bool "BiDi capability requested" true
+          (match body with Some body ->
+             Yojson.Safe.Util.(body |> member "capabilities" |> member "alwaysMatch" |> member "webSocketUrl") = `Bool true
+           | None -> false);
+        Ok (`Assoc ["sessionId",`String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `DELETE, "/session/owned" -> incr deleted; Ok `Null
+      | _ -> fail "setup failure exposed browser actions" in
+    let driver = Driver.create ~request
+      ~start_downloads:(fun ~session_id:_ ~websocket_url:_ -> Error "unsupported download events") in
+    (match Driver.execute driver (Lane.Session_open {headless=None}) with
+     | Lane.Refused _ -> () | _ -> fail "unsupported downloads silently degraded session");
+    check int "failed setup deletes the known remote session" 1 !deleted;
+    (match Driver.execute driver Lane.Tabs_list with Lane.Refused _ -> () | _ -> fail "rolled-back session still open"))
+
+let test_download_setup_cancellation () =
+  Eio_main.run (fun env ->
+    let deleted = ref false in
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `DELETE, "/session/owned" -> deleted := true; Ok `Null
+      | _ -> fail "unexpected setup request" in
+    let driver = Driver.create ~request
+      ~start_downloads:(fun ~session_id:_ ~websocket_url:_ -> Eio.Fiber.await_cancel ()) in
+    (try
+       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 0.01 (fun () ->
+         ignore (Driver.execute driver (Lane.Session_open {headless=None})))
+     with Eio.Time.Timeout -> ());
+    check bool "canceled setup deletes the known remote session" true !deleted)
+
 let () = run "native Firefox lane" ["behavior", [
+  test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
+  test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;
   test_case "closed tab error" `Quick test_backend_failure;
   test_case "malformed response" `Quick test_malformed_success;

@@ -57,7 +57,11 @@ let start ~sw ~env =
   | Ok (Some endpoint) ->
     let pool = Masc_http_client.Pool.create ~sw ~env () in
     let clock = Eio.Stdenv.clock env in
-    let driver = Browser_webdriver.create ~request:(request ~pool ~clock ~endpoint) in
+    let root = Filename.concat
+        (Config_dir_resolver.masc_root ~base_path:(Config_dir_resolver.base_path_or_cwd ())) "browser-downloads" in
+    let driver = Browser_webdriver.create
+      ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
+        ~publish:(Browser_download_artifact.publish ~base_path:(Config_dir_resolver.base_path_or_cwd ()))) ~request:(request ~pool ~clock ~endpoint) in
     Browser_lane.install_automation_executor (Some (Browser_webdriver.execute driver));
     Eio.Switch.on_release sw (fun () ->
       Browser_lane.install_automation_executor None;

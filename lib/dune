@@ -16,6 +16,8 @@
   graphql
   graphql_parser
   bigstringaf
+  ws-direct-core
+  ws-direct-eio
   unix
   threads
   logs

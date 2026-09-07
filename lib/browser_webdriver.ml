@@ -1,7 +1,7 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
-type session = { id : string; mutable handles : (string * int) list }
-type t = { request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
+type session = { id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
+type t = { start_downloads : Browser_downloads.start; request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -23,12 +23,13 @@ let decode_response ~status body =
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code; message })
-let create ~request = { request; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
+let create ~start_downloads ~request = { start_downloads; request; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
+let release_downloads session = Result.iter (fun (d : Browser_downloads.connection) -> d.close ()) session.downloads
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None
+   | Error (Remote { code = "invalid session id"; _ }) -> release_downloads session; t.session <- None
    | Ok _ | Error _ -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
@@ -45,11 +46,14 @@ let close_unlocked ?request t = match t.session with
     let request = Option.value ~default:t.request request in
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
-    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; Ok ()
+    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> release_downloads session; t.session <- None; Ok ()
     | Error error -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
-  | Some session -> Ok session
+  | Some session ->
+    let* downloads = Result.map_error (fun detail -> Protocol detail) session.downloads in
+    let* () = Result.map_error (fun detail -> Protocol detail) (downloads.check ()) in
+    Ok session
   | None -> Error (Protocol "Firefox session is closed; open a browser session first")
 let tab_id t session handle = match List.assoc_opt handle session.handles with
   | Some id -> id
@@ -57,6 +61,7 @@ let tab_id t session handle = match List.assoc_opt handle session.handles with
     let id = t.next_tab in
     t.next_tab <- id + 1;
     session.handles <- (handle, id) :: session.handles;
+    session.download_contexts <- (handle, id) :: session.download_contexts;
     id
 let select t session handle =
   call t session `POST "/window" (Some (`Assoc ["handle", `String handle]))
@@ -170,7 +175,7 @@ let execute_action t action =
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
-        (match result with `List [] -> t.session <- None | _ -> ());
+        (match result with `List [] -> release_downloads session; t.session <- None | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | _ ->
         (* Do not issue another fallible browser request after an effect.
@@ -180,19 +185,42 @@ let execute_action t action =
 let execute_unlocked t = function
   | Browser_lane.Session_open { headless } ->
     (match t.session with
-     | Some _ -> Ok (`Assoc ["opened", `Bool true; "reused", `Bool true])
+     | Some _ -> let* _ = session t in Ok (`Assoc ["opened", `Bool true; "reused", `Bool true])
      | None ->
        let args = if Option.value ~default:true headless then [`String "-headless"] else [] in
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
          ["browserName", `String "firefox";
+          "webSocketUrl", `Bool true;
           "unhandledPromptBehavior", `String "ignore";
           "moz:firefoxOptions", `Assoc ["args", `List args]]]] in
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
-       t.session <- Some { id; handles = [] };
-       Ok (`Assoc ["opened", `Bool true; "reused", `Bool false; "backend", `String "firefox-webdriver"]))
+       let owned = { id; handles = []; download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+       t.session <- Some owned;
+       Eio.Switch.run (fun setup_sw ->
+         let committed = ref false in
+         Eio.Switch.on_release setup_sw (fun () ->
+           if not !committed then ignore (close_unlocked t));
+         let* capabilities = match field "capabilities" result with
+           | Some value -> Ok value | None -> Error (Protocol "Firefox omitted capabilities") in
+         let* websocket_url = string_field "webSocketUrl" capabilities in
+         let* downloads = Result.map_error (fun detail -> Protocol ("Firefox download setup failed: " ^ detail))
+           (t.start_downloads ~session_id:id ~websocket_url) in
+         owned.downloads <- Ok downloads;
+         committed := true;
+         Ok (`Assoc ["opened", `Bool true; "reused", `Bool false; "backend", `String "firefox-webdriver"])))
   | Browser_lane.Session_close ->
     let* () = close_unlocked t in Ok (`Assoc ["closed", `Bool true])
+  | Browser_lane.Page_downloads {tab_id=id} ->
+    (* Retain readable interruption evidence even when further actions refuse. *)
+    (match t.session with
+     | None -> Error (Protocol "Firefox session is closed")
+     | Some session ->
+       let* downloads = Result.map_error (fun detail -> Protocol detail) session.downloads in
+       match List.find_opt (fun (_, known) -> known = id) session.download_contexts with
+       | None -> Error (Protocol "unknown tab id; refresh the tab list")
+       | Some (context, _) ->
+         Result.map_error (fun detail -> Protocol detail) (downloads.read ~context))
   | Browser_lane.Page_goto { url; tab_id } ->
     let* () = absolute_http_url url in
     let* session = session t in

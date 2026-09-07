@@ -35,8 +35,11 @@ let contains text expected =
     && (String.sub text i (String.length expected) = expected || search (i + 1)) in
   search 0
 let check message condition = if not condition then failwith message else Printf.printf "PASS %s\n%!" message
-let () = Eio_main.run (fun _ ->
-  let driver = Driver.create ~request in
+let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let root = Sys.getenv "MASC_PROBE_DOWNLOAD_ROOT" in
+  let driver = Driver.create ~request
+      ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
+        ~publish:publish_download) in
   let run verb = Driver.execute driver verb in
   let close () = match Driver.close driver with
     | Ok () -> ()
@@ -131,6 +134,39 @@ let () = Eio_main.run (fun _ ->
     act upload (Browser_action.Upload {selector="#upload";paths=[Sys.getenv "MASC_PROBE_UPLOAD_PATH"]});
     act upload (Browser_action.Click "#send-upload");
     check "real multipart upload preserves file bytes" (contains (member "text" (read upload) |> string) "Upload verified");
+    let downloads_tab = open_tab "/downloads" in
+    let download_rows () = success (run (Browser_lane.Page_downloads {tab_id=downloads_tab})) |> member "downloads" |> Yojson.Safe.Util.to_list in
+    let await_downloads count =
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 20. (fun () ->
+        let rec wait () =
+          let rows = download_rows () in
+          if List.length rows = count && List.for_all (fun row -> member "status" row = `String "completed") rows then rows
+          else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.05; wait ()) in wait ()) in
+    act downloads_tab (Browser_action.Click "#download-link");
+    ignore (await_downloads 1);
+    act downloads_tab (Browser_action.Click "#download-link");
+    ignore (await_downloads 2);
+    act downloads_tab (Browser_action.Click "#download-attribute");
+    ignore (await_downloads 3);
+    ignore (success (run (Browser_lane.Page_act (Browser_action.On_tab {
+      tab_id=downloads_tab;frame_path=["#download-frame"];interaction=Browser_action.Click "#frame-download"}))));
+    let rows = await_downloads 4 in
+    check "distinct UUIDs correlate identical URLs and null navigation" (List.length (List.sort_uniq String.compare
+      (List.map (fun row -> member "downloadId" row |> string) rows)) = 4);
+    check "iframe downloads belong to their observed top-level tab" (List.length rows = 4);
+    check "another tab cannot see these downloads"
+      (success (run (Browser_lane.Page_downloads {tab_id=second})) |> member "downloads" = `List []);
+    List.iter (fun row ->
+      let path = member "path" row |> string in
+      let bytes = In_channel.with_open_bin path In_channel.input_all in
+      check "completed native download contains exact binary bytes"
+        (bytes = String.init 40960 (fun i -> Char.chr (i mod 256)));
+      check "download publication returned metadata" (member "artifact" row <> `Null)) rows;
+    let evidence = success (run (Browser_lane.Page_downloads {tab_id=downloads_tab})) in
+    Out_channel.with_open_bin (Sys.getenv "MASC_PROBE_DOWNLOAD_RESULT") (fun oc ->
+      output_string oc (Yojson.Safe.pretty_to_string evidence));
+    act downloads_tab Browser_action.Close_tab;
+    check "completed downloads remain readable after their tab closes" (List.length (download_rows ()) = 4);
     act upload Browser_action.Close_tab;
     act first Browser_action.Close_tab;
     check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
@@ -139,4 +175,4 @@ let () = Eio_main.run (fun _ ->
     open_session ();
     let fresh = open_tab "/fresh" in
     check "reopened sessions never reuse tab IDs" (fresh > second);
-    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false)))
+    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false))))

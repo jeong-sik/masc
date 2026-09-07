@@ -17,7 +17,14 @@ html='''<!doctype html><meta charset="utf-8"><title>Firefox controls fixture</ti
 class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   content=html
-  if self.path=='/frame':content='<h1>Outer frame</h1><iframe id="nested-frame" src="http://localhost:'+str(self.server.server_port)+'/nested"></iframe>'
+  if self.path.startswith('/attachment') or self.path=='/plain-download':
+   data=bytes(range(256))*160
+   self.send_response(200)
+   if self.path.startswith('/attachment'):self.send_header('Content-Disposition','attachment; filename="same.bin"')
+   self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
+  if self.path=='/downloads':content='<a id="download-link" href="/attachment">Download</a><a id="download-attribute" href="/plain-download" download="attribute.bin">Attribute</a><iframe id="download-frame" src="/download-frame"></iframe>'
+  elif self.path=='/download-frame':content='<a id="frame-download" href="/attachment?frame">Frame download</a>'
+  elif self.path=='/frame':content='<h1>Outer frame</h1><iframe id="nested-frame" src="http://localhost:'+str(self.server.server_port)+'/nested"></iframe>'
   elif self.path=='/nested':content='<h1>Nested frame</h1><input id="nested-input"><button id="nested-apply" onclick="document.querySelector(\'#nested-result\').textContent=document.querySelector(\'#nested-input\').value">Apply</button><output id="nested-result"></output>'
   elif self.path=='/upload':content='<form method="post" action="/uploaded" enctype="multipart/form-data"><input id="upload" name="attachment" type="file"><button id="send-upload">Upload</button></form>'
   data=content.encode();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
@@ -87,8 +94,8 @@ execution={'mode':'compiled' if args.compiled_probe else 'interpreter','state':'
 try:
  if args.compiled_probe:execution['probe_sha256']=hashlib.sha256(args.compiled_probe.read_bytes()).hexdigest()
  (out/'sources.json').write_text(json.dumps({p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in [
-  'lib/browser_webdriver.ml','lib/browser_lane/browser_action.ml','lib/browser_lane/browser_lane.ml',
-  'lib/browser_page_script.ml','scripts/fixtures/firefox_controls_probe.ml','scripts/probe-firefox-controls.py','test/dune']},indent=2)+'\n')
+  'lib/browser_webdriver.ml','lib/browser_downloads.ml','lib/browser_bidi_downloads.ml','lib/browser_download_artifact.ml','lib/browser_lane/browser_action.ml','lib/browser_lane/browser_lane.ml',
+  'lib/browser_page_script.ml','scripts/fixtures/firefox_download_artifact_probe.ml','scripts/fixtures/firefox_controls_probe.ml','scripts/probe-firefox-controls.py','test/dune']},indent=2)+'\n')
  server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
  threading.Thread(target=server.serve_forever,daemon=True).start()
  with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
@@ -105,18 +112,22 @@ try:
  if args.compiled_probe:
   command=[str(args.compiled_probe.resolve())]
  else:
-  source='#use "topfind";;\n#require "eio_main,yojson,uri";;\nmodule Masc_http_client = struct module Pool = struct type http_method = [ `GET | `POST | `DELETE | `PUT | `PATCH | `HEAD ] end end;;\n'
+  source='#use "topfind";;\n#require "eio_main,yojson,uri,digestif.ocaml,ws-direct-eio,mirage-crypto-rng.unix";;\nmodule Masc_http_client = struct module Pool = struct type http_method = [ `GET | `POST | `DELETE | `PUT | `PATCH | `HEAD ] end end;;\n'
   action=(repo/'lib/browser_lane/browser_action.ml').read_text()
   lane=(repo/'lib/browser_lane/browser_lane.ml').read_text()
   verbs=lane[lane.index('type verb ='):lane.index('\nlet verb_to_string')]
   answer=lane[lane.index('type answer ='):lane.index('(* The public tool surface')]
   source+='module Browser_action = struct\n'+action+'\nend;;\nmodule Browser_lane = struct module Action = Browser_action\n'+verbs+answer+'\nend;;\n'
-  for module,path in [('Browser_page_script','lib/browser_page_script.ml'),('Driver','lib/browser_webdriver.ml')]:
+  source+='module Fs_compat = struct let rec mkdir_p path = if not (Sys.file_exists path) then (mkdir_p (Filename.dirname path); Unix.mkdir path 0o700) end;;\n'
+  for module,path in [('Crypto_rng','lib/crypto_rng/crypto_rng.ml'),('Browser_downloads','lib/browser_downloads.ml'),('Browser_bidi_downloads','lib/browser_bidi_downloads.ml'),('Browser_page_script','lib/browser_page_script.ml'),('Driver','lib/browser_webdriver.ml')]:
    source+='module '+module+' = struct\n'+(repo/path).read_text()+'\nend;;\n'
+  # Protocol probe uses real native BiDi transport. Artifact publication is
+  # exercised with the linked production store/reader in CI and focused tests.
+  source+='let publish_download path = let ic=open_in_bin path in let n=in_channel_length ic in close_in ic; Ok (`Assoc ["probe_bytes",`Int n]);;\n'
   source+=(repo/'scripts/fixtures/firefox_controls_probe.ml').read_text()
   script=out/'probe.ml';script.write_text(source)
   command=['ocaml','-noinit',str(script)]
- env=dict(os.environ,MASC_PROBE_DRIVER_URL=f'http://127.0.0.1:{port}',MASC_PROBE_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}',MASC_PROBE_SCREENSHOT_BASE64=str(out/'screenshot.b64'),MASC_PROBE_UPLOAD_PATH=str(upload_path))
+ env=dict(os.environ,MASC_PROBE_DRIVER_URL=f'http://127.0.0.1:{port}',MASC_PROBE_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}',MASC_PROBE_SCREENSHOT_BASE64=str(out/'screenshot.b64'),MASC_PROBE_UPLOAD_PATH=str(upload_path),MASC_PROBE_DOWNLOAD_ROOT=str(out/"downloads"),MASC_PROBE_ARTIFACT_BASE=str(out/"artifacts"),MASC_PROBE_DOWNLOAD_RESULT=str(out/"downloads.json"))
  execution['state']='running'
  with (out/'probe.log').open('w') as probe_log:
   probe=subprocess.Popen(command,env=env,stdout=probe_log,stderr=subprocess.STDOUT,start_new_session=True)

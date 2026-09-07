@@ -211,6 +211,13 @@ val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
+val range_day_file_paths_result :
+  t -> since:string -> until:string -> (string list, read_error) result
+(** Enumerate the complete selected dated paths, oldest first. A missing
+    store is empty; invalid ranges and failures to inspect or list the store
+    or a selected month are errors. Foreign names are ignored, as with
+    {!iter_range_entries_result}. Day files are not opened. *)
+
 val range_day_file_paths : t -> since:string -> until:string -> string list
 (** The day files the inclusive [[since, until]] range covers, oldest first,
     without opening any of them. Same day-selection rule as {!iter_range}, so a

@@ -7,6 +7,7 @@
  (modules keeper_tool_call_index)
  (libraries
   dated_jsonl
+  eio.unix
   fs_compat
   jsonl_writer
   masc_core

@@ -6,13 +6,21 @@
    that keeps "nothing buffered" from reading as "the channel is quiet". *)
 
 open Alcotest
+open Masc
 module Lane = Slack_lane
 
 let handle assoc =
-  Tool_misc_slack_lane.handle_read
-    ~tool_name:"masc_slack_read"
-    ~start_time:0.0
-    (`Assoc assoc)
+  let base_path = Filename.temp_dir "masc-slack-read-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let ctx : Tool_misc.context =
+      { config = Workspace.default_config base_path
+      ; agent_name = "slack-read-test"
+      ; help_schemas = []
+      }
+    in
+    match Tool_misc.dispatch ctx ~name:"masc_slack_read" ~args:(`Assoc assoc) with
+    | Some result -> result
+    | None -> fail "masc_slack_read is not dispatched by the misc tool owner")
 ;;
 
 let member name = function
@@ -128,9 +136,30 @@ let test_bad_action_is_a_workflow_error () =
     true
 ;;
 
+let test_reader_is_registered_and_discoverable () =
+  let module Descriptor = Keeper_tool_descriptor in
+  (match Descriptor.descriptors_for_internal "masc_slack_read" with
+   | [descriptor] ->
+       check bool "existing misc handler owns dispatch" true
+         (descriptor.runtime_handler = Descriptor.Tool_masc_misc_dispatch);
+       check (option bool) "reader is read-only" (Some true)
+         (Descriptor.readonly_static_hint descriptor);
+       check bool "buffer read can execute concurrently" true
+         (descriptor.execution = Descriptor.Ordinary Descriptor.Concurrent);
+       check bool "Keeper can name the reader" true
+         (descriptor.keeper_model_projection = Descriptor.Internal_name)
+   | _ -> fail "Slack reader must have exactly one discoverable descriptor");
+  check bool "misc registry routes the tool" true
+    (Unified_tool_registry.tag_of_name "masc_slack_read" = Some Tool_dispatch.Mod_misc);
+  (match Tool_schemas_misc.misc_registered_schema Tool_schemas_misc.Misc_slack_read with
+   | Some schema -> check string "canonical schema is registered" "masc_slack_read" schema.name
+   | None -> fail "Slack reader schema has no registered owner")
+;;
+
 let () =
   run "slack_read_tool"
-    [ ( "summary"
+    [ ( "registration", [test_case "reader is discoverable and routed" `Quick test_reader_is_registered_and_discoverable] )
+    ; ( "summary"
       , [ test_case "empty lane" `Quick test_summary_empty
         ; test_case "seeded lane" `Quick test_summary_seeded ] )
     ; ( "read"

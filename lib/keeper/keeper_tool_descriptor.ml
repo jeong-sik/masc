@@ -132,7 +132,6 @@ type runtime_handler =
   | Tool_browser_read
   | Tool_browser_session
   | Tool_browser_goto
-  | Tool_slack_read
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
@@ -259,7 +258,6 @@ let runtime_handler_to_string = function
   | Tool_browser_read -> "tool_browser_read"
   | Tool_browser_session -> "tool_browser_session"
   | Tool_browser_goto -> "tool_browser_goto"
-  | Tool_slack_read -> "tool_slack_read"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
@@ -474,7 +472,6 @@ let descriptor
       | Tool_browser_read
       | Tool_browser_session
       | Tool_browser_goto
-      | Tool_slack_read
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
@@ -2482,10 +2479,12 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
+  (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────── *)
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "config" "masc_config"
        ~readonly:true
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "slack_read" "masc_slack_read" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor

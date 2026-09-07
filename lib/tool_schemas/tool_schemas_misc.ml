@@ -37,8 +37,7 @@ let browser_session_schema : tool_schema = Tool_schemas_misc_toml.browser_sessio
 let browser_goto_schema : tool_schema = Tool_schemas_misc_toml.browser_goto
 
 let browser_lane_schemas =
-  [ slack_read_schema
-  ; browser_tabs_schema
+  [ browser_tabs_schema
   ; browser_read_schema
   ; browser_session_schema
   ; browser_goto_schema
@@ -47,7 +46,8 @@ let browser_lane_schemas =
 (* [schemas] is the public misc schema set, now read from
    config/tools/masc_*.toml. Operator control and web runtime schemas use the
    dedicated projections above. *)
-let schemas : tool_schema list = Tool_schemas_operator_surface.schemas
+let schemas : tool_schema list =
+  slack_read_schema :: Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
   | Start
@@ -152,8 +152,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_browser_tabs
   | Misc_browser_read
   | Misc_browser_session
-  | Misc_browser_goto
-  | Misc_slack_read -> None
+  | Misc_browser_goto -> None
+  | Misc_slack_read
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

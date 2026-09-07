@@ -13318,7 +13318,7 @@ def run_fusion_history_regression(executable: str) -> None:
         (200, post), (200, refreshed), (200, wrong_post), (200, refreshed),
     ])
 
-    def interact(process, master_fd, output):
+    def interact(process, master_fd, slave_fd, output, base_path):
         palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
         frame = resize_and_wait(
@@ -13327,7 +13327,7 @@ def run_fusion_history_regression(executable: str) -> None:
         )
         visible = CSI_RE.sub(b"", frame)
         for marker in (
-            b"Execution status and finish time: not retained",
+            b"This Board evidence does not provide execution status or finish time",
             b"Board author: board-author-701", b"Run reference: history-701",
             b"Observed tokens: 101 input / 202 output", b"Observed cost: not recorded",
             b"question-proof-501", b"panel-answer-first-501",

@@ -122,8 +122,12 @@ let with_execution_workspace f =
   Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_test_deps.init_eio_clock env;
+  (* The IR below supplies an absolute temporary cwd outside the checkout.
+     Process_eio appends it to this capability; an absolute path does not
+     escape the confinement of Stdenv.cwd. Host subprocess fixtures need
+     Stdenv.fs so Linux can open the real temporary working directory. *)
   Process_eio.init
-    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~cwd_default:(Eio.Stdenv.fs env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   let base_path = Filename.temp_file "guest-local-settlement-" "" in

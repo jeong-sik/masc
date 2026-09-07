@@ -84,7 +84,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 현재 실행 영수증과 과거 도구 증거는 분리됐지만 반복 감지는 전체 checkpoint를 사용. 06:13:07Z Execute count934 재관측. 명시적 Fresh/Resume 작업 식별·지속 상태 설계 완료, 구현은 남음.
+- 조치: 현재 실행 영수증과 과거 도구 증거는 분리됐지만 반복 감지는 전체 checkpoint를 사용. 06:13:07Z Execute count934 재관측. 명시적 Fresh/Resume 작업 식별·지속 상태 설계 완료, 구현은 남음. Fresh/Resume 경계 조사에서 direct operation ID 전달 누락과 HITL/Ask/Delegate/Composition의 영속 부모 연결 부재를 확인했다. 세션 전체 이력을 재개 증거로 사용하면 안 되며, scope 본 구현은 아직 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료.
+- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -351,3 +351,12 @@ Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으
 첫 독립 리뷰가 reaction-ledger의 중복 오판정 경로를 찾았고 수정 후 재검토에서 차단 사항이 없었다. 문법·소스 검사는 통과했지만 동작 테스트·실제 화면·배포는 미검증이다. 영속 queue/state codec은 변경하지 않았다. queue-summary fixture는 raw snapshot bytes 보존, reaction-ledger fixture는 파싱된 JSON 상태 보존을 검사하도록 작성됐으며 아직 실행하지 않았다.
 
 이 변경으로 쓰지 않게 되는 health.durable_queue_stale_sec가 운영 runtime.toml42행에 한 건 있다. 배포 시 정상 설정 경로로 해당 값과 운영 의도를 정리해야 한다. 이 세션은 운영 설정을 변경하지 않았다. 현재 파서는 소유 namespace에서 제외된 값을 적용하지 않으므로 제거 누락이 반드시 startup failure를 낸다고 주장하지 않는다.
+
+
+## 재개 인과관계 조사와 큐 원문 보존 선행 수정
+
+반복 도구 감지는 session history 전체의 matched tool call을 seed한다. direct operation의 영속 ID는 이미 있지만 claimed operation에서 실행 인자로 전달되지 않는다. autonomous selection은 payload-only Woken으로 축약되고, admitted_revision과 source_snapshot_ref는 defer/reprioritize 중 바뀐다. HITL은 여러 turn의 같은 요청을 기존 grant에 접으며, Ask/Delegate/Composition에도 재시작 뒤 부모 scope를 복원할 공통 영속 연결이 없다. 이 경계를 명시한 [소스 조사 문서](https://github.com/jeong-sik/masc/blob/5e1f4673d405499248fb7209c523040d72a55902/docs/design/keeper-repetition-scope-boundaries.md)는 설계·후속 검증 요건이며 반복 문제 해결 증거가 아니다.
+
+조사 중 queue loader가 문법상 유효하지만 schema/domain을 해석할 수 없는 primary를 빈 상태로 반환하고, 다음 쓰기에서 pending과 disposition 증거를 대체할 수 있음을 확인했다. [#33947](https://github.com/jeong-sik/masc/pull/33947) head5e1f4673d4는 present-invalid를 Error로 반환해 snapshot·WAL을 유지한다. 실제 primary 부재에 한해서만 기존 WAL-only 복원을 유지한다. 별도 캐시 경합도 수정해, 읽은 바이트 전후의 동일한 파일 식별자에만 상태를 연결하고 쓰기 후 첫 읽기는 재파싱한다. 이후 변경 없는 읽기는 다시 캐시를 사용한다. 추가 파싱의 운영 성능 영향은 미측정이다.
+
+정상 owner 등록·작업 접수, malformed orphan의 Demand_unknown, 실제 completion WAL 보존·primary 부재 뒤 sibling/중복 처리 복원, dangling primary, decode 직후 파일 교체 경합 시나리오를 작성했다. 문법5파일·diff·variant 정적 검사 및 독립 재검토는 통과했다. 동작 테스트·빌드·배포는 아직 없으며 운영 큐를 변경하지 않았다. 두 원본 날짜의 system 로그를 새로 조회한 결과 fail-open 메시지는0건이었다. 이 수정은 source에서 발견한 데이터 보존 결함이며 원래 로그 카운트를 늘리거나 새 유실 사고를 관측했다고 주장하지 않는다.

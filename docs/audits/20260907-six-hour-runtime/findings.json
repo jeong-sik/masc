@@ -167,7 +167,7 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "현재 실행 영수증과 과거 도구 증거는 분리됐지만 반복 감지는 전체 checkpoint를 사용. 06:13:07Z Execute count934 재관측. 명시적 Fresh/Resume 작업 식별·지속 상태 설계 완료, 구현은 남음.",
+    "action": "현재 실행 영수증과 과거 도구 증거는 분리됐지만 반복 감지는 전체 checkpoint를 사용. 06:13:07Z Execute count934 재관측. 명시적 Fresh/Resume 작업 식별·지속 상태 설계 완료, 구현은 남음. Fresh/Resume 경계 조사에서 direct operation ID 전달 누락과 HITL/Ask/Delegate/Composition의 영속 부모 연결 부재를 확인했다. 세션 전체 이력을 재개 증거로 사용하면 안 되며, scope 본 구현은 아직 남아 있다.",
     "status": "scope-design-required",
     "first": {
       "seq": 25984123,
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료.",
+    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료. 선행 결함 #33947은 해석 불가 primary를 빈 큐로 덮어쓰는 경로와 캐시 파일 교체 경합을 수정한다. 원문·WAL 보존 및 정상 owner 격리 시나리오 작성, 소스 리뷰·문법만 통과. 새 데이터 유실 사고가 실제 관측됐다는 뜻은 아니다.",
     "status": "batch-drain-observed"
   }
 ]

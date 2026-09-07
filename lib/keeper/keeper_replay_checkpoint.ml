@@ -312,6 +312,23 @@ let rec messages_share_values_by_identity left right =
   | _ -> false
 ;;
 
+(* Message identity avoids re-encoding the transcript, but says nothing about
+   Context, usage, tools or the next invocation's configuration. Compare the
+   remaining checkpoint schema through its owning codec so a new schema field
+   cannot silently fall outside this reuse decision. Creation time records the
+   snapshot operation, not a change to replay state. *)
+let same_replay_state_metadata
+    (left : Agent_core.Checkpoint.t)
+    (right : Agent_core.Checkpoint.t) =
+  let metadata checkpoint =
+    Agent_core.Checkpoint.to_json_result
+      { checkpoint with messages = []; created_at = 0. }
+  in
+  match metadata left, metadata right with
+  | Ok left, Ok right -> Yojson.Safe.equal left right
+  | Error _, _ | _, Error _ -> false
+;;
+
 let select_finalization_checkpoint
     ~(last_persisted_checkpoint : Agent_core.Checkpoint.t option)
     (result_checkpoint : Agent_core.Checkpoint.t) =
@@ -320,7 +337,8 @@ let select_finalization_checkpoint
     when Int.equal persisted.turn_count result_checkpoint.turn_count
          && messages_share_values_by_identity
               persisted.messages
-              result_checkpoint.messages ->
+              result_checkpoint.messages
+         && same_replay_state_metadata persisted result_checkpoint ->
     persisted, true
   | Some _ | None -> result_checkpoint, false
 ;;
@@ -334,5 +352,5 @@ let finalization_checkpoint_already_persisted
   && Option.is_none replay_suffix_pruned
   && String.equal source.session_id patched.session_id
   && source.messages == patched.messages
-  && source.working_context == patched.working_context
+  && same_replay_state_metadata source patched
 ;;

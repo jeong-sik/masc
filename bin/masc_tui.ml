@@ -16180,14 +16180,15 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0
        | Some "r"
          when (not message_mode)
+              && state.view <> Runtime
               && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
               && state.context_inspector_open = false ->
            (* The listing footers have promised [r:refresh] since the footer
               tables existed; no handler ever answered it. This arm makes the
               sheet true everywhere a listing draws it. The guards stay out
-              of the two surfaces that own their own r — the identity pane
-              and the context inspector — and out of the composer, where r
-              must type. *)
+              of the identity pane and context inspector, and out of the
+              composer, where r must type. Runtime also owns its refresh:
+              its r/R handler below forces a provider probe. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight

@@ -10716,12 +10716,25 @@ def runtime_surface_interaction(
             )
 
             fixtures[RUNTIME_PROBE_PATH] = (503, {"error": "probe refresh failed"})
-            send_and_wait(
+            read_available(master_fd, output)
+            refresh_start = len(output)
+            os.write(master_fd, b"r")
+            # Prove the key reached Runtime's forced-probe endpoint. A
+            # generic listing refresh used to intercept lowercase r, leaving
+            # only ordinary polls and never reaching this request.
+            wait_for_fixture_served(
                 process,
                 master_fd,
                 output,
-                b"r",
-                b"forced probe refresh failed",
+                force_probe,
+                after=0,
+                description="Runtime r forced provider probe",
+            )
+            # The next ordinary poll can replace the force failure's wording;
+            # both must leave the failed reading visible with the prior rows.
+            wait_for_output(
+                process, master_fd, output, b"runtime probe load failed",
+                start=refresh_start, timeout=3.0,
             )
             if force_probe.served != 1:
                 raise AssertionError(

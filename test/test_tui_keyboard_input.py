@@ -11753,6 +11753,11 @@ def run_acting_call_evidence_regression(executable: str) -> None:
                 raise AssertionError("Aggregated turn opened as an exact call")
             send_and_wait(process, master_fd, output, b"f", b"actions)")
             io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
+            # At 35 rows the complete I/O already fits: PgDn is a no-op and
+            # must not be expected to emit the same terminal bytes again.
+            # Narrow the viewport so this step actually exercises paging.
+            resize_and_wait(process, master_fd, output, rows=22, columns=140,
+                            needle=b"ACTING EVENT EVIDENCE")
             io_tail = send_and_wait(process, master_fd, output, b"\x1b[6~", b"safe-output-preview-exact")
             for needle in (b"skill-call-exact", b"research-plan-exact", b"receipt-exact", b"producer-redacted"):
                 if needle not in io_head + io_tail:
@@ -11763,6 +11768,8 @@ def run_acting_call_evidence_regression(executable: str) -> None:
             for needle in (b"safe-output-preview-exact", b"[2Jforged-preview-text"):
                 if needle not in visible_io:
                     raise AssertionError(f"Terminal-safe multiline preview lost text {needle!r}: {visible_io!r}")
+            resize_and_wait(process, master_fd, output, rows=35, columns=140,
+                            needle=b"safe-output-preview-exact")
             emit_frame("redacted-io", output)
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
             detail = send_and_wait(process, master_fd, output, b"k\r", b"Execution ID: exec-exact")

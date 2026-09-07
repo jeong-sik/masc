@@ -12,11 +12,19 @@ type init_mode = Generic.init_mode =
   | Init_only
   | Init_joined
 
-type expectation = Generic.expectation =
+type expectation =
   | Expect_success
   | Expect_success_or_refusal
   | Expect_refusal
   | Expect_refusal_saying of string
+  | Expect_missing_file_credentials
+  | Expect_no_audio
+
+let of_generic_expectation = function
+  | Generic.Expect_success -> Expect_success
+  | Generic.Expect_success_or_refusal -> Expect_success_or_refusal
+  | Generic.Expect_refusal -> Expect_refusal
+  | Generic.Expect_refusal_saying message -> Expect_refusal_saying message
 
 type keeper_case = {
   init_mode : init_mode;
@@ -31,6 +39,7 @@ and fixture = {
   meta : Masc.Keeper_meta_contract.keeper_meta;
   ctx_snapshot : Keeper_types.working_context;
   tools : Agent_core.Tool.t list;
+  cleanup : unit -> unit;
 }
 
 let string_starts_with = Generic.string_starts_with
@@ -111,6 +120,7 @@ let init_keeper_bridge =
       Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch)
 
 let keeper_matrix_owner = "keeper-tool-matrix"
+let sandbox_image = "masc-test-tool-matrix:fixture"
 
 let make_meta ?(name = keeper_matrix_owner) () =
   match
@@ -127,7 +137,10 @@ let make_meta ?(name = keeper_matrix_owner) () =
        every case ran under whatever that placeholder happened to be --
        Docker. What this suite measures is the tools, not a backend, so it
        says which backend it wants instead of inheriting one it never chose. *)
-    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
+    { meta with
+      sandbox_profile = Masc_test_deps.fixture_sandbox_profile ();
+      sandbox_image = Some sandbox_image;
+    }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 let all_keeper_tool_schemas_raw () =
@@ -161,6 +174,10 @@ let make_fixture
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
   in
   let config = Masc.Workspace.default_config base_path in
+  let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Generic.mkdir_p (Filename.concat playground "lib");
+  Generic.write_text_file (Filename.concat playground "lib/sample.ml")
+    "let sample = 1\n";
   let ctx =
     Masc.Keeper_context_runtime.create ~eio:false
       ~system_prompt:"keeper tool matrix"
@@ -172,12 +189,13 @@ let make_fixture
   Masc.Keeper_registry.For_testing.clear ();
   ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
-  let tools =
-    KTO.For_testing.make_tools
+  let bundle =
+    KTO.For_testing.make_tool_bundle
       ~config
       ~meta
       ~publication_recovery
       ~ctx_snapshot
+      ~clock
       ()
   in
   (match init_mode with
@@ -193,7 +211,7 @@ let make_fixture
          (Masc.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
-  { generic; config; meta; ctx_snapshot; tools }
+  { generic; config; meta; ctx_snapshot; tools = bundle.tools; cleanup = bundle.cleanup }
 
 let find_tool fixture name =
   let by_name tool_name =
@@ -267,6 +285,17 @@ let ensure_sub_board fixture =
   slug
 
 let prepare_keeper_name fixture name =
+  if name = "keeper_voice_listen" then (
+    (* No microphone or STT request: exercise the recorder's no-audio outcome. *)
+    let bin_dir = Filename.concat fixture.generic.base_path "voice-fixture-bin" in
+    Generic.mkdir_p bin_dir;
+    List.iter
+      (fun command ->
+        let path = Filename.concat bin_dir command in
+        Generic.write_text_file path "#!/bin/sh\nexit 0\n";
+        Unix.chmod path 0o755)
+      [ "rec"; "play" ];
+    Unix.putenv "PATH" (bin_dir ^ ":" ^ Sys.getenv "PATH"));
   if
     List.mem name
       [
@@ -528,6 +557,9 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
 let keeper_expectation_for_name name =
   match name with
   | "keeper_analyze_image" -> Expect_refusal
+  | "keeper_voice_listen" -> Expect_no_audio
+  | "tool_execute" | "tool_search_files" | "tool_read_file"
+  | "tool_write_file" | "keeper_ide_annotate" | "keeper_spawn" -> Expect_success
   | _ -> Expect_success_or_refusal
 
 let case_for_name name =
@@ -550,7 +582,11 @@ let case_for_name name =
              Generic.tool_arguments
                fixture.generic
                { schema with name = runtime_name });
-         expectation = generic_case.expectation;
+         expectation =
+           (match runtime_name with
+            | "masc_file_upload" | "masc_file_delete" | "masc_file_list" ->
+              Expect_missing_file_credentials
+            | _ -> of_generic_expectation generic_case.expectation);
        }
      | None ->
        {
@@ -561,7 +597,11 @@ let case_for_name name =
              Generic.tool_arguments
                fixture.generic
                { schema with name = runtime_name });
-         expectation = Expect_success_or_refusal;
+         expectation =
+           (match runtime_name with
+            | "masc_file_upload" | "masc_file_delete" | "masc_file_list" ->
+              Expect_missing_file_credentials
+            | _ -> Expect_success_or_refusal);
        })
   else if
     string_starts_with ~prefix:"keeper_" runtime_name
@@ -605,18 +645,46 @@ let refusal_class_report = function
   | Some Agent_core.Types.Unknown -> "unknown"
 
 let evaluate_expectation ~name expectation = function
-  | Ok _ -> (
+  | Ok (output : Agent_core.Types.tool_output) -> (
       match expectation with
       | Expect_success | Expect_success_or_refusal -> Ok ()
+      | Expect_no_audio ->
+        (match Yojson.Safe.from_string output.Agent_core.Types.content with
+         | json ->
+           (match Masc.Voice_bridge.capture_outcome_of_json json with
+            | Masc.Voice_bridge.Nothing_heard _ -> Ok ()
+            | _ -> Error "voice fixture expected the typed no-audio outcome")
+         | exception Yojson.Json_error error -> Error error)
+      | Expect_missing_file_credentials
       | Expect_refusal | Expect_refusal_saying _ ->
           Error (Printf.sprintf "%s expected a refusal but succeeded" name))
-  | Error { Agent_core.Types.message; error_class; _ } ->
+  | Error ({ Agent_core.Types.message; error_class; _ } as observed_error) ->
       let refused_gracefully = is_graceful_refusal error_class in
       let report = refusal_class_report error_class in
       if contains_any message host_failure_fragments then
         Error (Printf.sprintf "%s hit fatal keeper-tool failure: %s" name message)
       else (
         match expectation with
+        | Expect_missing_file_credentials ->
+            let expected =
+              `Assoc
+                [ "ok", `Bool false
+                ; "error", `String "masc_file requires the DEEPSEEK_API_KEY environment variable"
+                ]
+            in
+            let expected_result =
+              Tool_result.error ~failure_class:Tool_result.Runtime_failure
+                ~tool_name:name ~start_time:0.0
+                (Yojson.Safe.to_string expected)
+              |> Masc.Tool_bridge.to_agent_core_typed_result
+            in
+            (match expected_result with
+             | Error expected_error
+               when error_class = Some Agent_core.Types.Unknown
+                    && not observed_error.recoverable
+                    && observed_error.message = expected_error.message -> Ok ()
+             | Ok _ | Error _ -> Error ("unexpected file dependency failure: " ^ message))
+        | Expect_no_audio -> Error ("voice fixture failed before no-audio result: " ^ message)
         | Expect_success ->
             Error (Printf.sprintf "%s expected success but got error: %s" name message)
         | Expect_refusal ->
@@ -647,6 +715,8 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
 	  let saved_env =
 	    [
 	      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
+	      ("PATH", Sys.getenv_opt "PATH");
+	      ("DEEPSEEK_API_KEY", Sys.getenv_opt "DEEPSEEK_API_KEY");
 	    ]
 	  in
 	  let base_path = Generic.temp_dir "keeper-tool-matrix-" in
@@ -660,6 +730,14 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         restore_env "HOME" saved_home)
       (fun () ->
         Unix.putenv "HOME" base_path;
+        unsetenv "DEEPSEEK_API_KEY";
+        Eio_context.with_turn_switch sw @@ fun () ->
+        let registry =
+          match Spawn_registry.create ~run:"matrix-turn" ~output_limit_bytes:(1 lsl 16) with
+          | Some registry -> registry
+          | None -> failwith "valid matrix spawn registry was rejected"
+        in
+        Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
         try
           let case = case_for_name schema.Masc_domain.name in
           let meta = make_meta () in
@@ -689,6 +767,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
               ~publication_recovery
               case.init_mode
           in
+          Fun.protect ~finally:fixture.cleanup @@ fun () ->
           case.prepare fixture;
           let args = case.arguments fixture schema in
           match find_tool fixture schema.Masc_domain.name with

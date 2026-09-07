@@ -7,12 +7,9 @@ module Reading = Masc.Tui_decode
    The pane is a column of fleet rows. A row is a border cell, the health
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
    the configured names whole that the roster's window keeps whole. The
-   reading's budget is set by the longest reading a row states in full:
-   [▶ network_read · 3 calls · 12.4s ago] is 36 cells, and a settled
-   [■ 5 calls · 38.2k tok · 41.0s ago] or a waiting [? approval ·
-   tool_execute] fits inside it. A budget of 24 cut the tool name off every
-   waiting row and the age off every settled one, and a budget of 32 cut
-   the [ago] off the settled rows (2026-09-06). *)
+   reading's budget holds the event clock and its count authority:
+   [~ network_read · 3 seen · evt 12.4s] and
+   [■ 5 total · 38.2k tok · evt 41.0s] fit without widening the pane. *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
@@ -42,7 +39,7 @@ type tab =
   | Tab_changes
 
 let tab_label = function
-  | Tab_fleet -> "Fleet"
+  | Tab_fleet -> "Recent"
   | Tab_changes -> "Changes"
 
 let next_tab = function
@@ -137,7 +134,7 @@ type rendering = {
 (* ── Text ──────────────────────────────────────────────────────────────── *)
 
 let middle_dot = " \xc2\xb7 "
-let running_glyph = Acting.glyph_text Acting.Call_started
+let open_record_glyph = "~"
 let settled_glyph = Acting.glyph_text Acting.Turn_settled
 let attention_glyph = Acting.glyph_text Acting.Attention
 let quiet_glyph = Acting.glyph_text Acting.Quiet
@@ -155,6 +152,7 @@ let written_glyph = "+"
 let failed_glyph = "!"
 
 let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
+let event_age_text ~now at = "evt " ^ age_text ~now at
 
 let compact_count n =
   let thousand = 1_000 and million = 1_000_000 in
@@ -180,84 +178,61 @@ let cost_text = function
 
 let join parts = String.concat middle_dot (List.filter (fun s -> s <> "") parts)
 
-(* The tool a running turn is on: the newest call, from the ledger when it
-   reported, else the wire. *)
-let current_tool (chunk : Acting.chunk) =
+(* The most recently observed tool, not a statement that it is still running. *)
+let latest_tool (chunk : Acting.chunk) =
   match List.rev (Acting.chunk_tools chunk) with
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
-(* A settled turn's count is the one its settle confirmed -- the server's
-   own count of the whole turn, where the list is only what this feed saw,
-   and the feed can open mid-turn or drop the oldest rows.
+(* A settle reports the whole turn's count. An open record only knows the
+   calls this feed observed, which may start mid-turn or have lost rows. *)
+let chunk_calls_text (chunk : Acting.chunk) =
+  if chunk.Acting.ck_settled then
+    match chunk.Acting.ck_calls with
+    | Some count -> Printf.sprintf "%d total" count
+    | None -> "total ?"
+  else Printf.sprintf "%d seen" (List.length (Acting.chunk_tools chunk))
 
-   This started as a workaround for something else: ledger rows carried no
-   turn number, landed on whatever chunk was newest, and a settled row read
-   2449 calls for a turn of one call (live capture 2026-09-06). Reading the
-   settle's number hid that. The rows now state their turn and are keyed on
-   it ([Acting.ck_session_turn]), so the list is no longer a running total
-   and this is a preference between two honest counts rather than a way
-   around a wrong one.
+type record_state = Record_open | Record_unfinished | Record_settled
 
-   Before a settle there is no confirmed count, so the open turn counts its
-   list. *)
-let chunk_call_count (chunk : Acting.chunk) =
-  if chunk.Acting.ck_settled then Option.value ~default:0 chunk.Acting.ck_calls
+let record_state ~health (chunk : Acting.chunk) =
+  if chunk.Acting.ck_settled then Record_settled
   else
-    match Acting.chunk_tools chunk with
-    | [] -> Option.value ~default:0 chunk.Acting.ck_calls
-    | tools -> List.length tools
+    match health with
+    | Some Reading.Health_offline | Some Reading.Health_zombie -> Record_unfinished
+    | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_stale
+           | Reading.Health_degraded) | None -> Record_open
 
-(* An unsettled chunk means the feed never saw the turn end. A keeper whose
-   process is gone can never send that end, so for [Health_offline] and
-   [Health_zombie] the row states what is known — the turn is unfinished —
-   instead of an in-flight word that reads as progress beside the gone mark.
-   No health reading ([None]) keeps the turn's own claim. *)
-let keeper_can_finish = function
-  | Some Reading.Health_offline | Some Reading.Health_zombie -> false
-  | Some _ | None -> true
+let record_label = function
+  | Record_open -> ("open/gap", Dim)
+  | Record_unfinished -> ("unfinished", Warn)
+  | Record_settled -> ("settled", Dim)
 
 let unfinished_glyph = "!"
 
-(* Vocabulary: the word "running" names the keeper's process phase and
-   nothing else. An in-flight turn is "in turn" on the fleet row and on the
-   focus header — one word per fact, and once per block: the calls under
-   the header name what they were doing and since when, not the state the
-   header above them already states. *)
 let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
       [ { text = attention_glyph ^ " "; tone = Warn }
       ; { text = join [ "approval"; tool ]; tone = Warn }
       ]
-  | None, Some chunk when not chunk.Acting.ck_settled && keeper_can_finish health ->
-      let calls = chunk_call_count chunk in
-      let on =
-        match current_tool chunk with
-        | Some tool -> tool
-        | None -> "in turn"
-      in
-      [ { text = running_glyph ^ " "; tone = Ok }
-      ; { text = join [ on; (if calls > 0 then calls_text calls else "") ]; tone = Plain }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
-      ]
-  | None, Some chunk when not chunk.Acting.ck_settled ->
-      [ { text = unfinished_glyph ^ " "; tone = Warn }
-      ; { text = "unfinished"; tone = Warn }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
-      ]
   | None, Some chunk ->
-      [ { text = settled_glyph ^ " "; tone = Dim }
-      ; { text =
-            join
-              [ calls_text (chunk_call_count chunk)
-              ; tokens_text chunk.Acting.ck_tokens
-              ]
-        ; tone = Plain
-        }
-      ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
+      let state = record_state ~health chunk in
+      let glyph, detail, tone =
+        match state with
+        | Record_open ->
+          (open_record_glyph,
+           join [ Option.value ~default:"open/gap" (latest_tool chunk); chunk_calls_text chunk ], Dim)
+        | Record_unfinished ->
+          (unfinished_glyph, join [ "unfinished"; chunk_calls_text chunk ], Warn)
+        | Record_settled ->
+          (settled_glyph, join [ chunk_calls_text chunk; tokens_text chunk.Acting.ck_tokens ], Dim)
+      in
+      [ { text = glyph ^ " "; tone }
+      ; { text = detail; tone = (if state = Record_unfinished then Warn else Plain) }
+      ; { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim }
       ]
-  | None, None -> [ { text = quiet_glyph ^ " quiet"; tone = Dim } ]
+  | None, None -> [ { text = quiet_glyph ^ " no events"; tone = Dim } ]
 
 (* ── Lines ─────────────────────────────────────────────────────────────── *)
 
@@ -305,8 +280,7 @@ let header_line ~cols input =
     match input.feed with
     | Feed_off -> { text = "no feed"; tone = Dim }
     | Feed_opening -> { text = "feed opening"; tone = Dim }
-    | Feed_live events ->
-        { text = Printf.sprintf "live%s%s events" middle_dot (compact_count events); tone = Ok }
+    | Feed_live _ -> { text = "feed live"; tone = Ok }
     | Feed_closed reason -> { text = "feed closed: " ^ reason; tone = Bad }
   in
   fit_line ~cols
@@ -321,7 +295,7 @@ let header_line ~cols input =
        ])
 
 (* Newest chunk per keeper: the fold returns chunks newest-activity first,
-   so the first one met for a keeper is its current or latest turn. *)
+   so the first one met for a keeper is its latest observed record. *)
 let newest_chunk_by_keeper chunks =
   let table = Hashtbl.create 16 in
   List.iter
@@ -338,9 +312,9 @@ let approval_for approvals name =
       else None)
     approvals
 
-(* Who acted last comes first. A keeper waiting on an approval outranks a
-   working one: it is the row the reader can do something about. Keepers the
-   feed has not shown acting sit at the bottom in the roster's own order. *)
+(* Pending approvals rank first, then unclosed records before settled ones,
+   each by receipt time. The order does not assert current owner-turn state.
+   Keepers without observed activity retain the roster's own order. *)
 let fleet_order input newest =
   let rank keeper =
     match approval_for input.approvals keeper.name, Hashtbl.find_opt newest keeper.name with
@@ -379,8 +353,8 @@ let indicator_line ~cols arrow n =
   ( fit_line ~cols (with_border [ { text = arrow ^ " " ^ more_text n; tone = Dim } ])
   , Target_none )
 
-(* The focus block: the selected keeper's current turn, call by call, then
-   the turns before it. *)
+(* The focus block: the selected keeper's newest feed record, call by call,
+   then the records before it. *)
 let focus_keeper input newest =
   match input.selected with
   | Some name -> Some name
@@ -399,22 +373,20 @@ let health_of input name =
   | Some keeper -> keeper.health
   | None -> None
 
-let tool_line ~cols ~now ~can_finish (chunk : Acting.chunk) (tool : Acting.chunk_tool) ~is_last =
+let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
-    (* The header states the turn's state; the call's line states what it
-       was doing and since when, so the state word does not repeat under
-       its own header. The age is elapsed, so it says [ago]. *)
-    | None when is_last && not chunk.Acting.ck_settled ->
-        { text = age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
+    (* The feed does not carry a receipt clock for each folded tool. Its
+       unknown duration stays blank; the record header owns the event age. *)
     | None -> { text = ""; tone = Dim }
   in
   let glyph =
-    if is_last && (not chunk.Acting.ck_settled) && Option.is_none tool.Acting.ct_duration_ms
+    if (not chunk.Acting.ck_settled) && Option.is_none tool.Acting.ct_duration_ms
     then
-      if can_finish then { text = running_glyph ^ " "; tone = Ok }
-      else { text = unfinished_glyph ^ " "; tone = Warn }
+      (match state with
+       | Record_unfinished -> { text = unfinished_glyph ^ " "; tone = Warn }
+       | Record_open | Record_settled -> { text = open_record_glyph ^ " "; tone = Dim })
     else { text = settled_glyph ^ " "; tone = Dim }
   in
   let inner = cols - border_cells - mark_cells in
@@ -442,26 +414,32 @@ let turn_name (chunk : Acting.chunk) =
   | Some _ when chunk.Acting.ck_settled -> Some (Acting.turn_text chunk.Acting.ck_turn)
   | _ -> None
 
-let turn_summary_line ~cols ~now (chunk : Acting.chunk) =
+let turn_summary_line ~cols ~now ~health (chunk : Acting.chunk) =
   let named =
     match turn_name chunk with
     | Some text -> [ { text; tone = Plain } ]
     | None -> []
   in
+  let prefix =
+    match record_state ~health chunk with
+    | Record_settled -> { text = settled_glyph ^ " "; tone = Dim }
+    | Record_open -> { text = open_record_glyph ^ " open/gap"; tone = Dim }
+    | Record_unfinished -> { text = unfinished_glyph ^ " unfinished"; tone = Warn }
+  in
   fit_line ~cols
     (with_border
-       ( [ { text = settled_glyph ^ " "; tone = Dim } ]
+       ( [ prefix ]
        @ named
        @ [ { text =
                middle_dot
                ^ join
-                   [ calls_text (chunk_call_count chunk)
+                   [ chunk_calls_text chunk
                    ; tokens_text chunk.Acting.ck_tokens
                    ; cost_text chunk.Acting.ck_cost_usd
                    ]
            ; tone = Dim
            }
-         ; { text = middle_dot ^ age_text ~now chunk.Acting.ck_at ^ " ago"; tone = Dim }
+         ; { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim }
          ] ))
 
 (* Every focus row, oldest call first, then the earlier turns. The caller
@@ -471,15 +449,11 @@ let focus_lines ~cols input chunks name =
     List.filter (fun (c : Acting.chunk) -> String.equal c.Acting.ck_keeper name) chunks
   in
   let approval = approval_for input.approvals name in
-  let can_finish = keeper_can_finish (health_of input name) in
+  let health = health_of input name in
   let header =
     match own with
     | (current : Acting.chunk) :: _ ->
-        let state_word, state_tone =
-          if current.Acting.ck_settled then ("settled", Dim)
-          else if can_finish then ("in turn", Ok)
-          else ("unfinished", Warn)
-        in
+        let state_word, state_tone = record_label (record_state ~health current) in
         let named =
           match turn_name current with
           | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
@@ -489,12 +463,14 @@ let focus_lines ~cols input chunks name =
           (with_border
              ( { text = name; tone = Accent }
              :: named
-             @ [ { text = middle_dot ^ state_word; tone = state_tone } ] ))
+             @ [ { text = middle_dot ^ state_word; tone = state_tone }
+               ; { text = middle_dot ^ event_age_text ~now:input.now current.Acting.ck_at; tone = Dim }
+               ] ))
     | [] ->
         fit_line ~cols
           (with_border
              [ { text = name; tone = Accent }
-             ; { text = middle_dot ^ "no turn on this feed yet"; tone = Dim }
+             ; { text = middle_dot ^ "no events on this feed yet"; tone = Dim }
              ])
   in
   let approval_line =
@@ -513,17 +489,12 @@ let focus_lines ~cols input chunks name =
     | [] -> []
     | current :: earlier ->
         let tools = Acting.chunk_tools current in
-        let count = List.length tools in
         let calls =
-          List.mapi
-            (fun index tool ->
-              tool_line ~cols ~now:input.now ~can_finish current tool ~is_last:(index = count - 1))
-            tools
+          List.map (tool_line ~cols ~state:(record_state ~health current) current) tools
         in
-        (* A call-less open turn draws no body row: the header already
-           states the state and the age, and a row under it would repeat
-           both. *)
-        calls @ List.map (turn_summary_line ~cols ~now:input.now) earlier
+        (* A call-less record draws no body row: the header already states
+           the observation state and its receipt age. *)
+        calls @ List.map (turn_summary_line ~cols ~now:input.now ~health) earlier
   in
   List.map (fun line -> (line, Target_none)) ((header :: approval_line) @ body)
 
@@ -572,7 +543,7 @@ let scrolled_rows ~cols ~below ~scroll body =
   let slice = List.filteri (fun index _ -> index >= scroll && index < scroll + room) body in
   let hidden_below = total - (scroll + room) in
   let slice =
-    if hidden_below > 0 && room >= 1 then
+    if hidden_below > 0 && room >= 2 then
       List.filteri (fun index _ -> index < room - 1) slice
       @ [ indicator_line ~cols down_arrow (hidden_below + 1) ]
     else slice
@@ -594,14 +565,22 @@ let folded_rows ~cols ~below body =
    to that indicator. *)
 let window ~cols ~below ~scroll ~overview body =
   let total = List.length body in
-  let scroll_max = if total <= below then 0 else max 0 (total - (below - 1)) in
-  let scroll = max 0 (min scroll scroll_max) in
-  let drawn =
-    if total <= below then body
-    else if scroll = 0 then overview ()
-    else scrolled_rows ~cols ~below ~scroll body
-  in
-  (drawn, scroll_max)
+  if below <= 0 then ([], 0)
+  else if below = 1 then
+    (* A one-row window must still show actionable content. Indicators would
+       consume its only row and make scrolling unable to reach any target. *)
+    let scroll_max = max 0 (total - 1) in
+    let scroll = max 0 (min scroll scroll_max) in
+    (List.filteri (fun index _ -> index = scroll) body, scroll_max)
+  else
+    let scroll_max = if total <= below then 0 else max 0 (total - (below - 1)) in
+    let scroll = max 0 (min scroll scroll_max) in
+    let drawn =
+      if total <= below then body
+      else if scroll = 0 then overview ()
+      else scrolled_rows ~cols ~below ~scroll body
+    in
+    (drawn, scroll_max)
 
 let fleet_lines ~cols ~below ~scroll input =
   let traces = List.map (fun keeper -> (keeper.name, keeper.trace_id)) input.keepers in
@@ -723,13 +702,23 @@ let lines ~rows ~cols ~scroll input =
   if rows = 0 then { rows = []; targets = []; scroll_max = 0 }
   else
     let header = (header_line ~cols input, Target_next_tab) in
-    let below = rows - 1 in
+    let headers =
+      match input.tab with
+      | Tab_fleet when rows >= 2 ->
+        [ header
+        ; (fit_line ~cols
+             (with_border [ { text = "evt=since receipt · seen/total=tool calls"; tone = Dim } ]),
+           Target_none)
+        ]
+      | Tab_fleet | Tab_changes -> [ header ]
+    in
+    let below = rows - List.length headers in
     let drawn, scroll_max =
       match input.tab with
       | Tab_fleet -> fleet_lines ~cols ~below ~scroll input
       | Tab_changes -> changes_lines ~cols ~below ~scroll input
     in
-    let drawn = header :: drawn in
+    let drawn = headers @ drawn in
     let padding =
       List.init (max 0 (rows - List.length drawn)) (fun _ -> (blank_line ~cols, Target_none))
     in

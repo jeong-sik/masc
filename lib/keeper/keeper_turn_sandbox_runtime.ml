@@ -52,7 +52,7 @@ let sweep_abandoned_microvm_guests
       try
         Ok (Keeper_sandbox_microvm.sweep_abandoned_guests
           ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
-      with exn -> Error (exn, Printexc.get_raw_backtrace ()))
+      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* cancel-guard-ok: re-raised below after unlocking, including cancellation. *)
   with
   | Ok outcomes -> outcomes
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace

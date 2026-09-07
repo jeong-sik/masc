@@ -182,8 +182,8 @@ let load_and_verify_dashboard_blob
     else Ok body
 ;;
 
-let load_dashboard_asset relative_path =
-  match installed_selection () with
+let load_dashboard_asset_for_selection installed relative_path =
+  match installed with
   | Installed_dashboard.Unavailable e -> Error (Asset_installed_invalid e)
   | Installed_dashboard.Bound binding ->
     Result.map_error (function
@@ -232,6 +232,9 @@ let load_dashboard_asset relative_path =
     Error Asset_not_manifested
 ;;
 
+let load_dashboard_asset relative_path =
+  load_dashboard_asset_for_selection (installed_selection ()) relative_path
+
 let dashboard_asset_root () =
   match Build_identity.resolve_dashboard_asset "index.html" with
   | Build_identity.Dashboard_asset_bound { snapshot_root; _ } -> Some snapshot_root
@@ -257,14 +260,7 @@ type bundle_freshness =
     bundle. [Missing_stamp] covers both "never built" and any stat failure on
     the stamp path, so a broken assets_root resolution is never silently
     treated as fresh. *)
-let bundle_freshness () =
-  match installed_selection () with
-  | Installed_dashboard.Unavailable _ -> Missing_stamp
-  | Installed_dashboard.Bound binding ->
-    (match Installed_dashboard.load binding ".build-stamp" with
-     | Ok _ -> Fresh
-     | Error _ -> Missing_stamp)
-  | Installed_dashboard.Not_installed ->
+let source_bundle_freshness () =
   match Build_identity.resolve_dashboard_asset "index.html" with
   | Build_identity.Dashboard_asset_bound _ ->
     (match Build_identity.resolve_dashboard_asset ".build-stamp" with
@@ -286,6 +282,28 @@ let bundle_freshness () =
      | Some binary_mtime ->
        if stamp_mtime < binary_mtime then Stale { stamp_mtime; binary_mtime }
        else Fresh))
+
+(* Request-local observation: installed freshness and the final health verdict
+   share one fully verified stamp read, never a result from an earlier request. *)
+type bundle_observation =
+  | Source_bundle of bundle_freshness
+  | Installed_unavailable of Installed_dashboard.error
+  | Installed_stamp of (unit, Installed_dashboard.error) result
+
+let observe_bundle = function
+  | Installed_dashboard.Not_installed -> Source_bundle (source_bundle_freshness ())
+  | Installed_dashboard.Unavailable e -> Installed_unavailable e
+  | Installed_dashboard.Bound binding ->
+    Installed_stamp
+      (Result.map (fun _ -> ()) (Installed_dashboard.load binding ".build-stamp"))
+
+let observed_freshness = function
+  | Source_bundle freshness -> freshness
+  | Installed_stamp (Ok ()) -> Fresh
+  | Installed_stamp (Error _) | Installed_unavailable _ -> Missing_stamp
+
+let bundle_freshness () =
+  observed_freshness (observe_bundle (installed_selection ()))
 
 (** Log a boot-time WARN when the served bundle is stale or missing. Never
     silent: a missing stamp warns just as loudly as a stale one. Intended to
@@ -397,11 +415,12 @@ let surface_recovery_json = function
     logs. [status] is ["ok"], ["stale"], or ["missing"]; a present build-stamp
     with no [index.html] still reports ["missing"] because the index is what
     actually serves. *)
-let surface_status_json () =
+let surface_status_json_for_selection installed =
   let asset_resolution = Build_identity.resolve_dashboard_asset "index.html" in
   let manifest_identity = Build_identity.dashboard_manifest_identity () in
-  let loaded_index = load_dashboard_asset "index.html" in
-  let freshness = bundle_freshness () in
+  let loaded_index = load_dashboard_asset_for_selection installed "index.html" in
+  let bundle = observe_bundle installed in
+  let freshness = observed_freshness bundle in
   let index_present = Result.is_ok loaded_index in
   let bound_invalid =
     match asset_resolution with
@@ -421,7 +440,7 @@ let surface_status_json () =
         ] )
     | Fresh ->
       let stamp_field =
-        let stamp_mtime = match installed_selection () with
+        let stamp_mtime = match installed with
           | Installed_dashboard.Bound binding -> Installed_dashboard.build_stamp_mtime binding
           | Installed_dashboard.Unavailable _ -> None
           | Installed_dashboard.Not_installed -> Option.bind (build_stamp_path ()) mtime_of in
@@ -439,38 +458,47 @@ let surface_status_json () =
     else if index_present then freshness_status
     else "missing"
   in
-  let installed = installed_selection () in
   let status, recovery, installed_evidence =
-    match installed with
-    | Installed_dashboard.Not_installed ->
+    match bundle with
+    | Source_bundle _ ->
       status, surface_recovery ~asset_resolution ~loaded_index ~freshness, `Null
-    | Installed_dashboard.Unavailable _ ->
+    | Installed_unavailable _ ->
       "unavailable", Repair_exact_artifacts_and_restart Binding_invalid,
       Installed_dashboard.evidence installed
-    | Installed_dashboard.Bound binding ->
+    | Installed_stamp loaded_stamp ->
       let verified = match loaded_index with
         | Error (Asset_installed_invalid e) -> Error e
         | Error _ -> Error Installed_dashboard.Not_manifested
-        | Ok _ -> Result.map (fun _ -> ()) (Installed_dashboard.load binding ".build-stamp") in
+        | Ok _ -> loaded_stamp in
       (match verified with
        | Ok () -> "ok", No_recovery, Installed_dashboard.evidence installed
        | Error e -> "unavailable", Repair_exact_artifacts_and_restart Exact_read_failed,
            Installed_dashboard.evidence (Installed_dashboard.Unavailable e))
+  in
+  let surface_assets_root, surface_dashboard_root, surface_stamp_path =
+    match installed with
+    | Installed_dashboard.Bound binding ->
+      let root = Installed_dashboard.assets_root binding in
+      Some root, Some (Filename.concat root "dashboard"),
+      Installed_dashboard.asset_path binding ".build-stamp"
+    | Installed_dashboard.Unavailable _ -> None, None, None
+    | Installed_dashboard.Not_installed ->
+      assets_root (), dashboard_asset_root (), build_stamp_path ()
   in
   `Assoc
     ([ ("schema", `String "masc.dashboard_surface.v1")
      ; ("installed_release", installed_evidence)
      ; ("status", `String status)
      ; ("index_present", `Bool index_present)
-     ; ("assets_root", Json_util.string_opt_to_json (assets_root ()))
-     ; ("dashboard_asset_root", Json_util.string_opt_to_json (dashboard_asset_root ()))
+     ; ("assets_root", Json_util.string_opt_to_json surface_assets_root)
+     ; ("dashboard_asset_root", Json_util.string_opt_to_json surface_dashboard_root)
      ; ( "dashboard_manifest_root"
        , Json_util.string_opt_to_json
            (Option.map
               (fun (manifest : Build_identity.dashboard_assets_provenance) ->
                 manifest.snapshot_root)
               manifest_identity) )
-     ; ("build_stamp_path", Json_util.string_opt_to_json (build_stamp_path ()))
+     ; ("build_stamp_path", Json_util.string_opt_to_json surface_stamp_path)
      ; ( "index_sha256"
        , Json_util.string_opt_to_json
            (match loaded_index with
@@ -551,6 +579,9 @@ let surface_status_json () =
      ]
      @ freshness_fields)
 
+let surface_status_json () =
+  surface_status_json_for_selection (installed_selection ())
+
 let html () =
   match load_dashboard_asset "index.html" with
   | Ok body -> body
@@ -579,6 +610,7 @@ let is_safe_asset_relative_path rel =
     segments
 
 module For_testing = struct
+  let surface_status_json = surface_status_json_for_selection
   let select_installed_authority = select_installed_authority
   let surface_recovery = surface_recovery
   let surface_recovery_json = surface_recovery_json

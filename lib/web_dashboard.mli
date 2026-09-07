@@ -75,6 +75,10 @@ val load_dashboard_asset : string -> (string, asset_load_error) result
     returning bytes. Invalid/replaced bindings fail closed. *)
 
 module For_testing : sig
+  val surface_status_json : Installed_dashboard.selection -> Yojson.Safe.t
+  (** Health projection with an explicit, already selected installed authority.
+      Performs the real asset and receipt checks afresh on every call. *)
+
   val select_installed_authority :
     launch_source_root_state:Build_identity.launch_source_root_state ->
     installed:Installed_dashboard.selection -> Installed_dashboard.selection

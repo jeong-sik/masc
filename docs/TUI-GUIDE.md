@@ -1555,3 +1555,9 @@ keeper is in. The header's `N unread` counts the same rows.
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
 recorded in Recent Events.
+
+### Board navigation and Planning changes
+
+Board `s` stores the chosen order in `[tui].board_sort` in the resolved `runtime.toml`. `f` and `F` move to the next and previous Hearth; `H` opens a searchable chooser including all Hearths. IDs use subdued text, Hearths the information color, and authors the success color; votes retain their sign and replies remain an explicit count.
+
+Planning shows net changes in completed Goals, completed Tasks, and pending Goal reviews since the first successful Planning reading in this TUI session. The displayed baseline timestamp defines the window. These are changes in snapshot counts, not a durable completion history or operator-approval throughput.

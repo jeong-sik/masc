@@ -3511,7 +3511,7 @@ let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
       Ansi.dim
-      ^ "  hearths: none counted yet \xe2\x80\x94 f narrows once they are"
+      ^ "  H:choose hearth · f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -3583,7 +3583,7 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  order %s · s cycles ranking"
+    (Printf.sprintf "  Sort [s]: %s · saved for next start · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -3652,8 +3652,8 @@ let render_board_list (state : state) =
           else " 0"
         in
         let replies_text =
-          if p.bp_comment_count > 0 then Printf.sprintf "💬%d" p.bp_comment_count
-          else "c0"
+          if p.bp_comment_count > 0 then Printf.sprintf "%d" p.bp_comment_count
+          else "0"
         in
         let values =
           { Render_schedule.brow_mark = board_kind_mark p.bp_kind
@@ -3667,11 +3667,10 @@ let render_board_list (state : state) =
           }
         in
         let styles =
-          { Render_schedule.bstyle_id =
-              Masc_tui_theme.tone Masc_tui_theme.Accent
+          { Render_schedule.bstyle_id = Theme.recede ()
           ; bstyle_hearth =
               if String.equal hearth_text "" then Ansi.dim else (Theme.info ())
-          ; bstyle_author = Masc_tui_theme.tone Masc_tui_theme.Accent
+          ; bstyle_author = Theme.ok ()
           ; bstyle_age = Ansi.dim
           ; bstyle_score = board_score_style p.bp_votes
           ; bstyle_replies =
@@ -3695,8 +3694,7 @@ let render_board_list (state : state) =
 
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         "j/k:move  PgUp/PgDn:page  right/Enter:read  s:sort  f:hearth  Y:copy link  v/V:vote  w:write  r:refresh  Tab:next");
+       ~hints:(Masc_tui_keys.footer_hints state.view));
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
@@ -4077,7 +4075,7 @@ let planning_phase_label phase = Goal_phase.to_string phase
    silent -- the frame drops its last row, which is the footer. #32928 carries
    that change for the three surfaces where the tail is already established. *)
 (* One more than it was: the JUDGE legend sits under the column header. *)
-let planning_list_chrome_rows = 15
+let planning_list_chrome_rows = 17
 let planning_list_verdict_rows = 2
 
 let planning_phase_column =
@@ -4292,6 +4290,10 @@ let render_planning_list (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  Sort [s]: %s · Filter [f]: %s"
+       (planning_sort_label state.planning_sort)
+       (planning_filter_label state.planning_filter));
   box_divider buf cols;
 
   let goals =
@@ -4373,6 +4375,15 @@ let render_planning_list (state : state) =
          |> String.concat backlog_sep
        in
        box_line buf cols rollup;
+       box_line_styled buf cols ~style:(Theme.info ())
+         (match state.planning_baseline with
+          | None -> "  Trend: waiting for the first successful reading"
+          | Some first ->
+              Printf.sprintf "  Net change since %s: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                (Terminal_text.single_line first.pl_generated_at)
+                (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
+                (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
+                (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
        box_line buf cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        box_divider buf cols;

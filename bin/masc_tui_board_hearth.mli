@@ -16,3 +16,5 @@ val next :
     A [current] the census no longer holds returns to [None] rather than
     guessing a neighbour -- the hearth it named is gone from the board, and
     the whole board is the honest answer to "what comes after it". *)
+
+val previous : current:string option -> census:(string * int) list -> string option

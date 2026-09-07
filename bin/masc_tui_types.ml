@@ -1733,6 +1733,14 @@ let board_sort_label = function
   | Board_updated -> "updated"
   | Board_discussed -> "discussed"
 
+let board_sort_of_string = function
+  | "hot" -> Some Board_hot
+  | "trending" -> Some Board_trending
+  | "recent" -> Some Board_recent
+  | "updated" -> Some Board_updated
+  | "discussed" -> Some Board_discussed
+  | _ -> None
+
 let board_sort_explanation = function
   | Board_hot -> "net votes first; newer breaks ties"
   | Board_trending -> "net votes / √age-hours"
@@ -3341,6 +3349,7 @@ type state = {
      arm time and a press on a different row re-arms for that row. *)
   mutable board_vote_armed: (string * bool) option;
   mutable planning: planning_snapshot option;
+  mutable planning_baseline: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: int;
@@ -4513,6 +4522,7 @@ let create_state
   board_post_error = None;
   board_vote_armed = None;
   planning = None;
+  planning_baseline = None;
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = 0;
@@ -6010,6 +6020,7 @@ type palette_action =
   | Palette_config of config_pane
   | Palette_chat of string
   | Palette_task of string
+  | Palette_board_hearth of string option
   | Palette_board_post of string
   (* (question, symbol): a language-server question about a name on the
      Code pane's cursor line — the K/D candidates ride the palette as
@@ -6116,6 +6127,10 @@ let palette_entries (state : state) =
   @ List.map
       (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
       state.tasks
+  @ [ "hearth all", Palette_board_hearth None ]
+  @ List.map (fun (name, count) ->
+      (Printf.sprintf "hearth %s (%d posts)" name count, Palette_board_hearth (Some name)))
+      state.board_hearths
   @ List.map
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))

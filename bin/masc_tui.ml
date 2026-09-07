@@ -7801,6 +7801,8 @@ let apply_planning_load state = function
         Planning_selection.reconcile ~current_ids
           ~next_ids:(goal_ids planning) ~current
       in
+      if Option.is_none state.planning_baseline then
+        state.planning_baseline <- Some planning;
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -12378,6 +12380,12 @@ let main () =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
+  (match Masc_tui_config.board_sort ~base_path with
+   | None -> ()
+   | Some value ->
+       (match board_sort_of_string value with
+        | Some sort -> state.board_sort <- sort
+        | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
   (match Masc_tui_config.theme ~base_path with
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
@@ -15055,6 +15063,15 @@ and is loaded on demand through keeper_skill.
                      (match index_of 0 state.tasks with
                       | Some index -> state.task_cursor <- index
                       | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
+                     state.board_hearth <- hearth;
+                     state.board_cursor <- 0;
+                     state.board_mode <- Board_list;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_http_refresh state ~host:server_peer_host ~port:state.port
+                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_board_post post_id) ->
                      goto_surface state ~mailbox:async_messages Board;
                      let rec find i = function
@@ -16062,6 +16079,11 @@ and is loaded on demand through keeper_skill.
               with
               | index :: _ -> index
               | [] -> 0)
+       | Some "H" when state.view = Board && state.board_mode <> Board_compose ->
+           state.palette_open <- true;
+           state.palette_mode <- Palette_jump;
+           state.palette_query <- "hearth ";
+           state.palette_cursor <- 0
        | Some ":" ->
            state.palette_open <- true;
            state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -18249,8 +18271,8 @@ and is loaded on demand through keeper_skill.
               [fetch_board] -- so this refetches rather than filtering the
               page in hand. *)
            state.board_hearth <-
-             Board_hearth.next ~current:state.board_hearth
-               ~census:state.board_hearths;
+             (if key = Some "F" then Board_hearth.previous else Board_hearth.next)
+               ~current:state.board_hearth ~census:state.board_hearths;
            state.board_cursor <- 0;
            state.board_mode <- Board_list;
            add_event state "system"
@@ -19025,6 +19047,9 @@ and is loaded on demand through keeper_skill.
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
                      state.board_sort <- next_board_sort state.board_sort;
+                     (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
+                      | Ok () -> ()
+                      | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
                      add_event state "system"
                        ("Board order: "
                         ^ board_sort_label state.board_sort);

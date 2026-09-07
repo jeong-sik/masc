@@ -36,11 +36,20 @@ let test_a_hearth_absent_from_the_page_is_still_reachable () =
     ~current:(Some "ops")
     ~census:[ "verification", 447; "ops", 239; "archive", 3 ]
 
+let test_reverse_roundtrip () =
+  let census = [ "ops", 3; "research", 2; "release", 1 ] in
+  List.iter (fun current ->
+    let next = Hearth.next ~current ~census in
+    Alcotest.(check (option string)) "next then previous" current
+      (Hearth.previous ~current:next ~census))
+    [None; Some "ops"; Some "research"; Some "release"]
+
 let () =
   Alcotest.run
     "tui board hearth"
     [ ( "cycle"
-      , [ Alcotest.test_case "returns to every hearth" `Quick
+      , [ Alcotest.test_case "reverse roundtrip" `Quick test_reverse_roundtrip
+        ; Alcotest.test_case "returns to every hearth" `Quick
             test_the_cycle_returns_to_every_hearth
         ; Alcotest.test_case "cannot strand the reader" `Quick
             test_the_cycle_cannot_strand_the_reader

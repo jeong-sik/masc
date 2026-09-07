@@ -69,11 +69,10 @@ CAMLprim value masc_tui_termios_set_literal_next(value v_fd, value v_byte)
 
    [Unix.terminal_io] carries neither IEXTEN nor c_cc[VLNEXT], which is why
    this is a stub rather than a field on the record the caller already sets --
-   the same gap [masc_tui.ml] records for Ctrl-O, whose character is VDISCARD.
+   the same gap as Ctrl-O, reclaimed separately below through VDISCARD.
 
    VLNEXT alone is disabled rather than clearing IEXTEN, which would take
-   VDISCARD and VSTATUS with it: one key is being reclaimed, so one special
-   character is turned off.
+   VSTATUS with it. Each application key is reclaimed individually.
 
    Returns false when the descriptor is not a terminal or the kernel refused
    the change. The caller keeps its own terminal either way -- the key stays
@@ -95,4 +94,51 @@ CAMLprim value masc_tui_termios_disable_literal_next(value v_fd)
     CAMLreturn(Val_false);
 
   CAMLreturn(Val_true);
+}
+
+/* BSD tty line disciplines consume Ctrl-O as VDISCARD even with ICANON off.
+   Reclaim just this character, preserving IEXTEN and unrelated shell keys. */
+CAMLprim value masc_tui_termios_discard_output(value v_fd)
+{
+  CAMLparam1(v_fd);
+#ifdef VDISCARD
+  struct termios attrs;
+  if (tcgetattr(Int_val(v_fd), &attrs) != 0)
+    CAMLreturn(Val_int(-1));
+  CAMLreturn(Val_int((int)(unsigned char)attrs.c_cc[VDISCARD]));
+#else
+  CAMLreturn(Val_int(-1));
+#endif
+}
+
+CAMLprim value masc_tui_termios_set_discard_output(value v_fd, value v_byte)
+{
+  CAMLparam2(v_fd, v_byte);
+#ifdef VDISCARD
+  struct termios attrs;
+  if (tcgetattr(Int_val(v_fd), &attrs) != 0)
+    CAMLreturn(Val_false);
+  attrs.c_cc[VDISCARD] = (cc_t)(unsigned char)Int_val(v_byte);
+  if (tcsetattr(Int_val(v_fd), TCSANOW, &attrs) != 0)
+    CAMLreturn(Val_false);
+  CAMLreturn(Val_true);
+#else
+  CAMLreturn(Val_false);
+#endif
+}
+
+CAMLprim value masc_tui_termios_disable_discard_output(value v_fd)
+{
+  CAMLparam1(v_fd);
+#ifdef VDISCARD
+  struct termios attrs;
+  if (tcgetattr(Int_val(v_fd), &attrs) != 0)
+    CAMLreturn(Val_false);
+  attrs.c_cc[VDISCARD] = _POSIX_VDISABLE;
+  if (tcsetattr(Int_val(v_fd), TCSANOW, &attrs) != 0)
+    CAMLreturn(Val_false);
+  CAMLreturn(Val_true);
+#else
+  CAMLreturn(Val_false);
+#endif
 }

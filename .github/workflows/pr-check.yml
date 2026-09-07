@@ -151,6 +151,9 @@ jobs:
       - name: Check doc truth
         run: scripts/check-doc-truth.sh
 
+      - name: Verify release distribution fixtures
+        run: python3 test/test_release_dashboard_bundle.py -v
+
       - name: Build
         env:
           DUNE_JOBS: "4"

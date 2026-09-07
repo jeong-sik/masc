@@ -135,9 +135,10 @@ val run_vision
     local transport wiring rejections do not trigger this output-limit failover.
     A provider 4xx that is neither transient (408/409/429) nor capacity (413)
     is candidate-local and advances without backoff. Before each candidate is
-    called, the image is fitted to that candidate's request-body cap: sent as
-    is, shrunk once, or skipped without a call when no edge at or above the
-    floor would fit.
+    called, the image is fitted to the request-body cap that candidate
+    declares: sent as is, shrunk once, or skipped without a call when no edge
+    at or above the floor would fit. A candidate without a cap gets the image
+    as is.
     Eager ingestion can keep the turn alive with a typed unread placeholder. *)
 
 val handle

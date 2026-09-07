@@ -120,7 +120,7 @@ depends: [
   "mtime" {= "2.1.0"}
   "num" {= "1.6"}
   "ocaml" {= "5.5.0"}
-  "ocaml-base-compiler" {= "5.5.0"}
+  "ocaml-base-compiler" {= "5.5.1"}
   "ocaml-compiler" {= "5.5.0"}
   "ocaml-compiler-libs" {= "v0.17.0"}
   "ocaml-options-vanilla" {= "1"}

@@ -323,32 +323,27 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-type request_body_cap_error = Missing_or_non_positive_request_body_cap of
+type request_body_cap_error = Non_positive_request_body_cap of
   { runtime_id : string
   }
 (** A materialized runtime configuration reaches a Keeper provider boundary
-    without a positive serialized-request body ceiling. *)
+    with a non-positive explicit serialized-request body ceiling. *)
 
 val request_body_cap_error_to_string : request_body_cap_error -> string
 
 val validate_request_body_cap :
   runtime_id:string
   -> Llm_provider.Provider_config.t
-  -> (int, request_body_cap_error) result
+  -> (int option, request_body_cap_error) result
 (** Pure final-provider-config guard shared by every Keeper provider-call
     boundary. Config admission uses it for statically reachable routes; call
     sites must invoke it again after feature-local transforms. The successful
-    value is the exact positive cap validated on that final provider config. *)
+    value preserves absence or the exact positive caller cap on that final config. *)
 
 type keeper_dispatch_readiness =
   | Dispatchable
-  | Missing_request_body_cap of { table_path : string }
-      (** Whether a materialized runtime could carry a keeper turn if one were
-          routed to it, independent of whether anything routes to it today.
-          Boot validation judges only reachable ids on purpose, which left a
-          declared-but-unassigned blocked runtime with no observer: listed by
-          [/api/v1/runtime/resolved], impossible to assign, and silent about
-          why (masc#28404). *)
+  | Invalid_request_body_cap of { table_path : string }
+      (** An explicitly supplied caller cap is invalid. Omission is valid. *)
 
 val keeper_dispatch_readiness : t -> keeper_dispatch_readiness
 (** The single definition of "blocked", so the operator-facing projection and

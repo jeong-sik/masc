@@ -828,14 +828,14 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
          r.model.id)
 ;;
 
-type request_body_cap_error = Missing_or_non_positive_request_body_cap of
+type request_body_cap_error = Non_positive_request_body_cap of
   { runtime_id : string
   }
 
 let request_body_cap_error_to_string = function
-  | Missing_or_non_positive_request_body_cap { runtime_id } ->
+  | Non_positive_request_body_cap { runtime_id } ->
     Printf.sprintf
-      "Keeper runtime %S has no positive serialized-request ceiling"
+      "Keeper runtime %S has a non-positive explicit serialized-request ceiling"
       runtime_id
 ;;
 
@@ -846,26 +846,17 @@ let request_body_cap_error_to_string = function
 let validate_request_body_cap ~runtime_id
     (provider_config : Llm_provider.Provider_config.t) =
   match provider_config.max_request_body_bytes with
-  | Some cap when cap > 0 -> Ok cap
-  | None | Some _ ->
-    Error (Missing_or_non_positive_request_body_cap { runtime_id })
+  | None -> Ok None
+  | Some cap when cap > 0 -> Ok (Some cap)
+  | Some _ ->
+    Error (Non_positive_request_body_cap { runtime_id })
 ;;
 
-(* Whether a materialized runtime could carry a keeper turn if one were routed
-   to it, independent of whether anything routes to it today.
-
-   Boot validation deliberately checks only reachable ids — refusing to start
-   over a runtime nobody is assigned to would be wrong — but that left the
-   blocked state with no observer at all: a runtime declared in runtime.toml,
-   materialized, listed by /api/v1/runtime/resolved, and impossible to assign,
-   with nothing anywhere saying why. Seven live runtimes were in that state on
-   2026-08-12 and finding them required a separate script that re-parsed the
-   TOML (masc#28404). The readiness is the same predicate boot validation uses,
-   named once so the operator-facing projection and the fail-closed gate cannot
-   disagree. *)
+(* Explicit caller caps are validated for every materialized HTTP runtime.
+   Absence is dispatchable; it is not a missing provider capability. *)
 type keeper_dispatch_readiness =
   | Dispatchable
-  | Missing_request_body_cap of { table_path : string }
+  | Invalid_request_body_cap of { table_path : string }
 
 (* TEL-OK: pure predicate over an already-materialized runtime; the boot logger
    and the resolved projection own its observability. *)
@@ -879,7 +870,7 @@ let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
     (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
      | Ok _ -> Dispatchable
      | Error _ ->
-       Missing_request_body_cap
+       Invalid_request_body_cap
          { table_path =
              Otoml.string_of_path
                [ runtime.binding.provider_id; runtime.binding.model_id ]
@@ -892,10 +883,10 @@ let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
 (* TEL-OK: pure rendering of the variant above; callers decide where it lands. *)
 let keeper_dispatch_blocker = function
   | Dispatchable -> None
-  | Missing_request_body_cap { table_path } ->
+  | Invalid_request_body_cap { table_path } ->
     Some
       (Printf.sprintf
-         "no positive max-request-body-bytes; declare [%s].max-request-body-bytes"
+         "non-positive [%s].max-request-body-bytes; use a positive value or omit it"
          table_path)
 ;;
 
@@ -1030,20 +1021,18 @@ let validate_keeper_dispatch_request_caps
      max-prompt-bytes for them added a second authority over the same window,
      measured in wire bytes rather than tokens, and made its absence a boot
      refusal, so a deployment could not choose to let the provider decide. *)
-  let missing_ceiling runtime =
+  let invalid_ceiling runtime =
     match keeper_dispatch_readiness runtime with
     | Dispatchable -> None
-    | Missing_request_body_cap { table_path } -> Some (runtime, table_path)
+    | Invalid_request_body_cap { table_path } -> Some (runtime, table_path)
   in
-  match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
+  match List.find_map (fun id -> Option.bind (runtime_by_id id) invalid_ceiling) ids with
   | None -> Ok ()
   | Some (runtime, table_path) ->
     Error
       (Printf.sprintf
-         "%s: Keeper-dispatch runtime %S has no positive \
-          max-request-body-bytes; declare [%s].max-request-body-bytes before \
-          dispatch so the exact serialized request has an explicit admission \
-          ceiling"
+         "%s: Keeper-dispatch runtime %S has a non-positive \
+          [%s].max-request-body-bytes; use a positive value or omit it"
          config_path
          runtime.id
          table_path)

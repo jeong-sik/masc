@@ -1409,6 +1409,12 @@ let run_turn
                                 ~agent_core_turn:acc.current_turn
                                 provider_content
                             | Some (Error _) | None -> ());
+                           (* A preceding bounded candidate may have reported a
+                              window before failover. This exact uncapped request
+                              has no byte window; do not attribute the old cut to it. *)
+                           (match max_request_body_bytes with
+                            | None -> model_input_window_ref := None
+                            | Some _ -> ());
                            Keeper_request_wire_observation.record
                              ~keeper_name:meta.name
                              ~runtime_id

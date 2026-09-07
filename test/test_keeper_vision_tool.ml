@@ -602,12 +602,13 @@ let test_provider_for_vision_uses_runtime_temperature () =
             let configured = Vt.provider_for_vision provider_config in
             assert (configured.temperature = Some 1.0))))
 
-let test_uncapped_vision_fallback_rejects_before_provider_call () =
+let test_uncapped_vision_fallback_reaches_provider () =
   with_temp_runtime_toml uncapped_vision_fallback_runtime_toml (fun () ->
     let provider_calls = ref 0 in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      assert (config.Llm_provider.Provider_config.max_request_body_bytes = None);
       incr provider_calls;
-      Ok (ok_response "provider call must not happen")
+      Ok (ok_response "uncapped vision reached provider")
     in
     let outcome =
       Eio_main.run (fun env ->
@@ -622,10 +623,10 @@ let test_uncapped_vision_fallback_rejects_before_provider_call () =
             ~bytes:"\x89PNG\r\n\x1a\nraw"
             ()))
     in
-    assert (!provider_calls = 0);
+    assert (!provider_calls = 1);
     match outcome with
-    | Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; _ } -> ()
-    | _ -> failwith "uncapped vision fallback must fail before provider dispatch")
+    | Vt.Vo_ok "uncapped vision reached provider" -> ()
+    | _ -> failwith "uncapped vision fallback should reach provider")
 
 let image_capable_vision_runtime_toml =
   {|
@@ -1829,7 +1830,7 @@ let () =
   test_temp_runtime_toml_restores_runtime_cache ();
   test_image_capable_vision_runtime_is_admitted_without_schema_capability ();
   test_provider_for_vision_uses_runtime_temperature ();
-  test_uncapped_vision_fallback_rejects_before_provider_call ();
+  test_uncapped_vision_fallback_reaches_provider ();
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
   test_retryable_provider_error_tries_next_runtime ();

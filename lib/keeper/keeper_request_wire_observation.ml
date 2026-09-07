@@ -29,7 +29,7 @@ let record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes =
     ~labels:
       [ "keeper", keeper_name
       ; "runtime_id", runtime_id
-      ; "max_request_body_bytes", string_of_int max_request_body_bytes
+      ; "max_request_body_bytes", Option.fold ~none:"none" ~some:string_of_int max_request_body_bytes
       ]
     (Float.of_int body_bytes)
 ;;

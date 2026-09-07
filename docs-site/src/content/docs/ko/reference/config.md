@@ -45,8 +45,8 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 [로컬 AI 모델 연결](/ko/runbooks/llama-server/) 참고.
 
 **시드된 바인딩은 모두 keeper-dispatchable 합니다.** 카탈로그에는 예시를 겸해 provider·모델
-쌍 31개가 있고, 31개 모두 `max-request-body-bytes` 가 선언되어 부팅 경고 없이
-Keeper 턴을 받을 수 있습니다. `[runtime].default` 는 31개 안에 있습니다.
+쌍 31개가 있고 모두 Keeper 턴을 받을 수 있습니다. `max-request-body-bytes`는
+선택적인 호출자 제한이며, 생략하면 별도의 바이트 제한을 만들지 않습니다. `[runtime].default` 는 31개 안에 있습니다.
 
 ## runtime.toml
 

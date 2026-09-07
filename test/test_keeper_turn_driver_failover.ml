@@ -721,7 +721,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
       1
       current_goal_count)
 
-let test_deferred_tail_rejects_transformed_uncapped_runtime () =
+let test_deferred_tail_rejects_transformed_invalid_request_cap () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     Eio_main.run
     @@ fun env ->
@@ -749,7 +749,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
         ~provider_config_transform:(fun provider_config ->
           transformed_urls := provider_config.base_url :: !transformed_urls;
           if String.equal provider_config.base_url "http://127.0.0.1:2"
-          then Ok { provider_config with max_request_body_bytes = None }
+          then Ok { provider_config with max_request_body_bytes = Some 0 }
           else Ok provider_config)
         ~body_timeout_s:0.5
         ~sw
@@ -771,7 +771,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
          (Agent_core.Error.to_string error)
      | Ok _ ->
        Alcotest.fail
-         "transformed uncapped deferred runtime reached provider execution");
+         "transformed invalid-cap deferred runtime reached provider execution");
     Alcotest.(check (list string))
       "capped next candidate runs, then transformed tail is checked"
       [ "http://127.0.0.1:1"; "http://127.0.0.1:2" ]
@@ -3176,9 +3176,9 @@ let () =
             `Quick
             test_prior_checkpoint_appends_current_goal_once;
           Alcotest.test_case
-            "deferred tail rejects transformed uncapped runtime"
+            "deferred tail rejects transformed invalid request cap"
             `Quick
-            test_deferred_tail_rejects_transformed_uncapped_runtime;
+            test_deferred_tail_rejects_transformed_invalid_request_cap;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

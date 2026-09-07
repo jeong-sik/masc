@@ -2734,31 +2734,44 @@ type palette_mode =
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Live | Automation
+  type browser = Firefox | Zen
+  type client = { client_id : string; browser : browser }
+  type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
     tab_id : int; title : string; url : string; text : string;
     chars : int; truncated : bool;
   }
   type reading = {
-    tabs : tab list; page : page option; source : source;
+    tabs : tab list; page : page option; source : source; client_id : string option;
     elapsed_ms : float;
   }
   type screenshot = {
-    source : source; tab_id : int; title : string; url : string;
+    source : source; client_id : string option; tab_id : int; title : string; url : string;
     data : string; elapsed_ms : float;
   }
-  type operation = Read | Open_session | Close_session | Goto of string | Screenshot of int
+  type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
   type load = Idle | Loading of int * operation | Failed of string
   type t = {
+    clients : client list; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
+  let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
+  let client_id t = match t.source, t.selected_client with
+    | Live, Some client -> Some client.client_id
+    | Live, None | Automation, _ -> None
+  let browser_label t = match t.source, t.selected_client with
+    | Automation, _ -> "Firefox"
+    | Live, Some client -> browser_name client.browser
+    | Live, None -> "choose browser"
   let context_label t =
-    Printf.sprintf "Browser Lane · %s · Firefox page reader" (source_name t.source)
+    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
   let create () =
-    { source = Live; selected_tab = None; scroll = 0;
+    { clients = []; selected_client = None; client_picker = None;
+      source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0 }
@@ -2774,7 +2787,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2785,7 +2798,37 @@ module Browser_lane_view = struct
   let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
-            @ match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id])
+            @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
+            @ (match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id]))
+  let selected_client_available t = match t.source, t.selected_client with
+    | Automation, _ -> true
+    | Live, None -> false
+    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+  let choose_client client t =
+    { t with selected_client = Some client; selected_tab = None;
+      reading = None; scroll = 0; load = Idle; client_picker = None }
+  let accept_clients ~generation result t =
+    match t.load with
+    | Loading (current, Discover purpose) when current = generation ->
+        (match result with
+         | Error detail -> { t with clients = []; selected_tab = None; reading = None;
+             scroll = 0; client_picker = Some 0; load = Failed detail }, false
+         | Ok clients ->
+             let next = { t with clients; load = Idle } in
+             match t.selected_client, clients, purpose with
+             | None, [client], Read_after_discovery -> choose_client client next, true
+             | Some _, _, _ when selected_client_available next ->
+                 { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
+                 purpose = Read_after_discovery
+             | _, _, _ ->
+                 let detail = match t.selected_client, clients with
+                   | Some _, _ -> "Selected browser disconnected; b:choose browser"
+                   | None, [] -> "No connected browser; r:refresh connections"
+                   | None, _ -> "Choose a browser connection"
+                 in
+                 { next with selected_tab = None; reading = None; scroll = 0;
+                   client_picker = Some 0; load = Failed detail }, false)
+    | Loading _ | Idle | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function
     | `Assoc fields -> (match List.assoc_opt name fields with
@@ -2798,6 +2841,36 @@ module Browser_lane_view = struct
     | `String "live" -> Ok Live | `String "automation" -> Ok Automation
     | _ -> Error "unknown browser source"
   let get parse name json = let* value = field name json in parse value
+  let parse_client json =
+    let* client_id = get string "clientId" json in
+    let* browser = get (function
+      | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
+      | _ -> Error "unknown native browser") "browser" json in
+    if String.trim client_id = "" then Error "empty browser client ID"
+    else Ok { client_id; browser }
+  let decode_clients json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* clients = field "clients" data in
+      match clients with
+      | `List rows ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | row :: rest ->
+                let* client = parse_client row in
+                if List.exists (fun (old : client) -> old.client_id = client.client_id) acc
+                then Error "duplicate browser client ID"
+                else loop (client :: acc) rest
+          in loop [] rows
+      | _ -> Error "expected browser clients array"
+  let parse_client_id source json =
+    let* value = field "clientId" json in
+    match source, value with
+    | Live, `String id when String.trim id <> "" -> Ok (Some id)
+    | Automation, `Null -> Ok None
+    | _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* id = get integer "id" json in
     let* title = get string "title" json in
@@ -2833,17 +2906,19 @@ module Browser_lane_view = struct
       let* tabs = get parse_tabs "tabs" data in
       let* page = get parse_page "page" data in
       let* source = get parse_source "source" data in
+      let* client_id = parse_client_id source data in
       let* elapsed_ms = get milliseconds "elapsed_ms" data in
       match page with
       | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
           Error "page tab is absent from returned tabs"
-      | _ -> Ok { tabs; page; source; elapsed_ms }
+      | _ -> Ok { tabs; page; source; client_id; elapsed_ms }
   let decode_screenshot json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail
     else
       let* value = field "data" json in
       let* source = get parse_source "source" value in
+      let* client_id = parse_client_id source value in
       let* tab_id = get integer "tabId" value in
       let* title = get string "title" value in
       let* url = get string "url" value in
@@ -2851,7 +2926,7 @@ module Browser_lane_view = struct
       let* data = get string "data" value in
       let* elapsed_ms = get milliseconds "elapsed_ms" value in
       if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
-      else Ok { source; tab_id; title; url; data; elapsed_ms }
+      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
 
   (* Settle the browser operation even when a later key cancelled opening the
      image. The caller separately checks image intent before drawing. *)
@@ -2860,10 +2935,11 @@ module Browser_lane_view = struct
     | Loading (current, Screenshot requested_tab) when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
+                              && screenshot.client_id = client_id t
                               && screenshot.tab_id = requested_tab
                               && t.selected_tab = Some requested_tab ->
              { t with load = Idle }, Some screenshot
-         | Ok _ -> { t with load = Failed "screenshot source or tab mismatch" }, None
+         | Ok _ -> { t with load = Failed "screenshot source, client or tab mismatch" }, None
          | Error detail -> { t with load = Failed detail }, None)
     | Loading _ | Idle | Failed _ -> t, None
 
@@ -2871,10 +2947,10 @@ module Browser_lane_view = struct
     match t.load with
     | Loading (current, Read) when current = generation ->
         (match result with
-         | Ok reading when reading.source = t.source ->
+         | Ok reading when reading.source = t.source && reading.client_id = client_id t ->
              { t with reading = Some reading; load = Idle;
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
-         | Ok _ -> { t with load = Failed "browser response source mismatch" }
+         | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
     | Loading _ | Idle | Failed _ -> t
   let select_tab direction t =

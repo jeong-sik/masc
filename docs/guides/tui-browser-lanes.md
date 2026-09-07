@@ -57,3 +57,22 @@ retained evidence. Related TUI tests cover URL input and multiline text projecti
 `scripts/capture-browser-proof.py` captures a public page and automation session
 recovery on a scratch runtime. Use a binary built from the changed source;
 historical captures are not evidence of the current UI.
+
+### Native browser selection
+
+Live Browser Lane discovers the server's active native connections on entry and
+`r`. A single fresh connection is selected automatically. With several connections,
+choose Firefox or Zen using `b`, `j/k`, and Enter. The chooser displays the backend's
+browser identity and each connection UUID; the reader header names the selected
+browser. `r` inside the chooser reloads connections, and Esc returns to the reader.
+
+Each live read and Ctrl-O screenshot pins that connection UUID. Switching browsers
+clears the previous tab, text, and scroll before reading the new browser. A missing
+selected connection opens the chooser without silently rebinding to another browser,
+even when only one remains or both browsers use the same tab number. Select a
+connection explicitly to recover. Automation retains its separate Firefox session.
+
+Validation: the production pure Browser state module was interpreted against 14
+fixtures, including equal tab IDs across clients, stale discovery, disconnected pins,
+and screenshot ownership. PTY scenarios cover two-client choice and explicit recovery;
+they run in the existing browser-screenshot CI test alias. No local Dune build was run.

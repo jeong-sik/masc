@@ -7,7 +7,7 @@ let () =
   } in
   let reading : Lane.reading = {
     tabs = [{ id = 1; title = "Discussion"; url = page.url; active = true }];
-    page = Some page; source = Live; elapsed_ms = 1.;
+    page = Some page; source = Live; client_id = Some "11111111-1111-4111-8111-111111111111"; elapsed_ms = 1.;
   } in
   let view = { (Lane.create ()) with reading = Some reading } in
   let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in

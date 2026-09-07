@@ -12732,8 +12732,69 @@ def run_project_changes_regression(executable: str) -> None:
     )
 
 
+def run_browser_client_picker_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    firefox = "11111111-1111-4111-8111-111111111111"
+    zen = "22222222-2222-4222-8222-222222222222"
+    active = [{"clientId": firefox, "browser": "firefox"}, {"clientId": zen, "browser": "zen"}]
+    reads: list[dict[str, object]] = []
+
+    def read(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        reads.append(request)
+        client = request.get("clientId")
+        if client not in [row["clientId"] for row in active]:
+            return 409, {"ok": False, "error": "client_not_connected"}
+        text = "Zen selected page" if client == zen else "Firefox selected page"
+        return 200, {"ok": True, "data": {
+            "source": "live", "clientId": client, "elapsed_ms": 1.0,
+            "tabs": [{"id": 2, "title": text, "url": "https://example.org/", "active": True}],
+            "page": {"tabId": 2, "title": text, "url": "https://example.org/",
+                     "text": text, "chars": len(text), "truncated": False}}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = SequencedHttpResponse([
+        (200, {"ok": True, "data": {"clients": list(active)}}),
+        (200, {"ok": True, "data": {"clients": list(active)}}),
+        (200, {"ok": True, "data": {"clients": [active[1]]}}),
+    ])
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+
+    def interact(process, master_fd, slave_fd, output, _base):
+        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose a connected browser")
+        if reads:
+            raise AssertionError("unselected multi-client view sent a browser read")
+        os.write(master_fd, b"j")
+        wait_for_terminal_input_consumed(slave_fd)
+        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
+        if reads != [{"lane": "live", "clientId": zen}]:
+            raise AssertionError("Zen choice did not pin its client ID")
+        send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
+        # Wait for discovery settlement: Enter must never select the inventory
+        # retained while a new connection list is still in flight.
+        wait_for_output(process, master_fd, output, b"Firefox", timeout=3.0)
+        drain_until_quiet(process, master_fd, output)
+        send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
+        if reads[-1] != {"lane": "live", "clientId": firefox}:
+            raise AssertionError("browser switch reused the old browser's tab ID")
+        active[:] = [active[1]]
+        send_and_wait(process, master_fd, output, b"r", b"Selected browser disconnected")
+        if len(reads) != 2:
+            raise AssertionError("stale Firefox pin silently rebound to the remaining Zen client")
+        if b"Firefox selected page" in screen_text(bytes(output)):
+            raise AssertionError("disconnected browser content remained under the chooser")
+        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
+        if reads[-1] != {"lane": "live", "clientId": zen}:
+            raise AssertionError("explicit reconnect carried the stale tab ID")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(executable, description="Browser client pinning and disconnected selection",
+        interact=interact, http_fixtures=fixtures)
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
+    client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []
     png = [""]
     requested, release = threading.Event(), threading.Event()
@@ -12747,7 +12808,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         tab_id = request.get("tabId", 2)
         title = "first" if tab_id == 1 else "second"
         return 200, {"ok": True, "data": {
-            "source": request["lane"], "elapsed_ms": 12.5,
+            "source": request["lane"], "clientId": request.get("clientId"), "elapsed_ms": 12.5,
             "tabs": [{"id": n, "title": name, "url": "https://example.org/", "active": n == 2}
                      for n, name in [(1, "first"), (2, "second")]],
             "page": {"tabId": tab_id, "title": title, "url": "https://example.org/",
@@ -12763,9 +12824,10 @@ def run_browser_screenshot_regression(executable: str) -> None:
         if len(requests) == 4:
             return 404, {"ok": False, "error": "selected Firefox tab closed"}
         return 200, {"ok": True, "data": {
-            "source": request["lane"], "tabId": request["tabId"], "title": "selected Firefox tab",
+            "source": request["lane"], "clientId": request.get("clientId"), "tabId": request["tabId"], "title": "selected Firefox tab",
             "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
 
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
 
@@ -12781,7 +12843,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
                 raise AssertionError("screenshot did not use the PNG image viewer")
 
         capture()
-        if requests != [{"lane": "live", "tabId": 2}]:
+        if requests != [{"lane": "live", "clientId": client_id, "tabId": 2}]:
             raise AssertionError(f"screenshot did not bind the selected live tab: {requests!r}")
         send_and_wait(process, master_fd, output, b"j", b"second page body")
         send_and_wait(process, master_fd, output, b"a", b"second page body")
@@ -13386,6 +13448,7 @@ def main() -> None:
         return
     if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
         run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
+        run_browser_client_picker_regression(os.path.abspath(sys.argv[1]))
         print("tui Browser screenshot regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "config":

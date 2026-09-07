@@ -13586,20 +13586,22 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Unread -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
-      (screen_title " MASC Browser Lane") (source_name view.source)
+      (screen_title " MASC Browser Lane") (source_name view.source ^ " · " ^ browser_label view)
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:(match view.url_draft with
-      | Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
-      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None -> Masc_tui_keys.footer_hints_browser_lane)
+    ~hints:(match view.client_picker, view.url_draft with
+      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  Esc:back"
+      | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
+      | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
-        | Loading (_, Read) -> "Reading Firefox…", Theme.info ()
+        | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
+        | Loading (_, Read) -> "Reading " ^ browser_label view ^ "…", Theme.info ()
         | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation Firefox…", Theme.info ()
-        | Loading (_, Screenshot _) -> "Capturing selected Firefox tab… (any key cancels preview)", Theme.info ()
+        | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
@@ -13609,11 +13611,26 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       (* The global coordinator status is not the result of the Firefox HTTP
          request. Keep it labeled, including the existing workspace warning. *)
       c.push_styled ~style ("  coordinator " ^ connection_badge state ^ "  " ^ status);
+      match view.client_picker with
+      | Some cursor ->
+          c.push_styled ~style:(Theme.info ()) "  Choose a connected browser";
+          c.push_divider ();
+          let room = max 1 (budget - 4) in
+          let start = max 0 (cursor - room + 1) in
+          view.clients |> List.iteri (fun index (client : client) ->
+            if index >= start && index < start + room then
+              let line = Printf.sprintf "  %s%s · %s" (browser_name client.browser)
+                (if Some client = view.selected_client then " (selected)" else "") (Terminal_text.single_line client.client_id) in
+              if index = cursor then c.push_selected line
+              else c.push_styled ~style:Ansi.reset line);
+          if view.clients = [] then c.push_styled ~style:(Theme.recede ())
+            (if busy view then "  Waiting for active connections…" else "  No active native browser connections")
+      | None ->
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
          | None -> match view.source with
-             | Live -> "  Live Firefox • a:automation"
+             | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
              | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
@@ -13629,7 +13646,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let selected = List.nth_opt tabs index in
       c.push_styled ~style:(Theme.info ())
         (match selected with
-         | None -> "  No open tabs • Open a page in the selected Firefox session"
+         | None -> "  No open tabs • Open a page in the selected browser connection"
          | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));

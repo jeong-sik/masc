@@ -23,7 +23,7 @@ const browser = {
     },
     captureTab: async (id, options) => {
       captureCalls.push({id, options});
-      return 'data:image/png;base64,' + (oversized ? 'A'.repeat(1024 * 1024) : 'iVBORw0KGgo=');
+      return 'data:image/png;base64,' + (oversized ? 'A'.repeat(8 * 1024 * 1024) : 'iVBORw0KGgo=');
     },
   },
 };
@@ -51,7 +51,7 @@ assert.equal((await command({tabId: 7})).error, 'tab_navigated_during_capture');
 navigated = false; oversized = true;
 const large = await command({tabId: 7});
 assert.equal(large.ok, false);
-assert.equal(large.error, 'capture_exceeds_native_frame_limit');
+assert.equal(large.error, 'browser_reply_exceeds_8_mib');
 assert.equal('data' in large, false);
 oversized = false;
 assert.equal((await command({tabId: 7})).ok, true, 'oversized capture must not disconnect the lane');

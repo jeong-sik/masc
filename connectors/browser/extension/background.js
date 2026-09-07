@@ -210,12 +210,12 @@ async function onHostMessage(msg) {
     reply.error = String(e?.message ?? e);
   }
   try {
-    // Match the OCaml host's inbound frame bound before sending. Oversized
-    // captures fail explicitly without disconnecting the user's browser lane.
-    if (new TextEncoder().encode(JSON.stringify(reply)).length > 1024 * 1024) {
+    // Match the native host's bounded incoming frames, including JSON/UTF-8.
+    // Reject locally before an oversized frame can disconnect the host.
+    if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 8 * 1024 * 1024) {
       delete reply.data;
       reply.ok = false;
-      reply.error = "capture_exceeds_native_frame_limit";
+      reply.error = "browser_reply_exceeds_8_mib";
     }
     port?.postMessage(reply);
   } catch {

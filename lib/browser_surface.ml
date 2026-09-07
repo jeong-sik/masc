@@ -104,6 +104,9 @@ let capture request =
         field "mimeType" data, field "data" data with
   | Some (`Int actual), Some (`String url), Some (`String title),
     Some (`String "image/png"), Some (`String image) when actual = tab_id ->
+    let max_bytes = Keeper_vision_tool.max_image_bytes () in
+    let* () = if String.length image > ((max_bytes + 2) / 3) * 4
+      then Error "screenshot exceeds Vision image size limit" else Ok () in
     let* bytes = match Base64.decode image with
       | Ok bytes when String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes -> Ok bytes
       | Ok _ -> Error "screenshot payload is not PNG"

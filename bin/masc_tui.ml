@@ -805,6 +805,13 @@ let parse_args () =
   let tool_visibility = ref "compact" in
 
   let specs = [
+    ("--version", Arg.Unit (fun () -> print_endline Runtime_build_version.current; exit 0),
+      "Print this executable's build version and exit");
+    ("--build-commit", Arg.Unit (fun () ->
+        match Build_commit_generated.commit with
+        | Some commit -> print_endline commit; exit 0
+        | None -> prerr_endline "build commit is not embedded"; exit 1),
+      "Print the Git commit embedded at build time and exit");
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
@@ -12502,7 +12509,9 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   apply_raw_mode new_term
 
 (** Main loop *)
-let main () =
+let main
+    (base_path_input, base_path, workspace, port, refresh,
+     reasoning_visibility, tool_visibility) () =
   (* The provider layer reports through [Llm_provider.Diag], whose default sink
      writes to stderr -- which here is the terminal this draws on. One INFO line
      about the embedded model catalog lands between two frames and the screen is
@@ -12511,15 +12520,6 @@ let main () =
      to protect, so it routes them the same way and before anything can ask the
      catalog a question. *)
   Provider_diag_log_sink.install ();
-  let ( base_path_input
-      , base_path
-      , workspace
-      , port
-      , refresh
-      , reasoning_visibility
-      , tool_visibility ) =
-    parse_args ()
-  in
   (* Publish the path selected by this process before any workspace-backed
      store opens. Otherwise inherited path variables can make the screen read
      local Keeper metadata from a different workspace than its server. *)
@@ -20002,4 +20002,8 @@ let run_with_eio_context f =
             f ()))
   with Break -> ()
 
-let () = run_with_eio_context main
+let () =
+  (* Informational flags terminate during parsing, before base-path
+     resolution and before the TUI installs its runtime/terminal context. *)
+  let args = parse_args () in
+  run_with_eio_context (main args)

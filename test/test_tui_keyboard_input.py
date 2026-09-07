@@ -10757,7 +10757,11 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\x1b", b"9:Runtime")
+            # The trailing Runtime shortcut can be clipped at 99 columns.
+            # Verify the selected parent pane, which remains visible.
+            send_and_wait(
+                process, master_fd, output, b"\x1b", "▸runtime.toml".encode()
+            )
             os.write(master_fd, b"q")
             completed = True
         finally:

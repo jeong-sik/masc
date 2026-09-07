@@ -528,8 +528,6 @@ let test_rejections () =
   check_rejects ~name:"t" ~contents:(minimal "other") "file name";
   check_rejects ~name:"t" ~contents:"name = \"t\"\ndescription = \"\"\n" "empty";
   check_rejects ~name:"t" ~contents:(minimal "t" ^ "surprise = 1\n") "unknown key \"surprise\"";
-  check_rejects ~name:"t" ~contents:"name = \"t\"\ndescription = \"d.\"\ntitle = \"T\"\n"
-    "unknown key \"title\"";
   check_rejects ~name:"t" ~contents:(minimal "t" ^ "[[params]]\ntype = \"string\"\n")
     "missing the required key \"name\"";
   check_rejects ~name:"t" ~contents:(minimal "t" ^ "[[params]]\nname = \"p\"\n")

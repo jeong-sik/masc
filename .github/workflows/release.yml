@@ -204,6 +204,18 @@ jobs:
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
 
+      - name: Package binary-matched dashboard distribution
+        run: |
+          git diff --exit-code
+          python3 scripts/release-dashboard-bundle.py package \
+            --binary "dist/masc-${{ matrix.arch }}" \
+            --binary-asset "masc-${{ matrix.arch }}" \
+            --assets assets/dashboard \
+            --source-commit "$(git rev-parse HEAD)" \
+            --archive "dist/masc-dashboard-${{ matrix.arch }}.tar.gz"
+          cp scripts/release-dashboard-bundle.py \
+            "dist/masc-release-dashboard-bundle-${{ matrix.arch }}.py"
+
       # RFC-0427 B-1: the exec shim ships with the server release instead of
       # being built by the operator. It is a static musl binary built in a
       # container on this runner's own architecture (no emulation), and it is
@@ -263,7 +275,9 @@ jobs:
               "masc-$arch" \
               "masc-tui-$arch" \
               "masc-deployment-preflight-helper-$arch" \
-              "masc-check-runtime-deployment-preflight-$arch"; do
+              "masc-check-runtime-deployment-preflight-$arch" \
+              "masc-dashboard-$arch.tar.gz" \
+              "masc-release-dashboard-bundle-$arch.py"; do
               if [ ! -f "dist/$asset" ]; then
                 echo "required release asset missing: $asset"
                 exit 1

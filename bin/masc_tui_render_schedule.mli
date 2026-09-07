@@ -318,13 +318,18 @@ type fusion_row_values = {
   frow_run : string;
 }
 
-val fusion_run_width : inner_width:int -> keeper_width:int -> int
-val fusion_header_row : keeper_width:int -> run_width:int -> string
+type fusion_columns = {
+  fcol_keeper : int;
+  fcol_run : int;
+  fcol_show_preset : bool;
+}
+
+val allocate_fusion_columns : inner_width:int -> keeper_width:int -> fusion_columns
+val fusion_header_row : fusion_columns -> string
 
 val fusion_row :
   state_style:string ->
-  keeper_width:int ->
-  run_width:int ->
+  fusion_columns ->
   fusion_row_values ->
   string
 (** One run, on the same columns as {!fusion_header_row}. The keeper cell is

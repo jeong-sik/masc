@@ -68,3 +68,35 @@ let read request =
   Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"page",page;
     "source",`String lane_name;
     "elapsed_ms",`Float elapsed_ms])
+
+(* Captures always name a tab. An absent/closed target must never capture the
+   operator's newly active tab instead. The image is a viewport observation,
+   not an assertion that the document remained static while being painted. *)
+let parse_capture_request json =
+  let* request = parse_request json in
+  match request.tab_id with
+  | Some _ -> Ok request
+  | None -> Error "tabId is required for a screenshot"
+
+let capture request =
+  let* tab_id = match request.tab_id with
+    | Some id -> Ok id | None -> Error "tabId is required for a screenshot" in
+  let started = Mtime_clock.elapsed_ns () in
+  let lane_name = source_name request.source in
+  let* data = Browser_lane.issue ~lane_name ~verb:(Browser_lane.Page_capture {tab_id})
+      ~timeout_sec:20. |> decode_answer in
+  match field "tabId" data, field "url" data, field "title" data,
+        field "mimeType" data, field "data" data with
+  | Some (`Int actual), Some (`String url), Some (`String title),
+    Some (`String "image/png"), Some (`String image) when actual = tab_id ->
+    let* bytes = match Base64.decode image with
+      | Ok bytes when String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes -> Ok bytes
+      | Ok _ -> Error "screenshot payload is not PNG"
+      | Error (`Msg detail) -> Error ("invalid screenshot base64: " ^ detail) in
+    if String.length bytes = 0 then Error "empty screenshot"
+    else
+      let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
+      Ok (`Assoc ["source", `String lane_name; "tabId", `Int tab_id;
+        "title", `String title; "url", `String url; "mimeType", `String "image/png";
+        "data", `String image; "elapsed_ms", `Float elapsed_ms])
+  | _ -> Error "screenshot response does not match the requested tab or PNG contract"

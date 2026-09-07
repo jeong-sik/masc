@@ -72,6 +72,35 @@ val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
     Cancellation propagates. Other write or sync failures raise [Sys_error]
     without returning a reference. *)
 
+val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_ref
+(** Store an internal regular spool file without loading its complete contents
+    into memory. The caller owns the source file; this operation never removes
+    it. Hashing and copying use the same open descriptor and a fixed-size byte
+    buffer. The copied bytes are hashed again before publication, so a source
+    modified between the two passes cannot publish bytes under the wrong
+    content address.
+
+    The complete operation runs in a system thread when called from Eio and
+    uses the same mandatory payload/parent syncs as {!put_durable}. Source I/O,
+    non-regular sources, changed source contents, and publication failures
+    raise [Sys_error] without returning a reference. Invalid media types raise
+    [Invalid_argument]; cancellation propagates.
+
+    This bounds ingestion memory only. The first uncached {!fetch_range} still
+    validates its artifact with a whole-file read. *)
+
+module For_testing : sig
+  val put_file_durable
+    :  after_hash:(unit -> unit)
+    -> t
+    -> path:string
+    -> mime:string
+    -> Tool_output.artifact_ref
+  (** The production ingestion path with a fault-injection boundary between
+      hashing the source and copying it. The callback runs in the same
+      blocking job and must not perform Eio effects. *)
+end
+
 val fetch : t -> sha256:string -> (string option, fetch_error) result
 (** Validate and retrieve bytes by sha256. Returns [Ok None] only when the
     validated path is absent. The owned-file read validates the no-follow

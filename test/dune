@@ -4744,3 +4744,5 @@
 (include stanzas/test_browser_webdriver.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(include stanzas/test_execute_file_artifact.inc)

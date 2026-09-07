@@ -1131,11 +1131,35 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         !broadcast_namespace_truth_ref state))
 ;;
 
-let execution_cached_http_representation ~(config : Workspace.config) request =
+type execution_parameters =
+  { fixture : string option
+  ; actor : string option
+  ; full_mode : bool
+  ; force : bool
+  }
+
+let execution_parameters ~(config : Workspace.config) request =
   let fixture = query_param request "fixture" in
   let actor = execution_actor_for_request ~base_path:config.base_path request in
   let full_mode = bool_query_param request "full" ~default:false in
   let force = bool_query_param request "force" ~default:false in
+  { fixture; actor; full_mode; force }
+
+type execution_http_request =
+  { state : Mcp_server.server_state
+  ; config : Workspace.config
+  ; request : Httpun.Request.t
+  ; parameters : execution_parameters
+  }
+
+let execution_http_request ~state request =
+  let config = Mcp_server.workspace_config state in
+  let parameters = execution_parameters ~config request in
+  { state; config; request; parameters }
+
+let execution_cached_http_representation ~(config : Workspace.config)
+      ~(parameters : execution_parameters) (request : Httpun.Request.t) =
+  let { fixture; actor; full_mode; force } = parameters in
   match fixture, actor, full_mode, force with
   | None, None, false, false ->
     with_execution_publication_lock (fun () ->
@@ -1152,13 +1176,15 @@ let execution_cached_http_representation ~(config : Workspace.config) request =
   | _ -> None
 ;;
 
-let dashboard_execution_cached_http_representation ~state request =
+let dashboard_execution_cached_http_representation context =
   execution_cached_http_representation
-    ~config:(Mcp_server.workspace_config state) request
+    ~config:context.config ~parameters:context.parameters context.request
 ;;
 
 module For_testing = struct
-  let cached_representation = execution_cached_http_representation
+  let cached_representation ~config request =
+    let parameters = execution_parameters ~config request in
+    execution_cached_http_representation ~config ~parameters request
   let execution_publication_generation = current_execution_publication_generation
   let begin_execution_publication_attempt = begin_execution_publication_attempt
   let publish_execution_success_if_current = publish_execution_success_if_current
@@ -1265,16 +1291,12 @@ type execution_http_response =
   | Execution_json of Yojson.Safe.t
   | Execution_payload of Dashboard_cache.cached_payload
 
-let dashboard_execution_http_response ~state ~sw ~clock request =
-  let config = (Mcp_server.workspace_config state) in
+let dashboard_execution_http_response ~sw ~clock context =
+  let state = context.state in
+  let config = context.config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
-  let fixture = query_param request "fixture" in
-  let actor =
-    execution_actor_for_request ~base_path:config.base_path request
-  in
-  let full_mode = bool_query_param request "full" ~default:false in
-  let force = bool_query_param request "force" ~default:false in
+  let { fixture; actor; full_mode; force } = context.parameters in
   let light = not full_mode in
   let query =
     execution_query_json
@@ -1423,7 +1445,8 @@ let dashboard_execution_http_response ~state ~sw ~clock request =
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
-  match dashboard_execution_http_response ~state ~sw ~clock request with
+  let context = execution_http_request ~state request in
+  match dashboard_execution_http_response ~sw ~clock context with
   | Execution_json json -> json
   | Execution_payload payload -> payload.json
 ;;

@@ -1056,10 +1056,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               else
                 h2_respond_json h2_reqd body ~compress:false ~extra_headers
             in
-            match dashboard_execution_cached_http_representation ~state httpun_request with
+            let context = execution_http_request ~state httpun_request in
+            match dashboard_execution_cached_http_representation context with
             | Some (body, etag, headers) -> respond_cached ~body ~etag ~headers
             | None ->
-              (match dashboard_execution_http_response ~state ~sw ~clock httpun_request with
+              (match dashboard_execution_http_response ~sw ~clock context with
                | Execution_json json ->
                  h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors
                | Execution_payload payload ->

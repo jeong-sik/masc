@@ -118,7 +118,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: 원본 Finalized 증거 보존 관리자 ACK 구현#33910 병합. 후속#33926 head662aa5ad4d는103/103, 인증 HTTP#33920 headdaaf3bbfa8는34/34 원격 동작 테스트 PASS. 필수 lint 실패 조사 중이며 실제 종료 기록 변경은 미실행.
+- 조치: 원본 Finalized 증거 보존 ACK#33910 병합. #33926의662aa5ad4d에서103/103, HTTP#33920의daaf3bbfa8에서34/34 동작 테스트 PASS. 후속은 lint 설명 주석만 보완했으며 새 CI는 결제/한도로 미실행. 실제 ACK는 미실행.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 실행 경로 변경 후05:44Z 수동 복구. #33914가 binary/dashboard 함께 설치, #33922가 receipt 자동 검증 구현 중. 9c81559b용642파일 원격 artifact 준비됐으나 서버 외부 종료로 적용 보류.
+- 조치: 05:44Z 수동 복구 후 다시 다른 서버 커밋으로 stale. 배송#33914 Python11/11; resolver#33922의3d3695a1f3 fixture 수정은 원격 반영됐지만 CI가 결제/한도로 미시작. 실제 설치 smoke·배포 미완료.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -186,7 +186,7 @@
 
 ### 19. WebSearch 전 provider 실패와 WebFetch HTTP 오류
 
-- 조치: SearXNG 서비스를 복구해 직접 검색37결과/2.355초. 05:12:44Z geek-scout 실제 WebSearch outcome=ok도 관측. 성공 provider의 인과와 별도 WebFetch401/404는 미확인.
+- 조치: SearXNG 복구 후 실제 Keeper WebSearch 성공 관측. WebFetch 원래13건은401 네 건·404 아홉 건을 내부 고장으로 오분류. #33936에서 HTTP 코드와 실패 상태·상태별 안내를 보존하도록 수정; 동작 테스트 미실행. 최근 성공1건은 원래 실패 URL 복구 증명이 아님.
 - 관련 코드/경계: `lib/tool_misc_web_search.ml`
 - 집계 주의: search6 + fetch13; one query may fail two providers
 - 최초 증거: `2026-09-06T21:02:53Z` / seq `25984475` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266995`
@@ -329,3 +329,16 @@ Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으
 ## 최신 CLI 소비자와 CI 실행 거절
 
 #33913의 targeted63개가 통과한15b554f7a8 뒤, 전체 @check는 별도 bin/masc_lane_cli_probe.ml의 새 failure variant 분류 누락을 발견했다.31213cbd8c20a8165fb9664e48eabc3686c9fdb9에서 해당 소비자를 수정했다. 라이브러리와 테스트 구현은63개 통과 head와 동일하다. 최신 [34092089284](https://github.com/jeong-sik/masc/actions/runs/34092089284)는 세 job 모두 steps가 없고, GitHub annotation이 계정 결제 실패 또는 spending limit 때문에 시작하지 못했다고 명시한다. 새 head의 컴파일 성공은 미검증이며 이는 실행된 코드 실패와 구분한다. 사용자에게 계정 상태 확인을 요청했고 동일 CI 재시도는 보류했다.
+
+
+## 추가 소스 수정과 실행되지 않은 검증
+
+종료 ACK의 필수 lint 실패는 lifecycle reservation 잠금 키 보존용 ignore에 설명 주석이 없는 한 항목이었다. 실제 의미를 설명하는 주석·서식을 보완해 #33926은ad2af057c9, HTTP#33920은21500fe6d6로 갱신했다. 해당 로컬 lint와 문법 검사는 통과했고 두 변경의 이전103/34 동작 검증 head와 동작 코드 차이는 없다. 새 필수 CI34092799870/34092834504는 결제·한도 때문에 zero steps로 거절됐으므로 최신 head의 원격 PASS라고 표시하지 않는다.
+
+설치 resolver#33922의 malformed numeric fixture를3d3695a1f3에서 수정하고 원격 head를 확인했다. targeted34092646837은 동일 결제·한도 문제로 zero steps다. 이전87c20671e5의 installed16/17·Web39/39 결과와 구분하며 전체 실행은 FAIL이었다. 새 fixture의 동작 검증과 실제 release installer smoke는 아직 없다.
+
+원래 WebFetch 실패13건을 정확한 tool 필드로 재분류했다. HTTP401 네 건·404 아홉 건인데 모두 runtime_failure로 표시됐다. [status와 원본 seq](web-fetch-upstream-status-observation.json). #33936 head120422bb9b는 외부 표현을 얻지 못한 응답을 Dependency_unavailable로 분류하고 정확한 upstream_http_status를 모델까지 보존한다. 상태별 안내는401/403의 인증·권한,404의 부재 또는 비공개 불확실성,410·429·5xx를 구별한다. 자동 재시도와 계정 인증정보 추가는 없다. 여섯 handler→bridge 시나리오를 작성하고 문법·prompt 일치·diff·variant 정적 검사를 통과했지만 동작 실행은 미검증이다. 이 PR의 필수 검사34093512926도 세 job 모두 zero steps이며 계정 결제·한도 거절 annotation을 확인했다. [RFC9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.5)에 맞춰404를 삭제 확정으로 안내하지 않는다.
+
+06:36:00Z WebSearch 및06:36:37Z WebFetch의 실제 성공도 추가 관측했다. 두 성공은 원래 실패했던 URL들에 대한 재조회가 아니므로 접근 문제가 해결됐다는 근거로 사용하지 않는다.
+
+[추가 health 관측](health-followup-observation.json)은 같은17077da501 바이너리의 started_at이06:59:41Z임을 기록한다. 이 세션이 시작하거나 바이너리를 교체하지 않았으며 앞선06:32 프로세스와 연속 uptime으로 계산하지 않는다. 이 영수증은 overall warming·queue warming·dashboard stale을 기록한다. counts_complete=false이므로 표시된 pending_count0을 빈 큐의 증거로 사용하지 않는다. 상태는 영수증의 관측 시각에 한정한다.

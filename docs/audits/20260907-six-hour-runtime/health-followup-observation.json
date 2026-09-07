@@ -1,0 +1,39 @@
+{
+  "observed_at": "2026-09-07T07:00:30.006016+00:00",
+  "build": {
+    "binary_commit": "17077da5012f760bff857e9cffba020b466f5c32",
+    "started_at": "2026-09-07T06:59:41Z",
+    "executable_path": "/Users/dancer/.local/bin/masc"
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc"
+  },
+  "overall_status": "warming",
+  "dashboard_status": "stale",
+  "queue": {
+    "status": "warming",
+    "pending_count": 0,
+    "runnable_backlog_count": 0,
+    "runnable_oldest_age_seconds": null,
+    "storage_integrity": {
+      "schema": "masc.keeper_event_queue.storage_integrity.v1",
+      "status": "warming",
+      "counts_complete": false,
+      "read_error_count": 0,
+      "transition_outbox_count": 0,
+      "operator_action_required": false
+    },
+    "work_liveness": {
+      "schema": "masc.keeper_event_queue.work_liveness.v1",
+      "status": "warming",
+      "state": "unknown",
+      "runnable_backlog_count": 0,
+      "runnable_oldest_age_seconds": null,
+      "stale_after_seconds": 600.0,
+      "operator_action_required": false
+    }
+  },
+  "attribution": "This session did not start this process or replace its binary."
+}

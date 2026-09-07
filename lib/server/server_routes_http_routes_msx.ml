@@ -141,8 +141,12 @@ let handle_load ~base_path request reqd =
           (load_result_json ~ok:false ~message:("invalid JSON: " ^ message))
       | args ->
         let result =
+          (* Time_compat.now is the codebase's clock accessor the determinism
+             gate accepts, the same one Tool_misc.dispatch stamps tool calls
+             with; reading the wall clock any other way here would add
+             non-deterministic-boundary debt. *)
           Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-            ~start_time:(Unix.gettimeofday ()) ~base_path args
+            ~start_time:(Time_compat.now ()) ~base_path args
         in
         let ok = Tool_result.is_success result in
         let status = if ok then `OK else `Bad_request in

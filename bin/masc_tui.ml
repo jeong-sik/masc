@@ -14210,7 +14210,11 @@ and is loaded on demand through keeper_skill.
          frame on that cadence. The fetch is bounded work on loopback; drawing
          from the cache is cheap, so an unchanged frame just repaints. *)
       let input_timeout =
-        if state.msx_open then Float.min input_timeout msx_spectator_poll_seconds
+        (* Only the spectator needs the faster wake to re-poll; while the load
+           menu is up nothing repaints on a timer, so keep the normal timeout
+           and let a keypress wake the loop. *)
+        if state.msx_open && not state.msx_menu_open then
+          Float.min input_timeout msx_spectator_poll_seconds
         else input_timeout
       in
       (* The load menu owns the terminal while it is up: skip the frame poll so
@@ -14287,9 +14291,13 @@ and is loaded on demand through keeper_skill.
           | Masc_tui_msx.Stay -> ()
           | Closed ->
               state.msx_menu_open <- false;
-              if Option.is_some state.msx_frame then
-                (* A game is loaded underneath: fall back to watching it. *)
+              if Option.is_some state.msx_frame then begin
+                (* A game is loaded underneath: fall back to watching it, and
+                   poll at once so the next tick refreshes it (parity with the
+                   Watch arm). *)
+                state.msx_last_poll_ns <- 0L;
                 Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              end
               else begin
                 state.msx_open <- false;
                 invalidate_frame_for_resize frame_presenter render_schedule

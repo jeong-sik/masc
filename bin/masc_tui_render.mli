@@ -127,6 +127,7 @@ type visible_timeline_memo = {
   vtm_messages : Masc_tui_types.msg_entry list;
   vtm_memory : Masc_tui_types.memory_visibility;
   vtm_reasoning : Masc_tui_types.reasoning_visibility;
+  vtm_tools : Masc_tui_types.tool_visibility;
   vtm_timeline : (Masc_tui_types.msg_entry * float option) list;
 }
 type layout_entries_memo = {

@@ -92,6 +92,21 @@ def strip_comments(text: str) -> str:
     return "".join(out)
 
 
+def balanced_form(text: str, start: int) -> str:
+    """The parenthesised form beginning at [start], through its matching close."""
+    depth = 0
+    end = start
+    while end < len(text):
+        if text[end] == "(":
+            depth += 1
+        elif text[end] == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        end += 1
+    return text[start : end + 1]
+
+
 def sexp_forms(text: str, head: str):
     """Every parenthesised form in [text] starting with [head], balanced.
 
@@ -104,18 +119,9 @@ def sexp_forms(text: str, head: str):
         index = text.find(head, index)
         if index < 0:
             return
-        depth = 0
-        end = index
-        while end < len(text):
-            if text[end] == "(":
-                depth += 1
-            elif text[end] == ")":
-                depth -= 1
-                if depth == 0:
-                    break
-            end += 1
-        yield text[index : end + 1]
-        index = end + 1
+        form = balanced_form(text, index)
+        yield form
+        index += len(form)
 
 
 # `(libraries (re_export piaf) unix)` -- a library can be listed inside a
@@ -126,19 +132,28 @@ NESTED_LIBRARY_MARKERS = ("re_export",)
 def field_words(form: str, name: str) -> list[str] | None:
     """The words of `(name ...)` in [form], read to its matching paren.
 
-    Stopping at the first `)` instead would truncate a field whose value
-    nests -- `(libraries (re_export piaf) unix)` read that way yields
-    `(re_export piaf` and loses `unix` entirely.
+    Anchored on whitespace after the field name so `(modules ...)` does not
+    match `(modules_without_implementation ...)`, and balanced rather than
+    stopped at the first `)`: reading to the first one truncates a field whose
+    value nests, so `(libraries (re_export piaf) unix)` yields `(re_export
+    piaf` and loses `unix` entirely.
     """
-    field = next(sexp_forms(form, f"({name}"), None)
-    if field is None:
+    head = re.search(rf"\({re.escape(name)}s?\s", form)
+    if head is None:
         return None
-    body = field[field.index(" ") + 1 : -1] if " " in field else ""
+    field = balanced_form(form, head.start())
+    body = field[head.end() - head.start() : -1]
     words = body.replace("(", " ").replace(")", " ").split()
     return [word for word in words if word not in NESTED_LIBRARY_MARKERS]
 
 
-def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
+def modules_in(root: str, directory: str) -> list[str]:
+    """Every module in [directory], the set dune takes when (modules) is absent."""
+    paths = glob.glob(os.path.join(root, directory, "*.ml"))
+    return sorted(os.path.basename(path)[: -len(".ml")] for path in paths)
+
+
+def read_libraries(dune_path: str, directory: str, root_dir: str) -> dict[str, Library]:
     if not os.path.exists(dune_path):
         return {}
     text = strip_comments(open(dune_path, encoding="utf-8").read())
@@ -148,7 +163,12 @@ def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
         if not names:
             continue
         name = names[0]
-        modules = field_words(form, "module") or [name]
+        # Without a (modules) field a library takes every module in its
+        # directory. Reading the directory rather than assuming the library's
+        # own name matters for the wrapping rule below: shared_types has no
+        # shared_types.ml, and calling it single-module would send the build
+        # after a file that does not exist.
+        modules = field_words(form, "module") or modules_in(root_dir, directory)
         deps = field_words(form, "librarie") or field_words(form, "libraries") or []
         # C stubs are compiled alongside the modules: ocamlfind takes .c
         # files on the same command line. Without them the suite reaches the
@@ -169,7 +189,14 @@ def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
         # the stanza says otherwise, and nothing here generates that module.
         # Compiling one anyway gives every consumer an unbound module, so a
         # wrapped library is refused by name instead.
-        wrapped = (field_words(form, "wrapped") or ["true"])[0] != "false"
+        #
+        # One shape escapes that: a library whose only module carries the
+        # library's own name is its own main module, and dune generates no
+        # alias for it. Compiling the file gives exactly the module every
+        # consumer names, so wrapping costs nothing there. time_compat,
+        # dated_jsonl and fs_compat are that shape, and 71 suites link them.
+        declared = (field_words(form, "wrapped") or ["true"])[0] != "false"
+        wrapped = declared and modules != [name]
         library = Library(
             name,
             directory,
@@ -188,40 +215,70 @@ def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
     return out
 
 
-def read_suites(root: str) -> dict[str, list[str]]:
-    text = open(os.path.join(root, "test/dune"), encoding="utf-8").read()
+@dataclass(frozen=True)
+class Suite:
+    libraries: list[str]
+    # Why dune, and only dune, can run this one. None when nothing says so.
+    needs_dune: str | None = None
+
+
+def needs_dune_reason(form: str) -> str | None:
+    """What in the stanza puts this suite out of reach here.
+
+    Read off the stanza rather than off the suite's own complaint: both of
+    these print `main_eio executable is unbound; run the test via Dune` and
+    exit non-zero, which arrives as a red verdict on code that was never run.
+    """
+    if next(sexp_forms(form, "(enabled_if"), None) is not None:
+        return "enabled_if: dune decides whether this suite runs at all"
+    for word in field_words(form, "dep") or []:
+        if word.endswith(".exe"):
+            return f"deps on a built executable ({word})"
+    return None
+
+
+def read_suites(root: str) -> dict[str, Suite]:
+    text = strip_comments(open(os.path.join(root, "test/dune"), encoding="utf-8").read())
     for included in sorted(glob.glob(os.path.join(root, "test/stanzas/*.inc"))):
-        text += "\n" + open(included, encoding="utf-8").read()
-    out: dict[str, list[str]] = {}
+        text += "\n" + strip_comments(open(included, encoding="utf-8").read())
+    out: dict[str, Suite] = {}
     for form in sexp_forms(text, "(test"):
         names = field_words(form, "name")
         if not names:
             continue
         deps = field_words(form, "librarie") or field_words(form, "libraries") or []
+        suite = Suite(deps, needs_dune_reason(form))
         for name in names:
-            out[name] = deps
+            out[name] = suite
     return out
 
 
 def collect_libraries(root: str) -> dict[str, Library]:
-    libraries = read_libraries(os.path.join(root, "bin/dune"), "bin")
-    libraries.update(read_libraries(os.path.join(root, "test_lib/dune"), "test_lib"))
+    libraries = read_libraries(os.path.join(root, "bin/dune"), "bin", root)
+    libraries.update(read_libraries(os.path.join(root, "test_lib/dune"), "test_lib", root))
     # test/deps holds masc_test_deps, which 806 suites link. Left out, every
     # one of them was reported as blocked on a library this index had never
     # heard of, which says nothing about what to unblock first.
-    libraries.update(read_libraries(os.path.join(root, "test/deps/dune"), "test/deps"))
+    libraries.update(read_libraries(os.path.join(root, "test/deps/dune"), "test/deps", root))
     # test/dune and its includes declare libraries of their own beside the
     # suites -- exact_output_fixture is one -- and their modules sit in test/.
-    libraries.update(read_libraries(os.path.join(root, "test/dune"), "test"))
+    libraries.update(read_libraries(os.path.join(root, "test/dune"), "test", root))
     for included in sorted(glob.glob(os.path.join(root, "test/stanzas/*.inc"))):
-        libraries.update(read_libraries(included, "test"))
+        libraries.update(read_libraries(included, "test", root))
     # Libraries under lib/ as well. Whether one can be built from source is
     # decided per library below -- a wrapped one cannot -- rather than by
     # keeping only the leaves here, which used to exclude fs_compat and every
     # public name.
-    for path in sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True)):
+    # packages/ holds agent_core and its sublibraries, which nine suites name
+    # as masc.agent_core. Unread, they were blocked on a name the index did
+    # not carry; read, the report says the library is wrapped, which is the
+    # thing that would have to change.
+    library_dunes = sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True)) + sorted(
+        glob.glob(os.path.join(root, "packages/**/dune"), recursive=True)
+    )
+    for path in library_dunes:
         directory = os.path.relpath(os.path.dirname(path), root)
-        for name, library in read_libraries(path, directory).items():
+        for name, library in read_libraries(path, directory, root).items():
             libraries.setdefault(name, library)
     return libraries
 
@@ -470,7 +527,10 @@ def main() -> int:
         if name not in suites:
             blocked.append((name, "no such suite in test/dune"))
             continue
-        plan, blocker = resolver.plan(name, suites[name])
+        if suites[name].needs_dune is not None:
+            blocked.append((name, suites[name].needs_dune))
+            continue
+        plan, blocker = resolver.plan(name, suites[name].libraries)
         if plan is None:
             blocked.append((name, f"needs {blocker}"))
         else:

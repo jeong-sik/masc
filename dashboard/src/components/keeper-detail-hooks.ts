@@ -114,7 +114,3 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
   }, [keeperName, refreshNonce])
   return evidence
 }
-
-export function useKeeperRuntimeTrace(keeperName: string): KeeperRuntimeTraceResponse | null {
-  return evidenceFreshData(useKeeperRuntimeTraceEvidence(keeperName))
-}

@@ -3904,8 +3904,11 @@ let decode_runtime_probe_snapshot json =
   let* probe = required_object_field json "probe" in
   let* source = required_string_field probe "source" in
   let* () =
-    if String.equal source "runtime.toml" then Ok ()
-    else Error (Printf.sprintf "runtime probe source is %S, expected runtime.toml" source)
+    if String.equal source Config_dir_resolver.runtime_toml_filename then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime probe source is %S, expected %s" source
+           Config_dir_resolver.runtime_toml_filename)
   in
   let* status = required_string_field probe "status" in
   let* rps_status = runtime_probe_status_of_string status in

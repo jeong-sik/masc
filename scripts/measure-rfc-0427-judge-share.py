@@ -29,7 +29,7 @@ as ISO-8601 text, which the log writes in UTC with a Z suffix.
 
 Usage:
     scripts/measure-rfc-0427-judge-share.py --since 2026-09-05T16:20:00Z \
-        --until 2026-09-07T16:20:00Z ~/me/.masc/logs/system_log_2026-09-0[567].jsonl
+        --until 2026-09-07T16:20:00Z "$MASC_BASE_PATH"/logs/system_log_2026-09-0[567].jsonl
     scripts/measure-rfc-0427-judge-share.py --selftest
 """
 

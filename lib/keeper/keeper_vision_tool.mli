@@ -133,8 +133,12 @@ val run_vision
     Each candidate is attempted at most once; exhausting output-limited
     candidates returns [Vo_truncated]. Other invalid structured responses and
     local transport wiring rejections do not trigger this output-limit failover.
-    Provider HTTP 400/422 rejections remain candidate-local and advance through
-    the existing request-rejection path.
+    A provider 4xx that is neither transient (408/409/429) nor capacity (413)
+    is candidate-local and advances without backoff. Before each candidate is
+    called, the image is fitted to the request-body cap that candidate
+    declares: sent as is, shrunk once, or skipped without a call when no edge
+    at or above the floor would fit. A candidate without a cap gets the image
+    as is.
     Eager ingestion can keep the turn alive with a typed unread placeholder. *)
 
 val handle

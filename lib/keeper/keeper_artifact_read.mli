@@ -84,6 +84,12 @@ val handle :
     the same declared bounds earlier, but never replaces this parser's ownership
     of the handler input contract. *)
 
+val handle_with_page :
+  base_path:string -> args:Yojson.Safe.t -> Keeper_tool_execution.t * page option
+(** The same handler plus its successful page observation. None means no page
+    was produced. A produced page is not evidence of provider delivery or
+    semantic understanding; callers must keep those observations separate. *)
+
 module For_testing : sig
   val request_of_json : Yojson.Safe.t -> (request, invalid_request) result
   val page : request -> string -> (page, string) result

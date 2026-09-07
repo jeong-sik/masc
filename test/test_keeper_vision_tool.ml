@@ -486,7 +486,8 @@ let with_temp_runtime_toml content f =
       init_runtime_or_fail path;
       f ())
 
-let vision_failover_runtime_toml =
+let vision_failover_runtime_toml_with_caps ~p1_cap ~p2_cap =
+  Printf.sprintf
   {|
 [runtime]
 default = "p1.vision-a"
@@ -517,11 +518,16 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [p1.vision-a]
-max-request-body-bytes = 65536
+max-request-body-bytes = %d
 
 [p2.vision-b]
-max-request-body-bytes = 65536
+max-request-body-bytes = %d
 |}
+    p1_cap
+    p2_cap
+
+let vision_failover_runtime_toml =
+  vision_failover_runtime_toml_with_caps ~p1_cap:65536 ~p2_cap:65536
 
 let single_vision_runtime_toml =
   {|
@@ -1011,19 +1017,32 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable")))
 
-let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
+(* A 401 is one binding's key being refused; the next candidate carries its
+   own key. It used to end the walk after one call. *)
+let test_credential_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
-      let meta = make_meta "vision-nonretryable-stop" in
+      let meta = make_meta "vision-credential-failover" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let policy_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "candidate_policy_error"
+        ]
+      in
+      let before_policy =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels
+      in
       let calls = ref 0 in
       let models = ref [] in
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
-        Error
-          (Llm_provider.Http_client.HttpError
-             { code = 401; body = "bad credentials"; retry_after_header = None })
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 401; body = "bad credentials"; retry_after_header = None })
+        else Ok (ok_response "second runtime answered")
       in
       let raw =
         Eio_main.run (fun env ->
@@ -1038,10 +1057,157 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
               ()))
       in
       let json = json_of_output raw in
-      assert (!calls = 1);
-      assert (List.rev !models = [ "vision-a" ]);
-      assert (String.equal (assoc_string "error" json) "provider_error");
-      assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert_metric_increment
+        "vision_candidate candidate_policy_error (401)"
+        before_policy
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels)))
+
+module Fit = Masc.Keeper_vision_cap_fit
+
+let tiny_png = "\x89PNG\r\n\x1a\nraw"
+let tight_cap = 1024
+
+(* Under the tight cap the tiny image still does not fit: the envelope
+   allowance alone is above it, and its header carries no dimensions to
+   shrink by, so the walk must move on without a call. *)
+let test_cap_fit_sends_a_small_image_as_is () =
+  match
+    Fit.plan ~cap_bytes:65536 ~image_bytes:(String.length tiny_png) ~query_bytes:5
+      ~longest_edge:None ~min_edge:256
+  with
+  | Fit.Sends_as_is -> ()
+  | Fit.Shrink_longest_edge_to _ | Fit.Cannot_fit _ ->
+    failwith "an image under the cap is sent unchanged"
+
+let test_cap_fit_cannot_plan_without_dimensions () =
+  let image_bytes = String.length tiny_png in
+  match
+    Fit.plan ~cap_bytes:tight_cap ~image_bytes ~query_bytes:5 ~longest_edge:None
+      ~min_edge:256
+  with
+  | Fit.Cannot_fit { needed_bytes; cap_bytes } ->
+    assert (cap_bytes = tight_cap);
+    assert (needed_bytes = Fit.needed_bytes ~image_bytes ~query_bytes:5);
+    assert (needed_bytes = Fit.base64_length image_bytes + 5 + Fit.envelope_allowance_bytes)
+  | Fit.Sends_as_is | Fit.Shrink_longest_edge_to _ ->
+    failwith "without dimensions there is no edge to shrink to"
+
+(* The 1568px screenshot of 2026-09-07 (699,071 bytes) against the deepseek
+   cap. The predicted size at the planned edge must be under the cap, and
+   the edge must sit between the floor and the current edge. *)
+let test_cap_fit_shrinks_by_the_byte_ratio () =
+  let image_bytes = 699_071 and edge = 1568 and cap_bytes = 262_144 in
+  match
+    Fit.plan ~cap_bytes ~image_bytes ~query_bytes:20 ~longest_edge:(Some edge)
+      ~min_edge:256
+  with
+  | Fit.Shrink_longest_edge_to fitted ->
+    assert (fitted >= 256 && fitted < edge);
+    let scale = float_of_int fitted /. float_of_int edge in
+    let predicted_image_bytes =
+      int_of_float (float_of_int image_bytes *. scale *. scale)
+    in
+    assert (Fit.needed_bytes ~image_bytes:predicted_image_bytes ~query_bytes:20 <= cap_bytes)
+  | Fit.Sends_as_is | Fit.Cannot_fit _ ->
+    failwith "an image with known dimensions over the cap is shrunk"
+
+let test_cap_fit_refuses_below_the_edge_floor () =
+  match
+    Fit.plan ~cap_bytes:8192 ~image_bytes:699_071 ~query_bytes:20
+      ~longest_edge:(Some 1568) ~min_edge:256
+  with
+  | Fit.Cannot_fit _ -> ()
+  | Fit.Sends_as_is | Fit.Shrink_longest_edge_to _ ->
+    failwith "an edge under the floor is not worth a scaler run"
+
+let test_cap_fit_refuses_an_empty_image_without_dividing () =
+  match
+    Fit.plan ~cap_bytes:1024 ~image_bytes:0 ~query_bytes:20000
+      ~longest_edge:(Some 1568) ~min_edge:256
+  with
+  | Fit.Cannot_fit _ -> ()
+  | Fit.Sends_as_is | Fit.Shrink_longest_edge_to _ ->
+    failwith "an empty image has no byte ratio to scale by"
+
+let test_cap_fit_refuses_when_the_cap_leaves_no_room () =
+  match
+    Fit.plan ~cap_bytes:100 ~image_bytes:699_071 ~query_bytes:20
+      ~longest_edge:(Some 1568) ~min_edge:256
+  with
+  | Fit.Cannot_fit _ -> ()
+  | Fit.Sends_as_is | Fit.Shrink_longest_edge_to _ ->
+    failwith "a cap under the envelope cannot carry any image"
+
+(* p1's cap is under the envelope; p2's is not. The walk skips p1 without a
+   call, counts the skip under p1's id, and p2 answers. *)
+let test_image_over_a_candidates_cap_skips_to_the_next_without_a_call () =
+  with_temp_runtime_toml
+    (vision_failover_runtime_toml_with_caps ~p1_cap:tight_cap ~p2_cap:65536)
+    (fun () ->
+      with_temp_base (fun _ ->
+        let meta = make_meta "vision-cap-skip" in
+        let handle = store_image meta tiny_png in
+        let skip_labels =
+          [ "runtime_id", "p1.vision-a"; "result", "skipped"; "reason", "image_exceeds_cap" ]
+        in
+        let before_skip =
+          metric_value Keeper_metrics.VisionCandidateAttempts ~labels:skip_labels
+        in
+        let calls = ref 0 in
+        let models = ref [] in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+          incr calls;
+          models := config.Llm_provider.Provider_config.model_id :: !models;
+          Ok (ok_response "second runtime answered")
+        in
+        let raw =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.handle
+                ~complete
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env)
+                ~meta
+                ~args:(artifact_args handle)
+                ()))
+        in
+        let json = json_of_output raw in
+        assert (!calls = 1);
+        assert (!models = [ "vision-b" ]);
+        assert (String.equal (assoc_string "text" json) "second runtime answered");
+        assert_metric_increment
+          "vision_candidate skipped image_exceeds_cap"
+          before_skip
+          (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:skip_labels)))
+
+(* Every cap is under the envelope: no call is made and the walk reports the
+   size failure the client would have raised, naming the last cap. *)
+let test_image_over_every_cap_is_a_size_failure_without_a_call () =
+  with_temp_runtime_toml
+    (vision_failover_runtime_toml_with_caps ~p1_cap:tight_cap ~p2_cap:tight_cap)
+    (fun () ->
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        Ok (ok_response "must not be reached")
+      in
+      let outcome =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.run_vision ~complete ~sw
+              ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+              ~query:"read the screenshot" ~media_type:"image/png"
+              ~bytes:tiny_png ()))
+      in
+      assert (!calls = 0);
+      match outcome with
+      | Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail } ->
+        assert (String_util.contains_substring detail (string_of_int tight_cap))
+      | _ -> failwith "an image no candidate can carry is a visible runtime failure")
 
 let test_accept_rejected_is_policy_rejection_without_failover () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -1840,7 +2006,15 @@ let () =
   test_capacity_failover_preserves_image_and_declared_caps ();
   test_capacity_exhaustion_retains_size_failure ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();
-  test_non_retryable_provider_error_stops_without_trying_next_runtime ();
+  test_credential_error_tries_next_runtime ();
+  test_cap_fit_sends_a_small_image_as_is ();
+  test_cap_fit_cannot_plan_without_dimensions ();
+  test_cap_fit_shrinks_by_the_byte_ratio ();
+  test_cap_fit_refuses_below_the_edge_floor ();
+  test_cap_fit_refuses_an_empty_image_without_dividing ();
+  test_cap_fit_refuses_when_the_cap_leaves_no_room ();
+  test_image_over_a_candidates_cap_skips_to_the_next_without_a_call ();
+  test_image_over_every_cap_is_a_size_failure_without_a_call ();
   test_accept_rejected_is_policy_rejection_without_failover ();
   test_eager_eviction_reason_preserves_typed_outcome ();
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();

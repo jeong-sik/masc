@@ -88,22 +88,43 @@ check_rule "R1-masc-path" 0 \
   'workspace_utils_paths_backend|workspace_utils_backend_setup|workspace_eio' \
   lib bin
 
-# SSOT-R2 — loopback literal bypasses Masc_network_defaults.masc_http_default_host.
+# SSOT-R2 — loopback literal bypasses Masc_network_defaults.
 # Tracked: #8387.
 # Excluded: helper definition + display-name mapping (server_auth) + URL prefix predicate.
-check_rule "R2-loopback-literal" 1 \
+#
+# Baseline 0 since the two browser lane recognisers stopped listing
+# "127.0.0.1" | "localhost" | "::1" by hand and asked is_loopback_host, which
+# is the same widening #27576 made one layer down. Nothing in lib writes the
+# literal outside the helper now, so a new one is a new decision.
+check_rule "R2-loopback-literal" 0 \
   "Masc_network_defaults.masc_http_default_host" \
   '"127\.0\.0\.1"' \
   'masc_network_defaults|server_auth|graphql_endpoint' \
   lib
 
-# SSOT-R4 — config filename literal.
-# Tracked: #8414. Helper to be added (Config_filenames) in the fix.
-# No exclusion — every site should eventually route through the helper.
+# SSOT-R4 — config filename literal bypasses Config_dir_resolver.
+# Tracked: #8414 (closed 2026-04-19).
+# Excluded: the helper's own file, and dune files -- a build rule cannot call
+# an OCaml value, and lib/embedded_config/dune names runtime.toml as an
+# example of the lookup-key shape its generator produces.
+#
+# The pattern used to name runtime.json, keeper_runtime.toml and
+# tool_policy.toml, and its stated fix was to add a Config_filenames module.
+# That module was never built, and all three names are gone from lib and bin:
+# runtime.json as a repo config source is retired, with
+# test_runtime_config_validity asserting its absence, and the two toml names
+# survive only in CHANGELOG, one RFC and the dashboard prototypes. The rule
+# had one hit left, on a preset bundle's own runtime.json in prompt_preset.ml,
+# which is a different file that happens to share a name.
+#
+# So it was watching three dead names while the live one drifted.
+# Config_dir_resolver.runtime_toml_filename exists and five modules use it;
+# three more spelled "runtime.toml" by hand, and two of those produced a wire
+# field that the third compared against by literal.
 check_rule "R4-config-filename" 0 \
-  "Config_filenames.<name> (add helper per #8414)" \
-  '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
-  '' \
+  "Config_dir_resolver.runtime_toml_filename" \
+  '"runtime\.toml"' \
+  'config_dir_resolver|/dune:' \
   lib
 
 # SSOT-R5 — health path literal bypasses Server_health_paths helper.
@@ -118,15 +139,33 @@ check_rule "R5-health-path" 0 \
 # SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
 # from an explicit base path and then append .masc.
 #
-# Immutable evidence bundles may quote external prompts, runtime paths, and
-# session transcripts verbatim. Rewriting those captures to satisfy R6 would
-# falsify the evidence and invalidate its digest, so exclude only
-# [docs/evidence/] while continuing to scan all authored documentation.
+# Split in two on 2026-09-08, because the single rule could not be read.
+# It stood at 70 over a baseline of 0, and 69 of the 70 were prose: RFC
+# bodies, runbooks, an OCaml comment recording where a measurement was taken,
+# a script's usage example. Exactly one was a home-anchored root a program
+# actually used -- tui-frame-latency.py defaulted --base-path to one
+# machine's home directory, so anyone else ran the probe against a path they
+# had never named.
+#
+# A rule whose red is 99% quotation reports nothing, and its cheapest
+# resolution is to raise the baseline. Code and prose are counted apart now:
+# code is what the rule is about and stays at 0, prose is a debt that can
+# only shrink.
+#
+# Rewriting a quotation to satisfy a lint falsifies it, which is the argument
+# [docs/evidence/] was already excluded on. It applies to any capture; what
+# does not follow is that an RFC may keep teaching the path.
 check_rule "R6-home-masc-root" 0 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
+  '' \
+  bin lib scripts
+
+check_rule "R6-home-masc-root-docs" 67 \
+  "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
+  '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '^docs/evidence/' \
-  bin lib scripts docs
+  docs
 
 # SSOT-R7 — OTel metric label key for keeper identity is "keeper".
 # "keeper_name" in a metric label list splits the label vocabulary: Grafana

@@ -157,7 +157,3 @@ export function prepareRichContent(text: string, previewLimit = 4): {
     mediaEmbeds: extractMediaEmbeds(text, previewLimit),
   }
 }
-
-export function hasRichMarkdownSignals(text: string): boolean {
-  return /(^|\n)(`{3,}|~{3,}|#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+|!\[[^\]]*]\(|https?:\/\/\S+)/m.test(text)
-}

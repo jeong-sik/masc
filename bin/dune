@@ -1409,7 +1409,8 @@
 (library
  (name masc_tui_image_mosaic)
  (wrapped false)
- (modules masc_tui_image_mosaic))
+ (modules masc_tui_image_mosaic)
+ (libraries masc_tui_theme))
 (library
  (name masc_tui_msx)
 ;; The MSX spectator screen, over the opam path-pinned ocaml-msx core.

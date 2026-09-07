@@ -7,7 +7,7 @@
     on every truecolour terminal. *)
 
 let upper_half_block = "\xe2\x96\x80" (* U+2580 ▀ *)
-let reset = "\027[0m"
+let reset = Masc_tui_theme.Sgr.reset
 let bytes_per_pixel = 3
 
 let fit_grid ~src_w ~src_h ~max_cols ~max_rows =
@@ -86,8 +86,9 @@ let render ~cols ~rows (rgb : string) : string list =
         let tr, tg, tb = px x (2 * cy) in
         let br, bg, bb = px x ((2 * cy) + 1) in
         Buffer.add_string buf
-          (Printf.sprintf "\027[38;2;%d;%d;%dm\027[48;2;%d;%d;%dm%s" tr tg tb br
-             bg bb upper_half_block)
+          (Masc_tui_theme.Sgr.truecolor_foreground ~r:tr ~g:tg ~b:tb
+           ^ Masc_tui_theme.Sgr.truecolor_background ~r:br ~g:bg ~b:bb
+           ^ upper_half_block)
       done;
       Buffer.add_string buf reset;
       lines := Buffer.contents buf :: !lines

@@ -29,11 +29,6 @@ function resetForm(): void {
   formError.value = null
 }
 
-export function openAddRepoDialog(): void {
-  resetForm()
-  showAddRepoDialog.value = true
-}
-
 function closeAddRepoDialog(): void {
   showAddRepoDialog.value = false
   resetForm()

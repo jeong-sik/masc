@@ -1,24 +1,9 @@
 import { html } from 'htm/preact'
-import type { RefObject } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { EmptyState } from './feedback-state'
 import { sanitizeHtml } from '../../lib/dompurify.js'
 import { memoizeLru } from '../../lib/lru-cache'
 import { loadMermaid, type MermaidApi } from './mermaid-loader'
-import { useInViewOnce } from './use-in-view'
-
-/**
- * Observe whether an element is in (or near) the viewport.
- * The caller receives a ref to attach and a boolean that flips to true
- * once and stays true. Used to defer heavy mermaid renders until the
- * diagram is actually visible, avoiding main-thread work for off-screen
- * chat history diagrams.
- */
-export function useMermaidInView<T extends HTMLElement>(
-  rootMargin = '200px',
-): [RefObject<T>, boolean] {
-  return useInViewOnce<T>(rootMargin)
-}
 
 let mermaidConfigured = false
 let mermaidRenderCount = 0

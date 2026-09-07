@@ -3095,6 +3095,7 @@
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript
+  masc_tui_keeper_selection
   masc_tui_message_layout
   masc_tui_types
   yojson)

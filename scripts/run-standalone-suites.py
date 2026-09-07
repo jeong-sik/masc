@@ -629,7 +629,7 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         return Outcome(True, summary)
     failures = [line.strip() for line in output.splitlines() if line.startswith("FAIL")]
     summary = "; ".join(failures) if failures else "failed"
-    return Outcome(False, summary, failure_detail(output))
+    return Outcome(False, summary, failure_detail(output) or output_tail(output))
 
 
 # What alcotest printed under each failed assertion, bounded. The names alone
@@ -644,6 +644,23 @@ DETAIL_LINES = 40
 BUILD_DETAIL_LINES = 8
 SKIP_REASONS_SHOWN = 10
 DETAIL_STOP = ("Raised at", "ASSERT", "FAIL", "Logs saved to", "Testing ")
+
+
+def output_tail(output: str) -> str:
+    """The end of a run that failed without naming an assertion.
+
+    A suite need not be alcotest, and one that exits non-zero with no FAIL
+    line left the report as the bare word "failed" -- which is what a reader
+    of a CI log got for test_ci_run_tests_script, a Linux-only red with
+    nothing to act on. The tail is where a shell suite says what happened.
+    """
+    lines = [line.rstrip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return "the suite exited non-zero and wrote nothing"
+    tail = lines[-DETAIL_LINES:]
+    if len(lines) > DETAIL_LINES:
+        tail.insert(0, "  ... (earlier output omitted)")
+    return "\n".join(tail)
 
 
 def failure_detail(output: str) -> str:

@@ -468,24 +468,14 @@ let prepare_agent_setup
          Agent_core.Error.Internal
            (Keeper_skill_activation_recorder.error_to_string error))
   in
-  let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
-    { meta
-    ; tool_calls = initial_tool_calls ~history_messages
-    ; current_turn = 0
-    ; tool_surface =
+  let acc =
+    Keeper_run_tools_hook_accumulator.create ~meta
+      ~historical_tool_calls:(initial_tool_calls ~history_messages)
+      ~tool_surface:
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; config_root
         ; runtime_config_path
         }
-    ; requested_tool_names = []
-    ; receipt_completion_contract_result =
-        Keeper_execution_receipt.Completion_observation_unknown
-    ; receipt_actionable_signal = None
-    ; prompt_blocks = []
-    ; extra_system_context_digest = None
-    ; extra_system_context_size = None
-    ; assistant_turn_texts = []
-    }
   in
   (* The agent this turn will run, made here because the tools are made here
      and one of them widens the callable set while the turn is running. It is

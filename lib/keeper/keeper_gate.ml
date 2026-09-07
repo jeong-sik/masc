@@ -2034,12 +2034,13 @@ let decide_from_selected_mode ?observe request = function
        became an approval prompt and a keeper stopped searching. Manual
        mode is untouched: an operator who asked to see everything still
        sees everything. *)
-    if
-      Keeper_gate_readonly.observation_only_request
+    (match
+      Keeper_gate_readonly.classify_request
         ~operation:request.operation
         ~sandbox_profile:request.sandbox_profile
         ~input:request.input
-    then (
+     with
+     | Keeper_gate_readonly.Static_observation ->
       let source = Readonly_sandbox in
       let audit_receipt =
         audit_allow
@@ -2047,8 +2048,26 @@ let decide_from_selected_mode ?observe request = function
           ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
           source
       in
-      allow request source [ audit_receipt ])
-    else decide_after_observation request ~observe
+      allow request source [ audit_receipt ]
+     | Keeper_gate_readonly.Needs_observation reason as classification ->
+       (match reason with
+        | Keeper_gate_readonly.Unproven_request -> ()
+        | Keeper_gate_readonly.Git_configuration_override
+        | Keeper_gate_readonly.Git_command_requires_execution _ ->
+          Log.Keeper.emit
+            Log.Info
+            ~keeper_name:request.keeper_name
+            ~category:Log.Tool
+            ~details:
+              (`Assoc
+                 ([ "operation", `String request.operation
+                  ; "classification", Keeper_gate_readonly.classification_to_yojson classification
+                  ]
+                  @ (match request_turn_id request with
+                     | Some turn_id -> [ "turn_id", `Int turn_id ]
+                     | None -> [])))
+            "Git effects require execution evidence");
+       decide_after_observation request ~observe)
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
     let audit_receipt =

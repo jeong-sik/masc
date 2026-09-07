@@ -1,28 +1,15 @@
-(** Visual telemetry and metrics dashboard renderer for the MASC TUI.
-
-    Provides high-resolution ASCII & UTF-8 visualizations:
-    - 24-hour fleet activity heatmaps
-    - Keeper context window & fact memory gauges
-    - Turn token velocity sparklines
-    - Gate queue tool distribution bars
-    - Braille 2x4 dot matrix trend curves
-    - Compact overview pulse indicator
-
-    Pure by construction: no terminal I/O, no mutation, no unhandled exceptions. *)
+(** Metrics built from observed runtime and durable task snapshots.
+    Current work and outcomes are distinct from the Recent event feed.
+    Missing telemetry stays unavailable; rendering does not scan task history. *)
 
 open Masc_tui_types
 
+type turn_counts = { running : int; idle : int; unavailable : int }
 type metrics_kpis = {
   total_keepers : int;
-  active_keepers : int;
-  total_tasks : int;
-  done_tasks : int;
-  active_tasks : int;
-  awaiting_tasks : int;
-  total_facts : int;
-  ordinary_facts : int;
-  source_facts : int;
-  snapshot_bytes : int;
+  unpaused_keepers : int;
+  turns : turn_counts option;
+  tasks : Masc_tui_task_flow.counts option;
   gate_pending_count : int;
   held_approvals_count : int;
 }

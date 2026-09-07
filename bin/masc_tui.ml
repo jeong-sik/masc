@@ -11305,16 +11305,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
+           let observed_at = Unix.gettimeofday () in
            (* Two consecutive polls are what "just finished" is made of:
               running in the previous, idle in this one. The glow list is
               advanced before the rows are replaced, or the transition is
               gone. *)
            state.keeper_turn_finishes <-
              Masc_tui_answering.advance_finishes
-               ~now:(Unix.gettimeofday ())
+               ~now:observed_at
                ~previous_rows:state.keeper_turns ~current_rows:rows
                state.keeper_turn_finishes;
            state.keeper_turns <- rows;
+           state.keeper_turns_observed_at <- Some observed_at;
            state.keeper_turns_error <- None
        | Error detail ->
            (* Keep the last known rows: a fetch that failed says nothing

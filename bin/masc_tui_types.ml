@@ -2714,7 +2714,7 @@ let prev_metrics_section = function
 
 let metrics_section_label = function
   | Section_fleet -> "Engine & Scheduler"
-  | Section_resources -> "Fleet & Velocity"
+  | Section_resources -> "Work & Outcomes"
   | Section_tools -> "Memory & Gate Safety"
 
 (* What the [:] palette is for right now. A jump lists every destination
@@ -2934,6 +2934,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
+  mutable task_flow: Masc_tui_task_flow.t option;
   mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -2971,6 +2972,7 @@ type state = {
      the poll time that saw them finish. Fed by comparing consecutive
      keeper_turns polls; read by the footer glow and the overlay's ✓ rows. *)
   mutable keeper_turn_finishes: (string * float) list;
+  mutable keeper_turns_observed_at: float option;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -4540,6 +4542,7 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
+  task_flow = None;
   task_focus = Left_pane;
   help_open = false;
   agenda_open = false;
@@ -4551,6 +4554,7 @@ let create_state
   answering_scroll = 0;
   answering_cursor = 0;
   keeper_turn_finishes = [];
+  keeper_turns_observed_at = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;

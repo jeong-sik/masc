@@ -3639,6 +3639,8 @@
  (modules test_tui_render_metrics)
  (libraries
   alcotest
+  str
+  masc_tui_task_flow
   masc
   masc_test_deps
   masc_types

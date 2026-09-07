@@ -193,11 +193,13 @@ Ghostty 는 Kitty graphics 프로토콜을 지원하고 TUI 에는 `/image` 가 
 | 단계 | 통과 조건 |
 |---|---|
 | S0 | 세 번 재현에서 네 시각이 모두 로그에 있고, 어느 구간이 10초를 먹는지 한 문장으로 말할 수 있다 — **끝남.** 한 문장은 §3.0 맨 위에 있다. 네 시각 대신 TUI 를 뺀 대조군(`masc-http-probe`)으로 갈랐다: 같은 클라이언트가 밖에서 16 ms 에 받는 1.5 MB 를 TUI 는 2508 ms 로 적는다 |
-| S1 | `test_tui_decode` 에 `preview_line` 4케이스 — **끝남**. 팔레트 후보 모드에 task/post 가 없다 (`test_tui_palette_matching` 의 "a choice lists the names and nothing else") — **끝남**. Changes 목록 프레임에 `\x0A` 가 없다 (PTY 시나리오 1개) — **아직**. 메모 여백 golden 1장 — **아직** |
+| S1 | `test_tui_decode` 에 `preview_line` 4케이스 — **끝남**. 팔레트 후보 모드에 task/post 가 없다 (`test_tui_palette_matching` 의 "a choice lists the names and nothing else") — **끝남**. Changes 목록 프레임에 `\x0A` 가 없다 (PTY 시나리오 1개) — **끝남** (`changes-newline`). 메모 여백 golden 1장 — **아직** |
 | S2 | `test_lsp_process_manager`: 모든 variant 가 확장자·표지·명령을 갖는다 — **끝남**. runtime.toml 파서: 모르는 언어 키 거부, 아는 키는 명령 교체 (`test_runtime_config_validity` 의 `test_lsp_servers_*` 5케이스) — **끝남**. 이 호스트에서 `.py` hover 가 pyright 로 답한다 — **끝남**, §6 에 기록 |
 | S3 | golden 바이트 일치 — **끝남**, 12장을 물었고 `test_tui_mermaid` 가 26케이스로 답한다. 채팅 PTY 시나리오에서 mermaid 펜스가 상자로 그려진다 — **끝남** (`mermaid-chat`) |
 
 S3 의 두 조건은 서로를 대신하지 못한다. golden 은 렌더러가 무엇을 내놓는지 고정하고, 펜스가 렌더러까지 가는지는 못 본다. 채팅 본문은 `Masc_tui_render` 의 `chat_markdown` → `Masc_tui_markdown` 을 지나며, 그 모듈은 `Markdown` 이라는 로컬 alias 로 불린다. 언어가 `mermaid` 로 갈라지지 않으면 펜스는 평문 코드 경로로 떨어져 자기 소스를 찍는다 — golden 은 전부 초록인 채로. `mermaid-chat` 은 그 분기를 끄면 실패한다(확인함).
+
+S1 의 `\x0A` 조건도 자기 레인을 따로 쓴다. 처음에는 기존 Changes 시나리오 안에 단언을 넣었는데, 그 시나리오가 사는 기본 키보드 레인이 앞쪽 시나리오의 종료 단계에서 멈춘다(#34125). 단언은 돌지도 않은 채 초록으로 보였고, `Tui_decode.preview_line` 을 망가뜨려도 통과했다. 별도 레인(`changes-newline`)으로 옮기고서야 물었다 — 망가뜨리면 `let b = 2\x0A` 가 WHAT 열에 그대로 찍힌 걸 보고 실패한다.
 
 CI 비용: 단계마다 pr-check 1회 + 해당 suite 만 지정한 targeted run 1회.
 

@@ -13293,6 +13293,54 @@ def run_mermaid_chat_regression(executable: str) -> None:
     )
 
 
+# RFC-0429 §1.3 and §4. The second recorded change carries
+# "let b = 2\nlet c = 3", and the Changes list has one line per row to say it
+# in. Printing the newline writes the rest of the row wherever the terminal's
+# cursor lands; Tui_decode.preview_line projects it to one cell instead.
+#
+# This is its own lane rather than an assertion inside the default keyboard
+# regression: that lane stops before reaching the Changes surface, at the exit
+# step of "A spilled paste is written where the keeper reads" (issue filed), so
+# an assertion added there would never run and would read as green.
+CHANGES_NEWLINE_PROJECTED = "let b = 2\u23celet c = 3".encode()
+
+
+def changes_newline_projection_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_changes(process, master_fd, output)
+    send_and_wait(process, master_fd, output, b"\x1b[B", b"preview masc:lib/second.ml")
+
+    rows = screen_rows(bytes(output))
+    carrying_a_newline = sorted(row for row, text in rows.items() if b"\n" in text)
+    if carrying_a_newline:
+        raise AssertionError(
+            "the Changes frame printed a raw newline on row(s) "
+            f"{carrying_a_newline}: { {row: rows[row] for row in carrying_a_newline} !r}"
+        )
+    if CHANGES_NEWLINE_PROJECTED not in screen_text(bytes(output)):
+        naming = [text for text in rows.values() if b"second.ml" in text]
+        raise AssertionError(
+            f"the WHAT column did not project the newline to one cell: {naming!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def run_changes_newline_regression(executable: str) -> None:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+    run_terminal_scenario(
+        executable,
+        description="A recorded newline is one cell in the Changes list",
+        interact=changes_newline_projection_interaction,
+        http_fixtures=fixtures,
+    )
+
+
 def run_chat_clarity_regression(executable: str) -> None:
     fixtures = chat_clarity_http_fixtures()
     tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
@@ -13986,6 +14034,10 @@ def main() -> None:
         run_msx_palette_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX palette regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
+        run_changes_newline_regression(os.path.abspath(sys.argv[1]))
+        print("tui Changes newline projection regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "mermaid-chat":
         run_mermaid_chat_regression(os.path.abspath(sys.argv[1]))
         print("tui mermaid chat regression: PASS")
@@ -14034,7 +14086,7 @@ def main() -> None:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|mermaid-chat|runtime|resources|keepers-lanes|"
+            "chat-clarity|mermaid-chat|changes-newline|runtime|resources|keepers-lanes|"
             "board-json|code-memo|memory-journal|skill-usage-coverage]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))

@@ -3789,6 +3789,26 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-mermaid-chat)))
 
+; RFC-0429 §1.3/§4: the WHAT column projects a recorded newline to one cell.
+; Its own lane because the default keyboard regression stops before the
+; Changes surface, so an assertion added there would never run.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-changes-newline)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   changes-newline)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-changes-newline)))
+
 (rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps

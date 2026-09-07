@@ -69,18 +69,26 @@ reader 결과에 `scan_utf8` 을 돌린다. valid 면 텍스트 아이템, inval
 상한은 원본 바이트 기준), format(확장자에서 유도, 알 수 없으면 "unknown").
 truncated 는 상한에 닿은 경우 바이트 수로만 표현한다.
 
-### 4.2 저장 — attachments
+### 4.2 저장 — evidence 본문 저장소
 
-binary 아이템의 바이트는 attachments 스토어에 적재한다(`Keeper_chat_store.attachment`,
-이미지 첨부가 쓰는 저장소). 스냅숏의 `content` 필드는 싣지 않는다 — 스냅숏은
-증거의 **명세**이고, 바이트는 attachments 가 **본문**이다. attachment_id 를
-binary 아이템에 실어 둘을 잇는다.
+binary 아이템의 바이트는 verification 이 소유한 디렉터리에 적재한다:
+`<base_path>/evidence/<request_id>/<n>.bin`. 검토 설계 단계에서 채팅 attachments
+스토어(`Keeper_chat_store.attachment`)를 검토했으나 그 저장소는 채팅 라이프사이클에
+묶여 있다(바이트가 `masc://` 참조로 치환되는 등) — 증거 본문은 판정이 끝날 때까지
+그자리 바이트여야 하므로 verification 이 직접 소유한다. 스냅숏의 `content` 필드는
+싣지 않는다 — 스냅숏은 증거의 **명세**이고, 이 파일이 **본문**이다. binary 아이템에
+본문 경로(base_path 상대)를 실어 둘을 잇는다.
+
+서버 소유 경로라는 점이 #33745 의 교훈과 정합이다: 경로 자체가 증거가 아니라
+캡처 시점의 바이트와 해시가 증거이며, 본문은 프로필 무관하게 서버가 읽을 수 있는
+자리에 둔다.
 
 ### 4.3 judge 전달 — User_image
 
 review_request 조립에서, binary 아이템 중 format 이 이미지(png/jpg/gif/webp)면
-`User_image(Attached …)` 블록으로 evaluator 입력에 추가한다. 그 외 binary 는
-참조+해시 텍스트로만 전달한다. 텍스트 아이템은 지금처럼 content 로.
+본문 파일에서 바이트를 읽어 `User_image(Attached …)` 블록으로 evaluator 입력에
+추가한다(첨부 형태는 `Keeper_multimodal_input` 의 계약을 그대로 탄다). 그 외
+binary 는 참조+해시 텍스트로만 전달한다. 텍스트 아이템은 지금처럼 content 로.
 
 ### 4.4 내려가는 길
 
@@ -100,7 +108,7 @@ evaluator 가 이미지 블록을 소화하지 못하는 모델이면 provider �
 
 | 단계 | 내용 | 산출 |
 |---|---|---|
-| 1 | 캡처: `Evidence_artifact_binary` + sha256 + format + attachments 적재 | store PR + 테스트(바이너리 픽스처) |
+| 1 | 캡처: `Evidence_artifact_binary` + sha256 + format + 본문 파일 적재 | store PR + 테스트(바이너리 픽스처) |
 | 2 | judge: 이미지 binary 아이템의 `User_image` 전달과 강등 | completion authority PR + 비(vision) evaluator 테스트 |
 | 3 | 운영: 이미지 증거 태스크에 vision evaluator 지정 가이드 | docs |
 

@@ -413,7 +413,14 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
             bool
             (provider_label ^ " keeps glm-4.6v image-capable")
             true
-            caps.Capabilities.supports_image_input
+            caps.Capabilities.supports_image_input;
+          (* Z.AI's GLM-4.6V streaming example emits this typed delta field:
+             https://docs.z.ai/guides/vlm/glm-4.6v *)
+          (match (Llm_provider.Reasoning_dialect.of_capabilities caps).streaming with
+           | Delta_field "reasoning_content" -> ()
+           | No_streaming_reasoning | Delta_field _
+           | Delta_reasoning_details | Template_parser ->
+             fail (provider_label ^ " drops GLM-4.6V reasoning deltas"))
         | None -> fail (provider_label ^ " resolves no capabilities for glm-4.6v"))
       [ "glm-coding"; "glm" ])
 ;;

@@ -97,10 +97,12 @@ let drain ~keeper_id ~grace_ms : drain_result =
       if try_kill ~pid ~signum:Sys.sigterm then incr sigterm_sent
     ) pids;
     (* Wait up to grace_ms for graceful exits. Poll every 50ms. *)
-    let deadline = Unix.gettimeofday () +. (float_of_int grace_ms /. 1000.0) in
+    let deadline =
+      Monotonic_deadline.after ~seconds:(float_of_int grace_ms /. 1000.0)
+    in
     let poll_interval = 0.05 in
     let exit_count = ref 0 in
-    while !alive <> [] && Unix.gettimeofday () < deadline do
+    while !alive <> [] && not (Monotonic_deadline.passed deadline) do
       let still = ref [] in
       List.iter (fun pid ->
         match try_reap ~pid with

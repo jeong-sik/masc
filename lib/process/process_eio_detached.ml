@@ -201,11 +201,11 @@ let tree_kill ~pgid ~signal ~grace_sec =
   in
   safe_kill signal;
   if grace_sec > 0.0 then begin
-    let deadline = Unix.gettimeofday () +. grace_sec in
+    let deadline = Monotonic_deadline.after ~seconds:grace_sec in
     let step = min 0.1 (grace_sec /. 10.0) in
     let rec wait_loop () =
       if not (is_pgid_alive ~pgid) then ()
-      else if Unix.gettimeofday () >= deadline then
+      else if Monotonic_deadline.passed deadline then
         safe_kill Sys.sigkill
       else begin
         Safe_ops.protect ~default:() (fun () -> ignore (Unix.select [] [] [] step));

@@ -4394,6 +4394,10 @@ let test_decode_fusion_progress_and_completion_summary () =
   (match Tui_decode.decode_fusion_snapshot (snapshot [ running; completed ]) with
    | Error detail -> Alcotest.fail detail
    | Ok { Tui_decode.fus_runs = [ running; completed ]; _ } ->
+       Alcotest.(check (option (float 0.))) "running has no completion time" None
+         running.fur_finished_at;
+       Alcotest.(check (option (float 0.))) "terminal completion time"
+         (Some 1787557684.715736) completed.fur_finished_at;
        (match running.fur_stage with
         | Tui_decode.Fusion_stage_judge progress ->
             Alcotest.(check int) "answered" 2 progress.frs_answered;
@@ -4404,6 +4408,20 @@ let test_decode_fusion_progress_and_completion_summary () =
        Alcotest.(check (option string)) "summary"
          (Some "Two panels support the change.") completed.fur_summary
    | Ok _ -> Alcotest.fail "expected running and completed rows");
+  List.iter
+    (fun (label, row, timestamp) ->
+      let invalid = match row with
+        | `Assoc fields -> `Assoc (("finished_at", timestamp) :: List.remove_assoc "finished_at" fields)
+        | _ -> Alcotest.fail "fixture run must be an object"
+      in
+      Alcotest.(check bool) label true
+        (Result.is_error (Tui_decode.decode_fusion_snapshot (snapshot [invalid]))))
+    [ "running completion timestamp rejected", running, `Float 1787557684.
+    ; "terminal null completion rejected", completed, `Null
+    ; "negative completion rejected", completed, `Float (-1.)
+    ; "nonfinite completion rejected", completed, `Float infinity
+    ; "text completion rejected", completed, `String "1787557684"
+    ];
   let bad_counts =
     fusion_run_json ~status:"running" ~stage:"computed"
       ~progress:

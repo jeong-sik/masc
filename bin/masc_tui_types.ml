@@ -4203,6 +4203,11 @@ let selected_keeper_runs (state : state) =
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
   | _ -> []
 
+let selected_keeper_run (state : state) =
+  let runs = selected_keeper_runs state in
+  let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
+  Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
+
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
 let selected_standalone_lane (state : state) =

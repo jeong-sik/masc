@@ -7869,7 +7869,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
            else List.mapi (fun index (run : Tui_decode.fusion_run) ->
              let tm = Unix.localtime run.fur_started_at in
              Printf.sprintf "%s %04d-%02d-%02d %02d:%02d · %s · %s · %s"
-               (if index = state.keeper_run_cursor then ">" else " ")
+               (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
+                     (selected_keeper_run state) then ">" else " ")
                (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
                tm.Unix.tm_hour tm.Unix.tm_min
                (Tui_decode.fusion_run_status_to_string run.fur_status)
@@ -7964,6 +7965,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let scroll =
       Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
         ~content_height state.detail_scroll
+      |> fun scroll ->
+        if state.detail_tab = Detail_runs then
+          Option.fold ~none:scroll
+            ~some:(fun (cursor, _) ->
+              Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
+                ~height:(max 1 content_height) scroll)
+            (selected_keeper_run state)
+        else scroll
     in
 
     for i = 0 to visible_lines - 1 do
@@ -11655,15 +11664,15 @@ let render_fusion_list (state : state) =
   in
   (* The run id takes what the named columns leave, once the keeper column has
      been sized to the names it actually holds. *)
-  let run_width =
-    Render_schedule.fusion_run_width ~keeper_width
+  let columns =
+    Render_schedule.allocate_fusion_columns ~keeper_width
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Render_schedule.fusion_header_row ~keeper_width ~run_width);
+    ("  " ^ Render_schedule.fusion_header_row columns);
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -11707,7 +11716,7 @@ let render_fusion_list (state : state) =
             | Fusion_completed | Fusion_failed _ -> status
           in
           let line =
-            Render_schedule.fusion_row ~keeper_width ~run_width
+            Render_schedule.fusion_row columns
               ~state_style:(fusion_run_status_color run.fur_status)
               { Render_schedule.frow_time = fusion_run_clock run
               ; frow_age = fusion_run_age ~now:now_epoch run
@@ -16678,7 +16687,19 @@ let render_surface (state : state) =
            | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
                (match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
                 | Some post -> render_board_read state post
-                | None -> render_board_list state))
+                | None ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    surface_chrome state ~terminal_rows ~cols ~surface_key:"board-read"
+                      ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~body:(fun ~budget:_ c ->
+                        match Board_detail.view_for state.board_detail ~post_id with
+                        | Board_detail.Failed detail ->
+                            c.push_styled ~style:(Theme.bad ())
+                              ("  Board post load failed: " ^ Terminal_text.single_line detail)
+                        | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
+                        | Board_detail.Loading -> c.push "  Loading Board post..."
+                        | Board_detail.Ready _ -> ())))
   | Planning ->
       (match state.planning_mode with
        | Planning_list -> render_planning_list state

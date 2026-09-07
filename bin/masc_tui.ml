@@ -7822,6 +7822,10 @@ let apply_planning_load state = function
 
 let apply_fusion_runs_load state = function
   | Ok snapshot ->
+      let keeper_run_id =
+        Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
+          (selected_keeper_run state)
+      in
       let current_selected_id =
         match state.fusion_mode with
         | Fusion_detail run_id -> Some run_id
@@ -7847,6 +7851,11 @@ let apply_fusion_runs_load state = function
               ~default:fallback_cursor
       in
       state.fusion_runs <- Some snapshot;
+      let keeper_runs = selected_keeper_runs state in
+      state.keeper_run_cursor <-
+        Option.bind keeper_run_id (fun id ->
+          List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
+        |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_error <- None;
       state.fusion_cursor <- next_cursor;
       (match state.fusion_mode, current_selected_id with
@@ -8075,6 +8084,7 @@ let load_keeper_logs_if_safe state base_path limit keeper =
 ;;
 
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
+  state.keeper_run_cursor <- 0;
   match selected_keeper state with
   | None -> ()
   | Some keeper ->
@@ -8125,6 +8135,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
+  state.keeper_run_cursor <- 0;
   state.view <- Keepers Keeper_detail;
   state.keeper_detail_focus <- Right_pane;
   state.detail_scroll <- 0;
@@ -15415,33 +15426,49 @@ and is loaded on demand through keeper_skill.
               hidden connector binding while Firefox content is on screen. *)
            ()
        | Some ("j" | "down" | "k" | "up" as move)
-         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs ->
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
+              && not (Masc_tui_roster_pane.arrows_go_left
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            let count = List.length (selected_keeper_runs state) in
            let delta = if move = "j" || move = "down" then 1 else -1 in
            state.keeper_run_cursor <- max 0 (min (count - 1) (state.keeper_run_cursor + delta));
            state.detail_scroll <- state.keeper_run_cursor
        | Some ("\r" | "\n" | "right")
-         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs ->
-           (match List.nth_opt (selected_keeper_runs state) state.keeper_run_cursor with
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
+              && not (Masc_tui_roster_pane.arrows_go_left
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
+           (match selected_keeper_run state with
             | None -> ()
-            | Some run ->
+            | Some (_, run) ->
                 state.followed_from <- Some (state.view, None);
                 goto_surface state ~mailbox:async_messages Fusion;
                 state.fusion_mode <- Fusion_detail run.fur_run_id;
                 state.fusion_scroll <- 0;
+                state.fusion_detail <- None;
+                state.fusion_detail_error <- None;
                 launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
        | Some "K" when state.view = Fusion ->
            let run = match state.fusion_mode, state.fusion_runs with
-             | Fusion_detail id, Some snapshot -> List.find_opt (fun run -> run.fur_run_id = id) snapshot.fus_runs
+             | Fusion_detail id, Some snapshot -> List.find_opt
+                 (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
              | Fusion_list, Some snapshot -> List.nth_opt snapshot.fus_runs state.fusion_cursor
              | _, None -> None in
-           (match Option.bind run (fun run -> List.find_index (fun k -> k.k_name = run.fur_keeper) state.keepers) with
+           (match Option.bind run (fun (run : Tui_decode.fusion_run) ->
+              List.find_index (fun (k : keeper) -> String.equal k.k_name run.fur_keeper) state.keepers) with
             | None -> add_event state "system" "The calling Keeper is not in the current roster"
             | Some index ->
                 state.followed_from <- Some (state.view, None);
                 state.keeper_cursor <- index;
                 Option.iter (open_keeper_detail state ~base_path ~mailbox:async_messages) (selected_keeper state);
-                state.detail_tab <- Detail_runs)
+                state.detail_tab <- Detail_runs;
+                state.keeper_run_cursor <-
+                  Option.bind run (fun (run : Tui_decode.fusion_run) ->
+                    List.find_index (fun (candidate : Tui_decode.fusion_run) ->
+                      String.equal candidate.fur_run_id run.fur_run_id)
+                      (selected_keeper_runs state))
+                  |> Option.value ~default:0)
        | Some "B" when state.view = Fusion ->
            (match state.fusion_mode, state.fusion_detail with
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->

@@ -525,13 +525,14 @@ let run_argv_with_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?output_capture
       argv
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
     let env = sandbox_environment () in
     let cwd = Config_dir_resolver.current_working_dir () in
-    match on_stdout_chunk, on_stderr_chunk with
-    | None, None ->
+    match on_stdout_chunk, on_stderr_chunk, output_capture with
+    | None, None, None ->
       Process_eio.run_argv_with_status_split
         ?timeout_sec
         ~env
@@ -544,6 +545,7 @@ let run_argv_with_status_split
       let on_stderr_chunk = Option.value on_stderr_chunk ~default:(fun _ -> ()) in
       Process_eio.run_argv_with_status_split_streaming
         ?timeout_sec
+        ?output_capture
         ~env
         ~cwd
         ~on_stdout_chunk
@@ -565,12 +567,14 @@ let run_argv_with_stdin_and_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?output_capture
       ~stdin_content
       argv
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
     Process_eio.run_argv_with_stdin_and_status_split
       ?timeout_sec
+      ?output_capture
       ~env:(sandbox_environment ())
       ~cwd:(Config_dir_resolver.current_working_dir ())
       ?on_stdout_chunk
@@ -2121,6 +2125,7 @@ let run_exec_with_status_split_once
       ?on_stdout_chunk
       ?on_stderr_chunk
       ?timeout_sec
+      ?capture_dir
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
@@ -2136,39 +2141,43 @@ let run_exec_with_status_split_once
   with
   | Error _ as err -> err
   | Ok argv ->
-    let has_output_callback =
-      Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
-    in
-    let st, stdout, stderr =
-      match stdin_content, has_output_callback with
-      | Some content, false ->
-        run_argv_with_stdin_and_status_split
-          ?timeout_sec
-          ~stdin_content:content
-          argv
-      | None, false -> run_argv_with_status_split ?timeout_sec argv
-      | Some content, true ->
+    let run ?output_capture () =
+      match stdin_content with
+      | Some content ->
         run_argv_with_stdin_and_status_split
           ?timeout_sec
           ?on_stdout_chunk
           ?on_stderr_chunk
+          ?output_capture
           ~stdin_content:content
           argv
-      | None, true ->
+      | None ->
         run_argv_with_status_split
           ?timeout_sec
           ?on_stdout_chunk
           ?on_stderr_chunk
+          ?output_capture
           argv
     in
-    Ok (st, stdout, stderr)
+    let (st, stdout, stderr), files =
+      match capture_dir with
+      | None -> run (), None
+      | Some capture_dir ->
+        let result, files =
+          Process_output_capture.with_capture ~capture_dir (fun output_capture ->
+            run ~output_capture ())
+        in
+        result, Some files
+    in
+    Ok (st, stdout, stderr, files)
 ;;
 
-let run_exec_with_status_split
+let run_exec_with_optional_output_files
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
       ?timeout_sec
+      ?capture_dir
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
@@ -2183,12 +2192,13 @@ let run_exec_with_status_split
       ?on_stdout_chunk
       ?on_stderr_chunk
       ?timeout_sec
+      ?capture_dir
       t
       ~cwd
       ~command_argv
   with
   | Error _ as err -> err
-  | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
+  | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr, _) as failed ->
     (match failed_exec_recovery ?timeout_sec t with
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
@@ -2199,6 +2209,7 @@ let run_exec_with_status_split
             ?on_stdout_chunk
             ?on_stderr_chunk
             ?timeout_sec
+            ?capture_dir
             t
             ~cwd
             ~command_argv
@@ -2212,6 +2223,25 @@ let run_exec_with_status_split
             ~output:(output_for_status ~stdout ~stderr)
             detail))
   | Ok other -> Ok other
+;;
+
+let run_exec_with_status_split
+      ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+      t ~cwd ~command_argv
+  =
+  run_exec_with_optional_output_files
+    ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+    t ~cwd ~command_argv
+  |> Result.map (fun (status, stdout, stderr, _) -> status, stdout, stderr)
+;;
+
+let run_exec_with_output_files
+      ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+      ~capture_dir t ~cwd ~command_argv
+  =
+  run_exec_with_optional_output_files
+    ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+    ~capture_dir t ~cwd ~command_argv
 ;;
 
 let run_exec_with_status

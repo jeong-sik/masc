@@ -2,7 +2,11 @@ type dispatch_result = {
   status : Unix.process_status;
   stdout : string;
   stderr : string;
+  output_files : Process_output_capture.files option;
 }
+(** File sources survive only when they describe the returned streams.
+    A dispatch that combines or redirects streams without producing matching
+    files returns [None], never a file belonging to only one input stream. *)
 
 val resolve_arg : Shell_ir.arg -> string
 (** Resolve a Shell_ir.arg to a concrete string value. *)

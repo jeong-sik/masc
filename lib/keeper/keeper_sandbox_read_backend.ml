@@ -137,7 +137,7 @@ let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
       (Printf.sprintf
          "%s_read_transport_failed: endpoint=%s reason=%s stderr=%s"
          lane endpoint_name reason (Exec_policy.truncate_for_log stderr))
-  | Ran { status; stdout; stderr } ->
+  | Ran { status; stdout; stderr; output_files = _ } ->
     (match status with
      | Unix.WEXITED code
        when List.exists (fun allowed -> allowed = code) ok_exit_codes ->

@@ -4748,3 +4748,5 @@
 (include stanzas/test_browser_surface.inc)
 
 (include stanzas/test_execute_file_artifact.inc)
+
+(include stanzas/test_keeper_execute_output_files.inc)

@@ -6,6 +6,7 @@
  (wrapped false)
  (modules
   process_eio
+  process_output_capture
   posix_spawn_process_mgr
   spawn_handle
   spawn_registry

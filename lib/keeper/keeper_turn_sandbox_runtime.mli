@@ -202,6 +202,23 @@ val run_exec_with_status_split :
     stdout/stderr without applying success-code policy. This is the argv-level
     entrypoint used by Shell IR dispatch. *)
 
+val run_exec_with_output_files :
+  ?stdin_content:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  ?timeout_sec:float ->
+  capture_dir:string ->
+  t ->
+  cwd:string ->
+  command_argv:string list ->
+  (Unix.process_status * string * string * Process_output_capture.files option, string) result
+(** The same execution and container recovery path as
+    {!run_exec_with_status_split}, with fresh private output files per actual
+    process attempt. Capture errors never alter the command's status or cause
+    a retry. The returned files belong to the final attempt; prior attempt
+    files are retained under [capture_dir]. Cancellation closes and retains
+    partial files before propagating. *)
+
 type exec_pipeline_stage = {
   command_argv : string list;
   cwd : string option;

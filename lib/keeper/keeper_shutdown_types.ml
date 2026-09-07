@@ -503,7 +503,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ]
 ;;
 
-let cleanup_intent_equal left right =
+let cleanup_intent_equal (left : cleanup_intent) (right : cleanup_intent) =
   cleanup_reason_equal left.reason right.reason
   && Bool.equal left.remove_session right.remove_session
 ;;

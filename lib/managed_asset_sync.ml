@@ -389,16 +389,37 @@ let sample paths =
   , if omitted > 0 then Printf.sprintf ", and %d more" omitted else "" )
 ;;
 
+(* Overwritten carries names, copied does not, and the asymmetry is the
+   point. A copy is a file the operator never had; a version bump makes
+   dozens and the paths say nothing they wanted to know. An overwrite is a
+   file that was already there and differed, which for these three domains
+   means one thing: somebody edited it and the edit is now gone. That is the
+   same reason [removed] was given names -- an operator's file disappearing
+   is the whole message, and a count cannot deliver it.
+
+   [prompts/keeper.md] is the case this was written for. It is 23 KB of
+   system prompt sitting in the operator's own config root beside
+   runtime.toml, at the same permissions, with nothing in the file or its
+   name to say masc converges it. An operator who edits it gets it back from
+   the binary at the next boot and, before this line, "1 overwritten". *)
 let distribution_line ~label result =
   match result.copied, result.overwritten with
   | [], [] -> None
   | copied, overwritten ->
+    let named =
+      match overwritten with
+      | [] -> ""
+      | paths ->
+        let shown, more = sample paths in
+        Printf.sprintf " (%s%s)" shown more
+    in
     Some
       (Printf.sprintf
-         "%s assets synced from binary: %d copied, %d overwritten"
+         "%s assets synced from binary: %d copied, %d overwritten%s"
          label
          (List.length copied)
-         (List.length overwritten))
+         (List.length overwritten)
+         named)
 ;;
 
 let removed_line ~label result =

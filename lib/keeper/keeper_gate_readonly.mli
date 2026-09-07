@@ -1,68 +1,52 @@
-(** Deterministic observation-only classification for Keeper tool_execute
-    gate requests. See the implementation's header comment for the authority
-    argument: the judge's stated authority is the concrete effect's safety,
-    and for a shell-less observation-only argv dispatched into a per-keeper
-    disposable guest that question has a deterministic answer. *)
+(** Static observation classification for the external-effect Gate.
 
-(** [observation_only_request ~operation ~sandbox_profile ~input] is [true]
-    exactly when the gate request is a [tool_execute] whose argv is a
-    closed-set observation-only command and whose typed [sandbox_profile]
-    satisfies [Keeper_types_profile_sandbox.runs_in_disposable_guest], or
-    when it is a [network_read] request whose capability
-    is in the closed
-    observation set ([web_search] — server-side, provider-bound, no
-    caller-chosen address; [web_fetch] — caller-chosen URL whose literal
-    destination [Tool_misc_web_fetch] checks itself on the initial URL and
-    on every redirect hop: loopback, link-local, private, unspecified,
-    localhost, non-canonical numeric spellings, userinfo, unparsed
-    authority, and non-ASCII hosts are refused. It does not resolve DNS, so
-    a public name that resolves to a private address is not caught there —
-    and a judge reading the same URL string could not resolve it either).
+    [Needs_observation] does not reject a call: the existing boxed execution
+    may answer it without a Judge. Unsupported syntax and runtime profiles
+    retain their ordinary Gate path. No command is executed by this module. *)
 
-    What this gives up, on purpose: the judge also saw the previous tool
-    call, so a GET that carried bytes a keeper had just read in its query
-    string was visible to it. This classification runs such a fetch
-    unjudged. The record behind the decision — every network read the judge
-    saw over 2026-09-01..02 was approved, at a median of minutes per fetch —
-    is in docs/audits/keeper-fleet-waiting-audit-20260902.md §2. Reverting
-    it means removing [web_fetch] from [observation_network_capabilities];
-    nothing else depends on the choice.
-    [true] means the request may be allowed without judgment or queueing;
-    [false] means nothing — the request falls through to the configured
-    gate mode. The execute input shape is
-    [Keeper_tool_execute_runtime.execute_gate_input]; the network shape is
-    the [network_read] gate request ([capability] at the top level). The
-    sandbox labels inside the execute envelope are display/audit data and
-    are never read here.
+type git_command = Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
 
-    An execute request may carry its command as [argv], as a [script], or as
-    a script in an argv costume ([sh -c "..."]). A script is parsed by the
-    same bash-subset parser the dispatcher lowers it with, and every command
-    of the resulting IR — each pipeline stage, each part of a sequence — is
-    judged by the same closed tables as a real argv; [cd] is the shell's own
-    directory step and passes. A glob, a variable, a substitution, a
-    subshell, a heredoc, a write or append redirect to anything but the
-    discard sink, an environment prefix, or a line the parser refuses
-    returns [false] and keeps the judge (RFC-0421). *)
-val observation_only_request
+type observation_reason =
+  | Git_configuration_override
+  | Git_command_requires_execution of git_command
+  | Unproven_request
+
+type classification =
+  | Static_observation
+  | Needs_observation of observation_reason
+
+val classification_to_yojson : classification -> Yojson.Safe.t
+(** Canonical classification and reason tags for the execution record.
+    Includes a closed Git command name when known, never raw arguments. *)
+
+val classify_request
   :  operation:string
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
   -> input:Yojson.Safe.t
-  -> bool
+  -> classification
+(** Classify a [tool_execute] envelope or a [network_read] capability.
+    Commands are decoded from argv, script, or an argv shell costume using
+    the dispatcher's Shell IR parser. Reasons survive each layer of that
+    projection. A static command still requires a disposable-guest profile
+    before the whole request is statically observational; envelope sandbox
+    labels remain display data only.
+
+    The established [web_search]/[web_fetch] policy is retained. Their
+    executors own network destination validation; this function performs no
+    DNS lookup or output-location inference. *)
+
+val classify_script : string -> classification
+(** Classifies every pipeline/sequence stage through the dispatcher's parser.
+    The first stage without a static observation proof supplies the reason.
+    A dynamic or unsupported shell construct remains [Unproven_request]. *)
+
+val classify_argv : string list -> classification
+(** Git global configuration overrides and commands whose effects depend on
+    repository configuration, helper programs or output options need actual
+    execution evidence. Other command handling retains the existing policy;
+    this is not a complete effect proof for every Git/Unix option. *)
 
 val observation_network_capabilities : string list
-
-val classify_script : string -> bool
-(** The script classifier alone: [true] exactly when the bash-subset parser
-    accepts the text and every command in its IR classifies as observation
-    under {!classify_argv}, with [cd] admitted as the shell's directory step
-    and redirects limited to fd joins, stdin reads, and the discard sink.
-    Exposed for tests. *)
-
-(** Exposed for tests: the argv classifier alone. *)
-val classify_argv : string list -> bool
-
-(** Exposed so tests can iterate the full closed sets. *)
 val observation_commands : string list
 val git_read_subcommands : string list
-
+(** Existing static command inventories, exposed for coverage of that policy. *)

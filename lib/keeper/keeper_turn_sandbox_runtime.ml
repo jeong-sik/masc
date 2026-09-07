@@ -42,6 +42,22 @@ let with_microvm_lifecycle_lock f =
   | Some _ -> Eio.Mutex.use_rw ~protect:true microvm_lifecycle_mutex f
 ;;
 
+let sweep_abandoned_microvm_guests
+      ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv =
+  (* A CLI exception leaves an inventory to re-read, not a broken in-memory
+     invariant. Release the mutex before re-raising so an optional maintenance
+     failure cannot poison every subsequent boot and teardown. *)
+  match
+    with_microvm_lifecycle_lock (fun () ->
+      try
+        Ok (Keeper_sandbox_microvm.sweep_abandoned_guests
+          ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
+      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* cancel-guard-ok: re-raised below after unlocking, including cancellation. *)
+  with
+  | Ok outcomes -> outcomes
+  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+;;
+
 let microvm_identity_snapshot container_name =
   Atomic.get microvm_identity_snapshots |> List.assoc_opt container_name
 ;;

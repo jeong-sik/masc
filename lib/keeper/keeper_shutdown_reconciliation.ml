@@ -94,7 +94,7 @@ let outstanding_task_ids ~config operation backlog =
     | None | Some _ -> None) backlog.Masc_domain.tasks
 ;;
 
-let acknowledge_absent_owner ~config ~keeper_name ~operation_id
+let acknowledge_absent_owner_observing ~on_guards_acquired ~config ~keeper_name ~operation_id
     ~expected_revision ~expected_backlog_version ~actor ~reason =
   let* actor = Workspace.validate_agent_name actor
     |> Result.map_error (fun detail -> Invalid_request detail) in
@@ -112,6 +112,7 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
     Keeper_shutdown_intake_fence.run_durable_intake_observing ~base_path ~keeper_name
       (fun _intake_token ->
         Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name (fun () ->
+          on_guards_acquired ();
           let locked = Workspace_utils_ops.with_file_lock_r config
               (Workspace_backlog.backlog_lock_path config) (fun () ->
             let decide operation _inventory =
@@ -177,3 +178,13 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
           Ok committed))
   in result
 ;;
+
+let acknowledge_absent_owner ~config ~keeper_name ~operation_id
+    ~expected_revision ~expected_backlog_version ~actor ~reason =
+  acknowledge_absent_owner_observing ~on_guards_acquired:(fun () -> ())
+    ~config ~keeper_name ~operation_id ~expected_revision ~expected_backlog_version ~actor ~reason
+;;
+
+module For_testing = struct
+  let acknowledge_absent_owner = acknowledge_absent_owner_observing
+end

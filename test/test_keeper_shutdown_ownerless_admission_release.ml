@@ -963,6 +963,30 @@ let test_absence_acknowledgement_preserves_corrupt_sibling_fence () =
        | Some id -> Operation_id.equal id sibling.operation_id | None -> false))
 ;;
 
+let test_lifecycle_key_is_retained_across_gc () =
+  with_workspace (fun ~config ->
+    Eio.Switch.run @@ fun sw ->
+    let keeper_name = "lifecycle-key-gc" in
+    let locked, locked_r = Eio.Promise.create () in
+    let release, release_r = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Keeper_lifecycle_reservation.with_key_lock ~base_path:config.base_path ~keeper_name
+        (fun () -> Eio.Promise.resolve locked_r (); Eio.Promise.await release));
+    Eio.Promise.await locked;
+    Gc.full_major ();
+    let second_entered = ref false in
+    let done_p, done_r = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Keeper_lifecycle_reservation.with_key_lock ~base_path:config.base_path ~keeper_name
+        (fun () -> second_entered := true);
+      Eio.Promise.resolve done_r ());
+    Eio.Fiber.yield ();
+    check bool "GC cannot create a second lock for the held key" false !second_entered;
+    Eio.Promise.resolve release_r ();
+    Eio.Promise.await done_p;
+    check bool "same-key waiter progresses after release" true !second_entered)
+;;
+
 let test_absence_acknowledgement_orders_real_creation () =
   with_workspace (fun ~config ->
     let operation = retained_absent_operation "absent-ack-creation" in
@@ -970,18 +994,16 @@ let test_absence_acknowledgement_orders_real_creation () =
     Eio.Switch.run @@ fun sw ->
     let locked, locked_r = Eio.Promise.create () in
     let release, release_r = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw (fun () ->
-      ignore (Keeper_shutdown_store.For_testing.with_operation_write_lock ~config
-        ~keeper_name:operation.keeper_name operation.operation_id (fun () ->
-          Eio.Promise.resolve locked_r (); Eio.Promise.await release)));
-    Eio.Promise.await locked;
-    let ack_started, ack_started_r = Eio.Promise.create () in
+    let expected_backlog_version = (strict_backlog_exn config).version in
     let ack_result, ack_result_r = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
-      Eio.Promise.resolve ack_started_r ();
-      Eio.Promise.resolve ack_result_r (acknowledge ~config operation));
-    Eio.Promise.await ack_started;
-    Eio.Fiber.yield ();
+      let result = Reconciliation.For_testing.acknowledge_absent_owner
+        ~on_guards_acquired:(fun () -> Eio.Promise.resolve locked_r (); Eio.Promise.await release)
+        ~config ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id
+        ~expected_revision:operation.revision ~expected_backlog_version
+        ~actor:"operator" ~reason:"Confirmed owner and canonical files are absent" in
+      Eio.Promise.resolve ack_result_r result);
+    Eio.Promise.await locked;
     let creator_done, creator_done_r = Eio.Promise.create () in
     let registry_done, registry_done_r = Eio.Promise.create () in
     let created = ref false and registered = ref false in
@@ -1095,6 +1117,8 @@ let () =
             test_absence_acknowledgement_refuses_present_paths_and_conflicts
         ; Alcotest.test_case "absence acknowledgement preserves corrupt sibling fence" `Quick
             test_absence_acknowledgement_preserves_corrupt_sibling_fence
+        ; Alcotest.test_case "lifecycle key remains reachable across suspended callback and GC" `Quick
+            test_lifecycle_key_is_retained_across_gc
         ; Alcotest.test_case "absence acknowledgement orders real metadata and registry creation" `Quick
             test_absence_acknowledgement_orders_real_creation
         ; Alcotest.test_case

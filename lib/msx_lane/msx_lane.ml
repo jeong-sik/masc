@@ -316,3 +316,28 @@ let ledger () =
     | None -> []
     | Some st -> List.rev st.entries)
 ;;
+
+type frame = {
+  number : int;
+  width : int;
+  height : int;
+  rgb : string;
+  mode : string;
+  cartridge : string option;
+}
+
+let frame () =
+  locked (fun () ->
+    match !state with
+    | None -> None
+    | Some st ->
+      let width, height = Msx.frame_dims st.m in
+      Some
+        { number = st.frame
+        ; width
+        ; height
+        ; rgb = Msx.frame_rgb st.m
+        ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
+        ; cartridge = st.cart
+        })
+;;

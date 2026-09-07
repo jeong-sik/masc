@@ -292,8 +292,8 @@ let transaction store f =
   let committed = ref false in
   Fun.protect
     ~finally:(fun () ->
-      (* fire-and-forget: preserve the original transaction failure. *)
       if not !committed then
+        (* fire-and-forget: preserve the original transaction failure. *)
         ignore (exec store.db ~operation:"rollback advance" "ROLLBACK"
                 : (unit, string) result))
     (fun () ->

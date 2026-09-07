@@ -49,9 +49,13 @@ let select_shell_json
       Server_dashboard_http_core.dashboard_shell_http_json
         ?clock ?request ~timing:timing_obj ~light config)
 ;;
-let select_tools_json
+type tools_response =
+  | Tools_json of Yojson.Safe.t
+  | Tools_prepared of Dashboard_snapshot.tools_projection
+
+let select_tools_response_with ~fallback
       ?keeper ?timing (config : Workspace.config)
-  : Yojson.Safe.t
+  : tools_response
   =
   let timing_obj =
     match timing with
@@ -59,15 +63,31 @@ let select_tools_json
     | None -> Server_timing.create ()
   in
   match keeper, Dashboard_snapshot.current () with
-  | None, Some snap ->
+  | None, Some snap
+    when String.equal snap.tools.base_path config.base_path
+      && String.equal snap.tools.workspace_path config.workspace_path
+      && String.equal snap.tools.masc_root (Workspace.masc_root_dir config) ->
     Server_timing.measure
       timing_obj
       (Server_timing.Custom "snapshot_read")
-      (fun () -> snap.tools)
+      (fun () -> Tools_prepared snap.tools)
   | _ ->
-    Server_dashboard_http_runtime_info.dashboard_tools_http_json
-      ?keeper ~timing:timing_obj config
+    Tools_json (fallback ~keeper ~timing:timing_obj config)
 ;;
+
+let select_tools_response ?keeper ?timing config =
+  select_tools_response_with ?keeper ?timing config
+    ~fallback:(fun ~keeper ~timing config ->
+      Server_dashboard_http_runtime_info.dashboard_tools_http_json ?keeper ~timing config)
+
+let select_tools_json ?keeper ?timing config =
+  match select_tools_response ?keeper ?timing config with
+  | Tools_json json -> json
+  | Tools_prepared tools -> tools.json
+
+module For_testing = struct
+  let select_tools_response = select_tools_response_with
+end
 
 let select_telemetry_summary_json
       ?timing (config : Workspace.config)

@@ -1295,8 +1295,8 @@ let same_source (left : Semantic.source_member) (right : Semantic.source_member)
   left.post_id = right.post_id && left.admitted_revision = right.admitted_revision
   && left.source_sha256 = right.source_sha256
 ;;
-let semantic_prepare store ~id ~sources ~now =
-  let* candidate = Semantic.create ~id ~sources ~now |> Result.map_error (fun error -> Invalid_execution error) in
+let semantic_prepare store ~id ~input ~sources ~now =
+  let* candidate = Semantic.create ~id ~input ~sources ~now |> Result.map_error (fun error -> Invalid_execution error) in
   with_semantic_transaction store (fun () ->
     let* existing = semantic_get_with_db store.db id |> semantic_store_result in
     match existing with

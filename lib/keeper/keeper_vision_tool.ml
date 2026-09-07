@@ -362,16 +362,88 @@ type candidate_failure =
   | Candidate_provider_error of Llm_provider.Http_client.http_error
   | Candidate_output_limit
 
+(* One walk shrinks the image at most once per distinct edge it is asked
+   for. The live fleet declares three distinct caps, so a 4K screenshot costs
+   at most two extra scaler runs on top of the first downscale. *)
+let shrink_for_edge ~(req : Va.request) ~cache edge =
+  match Hashtbl.find_opt cache edge with
+  | Some cached -> cached
+  | None ->
+    let shrunk =
+      match
+        Keeper_vision_downscale.downscale_with_status
+          ~max_dimension:edge
+          ~media_type:req.Va.image_media_type
+          ~bytes:req.Va.image_bytes
+          ()
+      with
+      | (media_type, bytes), Keeper_vision_downscale.Downscaled _ -> Some (media_type, bytes)
+      | ( _
+        , ( Keeper_vision_downscale.Unchanged_within_bounds _
+          | Keeper_vision_downscale.Unchanged_unknown_dimensions
+          | Keeper_vision_downscale.Downscale_fallback_error _ ) ) -> None
+    in
+    Hashtbl.replace cache edge shrunk;
+    shrunk
+;;
+
+let longest_edge bytes =
+  match Keeper_vision_downscale.detect_dimensions bytes with
+  | None -> None
+  | Some { Keeper_vision_downscale.width; height } -> Some (max width height)
+;;
+
+(* The request this candidate gets: the image as it is when it fits under
+   the candidate's cap, a copy shrunk once to the edge the byte ratio
+   predicts when it does not, and no request at all when neither fits. The
+   client still measures the exact serialized body before dispatch. *)
+let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
+  let query_bytes = String.length req.Va.query in
+  let min_edge = Env_config_keeper.KeeperVision.max_dimension_floor in
+  let plan_for bytes =
+    Keeper_vision_cap_fit.plan
+      ~cap_bytes
+      ~image_bytes:(String.length bytes)
+      ~query_bytes
+      ~longest_edge:(longest_edge bytes)
+      ~min_edge
+  in
+  match plan_for req.Va.image_bytes with
+  | Keeper_vision_cap_fit.Sends_as_is -> Ok req
+  | Keeper_vision_cap_fit.Cannot_fit { needed_bytes; cap_bytes } ->
+    Error (needed_bytes, cap_bytes)
+  | Keeper_vision_cap_fit.Shrink_longest_edge_to edge ->
+    (match shrink_for_edge ~req ~cache edge with
+     | None ->
+       Error
+         ( Keeper_vision_cap_fit.needed_bytes
+             ~image_bytes:(String.length req.Va.image_bytes)
+             ~query_bytes
+         , cap_bytes )
+     | Some (image_media_type, image_bytes) ->
+       (match plan_for image_bytes with
+        | Keeper_vision_cap_fit.Sends_as_is ->
+          Ok { req with Va.image_media_type; image_bytes }
+        | Keeper_vision_cap_fit.Shrink_longest_edge_to _
+        | Keeper_vision_cap_fit.Cannot_fit _ ->
+          Error
+            ( Keeper_vision_cap_fit.needed_bytes
+                ~image_bytes:(String.length image_bytes)
+                ~query_bytes
+            , cap_bytes )))
+;;
+
 let run_candidates_outcome
     ?complete
     ~sw
     ~clock
     ~net
-    ~messages
+    ~(req : Va.request)
     ~last_error
     ~attempt_index
     candidates
   =
+  let cache = Hashtbl.create 4 in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
       (* The walk's outcome is the last candidate's: what ended it. A verdict
@@ -407,10 +479,29 @@ let run_candidates_outcome
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
           }
-      | Ok _ ->
+      | Ok cap_bytes ->
+        (match fit_request_to_cap ~req ~cache ~cap_bytes with
+         | Error (actual_bytes, limit_bytes) ->
+           record_vision_candidate_attempt
+             ~runtime_id
+             ~result:"skipped"
+             ~reason:"image_exceeds_cap";
+           (* No call was made, so no backoff and no attempt counted. The
+              size failure is kept as the last error so an exhausted walk
+              reports why the image went unread. *)
+           loop
+             ~last_error:
+               (Some
+                  (Candidate_provider_error
+                     (Llm_provider.Http_client.request_body_too_large_error
+                        ~actual_bytes
+                        ~limit_bytes)))
+             ~attempt_index
+             rest
+         | Ok fitted ->
         (match
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-             ~config ~messages ()
+             ~config ~messages:[ message_of_request fitted ] ()
          with
        | Error (Llm_provider.Http_client.TimeoutError _) ->
             record_vision_candidate_attempt
@@ -489,7 +580,7 @@ let run_candidates_outcome
                  ~runtime_id
                  ~result:"ok"
                  ~reason:"provider_response";
-               outcome))
+               outcome)))
   in
   loop ~last_error ~attempt_index candidates
 
@@ -523,7 +614,7 @@ let run_vision
                 ~sw
                 ~clock
                 ~net
-                ~messages:[ message_of_request req ]
+                ~req
                 ~last_error:None
                 ~attempt_index:0
                 (vision_runtime_candidates ())))

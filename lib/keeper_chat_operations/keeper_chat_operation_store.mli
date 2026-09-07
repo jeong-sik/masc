@@ -126,7 +126,7 @@ val semantic_error_to_string : semantic_error -> string
 val semantic_get : t -> Keeper_execution_scope_id.t -> (Semantic.t option, semantic_error) result
 val semantic_outstanding : t -> (Semantic.t list, semantic_error) result
 val semantic_prepare :
-  t -> id:Keeper_execution_scope_id.t -> sources:Semantic.source_member list -> now:float ->
+  t -> id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t -> sources:Semantic.source_member list -> now:float ->
   (semantic_admission, semantic_error) result
 (** The identity is Direct_operation or Autonomous_admission without aliases.
     The canonical typed JSON key includes both origin and scalar. Commits the

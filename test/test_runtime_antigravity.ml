@@ -396,10 +396,13 @@ let test_incomplete_prompt_is_not_reported () =
 
 let test_transmitted_prompt_survives_provider_rejection () =
   let sent = ref 0 in
-  with_fixture [ init (); result ~status:"ERROR" ~error:"fixture rejected" () ]
+  with_fixture [ init (); result ~status:"ERROR" ~response:"" ~error:"fixture rejected" () ]
     (fun path ->
       let result = run_fixture ~on_prompt_sent:(fun () -> incr sent) path in
-      check bool "provider rejection remains a failure" true (Result.is_error result);
+      (match result with
+       | Error (Runtime_antigravity.Turn_failed "fixture rejected") -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "provider rejection became a completed response");
       check int "transmission is retained despite provider rejection" 1 !sent)
 ;;
 

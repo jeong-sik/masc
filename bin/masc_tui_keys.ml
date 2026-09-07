@@ -320,6 +320,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
           ~help:"open the repository tree, or the selected changed file"
+      ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"
       ; b Act "d" "Git changes"
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"

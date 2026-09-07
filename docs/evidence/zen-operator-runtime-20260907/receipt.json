@@ -125,7 +125,36 @@
   "private_input_sha256": {
     "operator_receipt": "358d93d8becd45feb1deee8dffe80fb767640e02bf00cbe2a1a6da573aeaccf6",
     "archive_receipt": "af909874ea4b556712e82583e4ee66e9590e9052f53e50ac8037b4b1752ec265",
-    "prepared_source_receipt": "797ac424ed48eaf60acaf3c279cf71b908350d27e5ef76fab48f22443c6124b0"
+    "prepared_source_receipt": "797ac424ed48eaf60acaf3c279cf71b908350d27e5ef76fab48f22443c6124b0",
+    "headed_retry_receipt": "e8440b7e78aaaaf70f80a7ec4a5a5fc2176dbd8251c2a1b088ae390a2c5cbb83"
   },
-  "redaction": "explicit field allowlist; user Applications prefix replaced; private paths in the sole successful gate line replaced; ledger names omitted; no full health, raw TUI, environment or configuration payloads published"
+  "redaction": "explicit field allowlist; user Applications prefix replaced; private paths in the sole successful gate line replaced; ledger names omitted; no full health, raw TUI, environment or configuration payloads published",
+  "headed_retry": {
+    "result": "failed",
+    "headless": false,
+    "session_opened": true,
+    "session_open_elapsed_ms": 40067.9,
+    "error": {
+      "kind": "RemoteDisconnected",
+      "stage": "goto",
+      "detail": "MASC connection closed without HTTP response; session close also failed"
+    },
+    "server_before": {
+      "source_commit": "0799f02f796a647b4ef1fac57f54a064d7d3c6db",
+      "runtime_instance_id": "01a07c61-7e7b-7000-8d0c-b53d09b1565f"
+    },
+    "server_after": {
+      "source_commit": "afcd210659c9614fbfb77758903553f52f74db72",
+      "runtime_instance_id": "01a07c64-6efd-7000-ba1b-71f05524f331"
+    },
+    "runtime_replacement_observed": true,
+    "headed_page_or_preview_proven": false,
+    "session_closed_via_api": false,
+    "cleanup": {
+      "owned_driver_restarted": true,
+      "owned_zen_process_terminated": true,
+      "operator_zen_process_untouched": true
+    },
+    "scope": "session open succeeded; navigation connection closed while runtime identity changed; no complete headed page or preview proof"
+  }
 }

@@ -22,8 +22,12 @@ is `a2324d99eca6971a6dd44ebc6a5aa3c8d869ae7f0ebcdb550c83dc2ae400b53f`;
 its source revision was not established by this probe.
 
 An earlier headed request returned HTTP 400, but its response body was not captured,
-so the cause is unknown. GUI extension reload was not performed because Accessibility
-windows were unavailable. The native-host manifest is installed, but the Browser Lane extension still needs
+so the cause is unknown. A subsequent headed retry opened a session in **40.0679 s**,
+then navigation lost its connection across a runtime replacement (`0799f02f796a` →
+`afcd210659c9`). Its API close also failed; the owned driver was reset and its Zen
+process terminated. This establishes no headed page or preview proof.
+
+GUI extension reload was not performed because Accessibility windows were unavailable. The native-host manifest is installed, but the Browser Lane extension still needs
 to be loaded manually in the operator's GUI browser; the final live client list
 was empty. Overall fleet status was `warning`, not a healthy-fleet proof.
 

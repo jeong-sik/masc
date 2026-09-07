@@ -465,8 +465,11 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
     Unix.set_nonblock stdin_w;
     (pid, stdin_w, stdout_r, stderr_r)
 
+(* Every instant in this loop is an interval's endpoint -- the timeout, the
+   SIGKILL grace, the post-reap drain -- and none is reported as a time. So
+   they are read off a clock no correction moves; see [Shim_clock]. *)
 let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
-  let deadline = Unix.gettimeofday () +. timeout_sec in
+  let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
   let payload_off = ref 0 in
   let payload_len = String.length stdin_payload in
   let stdin_open = ref (payload_len > 0) in
@@ -513,7 +516,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     then (
       kill_started := true;
       kill_remaining := kill_policy trigger;
-      step_kill (Unix.gettimeofday ())) in
+      step_kill (Shim_clock.elapsed_seconds ())) in
   let poll_child () =
     match !status with
     | Some _ -> ()
@@ -522,7 +525,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
        | 0, _ -> ()
        | _, st ->
          status := Some st;
-         reaped_at := Some (Unix.gettimeofday ())) in
+         reaped_at := Some (Shim_clock.elapsed_seconds ())) in
   (* Forward drained child output to our own stdout/stderr.  If the peer
      went away (EPIPE) keep draining so the child cannot block on a full
      pipe, drop the bytes, and apply the channel-EOF kill policy. *)
@@ -546,7 +549,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       Unix.close pipe_fd;
       false in
   while !status = None || !out_open || !err_open do
-    let now = Unix.gettimeofday () in
+    let now = Shim_clock.elapsed_seconds () in
     if !status = None && (not !kill_started) && now >= deadline
     then (
       (* Only attribute [timed_out] when the deadline is what started the

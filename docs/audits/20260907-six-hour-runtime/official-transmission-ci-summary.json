@@ -1,0 +1,78 @@
+{
+  "schema": "masc.audit.targeted_ci_summary.v1",
+  "observed_at": "2026-09-07T10:46:04.203681+00:00",
+  "repository": "jeong-sik/masc",
+  "pr_number": 33994,
+  "pr_url": "https://github.com/jeong-sik/masc/pull/33994",
+  "head_sha": "563bc3492d5143ab02d2f97955134a3f4bc14766",
+  "state": "MERGED",
+  "merge_commit": "82cf770d12ef758348c4d46192dd2e491a4b7b5b",
+  "merged_at": "2026-09-07T10:11:09Z",
+  "merged_by": "jeong-sik",
+  "merge_attribution": "external actor; this review agent did not perform the merge",
+  "run_id": 34108972362,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34108972362",
+  "run_status": "completed",
+  "run_conclusion": "success",
+  "test_step_conclusion": "success",
+  "suites": [
+    {
+      "suite": "test_runtime_codex_app_server",
+      "passed": 70,
+      "failed": 0,
+      "duration_seconds": 12.905,
+      "evidence": "Test Successful in 12.905s. 70 tests run."
+    },
+    {
+      "suite": "test_runtime_claude_code",
+      "passed": 63,
+      "failed": 0,
+      "duration_seconds": 2.045,
+      "evidence": "Test Successful in 2.045s. 63 tests run."
+    },
+    {
+      "suite": "test_keeper_claude_code_runtime",
+      "passed": 23,
+      "failed": 0,
+      "duration_seconds": 0.449,
+      "evidence": "Test Successful in 0.449s. 23 tests run."
+    },
+    {
+      "suite": "test_keeper_codex_error_carriage",
+      "passed": 3,
+      "failed": 0,
+      "duration_seconds": 0.0,
+      "evidence": "Test Successful in 0.000s. 3 tests run."
+    },
+    {
+      "suite": "test_keeper_official_client_host",
+      "passed": 46,
+      "failed": 0,
+      "duration_seconds": 0.038,
+      "evidence": "Test Successful in 0.038s. 46 tests run."
+    }
+  ],
+  "passed_total": 205,
+  "failed_total": 0,
+  "evidence_scope": "Completed exact-head Test-step Alcotest success summaries, five selected suites; no deployment or live runtime verification.",
+  "pr_checks": [
+    {
+      "name": "lint suite",
+      "conclusion": "SUCCESS",
+      "status": "COMPLETED",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34108968249/job/101700486691"
+    },
+    {
+      "name": "dune build @check",
+      "conclusion": "SUCCESS",
+      "status": "COMPLETED",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34108968249/job/101700486871"
+    },
+    {
+      "name": "dashboard typecheck",
+      "conclusion": "SUCCESS",
+      "status": "COMPLETED",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34108968249/job/101700486842"
+    }
+  ]
+}

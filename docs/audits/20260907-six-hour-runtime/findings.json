@@ -167,7 +167,7 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "직접 요청 scope #33967은 97e3c224ad에서 scope11·host46·replay21·Codex2·Claude23·invocation11 PASS. 전체125개 중124 PASS/Antigravity 기존 전송 관측1 FAIL이며 외부8fd39e0069로 병합됐다. 그 실패 수정 #33982는 검증 중. 큐 binding #33984의 b9f30528ff는77/77 PASS, 후속9f79ffbb72는 lint용 주석1줄만 수정했다. 자율 실행·자식 부모 연결·official-client 재시작 영속화는 남아 있다.",
+    "action": "직접 요청 scope #33967은124/125 PASS(기존 Antigravity 전송 관측1 FAIL) 후 외부 병합. 후속 #33982는94/94, #33994 Codex·Claude는205/205 PASS 후 외부 병합됐다. 큐 binding #33984는77/77 PASS 및 필수 검사 후 외부 병합. source-batch #33990은122/124 PASS·fixture2 FAIL, 응답 #34012 검증 중. journal #34021은 대기 작업의 실행 슬롯 해제·동일 scope 복구를 구현했으나 자동 스케줄러·자식/세션 연결·중단 실행 증거 재조정은 남아 있다.",
     "status": "direct-scope-tested-autonomous-pending",
     "first": {
       "seq": 25984123,

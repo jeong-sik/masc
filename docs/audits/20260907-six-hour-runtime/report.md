@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 직접 요청 scope #33967은 97e3c224ad에서 scope11·host46·replay21·Codex2·Claude23·invocation11 PASS. 전체125개 중124 PASS/Antigravity 기존 전송 관측1 FAIL이며 외부8fd39e0069로 병합됐다. 그 실패 수정 #33982는 검증 중. 큐 binding #33984의 b9f30528ff는77/77 PASS, 후속9f79ffbb72는 lint용 주석1줄만 수정했다. 자율 실행·자식 부모 연결·official-client 재시작 영속화는 남아 있다.
+- 조치: 직접 요청 scope #33967은124/125 PASS(기존 Antigravity 전송 관측1 FAIL) 후 외부 병합. 후속 #33982는94/94, #33994 Codex·Claude는205/205 PASS 후 외부 병합됐다. 큐 binding #33984는77/77 PASS 및 필수 검사 후 외부 병합. source-batch #33990은122/124 PASS·fixture2 FAIL, 응답 #34012 검증 중. journal #34021은 대기 작업의 실행 슬롯 해제·동일 scope 복구를 구현했으나 자동 스케줄러·자식/세션 연결·중단 실행 증거 재조정은 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -430,3 +430,14 @@ ACK 이후08:32:41Z까지5분37초의 로그에서 해당 new-keeper shutdown re
 
 
 Antigravity #33982의 [수정 head f97d8de9c8 증거](antigravity-transmission-ci-summary.json)는 runtime37/Keeper11/host46=94/94 PASS다. 입력을 준비한 시점이 아니라 CLI stdin 전체 쓰기와 EOF 뒤에만 전송을 보고한다. 첫 추가 fixture는 ERROR와 성공 본문을 동시에 구성한 탓에 실패했으며, 실제 빈 본문의 거절로 바로잡은 후 통과했다. provider 수락·운영 실행 및 최종 필수 검사 완료를 뜻하지 않는다.
+
+
+## 10:52Z 실행 수명과 Stuck 방지 요구 반영
+
+사용자는 새 구조가 Stuck이나 추가 제약을 만들지 않고 건강한 복구 시나리오를 갖춰야 한다고 명시했다. [#34021](https://github.com/jeong-sik/masc/pull/34021)은 대기 중인 모든 작업을 잠그던 초안을 수정해 실제 Running만 하나로 제한하고, recovery 이전 상태와 정확한 checkpoint를 보존한다. Preparing/Ready 재확인, queue generation 갱신, A 대기 중 B 완료 후 A의 동일 scope 재개를 포함한 SQLite20개 사례를 정의했다. 이 시점에는 원격 검증 중이며 실제 자동 스케줄러/Owner admission, HITL·자식·official session 연결과 interrupted effect witness는 아직 연결되지 않았다. 빈 frame이나 checkpoint 존재만으로 재실행을 허용하지 않는다.
+
+[운영 읽기 전용 사전 점검](journal-live-readonly-preflight.json)은21개 파일 후보 중 읽은20개 journal의1,013행에서 입력 digest/시간 값 오류0건을 관측했다. tool_usage 아래1개는0바이트·schema없는 파일이어서 정상 journal로 세지 않았다. 원문 input·operation ID는 공개하지 않았으며, full schema 또는 실제 migration 통과를 측정한 것은 아니다.
+
+[#33994 정확한 head 검증](official-transmission-ci-summary.json)은563bc3492d의205/205 PASS다. Codex70/Claude63/Keeper Claude23/carriage3/host46이며, 필수 검사 후 외부 세션이10:11:09Z82cf770d12로 병합했다. 전송 전·후 실패를 구분하고 callback 관측 실패가 같은 작업 재실행을 허가하지 않도록 보강했다. 배포나 실제 provider 사용의 증거는 아니다.
+
+[#33990 원격 실행](heartbeat-source-batch-ci-summary.json)은b73711aa27의122/124 PASS다. 새 mixed-binding 검증은 통과했지만 실제 Gate 승인이 없는 HITL fixture와 초기 lane의 idle 전제를 검증하지 않은 cancellation fixture가 실패했다. #34012가 production 경계를 느슨하게 하지 않고 fixture를 실제 상태로 구성하며 원격 재검증 중이다. #33990의 외부 병합은 전체 동작 PASS와 구분한다.

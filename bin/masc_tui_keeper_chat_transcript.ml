@@ -652,40 +652,28 @@ let skill_activity_of_tool (activity : tool_activity) =
 
 (* One phrase per state, and no interpunct inside one.
 
-   The separator on this row does three jobs at once -- it parts the skill
-   name from the state, the state from the action count, and it parted a
-   state's own two words from each other. So "SERVED ONLY · DELIVERY NOT
-   RECORDED" gave the reader no way to tell, from the row, whether that was
-   one state or two.
-
-   "DELIVERED · NO ACTION OBSERVED" lost its second half outright: the row
-   already carries the action count, so an absent count is what "no action
-   observed" was there to say. It said it twice.
-
-   Korean, like the Gate row's phases beside it. These read as the arc they
-   are -- 보냄, 도착함, 쓰임 -- and the two that leave the arc say where it
-   stopped instead of naming a stage that did not happen. *)
-(* One phrase per state, and no interpunct inside one.
-
    The separator on this row does three jobs at once: it parts the state from
    the skill name, the name from the action count, and it used to part a
    state's own two words from each other. So "SERVED ONLY · DELIVERY NOT
    RECORDED" gave a reader no way to tell, from the row, whether that was one
    state or two.
 
-   "DELIVERED · NO ACTION OBSERVED" lost its second half outright: the row
-   already carries the action count, and an absent count is the whole of what
-   "no action observed" was there to say.
+   The row answers one question -- was it handed over, and did anything come
+   of it -- so the phrases answer that question in the words someone would
+   use out loud. Two earlier passes wrote them as nouns instead (쓰임, 도착함,
+   전달됨) and a noun is not what a person says here.
 
-   Korean, like the Gate row's phases beside it, and written as itself rather
-   than as byte escapes -- that is how the Gate wording is written, and a
-   hand-typed escape is a syllable nobody can proofread. *)
+   [Skill_delivered] and [Skill_used] differ by one syllable, 안, which is
+   what makes a column of them scannable. Naming it costs a word and is worth
+   it: the alternative was to leave the action count absent and let the reader
+   notice the absence, and noticing what is not there is not a thing a label
+   may ask for. *)
 let skill_state_label = function
   | Skill_calling -> "부르는 중"
-  | Skill_served_pending -> "보냄"
-  | Skill_served_only -> "보냈지만 도착 기록 없음"
-  | Skill_delivered -> "도착함"
-  | Skill_used -> "쓰임"
+  | Skill_served_pending -> "보냈고 확인 중"
+  | Skill_served_only -> "보냈는데 기록 없음"
+  | Skill_delivered -> "받고 안 씀"
+  | Skill_used -> "받아서 씀"
   | Skill_failed -> "실패"
   | Skill_evidence_missing -> "증거 없음"
   | Skill_evidence_unavailable -> "증거 못 읽음"

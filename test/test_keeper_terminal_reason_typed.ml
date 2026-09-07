@@ -1316,7 +1316,35 @@ let () =
          (entry_after_success.last_failure_reason = None);
        check
          "successful terminal turn clears turn consecutive failures"
-         (entry_after_success.turn_consecutive_failures = 0))
+         (entry_after_success.turn_consecutive_failures = 0);
+       let check_repeated_yield_preserves_failure_state label stop_reason =
+         Masc.Keeper_registry.For_testing.clear ();
+         ignore
+           (Masc.Keeper_registry.For_testing.register
+              ~base_path:config.base_path
+              keeper_name
+              meta);
+         latch_stale_provider_failure ();
+         UTS.reset_turn_failures_for_stop_reason
+           ~config
+           ~updated_meta:meta
+           (run_result ~stop_reason ());
+         let entry_after_yield = registered_entry () in
+         check
+           (label ^ " preserves stale provider failure reason")
+           (entry_after_yield.last_failure_reason = Some stale_provider_failure);
+         check
+           (label ^ " preserves turn consecutive failures")
+           (entry_after_yield.turn_consecutive_failures = 1)
+       in
+       check_repeated_yield_preserves_failure_state
+         "repeated tool stop"
+         (Runtime_agent.Yielded_after_repeated_tool_call
+            { turns_used = 3; tool_name = "board_post"; repeated_count = 3 });
+       check_repeated_yield_preserves_failure_state
+         "repeated assistant stop"
+         (Runtime_agent.Yielded_after_repeated_assistant_text
+            { turns_used = 3; repeated_count = 3 }))
 ;;
 
 let () =

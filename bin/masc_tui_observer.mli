@@ -70,7 +70,11 @@ type agent_core = {
   batch : (int * int) option;  (** [payload.batch_index], [payload.batch_size] *)
   at : float;  (** [ts_unix] *)
   correlation : string option;  (** [correlation_id], the trace *)
-  parent : string option;  (** [parent_event_id], the composition parent *)
+  parent : string option;  (** [parent_event_id], the producer-owned parent reference *)
+  event_id : string option;
+  run_id : string option;
+  caused_by : string option;
+  execution_id : string option;
 }
 
 type keeper_heartbeat = {
@@ -110,6 +114,14 @@ type keeper_tool_call = {
   kt_duration_ms : float option;
   kt_disposition : string option;  (** [completed], as the server writes it *)
   kt_at : float;
+  kt_tool_use_id : string option;
+  kt_schedule : (Agent_core.Tool_contract.schedule, string) result option;
+      (** None means no scheduling metadata was supplied. Invalid metadata
+          remains an Error so the caller can still inspect the call's I/O. *)
+  kt_tool_args : Yojson.Safe.t option;
+  kt_tool_result : Yojson.Safe.t option;
+  kt_tool_args_preview : string option;
+  kt_tool_output_preview : string option;
 }
 
 type event =
@@ -149,6 +161,13 @@ type decoded =
   | Event of event
   | Undecodable of string
 
+type delivery = {
+  cursor : int option;
+  decoded : decoded;
+}
+(** Transport identity from the SSE [id:] line, independent of the payload's
+    event/run/tool identities. [None] means the frame carried no replay ID. *)
+
 val chat_appended_keeper : event -> string option
 (** The keeper whose chat just gained a turn — [Some] only for
     {!Keeper_chat_appended}. The chat pane reloads its history on this
@@ -164,8 +183,8 @@ type t
 
 val create : unit -> t
 
-val feed : t -> string -> decoded list
+val feed : t -> string -> delivery list
 (** Hand the reader the next chunk. Returns the frames completed by it, in
-    order. A line the chunk cut in half is held until the rest arrives;
-    [retry:], [id:], [event:], and comment lines are the stream's framing
-    and produce nothing. *)
+    order. Both a cut line and an unterminated frame remain pending. A replay
+    cursor travels only with its completed data frame; an ID-only frame does
+    not acknowledge an event. *)

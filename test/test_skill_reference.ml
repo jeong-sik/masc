@@ -39,6 +39,50 @@ let check_reference label expected actual =
   check string label (reference_json expected) (reference_json actual)
 ;;
 
+let identity_json ?(source = "workspace") ?(package = "review") ?(name = "review") () =
+  `Assoc
+    [ "source_id", `String source; "package_id", `String package; "name", `String name ]
+;;
+
+(* Pinning and not pinning are different asks, and the decode says which. Folded
+   into one -- an absent revision standing for some default -- the caller that
+   spelled a revision out and the caller that left it open would arrive at the
+   resolver as the same value, and only one of them may be answered with a
+   revision it did not name. RFC-0411 §4.2. *)
+let test_a_request_says_whether_it_pinned () =
+  let pinned = reference ~revision:(String.make 64 'b') () in
+  (match Reference.request_of_yojson (Reference.to_yojson pinned) with
+   | Ok (Reference.Pinned decoded) -> check_reference "the pin survives" pinned decoded
+   | Ok (Reference.By_identity _) -> fail "a spelled-out revision decoded as unpinned"
+   | Error _ -> fail "a canonical reference stopped decoding");
+  match
+    Reference.request_of_yojson (`Assoc [ "identity", identity_json ~name:"review" () ])
+  with
+  | Ok (Reference.By_identity identity) ->
+    check string "the identity is kept whole" "review"
+      (Reference.identity_to_yojson identity
+       |> Yojson.Safe.Util.member "name"
+       |> Yojson.Safe.Util.to_string)
+  | Ok (Reference.Pinned _) -> fail "an absent revision invented a pin"
+  | Error _ -> fail "an identity-only request was rejected"
+;;
+
+(* The two ways a revision can be missing are not the same. Absent is a request
+   this module forwards; present-and-wrong is a request it refuses. A decoder
+   that treated a malformed revision as absent would resolve it against the
+   snapshot and serve content the caller never asked for. *)
+let test_an_omitted_revision_is_not_a_bad_one () =
+  match
+    Reference.request_of_yojson
+      (`Assoc
+        [ "identity", identity_json (); "content_revision", `String "not-a-revision" ])
+  with
+  | Error (Reference.Invalid_content_revision _) -> ()
+  | Error _ -> fail "a malformed revision was rejected for the wrong reason"
+  | Ok (Reference.By_identity _) -> fail "a malformed revision was read as absent"
+  | Ok (Reference.Pinned _) -> fail "a malformed revision was accepted"
+;;
+
 let test_canonical_round_trip () =
   let expected = reference () in
   match Reference.of_yojson (Reference.to_yojson expected) with
@@ -152,7 +196,11 @@ let () =
   run
     "skill exact reference"
     [ ( "wire"
-      , [ test_case "canonical round trip" `Quick test_canonical_round_trip
+      , [ test_case "a request says whether it pinned" `Quick
+            test_a_request_says_whether_it_pinned
+        ; test_case "an omitted revision is not a bad one" `Quick
+            test_an_omitted_revision_is_not_a_bad_one
+        ; test_case "canonical round trip" `Quick test_canonical_round_trip
         ; test_case
             "content revision is a domain-separated Skill digest"
             `Quick

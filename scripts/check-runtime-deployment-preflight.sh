@@ -20,6 +20,8 @@ PREFLIGHT_HELPER_COMMIT=""
 # The gate's own keeper-meta verdict prefix. The self-test asserts this exact
 # literal, so the gate and its test cannot drift apart.
 KEEPER_META_REJECTED='current keeper meta is invalid'
+# Keep aligned with Keeper_board_attention_candidate.schema_version.
+BOARD_ATTENTION_SCHEMA_VERSION=6
 
 usage() {
   sed -n '2,/^$/p' "$0"
@@ -237,10 +239,8 @@ run_gate() {
     fail "durable store validation rejected current runtime state"
   fi
 
-  # Board attention candidate ledgers are schema_version 4 (typed post_created
-  # identity). parse_rows is fail-total per file, so one pre-v4 row silently
-  # stalls that keeper's board attention after restart. There is deliberately
-  # no legacy reader: retire old ledgers instead of starting on top of them.
+  # The runtime reader rejects a whole ledger on an unsupported schema or torn
+  # row. Check the current version before restart without changing runtime data.
   local candidates_root="$runtime_root/board_attention_candidates"
   if [[ -e "$candidates_root" || -L "$candidates_root" ]]; then
     [[ -d "$candidates_root" && ! -L "$candidates_root" ]] \
@@ -256,12 +256,12 @@ run_gate() {
       fi
       # -R + fromjson: a torn or non-JSON line is reported instead of skipped —
       # the runtime reader is fail-total per file, so it would stall on it too.
-      stale_row_report="$(jq -Rr \
-        'first(select(test("\\S")) | try (fromjson | select(.schema_version != 4) | "schema_version=\(.schema_version)") catch "unparseable row") // empty' \
+      stale_row_report="$(jq -Rr --argjson version "$BOARD_ATTENTION_SCHEMA_VERSION" \
+        'first(select(test("\\S")) | try (fromjson | select(.schema_version != $version) | "schema_version=\(.schema_version)") catch "unparseable row") // empty' \
         "$candidate_ledger_path")" \
         || fail "board attention candidate ledger could not be inspected: $candidate_ledger_path"
       [[ -z "$stale_row_report" ]] \
-        || fail "board attention candidate ledger has a pre-v4 or unreadable row ($stale_row_report): $candidate_ledger_path — retire the store before restart: mv $candidates_root ${runtime_root}/board_attention_candidates-retired-$(date +%Y%m%d)"
+        || fail "board attention candidate ledger requires schema_version=$BOARD_ATTENTION_SCHEMA_VERSION; incompatible or unreadable row ($stale_row_report): $candidate_ledger_path"
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
@@ -272,6 +272,10 @@ run_gate() {
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
+  candidate_source_version="$(sed -n 's/^let schema_version = \([0-9][0-9]*\)$/\1/p' \
+    "$REPO_ROOT/lib/keeper/keeper_board_attention_candidate.ml")"
+  [[ "$candidate_source_version" == "$BOARD_ATTENTION_SCHEMA_VERSION" ]] \
+    || fail "Board attention preflight schema differs from the OCaml writer: gate=$BOARD_ATTENTION_SCHEMA_VERSION source=$candidate_source_version"
   fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/runtime-deployment-preflight.XXXXXX")"
   trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
 
@@ -315,7 +319,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local queue_dir="$target_root/.masc/keepers/fixture"
     mkdir -p "$queue_dir"
     jq -n '
-      {schema: "keeper.event_queue.state.v16", revision: 1,
+      {schema: "keeper.event_queue.state.v18", revision: 1,
        pending: [], last_transition: null,
        projected_dispositions: [], transition_outbox: [],
        accepted_transfer_projections: []}
@@ -326,13 +330,14 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # reproduces the 2026-08-23 incident shape: a hard cut removed fields the
   # on-disk snapshot still carried.
   keeper_meta_fixture='{
-    schema: "masc.keeper_meta.v1", name: "fixture",
+    schema: "masc.keeper_meta.v2", name: "fixture",
     instructions: "self-test fixture",
     trace_id: "trace-fixture",
     trace_history: [], last_handoff_ts: 0.0,
     created_at: "2026-08-23T00:00:00Z", updated_at: "2026-08-23T00:00:00Z",
     total_turns: 0, total_input_tokens: 0, total_output_tokens: 0,
     total_tokens: 0, total_cost_usd: 0.0, last_turn_ts: 0.0,
+    usage_cursor: null, last_usage_resolution: null,
     last_input_tokens: 0, last_output_tokens: 0, last_total_tokens: 0,
     last_latency_ms: 0,
     proactive_count_total: 0, last_proactive_ts: 0.0,
@@ -445,21 +450,44 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_current_queue "$current_root"
   "$0" --base-path "$current_root" >/dev/null
 
-  candidate_v4_root="$fixture_root/candidate-v4"
-  write_schedules "$candidate_v4_root" running
-  mkdir -p "$candidate_v4_root/.masc/board_attention_candidates"
-  printf '{"schema_version": 4, "candidate_id": "fixture"}\n' \
-    >"$candidate_v4_root/.masc/board_attention_candidates/fixture.jsonl"
-  "$0" --base-path "$candidate_v4_root" >/dev/null
+  candidate_current_root="$fixture_root/candidate-current"
+  write_schedules "$candidate_current_root" running
+  mkdir -p "$candidate_current_root/.masc/board_attention_candidates"
+  printf '{"schema_version": %s, "candidate_id": "fixture"}\n' "$BOARD_ATTENTION_SCHEMA_VERSION" \
+    >"$candidate_current_root/.masc/board_attention_candidates/fixture.jsonl"
+  "$0" --base-path "$candidate_current_root" >/dev/null
 
-  stale_candidate_root="$fixture_root/candidate-pre-v4"
+  stale_candidate_root="$fixture_root/candidate-old-schema"
   write_schedules "$stale_candidate_root" running
   mkdir -p "$stale_candidate_root/.masc/board_attention_candidates"
   printf '{"schema_version": 3, "candidate_id": "fixture"}\n' \
     >"$stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
   expect_failure stale_board_attention_candidate_ledger "$stale_candidate_root"
 
-  many_stale_candidate_root="$fixture_root/candidate-many-pre-v4"
+  # Reject prior, future, and wrong-typed versions after a valid row, so a
+  # successful first row cannot mask an incompatible later row.
+  for rejected_version in 4 5 7 6.5 '"6"' null true; do
+    version_candidate_root="$fixture_root/candidate-rejected-version"
+    write_schedules "$version_candidate_root" running
+    mkdir -p "$version_candidate_root/.masc/board_attention_candidates"
+    printf '{"schema_version": %s}\n{"schema_version": %s}\n' \
+      "$BOARD_ATTENTION_SCHEMA_VERSION" "$rejected_version" \
+      >"$version_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
+    expect_failure_contains rejected_board_attention_version \
+      "$version_candidate_root" "requires schema_version=$BOARD_ATTENTION_SCHEMA_VERSION"
+  done
+
+  for malformed_row in '{}' '[]' 'null' '"row"' '{broken'; do
+    malformed_candidate_root="$fixture_root/candidate-malformed-row"
+    write_schedules "$malformed_candidate_root" running
+    mkdir -p "$malformed_candidate_root/.masc/board_attention_candidates"
+    printf '%s\n' "$malformed_row" \
+      >"$malformed_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
+    expect_failure_contains malformed_board_attention_row \
+      "$malformed_candidate_root" "requires schema_version=$BOARD_ATTENTION_SCHEMA_VERSION"
+  done
+
+  many_stale_candidate_root="$fixture_root/candidate-many-old-schema"
   write_schedules "$many_stale_candidate_root" running
   mkdir -p "$many_stale_candidate_root/.masc/board_attention_candidates"
   jq -nc 'range(0; 5000) | {schema_version: 3, candidate_id: "fixture"}' \
@@ -467,7 +495,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   expect_failure_contains \
     many_stale_board_attention_candidate_rows \
     "$many_stale_candidate_root" \
-    "retire the store before restart"
+    "requires schema_version=$BOARD_ATTENTION_SCHEMA_VERSION"
 
   symlinked_candidate_root="$fixture_root/candidate-symlink"
   write_schedules "$symlinked_candidate_root" running
@@ -482,7 +510,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   torn_candidate_root="$fixture_root/candidate-torn"
   write_schedules "$torn_candidate_root" running
   mkdir -p "$torn_candidate_root/.masc/board_attention_candidates"
-  printf '{"schema_version": 4}\n{"schema_ver' \
+  printf '{"schema_version": %s}\n{"schema_ver' "$BOARD_ATTENTION_SCHEMA_VERSION" \
     >"$torn_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
   expect_failure torn_board_attention_candidate_ledger "$torn_candidate_root"
 

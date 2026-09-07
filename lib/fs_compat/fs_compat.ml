@@ -3655,4 +3655,3 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
         Stdlib.flush oc))
   end
 ;;
-module Capability_head = Capability_head

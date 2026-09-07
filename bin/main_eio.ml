@@ -2184,16 +2184,12 @@ let sandbox_image_build_in_a_directory_exit ~cli ~tag =
   let context = Filename.temp_file "masc-sandbox-image-" ".d" in
   Sys.remove context;
   Unix.mkdir context 0o700;
-  let dockerfile = Filename.concat context "Dockerfile" in
   let cleanup () =
-    (try Sys.remove dockerfile with Sys_error _ -> ());
+    (try Sys.remove (Filename.concat context "Dockerfile") with Sys_error _ -> ());
     try Unix.rmdir context with Unix.Unix_error _ -> ()
   in
   Fun.protect ~finally:cleanup (fun () ->
-      let oc = open_out dockerfile in
-      Fun.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () -> output_string oc Keeper_sandbox_image.dockerfile);
+      let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
       let argv =
         cli
         :: Keeper_sandbox_image.context_directory_build_argv ~tag ~dockerfile
@@ -2310,12 +2306,15 @@ let sandbox_image_cmd =
     ; `P
         "This builds the other one: bash, ripgrep and git on a Debian base, \
          which is what a turn needs to read, search and edit a repository. The \
-         recipe is embedded in this binary and reaches docker on stdin, so no \
-         checkout and no registry is involved."
+         recipe is embedded in this binary and goes straight to the runtime's \
+         build command, so no checkout and no registry is involved."
     ; `P
-        "It is not polyglot on purpose. A Keeper that has to build a project \
-         needs that project's toolchain, named in its TOML with sandbox_image; \
-         the container is read-only, so a turn cannot install what is missing."
+        "It carries gh and python3 because MASC itself asks the guest for \
+         them: it mounts a GitHub CLI config there, and its own \
+         repository-checkout probe runs python3. A Keeper that has to build a \
+         project needs that project's toolchain instead, named in its TOML \
+         with sandbox_image; the container is read-only, so a turn cannot \
+         install what is missing."
     ]
   in
   let print_only =

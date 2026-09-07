@@ -48,6 +48,22 @@ class RawHttpResponse:
         self.headers = headers
 
 
+class StreamingHttpResponse:
+    """SSE chunks released by the interaction while one connection stays open."""
+
+    def __init__(self, chunks: Callable[[], Iterator[bytes]], *,
+                 headers: tuple[tuple[str, str], ...] = ()) -> None:
+        self.chunks = chunks
+        self.headers = headers
+
+
+class HeadersHttpResponse:
+    """A streaming protocol fixture whose response depends on request headers."""
+
+    def __init__(self, resolve: Callable[[dict[str, str]], RawHttpResponse | StreamingHttpResponse]) -> None:
+        self.resolve = resolve
+
+
 class RequestHttpResponse:
     """A fixture whose JSON-RPC answer must echo fields from the POST body."""
 
@@ -61,7 +77,9 @@ class RequestHttpResponse:
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
+    | StreamingHttpResponse
     | RequestHttpResponse
+    | HeadersHttpResponse
     | Callable[[], HttpResponse]
 )
 HttpFixtures = dict[str, HttpFixture]
@@ -178,8 +196,24 @@ def test_http_endpoint(
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
+            elif isinstance(fixture, HeadersHttpResponse):
+                resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, StreamingHttpResponse):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Connection", "close")
+                for key, value in resolved.headers:
+                    self.send_header(key, value)
+                self.end_headers()
+                try:
+                    for chunk in resolved.chunks():
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             extra_headers: tuple[tuple[str, str], ...] = ()
             if isinstance(resolved, RawHttpResponse):
                 status = resolved.status
@@ -10137,6 +10171,14 @@ def code_lane_fixtures() -> HttpFixtures:
 
 
 CODE_MEMO_FILE_PATH = "/api/v1/workspace/file?path=init.lua"
+# The gutter mark a memo row wears (RFC-0429 §3.1); a Keeper's own change
+# wears a dimmer one, so the two are told apart by glyph.
+MEMO_GUTTER_MARK = "\u25cf".encode()
+# What the title says while the cursor sits on the memo's line. Truncated by
+# the frame if the pane is narrow, so the needle stops well before the end of
+# the memo's text.
+MEMO_CURSOR_RIDER = b"memo alpha (decision) keep the coroutine"
+
 CODE_MEMO_SOURCE = (
     "local lock = 1\n"
     "-- masc(alpha) decision: keep the coroutine, the pool is single threaded\n"
@@ -10196,6 +10238,34 @@ def code_memo_interaction(
     if "notes: init.lua" in CSI_RE.sub(b"", closed).decode("utf-8"):
         raise AssertionError(
             f"a second m left the memo list open: {closed!r}"
+        )
+
+    # RFC-0429 §3.1: the memo is a margin, not a replacement. With the body
+    # back, the row that carries the memo wears a mark in the gutter, and
+    # putting the cursor on that row says what the mark marks without opening
+    # the list again. These run after the list is closed on purpose: the
+    # rider repeats the memo's words in the title, and asserting them earlier
+    # would let a title redraw satisfy a needle meant for the overlay.
+    rows = screen_rows(bytes(output))
+    memo_rows = [text for text in rows.values() if b"masc(alpha) decision" in text]
+    if not memo_rows:
+        raise AssertionError(f"the memo's own row is not on screen: {rows!r}")
+    if not any(MEMO_GUTTER_MARK in text for text in memo_rows):
+        raise AssertionError(
+            f"the row carrying a memo wears no gutter mark: {memo_rows!r}"
+        )
+
+    # The memo sits on line 2 and the file opens on line 1. The needle is the
+    # memo's own row: the cursor line carries its gutter in reverse video, so
+    # landing there redraws that row whatever the title does. A needle taken
+    # from the title would make this wait, not the assertion below, the thing
+    # that notices a missing rider.
+    on_the_memo = send_and_wait(process, master_fd, output, b"j", b"masc(alpha)")
+    title = screen_text(bytes(output))
+    if MEMO_CURSOR_RIDER not in title:
+        raise AssertionError(
+            "the cursor on a memo line did not say what the memo says: "
+            f"{CSI_RE.sub(b'', on_the_memo)!r}"
         )
     os.write(master_fd, b"q")
 
@@ -11678,6 +11748,246 @@ def observer_http_fixtures() -> HttpFixtures:
     }
 
 
+def run_observer_reconnect_regression(executable: str) -> None:
+    releases = [threading.Event() for _ in range(8)]
+    seen: list[dict[str, str]] = []
+    requests: HttpRequests = []
+
+    def frame(event_id: int, call: str) -> bytes:
+        value = {
+            "type": "keeper_tool_call", "name": "alpha", "tool_name": "keeper_skill",
+            "ts_unix": 100.0, "turn": 7, "tool_use_id": call,
+            "tool_args": {"skill": "input-" + call},
+            "tool_result": {"receipt": "output-" + call},
+        }
+        return f"id: {event_id}\ndata: ".encode() + json.dumps(value).encode() + b"\n\n"
+
+    def respond(headers: dict[str, str]) -> StreamingHttpResponse:
+        index = len(seen)
+        seen.append(headers)
+        handshake = [
+            (("x-masc-sse-instance-id", "epoch-a"), ("x-masc-sse-replay", "fresh")),
+            (("x-masc-sse-instance-id", "epoch-a"), ("x-masc-sse-replay", "resumed")),
+            (("x-masc-sse-instance-id", "epoch-a"), ("x-masc-sse-replay", "resumed")),
+            (("x-masc-sse-instance-id", "epoch-b"), ("x-masc-sse-replay", "reset-instance-changed")),
+            (("x-masc-sse-instance-id", "epoch-c"),),  # malformed: no replay contract
+            (("x-masc-sse-instance-id", "epoch-c"), ("x-masc-sse-replay", "fresh")),
+            (),  # peer no longer implements scoped replay
+            (),
+        ][min(index, 7)]
+
+        def chunks():
+            if index == 0:
+                yield frame(41, "before-disconnect")
+                releases[0].wait(timeout=20)
+                yield b"id: 42\n"  # an ID-only partial frame was never delivered
+            elif index == 1:
+                yield frame(41, "before-disconnect") + frame(42, "during-disconnect")
+                releases[1].wait(timeout=20)
+            elif index == 2:
+                return  # same epoch EOF with zero new events must retain session/cursor
+            elif index == 3:
+                yield frame(1, "after-restart")
+                releases[3].wait(timeout=20)
+            elif index in (4, 6):
+                # No data: an old peer may suppress all events under our old
+                # high numeric cursor. The client must close after headers.
+                releases[index].wait(timeout=20)
+            elif index == 5:
+                yield frame(1, "after-malformed")
+                releases[5].wait(timeout=20)
+            else:
+                yield frame(1, "unsupported-live-only")
+                releases[7].wait(timeout=20)
+
+        return StreamingHttpResponse(chunks, headers=handshake)
+
+    fixtures = observer_http_fixtures()
+    fixtures["/mcp?sse_kind=observer"] = HeadersHttpResponse(respond)
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
+            wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
+            releases[0].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 2", start=0, timeout=10)
+            drain_until_quiet(process, master_fd, output)
+            plain = screen_text(bytes(output))
+            for needle in (b"Tool use ID: before-disconnect", b"output-before-disconnect",
+                           b"retained window resumed; history completeness unknown"):
+                if needle not in plain:
+                    raise AssertionError(f"Replayed call retargeted selection or lost replay coverage: {plain!r}")
+            releases[1].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 3", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"disconnected history not recovered", start=0, timeout=10)
+            releases[3].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 4", start=0, timeout=10)
+            releases[5].set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 5", start=0, timeout=10)
+            drain_until_quiet(process, master_fd, output)
+            plain = screen_text(bytes(output))
+            if b"Replay unavailable (live only)" not in plain or b"before-disconnect" not in plain:
+                raise AssertionError(f"Unsupported peer claimed replay or changed pinned evidence: {plain!r}")
+            expected = [(None, None), ("epoch-a", "41"), ("epoch-a", "42"),
+                        ("epoch-a", "42"), ("epoch-b", "1"), (None, None),
+                        ("epoch-c", "1"), (None, None)]
+            actual = [(h.get("x-masc-sse-instance-id"), h.get("last-event-id")) for h in seen]
+            if actual != expected:
+                raise AssertionError(f"HTTP cursor/epoch sequence differs: {actual!r}")
+            if len([path for path, _ in requests if path == "/mcp"]) != 1:
+                raise AssertionError("Transient zero-event close replaced the MCP session")
+            if any(h.get("mcp-session-id") != "mcp_fixture_session" for h in seen):
+                raise AssertionError("Reconnect did not retain the initialized MCP session")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+            detail = send_and_wait(process, master_fd, output, b"g\r", b"Tool use ID: unsupported-live-only")
+            if b"output-unsupported-live-only" not in screen_text(bytes(output)):
+                raise AssertionError(f"Live-only call did not expose its I/O: {detail!r}")
+            captured = bytes(output)
+            end = captured.rfind(FRAME_END) + len(FRAME_END)
+            redraw = captured.rfind(FULL_REDRAW, 0, end)
+            start = captured.rfind(FRAME_START, 0, redraw)
+            if end < len(FRAME_END) or start < 0:
+                raise AssertionError("Reconnect evidence has no completed redraw frame")
+            print("OBSERVER_RECONNECT_EVIDENCE " + json.dumps({
+                "fixture": "actual HTTP disconnect/restart/capability negotiation with canonical Keeper I/O",
+                "requests": actual, "retained_unique_events": 5,
+                "binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+                "pre_open_history_tested": False, "replay_completeness_proven": False,
+                "rows": 38, "columns": 150, "encoding": "base64",
+                "pty": base64.b64encode(captured[start:end]).decode(),
+            }), flush=True)
+            os.write(master_fd, b"q")
+        finally:
+            for release in releases:
+                release.set()
+
+    run_terminal_scenario(executable, description="Observer reconnect preserves scoped exact-call I/O",
+                          interact=interact, refresh=0.5, http_fixtures=fixtures,
+                          http_requests=requests)
+
+
+def run_acting_call_evidence_regression(executable: str) -> None:
+    release_next = threading.Event()
+    keep_open = threading.Event()
+    binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+
+    def emit_frame(phase: str, output: bytearray) -> None:
+        captured = bytes(output)
+        end = captured.rfind(FRAME_END)
+        if end < 0:
+            raise AssertionError("Acting evidence has no completed terminal frame")
+        end += len(FRAME_END)
+        redraw = captured.rfind(FULL_REDRAW, 0, end)
+        start = captured.rfind(FRAME_START, 0, redraw) if redraw >= 0 else -1
+        if start < 0:
+            raise AssertionError("Acting evidence has no complete redraw origin")
+        # A full redraw replaces every row; only its frame and later complete
+        # deltas are needed to reproduce this exact screen. Session history
+        # made the second evidence record exceed Dune's output allowance.
+        current_frame = captured[start:end]
+        print("ACTING_PTY_EVIDENCE " + json.dumps({
+            "phase": phase, "fixture": "synthetic exact-event inspector",
+            "binary_sha256": binary_sha256, "rows": 35, "columns": 140,
+            "encoding": "base64", "pty": base64.b64encode(current_frame).decode(),
+        }), flush=True)
+
+    def frame(value):
+        return b"event: message\ndata: " + json.dumps(value).encode() + b"\n\n"
+
+    keeper = {
+        "type": "keeper_tool_call", "name": "alpha", "tool_name": "keeper_skill",
+        "ts_unix": 100.0, "turn": 7, "tool_use_id": "skill-call-exact",
+        "planned_index": 3, "batch_index": 1, "batch_size": 2, "execution_mode": "concurrent",
+        "tool_args": {"skill": "research-plan-exact"},
+        "tool_result": {"receipt_sha256": "receipt-exact", "status": "served"},
+        "tool_args_preview": "safe-input-preview-exact",
+        "tool_output_preview": "safe-output-preview-exact\n\n\x1b[2Jforged-preview-text",
+    }
+    core = {
+        "type": "agent_core:tool_completed", "event_type": "tool_completed",
+        "agent_name": "runtime-lane-exact", "tool_name": "masc_fusion", "ts_unix": 101.0,
+        "event_id": "event-exact", "run_id": "run-exact", "caused_by": "cause-exact",
+        "parent_event_id": "parent-exact", "correlation_id": "trace-exact",
+        "payload": {"turn": 7, "tool_use_id": "call-exact", "execution_id": "exec-exact"},
+    }
+    late = dict(core, event_id="new-event-must-not-replace", tool_name="other_tool")
+    late["payload"] = {"turn": 8, "tool_use_id": "new-call-must-not-replace"}
+
+    def chunks():
+        yield frame(keeper) + frame(core)
+        if release_next.wait(timeout=15):
+            yield frame(late)
+            keep_open.wait(timeout=15)
+
+    fixtures = observer_http_fixtures()
+    fixtures["/mcp?sse_kind=observer"] = StreamingHttpResponse(chunks)
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            resize_and_wait(process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview")
+            wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            # A folded turn is never silently opened as one of its calls.
+            aggregate_start = len(output)
+            os.write(master_fd, b"\r")
+            drain_until_quiet(process, master_fd, output)
+            if b"ACTING EVENT EVIDENCE" in output[aggregate_start:]:
+                raise AssertionError("Aggregated turn opened as an exact call")
+            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
+            for scheduling in (b"Execution mode: concurrent", b"Planned index (zero-based): 3",
+                               b"Batch index (zero-based) / size: 1 / 2"):
+                if scheduling not in io_head:
+                    raise AssertionError(f"Keeper scheduling evidence missing: {scheduling!r}")
+            # Narrow the viewport so the I/O requires scrolling even when
+            # scheduling metadata is present above it.
+            resize_and_wait(process, master_fd, output, rows=22, columns=140,
+                            needle=b"ACTING EVENT EVIDENCE")
+            io_tail = send_and_wait(process, master_fd, output, b"\x1b[6~", b"safe-output-preview-exact")
+            for needle in (b"skill-call-exact", b"research-plan-exact", b"receipt-exact", b"producer-redacted"):
+                if needle not in io_head + io_tail:
+                    raise AssertionError(f"Selected Keeper event lost I/O evidence {needle!r}: {bytes(output)!r}")
+            visible_io = screen_text(bytes(output))
+            if b"\x1b[2Jforged-preview-text" in io_head + io_tail:
+                raise AssertionError("Tool output preview emitted a terminal clear command")
+            for needle in (b"safe-output-preview-exact", b"[2Jforged-preview-text"):
+                if needle not in visible_io:
+                    raise AssertionError(f"Terminal-safe multiline preview lost text {needle!r}: {visible_io!r}")
+            resize_and_wait(process, master_fd, output, rows=35, columns=140,
+                            needle=b"safe-output-preview-exact")
+            emit_frame("redacted-io", output)
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+            detail = send_and_wait(process, master_fd, output, b"k\r", b"Execution ID: exec-exact")
+            for needle in (b"Event ID: event-exact", b"Run ID: run-exact", b"Parent event ID: parent-exact", b"Caused by: cause-exact", b"Correlation ID: trace-exact"):
+                if needle not in CSI_RE.sub(b"", detail):
+                    raise AssertionError(f"Selected runtime event lost exact reference {needle!r}: {detail!r}")
+            start = len(output)
+            release_next.set()
+            wait_for_output(process, master_fd, output, b"Retained feed events: 3", start=start, timeout=8)
+            drain_until_quiet(process, master_fd, output)
+            pinned = bytes(output[start:])
+            plain = screen_text(bytes(output))
+            if b"Execution ID: exec-exact" not in plain or b"new-call-must-not-replace" in plain:
+                raise AssertionError(f"New SSE event retargeted the open detail: {pinned!r}")
+            emit_frame("pinned-exact-event", output)
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
+            # The newly arrived event is independently selectable after closing.
+            latest = send_and_wait(process, master_fd, output, b"g\r", b"new-call-must-not-replace")
+            if b"Execution ID: not carried" not in screen_text(bytes(output)):
+                raise AssertionError(f"Absent execution identity inherited the previous call: {latest!r}")
+            keep_open.set()
+            os.write(master_fd, b"q")
+        finally:
+            release_next.set()
+            keep_open.set()
+
+    run_terminal_scenario(executable, description="Acting exact event evidence stays pinned across SSE",
+                          interact=interact, http_fixtures=fixtures)
+
+
 def observer_feed_interaction(requests: HttpRequests) -> Interaction:
     """The TUI opens an MCP session after its first refresh reaches the
     server, subscribes to the observer feed with that session, and counts
@@ -12732,8 +13042,70 @@ def run_project_changes_regression(executable: str) -> None:
     )
 
 
+def run_browser_client_picker_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    firefox = "11111111-1111-4111-8111-111111111111"
+    zen = "22222222-2222-4222-8222-222222222222"
+    active = [{"clientId": firefox, "browser": "firefox"}, {"clientId": zen, "browser": "zen"}]
+    reads: list[dict[str, object]] = []
+
+    def read(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        reads.append(request)
+        client = request.get("clientId")
+        if client not in [row["clientId"] for row in active]:
+            return 409, {"ok": False, "error": "client_not_connected"}
+        text = "Zen selected page" if client == zen else "Firefox selected page"
+        return 200, {"ok": True, "data": {
+            "source": "live", "clientId": client, "elapsed_ms": 1.0,
+            "tabs": [{"id": 2, "title": text, "url": "https://example.org/", "active": True}],
+            "page": {"tabId": 2, "title": text, "url": "https://example.org/",
+                     "text": text, "chars": len(text), "truncated": False}}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = SequencedHttpResponse([
+        (200, {"ok": True, "data": {"clients": list(active)}}),
+        (200, {"ok": True, "data": {"clients": list(active)}}),
+        (200, {"ok": True, "data": {"clients": [active[1]]}}),
+    ])
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+
+    def interact(process, master_fd, slave_fd, output, _base):
+        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose a connected browser")
+        if reads:
+            raise AssertionError("unselected multi-client view sent a browser read")
+        os.write(master_fd, b"j")
+        wait_for_terminal_input_consumed(slave_fd)
+        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
+        if reads != [{"lane": "live", "clientId": zen}]:
+            raise AssertionError("Zen choice did not pin its client ID")
+        read_available(master_fd, output)
+        chooser_start = len(output)
+        send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
+        # b clears the displayed inventory until discovery settles. Require a
+        # row from this request, not Firefox text in an earlier chooser frame.
+        wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
+        send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
+        if reads[-1] != {"lane": "live", "clientId": firefox}:
+            raise AssertionError("browser switch reused the old browser's tab ID")
+        active[:] = [active[1]]
+        send_and_wait(process, master_fd, output, b"r", b"Selected browser disconnected")
+        if len(reads) != 2:
+            raise AssertionError("stale Firefox pin silently rebound to the remaining Zen client")
+        if b"Firefox selected page" in screen_text(bytes(output)):
+            raise AssertionError("disconnected browser content remained under the chooser")
+        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
+        if reads[-1] != {"lane": "live", "clientId": zen}:
+            raise AssertionError("explicit reconnect carried the stale tab ID")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(executable, description="Browser client pinning and disconnected selection",
+        interact=interact, http_fixtures=fixtures)
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
+    client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []
     png = [""]
     requested, release = threading.Event(), threading.Event()
@@ -12747,7 +13119,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         tab_id = request.get("tabId", 2)
         title = "first" if tab_id == 1 else "second"
         return 200, {"ok": True, "data": {
-            "source": request["lane"], "elapsed_ms": 12.5,
+            "source": request["lane"], "clientId": request.get("clientId"), "elapsed_ms": 12.5,
             "tabs": [{"id": n, "title": name, "url": "https://example.org/", "active": n == 2}
                      for n, name in [(1, "first"), (2, "second")]],
             "page": {"tabId": tab_id, "title": title, "url": "https://example.org/",
@@ -12763,13 +13135,19 @@ def run_browser_screenshot_regression(executable: str) -> None:
         if len(requests) == 4:
             return 404, {"ok": False, "error": "selected Firefox tab closed"}
         return 200, {"ok": True, "data": {
-            "source": request["lane"], "tabId": request["tabId"], "title": "selected Firefox tab",
+            "source": request["lane"], "clientId": request.get("clientId"), "tabId": request["tabId"], "title": "selected Firefox tab",
             "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
 
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
+        if hasattr(termios, "VDISCARD"):
+            cc = termios.tcgetattr(_slave_fd)[6][termios.VDISCARD]
+            discard = cc if isinstance(cc, int) else cc[0]
+            if discard != os.fpathconf(_slave_fd, "PC_VDISABLE"):
+                raise AssertionError("raw mode did not reclaim Ctrl-O from VDISCARD")
         palette_go(process, master_fd, output, b"go Browser Lane", b"second page body")
 
         def capture() -> None:
@@ -12781,7 +13159,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
                 raise AssertionError("screenshot did not use the PNG image viewer")
 
         capture()
-        if requests != [{"lane": "live", "tabId": 2}]:
+        if requests != [{"lane": "live", "clientId": client_id, "tabId": 2}]:
             raise AssertionError(f"screenshot did not bind the selected live tab: {requests!r}")
         send_and_wait(process, master_fd, output, b"j", b"second page body")
         send_and_wait(process, master_fd, output, b"a", b"second page body")
@@ -12799,8 +13177,8 @@ def run_browser_screenshot_regression(executable: str) -> None:
         wait_for_terminal_input_consumed(_slave_fd)
         drain_until_quiet(process, master_fd, output)
         retained = resize_and_wait(process, master_fd, output,
-            rows=31, columns=101, needle=draft + b"x", controls=(FULL_REDRAW,))
-        if b"Enter after completion" not in CSI_RE.sub(b"", retained):
+            rows=31, columns=101, needle=b"Enter after completion", controls=(FULL_REDRAW,))
+        if draft + b"x" not in CSI_RE.sub(b"", retained):
             raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
         read_available(master_fd, output)
         cancelled_from = len(output)
@@ -12813,7 +13191,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         restored = send_and_wait(process, master_fd, output, b" ", draft + b"x")
         if draft + b"x " in CSI_RE.sub(b"", restored).split(b"\xe2\x96\x8f")[0]:
             raise AssertionError("image dismissal typed into the retained URL draft")
-        send_and_wait(process, master_fd, output, b"\x1b", b"second page body")
+        send_and_wait(process, master_fd, output, b"\x1b", b"g:URL")
         send_and_wait(process, master_fd, output, b"]", b"first page body")
         send_and_wait(process, master_fd, output, b"\x0f", b"selected Firefox tab closed")
         if requests[-1] != {"lane": "automation", "tabId": 1}:
@@ -12847,6 +13225,154 @@ def run_config_regression(executable: str) -> None:
         executable,
         description="Config value navigation, paging, and model temperature",
         interact=config_navigation_interaction(),
+        http_fixtures=fixtures,
+    )
+
+
+# RFC-0429 §3.3 draws a mermaid fence rather than lexing it, and §4 asks a
+# chat PTY scenario to show that the drawing reaches the screen. The golden
+# suite (test_tui_mermaid) already pins what the renderer produces; what it
+# cannot see is the wiring -- chat text goes through Masc_tui_render's
+# [chat_markdown], which reaches Masc_tui_markdown under a local alias, and a
+# fence whose language is not routed there falls through to the plain code
+# path and prints its own source.
+MERMAID_CHAT_SOURCE_ARROW = b"-->"
+MERMAID_CHAT_LABELS = (b"Intake", b"Gate", b"Keeper")
+
+
+def mermaid_chat_history_fixture() -> HttpResponse:
+    return (
+        200,
+        [
+            {
+                "id": "mermaid-chat-reply",
+                "role": "assistant",
+                "content": (
+                    "Here is the shape:\n\n"
+                    "```mermaid\n"
+                    "graph TD\n"
+                    "  intake[Intake] --> gate{Gate}\n"
+                    "  gate --> keeper[Keeper]\n"
+                    "```\n"
+                ),
+                "ts": 1787348491.3,
+            }
+        ],
+    )
+
+
+def mermaid_chat_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # run_terminal_scenario already opens the pty at 30x100, so resizing to
+    # that size draws nothing and a wait on the first screen starves.
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=5.0
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    # Enter opens the keeper's Info tabs; the transcript hangs off the palette.
+    # The wait needle is a node label because the fallback prints the source,
+    # which carries the labels too -- the assertions below, not this wait,
+    # decide whether it was drawn.
+    drawn = palette_go(
+        process, master_fd, output, b"keeper alpha", MERMAID_CHAT_LABELS[0]
+    )
+    # A frame carries only the rows that changed, so the box may have been
+    # written before the row this wait returned on. Ask the reconstructed
+    # screen, not the last frame.
+    screen = screen_text(drawn)
+
+    missing = [label for label in MERMAID_CHAT_LABELS if label not in screen]
+    if missing:
+        raise AssertionError(
+            "the mermaid fence lost its node labels "
+            f"{[label.decode() for label in missing]}: {screen!r}"
+        )
+    if MERMAID_CHAT_SOURCE_ARROW in screen:
+        raise AssertionError(
+            "the mermaid fence printed its own source instead of a drawing -- "
+            "either the fence never reached Masc_tui_mermaid, or the render "
+            f"failed and fell back to the source: {screen!r}"
+        )
+    # Labels without a frame around them would also satisfy the two checks
+    # above, and that is what the plain code path draws.
+    if not any(glyph in screen for glyph in ("┌".encode(), "─".encode(), "│".encode())):
+        raise AssertionError(
+            f"the node labels are on screen but nothing was drawn around them: {screen!r}"
+        )
+
+    # Leaving the transcript before q: the chat surface does not quit on q,
+    # and where Escape lands (keeper detail or the list) is not what this
+    # scenario is about. send_and_wait only scans bytes written after the key,
+    # so the repainted tab bar is enough to say the surface changed.
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers")
+    os.write(master_fd, b"q")
+
+
+def run_mermaid_chat_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="A mermaid fence in keeper chat is drawn, not printed",
+        interact=mermaid_chat_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": mermaid_chat_history_fixture(),
+            "/api/v1/keepers/alpha/chat/history/page": (
+                200,
+                {"messages": [], "has_more": False, "next_before": None},
+            ),
+        },
+    )
+
+
+# RFC-0429 §1.3 and §4. The second recorded change carries
+# "let b = 2\nlet c = 3", and the Changes list has one line per row to say it
+# in. Printing the newline writes the rest of the row wherever the terminal's
+# cursor lands; Tui_decode.preview_line projects it to one cell instead.
+#
+# This is its own lane rather than an assertion inside the default keyboard
+# regression: that lane stops before reaching the Changes surface, at the exit
+# step of "A spilled paste is written where the keeper reads" (issue filed), so
+# an assertion added there would never run and would read as green.
+CHANGES_NEWLINE_PROJECTED = "let b = 2\u23celet c = 3".encode()
+
+
+def changes_newline_projection_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_changes(process, master_fd, output)
+    send_and_wait(process, master_fd, output, b"\x1b[B", b"preview masc:lib/second.ml")
+
+    rows = screen_rows(bytes(output))
+    carrying_a_newline = sorted(row for row, text in rows.items() if b"\n" in text)
+    if carrying_a_newline:
+        raise AssertionError(
+            "the Changes frame printed a raw newline on row(s) "
+            f"{carrying_a_newline}: { {row: rows[row] for row in carrying_a_newline} !r}"
+        )
+    if CHANGES_NEWLINE_PROJECTED not in screen_text(bytes(output)):
+        naming = [text for text in rows.values() if b"second.ml" in text]
+        raise AssertionError(
+            f"the WHAT column did not project the newline to one cell: {naming!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def run_changes_newline_regression(executable: str) -> None:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+    run_terminal_scenario(
+        executable,
+        description="A recorded newline is one cell in the Changes list",
+        interact=changes_newline_projection_interaction,
         http_fixtures=fixtures,
     )
 
@@ -13281,6 +13807,55 @@ def run_theme_scheme_regression(executable: str) -> None:
     )
 
 
+def run_msx_palette_regression(executable: str) -> None:
+    """The command palette opens the MSX screen by name.
+
+    [&] opens the MSX spectator, but a key is found only by someone who
+    already knows it; the palette is where an operator looks for a screen by
+    name. This drives the typed path end to end: `:` then `go msx` must take
+    the terminal over with the MSX screen, and Esc must hand it back.
+
+    The harness serves no machine, so the screen opens on its "no machine
+    loaded" line. That line is the proof the palette reached the screen at
+    all; the Overview header afterwards is the proof Esc left it.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The MSX screen paints the whole terminal itself, outside the frame
+        # presenter, so no frame-end marker follows it. Wait on the raw
+        # output for its title line, the way the Browser screenshot
+        # regression waits for its overlay.
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b":go msx\r")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"no machine loaded",
+            start=start,
+            timeout=3.0,
+        )
+        # Esc hands the terminal back to the presenter, whose frame ends the
+        # normal way, so the plain helper serves from here on.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="the palette opens the MSX screen by name",
+        interact=interact,
+    )
+
+
 def held_back_prompts_http_fixtures() -> HttpFixtures:
     """One prompt whose override the registry declined to restore.
 
@@ -13476,6 +14051,7 @@ def main() -> None:
         return
     if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
         run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
+        run_browser_client_picker_regression(os.path.abspath(sys.argv[1]))
         print("tui Browser screenshot regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "config":
@@ -13489,6 +14065,18 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
         run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
         print("tui theme scheme regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-palette":
+        run_msx_palette_regression(os.path.abspath(sys.argv[1]))
+        print("tui MSX palette regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
+        run_changes_newline_regression(os.path.abspath(sys.argv[1]))
+        print("tui Changes newline projection regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "mermaid-chat":
+        run_mermaid_chat_regression(os.path.abspath(sys.argv[1]))
+        print("tui mermaid chat regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
         run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
@@ -13523,12 +14111,19 @@ def main() -> None:
         run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
         print("tui Skill usage coverage regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "observer-reconnect":
+        run_observer_reconnect_regression(os.path.abspath(sys.argv[1]))
+        sys.exit(0)
+    if len(sys.argv) == 3 and sys.argv[2] == "acting-call-evidence":
+        run_acting_call_evidence_regression(os.path.abspath(sys.argv[1]))
+        print("tui Acting call evidence regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|runtime|resources|keepers-lanes|board-json|code-memo|"
-            "memory-journal|skill-usage-coverage]"
+            "chat-clarity|mermaid-chat|changes-newline|runtime|resources|keepers-lanes|"
+            "board-json|code-memo|memory-journal|skill-usage-coverage]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

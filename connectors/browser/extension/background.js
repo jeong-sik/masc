@@ -54,6 +54,55 @@ async function pageRead(args) {
   return {tabId, ...page};
 }
 
+async function pageElements(args) {
+  const tabId = typeof args?.tabId === "number" ? args.tabId
+    : (await browser.tabs.query({active:true,currentWindow:true}))[0]?.id;
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("invalid_tab_id");
+  const [page] = await browser.tabs.executeScript(tabId, {
+    code: '(' + (function () {
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
+function selector(el) {
+  const parts=[];
+  for (let node=el; node && node.nodeType===1; node=node.parentElement) {
+    const tag=node.localName;
+    const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(s=>s.localName===tag) : [node];
+    parts.unshift(tag+':nth-of-type('+(siblings.indexOf(node)+1)+')');
+  }
+  return parts.join(' > ');
+}
+const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden');
+function observe(el) {
+  const result = {selector:selector(el),tag:el.localName,
+    role:el.getAttribute('role'),type:el.getAttribute('type'),name:el.getAttribute('aria-label') || el.getAttribute('placeholder') || '',
+    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:el.matches(':disabled')};
+  if (el.localName==='input') {
+    // Read the normalized DOM type: missing/unknown types behave as text inputs.
+    result.type=el.type;
+    result.readOnly=!!el.readOnly;
+    if (el.type!=='password' && el.type!=='file') result.value=el.value;
+    if (el.type==='checkbox' || el.type==='radio') result.checked=!!el.checked;
+    if (el.type==='checkbox') result.indeterminate=!!el.indeterminate;
+  } else if (el.localName==='textarea') {
+    result.value=el.value;
+    result.readOnly=!!el.readOnly;
+  } else if (el.localName==='select') {
+    result.value=el.value;
+    result.multiple=!!el.multiple;
+    result.options=Array.from(el.options).map(option=>({
+      value:option.value,label:option.label,selected:!!option.selected,
+      disabled:!!option.disabled || (option.parentElement?.localName==='optgroup' && !!option.parentElement.disabled)
+    }));
+  }
+  return result;
+}
+return {url:location.href,title:document.title,total:visible.length,truncated:visible.length>200,
+  elements:visible.slice(0,200).map(observe)};
+}).toString() + ')()'
+  });
+  if (!page) throw new Error("page_unavailable");
+  return {tabId,...page};
+}
+
 async function pageCapture(args) {
   const tabId = args?.tabId;
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("tab_id_required");
@@ -67,16 +116,87 @@ async function pageCapture(args) {
     mimeType: "image/png", data: dataUrl.slice(prefix.length)};
 }
 
+function interactInPage(args) {
+  if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
+    throw new Error("page_url_changed");
+  const before = location.href;
+  if (args.action === "scroll") {
+    if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+      throw new Error("scroll_coordinates_must_be_integers");
+    window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
+  } else if (args.action === "click" || args.action === "fill") {
+    if (typeof args.selector !== "string" || !args.selector.trim())
+      throw new Error("selector_required");
+    let elements;
+    try { elements = document.querySelectorAll(args.selector); }
+    catch { throw new Error("invalid_css_selector"); }
+    if (elements.length !== 1)
+      throw new Error(elements.length === 0 ? "element_not_found" : "selector_is_ambiguous");
+    const element = elements[0];
+    const style = getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility === "hidden" || style.display === "none")
+      throw new Error("element_not_visible");
+    if (element.matches(":disabled")) throw new Error("element_disabled");
+    if (args.action === "click") {
+      if (typeof element.click !== "function") throw new Error("element_not_clickable");
+      element.click();
+    } else {
+      if (typeof args.text !== "string") throw new Error("fill_text_required");
+      const input = element instanceof HTMLInputElement;
+      const textarea = element instanceof HTMLTextAreaElement;
+      if ((!input && !textarea) || (input && !["text", "search", "email", "url", "tel", "password", "number"].includes(element.type)))
+        throw new Error("element_is_not_a_text_input");
+      if (element.readOnly) throw new Error("element_read_only");
+      const prototype = input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
+      const previousValue = element.value;
+      setter.call(element, args.text);
+      if (element.value !== args.text) {
+        setter.call(element, previousValue);
+        throw new Error("input_rejected_value");
+      }
+      element.dispatchEvent(new Event("input", {bubbles: true}));
+      element.dispatchEvent(new Event("change", {bubbles: true}));
+      if (element.value !== args.text) throw new Error("input_changed_during_events");
+    }
+  } else throw new Error("unknown_interaction_action");
+  return {action: args.action, urlBefore: before, url: location.href,
+    title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+}
+
+async function pageInteract(args) {
+  if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+  if (!['click', 'fill', 'scroll'].includes(args.action)) throw new Error("unknown_interaction_action");
+  // JSON encoding keeps selectors and text out of executable source syntax.
+  const [result] = await browser.tabs.executeScript(args.tabId, {
+    code: `(${interactInPage.toString()})(${JSON.stringify(args)})`,
+  });
+  if (!result) throw new Error("page_unavailable");
+  return {tabId: args.tabId, ...result};
+}
+
 async function onHostMessage(msg) {
   const reply = { id: msg?.id, ok: false };
   try {
     switch (msg?.verb) {
+      case "browser.info":
+        reply.data = await browser.runtime.getBrowserInfo();
+        reply.ok = true;
+        break;
       case "tabs.list":
         reply.data = await tabsList();
         reply.ok = true;
         break;
+      case "page.elements":
+        reply.data = await pageElements(msg.args);
+        reply.ok = true;
+        break;
       case "page.read":
         reply.data = await pageRead(msg.args);
+        reply.ok = true;
+        break;
+      case "page.interact":
+        reply.data = await pageInteract(msg.args);
         reply.ok = true;
         break;
       case "page.capture":
@@ -90,12 +210,12 @@ async function onHostMessage(msg) {
     reply.error = String(e?.message ?? e);
   }
   try {
-    // Match the OCaml host's inbound frame bound before sending. Oversized
-    // captures fail explicitly without disconnecting the user's browser lane.
-    if (new TextEncoder().encode(JSON.stringify(reply)).length > 1024 * 1024) {
+    // Match the native host's bounded incoming frames, including JSON/UTF-8.
+    // Reject locally before an oversized frame can disconnect the host.
+    if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 8 * 1024 * 1024) {
       delete reply.data;
       reply.ok = false;
-      reply.error = "capture_exceeds_native_frame_limit";
+      reply.error = "browser_reply_exceeds_8_mib";
     }
     port?.postMessage(reply);
   } catch {

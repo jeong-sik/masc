@@ -10,7 +10,7 @@ let navigated = false;
 let oversized = false;
 let queried = 0;
 const browser = {
-  runtime: {connectNative: () => ({
+  runtime: {getBrowserInfo: async () => ({name: "Firefox", version: "155.0.1", zen: {version: "1.22b"}}), connectNative: () => ({
     onMessage: {addListener() {}}, onDisconnect: {addListener() {}},
     postMessage: value => replies.push(value),
   })},
@@ -23,7 +23,7 @@ const browser = {
     },
     captureTab: async (id, options) => {
       captureCalls.push({id, options});
-      return 'data:image/png;base64,' + (oversized ? 'A'.repeat(1024 * 1024) : 'iVBORw0KGgo=');
+      return 'data:image/png;base64,' + (oversized ? 'A'.repeat(8 * 1024 * 1024) : 'iVBORw0KGgo=');
     },
   },
 };
@@ -51,8 +51,14 @@ assert.equal((await command({tabId: 7})).error, 'tab_navigated_during_capture');
 navigated = false; oversized = true;
 const large = await command({tabId: 7});
 assert.equal(large.ok, false);
-assert.equal(large.error, 'capture_exceeds_native_frame_limit');
+assert.equal(large.error, 'browser_reply_exceeds_8_mib');
 assert.equal('data' in large, false);
 oversized = false;
 assert.equal((await command({tabId: 7})).ok, true, 'oversized capture must not disconnect the lane');
 console.log('PASS: explicit target, PNG, closed tab, navigation race, frame bound, recovery');
+
+context.command = {id: 'metadata-fixture', verb: 'browser.info', args: {}};
+await vm.runInContext('onHostMessage(command)', context);
+assert.equal(replies.at(-1).data.zen.version, '1.22b');
+assert.equal(replies.at(-1).data.version, '155.0.1');
+console.log('PASS: actual browser info is forwarded including explicit Zen metadata');

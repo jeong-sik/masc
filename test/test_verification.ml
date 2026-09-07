@@ -1949,15 +1949,32 @@ let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
       ~agent_name:keeper_name
   in
   Fs_compat.mkdir_p (Filename.dirname path);
+  (* The meta contract refuses a microvm keeper whose host offers no backend
+     (microvm_backend_unresolved), and this guest has no assumed answer. A
+     microvm-profile fixture declares one so the test reaches the assertion
+     under test; other profiles keep the bare TOML. *)
+  let backend_line =
+    if String.equal sandbox_profile "microvm" then
+      "microvm_backend = \"microsandbox\"\n"
+    else ""
+  in
   Fs_compat.save_file
     path
     (Printf.sprintf
-       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n"
-       sandbox_profile)
+       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s"
+       sandbox_profile backend_line)
 
-let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
+let create_protocol_evidence_request ~sandbox_profile
+    ~base_path ~request_id ~evidence_refs =
   let config = W.default_config base_path in
   ignore (W.init config ~agent_name:None);
+  (* The meta store is two-layered: the record must exist for
+     read_effective_meta_resolved to answer, and keeper.toml carries the
+     profile the effective meta resolves to. Register the record first,
+     then overwrite the TOML with the profile under test. *)
+  ensure_keeper_meta config "omega";
+  write_keeper_profile ~base_path ~keeper_name:"omega"
+    ~sandbox_profile;
   ignore
     (W.add_task
        config
@@ -2053,6 +2070,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
     let request_id = "vrf-docker-relative-snapshot" in
     let task =
       create_protocol_evidence_request
+        ~sandbox_profile:"docker"
         ~base_path
         ~request_id
         ~evidence_refs:
@@ -2121,6 +2139,7 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
     let request_id = "vrf-immutable-snapshot" in
     let task =
       create_protocol_evidence_request
+        ~sandbox_profile:"docker"
         ~base_path
         ~request_id
         ~evidence_refs:[ "artifact:artifacts/immutable.txt" ]
@@ -2194,6 +2213,7 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
     let request_id = "vrf-relative-boundary-snapshot" in
     let task =
       create_protocol_evidence_request
+        ~sandbox_profile:"docker"
         ~base_path
         ~request_id
         ~evidence_refs:
@@ -3215,6 +3235,55 @@ let test_reader_routes_by_where_the_tree_lives () =
       Alcotest.(check bool) "docker keeps the direct host read" false
         (route Masc.Keeper_types_profile.Docker))
 
+(* The submit boundary reads a microvm producer's artifact where that
+   producer's sandbox keeps it, not from the operator-side bookkeeping
+   bundle. The bundle copy is left stale on purpose: it is the decoy that
+   made every Endpoint_owned artifact read back as the wrong bytes (the
+   9/9 Evidence_artifact_unreadable(read_error) class on task-1386's
+   completion submits). Uses only the existing API -- the reader wiring
+   inside create_submit_request is what is under test. Without a live
+   guest the backend answers a typed unreadable, so the invariant a unit
+   test can hold is the one the incident demands: the bundle's bytes are
+   never presented as the producer's artifact. *)
+let test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them
+    () =
+  with_eio_temp_dir (fun base_path ->
+      let bundle_artifact =
+        Filename.concat base_path ".masc/playground/omega/evidence.txt"
+      in
+      let producer_artifact =
+        Filename.concat base_path ".masc/playground/microvm/omega/evidence.txt"
+      in
+      Fs_compat.mkdir_p (Filename.dirname bundle_artifact);
+      Fs_compat.mkdir_p (Filename.dirname producer_artifact);
+      Fs_compat.save_file bundle_artifact "bundle decoy\n";
+      Fs_compat.save_file producer_artifact "producer content\n";
+      let request_id = "vrf-microvm-submit-snapshot" in
+      ignore
+        (create_protocol_evidence_request
+           ~sandbox_profile:"microvm"
+           ~base_path
+           ~request_id
+           ~evidence_refs:[ "artifact:evidence.txt"; "note:producer summary" ]);
+      match inspect_evidence ~base_path ~request_id () with
+      | VS.Evidence_available
+          { items = VS.Evidence_artifact { content; _ } :: _; _ } ->
+        Alcotest.failf
+          "the submit snapshot presented bundle bytes as the producer's artifact: %s"
+          content
+      | VS.Evidence_available
+          { items =
+              VS.Evidence_artifact_unreadable { reference; _ }
+              :: VS.Evidence_note "producer summary"
+              :: []
+          ; _
+          } ->
+        Alcotest.(check string)
+          "the producer's artifact is answered by the backend path, never by the bundle"
+          "artifact:evidence.txt"
+          reference
+      | _ -> Alcotest.fail "expected completion-authority evidence projection")
+
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
    evidence body when the caller names the request. *)
@@ -3670,6 +3739,10 @@ let () =
         test_artifact_reference_size_uses_the_injected_reader;
       Alcotest.test_case "the reader routes by where the tree lives" `Quick
         test_reader_routes_by_where_the_tree_lives;
+      Alcotest.test_case
+        "the submit snapshot reads microvm artifacts where the producer keeps them"
+        `Quick
+        test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
       Alcotest.test_case "a binary payload is adopted and filed" `Quick

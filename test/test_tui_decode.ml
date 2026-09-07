@@ -3693,6 +3693,62 @@ let keeper_lanes_json lanes =
     ; "snapshots", `List lanes
     ]
 
+(* Every phase the state machine has, through the wire and back.
+
+   Decoding and rendering a lane phase are two eight-arm copy-pastes of the
+   same list ([keeper_lane_phase_of_string], [keeper_lane_phase_to_string]).
+   A crossed pair -- "paused" decoded as [Lane_phase_stopped] -- puts a lane
+   on the operator's screen in a state it is not in, and the case below
+   checked exactly one known phase, so seven crossings passed.
+
+   The pairing is written out rather than round-tripped, because a round trip
+   survives a crossing that runs both ways: decode "paused" as
+   [Lane_phase_stopped] and render [Lane_phase_stopped] as "paused" and the
+   string comes back while the constructor every reader matches on is wrong.
+   [all_phases] is the completeness half -- a ninth phase fails the count
+   here rather than arriving untested. *)
+let lane_phase_pairs =
+  [ Keeper_state_machine.Offline, Tui_decode.Lane_phase_offline
+  ; Keeper_state_machine.Running, Tui_decode.Lane_phase_running
+  ; Keeper_state_machine.Failing, Tui_decode.Lane_phase_failing
+  ; Keeper_state_machine.Draining, Tui_decode.Lane_phase_draining
+  ; Keeper_state_machine.Paused, Tui_decode.Lane_phase_paused
+  ; Keeper_state_machine.Stopped, Tui_decode.Lane_phase_stopped
+  ; Keeper_state_machine.Crashed, Tui_decode.Lane_phase_crashed
+  ; Keeper_state_machine.Restarting, Tui_decode.Lane_phase_restarting
+  ]
+
+let decode_one_lane_phase raw =
+  match
+    Tui_decode.decode_keeper_lanes_snapshot
+      (keeper_lanes_json [ keeper_lane_json ~phase:raw "alpha" ])
+  with
+  | Error err -> Alcotest.failf "%s: decode failed: %s" raw err
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.kls_lanes with
+      | [ lane ] -> lane.Tui_decode.kl_phase
+      | lanes ->
+          Alcotest.failf "%s: one lane in, %d out" raw (List.length lanes))
+
+let test_every_known_phase_decodes_to_its_own_constructor () =
+  Alcotest.(check int)
+    "the table names every phase the state machine has"
+    (List.length Keeper_state_machine.all_phases)
+    (List.length lane_phase_pairs);
+  List.iter
+    (fun (phase, expected) ->
+      let raw = Keeper_state_machine.phase_to_string phase in
+      let decoded = decode_one_lane_phase raw in
+      Alcotest.(check bool)
+        (raw ^ " decodes to its own constructor")
+        true
+        (decoded = expected);
+      Alcotest.(check string)
+        (raw ^ " renders back as itself")
+        raw
+        (Tui_decode.keeper_lane_phase_to_string decoded))
+    lane_phase_pairs
+
 let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
   let last_outcome =
     `Assoc
@@ -5419,6 +5475,33 @@ let test_decode_runtime_resolved () =
              (Some "ollama_cloud.deepseek") a.ra_target_id
        | other ->
            Alcotest.failf "expected one assignment, got %d" (List.length other))
+
+let test_decode_unavailable_runtime_assignment () =
+  let with_resolution resolved =
+    let assignment = `Assoc
+      ["keeper", `String "affected"; "assignment_source", `String "explicit";
+       "resolved", resolved] in
+    match runtime_resolved_json with
+    | `Assoc fields -> `Assoc (("assignments", `List [assignment]) :: List.remove_assoc "assignments" fields)
+    | _ -> Alcotest.fail "runtime fixture is not an object"
+  in
+  let unavailable reason = with_resolution (`Assoc
+    ["kind", `String "unavailable"; "id", `String "fixture.missing"; "reason", reason]) in
+  let reason = `Assoc
+    ["kind", `String "missing_catalog_model"; "message", `String "Capability catalog entry unavailable";
+     "provider_id", `String "fixture"; "provider_label", `String "fixture"; "model_id", `String "missing"] in
+  (match Tui_decode.decode_runtime_resolved (unavailable reason) with
+   | Ok (runtimes, [assignment]) ->
+       Alcotest.(check int) "healthy runtime catalog remains visible" 2 (List.length runtimes);
+       Alcotest.(check (option string)) "configured unavailable identity survives" (Some "fixture.missing") assignment.ra_target_id;
+       Alcotest.(check (option string)) "unavailability is explicit" (Some "Capability catalog entry unavailable") assignment.ra_unavailable_reason
+   | Ok _ -> Alcotest.fail "unavailable assignment lost"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "missing reason cannot claim unavailable certainty" true
+    (Result.is_error (Tui_decode.decode_runtime_resolved (unavailable `Null)));
+  Alcotest.(check bool) "active assignment still requires an existing lane" true
+    (Result.is_error (Tui_decode.decode_runtime_resolved (with_resolution (`Assoc
+      ["kind", `String "lane"; "id", `String "fixture.missing"]))))
 
 let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
     ?(transport = "http") ?(http_status = `Int 200)
@@ -8125,7 +8208,9 @@ let () =
       ] );
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "carries runtimes and assignments" `Quick
-          test_decode_runtime_resolved
+          test_decode_runtime_resolved;
+        Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
+          test_decode_unavailable_runtime_assignment
       ] );
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick
@@ -8237,6 +8322,9 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "every known phase decodes to its own constructor"
+          `Quick
+          test_every_known_phase_decodes_to_its_own_constructor;
       ] );
     ( "decode_standalone_lanes",
       [

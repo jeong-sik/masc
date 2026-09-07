@@ -242,6 +242,69 @@ let chat_budget_config override model_id =
     ()
 ;;
 
+(* 2026-09-07 #34033: a model whose provider rejects JSON-Schema combinators
+   gets its tool schemas projected to the conformant subset. The enum leaves
+   the wire but its vocabulary survives in the description — the dispatcher's
+   own validation stays the authority, so no enforcement is lost. *)
+let enum_tool =
+  (* The AGENT-CORE tool JSON shape (name/description/parameters directly) —
+     [build_openai_tool_json] adds the {"type":"function","function":…} wire
+     wrapper itself. *)
+  `Assoc
+    [ "name", `String "pick_stream"
+    ; "description", `String "pick a stream"
+    ; "parameters"
+    , `Assoc
+        [ "type", `String "object"
+        ; "properties"
+        , `Assoc
+            [ ( "stream"
+              , `Assoc
+                  [ "type", `String "string"
+                  ; "enum", `List [ `String "stdout"; `String "stderr" ]
+                  ] )
+            ]
+        ; "required", `List [ `String "stream" ]
+        ]
+    ]
+;;
+
+let test_conformant_tool_schema_drops_enum_keeps_vocabulary () =
+  let override =
+    { CAP.default_capabilities with
+      tool_schema_conformance = CAP.Conformant_subset_required
+    }
+  in
+  let config = chat_budget_config override "strict-test" in
+  let json =
+    BOR.build_request ~config ~messages:[ user_msg "hi" ] ~tools:[ enum_tool ] ()
+    |> json_of_body
+  in
+  let tools = json |> member "tools" |> to_list in
+  check int "one tool" 1 (List.length tools);
+  let fn = tools |> List.hd |> member "function" in
+  let stream = fn |> member "parameters" |> member "properties" |> member "stream" in
+  check bool "enum gone" true (stream |> member "enum" = `Null);
+  check string "vocabulary survives"
+    "one of: stdout | stderr"
+    (stream |> member "description" |> to_string)
+;;
+
+let test_rich_tool_schema_keeps_enum_by_default () =
+  let config = chat_budget_config CAP.default_capabilities "rich-test" in
+  let json =
+    BOR.build_request ~config ~messages:[ user_msg "hi" ] ~tools:[ enum_tool ] ()
+    |> json_of_body
+  in
+  let stream =
+    json |> member "tools" |> to_list |> List.hd
+    |> member "function" |> member "parameters"
+    |> member "properties" |> member "stream"
+  in
+  check bool "enum stays" true (stream |> member "enum" <> `Null)
+;;
+
+
 let test_chat_budget_field_max_completion_tokens () =
   let override =
     { CAP.default_capabilities with
@@ -1606,6 +1669,14 @@ let () =
               "chat budget field default is classic max_tokens"
               `Quick
               test_chat_budget_field_default_is_classic
+          ; test_case
+              "conformant tool schema drops enum keeps vocabulary"
+              `Quick
+              test_conformant_tool_schema_drops_enum_keeps_vocabulary
+          ; test_case
+              "rich tool schema keeps enum by default"
+              `Quick
+              test_rich_tool_schema_keeps_enum_by_default
           ] )
       ])
 ;;

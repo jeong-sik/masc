@@ -4324,6 +4324,63 @@ let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   result, !provider_call_count
 ;;
 
+(* The returned SDK boundary is continuation evidence, not a label inferred
+   from stop_reason. Exercise the real HTTP -> tool -> sink -> yield path. *)
+let test_cooperative_boundary_result ~with_sink ~fail_sink () =
+  with_exec_fixture ~bind_eio_context:true "cooperative_boundary_result"
+    (fun ~config:_ ~meta:_ ~publication_recovery:_ ~ctx_work:_ ->
+      let tool_calls = ref 0 in
+      let observed_boundary = ref None in
+      let sink_stages = ref [] in
+      let tool = Agent_core.Tool.create ~name:"boundary_probe"
+        ~description:"Return one local tool result" ~parameters:[]
+        (fun _ -> incr tool_calls; Ok {content="boundary result"; _meta=None}) in
+      let result, provider_calls =
+        with_openai_tool_call_server ~tool_name:"boundary_probe" ~tool_input:(`Assoc [])
+          (fun ~sw ~net ~base_url ->
+            let provider_cfg = Llm_provider.Provider_config.make
+              ~kind:Llm_provider.Provider_config.OpenAI_compat
+              ~model_id:"boundary-model" ~base_url ~api_key:"test-key"
+              ~request_path:"/chat/completions" ~tool_stream:false () in
+            let config = Runtime_agent.default_config ~name:"boundary-runtime"
+              ~provider_cfg ~system_prompt:"Execute the local probe." ~tools:[tool] in
+            let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+              sink_stages := snapshot.stage :: !sink_stages;
+              if fail_sink && snapshot.stage = Agent_core.Agent.After_tool_results_appended
+              then Error "injected tool-boundary checkpoint failure"
+              else Ok () in
+            let config = {config with Runtime_agent.checkpoint_sink =
+                (if with_sink then Some sink else None)} in
+            Runtime_agent.run_blocks ~sw ~net ~config
+              ~cooperative_yield_probe:(fun boundary ->
+                observed_boundary := Some boundary;
+                Ok (Runtime_agent.Yield Runtime_agent.Operation_queued))
+              [Agent_core.Types.Text "run probe"])
+      in
+      check int "one actual provider call" 1 provider_calls;
+      check int "one completed local tool" 1 !tool_calls;
+      if fail_sink then (
+        check bool "failed sink never reaches cooperative boundary" true
+          (Option.is_none !observed_boundary);
+        match result with
+        | Error _ -> ()
+        | Ok _ -> fail "failed checkpoint sink produced a resumable runtime result")
+      else match result with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok result ->
+        (match result.cooperative_boundary, !observed_boundary, result.checkpoint with
+         | Some actual, Some expected, Some checkpoint ->
+           check int "exact yielded turn survives adapter" expected.turn actual.turn;
+           check bool "exact SDK stage survives adapter" true
+             (actual.checkpoint_stage = expected.checkpoint_stage);
+           check int "boundary joins returned checkpoint turn" checkpoint.turn_count actual.turn;
+           check bool "the tool-result stage is carried" true
+             (actual.checkpoint_stage = Agent_core.Agent.After_tool_results_appended);
+           check bool "sink presence remains distinct from boundary presence" with_sink
+             (List.mem actual.checkpoint_stage !sink_stages)
+         | _ -> fail "runtime dropped the actual yielded boundary or checkpoint"))
+;;
+
 (* A Gate deferral parks the search and the turn keeps going: the model gets
    the deferred tool result and answers in the same turn. The parked call is
    replayed by the host once the approval resolves. *)
@@ -4423,7 +4480,9 @@ let test_deferred_web_search_keeps_the_turn_going () =
           fail
             (Masc.Keeper_approval_queue.storage_error_to_string error));
        (match runtime_result with
-        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; _ } -> ()
+        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; cooperative_boundary; _ } ->
+          check bool "parked call does not invent a cooperative yield" true
+            (Option.is_none cooperative_boundary)
         | Ok result ->
           failf
             "parked effect returned stop_reason=%s"
@@ -7130,6 +7189,7 @@ let probe tool_name args =
 let composable_output_probes =
   [ probe "Execute" (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
   ; probe "keeper_time_now" (`Assoc [])
+  ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
     ; prepare =
         (fun ~config ~meta:_ ->
@@ -7282,6 +7342,39 @@ let validate_probe_output ~tool_name ~data =
          (Yojson.Safe.to_string data)
      | Error _ ->
        failf "%s output validation failed before reaching the schema" tool_name)
+
+let test_lane_status_observations_remain_composable () =
+  let module Profile = Masc.Keeper_types_profile in
+  with_exec_fixture
+    ~always_allow:true
+    "lane-status-composable-observations"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       List.iter
+         (fun (sandbox_profile, observation_field) ->
+            let meta = { meta with sandbox_profile } in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config ~meta ~publication_recovery ~ctx_work
+                ~name:"keeper_lane_status" ~input:(`Assoc []) ()
+            in
+            check string "status observation completes without a guest"
+              "success" (outcome_label result.KTE.disposition);
+            match result.KTE.data with
+            | None -> fail "lane status lost its structured observation"
+            | Some data ->
+              check string "the selected profile reaches the producer"
+                (Profile.sandbox_profile_to_string sandbox_profile)
+                Yojson.Safe.Util.(data |> member "profile" |> to_string);
+              (match Yojson.Safe.Util.member observation_field data with
+               | `String detail ->
+                 check bool "the profile-specific observation is present"
+                   true (String.length detail > 0)
+               | _ -> fail "lane status lost its profile-specific observation");
+              validate_probe_output ~tool_name:"keeper_lane_status" ~data)
+         [ Profile.Docker, "note"
+         ; Profile.Micro_vm, "unreachable"
+         ; Profile.Remote_ssh, "unreachable"
+         ])
 
 let test_composable_outputs_satisfy_declared_schema () =
   with_exec_fixture
@@ -7466,6 +7559,12 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
+      test_case "SDK yield carries the exact checkpoint boundary" `Quick
+        (test_cooperative_boundary_result ~with_sink:true ~fail_sink:false);
+      test_case "in-memory SDK boundary does not imply a checkpoint sink" `Quick
+        (test_cooperative_boundary_result ~with_sink:false ~fail_sink:false);
+      test_case "failed checkpoint sink cannot publish a yielded boundary" `Quick
+        (test_cooperative_boundary_result ~with_sink:true ~fail_sink:true);
       test_case "deferred WebSearch keeps the turn going" `Quick
         test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
@@ -7536,6 +7635,8 @@ let () =
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
     ("composable_output_contract", [
+      test_case "lane observations remain composable without a guest" `Quick
+        test_lane_status_observations_remain_composable;
       test_case "every composable tool has an output probe" `Quick
         test_every_composable_tool_has_an_output_probe;
       test_case "real producer output satisfies its declared schema" `Quick

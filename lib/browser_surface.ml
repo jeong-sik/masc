@@ -1,8 +1,15 @@
 type source = Live | Automation
-type request = { source : source; tab_id : int option }
+type request = { source : source; tab_id : int option; client_id : Browser_lane.client_id option }
 type tab = { id : int; title : string; url : string; active : bool }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
+let parse_client_id = function
+  | `Assoc fields ->
+    (match List.assoc_opt "clientId" fields with
+     | None -> Ok None
+     | Some (`String value) -> Result.map Option.some (Browser_lane.client_id_of_string value)
+     | _ -> Error "invalid_client_id")
+  | _ -> Error "body must be a JSON object"
 let parse_request = function
   | `Assoc fields ->
     let* source = match List.assoc_opt "lane" fields with
@@ -13,14 +20,16 @@ let parse_request = function
       | None -> Ok None
       | Some (`Int id) when id >= 0 -> Ok (Some id)
       | _ -> Error "tabId must be a nonnegative integer" in
-    let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId"]) fields
+    let* client_id = parse_client_id (`Assoc fields) in
+    let* () = if source = Automation && Option.is_some client_id then Error "client_id_requires_live" else Ok () in
+    let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId";"clientId"]) fields
       then Ok () else Error "unknown browser read argument" in
-    Ok {source; tab_id}
+    Ok {source; tab_id; client_id}
   | _ -> Error "body must be a JSON object"
 let decode_answer = function
   | Browser_lane.Lane_absent -> Error "browser lane is disconnected"
   | Browser_lane.Timed_out -> Error "browser lane timed out"
-  | Browser_lane.Refused error -> Error error
+  | Browser_lane.Refused error | Browser_lane.Rejected_before_effect error -> Error error
   | Browser_lane.Answered json ->
     match field "ok" json, field "data" json with
     | Some (`Bool true), Some data -> Ok data
@@ -40,10 +49,15 @@ let rec decode_tabs = function
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
 let source_name = function Live -> "live" | Automation -> "automation"
+let resolved_target request = Browser_lane.resolve_target
+  ~lane_name:(source_name request.source) ~client_id:request.client_id
+let client_id_json target = match Browser_lane.target_client_id target with
+  | None -> `Null | Some id -> `String (Browser_lane.client_id_to_string id)
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.source in
-  let issue verb = Browser_lane.issue ~lane_name ~verb ~timeout_sec:20. |> decode_answer in
+  let* target = resolved_target request in
+  let issue verb = Browser_lane.issue_for ~target ~verb ~timeout_sec:20. |> decode_answer in
   let* raw_tabs = issue Browser_lane.Tabs_list in
   let* tabs = match raw_tabs with `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list" in
   let* selected = match request.tab_id with
@@ -66,7 +80,7 @@ let read request =
        | _ -> Error "browser page lacks URL/title/text/length metadata; update the browser connector") in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"page",page;
-    "source",`String lane_name;
+    "source",`String lane_name; "clientId", client_id_json target;
     "elapsed_ms",`Float elapsed_ms])
 
 (* Captures always name a tab. An absent/closed target must never capture the
@@ -83,12 +97,16 @@ let capture request =
     | Some id -> Ok id | None -> Error "tabId is required for a screenshot" in
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.source in
-  let* data = Browser_lane.issue ~lane_name ~verb:(Browser_lane.Page_capture {tab_id})
+  let* target = resolved_target request in
+  let* data = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_capture {tab_id})
       ~timeout_sec:20. |> decode_answer in
   match field "tabId" data, field "url" data, field "title" data,
         field "mimeType" data, field "data" data with
   | Some (`Int actual), Some (`String url), Some (`String title),
     Some (`String "image/png"), Some (`String image) when actual = tab_id ->
+    let max_bytes = Keeper_vision_tool.max_image_bytes () in
+    let* () = if String.length image > ((max_bytes + 2) / 3) * 4
+      then Error "screenshot exceeds Vision image size limit" else Ok () in
     let* bytes = match Base64.decode image with
       | Ok bytes when String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes -> Ok bytes
       | Ok _ -> Error "screenshot payload is not PNG"
@@ -96,7 +114,7 @@ let capture request =
     if String.length bytes = 0 then Error "empty screenshot"
     else
       let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-      Ok (`Assoc ["source", `String lane_name; "tabId", `Int tab_id;
+      Ok (`Assoc ["source", `String lane_name; "clientId", client_id_json target; "tabId", `Int tab_id;
         "title", `String title; "url", `String url; "mimeType", `String "image/png";
         "data", `String image; "elapsed_ms", `Float elapsed_ms])
   | _ -> Error "screenshot response does not match the requested tab or PNG contract"

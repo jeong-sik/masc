@@ -805,6 +805,13 @@ let parse_args () =
   let tool_visibility = ref "compact" in
 
   let specs = [
+    ("--version", Arg.Unit (fun () -> print_endline Runtime_build_version.current; exit 0),
+      "Print this executable's build version and exit");
+    ("--build-commit", Arg.Unit (fun () ->
+        match Build_commit_generated.commit with
+        | Some commit -> print_endline commit; exit 0
+        | None -> prerr_endline "build commit is not embedded"; exit 1),
+      "Print the Git commit embedded at build time and exit");
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
@@ -1504,10 +1511,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
-         then gives full timestamp/request metadata a row of its own.
-         Ctrl-O would have read better for an origin, but it is VDISCARD on
-         this platform and [Unix.terminal_io] carries no IEXTEN field to turn
-         that off, so the terminal would eat the key before the loop saw it. *)
+         then gives full timestamp/request metadata a row of its own. *)
       state.msg_origin_display <- next_origin_display state.msg_origin_display;
       true
     end else if c = Some 21 then begin
@@ -1818,6 +1822,7 @@ type async_msg =
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
@@ -2006,9 +2011,12 @@ type async_msg =
       (** provider id, then how many scopes were recorded *)
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
-  | Observer_opened of string
-  | Observer_received of Masc_tui_observer.decoded list
-  | Observer_closed of string
+  | Observer_opened of {
+      session_id : string;
+      handshake : (Sse_wire.observer_handshake option, string) result;
+    }
+  | Observer_received of string option * Masc_tui_observer.delivery list
+  | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Task_dispatched of {
       keeper : string;
       task_id : string;
@@ -4036,11 +4044,16 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
+  | Some view when (match operation with Read | Screenshot _ -> true | _ -> false)
+                   && not (selected_client_available view) ->
+      state.browser_lane <- Some { view with client_picker = Some 0;
+        load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
-      state.browser_lane <- Some { view with load = Loading (generation, operation) };
+      state.browser_lane <- Some { view with load = Loading (generation, operation);
+        clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
         (* The mailbox is the effect boundary. Cancellation still belongs to
@@ -4051,12 +4064,14 @@ let launch_browser_lane state ~mailbox operation =
           | exn -> Error (Printexc.to_string exn)
         in
         match operation with
+        | Discover _ -> Browser_lane_clients_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Screenshot tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
-              ~host ~port ~source:view.source ~tab_id);
+              ~host ~port ~view ~tab_id);
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
@@ -4067,10 +4082,18 @@ let launch_browser_lane state ~mailbox operation =
        | None ->
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
 
+let refresh_browser_lane state ~mailbox =
+  match state.browser_lane with
+  | Some view when not (Browser_lane_view.busy view) ->
+      state.browser_lane <- Some (Browser_lane_view.refresh view);
+      launch_browser_lane state ~mailbox
+        (match view.source with Live -> Discover Read_after_discovery | Automation -> Read)
+  | Some _ | None -> ()
+
 let open_browser_lane state ~mailbox =
   show_browser_lane state;
   release_composer_for_browser_reader state;
-  launch_browser_lane state ~mailbox Browser_lane_view.Read
+  refresh_browser_lane state ~mailbox
 
 let launch_runtime_surface_load state ~mailbox ~force =
   match state.runtime_surface_inflight with
@@ -5184,7 +5207,7 @@ let goto_surface state ~mailbox (destination : surface) =
         | None -> launch_connectors_load state ~mailbox
         | Some _ ->
             release_composer_for_browser_reader state;
-            launch_browser_lane state ~mailbox Browser_lane_view.Read)
+            refresh_browser_lane state ~mailbox)
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config -> (
@@ -6482,6 +6505,23 @@ let write_to_terminal payload =
   in
   output_string stdout payload;
   flush stdout
+
+(* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
+   before watching one. Fetch the frame so the menu can offer "watch" when a
+   game is already loaded, and the inventory so there is something to pick.
+   Both are bounded loopback calls; the overlay then owns the terminal until a
+   game is chosen or [esc].
+
+   The menu, not the spectator, is what this opens. The [&] key and the
+   palette's "go MSX" both land here, so the two doors stay one door -- which
+   is why the menu goes in the function rather than at the key. *)
+let open_msx_screen (state : Masc_tui_types.state) =
+  state.msx_frame <-
+    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  state.msx_carts <-
+    Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+  Masc_tui_msx.open_menu ~write:write_to_terminal state
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -8300,8 +8340,10 @@ let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row 
    through the mailbox; the render fiber owns all state. The fiber ends with
    the stream, and whether to open another is the main loop's decision. *)
 let launch_observer state ~host ~port ~mailbox =
+  let exception Reconnect_without_cursor in
   state.observer <- Observer_opening;
   let session = state.mcp_session in
+  let cursor = state.observer_cursor in
   let run () =
     let result =
       try
@@ -8312,36 +8354,61 @@ let launch_observer state ~host ~port ~mailbox =
               Masc_tui_http.open_mcp_session ~host ~port
                 ~client_version:Runtime_build_version.current
         with
-        | Error detail -> Error detail
+        | Error detail -> Error (Masc_tui_http.Transport_failed detail)
         | Ok session_id -> (
-            enqueue_async mailbox (Observer_opened session_id);
             match Eio_context.get_clock_opt () with
-            | None -> Error "Eio clock is unavailable"
+            | None -> Error (Masc_tui_http.Transport_failed "Eio clock is unavailable")
             | Some clock ->
                 let reader = Masc_tui_observer.create () in
+                let instance_id = ref None in
+                let on_response ~status ~headers =
+                  if Masc.Tui_decode.is_success_http_status status then begin
+                    let handshake =
+                      match Sse_wire.decode_observer_response headers with
+                      | Ok (Some ({ replay = Sse_wire.Resumed; _ } as handshake)) ->
+                          (match cursor with
+                           | Some requested when String.equal requested.instance_id handshake.instance_id ->
+                               Ok (Some handshake)
+                           | Some _ | None -> Error "Observer resumed without a matching requested instance")
+                      | other -> other
+                    in
+                    instance_id :=
+                      (match handshake with
+                       | Ok (Some handshake) -> Some handshake.instance_id
+                       | Ok None | Error _ -> None);
+                    enqueue_async mailbox (Observer_opened { session_id; handshake });
+                    (match handshake, cursor with
+                     | (Ok None | Error _), Some _ ->
+                         (* An older peer may have already registered our old
+                            numeric cursor without understanding its epoch.
+                            Close that stream and reconnect without authority. *)
+                         raise Reconnect_without_cursor
+                     | (Ok (Some _) | Ok None | Error _), None
+                     | Ok (Some _), Some _ -> ())
+                  end
+                in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> enqueue_async mailbox (Observer_received decoded)
+                  | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
                 Masc_tui_http.observe_runtime_events ~clock ~host ~port
-                  ~session_id ~on_chunk)
+                  ~session_id ~cursor ~on_response ~on_chunk)
       with
+      | Reconnect_without_cursor ->
+          Error (Masc_tui_http.Transport_failed "Scoped replay unavailable; reconnecting without the previous cursor")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
-    enqueue_async mailbox
-      (Observer_closed
-         (match result with
-          | Ok () -> "the server closed the stream"
-          | Error detail -> detail))
+    enqueue_async mailbox (Observer_closed result)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       Eio.Fiber.fork_daemon ~sw (fun () ->
           run ();
           `Stop_daemon)
-  | None -> enqueue_async mailbox (Observer_closed "Eio switch is unavailable")
+  | None -> enqueue_async mailbox
+      (Observer_closed (Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
 
 (* The feed is opened only after a refresh has reached the server: opening
    it blind would report a closed feed every cycle while the TUI runs without
@@ -10193,12 +10260,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Observer_opened session_id ->
+  | Observer_opened { session_id; handshake } ->
       state.mcp_session <- Some session_id;
+      (match handshake with
+       | Ok (Some handshake) ->
+           (match handshake.replay with
+            | Sse_wire.Resumed -> ()
+            | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
+           state.observer_replay <- Observer_replay_scoped handshake
+       | Ok None ->
+           state.observer_cursor <- None;
+           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay"
+       | Error detail ->
+           state.observer_cursor <- None;
+           state.observer_replay <- Observer_replay_unavailable detail);
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
+      add_event state "observer" (observer_replay_description state.observer_replay);
       add_event state "observer" "runtime event feed open"
-  | Observer_received decoded ->
+  | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane
          shows the whole history anyway, and the loader is generation-
@@ -10227,8 +10307,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             String.equal name (Masc_tui_acting.keeper_of_event ~traces event)
       in
       List.iter
-        (fun item ->
-          match item with
+        (fun (delivery : Masc_tui_observer.delivery) ->
+          (* SSE publication commits IDs in order. Replaying a committed ID
+             must not append the event or retrigger its dependent refreshes. *)
+          let already_applied =
+            match instance_id, delivery.cursor, state.observer_cursor with
+            | Some instance_id, Some cursor, Some applied ->
+                String.equal instance_id applied.instance_id && cursor <= applied.event_id
+            | (None, _, _) | (_, None, _) | (_, _, None) -> false
+          in
+          if not already_applied then begin
+          (match delivery.decoded with
           | Masc_tui_observer.Event event ->
               (match state.observer with
                | Observer_live live ->
@@ -10261,6 +10350,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               state.acting <-
                 { Masc_tui_acting.ae_at = received; ae_event = event }
                 :: state.acting;
+              (match state.acting_filter with
+               | Masc_tui_acting.Turns -> ()
+               | Actions | Everything ->
+                   if Masc_tui_acting.visible state.acting_filter event
+                      && (state.acting_cursor > 0 || Option.is_some state.acting_detail)
+                   then state.acting_cursor <- state.acting_cursor + 1);
               (* A row arriving at the top pushes every row down one. An
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
@@ -10270,7 +10365,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               end
           | Masc_tui_observer.Undecodable reason ->
               state.acting_undecodable <- state.acting_undecodable + 1;
-              state.acting_undecodable_last <- Some reason)
+              state.acting_undecodable_last <- Some reason);
+          (match delivery.decoded, delivery.cursor, instance_id with
+           | Masc_tui_observer.Event _, Some event_id, Some instance_id ->
+               state.observer_cursor <- Some { instance_id; event_id }
+           | Masc_tui_observer.Event _, (None | Some _), _
+           | Masc_tui_observer.Undecodable _, _, _ -> ());
+          end)
         decoded;
       if
         List.length state.acting
@@ -10342,18 +10443,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       Buffer.add_string state.msg_input original;
       add_event state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
-  | Observer_closed reason ->
+  | Observer_closed outcome ->
       let events =
         match state.observer with
         | Observer_live live -> live.events
         | Observer_off | Observer_opening | Observer_closed _ -> 0
       in
+      let reason =
+        match outcome with
+        | Ok () -> "the server closed the stream"
+        | Error (Masc_tui_http.Transport_failed detail) -> detail
+        | Error (Masc_tui_http.Http_refused { status; detail }) ->
+            (* Explicit missing/conflicting MCP sessions can be reinitialized.
+               EOF and transport errors never invalidate a session by count. *)
+            (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
+            Printf.sprintf "observer stream refused with %d: %s" status detail
+      in
       state.observer <-
         Observer_closed { reason; at = Unix.gettimeofday (); events };
-      (* A stream the server refused outright delivered nothing. The session
-         it was asked under is dropped so the next attempt opens a fresh one;
-         a stream that ran and ended keeps the session for the next. *)
-      if events = 0 then state.mcp_session <- None;
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_generation) ->
       http_refresh_inflight := false;
@@ -11357,16 +11464,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
+           let observed_at = Unix.gettimeofday () in
            (* Two consecutive polls are what "just finished" is made of:
               running in the previous, idle in this one. The glow list is
               advanced before the rows are replaced, or the transition is
               gone. *)
            state.keeper_turn_finishes <-
              Masc_tui_answering.advance_finishes
-               ~now:(Unix.gettimeofday ())
+               ~now:observed_at
                ~previous_rows:state.keeper_turns ~current_rows:rows
                state.keeper_turn_finishes;
            state.keeper_turns <- rows;
+           state.keeper_turns_observed_at <- Some observed_at;
            state.keeper_turns_error <- None
        | Error detail ->
            (* Keep the last known rows: a fetch that failed says nothing
@@ -11813,6 +11922,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
                detail))
+  | Browser_lane_clients_loaded (generation, result) ->
+      (match state.browser_lane with
+       | None -> ()
+       | Some view ->
+           let next, read = Browser_lane_view.accept_clients ~generation result view in
+           state.browser_lane <- Some next;
+           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read)
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
@@ -12429,13 +12545,14 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
-(* Raw mode, and the one key the record cannot ask for.
+(* Raw mode, and the keys the record cannot ask for.
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
    filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
    among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
    that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
-   key. Pairing the two here is what keeps the three places that take raw mode
+   key. VDISCARD similarly consumes Ctrl-O on BSD terminals. Reclaiming both
+   here keeps the three places that take raw mode
    back (session start, the return from Ctrl-Z, the return from $EDITOR) from
    taking it back without the key.
 
@@ -12446,7 +12563,9 @@ let bracketed_paste_disable = "\x1b[?2004l"
 let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
   (* See above: a refusal is a hangup, which ends the session either way. *)
-  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool)
+  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool);
+  (* See masc_tui_termios_stubs.c: unsupported VDISCARD is a no-op; tty hangup follows the contract above. *)
+  ignore (Masc_tui_termios.disable_discard_output Unix.stdin : bool)
 ;;
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
@@ -12471,7 +12590,9 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   apply_raw_mode new_term
 
 (** Main loop *)
-let main () =
+let main
+    (base_path_input, base_path, workspace, port, refresh,
+     reasoning_visibility, tool_visibility) () =
   (* The provider layer reports through [Llm_provider.Diag], whose default sink
      writes to stderr -- which here is the terminal this draws on. One INFO line
      about the embedded model catalog lands between two frames and the screen is
@@ -12480,15 +12601,6 @@ let main () =
      to protect, so it routes them the same way and before anything can ask the
      catalog a question. *)
   Provider_diag_log_sink.install ();
-  let ( base_path_input
-      , base_path
-      , workspace
-      , port
-      , refresh
-      , reasoning_visibility
-      , tool_visibility ) =
-    parse_args ()
-  in
   (* Publish the path selected by this process before any workspace-backed
      store opens. Otherwise inherited path variables can make the screen read
      local Keeper metadata from a different workspace than its server. *)
@@ -12570,6 +12682,7 @@ let main () =
      key, which the PTY harness catches as a terminal this program did not put
      back the way it found it. *)
   let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
+  let old_discard_output = Masc_tui_termios.discard_output Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -12610,7 +12723,10 @@ let main () =
     if old_literal_next >= 0
     then
       (* See the guard above: a refusal here is the terminal already gone. *)
-      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool)
+      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
+    if old_discard_output >= 0 then
+      (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
   in
 
   (* Cleanup on exit *)
@@ -12920,6 +13036,17 @@ let main () =
   (* Main loop *)
   let refresh_interval_ns =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
+  in
+  (* A TUI key name to the lane's key vocabulary (RFC-0439 §3.3). The TUI sends
+     " " for space and single characters for letters; arrows come through by
+     name. [None] means "not a game key" -- esc is handled before this, and
+     deliberate non-key input ("") has no server key. *)
+  let msx_server_key = function
+    | " " -> Some "space"
+    | "up" | "down" | "left" | "right" as d -> Some d
+    | name when String.length name = 1 && Char.code name.[0] >= 33 && Char.code name.[0] < 127 ->
+        Some name
+    | _ -> None
   in
   (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
      reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
@@ -14083,10 +14210,17 @@ and is loaded on demand through keeper_skill.
          frame on that cadence. The fetch is bounded work on loopback; drawing
          from the cache is cheap, so an unchanged frame just repaints. *)
       let input_timeout =
-        if state.msx_open then Float.min input_timeout msx_spectator_poll_seconds
+        (* Only the spectator needs the faster wake to re-poll; while the load
+           menu is up nothing repaints on a timer, so keep the normal timeout
+           and let a keypress wake the loop. *)
+        if state.msx_open && not state.msx_menu_open then
+          Float.min input_timeout msx_spectator_poll_seconds
         else input_timeout
       in
-      if state.msx_open then begin
+      (* The load menu owns the terminal while it is up: skip the frame poll so
+         it does not repaint the picker with a game screen. The spectator poll
+         resumes the moment a game is chosen and the menu closes. *)
+      if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
         if
           Int64.compare (Int64.sub now_ns state.msx_last_poll_ns)
@@ -14148,10 +14282,69 @@ and is loaded on demand through keeper_skill.
         else None
       in
       (match msx_key with
-      | Some name ->
-          if not (Masc_tui_msx.consume ~write:write_to_terminal state name)
+      | None -> ()
+      | Some name when state.msx_menu_open -> (
+          (* The load menu owns the keyboard: the lib navigates the picker and
+             names the choice, and the I/O it cannot reach -- the load POST, the
+             frame fetch -- is done here before handing off to the spectator. *)
+          match Masc_tui_msx.menu_consume ~write:write_to_terminal state name with
+          | Masc_tui_msx.Stay -> ()
+          | Closed ->
+              state.msx_menu_open <- false;
+              if Option.is_some state.msx_frame then begin
+                (* A game is loaded underneath: fall back to watching it, and
+                   poll at once so the next tick refreshes it (parity with the
+                   Watch arm). *)
+                state.msx_last_poll_ns <- 0L;
+                Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              end
+              else begin
+                state.msx_open <- false;
+                invalidate_frame_for_resize frame_presenter render_schedule
+              end
+          | Watch ->
+              state.msx_menu_open <- false;
+              (* Poll at once so the spectator opens on a fresh frame. *)
+              state.msx_last_poll_ns <- 0L;
+              Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+          | Load cart -> (
+              match
+                Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port
+                  ~cart
+              with
+              | Ok () ->
+                  state.msx_menu_open <- false;
+                  state.msx_frame <-
+                    Masc_tui_http.fetch_msx_frame ~host:server_peer_host
+                      ~port:state.port;
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              | Error message ->
+                  (* Stay in the menu and say why, so the human can pick again. *)
+                  Masc_tui_msx.render_menu ~write:write_to_terminal
+                    ~status:("load failed: " ^ message) state))
+      | Some "esc" ->
+          (* esc closes the spectator; consume returns false and owes a repaint. *)
+          if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
           then invalidate_frame_for_resize frame_presenter render_schedule
-      | None -> ());
+      | Some name -> (
+          (* A game key: send it to the shared server machine (RFC-0439 §3.3),
+             then re-fetch so the human sees the result of their own press
+             without waiting for the next poll. A key with no server mapping
+             (e.g. deliberate non-key input) just repaints the cache. *)
+          match msx_server_key name with
+          | Some server_key ->
+              (match
+                 Masc_tui_http.post_msx_press ~host:server_peer_host
+                   ~port:state.port ~keys:[ server_key ]
+               with
+               | Ok _ | Error _ -> ());
+              state.msx_frame <-
+                Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+              Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+          (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
+          | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =
         if dismissed_image || Option.is_some msx_key then None
         else
@@ -15222,6 +15415,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
+                 | Some (_, Masc_tui_types.Palette_msx) ->
+                     open_msx_screen state
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
@@ -15554,6 +15749,33 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key
+         when (match browser_lane_on_screen state with
+           | Some view -> Option.is_some view.client_picker | None -> false)
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let open Browser_lane_view in
+                let cursor = Option.value ~default:0 view.client_picker in
+                (match key with
+                 | "esc" | "b" ->
+                     state.browser_lane_generation <- state.browser_lane_generation + 1;
+                     state.browser_lane <- Some { view with client_picker = None;
+                       load = (match view.load with Loading (_, Discover _) -> Idle | other -> other) }
+                 | "r" when not (busy view) ->
+                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                 | "j" | "down" | "k" | "up" ->
+                     let delta = if key = "j" || key = "down" then 1 else -1 in
+                     state.browser_lane <- Some { view with client_picker = Some
+                       (max 0 (min (List.length view.clients - 1) (cursor + delta))) }
+                 | "\r" | "\n" | "enter" when not (busy view) ->
+                     (match List.nth_opt view.clients cursor with
+                      | None -> ()
+                      | Some client ->
+                          state.browser_lane <- Some (choose_client client view);
+                          launch_browser_lane state ~mailbox:async_messages Read)
+                 | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
@@ -15565,7 +15787,7 @@ and is loaded on demand through keeper_skill.
                 in
                 match !terminal_draws_images, view.selected_tab with
                 | Some false, _ -> refuse terminal_draws_no_images
-                | _, None -> refuse "Read and select a Firefox tab before taking a screenshot"
+                | _, None -> refuse "Read and select a browser tab before taking a screenshot"
                 | (Some true | None), Some tab_id ->
                     launch_browser_lane state ~mailbox:async_messages
                       (Browser_lane_view.Screenshot tab_id))
@@ -15602,7 +15824,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g") as key)
+               | "o" | "x" | "g" | "b") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -15624,19 +15846,23 @@ and is loaded on demand through keeper_skill.
                      if state.view = Connectors then
                        launch_connectors_load state ~mailbox:async_messages
                  | "l" | "a" ->
-                     read (switch_source (if key = "l" then Live else Automation) view)
+                     state.browser_lane <- Some (switch_source (if key = "l" then Live else Automation) view);
+                     refresh_browser_lane state ~mailbox:async_messages
+                 | "b" when view.source = Live && not (busy view) ->
+                     state.browser_lane <- Some { view with client_picker = Some 0 };
+                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
-                 | "r" -> read (refresh view)
+                 | "r" -> refresh_browser_lane state ~mailbox:async_messages
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
-                     add_event state "system" "Select automation (a) to navigate its Firefox session"
+                     add_event state "system" "Select automation (a) to navigate its browser session"
                  | "o" | "x" when view.source = Automation ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)
                  | "o" | "x" ->
-                     add_event state "system" "Select automation (a) to open or close its Firefox session"
+                     add_event state "system" "Select automation (a) to open or close its browser session"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->
@@ -15649,7 +15875,7 @@ and is loaded on demand through keeper_skill.
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
               && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
            (* The child owns its keys. In particular b/u must never mutate a
-              hidden connector binding while Firefox content is on screen. *)
+              hidden connector binding while browser content is on screen. *)
            ()
        | Some ("j" | "down" | "k" | "up" as move)
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
@@ -16152,6 +16378,42 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some ("esc" | "left")
+         when state.view = Acting && Option.is_some state.acting_detail ->
+           state.acting_detail <- None;
+           state.acting_detail_scroll <- 0
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
+         when state.view = Acting && Option.is_some state.acting_detail ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           (match move with
+            | "g" -> state.acting_detail_scroll <- 0
+            | "G" ->
+                (* Rendering clamps this to the final wrapped evidence page. *)
+                state.acting_detail_scroll <- max_int
+            | _ ->
+                let delta = match move with
+                  | "j" | "down" -> 1 | "k" | "up" -> -1
+                  | "pageup" -> -page | _ -> page in
+                state.acting_detail_scroll <- max 0 (state.acting_detail_scroll + delta))
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
+         when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           let delta = match move with
+             | "j" | "down" -> 1 | "k" | "up" -> -1
+             | "pageup" -> -page | _ -> page in
+           state.acting_cursor <- max 0 (min (List.length (acting_flat_entries state) - 1)
+               (state.acting_cursor + delta));
+           if state.acting_cursor = 0 then state.acting_unseen <- 0
+       | Some ("\r" | "\n" | "enter") when state.view = Acting ->
+           (match state.acting_detail, state.acting_filter with
+            | Some _, _ -> ()
+            | None, Masc_tui_acting.Turns ->
+                add_event state "system" "Turns are aggregates; press f for Actions, then Enter for exact event evidence"
+            | None, (Actions | Everything) ->
+                state.acting_detail <- selected_acting_entry state;
+                state.acting_detail_scroll <- 0)
        | Some "1" when state.view = Acting || state.view = System_logs ->
            goto_surface state ~mailbox:async_messages Acting
        | Some "2" when state.view = Acting || state.view = System_logs ->
@@ -16397,15 +16659,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" ->
-           (* The MSX spectator takes the whole terminal, like the image
-              overlay: it draws the server's frame and the loop yields until
-              [esc], re-fetching on a timer. Fetch once now so it opens on a
-              picture. *)
-           state.msx_frame <-
-             Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
-           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-           Masc_tui_msx.open_screen ~write:write_to_terminal state
+      | Some "&" -> open_msx_screen state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
@@ -17104,7 +17358,7 @@ and is loaded on demand through keeper_skill.
             | Connectors ->
                 (match browser_lane_on_screen state with
                  | None -> launch_connectors_load state ~mailbox:async_messages
-                 | Some _ -> launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read)
+                 | Some _ -> refresh_browser_lane state ~mailbox:async_messages)
             | Runtime ->
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
@@ -18623,7 +18877,10 @@ and is loaded on demand through keeper_skill.
            state.changes_return <- Changes_return_detail;
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
-           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+           state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter;
+           state.acting_cursor <- 0;
+           state.acting_scroll <- 0;
+           state.acting_unseen <- 0
        | Some "f" | Some "F"
          when state.view = Config && state.config_pane = Config_themes ->
             let next =
@@ -18704,6 +18961,7 @@ and is loaded on demand through keeper_skill.
              | None ->
                  state.planning_cursor <- 0)
         | Some "g" when state.view = Acting ->
+           state.acting_cursor <- 0;
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
        | Some "g"
@@ -18792,7 +19050,8 @@ and is loaded on demand through keeper_skill.
             (* Past the end on purpose; the frame clamps it to the last page.
                The held count rather than max_int, because an event arriving
                before that frame adds one to it. *)
-            state.acting_scroll <- List.length state.acting
+            state.acting_scroll <- List.length state.acting;
+            state.acting_cursor <- max 0 (List.length (acting_flat_entries state) - 1)
         | Some "t" | Some "T" when state.repository_changes_open ->
             let path_opt =
               match state.repository_changes_diff_path with
@@ -19812,7 +20071,14 @@ and is loaded on demand through keeper_skill.
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _) -> frame.Frame_presenter.surface_key)
-               (fun () -> render state)
+               (fun () ->
+                 (* Event folding is frame preparation, so its cost belongs
+                    inside Build timing even though only the loop stores it. *)
+                 let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+                 (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
+                  | None -> ()
+                  | Some projection -> state.acting_chunk_projection <- Some projection);
+                 render state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
@@ -19865,4 +20131,8 @@ let run_with_eio_context f =
             f ()))
   with Break -> ()
 
-let () = run_with_eio_context main
+let () =
+  (* Informational flags terminate during parsing, before base-path
+     resolution and before the TUI installs its runtime/terminal context. *)
+  let args = parse_args () in
+  run_with_eio_context (main args)

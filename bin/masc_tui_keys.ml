@@ -31,7 +31,8 @@ let global =
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
   ; b Meta "&"
-      "the MSX screen: the emulator core over the whole terminal (esc: back)"
+      "the MSX screen: the emulator core over the whole terminal (esc: back; \
+       also `:` go MSX)"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \
@@ -73,7 +74,9 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
-      ; b Navigate "j/k" "scroll"
+      ; b Navigate "j/k" "select / scroll"
+      ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      ; b Act "Esc" "back" ~help:"close event evidence"
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
@@ -85,7 +88,7 @@ let for_surface = function
   | Metrics ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "1-3" "section"
-          ~help:"1: Engine & Scheduler · 2: Fleet & Velocity · 3: Memory & Gate Safety"
+          ~help:"1: Engine & Scheduler · 2: Work & Outcomes · 3: Memory & Gate Safety"
       ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
       ; b Act "Esc" "overview"
       ; b Meta "r" "refresh"
@@ -355,7 +358,7 @@ let for_surface = function
       @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read Firefox tabs and page text; select live / automation inside Browser"
+          ~help:"read browser tabs and page text; select live / automation inside Browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -826,7 +829,8 @@ let help_sections ?current () =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "l / a" "live / automation"
+    [ b Navigate "b" "browser"
+    ; b Navigate "l / a" "live / automation"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"

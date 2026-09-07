@@ -60,6 +60,9 @@ let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_frame_path = "/api/v1/msx/frame"
+let msx_press_path = "/api/v1/msx/press"
+let msx_carts_path = "/api/v1/msx/carts"
+let msx_load_path = "/api/v1/msx/load"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -295,6 +298,55 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
+   the new frame number on success, or an error string; the caller re-fetches
+   the frame to see the result. Auth rides [post_json]'s operator bearer. *)
+let post_msx_press ~(host : string) ~(port : int) ~(keys : string list) :
+    (int, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("keys", `List (List.map (fun k -> `String k) keys)) ])
+  in
+  match post_json ~host ~port ~path:msx_press_path ~body with
+  | Error e -> Error e
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> ( try Ok (member "frame" json |> to_int) with _ -> Ok 0)
+    | _ -> (
+      match member "message" json with `String m -> Error m | _ -> Error "press refused"))
+;;
+
+(* The cartridge inventory for the load menu (RFC-0439 §3.7). The empty list on
+   any transport or shape error is the honest answer for the menu: "nothing to
+   pick right now", the same way the frame poll treats a missing frame. *)
+let fetch_msx_carts ~(host : string) ~(port : int) : string list =
+  match get_json ~host ~port ~path:msx_carts_path with
+  | Error _ -> []
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "carts" json with
+    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> [])
+
+(* Plug a cartridge into the shared machine on the human's behalf (RFC-0439
+   §3.7). The server runs the same loader masc_msx_load does; on success the
+   caller re-fetches the frame to start spectating. Auth rides [post_json]'s
+   operator bearer, like a press. *)
+let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
+    (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [ ("cart", `String cart) ]) in
+  match post_json ~host ~port ~path:msx_load_path ~body with
+  | Error e -> Error e
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (
+      match member "message" json with `String m -> Error m | _ -> Error "load refused"))
+;;
+
 
 let post_keeper_chat ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
@@ -687,30 +739,30 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
   | Ok { Masc_http_client.headers; _ } ->
       Masc_tui_observer.session_id_of_headers headers
 
-(** Read the runtime's event feed until it ends.
+type observer_error =
+  | Transport_failed of string
+  | Http_refused of { status : int; detail : string }
 
-    Blocks on the calling fiber for the life of the stream and hands every
-    body chunk to [on_chunk] as it arrives. The silence bound is the one
-    the keeper chat stream uses: a feed from a runtime with keepers turning
-    that says nothing for that long has gone quiet, and the caller reopens
-    it on its own schedule. [Ok ()] is the server closing the stream; a
-    refusal and a transport failure both come back as [Error]. *)
+(** Stream headers are delivered before body chunks. A transport disconnect
+    and an explicit HTTP refusal remain distinct so a quiet connection does
+    not invalidate an otherwise usable MCP session or scoped replay cursor. *)
 let observe_runtime_events ~clock ~(host : string) ~(port : int)
-    ~(session_id : string) ~(on_chunk : string -> unit) : (unit, string) result
-    =
+    ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
+    ~on_response ~(on_chunk : string -> unit) : (unit, observer_error) result =
   let url = url_of ~host ~port ~path:observer_stream_path in
   let headers =
     ("Accept", "text/event-stream")
     :: ("Mcp-Session-Id", sanitize_header_value session_id)
     :: auth_headers ()
+    @ Sse_wire.observer_cursor_headers cursor
   in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url ~headers ~on_chunk ()
+      ~url ~headers ~on_response ~on_chunk ()
   with
-  | Error detail -> Error (report_err "observer stream failed" detail)
+  | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
-      Error (Printf.sprintf "observer stream refused with %d: %s" status body)
+      Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (** One MCP [tools/call] under an existing session.
@@ -2473,6 +2525,11 @@ let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : stri
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)
+let fetch_browser_lane_clients ~host ~port =
+  let open Masc_tui_types.Browser_lane_view in
+  let* json = get_json ~host ~port ~path:"/api/v1/dashboard/browser-lane/clients" in
+  decode_clients json
+
 let fetch_browser_lane ~host ~port view =
   (* The server can spend 20s listing tabs and 20s reading the page. *)
   match post_json_with_timeout ~timeout_sec:45.0 ~host ~port
@@ -2481,10 +2538,9 @@ let fetch_browser_lane ~host ~port view =
   | Error detail -> Error detail
   | Ok json -> Masc_tui_types.Browser_lane_view.decode json
 
-let fetch_browser_lane_screenshot ~host ~port ~source ~tab_id =
+let fetch_browser_lane_screenshot ~host ~port ~view ~tab_id =
   let open Masc_tui_types.Browser_lane_view in
-  let body = Yojson.Safe.to_string (`Assoc [
-    "lane", `String (source_name source); "tabId", `Int tab_id]) in
+  let body = Yojson.Safe.to_string (request_body { view with selected_tab = Some tab_id }) in
   let* json = post_json_with_timeout ~timeout_sec:45.0 ~host ~port
       ~path:"/api/v1/dashboard/browser-lane/screenshot" ~body in
   let* screenshot = decode_screenshot json in
@@ -2495,7 +2551,7 @@ let fetch_browser_lane_screenshot ~host ~port ~source ~tab_id =
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Read | Screenshot _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Screenshot _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

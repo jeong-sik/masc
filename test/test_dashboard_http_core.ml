@@ -2250,7 +2250,7 @@ let test_dashboard_shell_snapshot_selector_injects_auth () =
     ~finally:Dashboard_snapshot.reset_for_test
     (fun () ->
        let snapshot =
-         Dashboard_snapshot.make_for_test
+         Dashboard_snapshot.make_for_test ~config
            ~shell:
              (`Assoc
                 [
@@ -2390,6 +2390,11 @@ let test_execution_parameterized_payload_separates_request_queries () =
       (request_with_headers "/api/v1/dashboard/execution?full=1"
         [ "x-masc-agent", "bob" ]) in
   let payloads = [ absent; empty; explicit; light; forced; alice; bob ] in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    let encoded = match payload.encoded with Some value -> value
+      | None -> fail "parameterized execution lacks prepared encodings" in
+    check bool "each scoped encoding retains its own complete identity bytes" true
+      (encoded.identity == payload.raw_json)) payloads;
   let keys = List.map execution_payload_key payloads in
   check int "every distinct query owns its response bytes"
     (List.length payloads) (List.length (List.sort_uniq String.compare keys));
@@ -2448,6 +2453,8 @@ let test_execution_parameterized_payload_changes_after_invalidation () =
   check bool "publication generation advances" true
     (generation second > first_generation);
   check bool "invalidated bytes are not reused" true (first.raw_json != second.raw_json);
+  check bool "invalidated representations are rebuilt together" true
+    (Option.is_some second.encoded && first.encoded != second.encoded);
   check bool "new generation has a new cache key" true
     (execution_payload_key first <> execution_payload_key second);
   check bool "old key was evicted" true
@@ -2618,7 +2625,7 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
   Dashboard_snapshot.reset_for_test ();
   let marker = `Assoc [ "wire_marker", `String "snapshot-path" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:marker ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
@@ -2668,7 +2675,7 @@ let test_shell_snapshot_wire_light_reads_shell_light () =
   let full = `Assoc [ "wire_marker", `String "full-shell" ] in
   let light = `Assoc [ "wire_marker", `String "light-shell" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:full ~shell_light:light ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
@@ -2994,12 +3001,94 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
    [Server_dashboard_snapshot_select.select_tools_json] and
    [..._telemetry_summary_json]. *)
 
+let test_tools_worker_promotes_seed_before_component_ttl () =
+  let guard_was_ready = Eio_guard.is_ready () in
+  (* Restore after the fixture's entire Eio runtime and worker pool close,
+     including exceptional exits. Later synchronous fixtures must not inherit
+     this test's process-wide mutex guard. *)
+  Fun.protect
+    ~finally:(fun () ->
+      if guard_was_ready then Eio_guard.enable () else Eio_guard.disable ())
+  @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  Eio_guard.enable ();
+  let clock = Eio.Stdenv.clock env in
+  let key = "tools:" ^ config.Workspace.base_path in
+  Dashboard_cache.invalidate key;
+  let seed_json = `Assoc [ "status", `String "warming"; "tool_inventory", `List [] ] in
+  let ready_json = `Assoc [ "tool_inventory", `List [] ] in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. seed_json;
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  let await promise = Eio.Time.with_timeout_exn clock 2.
+      (fun () -> Eio.Promise.await promise) in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ();
+        Dashboard_cache.invalidate key)
+      (fun () ->
+        (* Keep the inventory fill pending while the real Tools producer and
+           snapshot component run on another worker. No HTTP request warms it. *)
+        let returned_seed = Dashboard_cache.get_or_compute_payload_with_timeout key
+          ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+            Eio.Promise.resolve started_u ();
+            Eio.Promise.await release;
+            ready_json) in
+        await started;
+        let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
+        let now_value = ref 100. in
+        let producer_calls = Atomic.make 0 in
+        let owner_domain = (Domain.self () :> int) in
+        let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
+          Executor_pool_ref.submit_or_inline (fun () ->
+            Dashboard_snapshot.For_testing.refresh_tools
+              ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
+                check bool "tools producer remains on a worker" true
+                  ((Domain.self () :> int) <> owner_domain);
+                Atomic.incr producer_calls;
+                Server_dashboard_http_runtime_info.dashboard_tools_http_result config))) in
+        let pending = refresh () in
+        now_value := 102.;
+        let still_pending = refresh () in
+        check bool "pending cycles reuse identity and all encodings" true
+          (pending == still_pending);
+        check int "pending producer is retried without waiting sixty seconds" 2
+          (Atomic.get producer_calls);
+        Eio.Promise.resolve release_u ();
+        let rec await_computed () =
+          match Dashboard_cache.peek_payload key with
+          | Some payload when payload.origin = Dashboard_cache.Computed -> payload
+          | _ -> Eio.Fiber.yield (); await_computed ()
+        in
+        let computed = Eio.Time.with_timeout_exn clock 2. await_computed in
+        check bool "returned seed keeps its origin after concurrent publication" true
+          (returned_seed.origin = Dashboard_cache.Seeded);
+        check bool "completed empty inventory has computed origin" true
+          (computed.origin = Dashboard_cache.Computed);
+        now_value := 104.;
+        let ready = refresh () in
+        check bool "ready promotes on the next cycle before the old TTL" true
+          (ready != pending);
+        check int "empty inventory remains empty after promotion" 0
+          Yojson.Safe.Util.(ready.json |> member "tool_inventory" |> to_list |> List.length);
+        check bool "promotion keeps the real producer's final decoration" true
+          (Yojson.Safe.Util.(ready.json |> member "keeper_waiting_inventory") <> `Null);
+        check string "promoted bytes describe the decorated JSON"
+          (Yojson.Safe.to_string ready.json) ready.encoded.identity;
+        now_value := 106.;
+        let ready_again = refresh () in
+        check bool "ready cycles reuse all prepared encodings" true (ready == ready_again);
+        check int "ready component TTL avoids another producer call" 3
+          (Atomic.get producer_calls)))
+
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
   let marker = `Assoc [ "tools_marker", `String "from-snapshot" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:marker
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
@@ -3020,22 +3109,329 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
      Re.execp re header);
   Dashboard_snapshot.reset_for_test ()
 
-(* [test_tools_snapshot_wire_bypasses_snapshot_when_actor_given]
-   intentionally omitted from the unit suite.  The selector's
-   actor=Some branch routes to
-   [Server_dashboard_http_runtime_info.dashboard_tools_http_json] which
-   requires a full Eio scheduler + runtime probe wiring not present
-   in [with_test_env].  Integration coverage of the actor-filter
-   bypass belongs in [test_dashboard_tools.ml] (which already runs
-   inside the live HTTP harness).  See RFC-0138 §3.3 Step 2 retire
-   criterion: snapshot grows an [Actor_filter] arm. *)
+let test_tools_prepared_selector_scope_and_keeper_contract () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect ~finally:Dashboard_snapshot.reset_for_test (fun () ->
+    let marker = `Assoc [ "snapshot", `String "final-tools" ] in
+    let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null
+      ~tools:marker ~namespace_truth:`Null ~telemetry_summary:`Null () in
+    Dashboard_snapshot.publish_for_test snapshot;
+    let require_prepared timing =
+      match Server_dashboard_snapshot_select.select_tools_response ~timing config with
+      | Tools_prepared tools -> tools
+      | Tools_json _ -> fail "matching default tools request missed prepared snapshot"
+    in
+    let first_timing = Server_timing.create () in
+    ignore (Server_timing.measure first_timing (Server_timing.Custom "request_one") (fun () -> ()));
+    let first = require_prepared first_timing in
+    let second_timing = Server_timing.create () in
+    let second = require_prepared second_timing in
+    check bool "repeat request reuses typed component" true (first == second);
+    check bool "each request records its snapshot read" true
+      (String_util.contains_substring (Server_timing.to_header_value second_timing) "snapshot_read");
+    check bool "previous request timing is not cached" false
+      (String_util.contains_substring (Server_timing.to_header_value second_timing) "request_one");
+    let other_base = { config with Workspace.base_path = config.base_path ^ "-other" } in
+    let other_workspace = { config with Workspace.workspace_path = config.workspace_path ^ "-other" } in
+    let other_root = { config with Workspace.backend_config =
+      { config.backend_config with Backend_types.cluster_name = "other-tools-cluster" } } in
+    check bool "cluster fixture resolves a distinct MASC root" true
+      (Workspace.masc_root_dir config <> Workspace.masc_root_dir other_root);
+    let expect_json query_config keeper =
+      let seen = ref None in
+      let fallback ~keeper ~timing:_ actual_config =
+        seen := Some (keeper, actual_config);
+        `Assoc [ "live", `Bool true ]
+      in
+      match Server_dashboard_snapshot_select.For_testing.select_tools_response
+        ~fallback ?keeper query_config with
+      | Tools_prepared _ -> fail "scoped or cold request reused unrelated tools bytes"
+      | Tools_json json ->
+        check bool "fallback JSON preserved" true (json = `Assoc [ "live", `Bool true ]);
+        (match !seen with
+         | Some (actual_keeper, actual_config) ->
+           check (option string) "keeper selector forwarded exactly" keeper actual_keeper;
+           check bool "requested config forwarded unchanged" true (actual_config == query_config)
+         | None -> fail "live fallback was not called")
+    in
+    List.iter (fun (scope, keeper) -> expect_json scope keeper)
+      [ config, Some ""; config, Some "exact-keeper";
+        other_base, None; other_workspace, None; other_root, None ];
+    Dashboard_snapshot.reset_for_test ();
+    expect_json config None)
+
+let tools_h1_wire_response ~router ~headers target =
+  let output = Buffer.create 4096 in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let request = Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list (("host", "localhost:8935") :: headers)) `GET target in
+  let raw = Printf.sprintf "GET %s HTTP/1.1\r\n%s" target
+    (Httpun.Headers.to_string request.headers) in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+        Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+        total + iov.len) 0 iovecs in
+      Httpun.Server_connection.report_write_result connection (`Ok written);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let boundary = try Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0
+    with Not_found -> failf "tools route produced invalid H1 response: %S" raw in
+  let head = String.sub raw 0 boundary |> String.split_on_char '\n' in
+  let status = int_of_string (List.nth (String.split_on_char ' ' (List.hd head)) 1) in
+  let headers = List.tl head |> List.map (fun line ->
+    let colon = String.index line ':' in
+    String.lowercase_ascii (String.sub line 0 colon),
+    String.trim (String.sub line (colon + 1) (String.length line - colon - 1))) in
+  status, headers, String.sub raw (boundary + 4) (String.length raw - boundary - 4)
+
+let tools_h2_wire_response ~handler ~headers target =
+  let response = ref None in
+  let body = Buffer.create 4096 in
+  let complete = ref false in
+  let client = H2.Client_connection.create
+    ~error_handler:(fun _ -> fail "tools H2 connection error") () in
+  let request = H2.Request.create ~scheme:"http" `GET target
+    ~headers:(H2.Headers.of_list ((":authority", "localhost:8935") :: headers)) in
+  let writer = H2.Client_connection.request client request
+    ~error_handler:(fun _ -> fail "tools H2 stream error")
+    ~response_handler:(fun reply reader ->
+      response := Some (H2.Status.to_code reply.H2.Response.status, H2.Headers.to_list reply.headers);
+      let rec consume () = H2.Body.Reader.schedule_read reader
+        ~on_eof:(fun () -> complete := true)
+        ~on_read:(fun buffer ~off ~len ->
+          Buffer.add_string body (Bigstringaf.substring buffer ~off ~len);
+          consume ()) in
+      consume ()) in
+  H2.Body.Writer.close writer;
+  let server = H2.Server_connection.create handler in
+  let transfer next_write report_write read =
+    let rec drain progressed = match next_write () with
+      | `Write iovecs ->
+        let written = List.fold_left (fun total (iov : Bigstringaf.t H2.IOVec.t) ->
+          let rec feed off remaining =
+            if remaining > 0 then (
+              let consumed = read iov.buffer ~off ~len:remaining in
+              if consumed <= 0 then fail "tools H2 transfer made no progress";
+              feed (off + consumed) (remaining - consumed))
+          in
+          feed iov.off iov.len;
+          total + iov.len) 0 iovecs in
+        report_write (`Ok written);
+        drain true
+      | `Yield | `Close _ -> progressed
+    in
+    drain false
+  in
+  let rec pump () =
+    let sent = transfer
+      (fun () -> H2.Client_connection.next_write_operation client)
+      (H2.Client_connection.report_write_result client) (H2.Server_connection.read server) in
+    let received = transfer
+      (fun () -> H2.Server_connection.next_write_operation server)
+      (H2.Server_connection.report_write_result server) (H2.Client_connection.read client) in
+    if !complete then ()
+    else if sent || received then pump ()
+    else fail "tools H2 route stalled before response completion"
+  in
+  pump ();
+  match !response with
+  | Some (status, headers) -> status, headers, Buffer.contents body
+  | None -> fail "tools H2 route omitted response headers"
+
+let tools_gunzip payload =
+  let input = De.bigstring_create De.io_buffer_size in
+  let output = De.bigstring_create De.io_buffer_size in
+  let decoded = Buffer.create 4096 in
+  let consumed = ref 0 in
+  let refill buffer =
+    let take = min (Bigstringaf.length buffer) (String.length payload - !consumed) in
+    Bigstringaf.blit_from_string payload ~src_off:!consumed buffer ~dst_off:0 ~len:take;
+    consumed := !consumed + take;
+    take
+  in
+  let flush buffer written = Buffer.add_string decoded (Bigstringaf.substring buffer ~off:0 ~len:written) in
+  match Gz.Higher.uncompress ~refill ~flush input output with
+  | Ok _ -> Buffer.contents decoded
+  | Error (`Msg detail) -> fail detail
+
+let test_tools_routes_serve_prepared_http_representations () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Dashboard_snapshot.reset_for_test ();
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token = match Auth.create_token config.base_path ~agent_name:"tools-wire-reader" ~role:Types.Worker with
+      | Ok (token, _) -> token
+      | Error error -> fail (Types.masc_error_to_string error) in
+    let final_json = `Assoc
+      [ "tool_inventory", `List (List.init 200 (fun i -> `Assoc
+          [ "name", `String ("tool-" ^ string_of_int i); "description", `String "full final snapshot tool description" ]))
+      ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
+      ; "effective_keeper_surface", `Null
+      ; "skill_activations", `Null ] in
+    let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
+      ~namespace_truth:`Null ~telemetry_summary:`Null () in
+    Dashboard_snapshot.publish_for_test snapshot;
+    (* Keep exact-Keeper fallback cheap while still resolving its live fields. *)
+    ignore (Dashboard_cache.get_or_compute ("tools:" ^ config.base_path) ~ttl:60.
+      (fun () -> `Assoc [ "tool_inventory", `List [] ]));
+    let router = Server_routes_http_routes_dashboard.add_routes ~sw
+      ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+    let trust_policy = match Server_request_authority.make_trust_policy
+      ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+      | Ok policy -> policy
+      | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. () in
+    let request_headers = [ "origin", "http://localhost:8935";
+      "authorization", "Bearer " ^ token ] in
+    let path = "/api/v1/dashboard/tools" in
+    List.iter (fun (protocol, send) ->
+      let check_headers headers =
+        if protocol = "H2" then
+          List.iter (fun (name, _) ->
+            check string "H2 wire field names are lowercase"
+              (String.lowercase_ascii name) name) headers;
+        check (option string) (protocol ^ " CORS reflects admitted origin")
+          (Some "http://localhost:8935") (List.assoc_opt "access-control-allow-origin" headers);
+        let vary = List.filter_map (fun (name, value) ->
+          if name = "vary" then Some value else None) headers |> String.concat "," in
+        check bool (protocol ^ " Vary preserves Origin") true (String_util.contains_substring vary "Origin");
+        check bool (protocol ^ " Vary preserves Accept-Encoding") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        check (option string) (protocol ^ " validator") (Some snapshot.tools.etag)
+          (List.assoc_opt "etag" headers);
+        check (option string) (protocol ^ " revalidate cache policy") (Some "no-cache")
+          (List.assoc_opt "cache-control" headers);
+        check bool (protocol ^ " request-local snapshot timing") true
+          (String_util.contains_substring
+            (Option.value ~default:"" (List.assoc_opt "server-timing" headers)) "snapshot_read")
+      in
+      List.iter (fun encoding ->
+        let headers = ("accept-encoding", encoding) :: request_headers in
+        let status, reply_headers, body = send ~headers path in
+        check int (protocol ^ " compressed success") 200 status;
+        check_headers reply_headers;
+        check (option string) (protocol ^ " selected content encoding") (Some encoding)
+          (List.assoc_opt "content-encoding" reply_headers);
+        check (option string) (protocol ^ " length describes compressed bytes")
+          (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+        let decode body = if encoding = "gzip" then tools_gunzip body else
+          match Compression_codec.decompress ~orig_size:(String.length snapshot.tools.encoded.identity) body with
+          | Ok json -> json | Error error -> fail error in
+        check string (protocol ^ " decoded body is complete final projection")
+          (Yojson.Safe.to_string final_json) (decode body);
+        let status, reply_headers, body = send
+          ~headers:(("if-none-match", snapshot.tools.etag) :: headers) path in
+        check int (protocol ^ " matching validator") 304 status;
+        check_headers reply_headers;
+        check string (protocol ^ " 304 has no body") "" body;
+        check (option string) (protocol ^ " 304 omits Content-Length") None
+          (List.assoc_opt "content-length" reply_headers);
+        let status, reply_headers, body = send ~headers:(("if-none-match", "W/\"older\"") :: headers) path in
+        check int (protocol ^ " stale validator receives current representation") 200 status;
+        check_headers reply_headers;
+        check string (protocol ^ " stale validator receives complete current bytes")
+          (Yojson.Safe.to_string final_json) (decode body))
+        [ "gzip"; "zstd" ];
+      let status, _, body = send ~headers:request_headers (path ^ "?keeper=missing-wire-keeper") in
+      check int (protocol ^ " exact Keeper fallback succeeds") 200 status;
+      let json = Yojson.Safe.from_string body in
+      check string (protocol ^ " exact Keeper uses live effective projection") "keeper_not_found"
+        Yojson.Safe.Util.(json |> member "effective_keeper_surface" |> member "reason" |> to_string);
+      check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
+        (String_util.contains_substring body "final-decoration"))
+      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ])
+
+let test_execution_routes_serve_prepared_http_representations () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state)
+  @@ fun () ->
+  let config = Lib.Mcp_server.workspace_config state in
+  Server_auth.For_testing.restore_server_state (Some state);
+  Auth.save_auth_config config.base_path
+    { Types.default_auth_config with enabled = true; require_token = true };
+  let token = match Auth.create_token config.base_path ~agent_name:"execution-wire-reader"
+    ~role:Types.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Types.masc_error_to_string error) in
+  let clock = Eio.Stdenv.clock env in
+  let path = "/api/v1/dashboard/execution" in
+  let request_headers = [ "origin", "http://localhost:8935";
+    "authorization", "Bearer " ^ token; "x-masc-agent", "untrusted-hint" ] in
+  let first = execution_payload ~state ~sw ~clock
+    (request_with_headers path request_headers) in
+  check string "authenticated producer canonicalizes the actor" "execution-wire-reader"
+    Yojson.Safe.Util.(first.json |> member "query" |> member "actor" |> to_string);
+  let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock
+    (Lib.Http_server_eio.Router.create ()) in
+  let trust_policy = match Server_request_authority.make_trust_policy
+    ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
+    ~server_start_time:0. () in
+  List.iter (fun (protocol, send) ->
+    List.iter (fun encoding ->
+      let headers = ("accept-encoding", encoding) :: request_headers in
+      let status, reply_headers, body = send ~headers path in
+      check int (protocol ^ " success") 200 status;
+      let expected_encoding = if encoding = "identity" then None else Some encoding in
+      check (option string) (protocol ^ " encoding selection") expected_encoding
+        (List.assoc_opt "content-encoding" reply_headers);
+      check (option string) (protocol ^ " wire length")
+        (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+      let check_headers headers =
+        check (option string) (protocol ^ " identity ETag") (Some first.etag)
+          (List.assoc_opt "etag" headers);
+        let vary = List.filter_map (fun (name, value) -> if name = "vary" then Some value else None)
+          headers |> String.concat "," in
+        check bool (protocol ^ " encoding varies") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        if protocol = "H2" then
+          check bool (protocol ^ " origin still varies") true
+            (String_util.contains_substring vary "Origin")
+      in
+      check_headers reply_headers;
+      let decoded = match encoding with
+        | "gzip" -> tools_gunzip body
+        | "zstd" -> (match Compression_codec.decompress ~orig_size:(String.length first.raw_json) body with
+          | Ok json -> json | Error error -> fail error)
+        | _ -> body in
+      check string (protocol ^ " full decorated payload decodes") first.raw_json decoded;
+      let status, cached_headers, cached_body = send
+        ~headers:(("if-none-match", first.etag) :: headers) path in
+      check int (protocol ^ " conditional response") 304 status;
+      check_headers cached_headers;
+      check string (protocol ^ " 304 empty body") "" cached_body;
+      check (option string) (protocol ^ " 304 omits length") None
+        (List.assoc_opt "content-length" cached_headers)) [ "identity"; "gzip"; "zstd" ])
+    [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler ];
+  let hit = execution_payload ~state ~sw ~clock (request_with_headers path request_headers) in
+  check bool "wire reads reuse the published encodings" true (first.encoded == hit.encoded)
 
 let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
   let marker = `Assoc [ "tele_marker", `String "from-snapshot" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:marker ());
   let timing = Server_timing.create () in
@@ -3078,7 +3474,7 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
     `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
   in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:`Null
        ~namespace_truth:marker ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
@@ -4861,6 +5257,14 @@ let () =
             test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
+          test_case "worker Tools seed promotes before component TTL with empty inventory" `Quick
+            test_tools_worker_promotes_seed_before_component_ttl;
+          test_case "tools prepared selector scopes bytes and preserves exact keeper" `Quick
+            test_tools_prepared_selector_scope_and_keeper_contract;
+          test_case "tools routes serve prepared encodings and conditional responses" `Quick
+            test_tools_routes_serve_prepared_http_representations;
+          test_case "authenticated execution routes reuse prepared encodings" `Quick
+            test_execution_routes_serve_prepared_http_representations;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick

@@ -58,6 +58,10 @@ type agent_core = {
   at : float;
   correlation : string option;
   parent : string option;
+  event_id : string option;
+  run_id : string option;
+  caused_by : string option;
+  execution_id : string option;
 }
 
 type keeper_heartbeat = {
@@ -87,6 +91,12 @@ type keeper_tool_call = {
   kt_duration_ms : float option;
   kt_disposition : string option;
   kt_at : float;
+  kt_tool_use_id : string option;
+  kt_schedule : (Agent_core.Tool_contract.schedule, string) result option;
+  kt_tool_args : Yojson.Safe.t option;
+  kt_tool_result : Yojson.Safe.t option;
+  kt_tool_args_preview : string option;
+  kt_tool_output_preview : string option;
 }
 
 type event =
@@ -114,6 +124,11 @@ type event =
 type decoded =
   | Event of event
   | Undecodable of string
+
+type delivery = {
+  cursor : int option;
+  decoded : decoded;
+}
 
 (* The keeper whose chat just gained a turn, when the event says so.
    The chat pane reloads its history on this and on nothing else, so
@@ -162,6 +177,12 @@ let required reader fields name ~event =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s carries no %s" event name)
 
+let optional_string_field fields name ~event =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> Error (Printf.sprintf "%s carries a non-string %s" event name)
+
 let agent_core_kind_of_event_type = function
   | "tool_called" -> Tool_called
   | "tool_completed" -> Tool_completed
@@ -189,6 +210,10 @@ let decode_agent_core ~type_name fields =
      list payload; it is still an event of the family, with no agent. *)
   let agent = string_field fields "agent_name" in
   let payload = Option.value ~default:[] (assoc_field fields "payload") in
+  let* event_id = optional_string_field fields "event_id" ~event:type_name in
+  let* run_id = optional_string_field fields "run_id" ~event:type_name in
+  let* caused_by = optional_string_field fields "caused_by" ~event:type_name in
+  let* execution_id = optional_string_field payload "execution_id" ~event:type_name in
   let batch =
     match (int_field payload "batch_index", int_field payload "batch_size") with
     | Some index, Some size -> Some (index, size)
@@ -206,6 +231,10 @@ let decode_agent_core ~type_name fields =
        ; at
        ; correlation = string_field fields "correlation_id"
        ; parent = string_field fields "parent_event_id"
+       ; event_id
+       ; run_id
+       ; caused_by
+       ; execution_id
        })
 
 let decode_keeper_heartbeat fields =
@@ -240,11 +269,29 @@ let decode_keeper_turn_complete fields =
        ; tc_at
        })
 
+let keeper_schedule fields =
+  let fields =
+    List.filter
+      (fun (key, _) ->
+        match key with
+        | "planned_index" | "batch_index" | "batch_size" | "execution_mode" -> true
+        | _ -> false)
+      fields
+  in
+  match fields with
+  | [] -> None
+  | _ -> Some (Agent_core.Execution_tool_schedule.of_yojson (`Assoc fields))
+
 let decode_keeper_tool_call fields =
   let event = "keeper_tool_call" in
   let* kt_keeper = required string_field fields "name" ~event in
   let* kt_tool = required string_field fields "tool_name" ~event in
   let* kt_at = required float_field fields "ts_unix" ~event in
+  let* kt_tool_use_id = optional_string_field fields "tool_use_id" ~event in
+  let* kt_tool_args_preview = optional_string_field fields "tool_args_preview" ~event in
+  let* kt_tool_output_preview = optional_string_field fields "tool_output_preview" ~event in
+  let kt_tool_args = List.assoc_opt "tool_args" fields in
+  let kt_tool_result = List.assoc_opt "tool_result" fields in
   Ok
     (Keeper_tool_call
        { kt_keeper
@@ -253,6 +300,12 @@ let decode_keeper_tool_call fields =
        ; kt_duration_ms = float_field fields "duration_ms"
        ; kt_disposition = string_field fields "disposition"
        ; kt_at
+       ; kt_tool_use_id
+       ; kt_schedule = keeper_schedule fields
+       ; kt_tool_args
+       ; kt_tool_result
+       ; kt_tool_args_preview
+       ; kt_tool_output_preview
        })
 
 (* The [ag_ui_event] frame names itself in [type]; only CUSTOM adds a [name],
@@ -355,27 +408,63 @@ let event_of_json (json : Yojson.Safe.t) =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "event is not a JSON object"
 
-type t = { pending : Buffer.t }
+type t = {
+  pending : Buffer.t;
+  mutable frame_cursor : (int option, string) result;
+  mutable frame_data : string list;
+  mutable frame_error : string option;
+}
 
-let create () = { pending = Buffer.create 4096 }
+let create () =
+  { pending = Buffer.create 4096; frame_cursor = Ok None; frame_data = []; frame_error = None }
 
-let decoded_of_line raw_line =
+let decode_payload payload =
+  match Yojson.Safe.from_string payload with
+  | json -> (
+      match event_of_json json with
+      | Ok event -> Event event
+      | Error detail -> Undecodable detail)
+  | exception Yojson.Json_error detail ->
+      Undecodable ("invalid JSON: " ^ detail)
+
+let finish_frame t =
+  let decoded =
+    match t.frame_error, t.frame_data with
+    | Some reason, _ -> Some (Undecodable reason)
+    | None, [] -> None
+    | None, lines -> Some (decode_payload (String.concat "\n" (List.rev lines)))
+  in
+  let delivery =
+    Option.map
+      (fun decoded ->
+        match t.frame_cursor with
+        | Ok cursor -> { cursor; decoded }
+        | Error reason -> { cursor = None; decoded = Undecodable reason })
+      decoded
+  in
+  t.frame_cursor <- Ok None;
+  t.frame_data <- [];
+  t.frame_error <- None;
+  Option.to_list delivery
+
+let feed_line t raw_line =
   match Projection.classify_sse_line raw_line with
-  | Projection.Sse_ignored | Projection.Sse_id _ | Projection.Sse_frame_end -> []
+  | Projection.Sse_frame_end -> finish_frame t
+  | Projection.Sse_ignored -> []
+  | Projection.Sse_id cursor ->
+      t.frame_cursor <-
+        (if cursor >= 0 then Ok (Some cursor)
+         else Error "observer replay ID must be non-negative");
+      []
   | Projection.Sse_noncanonical_data ->
-      [ Undecodable "data line without the canonical \"data: \" prefix" ]
-  | Projection.Sse_data payload -> (
-      match Yojson.Safe.from_string payload with
-      | json -> (
-          match event_of_json json with
-          | Ok event -> [ Event event ]
-          | Error detail -> [ Undecodable detail ])
-      | exception Yojson.Json_error detail ->
-          [ Undecodable ("invalid JSON: " ^ detail) ])
+      t.frame_error <- Some "data line without the canonical \"data: \" prefix";
+      []
+  | Projection.Sse_data payload ->
+      t.frame_data <- payload :: t.frame_data;
+      []
 
-(* Same cut as the live chat reader: everything up to the last newline is
-   complete, the rest is held. The server writes one event per data line,
-   so a line is a frame here. *)
+(* A cursor is committed with its frame, not when an id/data line happens to
+   end a network chunk. A disconnect before the blank line must replay it. *)
 let feed t chunk =
   Buffer.add_string t.pending chunk;
   let buffered = Buffer.contents t.pending in
@@ -389,4 +478,4 @@ let feed t chunk =
       in
       Buffer.clear t.pending;
       Buffer.add_string t.pending remainder;
-      String.split_on_char '\n' complete |> List.concat_map decoded_of_line
+      String.split_on_char '\n' complete |> List.concat_map (feed_line t)

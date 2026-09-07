@@ -250,8 +250,14 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str
     ~agent_name body_str
 
 let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
-  let actor = Server_auth.dashboard_actor_for_request ~base_path request in
-  Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
+  match body_jsonrpc_method body_str with
+  | Some ("tools/call", _) ->
+      let actor = Server_auth.dashboard_actor_for_request ~base_path request in
+      Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
+  | _ ->
+      (* Only tool arguments carry a caller identity. HTTP admission and
+         protocol authorization still run for every request. *)
+      body_str
 
 (* Auth-reject metric/log endpoint labels. Built on [profile_label]
    so the label vocabulary cannot drift from the session module's
@@ -678,6 +684,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 (Server_mcp_transport_http_headers.last_event_id_error_to_string
                    error)
           | Ok last_event_id ->
+      let observer_headers, last_event_id =
+        match sse_kind with
+        | Sse.Observer ->
+            let handshake, cursor =
+              Sse_wire.negotiate_observer
+                ~instance_id:Build_identity.runtime_instance_id
+                ~headers:(Httpun.Headers.to_list request.headers) ~last_event_id
+            in
+            Sse_wire.observer_response_headers handshake, cursor
+        | Sse.Agent_stream | Sse.Presence -> [], last_event_id
+      in
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
       in
@@ -717,7 +734,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
            | Ok (client_id, event_stream, evicted) ->
               let headers =
                 Httpun.Headers.of_list
-                  (sse_stream_headers ~deps session_id protocol_version origin)
+                  (observer_headers
+                   @ sse_stream_headers ~deps session_id protocol_version origin)
               in
               let response = Httpun.Response.create ~headers `OK in
               let writer = Httpun.Reqd.respond_with_streaming reqd response in

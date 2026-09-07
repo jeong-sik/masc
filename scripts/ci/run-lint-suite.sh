@@ -137,6 +137,75 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  # A guard nobody runs is a document. Twice a guard sat red on untouched main
+  # because nothing reached it -- the cancel-guard lint and
+  # check-tui-render-purity.sh -- and a sweep on 2026-09-07 found four more in
+  # the same state. This asks the question those answered too late: is every
+  # check script reached from something CI runs. It reads no diff base, so it
+  # belongs here rather than beside the PR-only guards.
+  # Ten guards this repository already wrote and no workflow reached. Each was
+  # run on untouched main on 2026-09-07 and passed, which is the cheapest
+  # moment to wire one: nothing to fix first, and the next time it goes red
+  # somebody sees it. Together they take about 10s of the job.
+  #
+  # check-boundary-guard-mli-pairs.sh is deliberately not here. It reads a
+  # diff against origin/main itself rather than taking a base, so where it
+  # belongs is a question this change does not answer (#34018).
+  run_lint "Agent-core package shape" bash scripts/check-agent-core-boundary.sh
+  run_lint "Execute async surface" bash scripts/check-execute-async-surface.sh
+  run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
+  run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
+  run_lint "Feature flag consistency" bash scripts/check-feature-flag-consistency.sh
+  run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
+  run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
+  run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh
+  run_lint "TLA variant sync" bash scripts/ci/check-tla-variant-sync.sh
+  # Two of the twenty-two audit-* scripts the name pattern used to skip. Both
+  # green on main and both proven to fail: an orphan .cfg under specs/ trips
+  # the first, an OCaml constructor the TLA set does not carry trips the
+  # second. --check-cross-spec is opt-in and nothing was opting in, so the
+  # three cross-spec sets it compares were compared nowhere.
+  # #32511 replaced the nine-job lane with one manual job. One step it deleted
+  # was "Meta bug-class gates (SSOT, SIL, STR, BND)", nine guards run together
+  # (#9516 #9517 #9519 #9521). Of those nine: two scripts no longer exist,
+  # check_model_prefix_inheritance is above, check_exact_field_decoder_preflight
+  # is red (#34018), and these five are green. Each was proven to fail by
+  # injection -- a spawn_config_of_key reference, a try ignore (, a docs/spec
+  # page naming a missing file, a Mirrors: pointing nowhere, and for the env
+  # floor by having been red until #34056.
+  run_lint "SSOT spawn drift" bash scripts/ci/check-ssot-spawn-drift.sh
+  run_lint "Silent failure patterns" \
+    bash scripts/ci/check-silent-failure-patterns.sh
+  run_lint "Spec Mirrors: references resolve" bash scripts/check-spec-truth.sh
+  run_lint "docs/spec names files that exist" \
+    python3 scripts/ci/check-spec-file-refs.py
+  # --self-test only, which is what the deleted step ran too: the real check
+  # shells out to `dune describe` and this job has no OCaml toolchain. It runs
+  # in the dune build @check job instead, where the switch is already built.
+  run_lint "Env-read config floor self-test" \
+    python3 scripts/ci/check_env_reads_below_config.py --self-test
+
+  # Both were red on main until today, which is the proof they can fail:
+  # audit-path-ssot for one expanduser site (#34080), audit-odoc-refs for two
+  # references its own field pattern could not resolve (#34081).
+  # The last of the nine. It was red until #34106 showed the red was the
+  # guard's: keeper meta carries the fields, and keeper_meta_store reads them.
+  run_lint "Exact-field decoders have a preflight" \
+    python3 scripts/ci/check_exact_field_decoder_preflight.py
+  run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
+  run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
+  # The two ratchets that survived #33313, which deleted eighteen nobody ran.
+  # Surviving that sweep was a decision to keep them; nothing has called them
+  # since. Both are green on main and both proven to fail: hide a -buggy.cfg
+  # for the first, take the last [@@deriving tla] out of a file for the second.
+  run_lint "TLA bug models keep their pair" bash scripts/tla-bug-model-ratchet.sh
+  run_lint "TLA ppx coverage floor" bash scripts/tla-ppx-ratchet.sh
+  run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh
+  run_lint "TLA annotation drift" \
+    bash scripts/audit-tla-annotation-drift.sh --check-cross-spec
+  run_lint "Model prefix inheritance" python3 scripts/ci/check_model_prefix_inheritance.py
+  run_lint "Every check script is reached" \
+    python3 scripts/ci/check-guards-are-wired.py
 }
 
 blocking_pr_lints() {

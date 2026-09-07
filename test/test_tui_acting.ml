@@ -16,6 +16,10 @@ let agent_core ?(kind = Observer.Tool_called) ?tool ?task ?turn ?tool_use_id ?ba
     ; at
     ; correlation = None
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
 
 let heartbeat keeper : Observer.event =
@@ -72,6 +76,12 @@ let ledger_tool ?duration_ms ?turn ~keeper tool : Observer.event =
     ; kt_duration_ms = duration_ms
     ; kt_disposition = Some "completed"
     ; kt_at = 100.
+      ; kt_tool_use_id = None
+      ; kt_schedule = None
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = None
+      ; kt_tool_output_preview = None
     }
 
 let turn_settled ~keeper ~turn ~input ~output ~cost : Observer.event =
@@ -433,6 +443,10 @@ let test_a_call_and_its_return_read_as_one_pair () =
     ; at = 100.032
     ; correlation = None
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
   in
   check string "the call names its tool, batch slot, turn, and task"
@@ -459,6 +473,10 @@ let test_a_return_with_no_start_held_has_no_duration () =
     ; at = 100.
     ; correlation = None
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
   in
   check (option (float 0.)) "another keeper's start with the same id does not pair"
@@ -503,6 +521,10 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
       ; at = 100.
       ; correlation = Some "trace-1787333554989-0001e"
       ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
       }
   in
   let traces =
@@ -545,6 +567,12 @@ let test_skill_tools_wear_a_skill_label () =
       ; kt_duration_ms = None
       ; kt_disposition = disposition
       ; kt_at = 100.
+      ; kt_tool_use_id = None
+      ; kt_schedule = None
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = None
+      ; kt_tool_output_preview = None
       }
   in
   check string "keeper skill call is named" "skill call"
@@ -641,6 +669,54 @@ let test_ledger_row_after_a_settle_finds_its_turn () =
 ;;
 
 
+let test_chunk_projection_tracks_ordered_trace_identity () =
+  let event = match agent_core ~tool:"Read" ~turn:5 "runtime-lane" with
+    | Observer.Agent_core event ->
+      Observer.Agent_core { event with correlation = Some "shared-trace" }
+    | _ -> fail "expected agent-core fixture" in
+  let source = entries_of [event] in
+  let traces = [ "keeper-a", "shared-trace"; "keeper-b", "shared-trace" ] in
+  let first = Acting.refresh_projection ~previous:None ~traces source in
+  let owner projection = match Acting.projection_chunks projection with
+    | [chunk] -> chunk.Acting.ck_keeper
+    | _ -> fail "expected one attributed chunk" in
+  check string "first duplicate trace owner wins" "keeper-a" (owner first);
+  let equal_traces = List.map Fun.id traces in
+  check bool "fixture mapping list was reallocated" false (traces == equal_traces);
+  let reused = Acting.refresh_projection ~previous:(Some first) ~traces:equal_traces source in
+  check bool "equal ordered mapping reuses derived chunks" true (first == reused);
+  let reversed = Acting.refresh_projection ~previous:(Some reused) ~traces:(List.rev traces) source in
+  check string "mapping reorder changes first-match attribution" "keeper-b" (owner reversed);
+  let reassigned = Acting.refresh_projection ~previous:(Some reversed)
+    ~traces:[ "keeper-c", "shared-trace" ] source in
+  check string "unchanged events follow trace reassignment" "keeper-c" (owner reassigned);
+  check string "previous immutable projection retains its owner" "keeper-a" (owner first)
+
+let test_chunk_projection_rebuilds_after_append_and_trim () =
+  let source = entries_of [agent_core ~tool:"Read" ~turn:5 "keeper-a"] in
+  let first = Acting.refresh_projection ~previous:None ~traces:[] source in
+  let only projection = match Acting.projection_chunks projection with
+    | [chunk] -> chunk
+    | _ -> fail "expected one chunk" in
+  check bool "initial observed call has no settlement" false (only first).Acting.ck_settled;
+  let appended = { Acting.ae_at = 101.; ae_event = settled "keeper-a" } :: source in
+  let next = Acting.refresh_projection ~previous:(Some first) ~traces:[] appended in
+  check bool "appended settle rebuilds projection" false (first == next);
+  check bool "settlement becomes observable" true (only next).Acting.ck_settled;
+  check int "existing wire call remains in settled chunk" 1
+    (List.length (only next).Acting.ck_wire_tools);
+  let trimmed = [List.hd appended] in
+  let after_trim = Acting.refresh_projection ~previous:(Some next) ~traces:[] trimmed in
+  check bool "trimmed source rebuilds projection" false (next == after_trim);
+  check int "trimmed wire call is no longer retained in chunk" 0
+    (List.length (only after_trim).Acting.ck_wire_tools);
+  let replaced = Acting.refresh_projection ~previous:(Some after_trim) ~traces:[]
+    (List.map Fun.id trimmed) in
+  check bool "equal-content replacement is a new event source" false (after_trim == replaced);
+  let empty = Acting.refresh_projection ~previous:(Some replaced) ~traces:[] [] in
+  check int "empty retained feed clears chunks" 0 (List.length (Acting.projection_chunks empty));
+  check bool "previous projection remains unclosed" false (only first).Acting.ck_settled
+
 let () =
   run "tui acting"
     [ ( "rows"
@@ -699,5 +775,9 @@ let () =
             test_late_ledger_row_stays_on_its_own_turn
         ; test_case "a ledger row after a settle finds its turn" `Quick
             test_ledger_row_after_a_settle_finds_its_turn
+        ; test_case "chunk projection follows ordered trace identity" `Quick
+            test_chunk_projection_tracks_ordered_trace_identity
+        ; test_case "chunk projection rebuilds after append and trim" `Quick
+            test_chunk_projection_rebuilds_after_append_and_trim
         ] )
     ]

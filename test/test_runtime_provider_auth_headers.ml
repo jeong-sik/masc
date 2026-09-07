@@ -1177,6 +1177,7 @@ let test_declared_thinking_capabilities_override_catalog () =
 id_prefix = "qwen"
 provider_name = "runpod_mtp"
 supports_system_prompt = true
+max_output_tokens = 32768
 supports_reasoning = true
 supports_reasoning_budget = true
 thinking_control_format = "ollama_think"
@@ -1221,7 +1222,99 @@ thinking_control_format = "ollama_think"
          check bool "sparse system prompt preserves catalog" true caps.supports_system_prompt;
          check bool "declared transport stream parser wins" true
            (caps.reasoning_streaming_format
-            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content"))
+            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content");
+         let body =
+           Llm_provider.Backend_openai.build_request_assoc
+             ~config:{ provider_cfg with max_tokens = Some 65536 }
+             ~messages:[] ()
+         in
+         check int "sparse thinking override preserves catalog output ceiling on wire"
+           32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
+
+let glm_vision_binding_config ~runtime_caps =
+  let provider = { runpod_provider with id = "glm-coding" } in
+  let model =
+    { qwen_model with id = "glm-4.6v"; api_name = "glm-4.6v"
+    ; capabilities = Some runtime_caps }
+  in
+  let binding =
+    { runpod_binding with provider_id = provider.id; model_id = model.id }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]; models = [ model ]
+    ; bindings = [ binding ]; default_runtime_id = Some "glm-coding.glm-4.6v"
+    ; keeper_assignments = []; media_failover = []; lane_decls = []
+    ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+    ; egress_allowlists = []; lsp_servers = [] }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg binding with
+  | Ok config -> config
+  | Error detail -> failf "vision binding failed: %s" detail
+
+let check_vision_output_wire config =
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "65536" (fun () ->
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc ~config
+        ~messages:[] ()
+    in
+    check bool "absent request budget remains absent despite known ceiling" true
+      (Yojson.Safe.Util.member "max_tokens" body = `Null);
+    let vision = Keeper_vision_tool.provider_for_vision config in
+    check (option int) "vision requests its configured default" (Some 65536)
+      vision.max_tokens;
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc ~config:vision
+        ~messages:[] ()
+    in
+    check int "vision request reaches wire within GLM image-model ceiling"
+      32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
+
+let test_runtime_max_only_capability_overrides_provider_base_on_wire () =
+  with_model_catalog
+    {|
+[[providers]]
+id = "glm-coding"
+kind = "glm"
+base_url = "https://example.invalid/v4"
+request_path = "/chat/completions"
+api_key_env = "TEST_UNUSED_GLM_KEY"
+capabilities_base = "glm"
+|}
+    (fun () ->
+       let baseline =
+         glm_vision_binding_config
+           ~runtime_caps:Runtime_schema.model_capabilities_default
+       in
+       let baseline_caps =
+         match Llm_provider.Provider_config.capabilities_for_config_model baseline with
+         | Some caps -> caps | None -> fail "provider base must resolve"
+       in
+       check (option int) "fixture reaches broader provider ceiling"
+         (Some 40960) baseline_caps.max_output_tokens;
+       let config =
+         glm_vision_binding_config
+           ~runtime_caps:{ Runtime_schema.model_capabilities_default with
+             max_output_tokens = Some 32768 }
+       in
+       (match Llm_provider.Provider_config.capabilities_for_config_model config with
+        | None -> fail "explicit model ceiling lost provider capabilities"
+        | Some caps ->
+          check bool "max-only declaration preserves provider reasoning contract"
+            baseline_caps.supports_reasoning caps.supports_reasoning);
+       check_vision_output_wire config)
+
+let test_embedded_glm_vision_catalog_ceiling_reaches_wire () =
+  let previous = Llm_provider.Model_catalog.global () in
+  Llm_provider.Model_catalog.clear_global ();
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+      | None -> Llm_provider.Model_catalog.clear_global ())
+    (fun () ->
+       glm_vision_binding_config
+         ~runtime_caps:Runtime_schema.model_capabilities_default
+       |> check_vision_output_wire)
 
 (* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
    Provider_config. Before the fix the adapter dropped both binding
@@ -1854,6 +1947,216 @@ let fresh_loopback_port () =
   Unix.close socket;
   port
 
+(* Exercise the catalog-owned wire choice through the runtime TOML and real
+   HTTP dispatch. No synthetic capability override or custom transport may
+   bypass the provider-qualified model row or select a codec for this test.
+   Explicit sampling values must survive binding and then be omitted by the
+   catalog-owned wire policy. The loopback responses prove local wire/parser
+   behavior, not account access or acceptance by OpenAI. *)
+let test_openai_responses_round_trip_through_runtime_toml () =
+  let module Provider = Llm_provider.Provider_config in
+  let module Types = Llm_provider.Types in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let module Json = Yojson.Safe.Util in
+  let catalog =
+    match Llm_provider.Model_catalog.load_default () with
+    | Ok catalog -> catalog
+    | Error message -> failf "embedded catalog failed: %s" message
+  in
+  let parameters =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc [ "query", `Assoc [ "type", `String "string" ] ]
+      ; "required", `List [ `String "query" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let tool =
+    `Assoc
+      [ "name", `String "lookup_record"
+      ; "description", `String "Look up the requested record."
+      ; "input_schema", parameters
+      ]
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Eio.Switch.on_release sw (fun () ->
+    match previous_catalog with
+    | Some previous -> Llm_provider.Model_catalog.set_global previous
+    | None -> Llm_provider.Model_catalog.clear_global ());
+  Llm_provider.Model_catalog.set_global catalog;
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let requests = ref [] in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    let body = Yojson.Safe.from_string body in
+    requests := (path, body) :: !requests;
+    if String.equal path "/v1/responses" then
+      let model = Json.member "model" body |> Yojson.Safe.to_string in
+      let response =
+        Printf.sprintf
+          {|{"id":"response-fixture","model":%s,"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Checking the record."}]},{"type":"function_call","id":"item-distinct-from-call-id","call_id":"call-fixture","name":"lookup_record","arguments":"{\"query\":\"fixture\"}"}],"usage":{"input_tokens":17,"output_tokens":9}}|}
+          model
+      in
+      Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    else
+      Cohttp_eio.Server.respond_string ~status:`Not_found
+        ~body:{|{"error":"unexpected provider path"}|} ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:raise);
+  List.iter
+    (fun (model_id, suffix) ->
+       let provider_id = "openai-responses" in
+       let toml =
+         Printf.sprintf
+           {|
+[runtime]
+default = "%s.fixture"
+[providers.%s]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d%s"
+[providers.%s.credentials]
+type = "inline"
+value = "local-fixture-key"
+[models.fixture]
+api-name = "%s"
+tools-support = true
+thinking-support = true
+reasoning-effort = "high"
+temperature = 0.3
+top-p = 0.8
+streaming = false
+[%s.fixture]
+is-default = true
+|}
+           provider_id provider_id port suffix provider_id model_id provider_id
+       in
+       let runtime =
+         match Runtime_toml.parse_string toml with
+         | Ok runtime -> runtime
+         | Error errors ->
+           failf "runtime TOML failed: %s"
+             (String.concat "; "
+                (List.map (fun (error : Runtime_toml.parse_error) ->
+                   error.path ^ ": " ^ error.message) errors))
+       in
+       let config =
+         match runtime.bindings with
+         | [ binding ] ->
+           (match Runtime_adapter.binding_to_execution runtime binding with
+            | Ok (Runtime_execution.Agent_core config) -> config
+            | Ok (Runtime_execution.Codex_app_server _
+                 | Runtime_execution.Claude_code _
+                 | Runtime_execution.Antigravity_cli _) ->
+              fail "HTTP binding selected an official client"
+            | Error message -> failf "binding failed: %s" message)
+         | _ -> fail "expected one declared binding"
+       in
+       check (option string) "provider qualifier survives binding"
+         (Some provider_id) config.provider_id;
+       check string "model api-name survives binding" model_id config.model_id;
+       check (option (float 0.0001)) "explicit temperature survives binding"
+         (Some 0.3) config.temperature;
+       check (option (float 0.0001)) "explicit top_p survives binding"
+         (Some 0.8) config.top_p;
+       check bool "no synthetic capability override" true
+         (Option.is_none config.model_capabilities_override);
+       (* This public accessor uses Some config.kind and disables bare-model
+          fallback for declared provider IDs, exactly as completion does. *)
+       let capabilities =
+         match Provider.capabilities_for_config_model config with
+         | Some capabilities -> capabilities
+         | None -> fail "declared provider/model has no capabilities"
+       in
+       check bool "provider-qualified model admits high reasoning" true
+         (match capabilities.accepted_reasoning_efforts with
+          | Some efforts -> List.mem Effort.High efforts
+          | None -> false);
+       check bool "TOML preserves the exact requested effort" true
+         (config.reasoning_effort = Some Effort.High);
+       (match Provider.validate_reasoning_effort_request_typed config with
+        | Ok () -> ()
+        | Error rejection ->
+          fail (Provider.reasoning_effort_request_rejection_to_message rejection));
+       let response =
+         match Llm_provider.Complete.complete ~sw ~net ~config ~tools:[ tool ]
+                 ~messages:[ Types.make_message ~role:Types.User [ Types.Text "Find fixture." ] ] () with
+         | Ok response -> response
+         | Error error ->
+           fail
+             (Agent_core.Provider_failure_attribution.core_error_of_http_error error
+              |> Agent_core.Error.to_string)
+       in
+       check string "response model parsed" model_id response.model;
+       check string "Responses envelope parsed" "response-fixture" response.id;
+       check bool "tool use stop is parsed" true
+         (response.stop_reason = Types.StopToolUse);
+       (match response.content with
+        | [ Types.Text "Checking the record."
+          ; Types.ToolUse { id; name; input } ] ->
+          check string "call_id, not Responses item id" "call-fixture" id;
+          check string "tool name parsed" "lookup_record" name;
+          check string "tool arguments parsed" "fixture"
+            Json.(input |> member "query" |> to_string)
+        | _ -> fail "surface response lost text or the typed function call");
+       (match response.usage with
+        | Some usage ->
+          check int "input usage parsed" 17 usage.input_tokens;
+          check int "output usage parsed" 9 usage.output_tokens
+        | None -> fail "surface response lost usage");
+       let path, body =
+         match !requests with
+         | [ request ] -> request
+         | _ -> fail "each completion must dispatch exactly one local HTTP request"
+       in
+       requests := [];
+       check string "actual path has one v1 segment" "/v1/responses" path;
+       check string "requested reasoning effort reaches Responses" "high"
+         Json.(body |> member "reasoning" |> member "effort" |> to_string);
+       check string "wire model remains exact" model_id
+         Json.(body |> member "model" |> to_string);
+       (match body with
+        | `Assoc fields ->
+          List.iter
+            (fun field ->
+               check bool (field ^ " is omitted rather than sent as null")
+                 false (List.mem_assoc field fields))
+            [ "temperature"; "top_p" ]
+        | _ -> fail "Responses request is not an object");
+       check int "one input message" 1
+         Json.(body |> member "input" |> to_list |> List.length);
+       check bool "Chat input envelope absent" true (Json.member "messages" body = `Null);
+       check bool "Chat reasoning field absent" true (Json.member "reasoning_effort" body = `Null);
+       let function_json =
+         match Json.(body |> member "tools" |> to_list) with
+         | [ tool ] -> tool
+         | _ -> fail "expected one function tool"
+       in
+       check string "wire tool type" "function"
+         Json.(function_json |> member "type" |> to_string);
+       check bool "Chat function wrapper absent" true
+         (Json.member "function" function_json = `Null);
+       check string "function schema name" "lookup_record"
+         Json.(function_json |> member "name" |> to_string);
+       check string "function description" "Look up the requested record."
+         Json.(function_json |> member "description" |> to_string);
+       check bool "function parameter schema preserved" true
+         (Json.member "parameters" function_json = parameters))
+    [ "gpt-5.6-luna", ""
+    ; "gpt-5.6-luna", "/v1"
+    ; "gpt-6-astra", ""
+    ; "gpt-6-astra", "/v1"
+    ]
+
 let with_native_count_server f =
   Eio_main.run
   @@ fun env ->
@@ -2306,6 +2609,14 @@ let () =
             `Quick
             test_declared_thinking_capabilities_override_catalog
         ; test_case
+            "max-only runtime capability overrides provider base on wire"
+            `Quick
+            test_runtime_max_only_capability_overrides_provider_base_on_wire
+        ; test_case
+            "embedded GLM vision catalog ceiling reaches wire"
+            `Quick
+            test_embedded_glm_vision_catalog_ceiling_reaches_wire
+        ; test_case
             "runtime adapter carries auth in api_key only"
             `Quick
             test_runtime_adapter_keeps_auth_out_of_headers
@@ -2401,6 +2712,10 @@ let () =
             "an OpenAI-compatible surface keeps the chat-completions path"
             `Quick
             test_openai_compat_surface_keeps_the_chat_completions_path
+        ; test_case
+            "catalog Responses models round trip through runtime TOML and HTTP"
+            `Quick
+            test_openai_responses_round_trip_through_runtime_toml
         ; test_case
             "runtime max_tokens wire omission and explicit override"
             `Quick

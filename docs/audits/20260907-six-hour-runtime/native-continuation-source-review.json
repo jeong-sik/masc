@@ -1,0 +1,45 @@
+{
+  "reviewed_main": "76a19882881bcc7d9a32203fe1304c8449207afb",
+  "review_kind": "independent_readonly_source_review",
+  "design_source": "PR34041 worktree; design not yet merged into reviewed main",
+  "findings": [
+    {
+      "source": "lib/keeper/keeper_repetition_scope.ml",
+      "lines": [
+        49,
+        55,
+        86
+      ],
+      "risk": "A holds the full multi-scope snapshot; reusing it after B either rejects a changed target or overwrites B.",
+      "required_behavior": "Project only the authoritative A frame into latest shared context; preserve every unrelated scope and conversation."
+    },
+    {
+      "source": "lib/keeper_execution_scope/keeper_repetition_snapshot.ml",
+      "lines": [
+        58
+      ],
+      "risk": "record does not verify active scope or provider attempt ownership.",
+      "required_behavior": "Join semantic execution and physical attempt ownership; retire callbacks before another attempt or B starts."
+    },
+    {
+      "source": "lib/keeper_chat_operations/keeper_chat_operation_store.ml",
+      "lines": [
+        1256
+      ],
+      "risk": "CAS storage error can represent uncertain commit; blindly appending again duplicates evidence.",
+      "required_behavior": "Keep exact pre-state and desired post-state, reread same identity, and publish only confirmed state. Do not turn one execution conflict into the Owner global storage latch."
+    },
+    {
+      "source": "lib/keeper/keeper_run_tools_hook_accumulator.ml",
+      "lines": [
+        76
+      ],
+      "risk": "Refreshing historical observations from each new journal revision counts current tool calls twice.",
+      "required_behavior": "Freeze historical repetition baseline at attempt start; persist ongoing observations separately."
+    }
+  ],
+  "limits": [
+    "These are native-integration preconditions and source risks, not proof that each scenario occurred live.",
+    "No automatic resume, data mutation, local build or runtime acceptance test performed."
+  ]
+}

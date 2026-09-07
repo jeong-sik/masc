@@ -199,6 +199,13 @@ val help_viewport : Masc_tui_types.state -> int * int
 val agenda_viewport : Masc_tui_types.state -> int * int
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 val answering_viewport : Masc_tui_types.state -> int * int
+(** Pure projection for the visible Recent pane, or [None] when it will not
+    consume chunks. Dimensions are the raw terminal measurement. The loop
+    stores this result inside frame Build timing; rendering never stores it. *)
+val acting_pane_chunk_projection :
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int ->
+  Masc_tui_acting.chunk_projection option
+
 val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *

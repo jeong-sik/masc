@@ -6,7 +6,7 @@
 //
 // This replaces the former shell-level SurfaceLead, which decided per-surface
 // whether to render a generic lead via a hand-maintained allow-list
-// (SURFACE_OWN_LEAD_IDS) — an N-of-M list the compiler could not enforce.
+// (SURFACE_LEAD_SOURCE) — a Record<TabId, _> the compiler now checks is complete.
 // Now each surface owns the decision to render its header (bespoke or this
 // generic one) at the call site, so there is a single, co-located source for
 // every surface's title.

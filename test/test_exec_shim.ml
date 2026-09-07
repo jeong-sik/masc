@@ -458,6 +458,15 @@ let test_probe_identity () =
       (Ok Exec_ssh_protocol.protocol_version)
       (Result.map Exec_ssh_protocol.int_of_major (Exec_ssh_protocol.major_of_probe p'))
 
+let test_child_boundary_acknowledgements () =
+  let open Exec_ssh_protocol in
+  List.iter (fun (ack, expected) ->
+    check bool ("child acknowledgement " ^ String.escaped ack) true
+      (Exec_shim.child_boundary_of_ack ack = expected))
+    ["A", Sandbox_applied; "AE", Exec_failed; "S", Setup_failed;
+     "", Child_ack_unavailable; "E", Child_ack_unavailable;
+     "AA", Child_ack_unavailable; "AEX", Child_ack_unavailable]
+
 let () =
   run "exec shim"
     [ "env", [ test_case "minimal base env" `Quick test_minimal_base_env
@@ -501,7 +510,9 @@ let () =
               ; test_case "rejects missing cwd" `Quick test_jail_rejects_missing_cwd ]
     ; "io", [ test_case "drain_fd" `Quick test_drain_fd ]
     ; "probe", [ test_case "identity" `Quick test_probe_identity ]
-    ; "box", [ test_case "plan for mode" `Quick test_plan_for_mode
+    ; "box", [ test_case "child-owned boundary acknowledgement" `Quick
+                 test_child_boundary_acknowledgements
+             ; test_case "plan for mode" `Quick test_plan_for_mode
              ; test_case "scratch env" `Quick test_scratch_env
              ; test_case "scratch_root config" `Quick test_parse_config_scratch_root
              ; test_case "support is consistent" `Quick test_observe_support_is_consistent ] ]

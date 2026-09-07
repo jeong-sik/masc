@@ -32,7 +32,7 @@
     "count": 617,
     "note": "",
     "source": "lib/keeper/keeper_runtime_attempt.ml",
-    "action": "provider 반환 Retry-After·reset과 실제 후보 선택을 대조. 동시 호출/queued wake에 의한 재시도 증폭을 별도 재현해야 함.",
+    "action": "실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 14:55Z 운영0799f02f79에 포함됨을 확인했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 재기동 후에도 실제 rate-limit 오류는 남아 있으며 특정 fallback 성공·장기 연속성은 미검증이다.",
     "status": "investigate",
     "first": {
       "seq": 25985072,
@@ -167,8 +167,8 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "08:03Z Execute count959로 반복 문제 미해결. #33950 기반6/6 PASS·필수 검사 PASS 후 이 세션이cf63fd467d로 병합. Context-only 저장 유실 수정 #33953도21/21·필수 검사 PASS 후8685db2478로 병합했다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.",
-    "status": "scope-design-required",
+    "action": "semantic journal #34021은114/114 PASS 후b388b11414 병합. 원래입력 보존 #34062는108/108 PASS 후3c353d75b5, 정확한 checkpoint 보존 #34036은수정bd0 기준55/55 PASS·최종3ac 필수 검사 PASS 후521773e7e8 병합. source-batch fixture #34012는busy polling을 실제 Owner fence 신호 대기로 고쳐같은1초 deadline에서115/115 PASS 후438689dc53 병합. SDK 경계 #34041은117/118 PASS로 별도 output probe1건 실패. 최신 공유 대화를 유지하는 native 재개·자식/세션 소유권·중단 effect 복구는 미연결이며 최근1시간 반복 신호21건으로 운영 해결은 미완료.",
+    "status": "direct-scope-tested-autonomous-pending",
     "first": {
       "seq": 25984123,
       "ts": "2026-09-06T21:00:25Z",
@@ -275,8 +275,8 @@
     "count": 6,
     "note": "",
     "source": "lib/keeper/keeper_shutdown_finalize.ml",
-    "action": "도메인103/103·HTTP34/34 PASS와 외부 병합 후, 운영6db68b4bea에서 이 세션이08:27:04Z 부재 ACK를 적용했다. 재조회 revision4→5·operator_absence_acknowledged, 이전 종료 증거·정리 의도 보존 확인. 새 서버 시작에서의 재발 여부는 미측정.",
-    "status": "live-acknowledged",
+    "action": "도메인103/103·HTTP34/34 PASS 후08:27:04Z 실제 부재 ACK 적용. 외부08:37:36Z 재시작 뒤09:06:48Z revision5·operator_absence_acknowledged 유지, 시작 이후 해당 복구 오류0건. 09:39:25Z에도 ACK 유지 확인. 이 세션이 재시작한 것은 아니다.",
+    "status": "live-ack-restart-observed",
     "first": {
       "seq": 26080010,
       "ts": "2026-09-06T23:26:03Z",
@@ -356,7 +356,7 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다.",
+    "action": "설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 설치 smoke PASS. 08:29Z 같은 소스의dashboard 자산 복구와실제브라우저표시는관측했다. 이후외부바이너리·자산변경으로14:55Z stale/unbound, 최종15:01Z health에서는missing이다. 실행바이너리0799f02f79와일치하는설치릴리스자산연결은미완료다.",
     "status": "distribution-stack",
     "first": {
       "seq": 26156709,
@@ -437,8 +437,8 @@
     "count": 12,
     "note": "",
     "source": "connectors/browser",
-    "action": "#33881 Node5/5 PASS. native host 실제 설치·원본 토큰 보존 확인. 사용자 확장 추가 뒤 Firefox 자식86997→8935 TCP 연결. 탭/본문 왕복 및 두 live 브라우저 구분은 미확인.",
-    "status": "host-installed-connected",
+    "action": "native host 설치 후09:40:03Z 실제 live 확장으로 tabs.list와 page.read 왕복 성공: HTTP200, 탭9개, 본문515자. 본문·URL·제목은 증거에서 제외. 정확한 응답 host PID 및 여러 브라우저 구분은 미측정.",
+    "status": "live-roundtrip-observed",
     "first": {
       "seq": 26003629,
       "ts": "2026-09-06T22:12:34Z",

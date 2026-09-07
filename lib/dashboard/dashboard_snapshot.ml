@@ -6,6 +6,28 @@
     [slot].  Handler wiring lives in [Server_dashboard_shell_snapshot]
     (renamed to [Server_dashboard_snapshot_select] in #16761). *)
 
+type tools_projection = {
+  base_path : string;
+  workspace_path : string;
+  masc_root : string;
+  json : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+
+let prepare_tools ~(config : Workspace.config) compute =
+  let masc_root = Workspace.masc_root_dir config in
+  let json = compute () in
+  let raw = Yojson.Safe.to_string json in
+  { base_path = config.base_path; workspace_path = config.workspace_path; masc_root;
+    json; etag = Http_server_eio.Response.weak_etag_value raw;
+    encoded = Http_response_payload.prepare raw }
+
+type tools_result =
+  | Tools_pending of Yojson.Safe.t
+  | Tools_ready of Yojson.Safe.t
+  | Tools_error of Yojson.Safe.t
+
 type t = {
   generated_at : float;
   shell : Yojson.Safe.t;
@@ -15,7 +37,7 @@ type t = {
      wait-free instead of recomputing.  Light is a DIFFERENT shape from
      [shell] (skips belief/tension evaluation, uses the light agent-count /
      runtime projections), so it is stored separately rather than derived. *)
-  tools : Yojson.Safe.t;
+  tools : tools_projection;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
@@ -33,21 +55,21 @@ let slot : t option Atomic.t = Atomic.make None
 
 let current () = Atomic.get slot
 
-type projection_cache_entry =
+type 'a projection_cache_entry =
   { refreshed_at : float
-  ; value : Yojson.Safe.t
+  ; value : 'a
   }
 
-type projection_cache = projection_cache_entry option Atomic.t
+type 'a projection_cache = 'a projection_cache_entry option Atomic.t
 
-let make_projection_cache () : projection_cache = Atomic.make None
+let make_projection_cache () : 'a projection_cache = Atomic.make None
 
 let should_reuse_projection ~now ~ttl ~refreshed_at =
   let age = now -. refreshed_at in
   age >= 0.0 && age < ttl
 ;;
 
-let refresh_projection ~now ~ttl ~(cache : projection_cache) compute =
+let refresh_projection ~now ~ttl ~(cache : 'a projection_cache) compute =
   let started_at = now () in
   match Atomic.get cache with
   | Some entry
@@ -65,6 +87,73 @@ let refresh_projection ~now ~ttl ~(cache : projection_cache) compute =
      | exception exn ->
        (match previous with
         | Some entry -> entry.value
+        | None -> raise exn))
+;;
+
+type tools_cache_entry =
+  | Pending_tools of tools_projection
+  | Failed_tools of tools_projection
+  | Ready_tools of tools_projection projection_cache_entry
+
+type tools_cache = tools_cache_entry option Atomic.t
+
+let make_tools_cache () : tools_cache = Atomic.make None
+
+let tools_cache_value = function
+  | Pending_tools value | Failed_tools value -> value
+  | Ready_tools entry -> entry.value
+
+let refresh_tools_projection ~now ~ttl ~cache ~config compute =
+  let previous = Atomic.get cache in
+  match previous with
+  | Some (Ready_tools entry)
+    when should_reuse_projection ~now:(now ()) ~ttl ~refreshed_at:entry.refreshed_at ->
+    entry.value
+  | _ ->
+    let started_at = now () in
+    let allocated_before = Gc.allocated_bytes () in
+    let retain_or_prepare transient json =
+      match previous, transient with
+      | Some (Ready_tools entry), _ -> entry.value
+      | Some (Pending_tools value), `Pending
+      | Some (Failed_tools value), `Failed -> value
+      | _ ->
+        let value = prepare_tools ~config (fun () -> json) in
+        Atomic.set cache (Some (match transient with
+          | `Pending -> Pending_tools value
+          | `Failed -> Failed_tools value));
+        value
+    in
+    (* Pending/error responses never earn the ready TTL. The existing snapshot
+       cycle retries them, reusing prepared placeholder bytes in the meantime.
+       A failed refresh also cannot renew the last successful timestamp. *)
+    (try
+     let value = match compute () with
+     | Tools_pending json -> retain_or_prepare `Pending json
+     | Tools_error json -> retain_or_prepare `Failed json
+     | Tools_ready json ->
+       let value = prepare_tools ~config (fun () -> json) in
+       Atomic.set cache (Some (Ready_tools { refreshed_at = now (); value }));
+       value
+     in
+     let elapsed_s = now () -. started_at in
+     let allocated_mb = (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0 in
+     if elapsed_s >= 5.0 || allocated_mb >= 256.0 then
+       Log.Dashboard.warn
+         "dashboard_snapshot heavy refresh: component=tools elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
+         elapsed_s allocated_mb ttl
+     else
+       Log.Dashboard.debug
+         "dashboard_snapshot refreshed: component=tools elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
+         elapsed_s allocated_mb ttl;
+     value
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Dashboard.warn "dashboard_snapshot refresh: tools failed (last good retained): %s"
+         (Printexc.to_string exn);
+       (match previous with
+        | Some entry -> tools_cache_value entry
         | None -> raise exn))
 ;;
 
@@ -105,11 +194,11 @@ let dashboard_shell_payload_json_ref :
 let register_dashboard_shell_payload_json fn =
   dashboard_shell_payload_json_ref := fn
 
-let dashboard_tools_http_json_ref =
-  ref (fun (_config : Workspace.config) -> `Null)
+let dashboard_tools_http_result_ref =
+  ref (fun (_config : Workspace.config) -> Tools_pending `Null)
 
-let register_dashboard_tools_http_json fn =
-  dashboard_tools_http_json_ref := fn
+let register_dashboard_tools_http_result fn =
+  dashboard_tools_http_result_ref := fn
 
 let namespace_truth_snapshot_callback =
   ref (fun (_state : Mcp_server.server_state) -> None)
@@ -135,7 +224,7 @@ let refresh_loop
   in
   let shell_cache = make_projection_cache () in
   let shell_light_cache = make_projection_cache () in
-  let tools_cache = make_projection_cache () in
+  let tools_cache = make_tools_cache () in
   let telemetry_cache = make_projection_cache () in
   let namespace_truth_cache = make_projection_cache () in
   let activity_defaults_cache = make_activity_defaults_cache () in
@@ -214,8 +303,8 @@ let refresh_loop
         (fun () -> (!dashboard_shell_payload_json_ref) ~light:true config)
     in
     let tools =
-      cached_projection ~ttl:60.0 ~cache:tools_cache "tools" (fun () ->
-        (!dashboard_tools_http_json_ref) config)
+      refresh_tools_projection ~now:(fun () -> Eio.Time.now clock) ~ttl:60.0 ~cache:tools_cache
+        ~config (fun () -> (!dashboard_tools_http_result_ref) config)
     in
     let telemetry_summary =
       cached_projection ~ttl:30.0 ~cache:telemetry_cache "telemetry_summary" (fun () ->
@@ -295,7 +384,7 @@ let refresh_loop
 
 let publish_for_test t = Atomic.set slot (Some t)
 
-let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
+let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
       ~telemetry_summary
       ?(activity_events_default = `Null)
       ?(activity_graph_default = `Null)
@@ -304,7 +393,7 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
     generated_at = Unix.gettimeofday ();
     shell;
     shell_light;
-    tools;
+    tools = prepare_tools ~config (fun () -> tools);
     namespace_truth;
     telemetry_summary;
     activity_events_default;
@@ -316,11 +405,14 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
 let reset_for_test () = Atomic.set slot None
 
 module For_testing = struct
-  type cache = projection_cache
+  type cache = Yojson.Safe.t projection_cache
+  type nonrec tools_cache = tools_cache
   type activity_cache = activity_defaults_cache
 
   let make_cache = make_projection_cache
   let refresh_projection = refresh_projection
+  let make_tools_cache = make_tools_cache
+  let refresh_tools = refresh_tools_projection
   let make_activity_cache = make_activity_defaults_cache
   let refresh_activity_defaults = refresh_activity_defaults
   let should_reuse_projection = should_reuse_projection

@@ -454,37 +454,17 @@ let handle_memory_retract_with_outcome
     ~args
 ;;
 
-(* Browser lane readers (docs/design/browser-lane.md): one queue hop, no
-   gate — the verb set is closed and read-only at the state layer. *)
+(* Browser lane tools preserve selected native-client identity. The closed
+   state-layer verb set distinguishes reads from explicit-tab interactions;
+   session ownership and direct navigation remain automation-only. *)
 let handle_browser_tabs_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
 ;;
 
 let handle_browser_read_with_outcome ~(meta : keeper_meta) ~args =
-  let result = Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.0 args in
-  match Tool_misc_browser_lane.read_format args, result with
-  | Ok Tool_misc_browser_lane.Image, Tool_result.Completed { data = `Assoc fields; _ } ->
-    (* Keep PNG bytes off the model's text channel. The existing vision tool
-       can inspect this Keeper-owned durable handle in a later tool call. *)
-    let stored =
-      match List.assoc_opt "data" fields with
-      | Some (`String encoded) ->
-        (match Base64.decode encoded with
-         | Error (`Msg detail) -> Error detail
-         | Ok bytes ->
-           Result.bind (Keeper_vision_tool.validate_image_size bytes) (fun () ->
-             Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) bytes))
-      | _ -> Error "screenshot has no image payload" in
-    (match stored with
-     | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
-     | Ok artifact ->
-       Keeper_tool_execution.success_data (`Assoc
-         (("artifact", `String (Multimodal.Vision_artifact_store.to_string artifact)) ::
-          ("next", `String "Use analyze_image with this artifact and your visual question.") ::
-          List.filter (fun (key, _) -> not (String.equal key "data")) fields)))
-  | _ -> Keeper_tool_execution.of_tool_result result
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_read ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:0.0 args)
 ;;
 
 let handle_browser_session_with_outcome ~args =
@@ -492,9 +472,31 @@ let handle_browser_session_with_outcome ~args =
     (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
 ;;
 
+let handle_browser_interact_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_interact ~tool_name:"masc_browser_interact" ~start_time:0.0 args)
+;;
+
 let handle_browser_goto_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
+;;
+
+let handle_browser_act_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+  let invoke ?upload_paths () =
+    let result, failure_effect_disposition =
+      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths
+        ~tool_name:"masc_browser_act" ~start_time:0.0 args in
+    Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
+  match Browser_lane.Action.parse args with
+  | Ok (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) ->
+    (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
+       ~config ~meta ~paths (fun upload_paths -> invoke ~upload_paths ()) with
+     | Ok outcome -> outcome
+     | Error message -> Keeper_tool_execution.failure
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json message))
+  | _ -> invoke ()
 ;;
 
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
@@ -2110,7 +2112,10 @@ let masc_file_failure message =
 
 let handle_masc_file_with_outcome ~name ~args () =
   let require_env key =
-    match Sys.getenv_opt key with
+    (* The key is the caller's, but the floor is the same: a value set in
+       runtime.toml has to answer here too, or masc_file refuses a variable the
+       deployment did declare. *)
+    match Env_config_core.raw_value_opt key with
     | Some v when v <> "" -> Ok v
     | _ -> Error ("masc_file requires the " ^ key ^ " environment variable")
   in

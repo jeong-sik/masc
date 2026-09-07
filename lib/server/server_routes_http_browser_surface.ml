@@ -32,13 +32,17 @@ let goto = function
        let uri = Uri.of_string url in
        (match Uri.scheme uri, Uri.host uri with
         | Some ("http" | "https"), Some host when host <> "" ->
-          Browser_lane.issue ~lane_name:"automation" ~verb:(Browser_lane.Page_goto {url}) ~timeout_sec:60.
+          Browser_lane.issue ~lane_name:"automation" ~verb:(Browser_lane.Page_goto { url; tab_id = None }) ~timeout_sec:60.
           |> Browser_surface.decode_answer
         | _ -> Error "url must be an absolute HTTP(S) URL")
      | _ -> Error "url is required")
   | _ -> Error "body must be an object"
 let add_routes router =
   router
+  |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"
+      (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
+         reply request reqd (Ok (`Assoc ["clients", `List
+           (List.map Browser_lane.client_json (Browser_lane.active_clients ()))]))))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/read"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
          read_body request reqd (fun json ->

@@ -71,10 +71,6 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   Buffer.add_string buf "\027[0K";
   write (Buffer.contents buf)
 
-let open_screen ~(write : string -> unit) (state : Masc_tui_types.state) =
-  state.msx_open <- true;
-  render ~write state.msx_frame
-
 let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   if String.equal key "esc" then begin
     state.msx_open <- false;
@@ -86,3 +82,108 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     render ~write state.msx_frame;
     true
   end
+
+(* --- The load menu (RFC-0439 §3.7) ------------------------------------- *)
+
+(* What a chosen row does. The keyboard I/O it implies -- fetching the
+   inventory, POSTing the load -- is the executable layer's, the only one that
+   can reach [Masc_tui_http]. This module draws the picker and names the
+   choice; it never flips [msx_menu_open]/[msx_open] itself, so the lifecycle
+   stays in one place. *)
+type menu_action =
+  | Stay              (* navigated or repainted; the menu is still up *)
+  | Closed            (* esc: leave the menu *)
+  | Watch             (* spectate the machine already loaded *)
+  | Load of string    (* plug this cartridge in *)
+
+(* The rows in order: a "watch current" row first when a machine is loaded,
+   then one row per cartridge. [msx_menu_index] indexes this list. *)
+let menu_entries (state : Masc_tui_types.state) : menu_action list =
+  let watch = if Option.is_some state.msx_frame then [ Watch ] else [] in
+  watch @ List.map (fun c -> Load c) state.msx_carts
+
+let clamp_index (state : Masc_tui_types.state) =
+  let n = List.length (menu_entries state) in
+  state.msx_menu_index <- (if n = 0 then 0 else max 0 (min (n - 1) state.msx_menu_index))
+
+let menu_title = " MSX \xe2\x80\x94 pick a game   (up/down move, enter load, esc back)"
+
+let entry_label (state : Masc_tui_types.state) = function
+  | Watch ->
+      let cart =
+        match state.msx_frame with
+        | Some { msx_cartridge = Some c; _ } -> c
+        | _ -> "current machine"
+      in
+      "> watch " ^ cart
+  | Load c -> "  " ^ c
+  | Stay | Closed -> ""
+
+let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
+  clamp_index state;
+  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let entries = menu_entries state in
+  let buf = Buffer.create 1024 in
+  Buffer.add_string buf "\027[2J\027[H";
+  Buffer.add_string buf (fit_line cols menu_title);
+  Buffer.add_string buf "\027[0K\r\n";
+  let status_rows =
+    match status with
+    | Some s ->
+        Buffer.add_string buf (fit_line cols (" " ^ s));
+        Buffer.add_string buf "\027[0K\r\n";
+        1
+    | None -> 0
+  in
+  (match entries with
+   | [] ->
+       Buffer.add_string buf
+         (fit_line cols
+            " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM images");
+       Buffer.add_string buf "\027[0K\r\n"
+   | _ ->
+       List.iteri
+         (fun i entry ->
+           let label = entry_label state entry in
+           let line =
+             if i = state.msx_menu_index then
+               "\027[7m" ^ fit_line (max 1 (cols - 1)) (" " ^ label) ^ "\027[0m"
+             else fit_line cols (" " ^ label)
+           in
+           Buffer.add_string buf line;
+           Buffer.add_string buf "\027[0K\r\n")
+         entries);
+  (* Pad the body so a previously longer list leaves no ghost rows behind. *)
+  let drawn = 1 + status_rows + max 1 (List.length entries) in
+  for _ = drawn to max 4 (rows - 1) do
+    Buffer.add_string buf "\027[0K\r\n"
+  done;
+  write (Buffer.contents buf)
+
+let open_menu ~(write : string -> unit) (state : Masc_tui_types.state) =
+  state.msx_open <- true;
+  state.msx_menu_open <- true;
+  state.msx_menu_index <- 0;
+  render_menu ~write state
+
+let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
+    menu_action =
+  match key with
+  | "esc" -> Closed
+  | "up" | "k" ->
+      state.msx_menu_index <- state.msx_menu_index - 1;
+      render_menu ~write state;
+      Stay
+  | "down" | "j" ->
+      state.msx_menu_index <- state.msx_menu_index + 1;
+      render_menu ~write state;
+      Stay
+  | "\r" | "\n" | " " | "space" -> (
+      match List.nth_opt (menu_entries state) state.msx_menu_index with
+      | Some ((Watch | Load _) as a) -> a
+      | Some (Stay | Closed) | None ->
+          render_menu ~write state;
+          Stay)
+  | _ ->
+      render_menu ~write state;
+      Stay

@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 
 HOST = Path(sys.argv.pop(1)).resolve()
 TOKEN = "browser-host-test-token-no-secret"
@@ -63,14 +64,28 @@ class Peer(http.server.BaseHTTPRequestHandler):
         if self.headers.get("x-lane-token") != TOKEN or self.headers.get("x-lane") != "live":
             self.send_error(403)
             return
+        client_id = self.headers.get("x-browser-client-id")
+        try:
+            uuid.UUID(client_id)
+        except (ValueError, TypeError, AttributeError):
+            self.send_error(400)
+            return
+        self.server.identities.append((client_id, self.headers.get("x-browser-name"),
+            self.headers.get("x-browser-version"), self.headers.get("x-browser-engine-version")))
         if self.path == "/browser-lane/poll":
             self.server.poll_seen.set()
+            if self.server.reject_client:
+                self.send_error(400)
+                return
             try:
                 response = self.server.commands.get(timeout=10)
             except queue.Empty:
                 response = {"ok": True, "empty": True}
         elif self.path == "/browser-lane/result":
             self.server.results.put(body)
+            response = {"ok": True}
+        elif self.path == "/browser-lane/disconnect":
+            self.server.disconnected.set()
             response = {"ok": True}
         else:
             self.send_error(404)
@@ -96,9 +111,23 @@ class NativeHost(unittest.TestCase):
         self.server.commands = queue.Queue()
         self.server.results = queue.Queue()
         self.server.poll_seen = threading.Event()
+        self.server.disconnected = threading.Event()
+        self.server.identities = []
+        self.server.reject_client = self._testMethodName == "test_retired_client_exits_for_fresh_identity"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.process = subprocess.Popen([str(HOST), "--base-path", str(base), "--server", f"http://127.0.0.1:{self.server.server_port}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        metadata = read_frame(self.process.stdout)
+        self.assertEqual(metadata["verb"], "browser.info")
+        self.assertFalse(self.server.poll_seen.is_set(), "must discover actual browser before polling")
+        browser = {"name": "Firefox", "vendor": "Mozilla", "version": "155.0.1"}
+        if self._testMethodName != "test_firefox_metadata":
+            browser["zen"] = {"version": "1.22b"}
+        if self._testMethodName == "test_bad_metadata_never_polls":
+            browser["zen"] = {"version": ""}
+        self.process.stdin.write(encode_frame({"id": metadata["id"], "ok": True, "data": browser}))
+        self.process.stdin.flush()
+
 
     def tearDown(self):
         if self.process.poll() is None:
@@ -117,8 +146,22 @@ class NativeHost(unittest.TestCase):
         self.thread.join()
         self.temporary.cleanup()
 
+    def test_firefox_metadata(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertTrue(all(row[1:] == ("firefox", "155.0.1", "155.0.1") for row in self.server.identities))
+
+    def test_retired_client_exits_for_fresh_identity(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertNotEqual(self.process.wait(timeout=5), 0)
+        self.assertTrue(self.server.disconnected.is_set())
+        self.assertEqual(len({identity[0] for identity in self.server.identities}), 1)
+
+    def test_bad_metadata_never_polls(self):
+        self.assertNotEqual(self.process.wait(timeout=2), 0)
+        self.assertFalse(self.server.poll_seen.is_set())
+
     def test_tabs_and_page_roundtrip_fragmented_utf8(self):
-        for index, verb in enumerate(["tabs.list", "page.read", "page.capture"]):
+        for index, verb in enumerate(["tabs.list", "page.read", "page.capture", "page.interact"]):
             command = {"id": str(index), "verb": verb, "args": {"tabId": 42} if index else {}}
             self.server.commands.put(command)
             self.assertEqual(read_frame(self.process.stdout), command)
@@ -132,21 +175,67 @@ class NativeHost(unittest.TestCase):
                 self.process.stdin.flush()
             self.assertEqual(self.server.results.get(timeout=5), reply)
 
+    def test_screenshot_reply_larger_than_command_limit(self):
+        command = {"id": "screenshot", "verb": "page.capture", "args": {"tabId": 73}}
+        self.server.commands.put(command)
+        self.assertEqual(read_frame(self.process.stdout), command)
+        reply = {"id": "screenshot", "ok": True, "data": {
+            "tabId": 73, "data": "A" * (2 * 1024 * 1024),
+            "url": "https://example.org", "title": "Screenshot"}}
+        self.process.stdin.write(encode_frame(reply))
+        self.process.stdin.flush()
+        self.assertEqual(self.server.results.get(timeout=10), reply)
+
     def test_unsupported_verb_is_not_forwarded(self):
-        self.server.commands.put({"id": "rejected", "verb": "page.goto", "args": {"url": "https://example.com"}})
-        reply = self.server.results.get(timeout=5)
-        self.assertFalse(reply["ok"])
-        self.assertEqual(reply["id"], "rejected")
-        self.assertFalse(select.select([self.process.stdout], [], [], 0)[0])
+        for verb, args in [
+            ("page.goto", {"url": "https://example.com"}),
+            ("page.act", {"action": "click", "tabId": 73, "selector": "button"}),
+        ]:
+            with self.subTest(verb=verb):
+                self.server.commands.put({"id": "rejected", "verb": verb, "args": args})
+                reply = self.server.results.get(timeout=5)
+                self.assertFalse(reply["ok"])
+                self.assertEqual(reply["id"], "rejected")
+                self.assertFalse(select.select([self.process.stdout], [], [], 0)[0])
+
+    def test_elements_roundtrip_preserves_target_and_control_observation(self):
+        for index, args in enumerate([{}, {"tabId": 73}]):
+            with self.subTest(args=args):
+                command = {"id": f"elements-{index}", "verb": "page.elements", "args": args}
+                self.server.commands.put(command)
+                self.assertEqual(read_frame(self.process.stdout), command)
+                reply = {
+                    "id": command["id"], "ok": True,
+                    "data": {
+                        "tabId": 73, "url": "https://example.org/form", "title": "폼",
+                        "total": 1, "truncated": False,
+                        "elements": [{
+                            "selector": "html > body > select:nth-of-type(1)",
+                            "tag": "select", "value": "draft-id", "multiple": False,
+                            "options": [{"value": "draft-id", "label": "초안",
+                                         "selected": True, "disabled": False}],
+                        }],
+                    },
+                }
+                framed = encode_frame(reply)
+                self.process.stdin.write(framed[:3])
+                self.process.stdin.flush()
+                self.process.stdin.write(framed[3:])
+                self.process.stdin.flush()
+                self.assertEqual(self.server.results.get(timeout=5), reply)
 
     def test_eof_cancels_waiting_http(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.process.stdin.close()
         self.assertEqual(self.process.wait(timeout=2), 0)
         self.assertEqual(self.process.stdout.read(), b"")
+        self.assertTrue(self.server.disconnected.is_set())
+        ids = {row[0] for row in self.server.identities}
+        self.assertEqual(len(ids), 1, "one native process owns one client UUID")
+        self.assertTrue(all(row[1:] == ("zen", "1.22b", "155.0.1") for row in self.server.identities))
 
     def test_oversized_frame_rejected_before_payload(self):
-        self.process.stdin.write(struct.pack("<I", 1024 * 1024 + 1))
+        self.process.stdin.write(struct.pack("<I", 8 * 1024 * 1024 + 1))
         self.process.stdin.flush()
         self.assertNotEqual(self.process.wait(timeout=2), 0)
         diagnostics = self.process.stderr.read()

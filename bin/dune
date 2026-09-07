@@ -6,7 +6,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix))
+ (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
 
 (executable
  (name main_eio)
@@ -395,7 +395,7 @@
  ; masc for the wire's own routing table: which event types are whole-projection
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
- (libraries masc masc_tui_keeper_chat_projection yojson))
+ (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_command)
@@ -428,7 +428,7 @@
  (name masc_tui_acting)
  (wrapped false)
  (modules masc_tui_acting)
- (libraries masc_tui_observer))
+ (libraries masc_tui_observer agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -974,10 +974,18 @@
 ; fetches for the surface on screen, and the chat pane having no field there
 ; is why it read its history once and never again.
 (library
+ (name masc_tui_task_flow)
+ (wrapped false)
+ (modules masc_tui_task_flow)
+ (libraries masc_types))
+
+(library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc.sse_wire
+  masc_tui_task_flow
   masc_tui_runtime_config_view
   masc_tui_frame
   masc_tui_image_preview
@@ -1089,6 +1097,7 @@
  (wrapped false)
  (modules masc_tui_render_metrics)
  (libraries
+  masc_tui_task_flow
   masc
   masc_types
   masc_tui_ansi
@@ -1148,6 +1157,10 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  ;; The CLI reports the build rule's stamp, without a runtime repository probe.
+  masc.build_commit
+  masc.sse_wire
+  masc_tui_task_flow
   masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi

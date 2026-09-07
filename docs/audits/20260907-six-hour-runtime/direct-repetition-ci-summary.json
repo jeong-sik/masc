@@ -1,0 +1,49 @@
+{
+  "head": "97e3c224adc8c60a301828bf3a4aefac9ab7c405",
+  "run": "https://github.com/jeong-sik/masc/actions/runs/34104466151",
+  "conclusion": "failure",
+  "tests_total": 125,
+  "tests_passed": 124,
+  "tests_failed": 1,
+  "suites": {
+    "scope": {
+      "passed": 11
+    },
+    "official_client_host": {
+      "passed": 46
+    },
+    "replay": {
+      "passed": 21
+    },
+    "codex_carriage": {
+      "passed": 2
+    },
+    "claude_runtime": {
+      "passed": 23
+    },
+    "antigravity_runtime": {
+      "passed": 10,
+      "failed": 1
+    },
+    "invocation_hints": {
+      "passed": 11
+    }
+  },
+  "failure": {
+    "case": "spawn failure is pre-dispatch",
+    "expected_input_reports": 0,
+    "received_input_reports": 1,
+    "source_attribution": "The failing fixture omits the new repetition callback; pre-spawn input reporting and expected zero were unchanged by this PR. No separate baseline execution measured.",
+    "response_pr": "https://github.com/jeong-sik/masc/pull/33982"
+  },
+  "merge": {
+    "commit": "8fd39e00699062cbaad3fcec266b66facdefe89f",
+    "at": "2026-09-07T09:17:28Z",
+    "by_this_session": false
+  },
+  "limits": [
+    "Shared host tests do not execute every vendor process.",
+    "No deployed direct-scope behavior proof in this observation.",
+    "Autonomous queue/child-parent continuation remains incomplete."
+  ]
+}

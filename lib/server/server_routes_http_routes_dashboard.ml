@@ -553,6 +553,8 @@ let parse_runtime_route_lane = function
   | lane ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
+     | `Unavailable missing ->
+       Error ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
      | `Missing ->
        Error
          (Printf.sprintf
@@ -2357,9 +2359,11 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value ~compress:false ~request:req
                 ~extra_headers:(Server_timing.extra_header timing) json reqd
             | Execution_payload payload ->
+              let body, headers = Dashboard_cache.select_http_representation
+                ~accept_encoding:(Httpun.Headers.get req.headers "accept-encoding") payload in
               Http.Response.json_lazy ~compress:false ~request:req ~etag:payload.etag
-                ~extra_headers:(Server_timing.extra_header timing)
-                (fun () -> payload.raw_json) reqd)
+                ~extra_headers:(headers @ Server_timing.extra_header timing)
+                (fun () -> body) reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2672,13 +2676,24 @@ let add_routes ~sw ~clock router =
            (* RFC-0138 Phase 3 Step 2: wait-free read via
               [Dashboard_snapshot.current ()] for the global catalog. An exact
               Keeper selector computes the effective surface beside it. *)
-           let json =
-             Server_dashboard_snapshot_select.select_tools_json
+           let response =
+             Server_dashboard_snapshot_select.select_tools_response
                ~timing
                ?keeper:(Server_utils.query_param request "keeper")
                (Mcp_server.workspace_config state)
            in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
+           let extra_headers = public_read_cors_headers req @ Server_timing.extra_header timing in
+           match response with
+           | Server_dashboard_snapshot_select.Tools_json json ->
+             Http.Response.json_value ~compress:true ~request:req
+               ~extra_headers json reqd
+           | Tools_prepared tools ->
+             let body, headers = Http_response_payload.select_prepared
+               ~accept_encoding:(Httpun.Headers.get req.headers "accept-encoding")
+               tools.encoded in
+             Http.Response.json_lazy ~compress:false ~request:req ~etag:tools.etag
+               ~extra_headers:(headers @ extra_headers)
+               (fun () -> body) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/skill-activations" (fun request reqd ->
        with_public_read (fun state req reqd ->

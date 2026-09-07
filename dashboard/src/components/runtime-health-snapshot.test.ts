@@ -412,7 +412,7 @@ describe('RuntimeHealthSnapshot', () => {
           },
         ],
         disabled_runtime_ids: ['mimo.mimo-v2.5-pro', 'mimo.mimo-v2.5'],
-        dropped_assignments: [],
+        unavailable_assignments: [],
         dropped_routes: [],
         dropped_media_failover: [],
         dropped_lane_candidates: [],

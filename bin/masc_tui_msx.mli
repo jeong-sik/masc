@@ -10,12 +10,39 @@ val render : write:(string -> unit) -> Masc_tui_types.msx_frame option -> unit
 (** Draw the frame as a truecolor mosaic, or a "no machine" line when it is
     [None] or too short. Writes the whole terminal. *)
 
-val open_screen : write:(string -> unit) -> Masc_tui_types.state -> unit
-(** Take the terminal over and draw [state.msx_frame]. The caller fetches the
-    first frame before this so the screen opens on a picture, not a blank. *)
-
 val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 (** One key while open. [esc] closes the screen and returns [false] (the caller
     then owes the normal frame a full repaint). Every other key repaints the
     cached frame and returns [true]; keys are not sent to the machine in this
     increment. *)
+
+(** {1 The load menu (RFC-0439 §3.7)}
+
+    The human picks a game from the cartridge inventory. It is an overlay on the
+    MSX screen: while [state.msx_menu_open] the keyboard drives the picker, so a
+    key never reaches the emulator. The load itself is HTTP, which lives in the
+    executable layer; this module draws the picker and reports the chosen row so
+    the caller does the I/O and owns the [msx_menu_open]/[msx_open] lifecycle. *)
+
+type menu_action =
+  | Stay  (** navigated or repainted; the menu is still up *)
+  | Closed  (** the human pressed [esc] *)
+  | Watch  (** spectate the machine that is already loaded *)
+  | Load of string  (** plug this cartridge in *)
+
+val open_menu : write:(string -> unit) -> Masc_tui_types.state -> unit
+(** Take the terminal over and draw the picker over the cartridge inventory
+    [state.msx_carts]. The caller fetches the inventory first. Selection starts
+    at the top row. *)
+
+val render_menu :
+  write:(string -> unit) -> ?status:string -> Masc_tui_types.state -> unit
+(** Redraw the picker. [status] is a single line above the list — used to show
+    why a load was refused. *)
+
+val menu_consume :
+  write:(string -> unit) -> Masc_tui_types.state -> string -> menu_action
+(** One key while the menu is up. Up/down (or [k]/[j]) move the highlight and
+    repaint, returning [Stay]; enter/space pick the highlighted row ([Watch] or
+    [Load name]); [esc] returns [Closed]. It never flips the open flags, so the
+    caller decides what a choice or a close does. *)

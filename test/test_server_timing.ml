@@ -130,7 +130,7 @@ let test_extra_header_wrap () =
   Server_timing.record_ms t Server_timing.Cache_compute 1.0;
   match Server_timing.extra_header t with
   | [ (name, value) ] ->
-    Alcotest.(check string) "header name" "Server-Timing" name;
+    Alcotest.(check string) "header name is valid for H1 and H2" "server-timing" name;
     Alcotest.(check bool) "value non-empty"
       true (String.length value > 0)
   | _ -> Alcotest.fail "expected exactly one extra header"

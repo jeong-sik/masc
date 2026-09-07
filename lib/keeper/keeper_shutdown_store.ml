@@ -339,6 +339,18 @@ let phase_to_json = function
       [ "kind", `String "reconciliation_required"
       ; "active_turn", active_turn_to_json turn
       ]
+  | Operator_absence_acknowledged ack ->
+    `Assoc
+      [ "kind", `String "operator_absence_acknowledged"
+      ; "finalization", finalization_evidence_to_json ack.finalization
+      ; "prior_revision", `Int ack.prior_revision
+      ; "prior_updated_at", `String ack.prior_updated_at
+      ; "prior_operation_sha256", `String ack.prior_operation_sha256
+      ; "actor", `String ack.actor
+      ; "reason", `String ack.reason
+      ; "acknowledged_at", `String ack.acknowledged_at
+      ; "backlog_version", `Int ack.backlog_version
+      ]
   | Finalized evidence ->
     `Assoc
       [ "kind", `String "finalized"
@@ -479,8 +491,18 @@ let optional_string field json =
 let ( let* ) result f = Result.bind result f
 
 let validate_operation operation =
-  Keeper_shutdown_types.validate operation
-  |> Result.map_error (fun error -> Invalid_operation error)
+  let* () = Keeper_shutdown_types.validate operation
+    |> Result.map_error (fun error -> Invalid_operation error) in
+  match operation.phase with
+  | Operator_absence_acknowledged ack ->
+    let original = { operation with revision = ack.prior_revision
+      ; updated_at = ack.prior_updated_at; phase = Finalized ack.finalization } in
+    let digest = Digestif.SHA256.(to_hex (digest_string
+      (Yojson.Safe.to_string (to_json original)))) in
+    if String.equal digest ack.prior_operation_sha256 then Ok () else
+      Error (Invalid_operation (Invalid_absence_acknowledgement
+        "retained original shutdown observation digest differs"))
+  | _ -> Ok ()
 ;;
 
 let active_turn_of_json json =
@@ -630,6 +652,19 @@ let phase_of_json json =
     let* active_json = assoc "active_turn" json in
     let* turn = active_turn_of_json active_json in
     Ok (Reconciliation_required turn)
+  | "operator_absence_acknowledged" ->
+    let* finalization_json = assoc "finalization" json in
+    let* finalization = finalization_evidence_of_json finalization_json in
+    let* prior_revision = int "prior_revision" json in
+    let* prior_updated_at = string "prior_updated_at" json in
+    let* prior_operation_sha256 = string "prior_operation_sha256" json in
+    let* actor = string "actor" json in
+    let* reason = string "reason" json in
+    let* acknowledged_at = string "acknowledged_at" json in
+    let* backlog_version = int "backlog_version" json in
+    Ok (Operator_absence_acknowledged
+      { finalization; prior_revision; prior_updated_at; prior_operation_sha256; actor; reason;
+        acknowledged_at; backlog_version })
   | "finalized" ->
     let* evidence_json = assoc "evidence" json in
     let* evidence = finalization_evidence_of_json evidence_json in
@@ -856,6 +891,7 @@ type terminal_delete_outcome =
    independently. *)
 let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   match operation.phase with
+  | Keeper_shutdown_types.Operator_absence_acknowledged _ -> false
   | Keeper_shutdown_types.Superseded _ -> true
   | Keeper_shutdown_types.Finalized
       { completion = Keeper_shutdown_types.Completion_pending _; _ } -> false
@@ -907,6 +943,10 @@ let delete_terminal ~config ~keeper_name ~operation_id =
 
 let replace ~config ~expected_revision operation =
   let* () = validate_operation operation in
+  let* () = match operation.phase with
+    | Operator_absence_acknowledged _ -> Error (Invalid_operation
+        (Invalid_absence_acknowledgement "use the explicit absence acknowledgement transaction"))
+    | _ -> Ok () in
   let* operation_path = path_for_operation ~config operation in
   with_keeper_inventory_lock
     ~access:Write
@@ -931,6 +971,9 @@ let replace ~config ~expected_revision operation =
                 { expected = expected_revision + 1
                 ; actual = operation.revision
                 })
+         | Ok { phase = Operator_absence_acknowledged _; _ } ->
+           Error (Invalid_operation (Invalid_absence_acknowledgement
+             "acknowledged shutdown evidence is immutable"))
          | Ok existing when Keeper_shutdown_types.immutable_fields_equal existing operation ->
            Keeper_fs.save_json_atomic operation_path (to_json operation)
            |> Result.map_error (fun detail -> Io_error detail)
@@ -1150,7 +1193,8 @@ let persist_blocked_latest ~config ~identity ~failure ~now =
            Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
          | Ok existing ->
            (match existing.phase with
-            | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _ ->
+            | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _
+            | Operator_absence_acknowledged _ ->
               Ok (State_preserved existing)
             | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
             | Cleanup_ready _ ->
@@ -1172,7 +1216,7 @@ let load ~config ~keeper_name operation_id =
     load_path_unlocked ~operation_path ~keeper_name ~operation_id)
 ;;
 
-let scan_keeper_dir ~config ~keeper_name =
+let scan_keeper_dir ~inventory_locked ~config ~keeper_name =
   let* dir = keeper_records_dir config keeper_name in
   match Fs_compat.path_kind ~follow:false dir with
   | Fs_compat.Missing -> Ok []
@@ -1183,7 +1227,10 @@ let scan_keeper_dir ~config ~keeper_name =
             "shutdown store owner entry is not a directory: %s"
             dir))
   | Fs_compat.Directory ->
-    with_operation_lock ~access:Read dir (fun () ->
+    let with_inventory f =
+      if inventory_locked then f () else with_operation_lock ~access:Read dir f
+    in
+    with_inventory (fun () ->
     (try
       Fs_compat.read_dir dir
       |> List.fold_left
@@ -1226,7 +1273,7 @@ let scan_keeper_dir ~config ~keeper_name =
 ;;
 
 let corrupt_operation_id_for_keeper ~config ~keeper_name =
-  let* inventory = scan_keeper_dir ~config ~keeper_name in
+  let* inventory = scan_keeper_dir ~inventory_locked:false ~config ~keeper_name in
   Ok
     (canonical_corrupt_operation_ids inventory
      |> List.assoc_opt keeper_name)
@@ -1259,7 +1306,7 @@ let scan_inventory ~config =
                        detail))
               in
               let* keeper_entries =
-                scan_keeper_dir ~config ~keeper_name:validated_name
+                scan_keeper_dir ~inventory_locked:false ~config ~keeper_name:validated_name
               in
               Ok (List.rev_append keeper_entries entries))
            (Ok [])
@@ -1270,7 +1317,7 @@ let scan_inventory ~config =
 ;;
 
 let list_for_keeper ~config ~keeper_name =
-  let* inventory = scan_keeper_dir ~config ~keeper_name in
+  let* inventory = scan_keeper_dir ~inventory_locked:false ~config ~keeper_name in
   inventory
   |> List.fold_left
        (fun result entry ->
@@ -1280,6 +1327,47 @@ let list_for_keeper ~config ~keeper_name =
           | Corrupt_record corrupt -> Error corrupt.error)
        (Ok [])
   |> Result.map List.rev
+;;
+
+type absence_acknowledgement_result =
+  | Absence_acknowledged of Keeper_shutdown_types.t
+  | Absence_already_acknowledged of Keeper_shutdown_types.t
+
+let acknowledge_absent_owner ~config ~keeper_name ~operation_id
+    ~expected_revision ~check_inventory ~decide =
+  let* operation_path = path ~config ~keeper_name operation_id in
+  with_keeper_inventory_lock ~access:Write ~config ~keeper_name (fun () ->
+    let* inventory = scan_keeper_dir ~inventory_locked:true ~config ~keeper_name in
+    with_operation_lock ~access:Write operation_path (fun () ->
+      let* current = load_path_unlocked ~operation_path ~keeper_name ~operation_id in
+      match check_inventory inventory with
+      | Error error -> Ok (Error error)
+      | Ok () ->
+      match current.phase with
+      | Operator_absence_acknowledged ack
+        when expected_revision = ack.prior_revision || expected_revision = current.revision ->
+        Ok (Ok (Absence_already_acknowledged current))
+      | _ when current.revision <> expected_revision ->
+        Error (Revision_conflict { expected = expected_revision; actual = current.revision })
+      | _ ->
+        match decide current inventory with
+        | Error error -> Ok (Error error)
+        | Ok acknowledgement ->
+          let* () =
+            match current.phase with
+            | Finalized evidence when evidence = acknowledgement.finalization -> Ok ()
+            | _ -> Error (Invalid_operation
+                (Invalid_absence_acknowledgement "acknowledgement must retain original Finalized evidence"))
+          in
+          let acknowledged =
+            { current with revision = current.revision + 1
+            ; updated_at = acknowledgement.acknowledged_at
+            ; phase = Operator_absence_acknowledged acknowledgement }
+          in
+          let* () = validate_operation acknowledged in
+          let* () = Keeper_fs.save_json_atomic operation_path (to_json acknowledged)
+            |> Result.map_error (fun detail -> Io_error detail) in
+          Ok (Ok (Absence_acknowledged acknowledged))))
 ;;
 
 module For_testing = struct

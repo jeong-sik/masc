@@ -7011,11 +7011,11 @@ let render_clients (state : state) =
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Runtime · Clients") timestamp
+          (screen_title " MASC Config / Runtime · Clients") timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC Runtime · Clients") shown timestamp
+          (screen_title " MASC Config / Runtime · Clients") shown timestamp
           (connection_badge state)
   in
   box_top buf cols;
@@ -10621,13 +10621,13 @@ let render_system_logs (state : state) =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC System Logs") timestamp
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]") timestamp
           (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s (%d of %d, seq %d)%s  %s  %s"
-          (screen_title " MASC System Logs")
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]")
           total_entries snapshot.sys_total snapshot.sys_latest_seq filter_note
           timestamp (connection_badge state)
   in
@@ -13761,7 +13761,7 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Runtime detail")
+    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Config / Runtime detail")
        (Terminal_text.single_line target_label) (connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
@@ -13821,7 +13821,7 @@ let render_runtime (state : state) =
     match state.runtime_surface with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Runtime") timestamp
+          (screen_title " MASC Config / Runtime") timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -13847,7 +13847,7 @@ let render_runtime (state : state) =
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s  %s%s  %s  %s"
-          (screen_title " MASC Runtime")
+          (screen_title " MASC Config / Runtime")
           (tab ~active:lanes_active
              (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count shown))
           (tab ~active:(not lanes_active)
@@ -14526,7 +14526,7 @@ let render_acting (state : state) =
   let header =
     Printf.sprintf "%s  %s  %s"
       (screen_title
-         (Printf.sprintf " MASC Activity (%d of %d held, %s)" shown held
+         (Printf.sprintf " MASC Activity  [1 Events* | 2 Logs] (%d of %d held, %s)" shown held
             (Acting.filter_label state.acting_filter)))
       timestamp
       (connection_badge state)
@@ -15649,7 +15649,7 @@ let config_pane_strip (state : state) =
     ; name Config_themes "themes"
     ; name Config_voice "voice"
     ]
-  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+  ^ Ansi.dim ^ "  p:next  9:Runtime" ^ Ansi.reset
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this
@@ -16735,8 +16735,7 @@ let help_surface_name (surface : surface) =
   | Planning | Verification | Harness -> "Planning"
   | Fusion -> "Fusion"
   | Repositories | Code | Changes -> "Workspace"
-  | Runtime | Lanes | Clients -> "Runtime"
-  | Config | Resources | Tools -> "Config"
+  | Runtime | Lanes | Clients | Config | Resources | Tools -> "Config"
   | Connectors | Schedules -> "Keepers"
   | System_logs -> "Activity"
 

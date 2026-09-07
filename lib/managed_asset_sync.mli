@@ -13,8 +13,8 @@
 
 (** The closed set of embedded subtrees this sync may own. Each carries its
     asset prefix inside the embedded tree ([prompts/] / [tools/] / [mcp/])
-    and the manifest [schema] string its [managed-assets.json] must
-    declare. *)
+    and the [schema] string written into the runtime directory's
+    [managed-assets.json]. *)
 type domain =
   | Prompts
   | Tools
@@ -38,25 +38,31 @@ val sync
   -> dest_dir:string
   -> unit
   -> sync_result
-(** Converge [dest_dir] onto the embedded assets of [domain]. Only entries
-    under the domain's prefix in [files] are considered. After all sync
-    preconditions validate, each is written into [dest_dir] when missing or
-    when its content differs from the embedded copy; identical files are
-    left untouched. The embedded managed-assets manifest must exactly equal
-    the current embedded asset set (an empty manifest with an empty set is
-    valid — the state of a domain before its first migrated asset). The
+(** Converge [dest_dir] onto the embedded assets of [domain]. The managed
+    set is every entry under the domain's prefix in [files]; nothing else
+    declares it (#31283 removed the hand-written [managed-assets.json] that
+    used to list the same files a second time and drifted from them). Each
+    asset is written into [dest_dir] when missing or when its content
+    differs from the embedded copy; identical files are left untouched. The
     runtime directory is an exact distribution-owned projection: paths
-    absent from the current manifest are removed, then the runtime manifest
-    is replaced with the current one.
+    absent from the embedded set are removed, then the runtime
+    [managed-assets.json] is rewritten from that set ([managed_by],
+    [schema], sorted [paths]) as the record of what this binary owns there.
+
+    An empty embedded set is refused: every domain ships assets, so an empty
+    set is a lost tree, and projecting it would delete the whole runtime
+    directory.
 
     [read]/[files] are typically [Embedded_config.read] /
     [Embedded_config.file_list], passed in by the server bootstrap so this
     module stays asset-source agnostic (and unit-testable).
 
-    Deletion is fail-closed: a malformed, incomplete, or unsafe manifest or
-    an unreadable runtime tree records an explicit [failed] entry and no
-    path is removed. [Eio.Cancel.Cancelled] propagates; per-file
-    [Sys_error] is recorded in [failed] without aborting the pass. *)
+    Every embedded relative path is validated before scanning or mutating
+    the runtime tree. An unsafe path or empty embedded set records explicit
+    [failed] entries and leaves runtime assets and the manifest untouched.
+    An unreadable runtime tree also prevents deletion.
+    [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded in
+    [failed] without aborting the pass. *)
 
 val sample_budget : int
 (** How many paths either report line names before it says how many more
@@ -75,7 +81,7 @@ val removed_line : label:string -> sync_result -> string option
     Its own line and its own {!sample_budget}, because a removal is a
     different event from a copy. A copy is the distribution converging; a
     removal is a file that was in the runtime tree and is not in the
-    manifest, which for [Tools] is the only way an operator's own definition
+    embedded set, which for [Tools] is the only way an operator's own definition
     can end — tool definitions have no runtime edit layer, so a file placed
     there is deleted at the next boot.
 

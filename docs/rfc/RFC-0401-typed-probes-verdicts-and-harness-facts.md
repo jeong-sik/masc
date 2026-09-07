@@ -171,10 +171,10 @@ Antigravity 가 자가 보고 confidence 를 모으지만 게이트로 쓰는 �
 ## 3. 판정 쪽
 
 - `config/prompts/verification.md` 에 템플릿 변수 `{{harness_facts_section}}` 를 더한다.
-  지금 변수 목록은 파일 5행의 `template_variables` 에 있다. 프롬프트 자산은 세 자리에
-  등록해야 부팅 sync 가 돈다: md 파일, 프롬프트 이름 목록, managed-assets manifest
-  (`lib/managed_asset_sync.ml:16`). `test/test_prompt_templates_render.ml` 이 새 변수를
-  검증한다.
+  지금 변수 목록은 파일 5행의 `template_variables` 에 있다. 프롬프트 자산은 두 자리에
+  등록한다: md 파일, 프롬프트 이름 목록. 부팅 sync 는 임베디드 트리에서 관리 대상을
+  계산한다(`lib/managed_asset_sync.ml`, #31283). `test/test_prompt_templates_render.ml` 이
+  새 변수를 검증한다.
 - 표에는 probe 마다 `executions_matched`·`location_exists`·`pinned_ref_drift` 를 그린다.
   "이 사실을 인용하라" 는 문장은 여기 한 곳에만 적는다. 강제는 아래 스키마가 한다.
 - `report_review_verdict` 의 JSON 스키마(`lib/task/anti_rationalization.ml:206`, 정확히

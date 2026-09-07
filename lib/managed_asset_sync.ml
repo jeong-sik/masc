@@ -12,8 +12,8 @@ let prefix = function
   | Mcp -> "mcp/"
 ;;
 
-(* One schema string per domain: a tools manifest pasted into prompts/ (or
-   the other way around) is a validation error, not a silent sync. *)
+(* One schema string per domain, written into the runtime manifest so a
+   reader of the runtime directory can tell which domain owns it. *)
 let manifest_schema = function
   | Prompts -> "masc.prompt-managed-assets.v1"
   | Tools -> "masc.tool-managed-assets.v1"
@@ -27,6 +27,9 @@ let noun = function
   | Mcp -> "mcp"
 ;;
 
+(* The runtime manifest, named the way the domain sees it. It is the only
+   manifest there is: no source file declares the managed set (#31283), the
+   embedded tree is the set, and this file is the sync's record of it. *)
 let manifest_path domain = prefix domain ^ "managed-assets.json"
 
 module String_set = Set.Make (String)
@@ -47,48 +50,14 @@ let relative_asset_path rel =
   && List.for_all (fun part -> part <> "" && part <> "." && part <> "..") parts
 ;;
 
-let managed_asset_paths ~domain content =
-  try
-    match Yojson.Safe.from_string content with
-    | `Assoc fields ->
-      (match List.assoc_opt "schema" fields, List.assoc_opt "paths" fields with
-       | Some (`String schema), Some (`List values)
-         when String.equal schema (manifest_schema domain) ->
-         let rec collect seen = function
-           | [] -> Ok seen
-           | `String rel :: rest when relative_asset_path rel ->
-             if String_set.mem rel seen
-             then
-               Error
-                 (Printf.sprintf "duplicate managed %s asset: %s" (noun domain) rel)
-             else collect (String_set.add rel seen) rest
-           | `String rel :: _ ->
-             Error
-               (Printf.sprintf "unsafe managed %s asset path: %s" (noun domain) rel)
-           | _ ->
-             Error
-               (Printf.sprintf "managed %s asset paths must be strings" (noun domain))
-         in
-         collect String_set.empty values
-       | Some (`String schema), _ ->
-         Error
-           (Printf.sprintf
-              "unsupported managed %s asset schema: %s"
-              (noun domain)
-              schema)
-       | _ ->
-         Error
-           (Printf.sprintf
-              "managed %s asset manifest is missing schema or paths"
-              (noun domain)))
-    | _ ->
-      Error
-        (Printf.sprintf
-           "managed %s asset manifest must be a JSON object"
-           (noun domain))
-  with
-  | Yojson.Json_error msg ->
-    Error (Printf.sprintf "invalid managed %s asset manifest: %s" (noun domain) msg)
+let runtime_manifest_content ~domain current =
+  Yojson.Safe.pretty_to_string
+    (`Assoc
+       [ "managed_by", `String "MASC"
+       ; "schema", `String (manifest_schema domain)
+       ; "paths", `List (List.map (fun rel -> `String rel) (String_set.elements current))
+       ])
+  ^ "\n"
 ;;
 
 let current_assets ~domain files =
@@ -96,8 +65,7 @@ let current_assets ~domain files =
   let prefix_len = String.length asset_prefix in
   List.filter_map
     (fun rel ->
-      if String.equal rel (manifest_path domain)
-         || not (String.starts_with ~prefix:asset_prefix rel)
+      if not (String.starts_with ~prefix:asset_prefix rel)
       then None
       else Some (rel, String.sub rel prefix_len (String.length rel - prefix_len)))
     files
@@ -291,81 +259,56 @@ let sync_current_asset ~domain ~read ~dest_dir acc (embedded_rel, runtime_rel) =
 let sync ~domain ~read ~files ~dest_dir () =
   let assets = current_assets ~domain files in
   let initial = { copied = []; overwritten = []; removed = []; failed = [] } in
-  match read (manifest_path domain) with
-  | None ->
+  let current =
+    List.fold_left (fun acc (_, rel) -> String_set.add rel acc) String_set.empty assets
+  in
+  let invalid_paths =
+    List.filter_map
+      (fun (embedded_rel, runtime_rel) ->
+        if relative_asset_path runtime_rel then None
+        else
+          Some
+            ( embedded_rel
+            , Printf.sprintf "unsafe embedded %s asset path" (noun domain) ))
+      assets
+  in
+  (* The embedded tree is the managed set. Until #31283 a hand-written
+     [managed-assets.json] beside the assets declared the same list a second
+     time, and five releases in a row shipped with a file on one side and not
+     the other -- the boot then refused the domain and every asset added
+     since stayed out of the runtime directory. With one source there is
+     nothing to disagree with.
+
+     What that comparison also caught was an empty embedded set: a crunch
+     step that lost the tree. Without a second list that case is caught on
+     its own, and refused, because every domain ships assets and projecting
+     an empty set would delete the operator's whole runtime directory. *)
+  (* Validate the complete authority set before removing absent runtime files
+     or writing even a valid asset that precedes an invalid one. *)
+  if invalid_paths <> [] then { initial with failed = invalid_paths }
+  else if String_set.is_empty current
+  then
     { initial with
-      failed = [ manifest_path domain, "embedded managed-assets manifest unreadable" ]
+      failed =
+        [ ( prefix domain
+          , Printf.sprintf
+              "embedded %s asset set is empty; refusing to project an empty tree"
+              (noun domain) )
+        ]
     }
-  | Some content ->
-    (match managed_asset_paths ~domain content with
-     | Error msg -> { initial with failed = [ manifest_path domain, msg ] }
-     | Ok managed ->
-       let current =
-         List.fold_left
-           (fun acc (_, rel) -> String_set.add rel acc)
-           String_set.empty
-           assets
-       in
-       (* An empty embedded set with a non-empty manifest means the crunch
-          step lost the tree; an empty set with an empty manifest is the
-          valid state of a domain before its first migrated asset. *)
-       if String_set.is_empty current && not (String_set.is_empty managed)
-       then
-         { initial with
-           failed =
-             [ ( manifest_path domain
-               , Printf.sprintf "embedded %s asset set is empty" (noun domain) )
-             ]
-         }
-       else (
-         let missing = String_set.diff current managed in
-         let extra = String_set.diff managed current in
-         if not (String_set.is_empty missing && String_set.is_empty extra)
-         then (
-           (* Both sides live inside this binary: [current] is what the crunch
-              step embedded, [managed] is what the embedded manifest declares.
-              They disagree two ways. A half-built binary is one. The other,
-              and the one that actually happens, is a source tree whose
-              manifest was not updated alongside the asset: then the binary is
-              built correctly and rebuilding reproduces the same mismatch.
-              Measured 2026-09-06 -- #33472 and #33639 each added tool TOMLs
-              without their manifest line, and every boot since told an
-              operator to rebuild, which could not have worked. So name both
-              directions and both remedies. The previous wording ("manifest differs
-              from current assets") left the reader to guess whether the
-              runtime directory, the source tree, or the build was at fault;
-              one 2026-08-25 recovery attempt spent half an hour on that
-              guess while the server stayed down. *)
-           let render set =
-             if String_set.is_empty set
-             then "(none)"
-             else String.concat ", " (String_set.elements set)
-           in
-           { initial with
-             failed =
-               [ ( manifest_path domain
-                 , Printf.sprintf
-                     "the embedded %s set and its %s do not match. Either the \
-                      manifest is missing a line for the asset beside it (edit %s \
-                      and rebuild), or this binary is half-built (rebuild). \
-                      Embedded but unlisted: %s. Listed but not embedded: %s."
-                     (noun domain)
-                     (manifest_path domain)
-                     (manifest_path domain)
-                     (render missing)
-                     (render extra) )
-               ]
-           })
-         else (
-           match runtime_asset_paths ~domain ~dest_dir with
-           | Error msg -> { initial with failed = [ manifest_path domain, msg ] }
-           | Ok runtime ->
-             let removable = String_set.diff runtime current in
-             let purged =
-               String_set.fold (remove_runtime_asset ~domain ~dest_dir) removable initial
-             in
-             List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
-             |> write_runtime_manifest ~domain ~dest_dir content)))
+  else (
+    match runtime_asset_paths ~domain ~dest_dir with
+    | Error msg -> { initial with failed = [ prefix domain, msg ] }
+    | Ok runtime ->
+      let removable = String_set.diff runtime current in
+      let purged =
+        String_set.fold (remove_runtime_asset ~domain ~dest_dir) removable initial
+      in
+      List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
+      |> write_runtime_manifest
+           ~domain
+           ~dest_dir
+           (runtime_manifest_content ~domain current))
 ;;
 
 (* Two lines, two budgets. The bootstrap used to concatenate copied,
@@ -430,7 +373,7 @@ let removed_line ~label result =
     Some
       (Printf.sprintf
          "%s assets deleted from the runtime directory (not in the embedded \
-          manifest): %s%s"
+          set): %s%s"
          label
          shown
          more)

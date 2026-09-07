@@ -1,7 +1,7 @@
 > **상태 갱신 (2026-09-03)**: model-prose ratchet 게이트(`scripts/model-prose-{ratchet.sh,scan.py,baseline.json}`)는 제거됐다.
 > allowlist 25파일·2만자가 상주하는 상태에서 게이트가 잡는 것은 신규 유입(+14자 수준)뿐이어서
 > 유지 비용이 값보다 컸다. 프롬프트 외부화 원칙(RFC 본문)은 그대로 산다 — 게이트가 아니라
-> 리뷰와 managed 파일 규칙(managed-assets.json)이 지킨다.
+> 리뷰가 지킨다. managed-assets.json 은 #31283 로 없어졌고, 관리 대상은 임베디드 트리에서 계산한다.
 
 ---
 rfc: "prompts-and-tool-definitions-outside-ocaml"

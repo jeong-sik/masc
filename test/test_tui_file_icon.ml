@@ -28,7 +28,7 @@ let kind_of_name =
   ; case "script.py" F.Code
   ; case "lib.rs" F.Code
   ; case "runtime.toml" F.Data
-  ; case "managed-assets.json" F.Data
+  ; case "release.json" F.Data
   ; case "config.yaml" F.Data
   ; case "README.md" F.Prose
   ; case "notes.txt" F.Prose

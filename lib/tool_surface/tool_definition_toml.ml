@@ -937,14 +937,11 @@ let load ~name ~contents =
 (* ── Embedded tree validation ─────────────────────────────────────────── *)
 
 let tools_asset_prefix = "tools/"
-let manifest_relative_path = tools_asset_prefix ^ "managed-assets.json"
 
 let validate_embedded ~read ~files =
   let validate_one acc rel =
     let* () = acc in
     if not (String.starts_with ~prefix:tools_asset_prefix rel)
-    then Ok ()
-    else if String.equal rel manifest_relative_path
     then Ok ()
     else if not (String.equal (Filename.dirname rel) "tools")
     then Error (sprintf "tool definitions must sit directly under tools/: %s" rel)

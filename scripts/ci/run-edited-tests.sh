@@ -46,16 +46,16 @@ sources=$( { printf '%s\n' "${changed}" \
 # A guard can protect an input that is not itself a test, and then no pull
 # request that breaks it ever edits it.
 # test_managed_assets_sync_from_binary runs the real sync over the real
-# embedded set, so a config/ asset added without its line in that domain's
-# managed-assets.json fails there rather than at the next boot -- which is
-# what its header says it is for. But a pull request that adds
-# config/tools/foo.toml edits no test/*.ml, so the selector above picks
-# nothing and the guard never runs.
+# embedded set, so a config/ asset the binary cannot read or place fails
+# there rather than at the next boot -- which is what its header says it is
+# for. But a pull request that adds config/tools/foo.toml edits no
+# test/*.ml, so the selector above picks nothing and the guard never runs.
 #
 # Measured 2026-09-06: #33472 added keeper_lane_status.toml and #33639 added
-# the three masc_file_* tools. Neither ran the guard, neither updated the
-# manifest, and every boot since printed the mismatch WARN with those four
-# stranded out of the runtime directory.
+# the three masc_file_* tools, and neither ran the guard. Back then the
+# guard also caught a hand-written manifest missing their lines; #31283
+# removed that manifest, and the guard still proves the assets embed and
+# sync.
 assets=$( { printf '%s\n' "${changed}" \
   | grep -E '^config/(prompts|tools|mcp)/' || [ $? -eq 1 ]; } | head -1)
 asset_guard="test/test_managed_assets_sync_from_binary.ml"

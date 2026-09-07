@@ -54,7 +54,7 @@ restart MASC:
 ```toml
 [browser]
 webdriver_url = "http://127.0.0.1:4444"
-# Optional: select an installed Firefox or Zen executable/app bundle.
+# Optional: select an installed Firefox or Zen executable.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 

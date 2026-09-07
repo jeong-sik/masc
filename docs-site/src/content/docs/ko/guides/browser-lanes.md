@@ -36,7 +36,7 @@ geckodriver --host 127.0.0.1 --port 4444
 ```toml
 [browser]
 webdriver_url = "http://127.0.0.1:4444"
-# 선택 사항: 설치된 Firefox 또는 Zen 실행 파일/app bundle 지정.
+# 선택 사항: 설치된 Firefox 또는 Zen 실행 파일 지정.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 

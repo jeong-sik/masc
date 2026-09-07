@@ -1,0 +1,10 @@
+{
+  "captured_at": "2026-09-07T09:06:48.417493+00:00",
+  "binary_commit": "a4e66033110f6b3909e364045e3f4e2f8c3e8965",
+  "started_at": "2026-09-07T08:37:36Z",
+  "ack_revision": 5,
+  "phase": "operator_absence_acknowledged",
+  "recovery_errors_since_start": 0,
+  "last_log_record": "2026-09-07T09:06:47Z",
+  "server_start_by_this_session": false
+}

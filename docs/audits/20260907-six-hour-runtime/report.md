@@ -18,17 +18,17 @@
 | 4 | DeepSeek tool-call 응답 누락 | 224 | code-fix |
 | 5 | 중첩 tool-cycle checkpoint 저장 실패 | 21 | related-code-fix |
 | 6 | 복합 도구는 성공하지만 실행 증거 저장 실패 | 5 | code-fix |
-| 7 | 재개 후 반복 도구 루프 | 231 | scope-design-required |
+| 7 | 재개 후 반복 도구 루프 | 231 | direct-scope-tested-autonomous-pending |
 | 8 | Provider 연결 장애 | 51 | tested-code-fix |
 | 9 | 일반 문장의 @check·lint를 ID 오류로 기록 | 362 | code-fix |
 | 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
-| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | live-acknowledged |
+| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | live-ack-restart-observed |
 | 12 | Board candidate ledger schema 불일치 | 12 | retention-merged-tested |
 | 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-merged |
 | 14 | Dashboard build-stamp 누락 | 5 | distribution-stack |
 | 15 | microVM sweep가 전체 Keeper 부팅을 막음 | 68 | tested-code-fix |
 | 16 | microsandbox가 요구 격리 보장을 표현 못함 | 5 | backend-capability |
-| 17 | 브라우저 live lane 미연결 | 12 | host-installed-connected |
+| 17 | 브라우저 live lane 미연결 | 12 | live-roundtrip-observed |
 | 18 | Discord 삭제·권한 없는 channel 바인딩 | 28 | external-binding |
 | 19 | WebSearch 전 provider 실패와 WebFetch HTTP 오류 | 19 | search-service-recovered |
 | 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | batch-drain-observed |
@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 08:03Z Execute count959로 반복 문제 미해결. #33950 기반6/6 PASS·필수 검사 PASS 후 이 세션이cf63fd467d로 병합. Context-only 저장 유실 수정 #33953도21/21·필수 검사 PASS 후8685db2478로 병합했다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.
+- 조치: 직접 요청 scope #33967은 97e3c224ad에서 scope11·host46·replay21·Codex2·Claude23·invocation11 PASS. 전체125개 중124 PASS/Antigravity 기존 전송 관측1 FAIL이며 외부8fd39e0069로 병합됐다. 그 실패 수정 #33982와 큐 binding #33984는 원격 검증 중. 자율 실행·자식 부모 연결·official-client 재시작 영속화는 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -120,7 +120,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: 도메인103/103·HTTP34/34 PASS와 외부 병합 후, 운영6db68b4bea에서 이 세션이08:27:04Z 부재 ACK를 적용했다. 재조회 revision4→5·operator_absence_acknowledged, 이전 종료 증거·정리 의도 보존 확인. 새 서버 시작에서의 재발 여부는 미측정.
+- 조치: 도메인103/103·HTTP34/34 PASS 후08:27:04Z 실제 부재 ACK 적용. 외부08:37:36Z 재시작 뒤09:06:48Z revision5·operator_absence_acknowledged 유지, 시작 이후 해당 복구 오류0건. 09:39:25Z에도 ACK 유지 확인. 이 세션이 재시작한 것은 아니다.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -146,7 +146,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다.
+- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다. 09:35Z 외부 바이너리 변경 후 다시 stale/unbound이며 실행·디스크 바이너리 hash도 불일치했다.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -171,7 +171,7 @@
 
 ### 17. 브라우저 live lane 미연결
 
-- 조치: #33881 Node5/5 PASS. native host 실제 설치·원본 토큰 보존 확인. 사용자 확장 추가 뒤 Firefox 자식86997→8935 TCP 연결. 탭/본문 왕복 및 두 live 브라우저 구분은 미확인.
+- 조치: native host 설치 후09:40:03Z 실제 live 확장으로 tabs.list와 page.read 왕복 성공: HTTP200, 탭9개, 본문515자. 본문·URL·제목은 증거에서 제외. 정확한 응답 host PID 및 여러 브라우저 구분은 미측정.
 - 관련 코드/경계: `connectors/browser`
 - 최초 증거: `2026-09-06T22:12:34Z` / seq `26003629` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:286149`
 > keeper:analyst tool_call tool=BrowserTabs source=- params=[lane] input_shape=[lane=string:4] outcome=error out_len=341 failed_params={"lane":"live"} error_preview=no browser lane connected: the live lane needs the operator's browser running with the browser-lane extension and host (connectors/browser) failure_class=workflow_rejection — The current state does not admit this action; it is a rule, ...
@@ -410,3 +410,17 @@ Release34098251245의 macOS 실제 job도 SUCCESS이며 공개 release job은 SK
 실제 브라우저에서도08:30:43Z MASC Overview가 렌더됐고 실행 중 Keeper13/19가 표시됐다. 캡처 구간 page error0·HTTP4xx/5xx0을 관측했다. [화면](dashboard-6db-dashboard.png) · [브라우저 관측](dashboard-6db-browser-proof.json). 전체 런타임은 warning이며 probe와 paused Keeper 항목이 남아 있어 대시보드 자산 정상화와 fleet 전체 정상화를 구별한다.
 
 ACK 이후08:32:41Z까지5분37초의 로그에서 해당 new-keeper shutdown recovery 오류0건을 확인했다. [후속 로그 관측](absence-ack-post-apply-observation.json). 같은 프로세스의 짧은 구간이며 재시작 성공 증거로 확대하지 않는다.
+
+
+## 09:40Z 검증 갱신: 실제 브라우저 왕복과 재시작 뒤 ACK
+
+[실측 증거](runtime-readonly-refresh-20260907T0940Z.json)는 읽기 전용 관측이다. 09:40:03Z live 확장 route가 탭 9개와 본문 515자를 반환했다. host 연결 여부만 확인하던 단계를 넘어 실제 tabs.list → page.read 왕복을 측정했다. 본문·URL·제목·자격증명 값은 저장하지 않았다. 응답한 정확한 host PID는 프로토콜에 없으므로 두 Firefox의 구분까지 증명하지 않는다.
+
+[재시작 이후 증거](absence-ack-after-external-restart.json)에서 외부 08:37:36Z 시작 후 09:06:48Z에도 ACK revision5가 유지되고, 해당 shutdown recovery 오류는 0건이다. 09:39:25Z 파일 재조회도 ACK 상태를 확인했다. 이 세션의 재시작은 없었다.
+
+09:35Z 실행 바이너리는 embedded a4e6603311, 대시보드는 다시 stale/unbound다. 09:37Z 제공 index·디스크 index·health index hash는 일치하지만, 실행 health와 디스크 바이너리 hash는 다르다. 08:30Z 자산 복구 성공은 당시 관측이며 현재 일치하는 설치 릴리스의 증거로 확대하지 않는다.
+
+[직접 scope CI](direct-repetition-ci-summary.json)는 exact 97e3c224ad의 125개 중124 PASS/1 FAIL이다. #33967은 외부 세션이 필수 검사 후 병합했다. 새 scope/host 테스트는 통과했고, 실패는 Antigravity가 spawn 전 입력을 전달했다고 보고하는 기존 source 불일치다. 별도 baseline 실행은 하지 않았다. #33982는 전체 stdin 쓰기·EOF 후에만 보고하도록 고치며, #33984는 큐 식별자 보존 및 불확실한 rename 이후 동기화 재확인을 보강한다. 두 후속의 원격 동작 검증과 자율 실행 연결은 아직 완료 증거가 아니다.
+
+
+09:43:44Z에 추가로 [후속 로그 구간](runtime-pattern-followup-0940.json)을 동결했다. 외부 시작08:37:36Z 이후22,486행(INFO20,726/WARN1,483/ERROR277)에서 원래 exact-tool 반복 경고는11건이 남았다. 선택한 기존 누락 tool-results·중첩 checkpoint·composition 증거 실패·new-keeper 종료 복구·browser lane 부재·Librarian 실패·Claude quota 문자열은0건이다. 각 경로의 실제 실행 횟수를 측정하지 않았으므로0건을 해결이나 통제된 전후 개선율로 해석하지 않는다.

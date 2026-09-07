@@ -59,7 +59,7 @@
     "count": 48,
     "note": "",
     "source": "lib/keeper/keeper_librarian_runtime.ml",
-    "action": "Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI 최초 attempt는 결제/한도로 미시작했으나 현재 재실행 중. 배포·실제후속선택은 미검증.",
+    "action": "Codex luna 후보 추가 후에도 Claude claim_schema_mismatch가 남은 후보를 막는 결함5건 확인. #33913의15b554f7a8에서63/63 동작 테스트 PASS. 외부 최종headcfc1f173d8의 필수 검사 PASS 후d16c83de17로 병합됐다. 실제 후속 후보 선택과 failover 연속성은 미검증.",
     "status": "domain-failover-tested",
     "first": {
       "seq": 25990215,

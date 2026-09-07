@@ -6,7 +6,7 @@
 
 **판정:** 아래 count는 대표 로그 이벤트 수이며 서로 독립인 사고 수가 아니다. provider 실패→pipeline 실패→Keeper 실패는 중첩한다. 최종 행은 health의 별도 live acceptance 상태다.
 
-**실행 식별:** 첫 health binary b90d5f6182, 검토 source 8b804d8d5b. 다른 운영 작업이 진행 중이며 중간 재조회 binary는 8b804d8d5b. 본 세션이 배포했다고 주장하지 않는다.
+**실행 식별:** 첫 health binary b90d5f6182, 검토 source 8b804d8d5b. 다른 운영 작업이 진행 중이며 중간 재조회 binary는 8b804d8d5b. 이 초기 바이너리 교체는 본 세션이 수행하지 않았다. 이후 이 세션의 자산 적용과 ACK는 하단 시각별 증거로 구분한다.
 
 | # | 개선 대상 | 대표 관측 | 진행 |
 |---|---|---:|---|
@@ -52,7 +52,7 @@
 
 ### 3. Librarian exact 실패와 주간 한도
 
-- 조치: Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI 최초 attempt는 결제/한도로 미시작했으나 현재 재실행 중. 배포·실제후속선택은 미검증.
+- 조치: Codex luna 후보 추가 후에도 Claude claim_schema_mismatch가 남은 후보를 막는 결함5건 확인. #33913의15b554f7a8에서63/63 동작 테스트 PASS. 외부 최종headcfc1f173d8의 필수 검사 PASS 후d16c83de17로 병합됐다. 실제 후속 후보 선택과 failover 연속성은 미검증.
 - 관련 코드/경계: `lib/keeper/keeper_librarian_runtime.ml`
 - 최초 증거: `2026-09-06T21:21:58Z` / seq `25990215` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:272735`
 > memory os librarian failed lane=librarian_exact: librarian exact execution failed outward_effect=started cause=agent_core_execution_failed: slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":"you (yousleepwhen) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 329bef59-e725-4293-aa76-0e6556d9efec)"} ; flow=[slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219; slot=glm-coding.glm-5.3-flash call_id=66a83f8e233f25848cf44bbb48d40b33; advance=glm-coding.glm-5.3-flash->ollama_cloud.deepseek-v4-flash-0731 kind=execution_failed cause=provider refused (http_status=429 refusal=rate_limited) raw_response_sha256=41976dbd
@@ -377,20 +377,20 @@ Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으
 
 WebFetch의 exact120422bb9b [34095824585](https://github.com/jeong-sik/masc/actions/runs/34095824585)은14/14·bridge20/20 총34 PASS, 필수 검사도 PASS다. [결과 요약](web-fetch-upstream-ci-summary.txt). 다른 작업 주체가07:39:38Z에#33936을c7fe4f67a1로 병합했다. 이 세션의 병합으로 표시하지 않는다.
 
-ACK의 exact ad2af057c9 [34095886814](https://github.com/jeong-sik/masc/actions/runs/34095886814)는103/103 PASS, exact21500fe6d6 [34095899962](https://github.com/jeong-sik/masc/actions/runs/34095899962)는34/34 PASS다. 이후 외부 병합은 각각cdae490f8774와8ac44f2af180이다. HTTP 최종head81c9f393967e는 관련 파일이 동일하고 필수 검사가 통과했지만21500의 targeted를81c9 exact 결과로 이동시키지 않는다. 실제 운영 ACK는 수행하지 않았다.
+ACK의 exact ad2af057c9 [34095886814](https://github.com/jeong-sik/masc/actions/runs/34095886814)는103/103 PASS, exact21500fe6d6 [34095899962](https://github.com/jeong-sik/masc/actions/runs/34095899962)는34/34 PASS다. 이후 외부 병합은 각각cdae490f8774와8ac44f2af180이다. HTTP 최종head81c9f393967e는 관련 파일이 동일하고 필수 검사가 통과했지만21500의 targeted를81c9 exact 결과로 이동시키지 않는다. 이 08:01Z 관측 시점에는 실제 운영 ACK를 수행하지 않았다. 08:27Z 적용 결과는 아래 후속 절에 기록했다.
 
-설치 resolver의3d3695a1f3 [34095776029](https://github.com/jeong-sik/masc/actions/runs/34095776029)는 installed17/17·Web39/39 PASS다. 외부에서 관련 파일이 동일한8a67c07c99를c328dbe8로 병합하고 feature branch를 삭제했다. 이 세션은 branch를 복구하지 않고 검증된3d를 가리키는 verify/installed-dashboard-3d3695에서 [Release34098251245](https://github.com/jeong-sik/masc/actions/runs/34098251245)를 dispatch했다. non-tag workflow_dispatch라 공개 release 단계는 실행 대상이 아니다. Linux x64/ARM64 실제 설치 smoke는 SUCCESS다. macOS ARM64는 진행 중이며 해당 job이 may-fail인 것과 실제 성공 여부를 구별해야 한다. 운영 설치·재시작은 하지 않았다.
+설치 resolver의3d3695a1f3 [34095776029](https://github.com/jeong-sik/masc/actions/runs/34095776029)는 installed17/17·Web39/39 PASS다. 외부에서 관련 파일이 동일한8a67c07c99를c328dbe8로 병합하고 feature branch를 삭제했다. 이 세션은 branch를 복구하지 않고 검증된3d를 가리키는 verify/installed-dashboard-3d3695에서 [Release34098251245](https://github.com/jeong-sik/masc/actions/runs/34098251245)를 dispatch했다. non-tag workflow_dispatch라 공개 release 단계는 실행 대상이 아니다. Linux x64/ARM64 실제 설치 smoke는 SUCCESS다. 당시 macOS ARM64는 진행 중이었다. 이후 실제 SUCCESS는08:31Z 절과 통합 증거에 기록했다. 운영 설치·재시작은 하지 않았다.
 
-반복 scope 기반 [#33950](https://github.com/jeong-sik/masc/pull/33950) head72deb19a38는 별도 draft다. constructor·decoder의 공통 검증, Fresh 멱등성, A/B/A 보존, unknown Resume 거부, target 복원 충돌을 구현했고 실제 checkpoint codec과 기존 detector를 잇는6개 대상 [34098406950](https://github.com/jeong-sik/masc/actions/runs/34098406950)에서6/6 PASS를 확인했다. 이후 main 충돌을 해결한bdc8852ccc는 구현·인터페이스·테스트·stanza가 동일하며 필수 PR check34099857999가 진행 중이다. runtime caller·영속 자식-parent linkage·official-client 저장 연결은 아직 없으므로 원래7번을 해결로 표시하지 않는다.
+반복 scope 기반 [#33950](https://github.com/jeong-sik/masc/pull/33950) head72deb19a38는 당시 별도 draft였다. constructor·decoder의 공통 검증, Fresh 멱등성, A/B/A 보존, unknown Resume 거부, target 복원 충돌을 구현했고 실제 checkpoint codec과 기존 detector를 잇는6개 대상 [34098406950](https://github.com/jeong-sik/masc/actions/runs/34098406950)에서6/6 PASS를 확인했다. 이후 main 충돌을 해결한bdc8852ccc는 구현·인터페이스·테스트·stanza가 동일하며 당시 필수 PR check34099857999가 진행 중이었으며 이후 PASS·병합 결과는 아래에 기록했다. runtime caller·영속 자식-parent linkage·official-client 저장 연결은 아직 없으므로 원래7번을 해결로 표시하지 않는다.
 
 08:01:52Z health 재조회는 binary1f7ec8a587·started07:56:05Z·base~/me·masc_root~/me/.masc·dashboardstale·overalldegraded, pending10/counts_complete=true를 반환했다. 이 서버 시작과 바이너리 교체는 이 세션이 수행하지 않았다. 이 커밋은 최근 병합된 변경들의 운영 반영 증거가 아니다.
 
 
 ### 08:20Z checkpoint 저장 경계와 설치 검증 후속
 
-[#33953](https://github.com/jeong-sik/masc/pull/33953) exact e19fd32c2c는 최종 메시지와 turn_count가 같더라도 Context·설정·도구·usage 등이 달라졌으면 새 체크포인트를 저장한다. 기존 코드는 이전 값을 재사용해 Context-only 관측이 유실될 수 있었다. 메시지 본문은 재직렬화하지 않으며, 나머지 replay 상태는 소유 codec으로 비교한다. 실제 디스크 저장·복원 시나리오를 추가했고 독립 리뷰에서 차단할 정확성 문제는 없었다. metadata 비교 비용은 크기에 비례하며 성능은 미측정이다. [targeted34100025761](https://github.com/jeong-sik/masc/actions/runs/34100025761)은 진행 중이며 운영 배포나 반복 문제 전체 해결을 뜻하지 않는다.
+[#33953](https://github.com/jeong-sik/masc/pull/33953) exact e19fd32c2c는 최종 메시지와 turn_count가 같더라도 Context·설정·도구·usage 등이 달라졌으면 새 체크포인트를 저장한다. 기존 코드는 이전 값을 재사용해 Context-only 관측이 유실될 수 있었다. 메시지 본문은 재직렬화하지 않으며, 나머지 replay 상태는 소유 codec으로 비교한다. 실제 디스크 저장·복원 시나리오를 추가했고 독립 리뷰에서 차단할 정확성 문제는 없었다. metadata 비교 비용은 크기에 비례하며 성능은 미측정이다. [targeted34100025761](https://github.com/jeong-sik/masc/actions/runs/34100025761)은 당시 진행 중이었다. 이후21/21 PASS·병합 결과는08:31Z 절에 있으며 운영 배포나 반복 문제 전체 해결을 뜻하지 않는다.
 
-Release34098251245의 Linux x64와 ARM64는 checkout 밖에서 설치 서버를 실행해 정확한 commit·index와 참조 자산3개를 확인하고, index 손상·receipt 누락 시503을 확인했다. 다운로드한 x64 artifact10009693579도 binary·receipt·dashboard642개 파일의 해시/크기를 독립 검증했다. [패키지 검증](release-linux-x64-verification.json). macOS는 아직 실제 성공이 확인되지 않았다. 이 검증용3d 바이너리는 운영 서버에 설치하지 않았다.
+Release34098251245의 Linux x64와 ARM64는 checkout 밖에서 설치 서버를 실행해 정확한 commit·index와 참조 자산3개를 확인하고, index 손상·receipt 누락 시503을 확인했다. 다운로드한 x64 artifact10009693579도 binary·receipt·dashboard642개 파일의 해시/크기를 독립 검증했다. [패키지 검증](release-linux-x64-verification.json). 이08:20Z 관측 때는 macOS 성공이 확인되지 않았고, 이후08:31Z 절에 실제 성공 결과를 추가했다. 이 검증용3d 바이너리는 운영 서버에 설치하지 않았다.
 
 CLI 도메인 failover #33913은 외부 최종 head cfc1f173d8의 필수 검사 SUCCESS 후d16c83de17로 병합됐다. 기존63개 대상 검증은15b554f7a8의 결과이며 최종 head 전체 테스트로 재표기하지 않는다.
 

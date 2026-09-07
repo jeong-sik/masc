@@ -354,8 +354,24 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${_subcommand}" != "clean" ]]; then
   _pin_script="$(dirname "${script_path}")/opam-pin-external-deps.sh"
   if [[ -f "${_pin_script}" ]] && command -v opam >/dev/null 2>&1; then
-    if ! _pin_report="$(bash "${_pin_script}" --check 2>&1)"; then
+    # Stderr only: the check writes its "all pins are in place" line to
+    # stdout, and repeating that before every build is noise. What it writes
+    # to stderr is either drift, which stops the build, or a note that a
+    # dependency is linking from a checkout on this machine -- that one has to
+    # reach the screen on a run that passes, or a build of somebody's working
+    # copy is indistinguishable from a build of the commit this repo names.
+    # Kept inside `if !`: this script runs under `set -e`, where a bare
+    # assignment from a failing command substitution exits on the spot -- the
+    # report captured and never printed.
+    _pin_report=""
+    _pin_status=0
+    if ! _pin_report="$(bash "${_pin_script}" --check 2>&1 1>/dev/null)"; then
+      _pin_status=1
+    fi
+    if [[ -n "${_pin_report}" ]]; then
       printf '%s\n' "${_pin_report}" >&2
+    fi
+    if [[ "${_pin_status}" -ne 0 ]]; then
       printf '[dune-local] set MASC_SKIP_DEPS_CHECK=1 to bypass this guard\n' >&2
       exit 1
     fi

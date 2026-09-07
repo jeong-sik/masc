@@ -21,6 +21,7 @@ type model_entry =
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
   ; assistant_tool_content_format : string option
+  ; chat_output_budget_field : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
   ; supports_reasoning_budget : bool option

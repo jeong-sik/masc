@@ -236,6 +236,8 @@ let merge_exact_model_entry
       prefer_overlay
         overlay.assistant_tool_content_format
         base.assistant_tool_content_format
+  ; chat_output_budget_field =
+      prefer_overlay overlay.chat_output_budget_field base.chat_output_budget_field
   ; supports_reasoning = prefer_overlay overlay.supports_reasoning base.supports_reasoning
   ; supports_extended_thinking =
       prefer_overlay overlay.supports_extended_thinking base.supports_extended_thinking

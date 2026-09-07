@@ -67,6 +67,7 @@ type entry =
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
   ; assistant_tool_content_format : string option
+  ; chat_output_budget_field : string option
     (** Wire shape for assistant messages that contain tool calls but no visible
         text (null / empty_string). *)
   ; supports_reasoning : bool option

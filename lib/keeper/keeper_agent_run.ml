@@ -562,7 +562,19 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
+let tool_boundary_before_repetition ~repetition_execution state =
+  match terminal_effect_boundary_decision state with
+  | Error _ as error -> error
+  | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+  | Ok Runtime_agent.Continue ->
+    match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
+    | Some error ->
+      Error (Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+    | None -> Ok Runtime_agent.Continue
+;;
+
 module For_testing = struct
+  let tool_boundary_before_repetition = tool_boundary_before_repetition
   let direct_repetition_boundary = direct_repetition_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
@@ -1146,18 +1158,13 @@ let run_turn
            Some
              (fun (_ : Agent_core.Agent.Advanced.tool_boundary) ->
                 try
-                  match Option.bind repetition_execution
-                          Keeper_repetition_scope.Execution.failure with
-                  | Some error ->
-                    Error (Agent_core.Error.Internal
-                      (Keeper_repetition_scope.error_to_string error))
-                  | None ->
                   (* AGENT_CORE invokes this probe after tool results and the
                      checkpoint have persisted. A descriptor-typed terminal
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
                   (match
-                     terminal_effect_boundary_decision (s.terminal_effect_state ())
+                     tool_boundary_before_repetition ~repetition_execution
+                       (s.terminal_effect_state ())
                    with
                    | Error _ as error -> error
                    | Ok (Runtime_agent.Yield _ as decision) -> Ok decision

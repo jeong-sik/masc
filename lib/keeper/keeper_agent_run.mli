@@ -64,6 +64,10 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val tool_boundary_before_repetition :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    Keeper_tools_agent_core.terminal_effect_state ->
+    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val direct_repetition_boundary :
     execution:Keeper_repetition_scope.Execution.t ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->

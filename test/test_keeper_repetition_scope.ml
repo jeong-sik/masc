@@ -247,6 +247,29 @@ let test_failed_scope_stops_official_provider_preparation () =
   check bool "failed scope does not enter later preparation hook" false !inner_called;
   check bool "failed scope does not project a provider request" false !projected
 
+let test_native_terminal_evidence_precedes_scope_failure () =
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  let execution = S.Execution.direct_operation (operation "direct-terminal") in
+  ignore (S.Execution.prepare execution ~source ~target |> require "prepare");
+  S.Execution.observe execution ~target { call with output_fingerprint = Some "invalid" };
+  let decide = Masc.Keeper_agent_run.For_testing.tool_boundary_before_repetition
+      ~repetition_execution:(Some execution) in
+  let completed = Masc.Keeper_tools_agent_core.Terminal_effect_completed
+      (Masc.Keeper_tool_execution.Memory_write_completed { revision = 1 }) in
+  (match decide completed with
+   | Ok (Masc.Runtime_agent.Yield Masc.Runtime_agent.Terminal_tool_completed) -> ()
+   | _ -> fail "scope failure hid an exact completed effect");
+  let failed = Masc.Keeper_tools_agent_core.Terminal_effect_failed
+      { failure_class = Tool_result.Runtime_failure
+      ; effect_disposition = Tool_result.Proven_post_effect
+      ; diagnostic = "exact committed failure" } in
+  check bool "structured terminal failure stays exact" true
+    (decide failed = Masc.Keeper_agent_run.terminal_effect_boundary_decision failed);
+  (match decide Masc.Keeper_tools_agent_core.Terminal_effect_open with
+   | Error (Agent_core.Error.Internal _) -> ()
+   | _ -> fail "open boundary continued despite latched scope failure")
+
 let () =
   run "keeper repetition scope checkpoint"
     [ "scope", [ test_case "A B checkpoint restart A" `Quick test_a_b_restart_a
@@ -258,4 +281,5 @@ let () =
                ; test_case "direct retry without checkpoint then new operation" `Quick test_direct_retry_without_provider_checkpoint
                ; test_case "direct observation failure survives retry" `Quick test_direct_observation_failure_is_latched
                ; test_case "direct preparation retains conflicting target" `Quick test_direct_prepare_preserves_conflicting_target
-               ; test_case "failed scope stops actual official preparation" `Quick test_failed_scope_stops_official_provider_preparation ] ]
+               ; test_case "failed scope stops actual official preparation" `Quick test_failed_scope_stops_official_provider_preparation
+               ; test_case "native terminal evidence precedes scope failure" `Quick test_native_terminal_evidence_precedes_scope_failure ] ]

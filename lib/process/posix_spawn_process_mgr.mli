@@ -8,8 +8,10 @@
     The manager accepts the same arguments as the eio_posix one: [cwd] (a
     native path), [env], [stdin]/[stdout]/[stderr] and, through
     [Eio_unix.Process.spawn_unix], any descriptor map. Children are awaited
-    through [Eio_unix.Process.sigchld], which eio_posix installs, and are
-    killed and reaped when their switch is released. A spawn failure raises
+    through [Eio_unix.Process.sigchld]; only a backend that installs a SIGCHLD
+    handler broadcasts it, and eio_linux installs none, so the manager
+    installs one itself on each spawn. Children are killed and reaped when
+    their switch is released. A spawn failure raises
     [Unix.Unix_error (errno, "posix_spawn", executable)]; the executable
     lookup on PATH and its [Eio.Io] error stay with [Eio_unix.Process]. *)
 

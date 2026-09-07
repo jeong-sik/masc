@@ -137,6 +137,7 @@
   domain-name
   ca-certs
   pbrt
+  masc.monotonic_deadline
   mtime
   mtime.clock
   mtime.clock.os

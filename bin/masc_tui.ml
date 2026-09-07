@@ -14558,17 +14558,34 @@ and is loaded on demand through keeper_skill.
             | "?" | "esc" ->
                 state.help_open <- false;
                 state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" ->
+            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
                 (* Bounded against the sheet the frame draws, which folds to
                    two columns on a wide terminal and so holds half the rows
-                   the lines were written as. *)
+                   the lines were written as. A page moves by the viewport
+                   height the sheet itself claims, so one press lands the
+                   reader where the last visible line was the first. *)
                 let count, height = Masc_tui_render.help_viewport state in
+                let step =
+                  match k with
+                  | "pageup" | "pagedown" -> max 1 height
+                  | _ -> 1
+                in
                 let move =
                   match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
+                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
                   | _ -> Masc_tui_scroll.up
                 in
-                state.help_scroll <- move ~count ~height state.help_scroll
+                (* [down]/[up] move by one; the page keys repeat the single
+                   step so the bound stays the scroll module's, not a
+                   re-derived one. *)
+                let rec repeat n scroll =
+                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
+                in
+                state.help_scroll <- repeat step state.help_scroll
+            | "g" -> state.help_scroll <- 0
+            | "G" ->
+              let count, height = Masc_tui_render.help_viewport state in
+              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
             | _ -> ())
        (* Modal for the same reason the help sheet is: a panel that is
           answering "what is coming" should not have a surface binding fire
@@ -15772,6 +15789,49 @@ and is loaded on demand through keeper_skill.
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
+       | Some "r"
+         when (not message_mode)
+              && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
+              && state.context_inspector_open = false ->
+           (* The listing footers have promised [r:refresh] since the footer
+              tables existed; no handler ever answered it. This arm makes the
+              sheet true everywhere a listing draws it. The guards stay out
+              of the two surfaces that own their own r — the identity pane
+              and the context inspector — and out of the composer, where r
+              must type. *)
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
+       | Some "i"
+         when (not message_mode)
+              && (match state.msg_target_keeper_name with
+                 | Some _ -> true
+                 | None ->
+                   (* With no conversation open, the shown keeper is whoever
+                      the list cursor names; that is who the composer
+                      addresses. *)
+                   Option.is_some (selected_keeper state))
+              && not (state.view = Config && state.config_pane = Config_prompts) ->
+           (* The sheet has promised [i] as "focus the composer" as long as
+              it promised [r]. It opens the chat of the keeper the screen is
+              about — the open conversation's keeper, else the one under the
+              list cursor. The config pane keeps its own i. *)
+           let target =
+             match state.msg_target_keeper_name with
+             | Some keeper_name -> Some keeper_name
+             | None ->
+               (match selected_keeper state with
+                | Some keeper -> Some keeper.k_name
+                | None -> None)
+           in
+           Option.iter
+             (fun keeper_name ->
+                open_message_for_keeper ~return_to:state.msg_return state keeper_name
+                  ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox:async_messages);
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message)
+             target
        | Some "@" ->
            state.answering_open <- true;
            state.answering_scroll <- 0;

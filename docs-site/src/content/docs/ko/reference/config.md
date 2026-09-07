@@ -23,8 +23,7 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 
 명단은 작업 공간마다 다르니 `masc init` 은 `keepers/` 를 만들기만 하고 아무것도 넣지
 않습니다. 커넥터 설정(Discord, Slack)도 별도 파일이 아니라 `runtime.toml` 안의
-테이블입니다(`[discord]` 등). `repositories.toml` 과 `keeper_repo_mappings.toml` 은
-그 기능을 쓰기 시작하면 생깁니다.
+테이블입니다(`[discord]` 등). `repositories.toml` 은 저장소를 등록하면 생깁니다.
 
 `.env.local` 은 없습니다. 설정은 TOML 에, 자격증명은 **서버를 띄운 환경**에
 있습니다 — [환경 변수](/ko/reference/env-contract/) 참고.

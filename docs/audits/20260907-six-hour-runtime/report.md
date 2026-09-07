@@ -485,3 +485,12 @@ raw429의 실패 소유권은 unknown이고 Retry-After는 존재할 때 보존�
 [14:05:26Z 운영 읽기 전용 실측](runtime-recovery-followup-1405.json): 바이너리116b6d13f2, 외부 시작13:44:23Z, 전체warning·dashboard ok다. journal 병합만 포함하며 이번 입력·checkpoint·429·fence 후속 병합은 아직 포함하지 않는다. dashboard의 릴리스 receipt/source binding은 여전히 없음이며 이번 관측은 브라우저 동작 검증이 아니다. 최근1시간13,065행(INFO11,805/WARN1,094/ERROR166) 중 반복 exact-tool 신호21건, GLM429 header-profile87건이 남았다. 다른 선택 신호0건은 해당 경로 실행이나 완치를 증명하지 않는다. 이번 세션은 배포·재시작하지 않았다.
 
 다음 연결은 A의 원래 입력/반복 frame을 선택하면서 B가 갱신한 공유 대화를 유지해야 한다. Direct 응답 종결과 부모 작업 종결을 구분하고, physical child 취소를 정확한 실행 identity에 묶어야 한다. 대기·불확실한 A 때문에 무관한 B를 막는 gate나 임의 만료는 추가하지 않는다.
+
+
+## 추가 운영 오류와 native 연결 검토
+
+[OpenAI 오류 분리](openai-request-failure-followup.json): 같은1시간의 openai.gpt-5.5 오류는 추론·도구/API 조합49건, 모델 접근권52건, 도구 스키마description 중복3건이다. 중복은 기존description 앞에 같은key를 추가하던 serializer 결함이며 #34075의96061에서 수정했다. 실제request codec46/46 PASS, broader provider-complete63/66 PASS로 합계109/112이며 실패3건은 tool을 넘기지 않는 별도 thinking-contract 검사다. 전체 run은 실패로 기록하고, 별도baseline 실행은 하지 않았다. 필수 검사와 codec 독립실행은 진행 중이다.
+
+[OpenAI 공식 GPT-5.5 안내](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.5)의 API/model parameters는 추론·도구·여러 턴 용도로 Responses를 안내한다. 운영의 openai provider는 openai-compatible-http이고 registry의 Chat Completions 경로를 사용한다. Responses를 명시적으로 선택하는 설정 표현을 보강하고 있으며, 추론을 끄거나 권한복구 완료로 표시하지 않는다.
+
+[독립 native 연결 소스 검토](native-continuation-source-review.json)는 전체 snapshot캐시로 인한 B 덮어쓰기/충돌, 늦은 provider callback의 실행 소유권, CAS commit불확실성에서의 중복 관측, historical baseline재주입에 따른 false yield를 확인했다. 각각 scope한정 projection, 정확한 physical attempt소유권, pre/post재조회 확인, attempt시작baseline고정으로 다뤄야 한다. 이번 결과를 native 구현 완료나 운영에서 네 가지 모두 재현한 증거로 사용하지 않는다.

@@ -42,9 +42,11 @@ let test_stale_response () =
   expect "wrong source/app cannot publish content" (wrong_source.reading = None)
 
 let test_session_generation () =
-  let view = { (create Browser) with load = Loading (7, Open_session) } in
-  expect "read cannot settle session operation"
-    (accept ~generation:7 (decode (response ())) view = view)
+  List.iter (fun operation ->
+    let view = { (create Browser) with load = Loading (7, operation) } in
+    expect "read cannot settle session or navigation operation"
+      (accept ~generation:7 (decode (response ())) view = view))
+    [Open_session; Close_session; Goto "https://example.org/?q=한글"]
 
 let test_failed_refresh () =
   let previous = loaded () in
@@ -54,8 +56,9 @@ let test_failed_refresh () =
   expect "failure preserves last successful reading" (refreshed.reading = previous.reading)
 
 let test_source_switch () =
-  let view = switch_source Automation (loaded ()) in
-  expect "switch clears content and selection" (view.reading = None && view.selected_tab = None);
+  let view = switch_source Automation { (loaded ()) with url_draft = Some "https://example.org" } in
+  expect "switch clears content, selection and hidden URL input"
+    (view.reading = None && view.selected_tab = None && view.url_draft = None);
   expect "live is the default" ((create Slack).source = Live);
   expect "Slack filter is explicit"
     (request_body (create Slack) = `Assoc ["lane", `String "live"; "app", `String "slack"])

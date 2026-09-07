@@ -48,5 +48,23 @@
     "docs/rfc/RFC-main-domain-scheduler-latency.md",
     "docs/rfc/RFC-schedule-history-and-outcome.md",
     "docs/runbooks/RFC-0154-system-error-class-schema-v2-cutover.md"
+  ],
+  "removed_images": [
+    "docs/screenshots/dashboard/2026-09-04/11-ide.png",
+    "docs/screenshots/dashboard/2026-09-04/19-work-repositories.png",
+    "docs/screenshots/tui/2026-08-24/keeper-lanes/01-live-lanes.png",
+    "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.png"
+  ],
+  "image_handling": "Historical images with confirmed organization text were removed, not synthetically edited.",
+  "image_audit": {
+    "images_examined": 202,
+    "visible_matches_confirmed": 4,
+    "retained_images_without_detected_matches": 198,
+    "method": "OCR and SVG text inspection; matches visually confirmed. One long image was additionally inspected through 13 browser viewport captures.",
+    "limitation": "OCR has recognition limits; absence of detected text is not a mathematical guarantee about every pixel."
+  },
+  "artifact_reference_updates": [
+    "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.json",
+    "docs/screenshots/dashboard/2026-09-04/README.md"
   ]
 }

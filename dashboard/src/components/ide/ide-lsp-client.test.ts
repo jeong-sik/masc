@@ -4,6 +4,7 @@ import {
   EMPTY_LSP_STATUS_SNAPSHOT,
   LspConnection,
   lspDiagnosticSnapshot,
+  lspStatusRejected,
   lspStatusSnapshot,
   parseLspStatusSnapshot,
   publishLspScope,
@@ -84,6 +85,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   lspDiagnosticSnapshot.value = new Map()
   lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
+  lspStatusRejected.value = false
   mockSockets.length = 0
   // The published scope is process-wide, so a case that declares one must not
   // decide what the next case connects with.
@@ -176,7 +178,6 @@ describe('LspConnection', () => {
         langs: [{
           lang: 'ocaml',
           connected: false,
-          overlay_only: true,
           command: 'ocamllsp',
           last_error: 'ocamllsp unavailable',
         }],
@@ -187,7 +188,6 @@ describe('LspConnection', () => {
       langs: [{
         lang: 'ocaml',
         connected: false,
-        overlay_only: true,
         command: 'ocamllsp',
         last_error: 'ocamllsp unavailable',
       }],
@@ -201,7 +201,6 @@ describe('LspConnection', () => {
       langs: [{
         lang: 'ocaml',
         connected: true,
-        overlay_only: false,
         command: 'ocamllsp',
         last_error: null,
       }],
@@ -224,6 +223,36 @@ describe('LspConnection', () => {
     expect(warn).toHaveBeenCalledWith('[LSP] invalid masc/lspStatus payload')
     expect(lspStatusSnapshot.value.langs).toHaveLength(1)
     expect(lspStatusSnapshot.value.langs[0]?.connected).toBe(true)
+    // The kept snapshot is now a past reading, and the statusbar has to be
+    // able to say so rather than present it as the current one.
+    expect(lspStatusRejected.value).toBe(true)
+    conn.dispose()
+  })
+
+  it('clears the rejection once a readable payload arrives', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+
+    socket.message({
+      jsonrpc: '2.0',
+      method: 'masc/lspStatus',
+      params: { langs: [{ lang: 'ocaml', connected: true }] },
+    })
+    expect(lspStatusRejected.value).toBe(true)
+
+    socket.message({
+      jsonrpc: '2.0',
+      method: 'masc/lspStatus',
+      params: {
+        langs: [{ lang: 'ocaml', connected: true, command: 'ocamllsp', last_error: null }],
+      },
+    })
+    expect(lspStatusRejected.value).toBe(false)
+    expect(lspStatusSnapshot.value.langs).toHaveLength(1)
     conn.dispose()
   })
 
@@ -374,9 +403,8 @@ describe('LspConnection', () => {
   })
 
   // The connection URL is how the server learns which codebase this editor is
-  // looking at: it picks both the annotation partition the overlay reads and
-  // the tree our repo-relative document paths resolve against. Without it the
-  // server had to guess, and read the wrong store.
+  // looking at: it picks the tree our repo-relative document paths resolve
+  // against. Without it the server had to guess.
   it('declares the repository scope on the connection URL', () => {
     installWebSocketMock()
     publishLspScope({

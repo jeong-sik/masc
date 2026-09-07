@@ -263,7 +263,7 @@ let system_fd_snapshot ?now () =
   | Some snapshot -> snapshot
   | None ->
     let snapshot =
-      Eio_guard.run_in_systhread (fun () -> detect_system_fd_snapshot_now ())
+      Eio_guard.run_in_systhread ~label:"fd-pressure-snapshot" (fun () -> detect_system_fd_snapshot_now ())
     in
     Atomic.set system_fd_cache (Some { sampled_at = now; snapshot });
     snapshot

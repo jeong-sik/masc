@@ -1,0 +1,11 @@
+{
+  "manifest_version": 2,
+  "name": "masc browser lane",
+  "version": "0.1.0",
+  "description": "Read bridge between this browser session and the masc browser lane (tabs list, page text)",
+  "permissions": ["tabs", "nativeMessaging", "<all_urls>"],
+  "background": { "scripts": ["background.js"] },
+  "browser_specific_settings": {
+    "gecko": { "id": "browser-lane@masc.local" }
+  }
+}

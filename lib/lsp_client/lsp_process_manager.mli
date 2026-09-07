@@ -46,6 +46,7 @@ type language =
   | Dart
   | Scala
   | Csharp
+  | Markdown
 
 (** Every variant once. The language test walks it against the exhaustive
     functions and fails when a variant is missing. *)
@@ -102,6 +103,27 @@ val covered_extensions : unit -> string list
 (** The language of a file, by extension. [None] for a file no server here
     covers. *)
 val language_of_path : string -> language option
+
+(** How a memo ({!Ide_memo}) is spelled in a language's comment syntax.
+    [None] for JSON, which has none. *)
+val memo_markers_of_language : language -> Ide_memo.markers option
+
+type memo_line_refusal =
+  | Extension_unknown of string  (** the extension, lower-case with the dot, or [""] *)
+  | No_comment_syntax of language
+
+val memo_line_refusal_to_string : memo_line_refusal -> string
+
+(** The comment markers a memo takes in the file at [path], or why it can
+    take none there: the extension names no language here, or the language
+    (JSON) has no comment. The writer spells the memo with them and the
+    reader looks for them, so the two agree on every file by construction. *)
+val memo_markers_of_path : string -> (Ide_memo.markers, memo_line_refusal) result
+
+(** The one comment line a memo becomes in the file at [path], or why it
+    cannot become one there. The tool that writes it and the projection that
+    records the call both spell it here. *)
+val memo_line : path:string -> Ide_memo.t -> (string, memo_line_refusal) result
 
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 val command_for_lang : string -> (string * string list) option

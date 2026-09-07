@@ -43,7 +43,6 @@ const VIEW_TAB_BASE = 'ide-view'
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
   { kind: 'parallel', label: 'Parallel', description: '동시 keeper 작업 표시' },
-  { kind: 'notes', label: 'Notes', description: 'NOTE/SUGGEST 마커' },
   {
     kind: 'keeper-trace',
     label: 'Trace',
@@ -52,7 +51,7 @@ export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
 ]
 
 export const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
-export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'notes'] as const
+export const REVIEW_FOCUS_LAYERS = ['keeper-trace'] as const
 
 // 'time' / 'parallel' read per-line git-blame ownership data
 // (ide-data-workspace-store.ts fetchGitBlame) that is only populated when

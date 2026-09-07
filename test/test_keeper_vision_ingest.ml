@@ -44,8 +44,7 @@ let test_store_path_reasons_are_declared () =
     (fun reason ->
        if not (in_set reason) then
          Alcotest.failf "undeclared store-path eviction reason: %s" reason)
-    [ "invalid_source_type"
-    ; "bad_base64"
+    [ "bad_base64"
     ; "image_too_large"
     ; "invalid_media_type"
     ; "store_failed"

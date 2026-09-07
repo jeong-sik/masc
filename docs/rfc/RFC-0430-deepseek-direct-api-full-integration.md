@@ -1,0 +1,174 @@
+---
+rfc: "0430"
+title: "DeepSeek direct API full integration"
+status: Draft
+created: 2026-09-06
+updated: 2026-09-06
+author: vincent
+related: []
+---
+
+# RFC-0430 — DeepSeek direct API full integration
+
+## 무엇을
+
+agent_core가 deepseek.com 직접 API를 카탈로그·런타임 양쪽에서 완전히 지원한다.
+2026-09-06 계정에 $50 를 충전하고 런타임 체인 3 lane(glm-5.2/5.3/5-turbo)의
+끝에 `deepseek.deepseek-v4-flash` 를 넣었다. 이 RFC 는 그 다음 — 문서 전수
+분석(2026-09-06, api-docs.deepseek.com 전 페이지 + awesome-deepseek-agent)로
+확정한 카탈로그/codec 갭을 닫는 작업의 범위와 순서를 정한다.
+
+## 근거 — 문서에서 읽은 사실 (2026-09-06, 출처 명시)
+
+- serve 모델 3종: `deepseek-v4-flash`(V4-Flash-0731), `deepseek-v4-pro`(V4-Pro-0813),
+  `deepseek-v4-flash-vision-exp`(실험, 이미지 입력). 컨텍스트 1M, max output 384K.
+  (https://api-docs.deepseek.com/)
+- 신가(2026-08-16 16:00 UTC~), peak/off-peak 이중 — flash 입력 miss $0.44/$0.22,
+  출력 $1.32/$0.66; pro 입력 miss $1.32/$0.66, 출력 $3.96/$1.98.
+  cache hit 입력은 miss 의 약 1/30(flash $0.014/$0.007).
+  (https://api-docs.deepseek.com/quick_start/pricing, /news/news260813)
+- `tool_choice` 는 `none`/`auto`/`required`/named function 전부 지원.
+  카탈로그의 `supports_required_tool_choice=false` 근거는 V3 시절
+  deepseek-ai/DeepSeek-V3 #1376 (2026-06-30 확인) — V4 스펙과 어긋난다.
+  (https://api-docs.deepseek.com/api/create-chat-completion)
+- thinking: `{"thinking":{"type":"enabled"|"disabled"}}` + `reasoning_effort`
+  `high`/`max`. **tools 가 있는 요청은 이전 모든 턴의 `reasoning_content` 를
+  다시 보내야 한다 — 빠뜨리면 400.** tools 가 없으면 reasoning_content 는
+  무시된다. (https://api-docs.deepseek.com/guides/thinking_mode)
+- reasoning 응답 필드: `message.reasoning_content`, usage 에
+  `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`/
+  `completion_tokens_details.reasoning_tokens`.
+- keep-alive: non-streaming 은 빈 줄, streaming 은 `: keep-alive` SSE 코멘트를
+  계속 받는다. 추론 시작 전 10 분이 지나면 서버가 접속을 끊는다.
+  (https://api-docs.deepseek.com/quick_start/rate_limit)
+- `user_id` 파라미터: 콘텐츠 심사·KVCache·스케줄링 격리 단위.
+- Responses API 정식 지원(base_url 그대로, Codex 용도; `[DONE]` 없이 종료
+  이벤트 3종). Anthropic 호환(`/anthropic`, claude-* 모델명 자동 매핑,
+  Claude Code 공식 연결 경로). Files API(이미지 전용, vision-exp 와 세트).
+  (https://api-docs.deepseek.com/guides/responses_api, /guides/anthropic_api,
+  /guides/files_api, /news/news260821)
+
+전체 분석 원문: 세션 산출물 `/tmp/deepseek-docs-analysis.md` (repo 외).
+
+## 고치는 것 — 갭과 순서
+
+| # | 갭 | 위치 | 위험/가치 | Phase |
+|---|---|---|---|---|
+| 1 | 직접 deepseek 4행에 `reasoning_replay` 없음 | models.toml | thinking+tools 루프에서 매 턴 400 — lane 실패의 직접 원인 | P0 |
+| 2 | 가격이 옛 값(flash $0.14/$0.28) — 신가 peak 반영 안 됨 | models.toml | 비용 계산·예산 판정 오류 | P0 |
+| 3 | `cache_read_multiplier` 없음(hit≈miss/30) | models.toml | 캐시 히트 비용 과대평가 | P0 |
+| 4 | `supports_required_tool_choice`/`supports_named_tool_choice=false` | models.toml | V4 스펙과 불일치 — 강제 tool_choice 거부. 실측 후 전환 | P0(실측 동반) |
+| 5 | vision-exp 모델 행 없음 | models.toml | keeper 이미지 입력 경로 확장 | P1 |
+| 6 | Anthropic 호환 provider stanza 없음 | runtime.toml | Claude Code 런타임을 deepseek 로 — 기존 anthropic codec 재사용 | P1 |
+| 7 | Responses API 연결 없음 | provider/codec | `backend_openai_responses` 는 있음 — deepseek base_url 연결 검증 | P2 |
+| 8 | SSE keep-alive 코멘트/빈 줄 처리, 10 분 절단 | codec | 긴 턴에서 파서 오동작 가능 — 실측으로 확인 후 필요시만 | P2 |
+| 9 | Files API | agent_core | 이미지 재사용·대용량 전송 — keeper 화상 워크플로 수요 시 | P3 |
+| 10 | `user_id` 송신 | codec | KVCache keeper 격리 — 측정 후 판단 | P3 |
+
+제외: FIM completion, Chat Prefix Completion(beta) — masc 에 소비자가 없다.
+
+## 구현 순서
+
+- **Phase 0 (P0)**: models.toml deepseek 4행 — `reasoning_replay` 지정
+  (ollama_cloud deepseek 행의 `drop_without_tool_preserve_with_tool` 선례와
+  문서 회귀 규칙이 일치하는지 실측으로 확인하고 지정), 가격 갱신(peak 기준
+  단일가 + off-peak 주석), `cache_read_multiplier` 추가, tool_choice 실측 후
+  플래그 전환. 카탈로그는 서버 재시행 시 반영된다(오버레이 아님).
+- **Phase 1 (P1)**: vision-exp 행(`supports_image_input=true`, base
+  openai_chat) 추가. `[providers.deepseek_anthropic]`(kind anthropic,
+  base_url `https://api.deepseek.com/anthropic`) 등록과 Claude Code 슬롯
+  대응 — 모델 매핑이 서버 내장이므로 스탠자만으로 동작하는지 확인.
+- **Phase 2 (P2)**: Responses API — provider stanza(request_path `/responses`)
+  로 `backend_openai_responses` 가 그대로 소화하는지 파리티 테스트. SSE
+  keep-alive 는 실측 로그로 필요성 판정.
+- **Phase 3 (P3)**: Files API·user_id — 수요 판정 후 별도 RFC.
+
+## 검증
+
+- 각 Phase 늬 카탈로그 변경 후 `dune build @check` 와 모델 카탈로그 파티티
+  테스트(masc ci 스탠자)를 통과시킨다.
+- P0 실측: deepseek 직접 런타임으로 1회 thinking+tools 턴을 라이브에서
+  돌려 (a) 400 없이 회귀 (b) usage 의 cache hit/miss 필드 파싱 (c) 강제
+  tool_choice 수용 여부를 확인한다. 결과를 이 RFC 의 Phase 0 항목에
+  기록한다.
+- 가격·배율은 과금 회계(cost_ledger)의 단가와 대조한다.
+
+## 실측 결과 (2026-09-06, api.deepseek.com 직접, deepseek-v4-flash)
+
+- 잔액 확인: USD $49.90 (topped_up) — 이 날 충전분. `is_available=true`.
+- baseline thinking+tools 턴: `finish=tool_calls`, `reasoning_content` 존재,
+  usage 에 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` 실재
+  (첫 요청 0/359). 문서 회계 가정 확인.
+- **`tool_choice=required` 및 named function: thinking 모드에서 400**
+  ("Thinking mode does not support this tool_choice"). `thinking:disabled`
+  에서는 `required` 수용. 즉 카탈로그의 `supports_required_tool_choice=false`/
+  `supports_named_tool_choice=false` 를 유지한다 — 근거는 V3 시절 이슈에서
+  이 실측으로 교체. masc 가 deepseek 를 thinking 으로 쓰는 한 강제
+  tool_choice 는 불가능하다.
+- **reasoning_content 회귀 규칙은 문서보다 완화돼 있다**: tools 요청의 2턴
+  재현에서 이전 assistant 턴의 reasoning_content 를 빼고 보내도 400 없이
+  통과했다(문서는 400 이라 명시). 포함/미포함 모두 동일 finish. 그러나
+  `preserve_with_tool` 정책은 (a) 문서 규칙이 특정 조건(복수 턴 누적 등)에
+  여전히 적용될 때 (b) 완화된 지금 모두 통과하는 안전한 방향이므로
+  Phase 0 의 선택을 유지한다.
+
+### 라이브 체인 검증 (2026-09-06 06:30Z, 서버 재부팅 후 첫 failover)
+
+- 런타임 id 가 동작하려면 카탈로그 행과 runtime.toml `[models.<id>]` 바인딩이
+  **쌍**으로 필요하다 — 첫 재시작이 `candidate "deepseek.deepseek-v4-flash"
+  not found among 61 runtimes` 로 FATAL, 바인딩 추가로 해소. lane 에 후보를
+  넣을 때 같은 창에서 바인딩까지 확인한다(운영 규칙으로 승격).
+- glm-5.3 lane keeper(pr-updater)의 턴이 api.z.ai 429 로 죽자 체인이
+  `deepseek.deepseek-v4-flash` 로 회전: `stop=tools_executed`(4.3s) 이어
+  `stop=end_turn`(39.3s) — thinking+tools 턴이 400 없이 완주했다. Phase 0 의
+  replay 정책이 라이브에서 증명됐다.
+
+### 풀 피처 실측 매트릭스 (2026-09-06, 직접 프로브 — 총 USD 0.05)
+
+| 기능 | 결과 |
+|---|---|
+| chat completions: thinking 토글·effort high/max·tools·replay | 완결 (직접+라이브) |
+| vision-exp base64 data URL | "Red, blue" 정확 |
+| Files API: upload→file_id 참조→list→retrieve→delete | 전 사이클 완결 |
+| JSON mode (response_format json_object + 지시) | `{"city":"Seoul","temp_c":18.0}` |
+| streaming: `data: [DONE]` + usage 청크 | 확인 (keep-alive 코멘트는 긴 대기 턴에서만 — 미발생, 문서 명시와 일치) |
+| strict tools (beta base_url, strict:true) | tool_calls, 인자 스키마 준수 |
+| FIM completion (beta, pro) | 코드 완성 생성 |
+| Chat Prefix Completion (beta) | prefix 에서 이어짐 |
+| Responses API sync | status completed |
+| Responses API stream | 이벤트 체계 확인, **[DONE] 없음**(문서대로) |
+| Responses API 이미지 입력 (input_image) | "Red Blue" 정확 |
+| Anthropic API tool_use | stop_reason tool_use, input 인자 정상 |
+| Anthropic API thinking + stream | anthropic SSE 이벤트 체계(message_start/content_block_delta/ping) |
+| tool_choice required/named | thinking 모드 400 / non-thinking 수용 (위 실측) |
+
+미확인 1건: non-streaming 빈 줄·streaming `: keep-alive` 코멘트는 10 분급
+대기 턴에서만 발생 — 실측 생략, 문서 명시로 충분.
+
+## 남은 슬라이스 체크리스트 (2026-09-06 작성 시점 기준)
+
+Files API keeper 도구 등록 — 구조는 전부 확인됨:
+
+1. `config/tools/masc_file_{upload,delete,list}.toml` — TOML 이 스키마까지
+   완전 정의한다(`Tool_definition_toml.load` 가 디코드; `masc_run_*.toml`
+   선례). upload 파라미터: filename, content_base64, purpose(고정
+   "user_data"). delete: file_id. list: 없음.
+2. `lib/tool_schemas/tool_schemas_files_toml.ml` — 임베드에서 읽어 노출
+   (`tool_schemas_run_toml.ml` 과 동일 형상).
+3. dispatch — 그룹 핸들러 연결(`mcp_tool_runtime_board.ml` 의
+   masc_board_* 패턴). files 도구의 그룹 배치는 신규 그룹 또는 기존
+   provider 도구 그룹.
+4. 핸들러 — `Provider_files.upload/delete`(agent_core) 를 keeper 도구
+   결과로 랩. api_key 주입 경로 확인 필요(DEEPSEEK_API_KEY env).
+5. keeper projection·권한(`defer_loading` 등) 과 테스트 등록 검사
+   (lint suite 의 테스트 등록 검사가 강제).
+
+vision 요청의 `{"type":"file","file_id":…}` 파트 — multimodal 직렬화
+경로(keeper paste 등)에 file 참조 파트 추가. Files API 와 세트.
+
+## 관계
+
+- 런타임 체인 등록(2026-09-06, runtime.toml lane 3곳 + `[providers.deepseek]`)은
+  본 RFC 이전에 적용됐다.
+- ollama_cloud deepseek 행의 `reasoning_replay` 선례(`:0731` 행 주석,
+  2026-08-24)가 Phase 0 의 참조다.

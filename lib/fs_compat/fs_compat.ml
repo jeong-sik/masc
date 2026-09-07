@@ -233,6 +233,15 @@ let mkdir_p_unix (path : string) : unit =
    main-domain-scheduler-latency §8.8). Inside an Eio fiber the three
    primitives therefore run their Unix implementation on a system thread;
    outside Eio they run it inline, as before. *)
+(* The label reaches the runtime-events ring as the fiber's suspend reason
+   ([Eio_unix.run_in_systhread] calls [Trace.suspend_fiber label]), and a
+   trace reads a long run as "resumed from X, suspended on Y". With the file
+   named, X and Y identify the code: a run between
+   [fs-compat-append-file chat.jsonl] and [fs-compat-load-file memory.json]
+   needs no further instrumentation to place. The basename alone keeps the
+   label short and is unique enough among the stores a keeper touches. *)
+let labelled operation path = operation ^ " " ^ Filename.basename path
+
 let on_systhread ~label f =
   let result = Eio_unix.run_in_systhread ~label f in
   Eio.Fiber.check ();
@@ -246,7 +255,10 @@ let load_file (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> load_file_unix path)
-    (fun _fs -> on_systhread ~label:"fs-compat-load-file" (fun () -> load_file_unix path))
+    (fun _fs ->
+       on_systhread
+         ~label:(labelled "fs-compat-load-file" path)
+         (fun () -> load_file_unix path))
 ;;
 
 (* The write behind [save_file] and the atomic writers: the path guard on
@@ -266,7 +278,9 @@ let save_file (path : string) (content : string) : unit =
     ~path
     ~fallback:(fun () -> save_file_unix path content)
     (fun _fs ->
-       on_systhread ~label:"fs-compat-save-file" (fun () -> save_file_unix path content))
+       on_systhread
+         ~label:(labelled "fs-compat-save-file" path)
+         (fun () -> save_file_unix path content))
 ;;
 
 let save_file_atomic path content =
@@ -598,7 +612,9 @@ let append_file (path : string) (content : string) : unit =
     ~path
     ~fallback:(fun () -> append_file_unix path content)
     (fun _fs ->
-       on_systhread ~label:"fs-compat-append-file" (fun () -> append_file_unix path content))
+       on_systhread
+         ~label:(labelled "fs-compat-append-file" path)
+         (fun () -> append_file_unix path content))
 ;;
 
 (** Check if file exists.
@@ -956,7 +972,7 @@ let load_owned_regular_file_with_snapshot ~ownership_root path =
       load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
              ~ownership_root
              path)
@@ -1010,7 +1026,7 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
         ~ownership_root ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
        in
@@ -1066,7 +1082,7 @@ let load_owned_regular_file_range
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread (fun () ->
+         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
        in
@@ -1105,7 +1121,7 @@ let file_size (path : string) : int option =
       try Some (Unix.stat path).st_size with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1116,7 +1132,7 @@ let file_mtime (path : string) : float option =
       try Some (Unix.stat path).st_mtime with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime)) with
+       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -1175,14 +1191,14 @@ let remove_tree (path : string) : unit =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> remove_tree_unix path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
 ;;
 
 let realpath_lenient (path : string) : string =

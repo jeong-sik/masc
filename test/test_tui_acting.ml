@@ -64,9 +64,10 @@ let test_filter_explanations_name_scope_and_quiet_rows () =
     (Acting.filter_explanation Acting.Everything)
 ;;
 
-let ledger_tool ?duration_ms ~keeper tool : Observer.event =
+let ledger_tool ?duration_ms ?turn ~keeper tool : Observer.event =
   Observer.Keeper_tool_call
     { Observer.kt_keeper = keeper
+    ; kt_turn = turn
     ; kt_tool = tool
     ; kt_duration_ms = duration_ms
     ; kt_disposition = Some "completed"
@@ -122,6 +123,29 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
     ; "\xe2\x96\xa0 kpr-07 turn 49 | masc_schedule_list 63ms \xc2\xb7 in \
        39050 out 70 \xc2\xb7 $0.0100"
     ]
+    (List.map text rows)
+
+(* The wire numbers a turn from the agent session; the settle numbers it
+   from the keeper's lifetime, and after a runtime restart the two
+   disagree. The same real turn then drew as two rows -- the open one
+   hoarding the ledger calls, the settled one holding the tokens (live
+   capture 2026-09-06: turn 1740 beside turn 3084). The settle joins the
+   newest open chunk and stamps it with the keeper's own number. *)
+let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
+  let k = "kpr-08" in
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_started ~turn:500 k
+    ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:500
+        ~tool_use_id:"c500" k
+    ; ledger_tool ~duration_ms:12. ~keeper:k "Read"
+    ; turn_settled ~keeper:k ~turn:3084 ~input:2000 ~output:40 ~cost:0.0040
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  check int "one turn, not two" 1 (List.length rows);
+  check (list string)
+    "the keeper's number, settled, with the ledger call on the same row"
+    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2000 out 40 \xc2\xb7 $0.0040" ]
     (List.map text rows)
 
 (* What is not turn lifecycle stays its own row, in feed position. *)
@@ -451,7 +475,7 @@ let test_keeper_rows_say_what_the_keeper_did () =
     "\xe2\x96\xa0 largo turn settled | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
   check string "a heartbeat in a turn says how long it has been in it"
-    "\xc2\xb7 bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
+    "  bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (heartbeat "bandleader")))
 
 let test_agent_terminal_rows_keep_success_and_failure_distinct () =
@@ -516,6 +540,7 @@ let test_skill_tools_wear_a_skill_label () =
   let keeper_tool_call ?disposition tool : Observer.event =
     Observer.Keeper_tool_call
       { Observer.kt_keeper = "alpha"
+      ; kt_turn = None
       ; kt_tool = tool
       ; kt_duration_ms = None
       ; kt_disposition = disposition
@@ -530,6 +555,91 @@ let test_skill_tools_wear_a_skill_label () =
   check string "a plain keeper tool stays a tool call" "tool call"
     (row (keeper_tool_call "masc_board_stats")).Acting.label
 ;;
+
+(* A ledger row states the turn it ran in, and the fold must key on it.
+
+   Before 2026-09-07 [Keeper_tool_call] decoded no turn, so a ledger row
+   matched whatever chunk was newest. Rows arriving after the next turn had
+   opened counted into it, and a settled turn of one call drew "2449 calls"
+   (live capture 2026-09-06). That was patched at the count instead -- a
+   settled chunk reports the settle's number and ignores its own list --
+   which left the rows misfiled and stopped one surface from showing it.
+
+   The server always sent the number: an observer capture on 2026-09-07
+   carried "turn" on 19 of 19 [keeper_tool_call] frames, on the plane the
+   agent-core wire numbers turns. It was dropped at the decoder.
+
+   These build the row directly, so they hold the fold and nothing else --
+   they would pass on a decoder that dropped the field again. That the
+   field survives a real frame is [test_tui_observer]'s
+   [keeper_tool_call_frame], whose fixture now carries the "turn" the
+   server sends. Two links, two tests. *)
+let test_late_ledger_row_stays_on_its_own_turn () =
+  let events =
+    [ agent_core ~kind:Observer.Turn_started ~turn:7 ~at:100. "alpha"
+    ; ledger_tool ~turn:7 ~keeper:"alpha" "Read"
+    ; agent_core ~kind:Observer.Turn_started ~turn:8 ~at:102. "alpha"
+    ; ledger_tool ~turn:8 ~keeper:"alpha" "Grep"
+      (* Turn 7's second call is reported only now, after turn 8 opened. *)
+    ; ledger_tool ~turn:7 ~keeper:"alpha" "Write"
+    ]
+  in
+  let chunks = Acting.chunks ~traces:[] (entries_of events) in
+  let tools_of turn =
+    List.find_opt (fun c -> c.Acting.ck_turn = Some turn) chunks
+    |> Option.map (fun c ->
+           List.map (fun t -> t.Acting.ct_tool) (Acting.chunk_tools c))
+  in
+  check
+    (option (list string))
+    "the late row went to turn 7"
+    (Some [ "Read"; "Write" ])
+    (tools_of 7);
+  check
+    (option (list string))
+    "turn 8 kept only its own call"
+    (Some [ "Grep" ])
+    (tools_of 8)
+;;
+
+(* The two planes must not collide. A settle numbers the turn from the
+   keeper's lifetime while the ledger and the wire number it from the agent
+   session, so a settle stamps its chunk with a number no ledger row will
+   match. A row arriving after that must still find its turn instead of
+   opening a second chunk that draws as another row for the same turn. *)
+let test_ledger_row_after_a_settle_finds_its_turn () =
+  let settle_other_plane =
+    Observer.Keeper_turn_complete
+      { Observer.tc_keeper = "alpha"
+      ; tc_turn = Some 3084
+      ; tc_model = None
+      ; tc_input_tokens = Some 10
+      ; tc_output_tokens = Some 2
+      ; tc_cost_usd = None
+      ; tc_tool_calls = Some 2
+      ; tc_at = 100.
+      }
+  in
+  let events =
+    [ agent_core ~kind:Observer.Turn_started ~turn:7 ~at:100. "alpha"
+    ; ledger_tool ~turn:7 ~keeper:"alpha" "Read"
+    ; settle_other_plane
+    ; ledger_tool ~turn:7 ~keeper:"alpha" "Write"
+    ]
+  in
+  let chunks =
+    Acting.chunks ~traces:[] (entries_of events)
+    |> List.filter (fun c -> String.equal c.Acting.ck_keeper "alpha")
+  in
+  check int "one turn drew one chunk" 1 (List.length chunks);
+  let chunk = List.hd chunks in
+  check
+    (list string)
+    "both calls landed on it"
+    [ "Read"; "Write" ]
+    (List.map (fun t -> t.Acting.ct_tool) (Acting.chunk_tools chunk))
+;;
+
 
 let () =
   run "tui acting"
@@ -571,6 +681,8 @@ let () =
             test_skill_tools_wear_a_skill_label
         ; test_case "turns fold the two planes into one row per turn" `Quick
             test_turns_fold_the_two_planes_into_one_row_per_turn
+        ; test_case "a settle joins the open turn it ends despite the number" `Quick
+            test_a_settle_joins_the_open_turn_it_ends_despite_the_number
         ; test_case "a running turn names its in-flight call" `Quick
             test_a_running_turn_names_its_in_flight_call
         ; test_case "turns pass non-lifecycle rows through" `Quick
@@ -583,5 +695,9 @@ let () =
             test_telemetry_refreshes_but_never_duplicates_a_turn
         ; test_case "turns fall back to the wire when the ledger is silent"
             `Quick test_turns_fall_back_to_the_wire_when_the_ledger_is_silent
+        ; test_case "a late ledger row stays on its own turn" `Quick
+            test_late_ledger_row_stays_on_its_own_turn
+        ; test_case "a ledger row after a settle finds its turn" `Quick
+            test_ledger_row_after_a_settle_finds_its_turn
         ] )
     ]

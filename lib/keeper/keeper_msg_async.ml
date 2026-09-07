@@ -1923,7 +1923,7 @@ let merge_staging_cleanup_report cleanup report =
 
 let run_staging_cleanup_in_systhread ~ownership_root path =
   let result =
-    Eio_guard.run_in_systhread (fun () ->
+    Eio_guard.run_in_systhread ~label:"msg-async-cleanup-atomic-orphans" (fun () ->
       Fs_compat.cleanup_atomic_orphans
         ~ownership_root
         ~base_path:path

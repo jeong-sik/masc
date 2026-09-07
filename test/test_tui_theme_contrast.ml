@@ -21,17 +21,19 @@ module Palette = Masc_tui_terminal_palette
 
 module Catalog = Masc_tui_theme_catalog
 
-(* [Catalog.all] reads config/themes relative to the process cwd, and a dune
-   test runs in _build/default/test, where that directory does not exist: the
-   list would quietly narrow to the bundled themes and every contrast below
-   would measure a copy instead of the shipped ones. The prompt gate
-   (test_prompt_templates_render) reads its directory through
-   DUNE_SOURCEROOT; this stanza deps (source_tree config/themes) the same
-   directory, so the two halves agree here. *)
+(* [Catalog.all]/[Catalog.find] take [~base_path] as the project root and
+   append "config/themes" to it themselves (theme_dirs_for_base in
+   masc_tui_theme_catalog.ml); the caller passes the root, not the themes
+   directory. A dune test runs in _build/default/test, where the process cwd
+   has no [config] at all: the list would quietly narrow to the bundled
+   themes and every contrast below would measure a copy instead of the
+   shipped ones. The prompt gate (test_prompt_templates_render) reads its
+   directory through DUNE_SOURCEROOT; this stanza deps (source_tree
+   config/themes) the same directory, so the two halves agree here. *)
 let themes_base_path () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> Filename.concat root "config/themes"
-  | None -> Filename.concat (Sys.getcwd ()) "config/themes"
+  | Some root -> root
+  | None -> Sys.getcwd ()
 ;;
 
 (* The schemes are the ones masc ships, not a copy of them. A number here is
@@ -467,10 +469,7 @@ let labelled_categories =
     (fun slot ->
       ( (match slot with
          | Masc_tui_ansi.Theme.Slot_1 -> "Slot_1"
-         | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2"
-         | Masc_tui_ansi.Theme.Slot_3 -> "Slot_3"
-         | Masc_tui_ansi.Theme.Slot_4 -> "Slot_4"
-         | Masc_tui_ansi.Theme.Slot_5 -> "Slot_5")
+         | Masc_tui_ansi.Theme.Slot_2 -> "Slot_2")
       , slot ))
     Masc_tui_ansi.Theme.all_categories
 ;;
@@ -488,11 +487,35 @@ let categorical_slot_colours =
    Theme.ok () once across the two panes write_two_panes joins, and for one
    commit its media mark was Bright_red -- Theme.bad () to the byte.
 
-   So this holds the slot set clear of those two. Info and warn are still
-   aliased, and are safe only because that surface draws neither; a surface
-   reaching for slot 1 or 2 owes the same check this test makes here. *)
+   So this holds the slot set clear of those two. That is what bounds the
+   alphabet at four: red, green and the receding black are spoken for, and
+   four hues are what is left. Info and warn are still aliased, and are safe
+   only because that surface draws neither; a surface reaching for slot 1 or 2
+   owes the same check this test makes here. *)
+(* Every state the surface drawing slots also draws, not the two that were
+   noticed first.
+
+   The file listing is the surface: write_two_panes joins it to the content
+   pane on one terminal row, so a slot colour on the left and a state colour
+   on the right are one colour with two meanings on one line. #33477 found it
+   as red against bad, when a .png drew the blame failure's escape beside it,
+   and named bad here. #33722 found green against ok and added ok. Cyan
+   against info and yellow against warn were live the whole time and this
+   list is why nobody saw them: a test that names the defect it was written
+   for finds that defect again and nothing else.
+
+   So the list is what the pane draws, read off its Theme calls rather than
+   off what has gone wrong. It drifts when the pane starts drawing a state it
+   did not before -- there is no reading of the renderer that would catch
+   that, and the alternative to saying so is a test that quietly narrows. *)
 let test_no_categorical_slot_aliases_a_drawn_status_token () =
-  let drawn = [ "bad", Masc_tui_ansi.Theme.bad; "ok", Masc_tui_ansi.Theme.ok ] in
+  let drawn =
+    [ "bad", Masc_tui_ansi.Theme.bad
+    ; "ok", Masc_tui_ansi.Theme.ok
+    ; "info", Masc_tui_ansi.Theme.info
+    ; "warn", Masc_tui_ansi.Theme.warn
+    ]
+  in
   List.iter
     (fun (slot_label, _) ->
       List.iter
@@ -694,19 +717,40 @@ let test_load_retro_themes_toml () =
         check string ("name matches " ^ name) name (Catalog.name scheme);
         check bool "is dark theme" false (Catalog.light scheme);
         check bool "to_palette produces palette" true (Option.is_some (Catalog.to_palette scheme)))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber"
+    ; "vaporwave"; "toxic"; "ultraviolet"; "glacier"; "bloodmoon"; "arcade" ]
 ;;
 
 (* The schemes above are found by name; this says they are also *measured*.
    [schemes] is the list every contract in this file iterates, so a theme
    missing here is a theme masc draws and never checks. *)
+(* Every shipped theme reaches the reader.
+
+   The catalogue drops a scheme it cannot parse. That is the right answer for
+   a TUI -- refusing to start over a bad hex would be worse -- but it means a
+   malformed file masc ships goes missing in silence, and the schemes moved
+   out of OCaml on 2026-09-06 are exactly the ones with nothing else pointing
+   at them any more. Counting the keys against the schemes is what turns that
+   silence into a failure here. *)
+let test_every_shipped_theme_parses () =
+  let keys =
+    List.filter
+      (fun key -> String.starts_with ~prefix:"themes/" key)
+      Embedded_config.file_list
+  in
+  check bool "the binary carries themes at all" true (List.length keys > 0);
+  check int "every shipped theme file becomes a scheme" (List.length keys)
+    (List.length Masc_tui_theme_catalog.bundled)
+;;
+
 let test_contracts_cover_the_toml_themes () =
   let measured = List.map (fun s -> s.name) schemes in
   List.iter
     (fun name ->
       check bool (name ^ " is under the readability contracts") true
         (List.mem name measured))
-    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber" ]
+    [ "dungeon-gold"; "norton"; "msx"; "pc-tools"; "msc"; "cyber"
+    ; "vaporwave"; "toxic"; "ultraviolet"; "glacier"; "bloodmoon"; "arcade" ]
 ;;
 
 let test_clean_hex_rejects_underscores () =
@@ -822,6 +866,8 @@ let () =
             test_load_retro_themes_toml
         ; Alcotest.test_case "readability contracts cover the toml themes" `Quick
             test_contracts_cover_the_toml_themes
+        ; Alcotest.test_case "every shipped theme parses" `Quick
+            test_every_shipped_theme_parses
         ; Alcotest.test_case "bundled retro presets carry the task's names" `Quick
             test_bundled_retro_presets_carry_the_task_names
         ; Alcotest.test_case "contracts cover the bundled retro presets" `Quick

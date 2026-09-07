@@ -109,7 +109,7 @@ type read_json_error =
 let parse_json_content_result ~context content =
   let trimmed = String.trim content in
   if trimmed = "" then Ok (`Assoc [])
-  else Safe_ops.parse_json_safe ~context trimmed
+  else Safe_ops.parse_json_off_fiber ~context trimmed
 
 let read_json_local_result_exn path =
   try

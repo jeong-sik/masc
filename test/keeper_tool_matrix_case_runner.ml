@@ -2,6 +2,14 @@ module Types = Masc_domain
 
 module Cases = Test_keeper_tool_matrix_cases
 
+(* [masc_dashboard] registers its handler in a module initializer
+   ([Tool_misc.register_dashboard_handler]); the production server links it
+   through masc.server. This runner is its own composition root, so force the
+   linkage the way the sibling [tool_matrix_case_runner] already does. Without
+   it the case answers "Dashboard handler not registered", and the tool is on
+   [strict_success_names]. *)
+let () = ignore Dashboard.force_link
+
 let init_runtime_default_for_tests () =
   let path = Filename.temp_file "keeper_tool_matrix_runtime_" ".toml" in
   let oc = open_out path in

@@ -1710,7 +1710,8 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model =
+let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
+    ~turn_instructions =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1765,7 +1766,11 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                 ~build_turn_prompt:
                                   (fun ~base_system_prompt ~messages:_ ->
                                     { Keeper_agent_run.system_prompt = base_system_prompt
-                                    ; dynamic_context = ""
+                                    ; dynamic_context =
+                                        (match turn_instructions with
+                                         | None -> ""
+                                         | Some ti ->
+                                           "--- Turn-specific instructions ---\n" ^ ti)
                                     })
                                 ~user_message
                                 ~turn_kind:Turn_record.Direct
@@ -3156,6 +3161,7 @@ let test_production_keeper_dispatches_codex_runtime () =
                   "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
                 ~cli_path
                 ~model:"gpt-fixture"
+                ~turn_instructions:None
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> assert_production_keeper_result result))
@@ -3182,6 +3188,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
                 ~user_message:"Start the production fixture thread."
                 ~cli_path
                 ~model:"gpt-fixture"
+                ~turn_instructions:None
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok _ -> ());
@@ -3201,6 +3208,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
                 ~user_message:"Resume the production fixture thread."
                 ~cli_path
                 ~model:"gpt-fixture"
+                ~turn_instructions:None
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
@@ -3222,6 +3230,192 @@ let test_production_keeper_resumes_across_trace_rotation () =
             check string "production thread" "thread-1" session_id
           | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
             fail "production Codex state did not settle"))
+;;
+
+let test_production_dynamic_context_reaches_codex_instruction_wire () =
+  let base_path = temp_workspace "masc-codex-production-context-" in
+  let capture = Filename.temp_file "masc-codex-production-context-" ".jsonl" in
+  (* #28169: enter through [build_turn_prompt] — the production assembly that
+     [Keeper_agent_run.run_turn] owns — not through a test-injected
+     before_turn_params hook. A failure here means the loss sits between the
+     prompt assembly and the official-client instruction wire, which is the
+     layer the hook-injected sibling test above cannot see. *)
+  let turn_instructions = "PRODUCTION_TURN_INSTRUCTIONS\nsecond line" in
+  let expected_dynamic_context =
+    "--- Turn-specific instructions ---\n" ^ turn_instructions
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path; Sys.remove capture)
+    (fun () ->
+       with_fixture
+         ~capture_path:capture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~turn_instructions:(Some turn_instructions)
+                ~base_path
+                ~trace_id:"codex-production-context-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result -> assert_production_keeper_result result);
+       let developer_instructions =
+         In_channel.with_open_bin capture (fun input ->
+             In_channel.input_lines input
+             |> List.map Yojson.Safe.from_string
+             |> List.find (fun json ->
+                  Yojson.Safe.Util.member "method" json = `String "thread/start")
+             |> Yojson.Safe.Util.member "params"
+             |> Yojson.Safe.Util.member "developerInstructions"
+             |> Yojson.Safe.Util.to_string)
+       in
+       let posture_note =
+         match
+           Keeper_codex_runtime.For_testing.native_posture_note
+             Runtime_native_tools.Native_read
+         with
+         | [] -> fail "Native_read posture note disappeared"
+         | sections -> String.concat "\n\n" sections
+       in
+       ignore posture_note;
+       (* [run_production_keeper_turn] assembles the real keeper system prompt
+          ahead of the posture note (see [Keeper_codex_runtime]: system_prompt ::
+          posture_note @ developer_messages), so unlike the hook-injected sibling
+          test the posture note is NOT the byte prefix of the wire. And the
+          production assembly appends more blocks after the turn instructions —
+          today the temporal summary — so the envelope text itself is not a
+          byte-exact window either. Assert the #28169 invariants instead: the
+          turn instructions appear inside one envelope message on the wire with
+          System role, typed provenance, and the exact instruction text intact.
+          Locate this turn's envelope by scanning for the instruction text and
+          trimming to the enclosing JSON object, which assumes neither a
+          position nor which other blocks share the envelope. *)
+       let find_sub text sub =
+         let n = String.length sub in
+         let rec go i =
+           if i + n > String.length text then None
+           else if String.sub text i n = sub then Some i
+           else go (i + 1)
+         in
+         go 0
+       in
+       let find_sub_from text from sub =
+         let n = String.length sub in
+         let rec go i =
+           if i + n > String.length text then None
+           else if String.sub text i n = sub then Some i
+           else go (i + 1)
+         in
+         go (max from 0)
+       in
+       let context_envelope =
+         (* The wire stores developer instructions as JSON strings: newlines in
+            the instruction text arrive escaped as [\n]. Encode the expected
+            text with Yojson so the substring scan compares like with like. *)
+         let encoded_needle =
+           Yojson.Safe.to_string (`String expected_dynamic_context)
+         in
+         let needle =
+           (* Yojson quotes the string but keeps its escaping: this is the
+              exact JSON-escaped form the wire carries inside the envelope. *)
+           let n = String.length encoded_needle in
+           String.sub encoded_needle 1 (n - 2)
+         in
+         match find_sub developer_instructions needle with
+         | None ->
+           fail
+             "production turn instructions are not on the \
+              developer-instruction wire"
+         | Some marker_at ->
+           (* The envelope object opens at the nearest preceding schema object
+              start, not at the nearest open brace of the text block that
+              happens to hold the instructions. *)
+           let envelope_open = "{\"schema\":" in
+           let open_obj =
+             let rec back i =
+               if i < 0 then 0
+               else if
+                 i + String.length envelope_open
+                 <= String.length developer_instructions
+                 && String.sub developer_instructions i
+                      (String.length envelope_open)
+                    = envelope_open
+               then i
+               else back (i - 1)
+             in
+             back marker_at
+           in
+           let marker_end = marker_at + String.length needle in
+           (* The envelope closes after the typed provenance marker; finding
+              that end marker is robust to nested braces inside content_blocks
+              (a plain forward scan for '}' would stop at the text block's own
+              closing brace). *)
+           let provenance_end =
+             "\"agent_core.extra_system_context.v1\":true}}}"
+           in
+           let close_obj =
+             match find_sub_from developer_instructions marker_end provenance_end with
+             | Some i -> i + String.length provenance_end
+             | None -> String.length developer_instructions
+           in
+           let candidate =
+             String.sub developer_instructions open_obj (close_obj - open_obj)
+           in
+           Yojson.Safe.from_string candidate
+       in
+       let open Yojson.Safe.Util in
+       check string
+         "production dynamic context envelope schema"
+         Keeper_official_client_context_codec.schema
+         (context_envelope |> member "schema" |> to_string);
+       let context_message = context_envelope |> member "message" in
+       check string
+         "production dynamic context keeps System role"
+         "system"
+         (context_message |> member "role" |> to_string);
+       let wire_text =
+         context_message
+         |> member "content_blocks"
+         |> index 0
+         |> member "text"
+         |> to_string
+       in
+       (* The production assembly appends the temporal summary into the same
+          envelope after the turn instructions, so the instructions are the
+          prefix of the wire text rather than the whole of it. *)
+       if
+         String.length wire_text < String.length expected_dynamic_context
+         || String.sub wire_text 0 (String.length expected_dynamic_context)
+            <> expected_dynamic_context
+       then
+         check string
+           "production turn instructions stay exact on the wire"
+           expected_dynamic_context
+           wire_text
+       else
+         check string
+           "production turn instructions stay exact on the wire"
+           expected_dynamic_context
+           (String.sub wire_text 0 (String.length expected_dynamic_context));
+       (match
+          context_message
+          |> member "metadata"
+          |> to_assoc
+          |> Agent_core.Types.Extra_system_context_provenance.classify
+        with
+        | Agent_core.Types.Extra_system_context_provenance.Present -> ()
+        | Absent | Invalid | Duplicate ->
+          fail "production dynamic context lost its typed provenance"))
 ;;
 
 let test_keeper_projects_typed_tools_and_hooks () =
@@ -3655,6 +3849,7 @@ let test_live_production_keeper_subscription () =
                "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
              ~cli_path:"codex"
              ~model:"gpt-5.6-sol"
+             ~turn_instructions:None
          with
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok result -> assert_production_keeper_result result)
@@ -3919,6 +4114,10 @@ let () =
             "production Keeper resumes across trace rotation"
             `Quick
             test_production_keeper_resumes_across_trace_rotation
+        ; test_case
+            "production dynamic context reaches Codex instruction wire"
+            `Quick
+            test_production_dynamic_context_reaches_codex_instruction_wire
         ; test_case
             "Keeper projects typed tools and hooks"
             `Quick

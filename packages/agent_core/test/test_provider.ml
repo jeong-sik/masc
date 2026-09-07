@@ -15,6 +15,41 @@ let require_estimated_cost = function
   | Llm_provider.Pricing.Incomplete _ -> Alcotest.fail "expected an exact cost estimate"
 ;;
 
+let test_multipart_body_shape () =
+  let boundary = "probe-boundary" in
+  let body =
+    Llm_provider.Provider_files.multipart_upload_body ~boundary
+      ~filename:"probe.png" ~purpose:"user_data" ~content:"PNGDATA"
+  in
+  let has needle =
+    let open Stdlib in
+    let rec find haystack_start =
+      if String.length body - haystack_start < String.length needle then false
+      else if String.sub body haystack_start (String.length needle) = needle
+      then true
+      else find (haystack_start + 1)
+    in
+    find 0
+  in
+  Alcotest.(check bool) "file part" true (has "name=\"file\"; filename=\"probe.png\"");
+  Alcotest.(check bool) "purpose part" true (has "name=\"purpose\"");
+  Alcotest.(check bool) "purpose value after blank line" true (has "\r\n\r\nuser_data\r\n");
+  Alcotest.(check bool) "closing boundary" true (has "--probe-boundary--\r\n")
+;;
+
+let test_file_object_decode () =
+  match
+    Llm_provider.Provider_files.file_object_of_yojson
+      (Yojson.Safe.from_string
+         {| {"id":"file-api-1","bytes":137,"created_at":1788676840,"filename":"p.png","purpose":"user_data"} |})
+  with
+  | Ok obj ->
+    Alcotest.(check string) "id" "file-api-1" obj.Llm_provider.Provider_files.id;
+    Alcotest.(check int) "bytes" 137 obj.Llm_provider.Provider_files.bytes;
+    Alcotest.(check string) "filename" "p.png" obj.Llm_provider.Provider_files.filename
+  | Error detail -> Alcotest.failf "expected a decode, got %s" detail
+;;
+
 let test_pricing_sonnet () =
   let p = declared_pricing "claude-sonnet-4-6-20250514" in
   Alcotest.(check (float 0.001)) "input/M" 3.0 p.input_per_million;
@@ -132,6 +167,14 @@ let () =
             "model rebind clears parent context"
             `Quick
             test_provider_config_rebinds_model_specific_context
+        ] )
+    ; ( "provider_files"
+      , [ Alcotest.test_case
+            "multipart body carries both form parts and the closing boundary"
+            `Quick test_multipart_body_shape
+        ; Alcotest.test_case
+            "file object decodes id/bytes/filename/purpose"
+            `Quick test_file_object_decode
         ] )
     ]
 ;;

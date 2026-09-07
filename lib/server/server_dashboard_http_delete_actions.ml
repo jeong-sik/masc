@@ -57,7 +57,7 @@ let lstat_path_blocking path =
 ;;
 
 let lstat_path path =
-  try Eio_guard.run_in_systhread (fun () -> lstat_path_blocking path) with
+  try Eio_guard.run_in_systhread ~label:"dashboard-delete-lstat" (fun () -> lstat_path_blocking path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (path_error "systhread lstat" path exn)
 ;;
@@ -111,7 +111,7 @@ let rec remove_path_strict_blocking path =
 ;;
 
 let remove_path_strict path =
-  try Eio_guard.run_in_systhread (fun () -> remove_path_strict_blocking path) with
+  try Eio_guard.run_in_systhread ~label:"dashboard-delete-remove" (fun () -> remove_path_strict_blocking path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (path_error "systhread recursive removal" path exn)
 ;;

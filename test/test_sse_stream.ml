@@ -121,6 +121,32 @@ let test_send_to_popable ~auth () =
            (Sse.get_events_after_for_session ~session_id:"s-st-1"
               ~kind:Observer before_id)))
 
+(* The replay filter reads the delivery's parsed payload rather than parsing
+   the frame text again. Both must reach the same verdict: a JSON-RPC
+   broadcast replays into an Agent_stream session, anything else does not. *)
+let test_agent_stream_replay_filters_non_jsonrpc ~auth () =
+  reset ();
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister "s-replay-filter";
+      Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      ignore (register_exn ~auth ~kind:Agent_stream "s-replay-filter" ~last_event_id:0);
+      let before_id = Sse.current_id () in
+      Sse.broadcast (jsonrpc_notification "notifications/replay_test");
+      Sse.broadcast (`Assoc [ ("type", `String "activity"); ("detail", `String "not jsonrpc") ]);
+      let replayed =
+        Sse.get_events_after_for_session ~session_id:"s-replay-filter"
+          ~kind:Agent_stream before_id
+      in
+      Alcotest.(check int) "only the jsonrpc broadcast replays" 1 (List.length replayed);
+      Alcotest.(check int) "an observer replays both" 2
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-replay-filter"
+              ~kind:Observer before_id)))
+
 let test_pop_blocks_then_receives ~auth () =
   reset ();
   ignore (register_exn ~auth ~kind:Observer "s-block" ~last_event_id:0);
@@ -377,6 +403,8 @@ let () =
           ( "send_to_stream",
             [
               Alcotest.test_case "send_to popable" `Quick (test_send_to_popable ~auth);
+              Alcotest.test_case "agent_stream replay filters non-jsonrpc" `Quick
+                (test_agent_stream_replay_filters_non_jsonrpc ~auth);
             ] );
           ( "pop_blocking",
             [

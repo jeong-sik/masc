@@ -212,30 +212,15 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('0 events · 0 keepers')
   })
 
-  it('renders file context from annotation and diff props', () => {
+  it('renders file context from diff props', () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, {
       activeFile: 'lib/runtime.ml',
-      annotations: [{
-        id: 'ann-1',
-        file_path: 'lib/runtime.ml',
-        line_start: 4,
-        line_end: 4,
-        keeper_id: 'sangsu',
-        kind: 'Comment',
-        content: 'Task status belongs next to this line',
-        goal_id: 'goal-runtime',
-        task_id: 'task-runtime',
-        references: [],
-        created_at_ms: 1,
-        updated_at_ms: 1,
-      }],
       diffRows: [{ kind: 'add', oldLine: null, newLine: 4, text: '+let x = 1' }],
     }), container)
 
     expect(container.textContent).toContain('CONTEXT LENS')
     expect(container.textContent).toContain('runtime.ml')
-    expect(container.textContent).toContain('goal goal-runtime')
     expect(container.textContent).toContain('1 changed rows')
   })
 

@@ -145,8 +145,17 @@ let create_submit_request ~(config : Workspace.config)
    | Masc_domain.Completion_evidence _ -> warn_contract_gap task
    | Masc_domain.Cancellation_reason _ -> ());
   let spec = submit_request_spec ~config ~task ~assignee ~claim in
+  let artifact_read =
+    (* The capture reads the artifact where the producer's sandbox keeps it;
+       see [Keeper_tool_task_runtime.evidence_artifact_reader]. *)
+    match Keeper_meta_store.read_effective_meta_resolved config assignee with
+    | Ok (Some (_file, meta)) ->
+        Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ()
+    | Ok None | Error _ -> None
+  in
   let evidence_snapshot =
     Workspace_verification_store.snapshot_submitted_evidence_json
+      ?artifact_read
       ~base_path
       ~worker:assignee
       spec.submitted_evidence

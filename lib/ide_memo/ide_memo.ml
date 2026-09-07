@@ -11,20 +11,31 @@ type parsed =
 
 let head = "masc("
 
-let kind_word = function
-  | Agent_observation.Comment -> None
-  | Agent_observation.Decision -> Some "decision"
-  | Agent_observation.Question -> Some "question"
-  | Agent_observation.Bookmark -> Some "bookmark"
+(* The one table of kind words. The printer, the reader, the tool schema's
+   enum and the runtime's error message all derive from it, so a fifth kind
+   reaches every one of them by being added here. *)
+let word_of_kind = function
+  | Agent_observation.Comment -> "comment"
+  | Agent_observation.Decision -> "decision"
+  | Agent_observation.Question -> "question"
+  | Agent_observation.Bookmark -> "bookmark"
 ;;
 
-(* The reader's side of [kind_word]. The absent word is read as the plain
-   comment by [parse_body] before a word reaches here. *)
-let kind_of_word = function
-  | "decision" -> Some Agent_observation.Decision
-  | "question" -> Some Agent_observation.Question
-  | "bookmark" -> Some Agent_observation.Bookmark
-  | _ -> None
+let kind_words = List.map word_of_kind Agent_observation.all_annotation_kinds
+
+(* The printer leaves the plain kind's word out. *)
+let kind_word = function
+  | Agent_observation.Comment -> None
+  | (Agent_observation.Decision | Agent_observation.Question | Agent_observation.Bookmark) as kind ->
+    Some (word_of_kind kind)
+;;
+
+(* The reader's side, the plain kind spelled out included. The absent word
+   is read as the plain comment by [parse_body] before a word reaches here. *)
+let kind_of_word word =
+  List.find_opt
+    (fun kind -> String.equal (word_of_kind kind) word)
+    Agent_observation.all_annotation_kinds
 ;;
 
 let is_author_char = function
@@ -32,9 +43,10 @@ let is_author_char = function
   | _ -> false
 ;;
 
-(* The comment markers the TUI's lexers produce. A block comment is a memo
-   only when it closes on its own row: a memo is one line, and the rows a
-   block comment goes on to cover are not part of it. *)
+(* The comment markers the reader strips. A block comment is a memo only
+   when it closes on its own row: a memo is one line, and the rows a block
+   comment goes on to cover are not part of it. Blocks are tried first so
+   that [<!--] is not read as the line marker [--]. *)
 type markers =
   | Block of
       { opens : string
@@ -42,11 +54,13 @@ type markers =
       }
   | Line of string
 
-let markers =
+let known_markers =
   [ Block { opens = "(*"; closes = "*)" }
   ; Block { opens = "/*"; closes = "*/" }
+  ; Block { opens = "<!--"; closes = "-->" }
   ; Line "//"
   ; Line "#"
+  ; Line "--"
   ]
 ;;
 
@@ -66,7 +80,7 @@ let strip_markers comment =
       | Block { opens; closes } ->
         if String.starts_with ~prefix:opens comment then Some (inner_of ~opens ~closes) else None
       | Line opens -> if String.starts_with ~prefix:opens comment then Some (Some (after opens)) else None)
-    markers
+    known_markers
   |> Option.join
 ;;
 
@@ -125,4 +139,10 @@ let to_body t =
     | Some word -> " " ^ word
   in
   head ^ t.author ^ ")" ^ word ^ ": " ^ t.text
+;;
+
+let to_line markers t =
+  match markers with
+  | Block { opens; closes } -> opens ^ " " ^ to_body t ^ " " ^ closes
+  | Line opens -> opens ^ " " ^ to_body t
 ;;

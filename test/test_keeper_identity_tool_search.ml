@@ -510,13 +510,50 @@ let test_a_tool_this_conversation_ran_comes_back_with_its_schema () =
 
 (* The bound. Asking is not evidence of need: carrying every requested tool
    grows the surface back toward the full attached list, measured at 111 of a
-   possible 133 an hour after that shipped. *)
-let test_a_tool_only_asked_for_is_not_carried () =
+   possible 133 an hour after that shipped.
+
+   Narrowed rather than dropped. A request is answered on the next request and
+   spent there: any later call, of any tool, ends it. What the measurement
+   above warns about is accumulation, and one request that the next call
+   clears does not accumulate. *)
+let test_a_tool_asked_for_and_then_left_behind_is_not_carried () =
   check
     (list string)
-    "a tool the model asked for but never ran is not placed"
-    []
+    "the request is gone and only the call it moved on to is placed"
+    [ "atlassian_confluence_search" ]
+    (already_used
+       ~history:
+         [ asked_for [ "atlassian_jira_search" ]; called "atlassian_confluence_search" ]
+       (offered two_offered))
+;;
+
+(* The deadlock this narrowing exists for. A load reaches the agent of the
+   turn that made it and no further, so when a tool call ends the turn, a
+   tool searched for and not yet called is not placed on the next request --
+   the model sees the name again and searches again. Measured 2026-09-06:
+   sangsu made fourteen consecutive searches for [keeper_voice_speak] and
+   called it zero times. [make] already promises this costs one round trip. *)
+let test_the_last_request_is_placed_on_the_next_turn () =
+  check
+    (list string)
+    "the tool the last call asked for is placed"
+    [ "atlassian_jira_search" ]
     (already_used ~history:[ asked_for [ "atlassian_jira_search" ] ] (offered two_offered))
+;;
+
+(* A request grants exactly its own names. A listing that placed everything a
+   conversation ever asked for is the accumulation the bound above measured. *)
+let test_a_request_places_only_what_it_named () =
+  check
+    (list string)
+    "an earlier request is not revived by a later one"
+    [ "atlassian_confluence_search" ]
+    (already_used
+       ~history:
+         [ asked_for [ "atlassian_jira_search" ]
+         ; asked_for [ "atlassian_confluence_search" ]
+         ]
+       (offered two_offered))
 ;;
 
 let test_a_conversation_that_ran_nothing_carries_nothing () =
@@ -733,8 +770,12 @@ let () =
     ; ( "carried across turns"
       , [ test_case "a tool this conversation ran comes back with its schema" `Quick
             test_a_tool_this_conversation_ran_comes_back_with_its_schema
-        ; test_case "a tool only asked for is not carried" `Quick
-            test_a_tool_only_asked_for_is_not_carried
+        ; test_case "a request the conversation moved past is not carried" `Quick
+            test_a_tool_asked_for_and_then_left_behind_is_not_carried
+        ; test_case "the last request is placed on the next turn" `Quick
+            test_the_last_request_is_placed_on_the_next_turn
+        ; test_case "a request places only what it named" `Quick
+            test_a_request_places_only_what_it_named
         ; test_case "a conversation that ran nothing carries nothing" `Quick
             test_a_conversation_that_ran_nothing_carries_nothing
         ; test_case "a name no longer offered is not placed" `Quick

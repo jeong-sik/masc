@@ -486,7 +486,9 @@ let () =
        in this env var crashed server bootstrap. [get_int_nonneg] also
        maps a negative value to the default. *)
     let gc_space_overhead =
-      Env_config_core.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD"
+      Env_config_core.get_int_nonneg
+        ~default:(Env_setting.Int_knob.default Gc_space_overhead)
+        (Env_setting.Int_knob.env_name Gc_space_overhead)
     in
     let ctrl = get () in
     set { ctrl with
@@ -848,7 +850,7 @@ let initialize_owner_state_blocking
      denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in
   let base_path =
-    match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
+    match Eio_unix.run_in_systhread ~label:"bootstrap-realpath-base-path" (fun () -> Unix.realpath base_path) with
     | canonical -> canonical
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
@@ -949,9 +951,12 @@ let initialize_owner_state_blocking
      churn, and 30s is often enough to see it move when retention sweeps.
      Sampled here rather than inside [Gc_sampler] so neither that module nor
      [Activity_graph] gains a dependency on the other. *)
+  (* The maintenance loops open their named switch once per iteration, not
+     once per fiber: the runtime-events ring keeps a name only until it is
+     overwritten, so a tracer attached later sees the per-iteration names. *)
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run ~name:"activity-cache-gauges" @@ fun _ ->
     let rec loop () =
+      Eio.Switch.run ~name:"activity-cache-gauges" (fun _ ->
       (try
          let stats = Activity_graph.cache_stats () in
          Otel_metric_store.set_gauge
@@ -963,34 +968,34 @@ let initialize_owner_state_blocking
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
-         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn));
+         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn)));
       Eio.Time.sleep clock 30.0;
       loop ()
     in
     loop ());
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run ~name:"tool-usage-flush" @@ fun _ ->
     let rec loop () =
       Eio.Time.sleep clock 5.0;
+      Eio.Switch.run ~name:"tool-usage-flush" (fun _ ->
       (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "tool_usage flush_all_dirty failed: %s"
-           (Printexc.to_string exn));
+           (Printexc.to_string exn)));
       loop ()
     in
     loop ());
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run ~name:"trajectory-flush" @@ fun _ ->
     let rec loop () =
       Eio.Time.sleep clock 2.0;
+      Eio.Switch.run ~name:"trajectory-flush" (fun _ ->
       (try Trajectory.flush_all_pending () with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "trajectory flush_all_pending failed: %s"
-           (Printexc.to_string exn));
+           (Printexc.to_string exn)));
       loop ()
     in
     loop ());
@@ -1190,7 +1195,7 @@ let initialize_owner_state_blocking
            (Keeper_persistence_preparation_failed error))
   in
   (match
-     Eio_unix.run_in_systhread (fun () ->
+     Eio_unix.run_in_systhread ~label:"wire-capture-prune" (fun () ->
        Keeper_wire_capture.prune_expired
          ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state)))
    with

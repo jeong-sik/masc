@@ -35,6 +35,8 @@ type t =
   | View_image_missing_path
   | Attach_image of string
   | Attach_image_missing_path
+  | Attach_image_ref of string
+  | Attach_image_ref_missing_value
   | Preset_list
   | Preset_save of {
       name : string;
@@ -130,6 +132,10 @@ let catalog =
   ; { word = "attach"
     ; args = "<path>"
     ; summary = "stage an image to send with the next keeper message"
+    }
+  ; { word = "ref"
+    ; args = "<url|file_id>"
+    ; summary = "stage an image reference; the provider fetches it"
     }
   ; { word = "preset"
     ; args = "[save <name> [description] | restore <name>]"
@@ -264,6 +270,8 @@ let parse text =
     | "image", path -> View_image path
     | "attach", "" -> Attach_image_missing_path
     | "attach", path -> Attach_image path
+    | "ref", "" -> Attach_image_ref_missing_value
+    | "ref", value -> Attach_image_ref value
     | "preset", "" -> Preset_list
     | "preset", rest -> (
         match split_word rest with

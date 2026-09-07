@@ -574,9 +574,12 @@ let test_keeper_effects_unavailable_without_dispatch () =
            ~args:(`Assoc [ "opaque", `String name ])
            ()
        in
+       (* The approval machinery was unavailable, so the effect provably did
+          not run. That is a missing dependency, not a fault in the call:
+          Runtime_failure would reach the model as an uncertain outcome. *)
        expect_failed
          (name ^ " unavailable")
-         Tool_result.Runtime_failure
+         Tool_result.Dependency_unavailable
          result)
     keeper_effect_names;
   check int "unavailable Gate executes no Keeper effect" 0 (List.length !calls)
@@ -664,7 +667,7 @@ let test_ollama_probe_defer_and_unavailable_do_not_dispatch () =
       ~args:ollama_probe_input
       ()
   in
-  expect_failed "probe unavailable" Tool_result.Runtime_failure unavailable;
+  expect_failed "probe unavailable" Tool_result.Dependency_unavailable unavailable;
   ()
 ;;
 

@@ -3,20 +3,26 @@
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 
 (* A request, a mailbox wait or a loop gap at least this long is written to
-   the TUI log with two clocks (RFC-0429 §3.0): wall time and process CPU
-   time. A request that took ten seconds of wall and none of CPU was waiting
-   on something; the cadence's routine polls stay under this and out of the
-   log. This is measurement, not a fix: the stall it exists to place has
-   not been placed yet. *)
-let slow_report_sec = 1.0
+   the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
+   time. A request that took ten seconds of elapsed and none of CPU was
+   waiting on something; the cadence's routine polls stay under this and out
+   of the log. This is measurement, not a fix: the stall it exists to place
+   has not been placed yet.
+
+   Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. The stall
+   being chased is around ten seconds, and a wall clock corrected by that
+   much would either invent it or hide it — the one thing this log must not
+   do. [Masc_tui_esc_interrupt] takes the same clock for the same reason. *)
+let slow_report_ns = 1_000_000_000L
+let ms_of_ns ns = Int64.to_float ns /. 1e6
 
 let timed ~verb ~path (run : unit -> (int * string, string) result) =
-  let started_wall = Unix.gettimeofday () and started_cpu = Sys.time () in
+  let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
-  let wall = Unix.gettimeofday () -. started_wall in
-  if wall >= slow_report_sec then
-    Log.Transport.info "http %s %s took %.0f ms wall, %.0f ms cpu: %s" verb path
-      (wall *. 1000.)
+  let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
+  if Int64.compare elapsed_ns slow_report_ns >= 0 then
+    Log.Transport.info "http %s %s took %.0f ms elapsed, %.0f ms cpu: %s" verb
+      path (ms_of_ns elapsed_ns)
       ((Sys.time () -. started_cpu) *. 1000.)
       (match result with
        | Ok (status, _) -> Printf.sprintf "status %d" status
@@ -177,6 +183,29 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
   with
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "GET failed" e)
+
+(** Fetch an arbitrary external URL's body for web link previews. Unlike the
+    dashboard helpers above this sends NO masc auth header -- the URL is a
+    third-party site, so leaking the operator's token there would be a real
+    credential exposure. Only http(s) is followed, and only a 2xx response
+    yields a body. Response size is capped by {!Masc_http_client} (8 MB). *)
+let fetch_link_preview_body ~(url : string) : (string, string) result =
+  if not (String.starts_with ~prefix:"http://" url
+          || String.starts_with ~prefix:"https://" url)
+  then Error "link preview: unsupported url scheme"
+  else
+    let headers =
+      [ ("User-Agent", "masc-tui/link-preview (+https://github.com/jeong-sik/masc)")
+      ; ("Accept", "text/html,application/xhtml+xml") ]
+    in
+    match
+      Masc_http_client.get_response_sync ?clock:(request_clock ())
+        ~timeout_sec:(request_timeout_sec ()) ~url ~headers ()
+    with
+    | Error e -> Error (report_err "link preview GET failed" e)
+    | Ok { Masc_http_client.status; body; _ } ->
+        if status >= 200 && status < 300 then Ok body
+        else Error (Printf.sprintf "link preview: HTTP %d" status)
 
 (** Send an HTTP POST request with a JSON body and return the structured status/body pair. *)
 let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)

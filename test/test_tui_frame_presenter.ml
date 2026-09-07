@@ -277,17 +277,38 @@ let test_viewport_discards_offscreen_rows () =
 (* A scheme changes the ink it names; without this it does not change the two
    colours it does not name. masc draws most of its text without naming a
    colour, so that text is the terminal's default foreground. *)
+let slot_colour index =
+  Masc_tui_terminal_palette.make_rgb ~red:(0x10 + index) ~green:(0x20 + index)
+    ~blue:(0x30 + index)
+;;
+
+let slot_spec index =
+  Printf.sprintf "%d;rgb:%02x/%02x/%02x" index (0x10 + index) (0x20 + index)
+    (0x30 + index)
+;;
+
+(* Solarized Dark's own text and page, and sixteen slots that are nobody's.
+
+   A real scheme's slots would be the faithful fixture and the blind one:
+   base16 gives the bright colours the same bodies as the normal ones, so
+   Solarized Dark's slot 1 and slot 9 are both dc322f, and a test built on
+   them passes just as well with the two swapped. Which index a colour is sent
+   under is the whole contract here, so the fixture makes all sixteen tell
+   each other apart. *)
 let solarized_dark =
   { Presenter.foreground =
       Masc_tui_terminal_palette.make_rgb ~red:0x93 ~green:0xa1 ~blue:0xa1
   ; background =
       Masc_tui_terminal_palette.make_rgb ~red:0x00 ~green:0x2b ~blue:0x36
+  ; ansi =
+      Array.init Masc_tui_terminal_palette.ansi_slot_count (fun index ->
+        Some (slot_colour index))
   }
 ;;
 
 let test_a_scheme_repaints_the_terminals_own_background () =
   let captured = sink () in
-  Presenter.sync_page ~write:(write captured) ~flush:(flush captured)
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured)
     (Some solarized_dark);
   let sent = output captured in
   check bool "OSC 11 carries the scheme's own background" true
@@ -299,22 +320,89 @@ let test_a_scheme_repaints_the_terminals_own_background () =
    nine OSC 11 went out walking the catalogue and no OSC 10 at all. *)
 let test_a_scheme_also_repaints_the_terminals_own_text () =
   let captured = sink () in
-  Presenter.sync_page ~write:(write captured) ~flush:(flush captured)
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured)
     (Some solarized_dark);
   check bool "OSC 10 carries the scheme's own foreground" true
     (contains (output captured) "\027]10;rgb:93/a1/a1\027\\")
+
+(* The half that was missing next. Between #30781 and this change a chosen
+   scheme reached the page and the default text and stopped: everything masc
+   says with colour is drawn by naming a code, and no code was ever sent. The
+   catalogue's own high-contrast schemes were the worst hit -- masc's lift was
+   the only path a chosen colour had to a code, and a scheme that needs no
+   lift got none, so picking [norton-commander] changed nothing at all. *)
+let test_a_scheme_repaints_the_sixteen_colour_codes () =
+  let captured = sink () in
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured)
+    (Some solarized_dark);
+  let sent = output captured in
+  for index = 0 to Masc_tui_terminal_palette.ansi_slot_count - 1 do
+    check bool
+      (Printf.sprintf "OSC 4 carries slot %d under its own index" index)
+      true
+      (contains sent (slot_spec index))
+  done
+
+let test_the_sixteen_travel_as_one_sequence () =
+  (* Sixteen sequences is sixteen parses and sixteen chances for a terminal to
+     repaint between them. OSC 4 takes pairs, so they go as one. *)
+  let captured = sink () in
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured)
+    (Some solarized_dark);
+  let sent = output captured in
+  let occurrences =
+    List.length (Str.split_delim (Str.regexp_string "\027]4;") sent) - 1
+  in
+  check int "one OSC 4 for all sixteen" 1 occurrences
+
+let test_a_slot_without_a_colour_does_not_shift_the_others () =
+  (* [None] is a slot masc has nothing to say about, and the pairs are built
+     by filtering. Filter before numbering and every later colour lands one
+     index low -- the scheme still looks applied and every colour is wrong. *)
+  let captured = sink () in
+  let ansi = Array.copy solarized_dark.Presenter.ansi in
+  ansi.(3) <- None;
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured)
+    (Some { solarized_dark with Presenter.ansi });
+  let sent = output captured in
+  check bool "the empty slot is not sent" false (contains sent (slot_spec 3));
+  check bool "the slot after it keeps its own index" true
+    (contains sent (slot_spec 4));
+  check bool "the last slot keeps its own index" true
+    (contains sent
+       (slot_spec (Masc_tui_terminal_palette.ansi_slot_count - 1)))
+
+let test_a_scheme_with_no_slots_sends_no_osc_4 () =
+  (* An empty OSC 4 is a sequence with no pairs in it, which is a terminal
+     being asked to parse nothing. *)
+  let captured = sink () in
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured)
+    (Some
+       { solarized_dark with
+         Presenter.ansi =
+           Array.make Masc_tui_terminal_palette.ansi_slot_count None
+       });
+  let sent = output captured in
+  check bool "no OSC 4 goes out" false (contains sent "\027]4;");
+  check bool "the page still does" true
+    (contains sent "\027]11;rgb:00/2b/36\027\\")
 
 let test_withdrawing_a_scheme_puts_the_background_back () =
   (* [None] is "follow the terminal", which is a reset rather than a colour:
      masc has no opinion to send once the reader has withdrawn theirs. Both
      halves come back, for the same reason both go out. *)
   let captured = sink () in
-  Presenter.sync_page ~write:(write captured) ~flush:(flush captured) None;
+  Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured) None;
   let sent = output captured in
   check bool "OSC 111 restores the terminal's own page" true
     (contains sent "\027]111\027\\");
   check bool "OSC 110 restores the terminal's own text" true
-    (contains sent "\027]110\027\\")
+    (contains sent "\027]110\027\\");
+  (* 104 with no index is every slot. Naming them would leave one behind on
+     the day the count changes, and a slot left behind is the reader's shell
+     wearing one of masc's colours. *)
+  check bool "OSC 104 restores all sixteen colour codes" true
+    (contains sent "\027]104\027\\")
 
 let test_cleanup_returns_the_background_before_the_screen () =
   (* The failure this exists for: quit with a scheme in force and the reader's
@@ -329,6 +417,8 @@ let test_cleanup_returns_the_background_before_the_screen () =
     (contains left "\027]111\027\\");
   check bool "cleanup returns the text colour too" true
     (contains left "\027]110\027\\");
+  check bool "cleanup returns the sixteen colour codes too" true
+    (contains left "\027]104\027\\");
   let reset_at = Str.search_forward (Str.regexp_string "\027]110") left 0 in
   let leave_at = Str.search_forward (Str.regexp_string "\027[?1049l") left 0 in
   check bool "before leaving the alternate screen" true (reset_at < leave_at)
@@ -464,6 +554,14 @@ let () =
             test_a_scheme_also_repaints_the_terminals_own_text
         ; test_case "withdrawing puts the background back" `Quick
             test_withdrawing_a_scheme_puts_the_background_back
+        ; test_case "a scheme repaints the sixteen colour codes" `Quick
+            test_a_scheme_repaints_the_sixteen_colour_codes
+        ; test_case "the sixteen travel as one sequence" `Quick
+            test_the_sixteen_travel_as_one_sequence
+        ; test_case "an empty slot does not shift the others" `Quick
+            test_a_slot_without_a_colour_does_not_shift_the_others
+        ; test_case "no slots means no OSC 4" `Quick
+            test_a_scheme_with_no_slots_sends_no_osc_4
         ; test_case "cleanup returns the background first" `Quick
             test_cleanup_returns_the_background_before_the_screen
         ] )

@@ -98,6 +98,10 @@ type t =
           sends nothing: one is for the operator to look at, the other is for
           the Keeper to read. The path grammar matches [/image]. *)
   | Attach_image_missing_path  (** [/attach] with no path on the line. *)
+  | Attach_image_ref of string
+    (** [/ref <url|file_id>] — stage an image reference the provider fetches. *)
+  | Attach_image_ref_missing_value
+    (** [/ref] with no value on the line. *)
   | Preset_list  (** [/preset] — list the prompt presets the server holds. *)
   | Preset_save of {
       name : string;

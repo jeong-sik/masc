@@ -324,7 +324,7 @@ const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
 
 /**
  * Fire the IDE workspace-store's live refresh, debounced and scoped to the
- * `code` surface. The store re-fetches tree/diff/file/blame/annotations from
+ * `code` surface. The store re-fetches tree/diff/file/blame from
  * the same HTTP endpoints it already uses; these are idempotent (server is the
  * SSOT), so a coalesced refresh is safe. Off the code tab this is a no-op, so
  * the singleton store does not fetch in the background.

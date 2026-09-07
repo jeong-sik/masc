@@ -25,7 +25,7 @@ let default_config = {
     Env_config_core.get_int
       ~default:Masc_network_defaults.masc_http_default_max_connections
       "MASC_HTTP_MAX_CONNECTIONS";
-  listen_backlog = Env_config_core.get_int ~default:128 "MASC_TCP_LISTEN_BACKLOG";
+  listen_backlog = Env_setting.Int_knob.get Tcp_listen_backlog;
 }
 
 (** HTTP request handler type *)

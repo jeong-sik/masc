@@ -11,6 +11,7 @@ let request : Chat.request =
     keeper_name = "keeper.one";
     message = "hello";
     attachments = [];
+    references = [];
   }
 
 let thread_id = "keeper:" ^ request.keeper_name
@@ -126,7 +127,51 @@ let test_a_resume_position_rides_beside_the_request () =
        (Chat.request_to_yojson ~since_seq:(Position.After_seq 9) with_image)
      = `Int 9);
   check bool "identity does not read the position" true
-    (Chat.same_request_identity request request)
+    (Chat.same_request_identity request request);
+  (* #33728: a reference rides as its user_block carrier and sends no bytes —
+     the attachments array stays absent when only references are staged. *)
+  let with_ref =
+    Chat.create_request
+      ~references:[ Chat.Ref_url "https://example.test/a.png"; Chat.Ref_file_id "file-1" ]
+      ~keeper_name:"keeper.one"
+      ~message:"look"
+      ()
+  in
+  let ref_json = Chat.request_to_yojson ~since_seq:Position.Whole_turn with_ref in
+  check bool "references send no attachments array" true
+    (Yojson.Safe.Util.member "attachments" ref_json = `Null);
+  (match Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "user_blocks" ref_json) with
+   | [ url_block; file_id_block; text_block ] ->
+       check string "url carrier block"
+         "https://example.test/a.png"
+         (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "url" url_block));
+       check string "file_id carrier block"
+         "file-1"
+         (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "file_id" file_id_block));
+       check string "text closes the blocks"
+         "look"
+         (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" text_block))
+   | _ -> Alcotest.fail "references-only request should carry two carriers and text");
+  let with_both =
+    Chat.create_request ~attachments:[ attachment ]
+      ~references:[ Chat.Ref_url "https://example.test/a.png" ]
+      ~keeper_name:"keeper.one"
+      ~message:"look"
+      ()
+  in
+  let both_json = Chat.request_to_yojson ~since_seq:Position.Whole_turn with_both in
+  check bool "bytes still ride the attachments array" true
+    (Yojson.Safe.Util.member "attachments" both_json <> `Null);
+  (match Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "user_blocks" both_json) with
+   | [ bytes_block; ref_block; text_block ] ->
+       check bool "bytes block keys by attachment_id" true
+         (Yojson.Safe.Util.member "attachment_id" bytes_block <> `Null);
+       check bool "reference block keys by url, not attachment_id" true
+         (Yojson.Safe.Util.member "url" ref_block <> `Null
+          && Yojson.Safe.Util.member "attachment_id" ref_block = `Null);
+       check bool "text block last" true
+         (Yojson.Safe.Util.member "text" text_block <> `Null)
+   | _ -> Alcotest.fail "bytes+reference request should carry three blocks")
 ;;
 
 let test_request_body_and_identity () =
@@ -987,7 +1032,7 @@ let test_operation_reconciliation_uses_server_canonical_message () =
 
 let test_stale_completion_identity () =
   let current : Chat.request =
-    { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one"; attachments = [] }
+    { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one"; attachments = []; references = [] }
   in
   let same = { current with message = "same identity" } in
   let stale = { current with request_id = "tui-stale" } in

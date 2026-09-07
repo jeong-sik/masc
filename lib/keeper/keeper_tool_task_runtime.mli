@@ -24,6 +24,20 @@ val handle_keeper_task_tool :
   args:Yojson.Safe.t ->
   string
 
+val evidence_artifact_reader :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  (worker:string ->
+   relative:string ->
+   Workspace_verification_store.artifact_read_result)
+  option
+(** The submit-boundary artifact read for a producer whose sandbox keeps its
+    tree on the endpoint (microvm, remote-ssh): the guest's work volume,
+    reached through the sandbox backend. [None] for a shared-mount (Docker)
+    keeper -- its tree sits on the host playground the store reads directly --
+    and for callers that want the store's default direct read. *)
+
 val handle_keeper_task_tool_with_outcome :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -297,6 +297,54 @@ let test_covered_extensions_are_the_table () =
     (List.length covered = List.length (List.sort_uniq compare covered))
 ;;
 
+(* The memo a keeper leaves is a comment in the file's own syntax, so every
+   language that has one must spell a memo the reader reads back. Walked
+   over the list, so a language added with a marker the reader lacks fails
+   here rather than as a memo nobody sees. *)
+let test_every_language_with_comments_writes_a_memo_it_reads_back () =
+  let memo =
+    { Ide_memo.author = "alpha"; kind = Agent_observation.Question; text = "why three" }
+  in
+  List.iter
+    (fun language ->
+      let id = Lsp_process_manager.lang_id_of_language language in
+      match Lsp_process_manager.memo_markers_of_language language with
+      | None ->
+        check bool (id ^ " is the one language without comments") true
+          (language = Lsp_process_manager.Json)
+      | Some markers ->
+        (match Ide_memo.of_comment (Ide_memo.to_line markers memo) with
+         | Ide_memo.Memo read -> check bool (id ^ " reads its own memo back") true (read = memo)
+         | Ide_memo.Malformed why -> Alcotest.failf "%s: malformed: %s" id why
+         | Ide_memo.Not_a_memo -> Alcotest.failf "%s: the reader does not know its marker" id))
+    Lsp_process_manager.all_languages;
+  (match Lsp_process_manager.memo_line ~path:"notes/readme.md" memo with
+   | Ok line ->
+     check string "markdown spells it as an html comment"
+       "<!-- masc(alpha) question: why three -->" line
+   | Error refusal ->
+     Alcotest.fail (Lsp_process_manager.memo_line_refusal_to_string refusal));
+  (match Lsp_process_manager.memo_markers_of_path "init.lua" with
+   | Ok (Ide_memo.Line "--") -> ()
+   | Ok markers ->
+     Alcotest.failf "lua: wrong markers: %s"
+       (Ide_memo.to_line markers memo)
+   | Error refusal ->
+     Alcotest.fail (Lsp_process_manager.memo_line_refusal_to_string refusal));
+  (match Lsp_process_manager.memo_line ~path:"data.json" memo with
+   | Error (Lsp_process_manager.No_comment_syntax Lsp_process_manager.Json) -> ()
+   | Error refusal ->
+     Alcotest.failf "json: wrong refusal: %s"
+       (Lsp_process_manager.memo_line_refusal_to_string refusal)
+   | Ok line -> Alcotest.failf "json took a memo: %s" line);
+  (match Lsp_process_manager.memo_line ~path:"notes.COBOL" memo with
+   | Error (Lsp_process_manager.Extension_unknown ".cobol") -> ()
+   | Error refusal ->
+     Alcotest.failf "cobol: wrong refusal: %s"
+       (Lsp_process_manager.memo_line_refusal_to_string refusal)
+   | Ok line -> Alcotest.failf "cobol took a memo: %s" line)
+;;
+
 let () =
   run
     "lsp_process_manager"
@@ -339,6 +387,8 @@ let () =
             test_every_command_names_one_executable
         ; test_case "the covered extensions are the table read the other way" `Quick
             test_covered_extensions_are_the_table
+        ; test_case "every language with comments writes a memo it reads back" `Quick
+            test_every_language_with_comments_writes_a_memo_it_reads_back
         ] )
     ]
 ;;

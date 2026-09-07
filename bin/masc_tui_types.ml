@@ -122,13 +122,23 @@ type log_entry = Tui_decode.log_entry
     Each arm carries the label to draw. The label is a rendering of the fact;
     the constructor is the fact. *)
 type message_author =
-  | Sent_by_operator of string
-      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
-          where the line came in from somewhere other than the dashboard. *)
-  | Sent_by_other of string
+  | Sent_by_operator of { surface : string option }
+      (** The person reading this pane, and the door they came in by when it
+          was not the dashboard -- an operator can write to a keeper from a
+          connector. Apart for the same reason as the arm below, and it was
+          joined here while that one was split: at a ten-cell column
+          ["you \xc2\xb7 broadcast"] was cut to ["yo\xe2\x80\xa6dcast"],
+          losing the speaker to keep the tail of the surface. *)
+  | Sent_by_other of
+      { speaker : string
+      ; surface : string option
+      }
       (** Anyone else: another agent's broadcast, a connector, a second
-          operator. Named as the server named them, with the surface it
-          arrived on. *)
+          operator. Kept apart rather than joined here because the speaker
+          column is narrower than the pair: joined, the fit cuts the middle of
+          one string and the tail it favours is the surface, so the row keeps
+          which door it came in by and loses who came through it. Whoever
+          knows the column decides. *)
 
 type msg_role =
   | Message_user of message_author
@@ -244,8 +254,12 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
     List.filter_map Fun.id
       [ (match memory with
          | Memory_summary -> None
-         | Memory_hidden -> Some "memory:off"
-         | Memory_full -> Some "memory:full")
+         (* Named for the rows it governs, which the pane labels JOURNAL and
+            the footer reaches with Ctrl-N:journal. It read "memory" here and
+            "journal" there, so pressing the key and looking for what moved
+            meant knowing the two words were one axis. *)
+         | Memory_hidden -> Some "journal:off"
+         | Memory_full -> Some "journal:full")
       ; (* The clock-free gutter is the resting layout: the speaker mark and
            label retain who/what, while timestamps and request ids remain one
            keypress away. Name only the denser projection's added metadata so
@@ -2632,6 +2646,11 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  (* Whether ^Y ending a voice capture also sends what was heard
+     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     in the draft either way, and that draft is also where a spoken
+     half-sentence waits for typing. *)
+  mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2718,6 +2737,12 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
+     set the loop draws no frames and every key belongs to the emulator. The
+     machine is [Option] so it exists only once the screen has been opened,
+     and it survives closing -- reopening continues the same frame. *)
+  mutable msx_open: bool;
+  mutable msx: Msx.t option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -3318,11 +3343,11 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
-  (* The file pane's notes view: m on an open file (repository scope only --
-     the annotation routes are scoped by the server-minted codebase slug,
-     which only a Repositories row carries) swaps the content for the notes
-     anchored to the file. *)
-  (* The notes anchored to the open file, keyed by its path. *)
+  (* The file pane's notes view: m on an open file swaps the content for
+     the memos written as comments in the file itself. Read off the rows
+     once at load, like the width above: the memos change when the file
+     does, and rebuilding them per frame walks every row of it. *)
+  mutable code_memos: Masc_tui_memo.found list;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -3449,6 +3474,10 @@ type state = {
      message: switching keepers or abandoning the draft must not leave an image
      attached to whatever is typed later. *)
   mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
+  (* Image references staged with :ref (#33728) — a URL the provider fetches
+     or a Files-API id. Same lifecycle as [msg_attachments]: part of the unsent
+     message, consumed by the send that consumes the draft. *)
+  mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
      history row that was newest when the newest attachment entered the
@@ -4025,6 +4054,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -4059,6 +4089,8 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  msx_open = false;
+  msx = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -4351,6 +4383,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
+  code_memos = [];
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
@@ -4416,6 +4449,7 @@ let create_state
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
+  msg_references = [];
   msg_attachments_since = None;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;

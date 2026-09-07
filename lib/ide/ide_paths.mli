@@ -1,8 +1,7 @@
 (** IDE store path SSOT.
 
     Centralises the [.masc-ide/] subdirectory name and store path
-    construction used by the IDE annotation, region tracker, and HTTP
-    query modules.
+    construction used by the IDE bridge and HTTP query modules.
 
     RFC-0378 §5.2: the store holds addressed code facts only, laid out
     as [by-url/<codebase-slug>/]. A store directory is named by the

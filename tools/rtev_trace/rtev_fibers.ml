@@ -90,6 +90,11 @@ let () =
      cancellation contexts ([Switch.run ~name]), never fibers, so a fiber
      that opens a named switch at the top of its body is labelled by it. *)
   let opened : (int, string) Hashtbl.t = Hashtbl.create 4096 in
+  (* The first named switch each fiber opened: masc names its long-lived
+     fibers at the top of their body, and Eio names its own internal
+     switches ([both], [with_open_in], [Buf_write.with_flow]) later, so the
+     first name is the code and the newest is what the fiber was doing. *)
+  let opened_first : (int, string) Hashtbl.t = Hashtbl.create 4096 in
   let lost = ref 0 in
   let close d ts ended_by =
     let s = state d in
@@ -139,7 +144,9 @@ let () =
     | `Name (id, n) ->
       Hashtbl.replace names id n;
       (match Hashtbl.find_opt created_by id with
-       | Some creator -> Hashtbl.replace opened creator n
+       | Some creator ->
+         Hashtbl.replace opened creator n;
+         if not (Hashtbl.mem opened_first creator) then Hashtbl.replace opened_first creator n
        | None -> ())
     | _ -> ()
   in
@@ -192,9 +199,11 @@ let () =
         s.over_10 s.over_50 s.over_100 (ms s.run_max_ns))
     domains;
   let label_of fiber =
-    match Hashtbl.find_opt opened fiber with
-    | Some n -> n
-    | None -> (
+    match Hashtbl.find_opt opened_first fiber, Hashtbl.find_opt opened fiber with
+    | Some first, Some last when not (String.equal first last) -> first ^ " > " ^ last
+    | Some first, _ -> first
+    | None, Some last -> last
+    | None, None -> (
       match Hashtbl.find_opt names fiber with
       | Some n -> n
       | None -> (
@@ -221,7 +230,7 @@ let () =
            | None -> ()
            | Some creator ->
              Buffer.add_string buf (Printf.sprintf " <- fiber %d" creator);
-             (match Hashtbl.find_opt opened creator with
+             (match Hashtbl.find_opt opened_first creator with
               | Some n -> Buffer.add_string buf (Printf.sprintf "(%s)" n)
               | None -> ());
              go creator (depth + 1))

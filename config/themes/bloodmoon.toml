@@ -1,0 +1,20 @@
+name = "bloodmoon"
+light = false
+
+[palette]
+base00 = "140708"
+base01 = "1f0c0e"
+base02 = "2e1417"
+base03 = "6b3038"
+base04 = "a85c66"
+base05 = "f0d5d0"
+base06 = "f8e8e4"
+base07 = "fff5f2"
+base08 = "ff5c5c"
+base09 = "ff8f4d"
+base0a = "ffd24d"
+base0b = "9fd96b"
+base0c = "5cd9c4"
+base0d = "6f9fe0"
+base0e = "b05cf0"
+base0f = "ff6fa8"

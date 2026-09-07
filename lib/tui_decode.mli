@@ -368,6 +368,12 @@ type skills_catalog_state =
   | Skills_uninitialized
   | Skills_invalid_workspace
 
+(** Coverage of current Keeper trace activation ledgers, not lifetime usage. *)
+type skill_usage_coverage = {
+  suc_ledgers_loaded : int;
+  suc_unavailable : string list;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -376,6 +382,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_usage_coverage : skill_usage_coverage option;
 }
 
 val skills_catalog_state_to_string : skills_catalog_state -> string
@@ -1471,6 +1478,22 @@ type fusion_detail = {
   fud_evidence_status : fusion_evidence_status;
   fud_evidence : fusion_evidence option;
 }
+
+type fusion_historical_detail = {
+  fhd_reference : fusion_historical_evidence;
+  fhd_author : string;
+  fhd_title : string;
+  fhd_body : string;
+  fhd_observations : ((int * int) option * float option, string) result;
+  fhd_evidence : (fusion_evidence, string) result;
+}
+
+val decode_fusion_historical_detail :
+  reference:fusion_historical_evidence -> Yojson.Safe.t ->
+  (fusion_historical_detail, string) result
+(** Read an exact Board original independently of registry lifecycle. Source
+    identity is required; a malformed evidence payload remains an explicit
+    error beside the preserved original. *)
 
 val decode_fusion_snapshot : Yojson.Safe.t -> (fusion_snapshot, string) result
 (** Decode the retained registry list from

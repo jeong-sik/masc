@@ -23,15 +23,6 @@ let make_keeper ?(paused = false) name : Decode.keeper =
   }
 ;;
 
-let make_task ~id ~title ~status : Decode.task =
-  { id
-  ; title
-  ; status
-  ; priority = 1
-  ; goal_ids = []
-  }
-;;
-
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
@@ -95,49 +86,139 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   }
 ;;
 
+let contains text needle =
+  try ignore (Str.search_forward (Str.regexp_string needle) text 0); true
+  with Not_found -> false
+
+let domain_task ~id ~created_at ~status : Masc_domain.task =
+  { id; title = id; description = ""; task_status = status; priority = 3;
+    files = []; created_at; created_by = Some "producer";
+    predecessor_task_id = None; contract = None;
+    execution_links = Masc_domain.no_execution_links; handoff_context = None;
+    cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None; skills = [] }
+
 let test_calculate_kpis_empty () =
   let state = make_state () in
   let kpis = Render_metrics.calculate_kpis state in
-  check int "total keepers 0" 0 kpis.total_keepers;
-  check int "active keepers 0" 0 kpis.active_keepers;
-  check int "total tasks 0" 0 kpis.total_tasks;
-  check int "done tasks 0" 0 kpis.done_tasks;
-  check int "active tasks 0" 0 kpis.active_tasks;
-  check int "awaiting tasks 0" 0 kpis.awaiting_tasks;
-  check int "total facts 0" 0 kpis.total_facts;
-  check int "ordinary facts 0" 0 kpis.ordinary_facts;
-  check int "source facts 0" 0 kpis.source_facts;
-  check int "snapshot bytes 0" 0 kpis.snapshot_bytes;
-  check int "gate pending 0" 0 kpis.gate_pending_count;
-  check int "held approvals 0" 0 kpis.held_approvals_count
+  check bool "unobserved tasks stay unknown" true (Option.is_none kpis.tasks);
+  check bool "unobserved turns stay unknown" true (Option.is_none kpis.turns);
+  let output = String.concat "\n" (Render_metrics.render_section_fleet ~cols:160 state) in
+  check bool "missing GC is visible" true (contains output "GC telemetry not observed");
+  check bool "missing scheduler is visible" true (contains output "Scheduler telemetry not observed");
+  check bool "no fabricated heap" false (contains output "42.5");
+  check bool "no fabricated latency" false (contains output "0.82")
 ;;
 
 let test_calculate_kpis_populated () =
   let state = make_state () in
-  let k1 = make_keeper ~paused:false "keeper-alpha" in
-  let k2 = make_keeper ~paused:true "keeper-beta" in
-  state.keepers <- [ k1; k2 ];
-  let t1 = make_task ~id:"t1" ~title:"Task 1" ~status:(Masc_domain.Done { assignee = "keeper-alpha"; completed_at = "now"; notes = None }) in
-  let t2 = make_task ~id:"t2" ~title:"Task 2" ~status:(Masc_domain.InProgress { assignee = "keeper-alpha"; started_at = "now" }) in
-  let t3 = make_task ~id:"t3" ~title:"Task 3" ~status:(Masc_domain.AwaitingVerification { assignee = "keeper-alpha"; started_at = "now"; submitted_at = "now"; intent = Masc_domain.Complete_task; verification_id = "v1" }) in
-  state.tasks <- [ t1; t2; t3 ];
-  let kh1 = make_keeper_health ~keeper_id:"keeper-alpha" ~facts:20 ~snapshot_bytes:2048 in
-  let mhs = make_memory_health ~total_facts:20 ~source_facts:5 ~keepers:[ kh1 ] in
-  state.memory_health <- Some mhs;
-  let gp = make_gate_pending ~id:"gp1" ~keeper:"keeper-alpha" in
-  state.gate_pending <- [ gp ];
+  state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
+  state.keeper_turns <-
+    [ { Decode.ktr_keeper_name = "running";
+        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; preview = None } };
+      { Decode.ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
+      { Decode.ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
+  state.keeper_turns_observed_at <- Some 100.;
   let kpis = Render_metrics.calculate_kpis state in
-  check int "total keepers 2" 2 kpis.total_keepers;
-  check int "active keepers 1" 1 kpis.active_keepers;
-  check int "total tasks 3" 3 kpis.total_tasks;
-  check int "done tasks 1" 1 kpis.done_tasks;
-  check int "active tasks 1" 1 kpis.active_tasks;
-  check int "awaiting tasks 1" 1 kpis.awaiting_tasks;
-  check int "total facts 20" 20 kpis.total_facts;
-  check int "ordinary facts 15" 15 kpis.ordinary_facts;
-  check int "source facts 5" 5 kpis.source_facts;
-  check int "snapshot bytes 2048" 2048 kpis.snapshot_bytes;
-  check int "gate pending count 1" 1 kpis.gate_pending_count
+  check int "unpaused is a configuration count" 1 kpis.unpaused_keepers;
+  let turns = Option.get kpis.turns in
+  check int "only actual running owners count as running" 1 turns.running;
+  check int "idle is distinct" 1 turns.idle;
+  check int "unavailable is distinct" 1 turns.unavailable;
+  state.keeper_turns_error <- Some "poll failed";
+  check bool "stale rows do not remain a current count" true
+    (Option.is_none (Render_metrics.calculate_kpis state).turns);
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "failed observation is visible" true (contains output "poll failed");
+  check bool "elapsed rows are not advanced as current on failure" false (contains output "lane autonomous")
+;;
+
+let test_scheduler_sample_availability () =
+  List.iter
+    (fun (samples, probe, displayed_probe) ->
+      let state = make_state () in
+      let payload =
+        `Assoc
+          [ ("status", `String "ok")
+          ; ("scheduler", `Assoc
+              [ ("samples", `Int samples)
+              ; ("probe", `String probe)
+              ; ("pool_domains", `Int 3)
+              ; ("p95_ms", `Float 512.125)
+              ; ("stalls", `Int 7)
+              ])
+          ]
+      in
+      state.server_identity <- Some
+        (match Decode.decode_server_identity payload with
+         | Ok identity -> identity
+         | Error detail -> fail detail);
+      state.metrics_section <- Types.Section_fleet;
+      let lines = ref [] in
+      let push line = lines := line :: !lines in
+      Render_metrics.render_metrics_body ~cols:200 ~budget:40 state
+        ~push ~push_styled:(fun ~style:_ line -> push line)
+        ~push_selected:push ~push_divider:(fun () -> ())
+        ~push_empty:(fun () -> ());
+      let output = String.concat "\n" (List.rev !lines) in
+      let measured = samples > 0 in
+      check bool "measured p95 requires a positive sample count" measured
+        (contains output "p95 512.125");
+      check bool "stall count requires a positive sample count" measured
+        (contains output "stalls");
+      check bool "sample absence is explicit" (not measured)
+        (contains output "No latency samples in the producer window");
+      check bool "domain observation remains visible in detail" true
+        (contains output "worker domains 3");
+      if not measured then (
+        check bool "card explains absent samples" true
+          (contains output "No latency samples");
+        check bool "card preserves normalized probe observation" true
+          (contains output ("Probe: " ^ displayed_probe));
+        check bool "detail preserves normalized probe observation" true
+          (contains output ("Probe " ^ displayed_probe))))
+    [ (0, "running", "running")
+    ; (0, "", "unreported")
+    ; (-1, " \t ", "unreported")
+    ; (1, "running", "running")
+    ]
+;;
+
+let test_retained_task_outcomes () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-07T12:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_at at = Masc_domain.Done { assignee = "producer"; completed_at = at; notes = None } in
+  let tasks =
+    [ task "old-completed" "2026-09-01T00:00:00Z" (done_at "2026-09-07T11:00:00Z");
+      task "submitted" "2026-09-07T10:00:00Z"
+        (AwaitingVerification { assignee = "producer"; started_at = "2026-09-07T10:00:00Z";
+          submitted_at = "2026-09-07T11:00:00Z"; intent = Complete_task; verification_id = "proof" });
+      task "boundary" "2026-09-06T12:00:00Z" Todo;
+      task "cancelled" "2026-09-07T09:00:00Z"
+        (Cancelled { cancelled_by = "producer"; cancelled_at = "2026-09-07T11:30:00Z"; reason = None });
+      task "older-done" "2026-09-01T00:00:00Z" (done_at "2026-09-05T10:00:00Z");
+      task "invalid" "invalid timestamp" Todo;
+      task "future" "2026-09-08T10:00:00Z" Todo ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  check int "new registrations in the window" 3 flow.recent.created;
+  check int "completion is independent of creation time" 1 flow.recent.completed;
+  check int "cancellation is separate" 1 flow.recent.cancelled;
+  check int "retained done includes old outcomes" 2 flow.current.completed;
+  check int "verification pending is not done" 1 flow.current.awaiting_verification;
+  check int "open includes pending and invalid-date tasks" 4 (Masc_tui_task_flow.open_count flow.current);
+  check int "invalid timestamp count retained" 1 flow.unparseable_timestamps;
+  check (option (float 0.001)) "oldest open registration" (Some (now -. 86400.)) flow.oldest_open_created_at;
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  state.tasks <- [];
+  state.tasks_error <- Some "goal links unavailable";
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "active-only list does not erase completed outcomes" 2 (Option.get kpis.tasks).completed;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "snapshot window is explicit" true (contains output "2026-09-06 12:00 UTC");
+  check bool "source warning does not erase known counts" true (contains output "New tasks 3 · Done 1 · Cancelled 1");
+  check bool "source warning is visible" true (contains output "goal links unavailable");
+  check bool "old glow cache is not presented as history" false (contains output "Heatmap")
 ;;
 
 let test_overview_pulse_line () =
@@ -282,6 +363,7 @@ let () =
     [ ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
+        ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line ] )
@@ -289,6 +371,7 @@ let () =
       , [ test_case "section_pills_line" `Quick test_section_pills_line ] )
     ; ( "sections"
       , [ test_case "fleet" `Quick test_section_fleet_lines
+        ; test_case "scheduler sample availability" `Quick test_scheduler_sample_availability
         ; test_case "resources" `Quick test_section_resources_lines
         ; test_case "tools" `Quick test_section_tools_lines
         ; test_case "fleet_populated" `Quick test_section_fleet_populated

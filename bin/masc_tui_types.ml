@@ -260,14 +260,19 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
             meant knowing the two words were one axis. *)
          | Memory_hidden -> Some "journal:off"
          | Memory_full -> Some "journal:full")
-      ; (* The clock-free gutter is the resting layout: the speaker mark and
-           label retain who/what, while timestamps and request ids remain one
-           keypress away. Name only the denser projection's added metadata so
-           the header explains what changed instead of describing the default
-           as though something were missing. *)
+      ; (* The short clock is the resting layout. It was the bare gutter, on
+           the grounds that a clock on every row was noise -- and it was, back
+           when it drew on every row. It is now drawn only where the minute
+           moved, which over 531 captured rows left it blank on 45% of them,
+           and a gutter that spends seventeen cells without saying when
+           anything happened is the emptier column of the two.
+
+           So the header names the two projections away from it: the bare
+           gutter, because a pane with no clock at all should say that it is
+           the reader's choice, and the full row. *)
         (match origin with
-         | Masc_tui_message_layout.Origin_bare -> None
-         | Masc_tui_message_layout.Origin_inline -> Some "metadata:inline"
+         | Masc_tui_message_layout.Origin_bare -> Some "metadata:off"
+         | Masc_tui_message_layout.Origin_inline -> None
          | Masc_tui_message_layout.Origin_row -> Some "metadata:full")
       ; (match reasoning with
          | Reasoning_hidden -> None
@@ -287,9 +292,11 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Start from the resting clock-free gutter, then add a short inline clock,
-   then give the full timestamp and request id a row of their own. One key
-   walks from the densest conversation toward progressively more metadata. *)
+(* One key walks the whole axis, and the walk is unchanged: from the resting
+   short clock to the full timestamp and request id on a row of their own,
+   then to the bare gutter, then back. What moved is where it rests -- see
+   [chat_visibility_summary]. Every stop is still reachable, and the two ends
+   are still one press apart from each other. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -4882,7 +4889,7 @@ let create_state
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
      the typed speaker/kind; Ctrl-F adds inline, then full timestamp/request
      metadata when the operator needs to trace a turn. *)
-  msg_origin_display = Masc_tui_message_layout.Origin_bare;
+  msg_origin_display = Masc_tui_message_layout.Origin_inline;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;

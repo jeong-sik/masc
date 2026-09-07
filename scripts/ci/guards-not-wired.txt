@@ -9,10 +9,38 @@
 # Which is which is #34018, along with the state each was measured in on
 # 2026-09-07:
 #
-#   red   -- run on untouched main and failed
-#   green -- run on untouched main and passed, so wiring it costs nothing now
+#   red    -- run on untouched main and failed
+#   green  -- run on untouched main and passed, so wiring it costs nothing now
+#   report -- prints findings and exits 0 either way; wiring it enforces
+#             nothing, so the work is to give it a verdict first
+#   tool   -- takes arguments or a mode; not a standalone check
 #   (unmarked) -- not run
 #
+# 2026-09-07: the name pattern above used to read (lint|check|guard|ratchet),
+# which is every guard in this repository except the twenty-two named
+# audit-*. They were not passing this check, they were not in it. Counts went
+# 76/23 to 103/45.
+#
+scripts/audit-agent-core-payload.py  # red
+scripts/audit-catchall.sh  # report
+scripts/audit-code-smell.sh  # report
+scripts/audit-cross-module-exhaustive-match.sh  # report
+scripts/audit-dashboard-prompt-keys.sh  # green
+scripts/audit-dead-surface.py  # tool: needs --modules/--exports/--stanzas
+scripts/audit-hardcoding-truth.sh  # report: prints "Status: findings", exits 0
+scripts/audit-keeper-credential-drift.sh  # report
+scripts/audit-keeper-credential-uuid-integrity.sh  # red
+scripts/audit-keeper-tool-boundary-matrix.sh  # tool
+scripts/audit-ocaml-phase-count.sh  # green
+scripts/audit-ocaml-spec-nav-line-refs.sh  # green, but 0 citations exist to check
+scripts/audit-odoc-refs.py  # red
+scripts/audit-path-ssot.sh  # red
+scripts/audit-rfc-closeout-lag.sh  # report
+scripts/audit-route-tool-catalog.sh  # green
+scripts/audit-shell-ir-consumption.sh  # green
+scripts/audit-tla-ml-line-refs.sh  # green, but 0 citations exist to check
+scripts/audit-tla-phase-count.sh  # green
+scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-boundary-guard-mli-pairs.sh  # green
 scripts/check-boundary-guard.sh
 scripts/check-checkpoint-installation-legacy-purge.sh

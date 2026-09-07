@@ -28,7 +28,7 @@ import sys
 
 SKIP_DIRS = {".git", "_build", "node_modules", ".worktrees", "_opam", "dist"}
 SCRIPT_SUFFIXES = (".sh", ".py")
-GUARD_NAME = re.compile(r"(lint|check|guard|ratchet)")
+GUARD_NAME = re.compile(r"(lint|check|guard|ratchet|audit)")
 
 # One guard per wiring mechanism, and where its name is written. A mechanism
 # the seed loses shows up here as the file that names it no longer naming it,

@@ -160,6 +160,14 @@ blocking_lints() {
   run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
   run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh
   run_lint "TLA variant sync" bash scripts/ci/check-tla-variant-sync.sh
+  # Two of the twenty-two audit-* scripts the name pattern used to skip. Both
+  # green on main and both proven to fail: an orphan .cfg under specs/ trips
+  # the first, an OCaml constructor the TLA set does not carry trips the
+  # second. --check-cross-spec is opt-in and nothing was opting in, so the
+  # three cross-spec sets it compares were compared nowhere.
+  run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh
+  run_lint "TLA annotation drift" \
+    bash scripts/audit-tla-annotation-drift.sh --check-cross-spec
   run_lint "Model prefix inheritance" python3 scripts/ci/check_model_prefix_inheritance.py
   run_lint "Every check script is reached" \
     python3 scripts/ci/check-guards-are-wired.py

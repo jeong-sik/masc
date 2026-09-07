@@ -5,8 +5,8 @@
     "count": 1698,
     "note": "1698 quota events; propagated fences are overlapping observations",
     "source": "lib/runtime/runtime_claude_code.ml",
-    "action": "API diagnostic 수정은 배포 관측. #33855는 typed CLI quota scope와 후보 순서를 공유하도록 병합됐으며 fixture 후속 #33873 검증 중.",
-    "status": "quota-code-fix",
+    "action": "API diagnostic와 exact CLI quota 수정은 현재 binary fe702d71da에 포함. 후속 #33873 exact CLI11/11, HITL46/47; 기존1개 실패로 전체 CI는 FAIL. 실제 failover 연속성은 별도 검증 필요.",
+    "status": "quota-tested",
     "first": {
       "seq": 25985026,
       "ts": "2026-09-06T21:05:47Z",
@@ -329,8 +329,8 @@
     "count": 111,
     "note": "shell_light70 among111; other18 slow render not added",
     "source": "lib/dashboard/dashboard_snapshot.ml",
-    "action": "#33877: 한 shell projection에서 TOML 선언 snapshot을 공유, 반복 읽기 제거. 기존 실측 runtime_resolution3468/3873ms 및1215/1292ms. 개선 후 지연/UI는 미측정.",
-    "status": "performance-code-fix",
+    "action": "선언 TOML을 요청당 한 번 읽어 fleet에 공유하는 #33877 병합. 새4개 포함90/91 PASS, 기존 identity scan 실패. 현재 fe702d71da에는 아직 없으므로 성능 개선 미측정.",
+    "status": "performance-merged",
     "first": {
       "seq": 26080100,
       "ts": "2026-09-06T23:26:05Z",
@@ -356,8 +356,8 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "#33867: 직접 Vite 빌드도 stamp 생성, 원격 번들/소스 영수증 workflow 추가. 기본 브랜치에 workflow가 없어 dispatch404; 실제 artifact/build/deploy 미확인.",
-    "status": "artifact-code-fix",
+    "action": "현재 서버 fe702d71da의 원격 artifact34085743562 성공. 642파일 해시 검증 후05:15:17Z 적용, 실제 build-stamp mtime 보존. health dashboard=ok 및 화면 경고 해소 확인.",
+    "status": "deployed-verified",
     "first": {
       "seq": 26156709,
       "ts": "2026-09-07T00:47:21Z",
@@ -383,7 +383,7 @@
     "count": 68,
     "note": "68 wait lines, 23 WARN, max119.4s",
     "source": "lib/server/server_runtime_bootstrap.ml",
-    "action": "#33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 최신 배포에는 미포함.",
+    "action": "#33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 현재 fe702d71da에 병합 커밋57ca6d5399 포함을 확인. 성공 VM 생성은 미검증.",
     "status": "tested-code-fix",
     "first": {
       "seq": 26080169,
@@ -437,8 +437,8 @@
     "count": 12,
     "note": "",
     "source": "connectors/browser",
-    "action": "native host가 설치 토큰 파일을 읽지 않고 wrapper는 과거 worktree를 참조하는 결함 확인. 수정 중. 실제 Firefox/Zen extension 연결은 별도 검증 필요.",
-    "status": "host-code-repair",
+    "action": "#33881 Node5/5 PASS. native host 실제 설치·원본 토큰 보존 확인. 사용자 확장 추가 뒤 Firefox 자식86997→8935 TCP 연결. 탭/본문 왕복 및 두 live 브라우저 구분은 미확인.",
+    "status": "host-installed-connected",
     "first": {
       "seq": 26003629,
       "ts": "2026-09-06T22:12:34Z",
@@ -491,7 +491,7 @@
     "count": 19,
     "note": "search6 + fetch13; one query may fail two providers",
     "source": "lib/tool_misc_web_search.ml",
-    "action": "localhost:8888 connection refused 확인 후 공식 SearXNG digest 고정 서비스 복구. 직접 질의2.355초/37결과. MASC 내부 WebSearch 경유와 별도 WebFetch401/404는 아직 미검증.",
+    "action": "SearXNG 서비스를 복구해 직접 검색37결과/2.355초. 05:12:44Z geek-scout 실제 WebSearch outcome=ok도 관측. 성공 provider의 인과와 별도 WebFetch401/404는 미확인.",
     "status": "search-service-recovered",
     "first": {
       "seq": 25984475,
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "04:40:49Z binary1ec84be0a4 재조회: runnable27 oldest4595초, degraded. 큐 감소로 소비/효과 전달을 성공 처리하지 않음.",
-    "status": "live-acceptance"
+    "action": "후보 판정→전달에 첨부 표본에서 최대 약111분 지연: owner turn당 relevant1개만 전달하던 #33890 원격40+21+15=76개 PASS. 배포 후 지연 검증은 남음. pr-updater 원래2개는 정확한 incarnation과 terminal ACK로 소비 확인. 공급자 실패·큐 실제 입장시각 분리는 남음.",
+    "status": "queue-root-cause-fix"
   }
 ]

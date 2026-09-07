@@ -1,0 +1,118 @@
+{
+  "polisher": [
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1605:7e82b9e3bcd0db99f40c0a196610f16185e9aa634f99eef8e79ef52042f35a36",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1605:7e82b9e3bcd0db99f40c0a196610f16185e9aa634f99eef8e79ef52042f35a36",
+      "applied_at_unix": 1788757137.182895,
+      "operator_operation_id": "turn-attempt-terminal:1605:7e82b9e3bcd0db99f40c0a196610f16185e9aa634f99eef8e79ef52042f35a36",
+      "transition_ref": "1aeec2890d9a14083e601105f15b43e82a0ab38393d2db81977257ead9166482",
+      "source_ref": "7e82b9e3bcd0db99f40c0a196610f16185e9aa634f99eef8e79ef52042f35a36",
+      "post_id": "p-007b66e548f8bfd3ae6284142ec20bff",
+      "urgency": "normal",
+      "source_arrived_at": 1788756869.971926,
+      "source_kind": "board_signal",
+      "source_incarnation": 1605,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    },
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1604:84befe7ffe31be9be4bcb171dee321ffa17b34e0b0f2d76af6f305077f084c66",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1604:84befe7ffe31be9be4bcb171dee321ffa17b34e0b0f2d76af6f305077f084c66",
+      "applied_at_unix": 1788757137.149361,
+      "operator_operation_id": "turn-attempt-terminal:1604:84befe7ffe31be9be4bcb171dee321ffa17b34e0b0f2d76af6f305077f084c66",
+      "transition_ref": "f947e6b9dec8275c5bb86b2ef84533ee7f9d498dc8ed63e3ca574aecaa664ed1",
+      "source_ref": "84befe7ffe31be9be4bcb171dee321ffa17b34e0b0f2d76af6f305077f084c66",
+      "post_id": "p-007b66e548f8bfd3ae6284142ec20bff",
+      "urgency": "normal",
+      "source_arrived_at": 1788756681.621317,
+      "source_kind": "board_signal",
+      "source_incarnation": 1604,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    },
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1603:1f58faf1b86d56d68b29cbb8ce9b7d1ae981995157bebb93bcaeb7a309b6ff0d",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1603:1f58faf1b86d56d68b29cbb8ce9b7d1ae981995157bebb93bcaeb7a309b6ff0d",
+      "applied_at_unix": 1788757137.119645,
+      "operator_operation_id": "turn-attempt-terminal:1603:1f58faf1b86d56d68b29cbb8ce9b7d1ae981995157bebb93bcaeb7a309b6ff0d",
+      "transition_ref": "fd5fb17c8b9bdb5226d792f51c9243f17b9324679a24c5dcbd87ed0b3b5f69d2",
+      "source_ref": "1f58faf1b86d56d68b29cbb8ce9b7d1ae981995157bebb93bcaeb7a309b6ff0d",
+      "post_id": "p-007b66e548f8bfd3ae6284142ec20bff",
+      "urgency": "normal",
+      "source_arrived_at": 1788756534.864307,
+      "source_kind": "board_attention",
+      "source_incarnation": 1603,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    },
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1602:586457d11e2eb9fafe76bf14f8a91411ccefcbf8b97d79be84142e07650879b2",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1602:586457d11e2eb9fafe76bf14f8a91411ccefcbf8b97d79be84142e07650879b2",
+      "applied_at_unix": 1788757137.079229,
+      "operator_operation_id": "turn-attempt-terminal:1602:586457d11e2eb9fafe76bf14f8a91411ccefcbf8b97d79be84142e07650879b2",
+      "transition_ref": "6996fb47d6fa40986be8f2250c675155143c113c5efd103d117444f7a02a31e0",
+      "source_ref": "586457d11e2eb9fafe76bf14f8a91411ccefcbf8b97d79be84142e07650879b2",
+      "post_id": "p-007b66e548f8bfd3ae6284142ec20bff",
+      "urgency": "normal",
+      "source_arrived_at": 1788756414.002085,
+      "source_kind": "board_attention",
+      "source_incarnation": 1602,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    },
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1599:98bc71d5dab6858a2ff9f3abbf00a33b8dfa337f73ea2e46a5f7548d6e5e878e",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1599:98bc71d5dab6858a2ff9f3abbf00a33b8dfa337f73ea2e46a5f7548d6e5e878e",
+      "applied_at_unix": 1788757137.030349,
+      "operator_operation_id": "turn-attempt-terminal:1599:98bc71d5dab6858a2ff9f3abbf00a33b8dfa337f73ea2e46a5f7548d6e5e878e",
+      "transition_ref": "08ed61891360cde8e93ea15a6246ab737d61f15852ebfed5302fa9d0fc530944",
+      "source_ref": "98bc71d5dab6858a2ff9f3abbf00a33b8dfa337f73ea2e46a5f7548d6e5e878e",
+      "post_id": "hitl-approval:appr_01a07a32-1340-7000-925a-68234ac20132",
+      "urgency": "immediate",
+      "source_arrived_at": 1788756503.183829,
+      "source_kind": "hitl_resolved",
+      "source_incarnation": 1599,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    }
+  ],
+  "pr-updater": [
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1214:ec32134550cee9c8edcf7b9e67071e4b7d517bd18c7a18131928bb8feefac7e4",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1214:ec32134550cee9c8edcf7b9e67071e4b7d517bd18c7a18131928bb8feefac7e4",
+      "applied_at_unix": 1788756625.579612,
+      "operator_operation_id": "turn-attempt-terminal:1214:ec32134550cee9c8edcf7b9e67071e4b7d517bd18c7a18131928bb8feefac7e4",
+      "transition_ref": "c27d7c057da79718bd0da78909065ccc8e92a4efc887c28a6045e475ed42dbd4",
+      "source_ref": "ec32134550cee9c8edcf7b9e67071e4b7d517bd18c7a18131928bb8feefac7e4",
+      "post_id": "p-e767b8e6e987924a2024fef4184297f3",
+      "urgency": "normal",
+      "source_arrived_at": 1788754606.436326,
+      "source_kind": "board_attention",
+      "source_incarnation": 1214,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    },
+    {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1213:13c860a2ba729ef21e4507f56358b657f9418e6577987d899ef9138fceeb4583",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1213:13c860a2ba729ef21e4507f56358b657f9418e6577987d899ef9138fceeb4583",
+      "applied_at_unix": 1788756625.551999,
+      "operator_operation_id": "turn-attempt-terminal:1213:13c860a2ba729ef21e4507f56358b657f9418e6577987d899ef9138fceeb4583",
+      "transition_ref": "20b70ec74e35831336f5298ded3ba644af8317fe6e72cc14e70e8db90915b12d",
+      "source_ref": "13c860a2ba729ef21e4507f56358b657f9418e6577987d899ef9138fceeb4583",
+      "post_id": "bootstrap",
+      "urgency": "normal",
+      "source_arrived_at": 1788756043.197483,
+      "source_kind": "bootstrap",
+      "source_incarnation": 1213,
+      "disposition": {
+        "kind": "turn_completed"
+      }
+    }
+  ]
+}

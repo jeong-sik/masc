@@ -10,7 +10,7 @@
 
 | # | 개선 대상 | 대표 관측 | 진행 |
 |---|---|---:|---|
-| 1 | Claude quota 반복과 잘못된 effect fence | 1698 | quota-code-fix |
+| 1 | Claude quota 반복과 잘못된 effect fence | 1698 | quota-tested |
 | 2 | GLM 요청 제한 | 617 | investigate |
 | 3 | Librarian exact 실패와 주간 한도 | 48 | config-applied |
 | 4 | DeepSeek tool-call 응답 누락 | 224 | code-fix |
@@ -22,20 +22,20 @@
 | 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
 | 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | data-reconciliation |
 | 12 | Board candidate ledger schema 불일치 | 12 | pending-preserved |
-| 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-code-fix |
-| 14 | Dashboard build-stamp 누락 | 5 | artifact-code-fix |
+| 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-merged |
+| 14 | Dashboard build-stamp 누락 | 5 | deployed-verified |
 | 15 | microVM sweep가 전체 Keeper 부팅을 막음 | 68 | tested-code-fix |
 | 16 | microsandbox가 요구 격리 보장을 표현 못함 | 5 | backend-capability |
-| 17 | 브라우저 live lane 미연결 | 12 | host-code-repair |
+| 17 | 브라우저 live lane 미연결 | 12 | host-installed-connected |
 | 18 | Discord 삭제·권한 없는 channel 바인딩 | 28 | external-binding |
 | 19 | WebSearch 전 provider 실패와 WebFetch HTTP 오류 | 19 | search-service-recovered |
-| 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | live-acceptance |
+| 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | queue-root-cause-fix |
 
 ## 항목별 증거와 다음 완료 조건
 
 ### 1. Claude quota 반복과 잘못된 effect fence
 
-- 조치: API diagnostic 수정은 배포 관측. #33855는 typed CLI quota scope와 후보 순서를 공유하도록 병합됐으며 fixture 후속 #33873 검증 중.
+- 조치: API diagnostic와 exact CLI quota 수정은 현재 binary fe702d71da에 포함. 후속 #33873 exact CLI11/11, HITL46/47; 기존1개 실패로 전체 CI는 FAIL. 실제 failover 연속성은 별도 검증 필요.
 - 관련 코드/경계: `lib/runtime/runtime_claude_code.ml`
 - 집계 주의: 1698 quota events; propagated fences are overlapping observations
 - 최초 증거: `2026-09-06T21:05:47Z` / seq `25985026` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267546`
@@ -135,7 +135,7 @@
 
 ### 13. Dashboard snapshot 장시간 갱신
 
-- 조치: #33877: 한 shell projection에서 TOML 선언 snapshot을 공유, 반복 읽기 제거. 기존 실측 runtime_resolution3468/3873ms 및1215/1292ms. 개선 후 지연/UI는 미측정.
+- 조치: 선언 TOML을 요청당 한 번 읽어 fleet에 공유하는 #33877 병합. 새4개 포함90/91 PASS, 기존 identity scan 실패. 현재 fe702d71da에는 아직 없으므로 성능 개선 미측정.
 - 관련 코드/경계: `lib/dashboard/dashboard_snapshot.ml`
 - 집계 주의: shell_light70 among111; other18 slow render not added
 - 최초 증거: `2026-09-06T23:26:05Z` / seq `26080100` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312620`
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: #33867: 직접 Vite 빌드도 stamp 생성, 원격 번들/소스 영수증 workflow 추가. 기본 브랜치에 workflow가 없어 dispatch404; 실제 artifact/build/deploy 미확인.
+- 조치: 현재 서버 fe702d71da의 원격 artifact34085743562 성공. 642파일 해시 검증 후05:15:17Z 적용, 실제 build-stamp mtime 보존. health dashboard=ok 및 화면 경고 해소 확인.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -152,7 +152,7 @@
 
 ### 15. microVM sweep가 전체 Keeper 부팅을 막음
 
-- 조치: #33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 최신 배포에는 미포함.
+- 조치: #33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 현재 fe702d71da에 병합 커밋57ca6d5399 포함을 확인. 성공 VM 생성은 미검증.
 - 관련 코드/경계: `lib/server/server_runtime_bootstrap.ml`
 - 집계 주의: 68 wait lines, 23 WARN, max119.4s
 - 최초 증거: `2026-09-06T23:26:08Z` / seq `26080169` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312689`
@@ -169,7 +169,7 @@
 
 ### 17. 브라우저 live lane 미연결
 
-- 조치: native host가 설치 토큰 파일을 읽지 않고 wrapper는 과거 worktree를 참조하는 결함 확인. 수정 중. 실제 Firefox/Zen extension 연결은 별도 검증 필요.
+- 조치: #33881 Node5/5 PASS. native host 실제 설치·원본 토큰 보존 확인. 사용자 확장 추가 뒤 Firefox 자식86997→8935 TCP 연결. 탭/본문 왕복 및 두 live 브라우저 구분은 미확인.
 - 관련 코드/경계: `connectors/browser`
 - 최초 증거: `2026-09-06T22:12:34Z` / seq `26003629` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:286149`
 > keeper:analyst tool_call tool=BrowserTabs source=- params=[lane] input_shape=[lane=string:4] outcome=error out_len=341 failed_params={"lane":"live"} error_preview=no browser lane connected: the live lane needs the operator's browser running with the browser-lane extension and host (connectors/browser) failure_class=workflow_rejection — The current state does not admit this action; it is a rule, ...
@@ -186,7 +186,7 @@
 
 ### 19. WebSearch 전 provider 실패와 WebFetch HTTP 오류
 
-- 조치: localhost:8888 connection refused 확인 후 공식 SearXNG digest 고정 서비스 복구. 직접 질의2.355초/37결과. MASC 내부 WebSearch 경유와 별도 WebFetch401/404는 아직 미검증.
+- 조치: SearXNG 서비스를 복구해 직접 검색37결과/2.355초. 05:12:44Z geek-scout 실제 WebSearch outcome=ok도 관측. 성공 provider의 인과와 별도 WebFetch401/404는 미확인.
 - 관련 코드/경계: `lib/tool_misc_web_search.ml`
 - 집계 주의: search6 + fetch13; one query may fail two providers
 - 최초 증거: `2026-09-06T21:02:53Z` / seq `25984475` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266995`
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: 04:40:49Z binary1ec84be0a4 재조회: runnable27 oldest4595초, degraded. 큐 감소로 소비/효과 전달을 성공 처리하지 않음.
+- 조치: 후보 판정→전달에 첨부 표본에서 최대 약111분 지연: owner turn당 relevant1개만 전달하던 #33890 원격40+21+15=76개 PASS. 배포 후 지연 검증은 남음. pr-updater 원래2개는 정확한 incarnation과 terminal ACK로 소비 확인. 공급자 실패·큐 실제 입장시각 분리는 남음.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -234,8 +234,8 @@ IPv4 api.z.ai: HTTP301, connect 0.030s. IPv6: curl7 연결 실패. 인증 없는
 - #33846: head642df022c9, [34082014565](https://github.com/jeong-sik/masc/actions/runs/34082014565), sandbox55/55 및 startup85/85 PASS. 이후 main merge head985f7dbac0에서 대상 구현은 동일하며 PR은57ca6d5399로 병합됐다. 성공 VM 생성은 미검증.
 - #33857: headec07fcf653, [34083036685](https://github.com/jeong-sik/masc/actions/runs/34083036685), 현재 실행 증거 분리 포함 outcome39/39 PASS. 기존 hooks48개 중 paused adoption1개 실패하므로 실행 전체는 FAIL.
 - #33856: headb812ea7266, [34083423286](https://github.com/jeong-sik/masc/actions/runs/34083423286), 새 연결/취소/FD10개와 캐시19개 PASS. quota13개도 PASS. 기존 HTTP43개 중 zero-length buffer를 Eio.Flow.single_read에 넘기는1개가 Eio precondition에서 실패, 전체 실행 FAIL. 해당 기존 함수는 이번 diff 밖이며 기준 실행 비교는 미측정.
-- #33855/#33873: Claude UUID, Antigravity usage/TOML timeout/OAuth/cwd, Claude assistant model 등의 fixture 누락을 고쳤다. 최종 후속 heada92c1b6859의 [34084021921](https://github.com/jeong-sik/masc/actions/runs/34084021921) 진행 중. 검증 전 성공으로 집계하지 않는다.
-- #33877: per-projection TOML snapshot의 [34084240453](https://github.com/jeong-sik/masc/actions/runs/34084240453) 진행 중.
+- #33855/#33873: Claude UUID, Antigravity usage/TOML timeout/OAuth/cwd, Claude assistant model 등의 fixture 누락을 고쳤다. 최종 후속 heada92c1b6859의 [34084021921](https://github.com/jeong-sik/masc/actions/runs/34084021921): exactCLI11/11 PASS, HITL46/47 PASS. 새 quota/실행 식별자 사례는 통과했고, 기존 pre-bind cancellation payload identity1개가 실패하여 전체 FAIL이다. 기준 실행 비교는 미측정이다.
+- #33877: headde33f2c50f의 [34084240453](https://github.com/jeong-sik/masc/actions/runs/34084240453): 새4개 포함90/91 PASS. 기존 repository-wide concrete Keeper identity scan이 이번 diff 밖12개 문자열을 지적해 전체 FAIL. 지연 개선은 아직 미측정.
 
 두 원본 system JSONL 파일을 전체 스캔한 결과 JSON 파싱 실패0행, timestamp 누락0행이었다. CI summary 파일은 해당 실행 로그의 판정 줄을 추출하고 후행 공백만 정리했다.
 
@@ -243,7 +243,7 @@ IPv4 api.z.ai: HTTP301, connect 0.030s. IPv6: curl7 연결 실패. 인증 없는
 
 03:32Z 재조회 binary148a773ff8의 Git ancestry에는 #33829/#33833/#33834/#33839 네 변경이 실제 포함된다. 이 배포와 merge는 다른 작업 주체가 진행했으며 본 세션이 실행하지 않았다. 03:22:10Z–03:32:26Z 약10분, 4,391행에서 insufficient-tool-message cycle error0, overlapping checkpoint0, composition evidence failure0, check·lint warning0, Claude quota13이 관측됐다. 전체6시간 대비 단순 감소율이나 완치율로 비교할 수 없다. 해당 경로가 실제 충분히 실행됐는지와 concurrent 변경 영향이 남는다.
 
-가장 최근 health는 runnable pending61, oldest2292초(약38분)이며 여전히 stalled/degraded이다. 직전 관측 pending115/oldest6471초에서 줄었지만 감소만으로 FIFO 소비·효과 전달 성공을 판정하지 않는다. dashboard stamp는 여전히 missing. 최신 health-final.json과 post-deployment-observation.json 참고.
+03:32Z 당시 health는 runnable pending61, oldest2292초(약38분)이며 여전히 stalled/degraded이다. 직전 관측 pending115/oldest6471초에서 줄었지만 감소만으로 FIFO 소비·효과 전달 성공을 판정하지 않는다. dashboard stamp는 여전히 missing. 최신 health-final.json과 post-deployment-observation.json 참고.
 
 동일한 새 배포 관측 창에서 started_at이 배포 이후이고 recorded_at이 창 종료 이전인 영수증도 별도 조회했다. polisher1, rondo7, geek-scout12, pr-updater6개의 receipt_done이 있었다. jazz-developer는 같은 조건의 완료 영수증0개여서 재개 완료로 선언하지 않는다. 이 결과는 응답 품질·기억 연속성·모든 pending event 소비 증명과 다르다. post-deployment-receipts.json에 원본 파일/행과 terminal 필드를 기록했다.
 
@@ -255,4 +255,35 @@ Board/Librarian/HITL의 기존 두 CLI 후보는 같은 Claude 계정이었다. 
 
 설정된 검색 endpoint localhost8888에는 listener가 없었다. [공식 SearXNG 설치 문서](https://docs.searxng.org/admin/installation-docker)에 따라 digest55e1fa15…의 서비스를 loopback8888에 복구했다. 직접 검색은37결과/2.355초. 두 upstream engine CAPTCHA/parse 오류는 응답에 보존돼 있다. 공개 MCP40개 목록에는 WebSearch가 없어 내부 도구 경유 성공까지 주장하지 않는다. 서비스 구성은 runtime services/searxng에 영속했고 영수증에 digest를 기록했다.
 
-최신 health04:40:49Z binary1ec84be0a4, started04:39:48Z. 배포는 다른 작업 주체가 수행했다. 이 바이너리에 이번 추가 수정 전체가 들어갔다고 주장하지 않는다. runnable backlog27, oldest4595초이며 dashboard stamp도 missing이다. 20항목 전체 해결/연속 턴/기억/표면 전달 완료는 아직 아니다.
+해당 시점 health04:40:49Z binary1ec84be0a4, started04:39:48Z. 배포는 다른 작업 주체가 수행했다. 이 바이너리에 이번 추가 수정 전체가 들어갔다고 주장하지 않는다. runnable backlog27, oldest4595초이며 dashboard stamp도 missing이다. 20항목 전체 해결/연속 턴/기억/표면 전달 완료는 아직 아니다.
+
+## 04:55–05:00Z 브라우저와 원격 artifact
+
+#33881 headc3a85dac8e: native host를 checkout 외부에 설치하고 GUI base·토큰 파일 읽기를 고쳤다. Node의 실제 자식 프로세스/가짜 HTTP·native peer 테스트5/5 PASS. 운영 Mozilla NativeMessagingHosts에 설치한 파일 해시는 검토한 소스와 일치하고 기존 토큰 bytes/hash 및0600권한을 보존했다. 원본 토큰은 증거에 없다.
+
+사용자가 확장을 새로 추가했다고 알려준 뒤, Firefox70838의 자식 host86997이8935에 TCP 연결한 것을 확인했다. 검증용 다른 Firefox85089의 host85483도 같은 live lane에 연결돼 있다. 프로세스·TCP 증거는 실제 탭/본문 왕복 성공 및 어느 브라우저가 응답했는지를 증명하지 않는다.
+
+WebSearch의 공개 MCP 직접 호출은 unregistered tool 정책으로 거절됐다. 이를 우회하지 않았으며 SearXNG 직접검색37결과와 MASC 내부 도구 검증의 경계를 유지한다.
+
+#33867의 필수 @check·lint·dashboard typecheck와 충돌 확인 뒤 이 세션이 병합했다. merge e4c5bdc2cafe12028b091d7180d97c71602c266f를 verify/dashboard-artifact-e4c5bdc2로 고정해 [Dashboard artifact34085143698](https://github.com/jeong-sik/masc/actions/runs/34085143698)를 실행했다. 이 첫 artifact 실행은 성공했으며 이후 새 서버 커밋과 맞춘 재빌드·배포 증거는 아래에 기록했다.
+
+
+## 05:15Z 대시보드 실제 복구
+
+#33867 병합 뒤 첫 artifact를 배포했지만, 그 사이 다른 작업 주체가 서버를 fe702d71da로 갱신해 빌드 시각 기준 stale이었다. stamp를 임의 갱신하지 않고 실제 서버 커밋 fe702d71daefc1f87de1434202e4c9de17d7711c로 [34085743562](https://github.com/jeong-sik/masc/actions/runs/34085743562)를 다시 실행했다. production bundle 테스트3개 및 빌드 성공, 642개 파일을 검증했다.
+
+05:15:17Z에 이 세션이 dashboard assets를 적용했다. index SHA256은 8e3b1f76c3619a1ea72494125e462bd1b3b4c49d72ba8fd5cf5c0870b35adb61, 실제 artifact build-stamp mtime을 보존했다. 기존 참조 가능 hashed assets와 교체 전 파일을 보존했으며 서버 재시작은 하지 않았다. 서버 HTTP index와 artifact 해시가 같고 health dashboard_status=ok다. [배포 영수증](dashboard-deploy-receipt.json), [health](health-dashboard-recovered.json), [새 화면](dashboard-after.png)을 함께 확인했다. 화면에 실행 중 Keeper14/19가 표시되고 missing/stale 배너가 없어졌다. 전체 health는 queue 때문에 degraded이며 이 UI 복구와 구별한다.
+
+fe702d71da의 Git ancestry에 병합 커밋 기준으로 startup57ca6d5399, network367aa0822b, tool observation7729144ae7, exact quota2666e8e9fd가 포함된다. 원 PR head는 squash로 ancestry가 없어 배포 판정에 사용하지 않았다. #33877 성능 변경은05:11Z 병합돼 이 서버 커밋에는 포함되지 않는다.
+
+## durable queue 원인과 실제 소비 증거
+
+05:02Z pending30은 글로벌 FIFO deadlock을 뜻하지 않는다. pr-updater의 첨부 증거의 기존 incarnation1213/1214 두 건은04:50:25Z terminal ACK와 성공에 정확히 결합되고, polisher의 원래 항목도04:58:57Z terminal ACK가 있다. 새 schedule/HITL 유입은 구분했다. jazz는 timeout 뒤 다음 턴을 수행 중이고 provider 실패는 항목을 보존한다.
+
+별도 병목은 Board 판정 완료 후 전달이다. code-reviewer 후보는02:59:55Z 판정 완료,04:48:30Z 전달로 약109분이 걸렸다. owner turn당 첫 Relevant 뒤 중단하는 정책을 제거하고 시작 시점의 completed snapshot을 FIFO로 처리하는 #33890을 작성했다. 첫 targeted34085985444는 비공개 yield helper 참조로 컴파일 실패하여 행동 테스트는 실행되지 않았다. 다른 작업 주체가 동일 공개 helper 수정ac8005c3를 반영했고, [34086843337](https://github.com/jeong-sik/masc/actions/runs/34086843337)에서 worker40/40, candidate21/21, partition15/15 총76개가 통과했다. 아직 live 개선으로 주장하지 않는다.
+
+health의 oldest 값은 후보 source timestamp를 사용해 실제 큐 입장 전 지연도 포함한다. queue-owned first_admitted_at을 영속해 두 시간을 구분하는 변경은 아직 없다. 감소한 수치만으로 나머지 pending 전체의 소비와 효과 전달을 완료 처리하지 않는다.
+
+05:12:44Z 추가 확인: geek-scout의 실제 `WebSearch` 도구 호출이 `outcome=ok`, 출력23,844자로 기록됐다. [원본 seq와 메시지](keeper-web-search-success.json)는 SearXNG 직접 질의와 별도로 Keeper 경유 성공을 증명한다. 로그가 선택 provider를 식별하지 않으므로 SearXNG에 성공 원인을 단정하지 않는다. 앞선 MCP policy 거절은 해당 운영자 도구 표면의 검증 제한이며 실제 Keeper 실패가 아니다.
+
+증거 검토 보정: 첨부 terminal join이 직접 증명하는 pr-updater 항목은1213/1214 두 건이다. 후보 첫 사례의 판정→전달은약109분이며 첨부 표본의 최대 지연은6,654.176초(약111분)이다.

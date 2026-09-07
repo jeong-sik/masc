@@ -19380,10 +19380,14 @@ and is loaded on demand through keeper_skill.
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
          | Connectors ->
-             (* Browser content is fetched on entry and explicit refresh.
-                Periodic tab reads would continually drive Firefox focus. *)
-             if Option.is_none state.browser_lane then
-               launch_connectors_load state ~mailbox:async_messages
+             (match state.browser_lane with
+              | None -> launch_connectors_load state ~mailbox:async_messages
+              | Some view when Browser_lane_view.should_refresh_on_tick view ->
+                  (* Live extension reads do not focus Firefox tabs. Reuse
+                     this surface's configured cadence for the Slack stream;
+                     automation still reads only on an operator action. *)
+                  launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read
+              | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)

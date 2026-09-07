@@ -415,10 +415,6 @@ export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLin
   })
 }
 
-export function logCodeRouteLink(entry: LogEntry): IdeContextRouteLink | null {
-  return logRouteLinks(entry).find(link => link.label === 'Code') ?? null
-}
-
 function renderLogMessage(entry: LogEntry): string {
   const details = entryDetails(entry)
   const message = interpolateStructuredMessage(entry.message, details)

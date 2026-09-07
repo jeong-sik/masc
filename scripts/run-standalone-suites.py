@@ -57,6 +57,7 @@ class Library:
     deps: tuple[str, ...]
     stubs: tuple[str, ...]
     c_library_flags: tuple[str, ...]
+    wrapped: bool
 
 
 @dataclass
@@ -126,14 +127,26 @@ def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
             for word in (field_words(form, "c_library_flag") or [])
             if word.strip("()")
         ]
-        out[name] = Library(
+        # dune wraps a library's modules in a generated alias module unless
+        # the stanza says otherwise, and nothing here generates that module.
+        # Compiling one anyway gives every consumer an unbound module, so a
+        # wrapped library is refused by name instead.
+        wrapped = (field_words(form, "wrapped") or ["true"])[0] != "false"
+        library = Library(
             name,
             directory,
             tuple(modules),
             tuple(deps),
             tuple(stubs),
             tuple(c_flags),
+            wrapped,
         )
+        out[name] = library
+        # A consumer names a library by whichever of the two the author wrote,
+        # so both reach the same stanza.
+        public = field_words(form, "public_name")
+        if public:
+            out[public[0]] = library
     return out
 
 
@@ -155,14 +168,14 @@ def read_suites(root: str) -> dict[str, list[str]]:
 def collect_libraries(root: str) -> dict[str, Library]:
     libraries = read_libraries(os.path.join(root, "bin/dune"), "bin")
     libraries.update(read_libraries(os.path.join(root, "test_lib/dune"), "test_lib"))
-    # Leaf libraries under lib/: one module and nothing of their own to pull
-    # in. Anything with dependencies stays out, because following them ends at
-    # masc.
+    # Libraries under lib/ as well. Whether one can be built from source is
+    # decided per library below -- a wrapped one cannot -- rather than by
+    # keeping only the leaves here, which used to exclude fs_compat and every
+    # public name.
     for path in sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True)):
         directory = os.path.relpath(os.path.dirname(path), root)
         for name, library in read_libraries(path, directory).items():
-            if not library.deps and name not in libraries:
-                libraries[name] = library
+            libraries.setdefault(name, library)
     return libraries
 
 
@@ -189,6 +202,9 @@ class Resolver:
             if name in ordered:
                 return True
             library = self.libraries.get(name)
+            if library is not None and library.wrapped:
+                blocker = blocker or f"{name} (wrapped)"
+                return False
             if library is None:
                 if self.installed(name):
                     if name not in packages:

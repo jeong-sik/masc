@@ -46,7 +46,7 @@
 
 ### 2. GLM 요청 제한
 
-- 조치: 실제 HTTP429는 Api(Retry.RateLimited)로 전달되지만 Keeper 후보 순서 관측은 Provider(RateLimit|HardQuota)만 처리하는 불일치를 확인했다. 실제 전송 오류를 사용하는 테스트와 수정 진행 중. 원래617은 diagnostic pair617쌍이며 최근1시간33쌍이 남았다. unknown scope를 계정 한도 소진으로 단정하지 않고 다른 후보가 진행하도록 구분해야 한다. 실제 fallback 성공은 미검증이다.
+- 조치: 실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 14:05Z 현재 운영 바이너리에 이 병합은 없으며 최근1시간 GLM429 diagnostic87건이 남아 있다. 운영 fallback 성공은 미검증.
 - 관련 코드/경계: `lib/keeper/keeper_runtime_attempt.ml`
 - 최초 증거: `2026-09-06T21:05:50Z` / seq `25985072` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267592`
 > [agent_core:http_client] {"event":"http_client_4xx_request_header_profile","url":"https://api.z.ai/api/coding/paas/v4/chat/completions","status":429,"response_server":null,"cf_ray":null,"request_header_count":4,"total_request_header_bytes":148,"max_single_header_bytes":73,"cdn_per_header_limit_bytes":8192,"header_sizes":[{"name":"Authorization","bytes":73},{"name":"Content-Type","bytes":32},{"name":"content-length","bytes":24},{"name":"connection","bytes":19}],"note":"4xx from an LLM endpoint. Header VALUES omitted (may carry credentials); sizes only. A cloudflare/RunPod edge rejects a single header line over cdn_per_header_limit_bytes with an opaque 400 before the origin — compare max_single_header_bytes."}
@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 직접 scope #33967은124/125 PASS 후 외부 병합, 전송 후속 #33982는94/94·#33994는205/205 PASS. 큐 binding #33984는77/77 PASS. semantic journal #34021의 수정87243은114/114 PASS와 필수 검사 PASS, checkpoint 보존 #34036의58f590은55/55 PASS지만 lint 실패 대응 중. source-batch의 HITL은9/9 PASS이나 lane 전환은60/61 PASS·게시 전 대기 원인 조사 중. SDK 재개 경계 전달 #34041은117/118 PASS(이번 diff에 없는 output probe1건 실패)이며 공유 대화를 되감지 않는 native 연결·원래입력·자식/세션관계·중단 effect 복구는 남아 있다.
+- 조치: semantic journal #34021은114/114 PASS 후b388b11414 병합. 원래입력 보존 #34062는108/108 PASS 후3c353d75b5, 정확한 checkpoint 보존 #34036은수정bd0 기준55/55 PASS·최종3ac 필수 검사 PASS 후521773e7e8 병합. source-batch fixture #34012는busy polling을 실제 Owner fence 신호 대기로 고쳐같은1초 deadline에서115/115 PASS 후438689dc53 병합. SDK 경계 #34041은117/118 PASS로 별도 output probe1건 실패. 최신 공유 대화를 유지하는 native 재개·자식/세션 소유권·중단 effect 복구는 미연결이며 최근1시간 반복 신호21건으로 운영 해결은 미완료.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -472,3 +472,16 @@ Antigravity #33982의 [수정 head f97d8de9c8 증거](antigravity-transmission-c
 [집계와 소스 근거](glm429-source-and-live-followup.json)에서 원래617은 header-profile617행과 request-shape617행의 diagnostic pair이며1,234개의 독립 호출이 아니다. 11:54:35–12:54:35Z6,328행에는33쌍이 남았다. 실제 rawHTTP429는 SDK에서 Api(Retry.RateLimited)로 전달되지만 Keeper driver의 순서 관측은 Provider(RateLimit|HardQuota)만 처리해 이 경로를 놓친다. 기존 테스트는 중간에 Provider variant로 직접 변환해 결함을 가렸다. 원래2번의 수정 대상으로 삼는다.
 
 raw429의 실패 소유권은 unknown이고 Retry-After는 존재할 때 보존된다. 현재 로그로 hint 부재·동시성 제한·hard quota를 확정할 수 없다. 수정은 unknown backpressure와 계정 소유 quota를 구분해야 하며, 실제 다른 후보 성공이나 새 운영 반영은 아직 검증하지 않았다.
+
+
+## 14:05Z 후속 병합과 운영 재검증
+
+- [설정 전환115/115](lane-fence-1b3143-ci-summary.json): #34012의1b3143은 실제 Owner shutdown 게시로 promise를 깨워 같은1초 deadline을 통과했다. busy yield polling과 임시 production 계측을 제거했다. 13:55:05Z438689dc53으로 병합했다. 생산 writer의 교착이 증명되었다거나 deadline을 늘려 수리했다고 해석하지 않는다.
+- [원래 입력108/108](semantic-input-9092-ci-summary.json): #34062의9092는 semantic29/chat11/Owner45/shutdown23 및 필수 검사 PASS. Direct 응답 완료 후에도 의미상 작업이 대기 중이면 입력을 보존하고, 다른 Auto 작업 뒤 재개하며, semantic 종결에서만 본문을 해제한다. 14:04:19Z3c353d75b5로 병합했다.
+- [정확한 checkpoint55/55](owned-checkpoint-bd0f2ebe-ci-summary.json): #34036의 수정bd0에서 owned10/stale guard27/purge18 PASS. 이후 외부 main merge3ac는 대상 코드·테스트 변경 없음과 필수 검사 PASS를 확인했다. 14:04:28Z521773e7e8로 병합했다. bd0의 동작 결과와 최종3ac의 필수 검사 결과를 구분한다.
+- [HTTP429139/139](http429-033899-ci-summary.json): #34059의033899는 driver59/lane18/quota13/routing49 및 필수 검사 PASS. 실제 transport Api variant로 진입하며 변경 없는 reload·credential 교체·모든 후보가 낮은 순위일 때 진행까지 검증했다. 최초e3fa의 fixture 타입 컴파일 실패를 수정한 후 결과다. 14:04:35Z76a1988288로 병합했다.
+- [journal114/114](semantic-journal-87243-ci-summary.json)은13:13:21Zb388b11414로 병합됐다. 이 저장소 원리만으로 native lifecycle 연결 완료를 주장하지 않는다.
+
+[14:05:26Z 운영 읽기 전용 실측](runtime-recovery-followup-1405.json): 바이너리116b6d13f2, 외부 시작13:44:23Z, 전체warning·dashboard ok다. journal 병합만 포함하며 이번 입력·checkpoint·429·fence 후속 병합은 아직 포함하지 않는다. dashboard의 릴리스 receipt/source binding은 여전히 없음이며 이번 관측은 브라우저 동작 검증이 아니다. 최근1시간13,065행(INFO11,805/WARN1,094/ERROR166) 중 반복 exact-tool 신호21건, GLM429 header-profile87건이 남았다. 다른 선택 신호0건은 해당 경로 실행이나 완치를 증명하지 않는다. 이번 세션은 배포·재시작하지 않았다.
+
+다음 연결은 A의 원래 입력/반복 frame을 선택하면서 B가 갱신한 공유 대화를 유지해야 한다. Direct 응답 종결과 부모 작업 종결을 구분하고, physical child 취소를 정확한 실행 identity에 묶어야 한다. 대기·불확실한 A 때문에 무관한 B를 막는 gate나 임의 만료는 추가하지 않는다.

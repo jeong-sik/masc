@@ -32,7 +32,7 @@
     "count": 617,
     "note": "",
     "source": "lib/keeper/keeper_runtime_attempt.ml",
-    "action": "실제 HTTP429는 Api(Retry.RateLimited)로 전달되지만 Keeper 후보 순서 관측은 Provider(RateLimit|HardQuota)만 처리하는 불일치를 확인했다. 실제 전송 오류를 사용하는 테스트와 수정 진행 중. 원래617은 diagnostic pair617쌍이며 최근1시간33쌍이 남았다. unknown scope를 계정 한도 소진으로 단정하지 않고 다른 후보가 진행하도록 구분해야 한다. 실제 fallback 성공은 미검증이다.",
+    "action": "실제 Api(Retry.RateLimited) 전달 누락을 #34059에서 수정해033899 기준139/139 및 필수 검사 PASS 후76a1988288로 병합했다. 한도 소유권이 불명확한429는 해당 후보의 순서만 낮추며 후보 제외·강제 대기·공유 계정 quota 판정을 추가하지 않는다. 14:05Z 현재 운영 바이너리에 이 병합은 없으며 최근1시간 GLM429 diagnostic87건이 남아 있다. 운영 fallback 성공은 미검증.",
     "status": "investigate",
     "first": {
       "seq": 25985072,
@@ -167,7 +167,7 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "직접 scope #33967은124/125 PASS 후 외부 병합, 전송 후속 #33982는94/94·#33994는205/205 PASS. 큐 binding #33984는77/77 PASS. semantic journal #34021의 수정87243은114/114 PASS와 필수 검사 PASS, checkpoint 보존 #34036의58f590은55/55 PASS지만 lint 실패 대응 중. source-batch의 HITL은9/9 PASS이나 lane 전환은60/61 PASS·게시 전 대기 원인 조사 중. SDK 재개 경계 전달 #34041은117/118 PASS(이번 diff에 없는 output probe1건 실패)이며 공유 대화를 되감지 않는 native 연결·원래입력·자식/세션관계·중단 effect 복구는 남아 있다.",
+    "action": "semantic journal #34021은114/114 PASS 후b388b11414 병합. 원래입력 보존 #34062는108/108 PASS 후3c353d75b5, 정확한 checkpoint 보존 #34036은수정bd0 기준55/55 PASS·최종3ac 필수 검사 PASS 후521773e7e8 병합. source-batch fixture #34012는busy polling을 실제 Owner fence 신호 대기로 고쳐같은1초 deadline에서115/115 PASS 후438689dc53 병합. SDK 경계 #34041은117/118 PASS로 별도 output probe1건 실패. 최신 공유 대화를 유지하는 native 재개·자식/세션 소유권·중단 effect 복구는 미연결이며 최근1시간 반복 신호21건으로 운영 해결은 미완료.",
     "status": "direct-scope-tested-autonomous-pending",
     "first": {
       "seq": 25984123,

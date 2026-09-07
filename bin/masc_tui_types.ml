@@ -2275,7 +2275,10 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
-let runtime_listing_chrome ~error = listing_chrome ~error + 2
+let runtime_listing_chrome ~error ~action_error ~picker_rows =
+  listing_chrome ~error + 2
+  + (if Option.is_some action_error then 2 else 0)
+  + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
 let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
@@ -5672,6 +5675,39 @@ let prev_memory_category (current : memory_category_filter)
       in
       before rev
 
+type runtime_picker_projection = {
+  rlp_lane : string;
+  rlp_already : string list;
+  rlp_providers : string list;
+  rlp_choices : Tui_decode.runtime_option list;
+}
+
+let runtime_picker_projection (state : state) =
+  Option.map (fun lane ->
+    let already = match state.runtime_surface with
+      | None -> []
+      | Some snapshot ->
+          snapshot.Tui_decode.rss_resolved.rrs_lanes
+          |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
+          |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
+          |> Option.value ~default:[]
+    in
+    let providers = already |> List.filter_map (fun id ->
+      state.runtime_catalog
+      |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
+      |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
+    let choices = runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog
+      |> List.filteri (fun i _ -> i >= state.runtime_lane_pick_cursor && i < state.runtime_lane_pick_cursor + 3)
+    in
+    { rlp_lane = lane; rlp_already = already; rlp_providers = providers; rlp_choices = choices })
+    state.runtime_lane_pick
+
+let runtime_surface_listing_chrome state =
+  runtime_listing_chrome ~error:state.runtime_surface_error
+    ~action_error:state.runtime_lane_error
+    ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
+      (runtime_picker_projection state))
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
@@ -5769,7 +5805,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
                  List.length s.Tui_decode.rss_candidates
              | Some s, Runtime_all ->
                  List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-        ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        ; sc_chrome = runtime_surface_listing_chrome state
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }

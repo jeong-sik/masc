@@ -255,9 +255,8 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
 ;;
 
 (** Accept loop with automatic HTTP/1.1 vs HTTP/2 detection.
-    Each connection is peeked (MSG_PEEK) to inspect the first bytes
-    before dispatching to httpun-eio or h2-eio.  The peek is
-    non-destructive, so both libraries read the socket normally. *)
+    Detection suspends until the stream identifies a protocol. The returned
+    socket replays the inspected prefix to httpun-eio or h2-eio. *)
 let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handler ~h2_error_handler =
   let mode = "auto" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
@@ -291,15 +290,15 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
           on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             match Http_protocol_detect.detect flow with
-            | Ok Http_protocol_detect.Http2 ->
+            | Ok (Http_protocol_detect.Http2, detected_flow) ->
               ignore (Atomic.fetch_and_add h2_count 1);
               H2_eio.Server.create_connection_handler
                 ~sw:conn_sw
                 ~request_handler:h2_request_handler
                 ~error_handler:h2_error_handler
                 client_addr
-                flow
-            | Ok Http_protocol_detect.Http1 ->
+                detected_flow
+            | Ok (Http_protocol_detect.Http1, detected_flow) ->
               ignore (Atomic.fetch_and_add h1_count 1);
               let conn_handler =
                 Httpun_eio.Server.create_connection_handler
@@ -319,7 +318,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
                     Httpun.Body.Writer.write_string body msg;
                     Httpun.Body.Writer.close body)
               in
-              conn_handler client_addr flow
+              conn_handler client_addr detected_flow
             | Error msg ->
               Log.Misc.debug "[%s] protocol detect skipped: %s" listener_tag msg
           with

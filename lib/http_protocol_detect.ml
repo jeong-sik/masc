@@ -1,63 +1,69 @@
-(** HTTP protocol detection via connection preface inspection.
-
-    HTTP/2 clients using prior knowledge (h2c) send a 24-byte
-    connection preface that starts with [PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n].
-    We peek the first bytes of a newly accepted connection (using
-    [Unix.recv MSG_PEEK] so the data stays in the kernel buffer) and
-    branch to the appropriate handler. *)
+(** See [http_protocol_detect.mli]. *)
 
 type protocol =
   | Http1
   | Http2
 
-(** The first 14 bytes of the HTTP/2 connection preface are enough to
-    disambiguate from any valid HTTP/1.x request line, which always
-    starts with a method token (GET, POST, ...). *)
+(* This prefix distinguishes H2 from valid HTTP/1 request lines. *)
 let h2_preface_prefix = "PRI * HTTP/2.0"
+let h2_preface_len = String.length h2_preface_prefix
 
-let h2_preface_len = String.length h2_preface_prefix (* 14 *)
+module Replay = struct
+  type tag = [`Generic]
+  type t =
+    { flow : [`Generic] Eio.Net.stream_socket_ty Eio.Resource.t
+    ; mutable prefix : Cstruct.t
+    }
 
-(** [detect_from_fd fd] peeks at the first bytes on [fd] using
-    [MSG_PEEK] (non-destructive) and returns the detected protocol.
+  let read_methods = []
 
-    Returns [Ok Http2] if the prefix matches the HTTP/2 connection
-    preface, [Ok Http1] otherwise.  Returns [Error msg] if the peek
-    syscall fails (e.g. connection reset before any data). *)
-let detect_from_fd (fd : Unix.file_descr) : (protocol, string) result =
-  let buf = Bytes.create h2_preface_len in
-  match Unix.recv fd buf 0 h2_preface_len [ Unix.MSG_PEEK ] with
-  | n when n >= h2_preface_len ->
-    if Bytes.sub_string buf 0 h2_preface_len = h2_preface_prefix then
-      Ok Http2
-    else
-      Ok Http1
-  | n when n > 0 ->
-    (* Partial read: not enough bytes for H2 preface, treat as HTTP/1.1.
-       This can happen if the client sends a very short request, but any
-       valid HTTP/2 client sends the full preface first. *)
-    Ok Http1
-  | _ ->
-    (* 0 bytes = connection closed before sending anything *)
-    Error "connection closed before protocol detection"
-  | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
-    (* Non-blocking socket with no data yet. Default to HTTP/1.1 —
-       any HTTP/2 client sends the connection preface immediately,
-       so EAGAIN means a normal HTTP/1.1 request in flight. *)
-    Ok Http1
-  | exception Unix.Unix_error (err, _fn, _arg) ->
-    Error (Printf.sprintf "peek failed: %s" (Unix.error_message err))
+  let single_read t dst =
+    if Cstruct.length t.prefix = 0 then Eio.Flow.single_read t.flow dst
+    else (
+      let n = min (Cstruct.length t.prefix) (Cstruct.length dst) in
+      Cstruct.blit t.prefix 0 dst 0 n;
+      t.prefix <- Cstruct.shift t.prefix n;
+      n)
 
-(** [detect flow] extracts the underlying Unix FD from an Eio stream
-    socket, peeks at the first bytes, and returns the detected protocol.
+  let single_write t bufs = Eio.Flow.single_write t.flow bufs
+  let copy t ~src = Eio.Flow.copy src t.flow
 
-    The socket data is not consumed; both httpun-eio and h2-eio will
-    read it normally afterwards. *)
-let detect (flow : _ Eio.Net.stream_socket) : (protocol, string) result =
-  match Eio_unix.Resource.fd_opt (flow :> _ Eio.Resource.t) with
-  | None -> Error "no Unix FD available on this socket"
-  | Some eio_fd ->
-    Eio_unix.Fd.use_exn "protocol_detect" eio_fd (fun unix_fd ->
-      detect_from_fd unix_fd)
+  let shutdown t command =
+    (match command with
+     | `Receive | `All -> t.prefix <- Cstruct.empty
+     | `Send -> ());
+    Eio.Flow.shutdown t.flow command
+
+  let close t =
+    t.prefix <- Cstruct.empty;
+    Eio.Flow.close t.flow
+end
+
+let replay_handler = Eio.Net.Pi.stream_socket (module Replay)
+
+let detect flow =
+  let buffer = Cstruct.create h2_preface_len in
+  let rec read matched =
+    (* Consume only the prefix still needed. An Eio read suspends on delayed
+       input; consuming partial bytes avoids re-peeking a readable prefix in
+       a busy loop. The returned socket restores all consumed bytes. *)
+    let n = Eio.Flow.single_read flow (Cstruct.shift buffer matched) in
+    let available = matched + n in
+    let rec compare i =
+      if i = available then
+        if available = h2_preface_len then Http2, available else read available
+      else if Cstruct.get_char buffer i <> h2_preface_prefix.[i] then
+        Http1, available
+      else compare (i + 1)
+    in
+    compare matched
+  in
+  match read 0 with
+  | protocol, length ->
+    let state = Replay.{ flow = (flow :> [`Generic] Eio.Net.stream_socket_ty Eio.Resource.t)
+                       ; prefix = Cstruct.sub buffer 0 length } in
+    Ok (protocol, Eio.Resource.T (state, replay_handler))
+  | exception End_of_file -> Error "connection closed before protocol detection"
 
 let protocol_to_string = function
   | Http1 -> "HTTP/1.1"

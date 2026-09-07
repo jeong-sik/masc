@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함.",
+    "action": "#33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료.",
     "status": "batch-drain-observed"
   }
 ]

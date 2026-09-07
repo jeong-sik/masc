@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함.
+- 조치: #33890은76/76 PASS·병합 후9c81559b에서 batch settlement 로그7회 관측. 이는 전체 큐 소비 증명이 아니다. 06:14 외부SIGTERM 후06:32 다른PID가 재시작. 연속성은 새 관측 창에서 검증해야 함. #33938은 실제 큐 체류 미측정과 원본 시각을 구분하며 두 health 경로의 시간 오판정을 수정했다. 소스 리뷰·문법만 통과했고 동작 검증·배포는 미완료.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -342,3 +342,12 @@ Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으
 06:36:00Z WebSearch 및06:36:37Z WebFetch의 실제 성공도 추가 관측했다. 두 성공은 원래 실패했던 URL들에 대한 재조회가 아니므로 접근 문제가 해결됐다는 근거로 사용하지 않는다.
 
 [추가 health 관측](health-followup-observation.json)은 같은17077da501 바이너리의 started_at이06:59:41Z임을 기록한다. 이 세션이 시작하거나 바이너리를 교체하지 않았으며 앞선06:32 프로세스와 연속 uptime으로 계산하지 않는다. 이 영수증은 overall warming·queue warming·dashboard stale을 기록한다. counts_complete=false이므로 표시된 pending_count0을 빈 큐의 증거로 사용하지 않는다. 상태는 영수증의 관측 시각에 한정한다.
+
+
+## 큐 시간의 의미 수정
+
+#33938 head827803c9827d2d39a5de57197d702fcec3a1c32c는 pending의 source timestamp를 실제 큐 체류 시간으로 판단하던 두 경로(keeper_event_queue health, reaction-ledger)를 수정한다. source age는 계속 표시하고, 실제 체류 시간은 typed Unknown·JSON null과 사유로 표시한다. runnable backlog는 warning/backlogged로 드러나며 독립적인 소유자·격리·저장소 오류는 유지한다. 원래 큐 drain 수정이나 전체 큐 소비 완료와는 다른 진단 정확성 수정이다.
+
+첫 독립 리뷰가 reaction-ledger의 중복 오판정 경로를 찾았고 수정 후 재검토에서 차단 사항이 없었다. 문법·소스 검사는 통과했지만 동작 테스트·실제 화면·배포는 미검증이다. 영속 queue/state codec은 변경하지 않았다. queue-summary fixture는 raw snapshot bytes 보존, reaction-ledger fixture는 파싱된 JSON 상태 보존을 검사하도록 작성됐으며 아직 실행하지 않았다.
+
+이 변경으로 쓰지 않게 되는 health.durable_queue_stale_sec가 운영 runtime.toml42행에 한 건 있다. 배포 시 정상 설정 경로로 해당 값과 운영 의도를 정리해야 한다. 이 세션은 운영 설정을 변경하지 않았다. 현재 파서는 소유 namespace에서 제외된 값을 적용하지 않으므로 제거 누락이 반드시 startup failure를 낸다고 주장하지 않는다.

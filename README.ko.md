@@ -43,7 +43,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 |---|---|---|
 | **TUI** | Keeper를 지켜보고 지시하고, Gate에 답하고, 도구 호출과 코드, diff, blame, 메모리를 볼 때 | 터미널에서 `masc`. 이름으로 부르면 `masc-tui` |
 | **MCP** | 내가 쓰는 에이전트를 작업 공간에 넣을 때. 작업을 잡고, 보드에 쓰고, 증거를 남깁니다 | MCP 클라이언트로 `http://127.0.0.1:8935/mcp`에 bearer와 함께 |
-| **대시보드** | 같은 상태를 브라우저에서 볼 때 | 같은 서버의 `/dashboard/` |
+| **대시보드** | 같은 상태를 브라우저에서 볼 때 | 같은 서버의 `/dashboard/`. 빌드된 번들이 있을 때만 뜹니다. 소스 체크아웃에는 있고, 공개 바이너리에는 없습니다 |
 
 셋 다 같은 `.masc/`를 읽고 씁니다. 운영자용 새 기능은 TUI에 먼저 들어갑니다.
 대시보드는 빌드되고 사실을 보여 주는 상태로 유지하지만, 제품이 자라는 곳은
@@ -332,11 +332,14 @@ Keeper가 하는 일은 승인 레인 둘이 막습니다. 작업 공간 레인�
 Slack 같은 붙인 서비스로 나가는 호출은 `manual`로 시작합니다. 첫 작업에서
 멈춘 것처럼 보이는 Keeper는 대개 Approvals에서 기다리고 있습니다.
 
-커넥터는 선언이지 연결이 아닙니다. 갓 설치한 상태에서
+OAuth 커넥터는 선언이지 연결이 아닙니다. 갓 설치한 상태에서
 `GET /api/v1/keepers/oauth/providers`는 모든 프로바이더에 `has_client: false`를
 답합니다. 붙이려면 먼저 OAuth 클라이언트가 있어야 하고, Connectors 화면이나
-`POST /api/v1/keepers/oauth/client`로 넣습니다. Discord, iMessage, Slack
-채널은 서버 안에서 돌고, Telegram은 사이드카를 거칩니다.
+`POST /api/v1/keepers/oauth/client`로 넣습니다. 채널 커넥터는 다릅니다.
+Discord, iMessage, Slack은 서버 안에서 돌고, 토큰이 서버 환경에 있으면 바로
+붙습니다. `DISCORD_BOT_TOKEN`을 export한 셸에서 띄운 서버는 base path가
+임시 디렉터리여도 부팅과 함께 그 길드에 들어갑니다. Telegram은 사이드카를
+거칩니다.
 
 `microvm`은 하이퍼바이저 뒤 게스트를 뜻하고, 어느 런타임인지는
 `microvm_backend`가 정합니다. 2026-09-04 macOS 26.6.1에서 잰 상태:
@@ -377,11 +380,19 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 
 ## 대시보드
 
-같은 프로세스가 `/dashboard/`에 TypeScript/Preact SPA를 띄웁니다. TUI가 읽는
-상태를 그대로 읽고, TUI에 없는 화면 둘(실험적인 IDE 셸, Lab 진단)을 아직
-갖고 있습니다. 2026-09-07까지 두 주 동안 대시보드에 137건, TUI에 583건의
-커밋이 들어갔습니다(전체 3,003건). 운영자 기능은 TUI에 먼저 만들고,
-대시보드는 빌드되고 타입 검사를 통과하고 사실을 보여 주는 상태로 유지합니다.
+같은 프로세스가 빌드된 번들을 찾을 수 있을 때 `/dashboard/`에
+TypeScript/Preact SPA를 띄웁니다. `MASC_ASSETS_DIR` 아래, 그다음 소스
+체크아웃 배치대로 실행 파일 옆에서 `assets/dashboard/`를 찾습니다. 공개
+바이너리에는 번들이 없습니다. v0.33.0을 설치해 띄우면 `/dashboard/`는
+`503 Dashboard unavailable`을 답하고 `/health?full=1`의
+`dashboard_surface.status`는 `"missing"`입니다. 번들은
+`.github/workflows/dashboard-artifact.yml`이 하듯 `dashboard/`에서 빌드합니다.
+
+대시보드는 TUI가 읽는 상태를 그대로 읽고, TUI에 없는 화면 둘(실험적인 IDE
+셸, Lab 진단)을 아직 갖고 있습니다. 2026-09-07까지 두 주 동안 대시보드에
+137건, TUI에 583건의 커밋이 들어갔습니다(전체 3,003건). 운영자 기능은 TUI에
+먼저 만들고, 대시보드는 빌드되고 타입 검사를 통과하고 사실을 보여 주는
+상태로 유지합니다.
 [화면 24장 목록](docs/screenshots/dashboard/2026-09-04/README.md)과
 [`docs/DASHBOARD-INTEGRATION.md`](docs/DASHBOARD-INTEGRATION.md)에 설명이
 있습니다. 관리자 조작과 쓰기 권한은
@@ -401,7 +412,8 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 - microVM Keeper는 `apple_container`에서만 부팅이 확인됐습니다. `auto_judge`는
   자기 레인에 모델이 있어야 하는데, 프로바이더 키 하나로 설치한 환경에는 대개
   없습니다. 그 호출은 사람을 기다립니다.
-- TUI 화면과 키는 `main`에서 바뀝니다. 공개 릴리스는 그보다 뒤에 있습니다.
+- TUI 화면과 키는 `main`에서 바뀝니다. 공개 릴리스는 그보다 뒤에 있고,
+  대시보드 번들도 들어 있지 않습니다.
 
 ## 저장소 구조
 

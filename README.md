@@ -44,13 +44,13 @@ and the capture metadata are in the same directory.
 |---|---|---|
 | **TUI** | Watch and steer Keepers, answer the Gate, read tool calls, browse code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claims a task, posts to the board, records evidence | Any MCP client at `http://127.0.0.1:8935/mcp` with a bearer |
-| **Dashboard** | The same state in a browser | `/dashboard/` on the same server |
+| **Dashboard** | The same state in a browser | `/dashboard/` on the same server, when a built bundle is present. A source checkout has one; the published binary ships none |
 
 All three read and write the same `.masc/`. New operator work lands in the
 TUI. The dashboard is kept building and truthful, but it is not where the
 product grows (see [Dashboard](#dashboard)).
 
-## Install
+## Start here
 
 ### Published binaries
 
@@ -194,7 +194,7 @@ server are on different roots.
 Every binding, per-surface behaviour, themes, the browser lane, and
 troubleshooting are in [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md).
 
-## Connecting an agent over MCP
+## MCP client setup
 
 `masc mcp-config` mints a bearer and prints a config block for the client you
 name:
@@ -345,11 +345,14 @@ The external-services lane, anything leaving for Jira, GitHub, Slack, or
 another attached service, starts in `manual`. A Keeper that looks stuck on
 its first task is often waiting in Approvals.
 
-Connectors are declarations, not connections. On a fresh install
+OAuth connectors are declarations, not connections. On a fresh install
 `GET /api/v1/keepers/oauth/providers` answers `has_client: false` for every
 provider; attaching one needs an OAuth client first, entered through the
-Connectors view or `POST /api/v1/keepers/oauth/client`. Discord, iMessage,
-and Slack channels run in-process; Telegram goes through a sidecar.
+Connectors view or `POST /api/v1/keepers/oauth/client`. Channel connectors
+are different: Discord, iMessage, and Slack run in-process and attach as soon
+as their token is in the server's environment, so a server started from a
+shell that exports `DISCORD_BOT_TOKEN` joins that guild on boot, scratch
+base path or not. Telegram goes through a sidecar.
 
 `microvm` names a guest behind a hypervisor, and `microvm_backend` names the
 runtime. Measured 2026-09-04 on macOS 26.6.1:
@@ -391,10 +394,17 @@ says which prompt file each reader gets.
 
 ## Dashboard
 
-The same process serves a TypeScript/Preact SPA at `/dashboard/`. It reads
-the state the TUI reads, and it holds two screens the TUI does not have: the
-experimental IDE shell and the Lab diagnostics. In the two weeks to
-2026-09-07 the dashboard received 137 commits and the TUI 583, out of 3,003.
+The same process serves a TypeScript/Preact SPA at `/dashboard/` when it can
+find a built bundle. It looks for `assets/dashboard/` under `MASC_ASSETS_DIR`,
+then next to the executable the way a source checkout lays it out. The
+published binary ships no bundle: on a v0.33.0 install, `/dashboard/`
+answered `503 Dashboard unavailable` and `/health?full=1` reported
+`dashboard_surface.status: "missing"`. A bundle is built from `dashboard/`,
+as `.github/workflows/dashboard-artifact.yml` does.
+
+The dashboard reads the state the TUI reads, and it holds two screens the TUI
+does not have: the experimental IDE shell and the Lab diagnostics. In the two
+weeks to 2026-09-07 it received 137 commits and the TUI 583, out of 3,003.
 Operator features are built in the TUI first; the dashboard is kept
 building, type-checked, and truthful. The
 [24-screen inventory](docs/screenshots/dashboard/2026-09-04/README.md) and
@@ -416,7 +426,8 @@ it. Admin operations and write access are in
 - Only `apple_container` is known to boot a microVM Keeper. `auto_judge` needs
   a model on its own lane, which an install with one provider key usually
   lacks; those calls wait for a person.
-- TUI surfaces and keys change on `main`. The published release lags it.
+- TUI surfaces and keys change on `main`. The published release lags it, and
+  it carries no dashboard bundle.
 
 ## Repository layout
 

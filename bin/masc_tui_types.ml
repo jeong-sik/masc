@@ -4225,6 +4225,48 @@ let workspace_activity_rows (state : state) =
 
 let workspace_activity_page_rows ~surface_rows = max 1 (surface_rows - 12)
 
+(* The frame, Enter and a completed refresh share the same visible selection,
+   including when the latest reading contains fewer rows. *)
+let workspace_activity_selection state =
+  let rows = workspace_activity_rows state in
+  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  (rows, cursor, List.nth_opt rows cursor)
+
+let apply_workspace_activity_read state request result =
+  state.workspace_activity <-
+    Masc_tui_fetched.complete ~equal:String.equal state.workspace_activity
+      request result;
+  let _, cursor, _ = workspace_activity_selection state in
+  state.workspace_activity_cursor <- cursor
+
+let enter_keeper_code_file state ~keeper ~path =
+  state.code_scope <- Code_scope_keeper keeper;
+  let parent = Filename.dirname path in
+  state.code_dir <- (if String.equal parent "." then "" else parent);
+  state.code_cursor <- 0;
+  state.code_entries <- [];
+  state.code_entries_error <- None;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_cursor <- 0;
+  state.code_file_scroll <- 0;
+  state.code_file_hscroll <- 0;
+  state.code_file_max_width <- 0;
+  state.code_target_line <- None;
+  state.code_lsp_note <- None;
+  state.code_history <- Masc_tui_fetched.clear state.code_history;
+  state.code_history_open <- false;
+  state.code_history_scroll <- 0;
+  state.code_diff <- Masc_tui_fetched.clear state.code_diff;
+  state.code_diff_open <- false;
+  state.code_diff_scroll <- 0;
+  state.code_memos <- [];
+  state.code_notes_open <- false;
+  state.code_notes_scroll <- 0;
+  state.code_blame <- Masc_tui_fetched.clear state.code_blame;
+  state.code_focus_file <- Right_pane;
+  state.followed_from <- Some (state.view, None);
+  state.view <- Code
+
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
   | Some snapshot ->

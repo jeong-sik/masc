@@ -29,7 +29,7 @@ afterEach(() => {
 })
 
 const capture = {
-  keeper: 'kidsnote',
+  keeper: 'exampleorg',
   captured_at: 1786000000,
   trace_id: 'trace-a',
   absolute_turn: 17534,
@@ -43,7 +43,7 @@ const capture = {
 describe('last prompt', () => {
   it('keeps block text byte-for-byte, newlines included', async () => {
     stubFetch(capture)
-    const decoded = await fetchKeeperLastPrompt('kidsnote')
+    const decoded = await fetchKeeperLastPrompt('exampleorg')
     expect(decoded.absoluteTurn).toBe(17534)
     expect(decoded.blocks[0]?.text).toBe('--- Memory OS Recall ---\nrevision 223\n')
     expect(decoded.assembled).toBe('--- Memory OS Recall ---\nrevision 223\n')
@@ -54,7 +54,7 @@ describe('last prompt', () => {
       ...capture,
       blocks: [{ id: 'operator_note', bytes: 12, text: 'resume 195\n' }],
     })
-    const decoded = await fetchKeeperLastPrompt('kidsnote')
+    const decoded = await fetchKeeperLastPrompt('exampleorg')
     expect(decoded.blocks[0]?.id).toBe('operator_note')
   })
 
@@ -68,12 +68,12 @@ describe('last prompt', () => {
         { id: 'future_block', bytes: 4, text: 'hidden\n' },
       ],
     })
-    await expect(fetchKeeperLastPrompt('kidsnote')).rejects.toThrow('prompt capture')
+    await expect(fetchKeeperLastPrompt('exampleorg')).rejects.toThrow('prompt capture')
   })
 
   it('distinguishes an absent assembled context from an empty one', async () => {
     stubFetch({ ...capture, assembled: null, assembled_bytes: 0, blocks: [] })
-    const decoded = await fetchKeeperLastPrompt('kidsnote')
+    const decoded = await fetchKeeperLastPrompt('exampleorg')
     expect(decoded.assembled).toBeNull()
     expect(decoded.blocks).toHaveLength(0)
   })
@@ -82,21 +82,21 @@ describe('last prompt', () => {
 describe('raw traces', () => {
   it('decodes the turn listing', async () => {
     stubFetch({
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       turns: [
         {
           file: 'turn-1.jsonl',
-          trace_id: 'trace-kidsnote-1',
+          trace_id: 'trace-exampleorg-1',
           bytes: 2048,
           census: { state: 'whole_file', records: 218 },
           modified_at: 1786000000,
         },
       ],
     })
-    const turns = await fetchKeeperRawTraces('kidsnote', 25)
+    const turns = await fetchKeeperRawTraces('exampleorg', 25)
     expect(turns).toHaveLength(1)
     expect(turns[0]?.census).toEqual({ state: 'whole_file', records: 218 })
-    expect(turns[0]?.traceId).toBe('trace-kidsnote-1')
+    expect(turns[0]?.traceId).toBe('trace-exampleorg-1')
   })
 
   // A turn past the listing budget arrives without a count. The decoder has to
@@ -122,18 +122,18 @@ describe('raw traces', () => {
 
   it('rejects a census state this build does not know', async () => {
     stubFetch({
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       turns: [
         {
           file: 'turn-1.jsonl',
-          trace_id: 'trace-kidsnote-1',
+          trace_id: 'trace-exampleorg-1',
           bytes: 2048,
           census: { state: 'sampled', records: 12 },
           modified_at: 1786000000,
         },
       ],
     })
-    await expect(fetchKeeperRawTraces('kidsnote', 25)).rejects.toThrow(
+    await expect(fetchKeeperRawTraces('exampleorg', 25)).rejects.toThrow(
       '유효하지 않은 raw trace 목록 payload',
     )
   })
@@ -151,7 +151,7 @@ describe('raw traces', () => {
         { ok: true, raw: '{"seq":3,"record_type":"run_finished"}', record: { seq: 3, record_type: 'run_finished' } },
       ],
     })
-    const page = await fetchKeeperRawTrace('kidsnote', 'turn-1.jsonl')
+    const page = await fetchKeeperRawTrace('exampleorg', 'turn-1.jsonl')
     expect(page.totalRecords).toBe(3)
     expect(page.records).toHaveLength(3)
     expect(page.records[1]).toEqual({ ok: false, raw: '{not json', error: 'Line 2: invalid token' })
@@ -164,14 +164,14 @@ describe('raw traces', () => {
       offset: 0,
       records: [{ record: { seq: 1 } }],
     })
-    await expect(fetchKeeperRawTrace('kidsnote', 'turn-1.jsonl')).rejects.toThrow('raw trace')
+    await expect(fetchKeeperRawTrace('exampleorg', 'turn-1.jsonl')).rejects.toThrow('raw trace')
   })
 })
 
 describe('operator note', () => {
   it('reports a pending note', async () => {
     stubFetch({
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       pending: true,
       note: {
         text: 'openssl decision landed',
@@ -181,7 +181,7 @@ describe('operator note', () => {
         consumed_turn: null,
       },
     })
-    const note = await fetchKeeperOperatorNote('kidsnote')
+    const note = await fetchKeeperOperatorNote('exampleorg')
     expect(note.pending).toBe(true)
     expect(note.consumedTurn).toBeNull()
   })
@@ -190,7 +190,7 @@ describe('operator note', () => {
   // the answer to the first question an operator asks.
   it('reports the turn that consumed a delivered note', async () => {
     stubFetch({
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       pending: false,
       note: {
         text: 'openssl decision landed',
@@ -200,14 +200,14 @@ describe('operator note', () => {
         consumed_turn: 17534,
       },
     })
-    const note = await fetchKeeperOperatorNote('kidsnote')
+    const note = await fetchKeeperOperatorNote('exampleorg')
     expect(note.pending).toBe(false)
     expect(note.consumedTurn).toBe(17534)
   })
 
   it('rejects a payload whose consumed_turn is neither null nor a number', async () => {
     stubFetch({
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       pending: false,
       note: {
         text: 'x',
@@ -217,7 +217,7 @@ describe('operator note', () => {
         consumed_turn: 'seventeen',
       },
     })
-    await expect(fetchKeeperOperatorNote('kidsnote')).rejects.toThrow('operator note')
+    await expect(fetchKeeperOperatorNote('exampleorg')).rejects.toThrow('operator note')
   })
 })
 
@@ -225,7 +225,7 @@ describe('writing an operator note', () => {
   it('returns the stored note as pending', async () => {
     stubFetch({
       ok: true,
-      keeper: 'kidsnote',
+      keeper: 'exampleorg',
       pending: true,
       note: {
         text: 'resume task-195',
@@ -235,7 +235,7 @@ describe('writing an operator note', () => {
         consumed_turn: null,
       },
     })
-    const note = await putKeeperOperatorNote('kidsnote', 'resume task-195')
+    const note = await putKeeperOperatorNote('exampleorg', 'resume task-195')
     expect(note.pending).toBe(true)
     expect(note.text).toBe('resume task-195')
   })
@@ -247,12 +247,12 @@ describe('writing an operator note', () => {
     stubFetch(
       {
         ok: false,
-        keeper: 'kidsnote',
+        keeper: 'exampleorg',
         error: 'operator note is 8192 bytes; the cap is 4096.',
       },
       400,
     )
-    await expect(putKeeperOperatorNote('kidsnote', 'x'.repeat(8192))).rejects.toThrow(
+    await expect(putKeeperOperatorNote('exampleorg', 'x'.repeat(8192))).rejects.toThrow(
       /8192 bytes/,
     )
   })

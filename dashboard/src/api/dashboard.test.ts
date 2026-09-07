@@ -1350,11 +1350,11 @@ describe('fetchDashboardTools', () => {
       waiting_keeper_count: 1,
       row_count: 1,
       keepers: [{
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         state: 'waiting',
         waiting_count: 1,
         waiting_on: [{
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           source: 'event_queue_pending',
           waiting_on: 'schedule_due',
           next_action: 'keeper_consume_event',
@@ -1369,10 +1369,10 @@ describe('fetchDashboardTools', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchKeeperWaitingInventory('kidsnote')
+    const result = await fetchKeeperWaitingInventory('exampleorg')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/kidsnote/waiting-inventory')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/exampleorg/waiting-inventory')
     expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
   })
 
@@ -2248,7 +2248,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'manual',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -2257,7 +2257,7 @@ describe('fetchDashboardGate', () => {
         keeper_modes_state: { state: 'ready' },
         keeper_exact_lanes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             lane_id: 'hitl_auto_judge',
             slot_id: 'glm-coding.glm-5-turbo',
             updated_by: 'vincent',
@@ -2273,7 +2273,7 @@ describe('fetchDashboardGate', () => {
 
     expect(result.keeper_modes).toEqual([
       {
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         mode: 'manual',
         updated_by: 'vincent',
         updated_at: '2026-08-27T05:00:00Z',
@@ -2315,7 +2315,7 @@ describe('fetchDashboardGate', () => {
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
         keeper_exact_lanes: [{
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
@@ -2343,7 +2343,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'manual',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -2369,7 +2369,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'ask_nicely',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',

@@ -151,7 +151,7 @@ r1 표의 수치는 09-01 20:00 KST 시점(7,515행)이었다. 전일 전체는 
 |---|---:|---|
 | code-reviewer | 2,145 | keeper_artifact_read 2,016 |
 | edgar.a.poe | 1,412 | keeper_time_now 1,367 |
-| kidsnote-pr-jira-checker | 1,385 | atlassian_searchJiraIssuesUsingJql 1,345 |
+| exampleorg-pr-jira-checker | 1,385 | atlassian_searchJiraIssuesUsingJql 1,345 |
 | polisher | 732 | keeper_artifact_read 270, Read 207, keeper_spawn_read 160 |
 | analyst | 587 | keeper_artifact_read 448 |
 
@@ -174,7 +174,7 @@ r1 표의 수치는 09-01 20:00 KST 시점(7,515행)이었다. 전일 전체는 
 새로 보인 것:
 
 - duplicate 97 중 89가 `keeper_time_now`. edgar.a.poe 가 할 일 없는 자율 턴에서 다음 scheduled wake 까지 5초마다 시계를 폴링한다(한 턴 306회·29분, 9-01 에도 턴당 150~327회). → [#32452](https://github.com/jeong-sik/masc/issues/32452)
-- fanout 145 중 90이 `atlassian_searchJiraIssuesUsingJql`(kidsnote-pr-jira-checker, 110회 전부 batch_size=1). 전일로는 1,345회다. 다른 keeper, 다른 원인이라 기록만 한다.
+- fanout 145 중 90이 `atlassian_searchJiraIssuesUsingJql`(exampleorg-pr-jira-checker, 110회 전부 batch_size=1). 전일로는 1,345회다. 다른 keeper, 다른 원인이라 기록만 한다.
 - 실패 호출 중 post_id 가 깨진 것 2건(`p-d threshold-placeholder`, `…b043b sha256=`) — #32451 과 같은 부류(긴 id 복사 오류).
 
 r3 계획: 2026-09-03 하루 창에서 같은 명령. 판정은 keeper 별로 본다 — meter 가 분류와 artifact paging 둘 다 keeper 표를 내도록 이 PR 에서 보강했다(keeper 별 합이 전체와 같은지 assert 로 확인).

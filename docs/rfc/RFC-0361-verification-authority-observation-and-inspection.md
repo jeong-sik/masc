@@ -31,7 +31,7 @@ Amended: 2026-08-19 — D7 (keeper급 standalone 격상) 추가, Non-goal §2 �
 
 ```
 verification_id  vrf-24b43c36fc86a9f2e25763affa527f7d
-producer         keeper-kidsnote-agent
+producer         keeper-exampleorg-agent
 authority        system_llm_agent / system-llm-agent-473b608e9bc8b621d4ca7c9419a84b34
 verdict          approved  →  task-136 = done
 ```
@@ -42,7 +42,7 @@ verdict          approved  →  task-136 = done
 | 7개 파일 내용 일치 | — | 0/7 |
 
 ```
-$ git -C .masc/playground/kidsnote/repos/kidsnote_web_inapp \
+$ git -C .masc/playground/exampleorg/repos/exampleorg_web_inapp \
       log --oneline -S 'aria-label' -- services/benefit-firstcome
 (빈 출력)
 ```

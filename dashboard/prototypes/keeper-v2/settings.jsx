@@ -202,7 +202,7 @@ function SettingsSurface({ onNav }) {
   // repositories — POST /api/v1/repositories (add-repo-dialog.ts fields)
   const [repos, setRepos] = useSet([
     { id: 'masc', name: 'masc', url: 'https://github.com/jeong-sik/masc.git', branch: 'main', autoSync: true, interval: 300, path: '.masc/repos/masc' },
-    { id: 'kidsnote', name: 'kidsnote-web', url: 'https://github.com/kidsnote/web.git', branch: 'develop', autoSync: false, interval: 300, path: '.masc/repos/kidsnote-web' },
+    { id: 'exampleorg', name: 'exampleorg-web', url: 'https://github.example.invalid/exampleorg/web.git', branch: 'develop', autoSync: false, interval: 300, path: '.masc/repos/exampleorg-web' },
   ]);
   const [repoAdding, setRepoAdding] = useSet(false);
   const [fleetMax, setFleetMax] = useSet(10);

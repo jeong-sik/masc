@@ -5,7 +5,14 @@ on:
     paths:
       - 'bin/masc_browser_host.ml'
       - 'bin/dune'
+      - 'lib/browser_lane/**'
+      - 'lib/browser_webdriver.*'
+      - 'lib/browser_page_script.ml'
+      - 'lib/browser_screenshot.*'
+      - 'scripts/probe-firefox-controls.py'
+      - 'scripts/fixtures/firefox_controls_probe.ml'
       - 'test/test_browser_native_host.py'
+      - 'test/dune'
       - '.github/workflows/browser-host-proof.yml'
   workflow_dispatch:
 
@@ -19,7 +26,7 @@ concurrency:
 jobs:
   macos-native-host:
     runs-on: macos-14
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
@@ -62,12 +69,31 @@ jobs:
           mkdir -p proof
           python3 test/test_browser_native_host.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/native-host-tests.log
 
+      - name: Install Firefox and geckodriver
+        run: |
+          brew install geckodriver
+          if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
+            brew install --cask firefox
+          fi
+
+      - name: Build native Firefox scenario
+        run: opam exec -- dune build --release test/firefox_controls_probe.exe
+
+      - name: Exercise real Firefox controls and screenshots
+        run: |
+          python3 scripts/probe-firefox-controls.py \
+            --geckodriver "$(command -v geckodriver)" \
+            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --compiled-probe _build/default/test/firefox_controls_probe.exe \
+            --out proof/firefox
+
       - name: Package verified executable and identity
         working-directory: proof
         run: |
           cp ../_build/default/bin/masc_browser_host.exe masc-browser-host-macos-arm64
+          cp ../_build/default/test/firefox_controls_probe.exe firefox-controls-probe-macos-arm64
           git rev-parse HEAD > SOURCE_COMMIT
-          shasum -a 256 masc-browser-host-macos-arm64 > SHA256SUMS
+          shasum -a 256 masc-browser-host-macos-arm64 firefox-controls-probe-macos-arm64 > SHA256SUMS
 
       - name: Upload native host proof
         if: always()

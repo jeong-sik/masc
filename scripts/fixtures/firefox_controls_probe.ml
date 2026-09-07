@@ -6,7 +6,7 @@ let endpoint = Sys.getenv "MASC_PROBE_DRIVER_URL"
 let fixture_url = Sys.getenv "MASC_PROBE_FIXTURE_URL"
 let remote_session = ref None
 let request ~method_ ~path ~body =
-  let method_name = match method_ with `GET -> "GET" | `POST -> "POST" | `DELETE -> "DELETE" in
+  let method_name = match method_ with `GET -> "GET" | `POST -> "POST" | `DELETE -> "DELETE" | `PUT -> "PUT" | `PATCH -> "PATCH" | `HEAD -> "HEAD" in
   let args = ["curl";"--silent";"--show-error";"--max-time";"45";"--request";method_name;
     "--header";"Content-Type: application/json";"--write-out";"\n%{http_code}";endpoint ^ path]
     @ (match body with None -> [] | Some json -> ["--data-binary";Yojson.Safe.to_string json]) in
@@ -29,6 +29,11 @@ let success = function
   | Browser_lane.Answered json -> member "data" json
   | Browser_lane.Refused message | Browser_lane.Rejected_before_effect message -> failwith message
   | _ -> failwith "no browser answer"
+let contains text expected =
+  let rec search i =
+    i + String.length expected <= String.length text
+    && (String.sub text i (String.length expected) = expected || search (i + 1)) in
+  search 0
 let check message condition = if not condition then failwith message else Printf.printf "PASS %s\n%!" message
 let () = Eio_main.run (fun _ ->
   let driver = Driver.create ~request in
@@ -63,10 +68,11 @@ let () = Eio_main.run (fun _ ->
     act first (Browser_action.Click (selector "submit"));
     let read id = success (run (Browser_lane.Page_read {tab_id=Some id;max_chars=None})) in
     let text = member "text" (read first) |> string in
-    check "native fill select and click changed page" (String.starts_with ~prefix:"Firefox fixture" text && String.contains text '1');
+    check "native fill select and click changed page" (contains text "1 submissions: 한글 Firefox 🙂 / opaque-02");
     let current = elements first |> member "elements" |> Yojson.Safe.Util.to_list in
     check "live DOM value reflects native fill" (List.exists (fun item -> member "value" item = `String "한글 Firefox 🙂") current);
     act first (Browser_action.Press {selector=selector "name";key=Browser_action.Enter});
+    check "native Enter submits the filled form" (contains (member "text" (read first) |> string) "2 submissions: 한글 Firefox 🙂 / opaque-02");
     let second = open_tab "/second" in
     act first (Browser_action.Click (selector "submit"));
     check "second tab remains independently readable" (member "url" (read second) = `String (fixture_url ^ "/second"));
@@ -84,9 +90,13 @@ let () = Eio_main.run (fun _ ->
     act first (Browser_action.Scroll {x=0;y=(-400)});
     check "screenshot target is the first fixture page"
       (member "url" (read first) = `String (fixture_url ^ "/first"));
-    (* Capture the resulting real Firefox viewport using the same native transport. *)
+    check "another tab is selected before screenshot"
+      (member "url" (read second) = `String (fixture_url ^ "/next"));
+    (* The requested screenshot must switch away from the currently selected tab. *)
     let screenshot = success (run (Browser_lane.Page_screenshot {tab_id=first})) in
     check "native screenshot carries the selected tab" (member "tabId" screenshot = `Int first);
+    check "native screenshot switches to the requested page"
+      (member "url" screenshot = `String (fixture_url ^ "/first"));
     let png = member "base64" screenshot |> string in
     let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in
     output_string oc png; close_out oc;

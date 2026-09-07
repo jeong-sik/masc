@@ -4800,3 +4800,19 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_screenshot)))
+
+; The same scenario used by the local interpreter probe, linked against real
+; MASC interfaces for the CI-owned native Firefox run.
+(rule
+ (targets firefox_controls_probe.ml)
+ (deps ../scripts/fixtures/firefox_controls_probe.ml)
+ (action
+  (with-stdout-to %{targets}
+   (progn
+    (echo "module Driver = Masc.Browser_webdriver\nmodule Browser_action = Browser_lane.Action\n")
+    (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))
+
+(executable
+ (name firefox_controls_probe)
+ (modules firefox_controls_probe)
+ (libraries masc masc.browser_lane eio eio_main yojson unix))

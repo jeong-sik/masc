@@ -74,3 +74,20 @@ and [native message framing](https://developer.mozilla.org/en-US/docs/Mozilla/Ad
 Screenshots require the authenticated in-process Keeper context. Generic tool
 dispatch does not treat an agent display name as Keeper ownership. The live
 8 MiB transport bound is independent of a larger configured Vision image limit.
+
+## Compiled Firefox acceptance scenario
+
+The Browser Host Proof CI job builds `test/firefox_controls_probe.exe` against
+MASC's real interfaces, installs stock Firefox/geckodriver, and runs the same
+loopback form scenario as the interpreter probe. It checks actual submitted
+Unicode text/option values, native Enter, explicit tab receipts, history and
+screenshot capture. The artifact includes execution mode, binary checksum,
+source hashes, request-independent assertion logs and the resulting PNG.
+The screenshot request switches from a different active tab and validates the
+returned page identity, PNG checksums and decoded scanline structure. Partial
+logs and execution status survive a timeout; isolated process groups limit
+cleanup to the owned probe, Firefox and geckodriver processes.
+
+This makes native browser behavior a CI check rather than relying solely on
+source interpretation or a simulated WebDriver response. It still does not
+claim a complete deployed Keeper/model/operator-browser session.

@@ -215,8 +215,8 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with exn ->  (* cancel-guard-ok: re-raises below *)
-    (try Unix.close fd with Unix.Unix_error _ -> ());  (* cancel-guard-ok: re-raises below *)
+  with exn ->  (* re-raises below *)
+    (try Unix.close fd with Unix.Unix_error _ -> ());  (* re-raises below *)
     raise exn
 
 (** Fiber-friendly wrapper around [acquire_flock_retry].
@@ -258,7 +258,7 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with exn ->  (* cancel-guard-ok: re-raises below *)
+  with exn ->  (* re-raises below *)
     run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 

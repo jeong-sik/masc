@@ -36,10 +36,13 @@ let rec atomic_update atomic f =
 let token_counter = Atomic.make 0
 let next_token () = Atomic.fetch_and_add token_counter 1
 
+type payload_origin = Seeded | Computed | Timeout
+
 type cached_payload = {
   json : Yojson.Safe.t;
   raw_json : string;
   etag : string;
+  origin : payload_origin;
 }
 
 let etag_hex_chars = 12
@@ -56,10 +59,10 @@ let refresh_registered_hook : (unit -> unit) option Atomic.t = Atomic.make None
 
 type refresh_registration = Queued | Registered | Abandoned
 
-let payload_of_json json =
+let payload_of_json ~origin json =
   let raw_json = Yojson.Safe.to_string json in
   let etag = weak_etag_of_string raw_json in
-  let payload = { json; raw_json; etag } in
+  let payload = { json; raw_json; etag; origin } in
   Option.iter (fun hook -> hook payload) (Atomic.get payload_prepared_hook);
   payload
 
@@ -614,7 +617,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             | _ -> raise exn)
        | None ->
            let fallback_val = ref None in
-           let fallback_payload = payload_of_json
+           let fallback_payload = payload_of_json ~origin:Timeout
              (timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ())) in
            atomic_update table (fun map ->
              match SMap.find_opt key map with
@@ -745,11 +748,11 @@ let peek key = Option.map (fun entry -> entry.payload.json) (peek_entry key)
    submissions to 1.0, which is a different change. Pool size then bounds how
    many computes run at once, so no separate concurrency gate is added. *)
 let offloaded_payload compute () =
-  Executor_pool_ref.submit_or_inline (fun () -> payload_of_json (compute ()))
+  Executor_pool_ref.submit_or_inline (fun () -> payload_of_json ~origin:Computed (compute ()))
 
 let get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
-    payload_of_json (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
+    payload_of_json ~origin:Timeout (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
   else
     let compute = offloaded_payload compute in
     let with_timeout f =
@@ -772,7 +775,7 @@ let get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute =
     with
     | Compute_timeout (key, waiting) ->
         record_timeout_circuit key;
-        payload_of_json (timeout_error_json ~waiting key timeout_sec)
+        payload_of_json ~origin:Timeout (timeout_error_json ~waiting key timeout_sec)
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   (get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute).json
@@ -828,7 +831,7 @@ let seed_stale_if_missing key ~stale_for value =
   if not (SMap.mem key (Atomic.get table)) then begin
     (* Warming seeds are small and must remain available even while all workers
        are busy. Prepare before publication, without queueing behind refreshes. *)
-    let payload = payload_of_json value in
+    let payload = payload_of_json ~origin:Seeded value in
     let ts = now () in
     atomic_update table (fun map ->
         match SMap.find_opt key map with

@@ -175,6 +175,17 @@ jobs:
       - name: Env reads below the config floor
         run: python3 scripts/ci/check_env_reads_below_config.py
 
+      # Two guards #34018 found unwired that the lint job cannot run: this one
+      # compiles a Parsetree checker with ocamlc -I +compiler-libs, and the
+      # sublib gate below reads dune's own dependency graph. Wired here, where
+      # the switch is, rather than into the lint suite, where they would fail
+      # on a missing binary instead of on what they check.
+      - name: Keeper event-queue projection boundary
+        run: bash scripts/check-keeper-event-queue-projection-boundary.sh
+
+      - name: Sublibrary leaf boundary (RFC-0056 G1)
+        run: python3 scripts/audit-sublib-cycle.py
+
       - name: OCaml boundary ratchet
         env:
           OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}

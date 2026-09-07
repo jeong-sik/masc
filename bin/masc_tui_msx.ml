@@ -15,26 +15,6 @@ module Frame = Masc_tui_image_mosaic
 
 let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
-(* Nearest-neighbour shrink of the native frame onto the [pcols x prows] grid
-   the mosaic wants (two pixel rows per character cell). Hard edges, so no
-   filter. *)
-let mosaic_of ~pcols ~prows ~w ~h (rgb : string) =
-  let grid = Bytes.create (pcols * prows * 3) in
-  for py = 0 to prows - 1 do
-    let y = min (h - 1) (py * h / prows) in
-    for px = 0 to pcols - 1 do
-      let x = min (w - 1) (px * w / pcols) in
-      let src = ((y * w) + x) * 3 in
-      let dst = ((py * pcols) + px) * 3 in
-      if src + 2 < String.length rgb then begin
-        Bytes.set grid dst rgb.[src];
-        Bytes.set grid (dst + 1) rgb.[src + 1];
-        Bytes.set grid (dst + 2) rgb.[src + 2]
-      end
-    done
-  done;
-  Bytes.to_string grid
-
 let title_of (frame : Masc_tui_types.msx_frame option) =
   match frame with
   | None -> " MSX — no machine loaded. A keeper loads one with masc_msx_load."
@@ -48,25 +28,41 @@ let footer = " esc: back   (keeper plays; this is a live view)"
 let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let screen_rows = max 4 (rows - 2) in
-  let pcols = min cols 256 in
-  let prows = 2 * screen_rows in
-  let buf = Buffer.create (pcols * 24 * screen_rows) in
+  let buf = Buffer.create (cols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (title_of frame));
   Buffer.add_string buf "\027[0K\r\n";
+  let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
+       (* The machine's frame has a shape of its own -- 256x192 from the
+          server's screen -- and the terminal has another. Fitting the grid to
+          the terminal alone drew that shape stretched to whatever the window
+          happened to be. The grid keeps the frame's ratio and the leftover
+          rows and columns stay blank, so the picture is the picture. *)
+       let pcols, prows =
+         Frame.fit_grid ~src_w:f.msx_width ~src_h:f.msx_height ~max_cols:cols
+           ~max_rows:(2 * screen_rows)
+       in
+       let lines =
+         Frame.render ~cols:pcols ~rows:prows
+           (Frame.downscale ~src_w:f.msx_width ~src_h:f.msx_height ~cols:pcols
+              ~rows:prows f.msx_rgb)
+       in
+       let drawn = List.length lines in
+       let above = (screen_rows - drawn) / 2 in
+       let left = String.make ((cols - pcols) / 2) ' ' in
+       for _ = 1 to above do blank_row () done;
        List.iter
          (fun line ->
+           Buffer.add_string buf left;
            Buffer.add_string buf line;
-           Buffer.add_string buf "\027[0K\r\n")
-         (Frame.render ~cols:pcols ~rows:prows
-            (mosaic_of ~pcols ~prows ~w:f.msx_width ~h:f.msx_height f.msx_rgb))
+           blank_row ())
+         lines;
+       for _ = 1 to screen_rows - drawn - above do blank_row () done
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)
-       for _ = 1 to screen_rows do
-         Buffer.add_string buf "\027[0K\r\n"
-       done);
+       for _ = 1 to screen_rows do blank_row () done);
   Buffer.add_string buf (fit_line cols footer);
   Buffer.add_string buf "\027[0K";
   write (Buffer.contents buf)

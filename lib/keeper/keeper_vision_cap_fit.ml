@@ -32,7 +32,7 @@ let plan ~cap_bytes ~image_bytes ~query_bytes ~longest_edge ~min_edge =
       (* Raw bytes the cap leaves for the image once base64 expansion, the
          query and the envelope are taken out. *)
       let budget_bytes = (cap_bytes - query_bytes - envelope_allowance_bytes) * 3 / 4 in
-      if budget_bytes <= 0 || edge <= 0
+      if budget_bytes <= 0 || edge <= 0 || image_bytes <= 0
       then cannot_fit
       else (
         (* Encoded size grows with pixel count, so with the square of the

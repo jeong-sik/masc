@@ -433,6 +433,21 @@ let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
             , cap_bytes )))
 ;;
 
+(* The same kind the client raises when it measures the serialized body,
+   so the walk's exhaustion classifies as capacity; the message says the
+   number is this walk's prediction, made before any body was serialized. *)
+let predicted_size_failure ~actual_bytes ~limit_bytes =
+  Llm_provider.Http_client.ProviderFailure
+    { kind = Llm_provider.Http_client.Request_body_too_large { actual_bytes; limit_bytes }
+    ; message =
+        Printf.sprintf
+          "predicted request body of %d bytes exceeds the candidate's %d-byte cap; \
+           skipped before dispatch"
+          actual_bytes
+          limit_bytes
+    }
+;;
+
 let run_candidates_outcome
     ?complete
     ~sw
@@ -491,11 +506,7 @@ let run_candidates_outcome
               reports why the image went unread. *)
            loop
              ~last_error:
-               (Some
-                  (Candidate_provider_error
-                     (Llm_provider.Http_client.request_body_too_large_error
-                        ~actual_bytes
-                        ~limit_bytes)))
+               (Some (Candidate_provider_error (predicted_size_failure ~actual_bytes ~limit_bytes)))
              ~attempt_index
              rest
          | Ok fitted ->

@@ -1122,6 +1122,15 @@ let test_cap_fit_refuses_below_the_edge_floor () =
   | Fit.Sends_as_is | Fit.Shrink_longest_edge_to _ ->
     failwith "an edge under the floor is not worth a scaler run"
 
+let test_cap_fit_refuses_an_empty_image_without_dividing () =
+  match
+    Fit.plan ~cap_bytes:1024 ~image_bytes:0 ~query_bytes:20000
+      ~longest_edge:(Some 1568) ~min_edge:256
+  with
+  | Fit.Cannot_fit _ -> ()
+  | Fit.Sends_as_is | Fit.Shrink_longest_edge_to _ ->
+    failwith "an empty image has no byte ratio to scale by"
+
 let test_cap_fit_refuses_when_the_cap_leaves_no_room () =
   match
     Fit.plan ~cap_bytes:100 ~image_bytes:699_071 ~query_bytes:20
@@ -2001,6 +2010,7 @@ let () =
   test_cap_fit_cannot_plan_without_dimensions ();
   test_cap_fit_shrinks_by_the_byte_ratio ();
   test_cap_fit_refuses_below_the_edge_floor ();
+  test_cap_fit_refuses_an_empty_image_without_dividing ();
   test_cap_fit_refuses_when_the_cap_leaves_no_room ();
   test_image_over_a_candidates_cap_skips_to_the_next_without_a_call ();
   test_image_over_every_cap_is_a_size_failure_without_a_call ();

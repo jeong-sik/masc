@@ -2,7 +2,9 @@
 
 Open the command palette with `:` and select `go Browser Lane` or `go Slack Lane`.
 The views live inside Connectors. From the Connectors list, `B` and `S` open them.
-Both start with the live Firefox source. Slack asks the server to filter matching
+Both start with the live Firefox source. Reader views use the full content width
+and show Browser/Slack source context in the bottom row. Keeper fleet/changes
+panels and the Keeper composer return when the operator leaves the reader. Slack asks the server to filter matching
 Slack tabs; it does not send Slack messages or change channel bindings.
 
 | Key | Action |
@@ -42,7 +44,7 @@ See the [Eio fiber reference](https://ocaml.org/p/eio/1.0/doc/eio/Eio/Fiber/inde
 
 `test/test_tui_browser_lane.ml` exercises tab selection, strict schema decoding,
 late responses, source identity, failed-refresh retention and empty Slack tabs.
-For this change its ten state scenarios were executed using the OCaml interpreter
+For this change its eleven state scenarios were executed using the OCaml interpreter
 with the production pure module extracted verbatim. All changed OCaml files
 passed parser checks. Multiline projection, URL input ownership and Unicode URL
 viewport tests are committed for CI; they were not executed locally. These checks do not establish full executable typechecking,

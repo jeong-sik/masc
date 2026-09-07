@@ -2640,6 +2640,9 @@ module Browser_lane_view = struct
 
   let source_name = function Live -> "live" | Automation -> "automation"
   let app_name = function Browser -> "browser" | Slack -> "slack"
+  let context_label t =
+    let app = match t.app with Browser -> "Browser Lane" | Slack -> "Slack Lane" in
+    Printf.sprintf "%s · %s · Firefox page reader" app (source_name t.source)
   let create app =
     { app; source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None }
@@ -3789,6 +3792,11 @@ type state = {
    paint had to draw compact is not showing the field, and the two identity
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
+(* Browser and Slack are operator readers inside Connectors. A retained
+   reader model must not change chrome after the operator leaves its view. *)
+let browser_lane_on_screen (state : state) =
+  match state.view with Connectors -> state.browser_lane | _ -> None
+
 type text_input_target =
   | Text_browser_url
   | Text_preset_name

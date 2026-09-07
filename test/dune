@@ -4722,6 +4722,16 @@
  (modules test_monotonic_deadline)
  (libraries alcotest masc.monotonic_deadline unix))
 
+(test
+ (name test_tui_browser_lane)
+ (modules test_tui_browser_lane)
+ (libraries masc_tui_types))
+
+(test
+ (name test_tui_browser_lane_text)
+ (modules test_tui_browser_lane_text)
+ (libraries masc_tui_types))
+
 (include stanzas/test_browser_webdriver.inc)
 
 (include stanzas/test_browser_surface.inc)

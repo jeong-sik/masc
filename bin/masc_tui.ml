@@ -1808,6 +1808,9 @@ type async_msg =
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_lane_loaded of
+      int * (Browser_lane_view.reading, string) result
+  | Browser_lane_session_done of int * (unit, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -3994,6 +3997,42 @@ let launch_connectors_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
 
+let launch_browser_lane state ~mailbox operation =
+  let open Browser_lane_view in
+  match state.browser_lane with
+  | None -> ()
+  | Some view when busy view -> ()
+  | Some view ->
+      state.browser_lane_generation <- state.browser_lane_generation + 1;
+      let generation = state.browser_lane_generation in
+      state.browser_lane <- Some { view with load = Loading (generation, operation) };
+      let host = server_peer_host and port = state.port in
+      let perform () =
+        (* The mailbox is the effect boundary. Cancellation still belongs to
+           the switch; unexpected transport failures become visible errors. *)
+        let call f =
+          try f () with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        match operation with
+        | Read -> Browser_lane_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
+        | Open_session | Close_session -> Browser_lane_session_done
+            (generation, call (fun () -> Masc_tui_http.browser_lane_session ~host ~port operation))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+           enqueue_async mailbox (perform ()); `Stop_daemon)
+       | None ->
+           state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
+
+let open_browser_lane state ~mailbox app =
+  state.view <- Connectors;
+  state.browser_lane <- Some (Browser_lane_view.create app);
+  state.search <- None;
+  launch_browser_lane state ~mailbox Browser_lane_view.Read
+
 let launch_runtime_surface_load state ~mailbox ~force =
   match state.runtime_surface_inflight with
   | Some _ -> if force then state.runtime_surface_force_pending <- true
@@ -5044,7 +5083,10 @@ let goto_surface state ~mailbox (destination : surface) =
        match state.changes_keeper with
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
        | None -> ())
-   | Connectors -> launch_connectors_load state ~mailbox
+   | Connectors ->
+       (match state.browser_lane with
+        | None -> launch_connectors_load state ~mailbox
+        | Some _ -> launch_browser_lane state ~mailbox Browser_lane_view.Read)
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config -> (
@@ -11617,6 +11659,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
                detail))
+  | Browser_lane_loaded (generation, result) ->
+      state.browser_lane <- Option.map
+        (Browser_lane_view.accept ~generation result) state.browser_lane
+  | Browser_lane_session_done (generation, result) ->
+      (match state.browser_lane with
+       | Some view ->
+           (match view.Browser_lane_view.load with
+            | Browser_lane_view.Loading (current, (Open_session | Close_session))
+              when generation = current ->
+                (match result with
+                 | Error detail ->
+                     state.browser_lane <- Some { view with load = Failed detail }
+                 | Ok () ->
+                     state.browser_lane <- Some
+                       { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
+                     launch_browser_lane state ~mailbox Browser_lane_view.Read)
+            | Loading _ | Idle | Failed _ -> ())
+       | None -> ())
   | Connectors_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -14897,6 +14957,8 @@ and is loaded on demand through keeper_skill.
                 in
                 close ();
                 (match chosen with
+                 | Some (_, Masc_tui_types.Palette_browser_lane app) ->
+                     open_browser_lane state ~mailbox:async_messages app
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
                  | Some (_, Masc_tui_types.Palette_config pane) ->
@@ -15215,6 +15277,55 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some (("B" | "S") as key) when state.view = Connectors ->
+           open_browser_lane state ~mailbox:async_messages
+             (if key = "B" then Browser_lane_view.Browser else Slack)
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+               | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
+               | "o" | "x") as key)
+         when state.view = Connectors && Option.is_some state.browser_lane ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view ->
+                let open Browser_lane_view in
+                let scroll delta =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let limit = Masc_tui_render.browser_lane_scroll_limit state ~terminal_rows ~cols view in
+                  state.browser_lane <- Some
+                    { view with scroll = max 0 (min limit (min limit view.scroll + delta)) }
+                in
+                let read view =
+                  state.browser_lane <- Some view;
+                  launch_browser_lane state ~mailbox:async_messages Read
+                in
+                (match key with
+                 | "esc" | "left" ->
+                     state.browser_lane <- None;
+                     launch_connectors_load state ~mailbox:async_messages
+                 | "l" | "a" ->
+                     read (switch_source (if key = "l" then Live else Automation) view)
+                 | "[" | "]" when not (busy view) ->
+                     read (select_tab (if key = "[" then -1 else 1) view)
+                 | "r" -> read (refresh view)
+                 | "o" | "x" when view.source = Automation ->
+                     launch_browser_lane state ~mailbox:async_messages
+                       (if key = "o" then Open_session else Close_session)
+                 | "o" | "x" ->
+                     add_event state "system" "Select automation (a) to open or close its Firefox session"
+                 | "j" | "down" -> scroll 1
+                 | "k" | "up" -> scroll (-1)
+                 | "pagedown" | "pageup" ->
+                     let rows, _ = get_terminal_size () in
+                     let delta = max 1 (rows - 10) in
+                     scroll (if key = "pagedown" then delta else -delta)
+                 | "home" -> state.browser_lane <- Some { view with scroll = 0 }
+                 | _ -> ()))
+       | Some key
+         when state.view = Connectors && Option.is_some state.browser_lane
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+           (* The child owns its keys. In particular b/u must never mutate a
+              hidden connector binding while Firefox content is on screen. *)
+           ()
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
@@ -16504,7 +16615,10 @@ and is loaded on demand through keeper_skill.
                     launch_file_changes_load state ~mailbox:async_messages
                       ~keeper_name
                 | None -> ())
-            | Connectors -> launch_connectors_load state ~mailbox:async_messages
+            | Connectors ->
+                (match state.browser_lane with
+                 | None -> launch_connectors_load state ~mailbox:async_messages
+                 | Some _ -> launch_browser_lane state ~mailbox:async_messages Browser_lane_view.Read)
             | Runtime ->
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
@@ -19191,8 +19305,10 @@ and is loaded on demand through keeper_skill.
                 the list is refreshed on the tick like the surfaces above. *)
              launch_repositories_load state ~mailbox:async_messages
          | Connectors ->
-             (* Reachability is the column that moves on its own. *)
-             launch_connectors_load state ~mailbox:async_messages
+             (* Browser content is fetched on entry and explicit refresh.
+                Periodic tab reads would continually drive Firefox focus. *)
+             if Option.is_none state.browser_lane then
+               launch_connectors_load state ~mailbox:async_messages
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)

@@ -553,6 +553,8 @@ let parse_runtime_route_lane = function
   | lane ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
+     | `Unavailable missing ->
+       Error ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
      | `Missing ->
        Error
          (Printf.sprintf

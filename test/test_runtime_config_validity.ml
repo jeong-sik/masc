@@ -3499,7 +3499,99 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
                  (Runtime.Missing_catalog_models report))
               "provider_label=custom"))
 
-let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
+let test_degraded_assignment_isolation_preserves_routing_and_recovers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let server = Exact_output_fixture.start_server
+      ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply
+         (Exact_output_fixture.openai_response (`Assoc ["answer", `String "route reached"]))) in
+  let catalog_row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n" id in
+  let catalog = catalog_row "good" in
+  let runtime_toml = Printf.sprintf {|[runtime]
+default = "fixture.good"
+[runtime.assignments]
+affected = "fixture.missing"
+healthy = "fixture.good"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.good]
+api-name = "good"
+max-context = 8192
+streaming = false
+[models.missing]
+api-name = "missing"
+max-context = 8192
+streaming = false
+[fixture.good]
+max-request-body-bytes = 65536
+[fixture.missing]
+max-request-body-bytes = 65536
+|} server.base_url in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml runtime_toml @@ fun path ->
+      let init () = match Runtime.init_default_degraded_report ~config_path:path with
+        | Ok outcome -> outcome
+        | Error error -> fail (Runtime.strict_init_error_to_string error) in
+      (match init () with
+       | Runtime.Initialized -> fail "missing catalog row must remain observable"
+       | Runtime.Initialized_degraded report ->
+           check (list string) "only affected assignment unavailable" ["affected"]
+             (List.map (fun (a : Runtime.unavailable_runtime_assignment) -> a.keeper_name) report.unavailable_assignments));
+      check (option string) "configured assignment is retained" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      check string "default identity is unchanged" "fixture.good" (Runtime.get_default_runtime_id ());
+      let meta keeper = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String keeper; "trace_id", `String ("trace-" ^ keeper)]) with
+        | Ok meta -> meta | Error detail -> fail detail in
+      let assert_unavailable = function
+        | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+            check string "runtime configuration error" "runtime_id" field;
+            check bool "exact configured identity in reason" true
+              (String_util.contains_substring detail "fixture.missing")
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ -> fail "unavailable assignment dispatched" in
+      let run keeper =
+        let meta = meta keeper in
+        Keeper_turn_driver.run_named ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+          ~keeper_name:keeper ~base_path ~system_prompt:"Answer the fixture task."
+          ~goal:"Return the fixture answer." ~agent_core_tools:[] ~sw ~net:env#net () in
+      (match Runtime.resolve_assignment "fixture.missing" with
+       | `Unavailable missing -> check string "catalog identity is typed" "missing" missing.model_id
+       | `Missing | `Lane _ -> fail "configured unavailable runtime became unknown or active");
+      let projection = Server_dashboard_runtime_resolved_json.assignment_json
+          (Runtime.get_default_runtime ()) "affected" in
+      check string "Dashboard exposes the unavailable state" "unavailable"
+        Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
+      check string "Dashboard preserves the requested ID" "fixture.missing"
+        Yojson.Safe.Util.(projection |> member "resolved" |> member "id" |> to_string);
+      let affected_meta = meta "affected" in
+      assert_unavailable (Keeper_unified_turn_pre_dispatch.build_runtime_execution
+          ~meta:affected_meta ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta affected_meta));
+      assert_unavailable (run "affected");
+      check int "no provider request for unavailable assignment" 0 (Exact_output_fixture.post_count server);
+      List.iter (fun keeper -> match run keeper with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error)) ["healthy"; "default-rider"];
+      check int "healthy and default Keeper both reach the real HTTP provider" 2
+        (Exact_output_fixture.post_count server);
+      with_model_catalog_content (catalog ^ catalog_row "missing") @@ fun () ->
+      (match init () with Runtime.Initialized -> () | Runtime.Initialized_degraded _ -> fail "restored row stayed unavailable");
+      check (option string) "recovery did not rewrite the assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      check int "same assigned Keeper now reaches provider" 3 (Exact_output_fixture.post_count server);
+      let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+      check string "restored route used its own model, not default" "missing"
+        Yojson.Safe.Util.(body |> member "model" |> to_string))
+
+let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
@@ -3619,11 +3711,11 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
-         check (list string) "no dropped assignment"
+         check (list string) "no unavailable assignment"
            []
            (List.map
-              (fun (entry : Runtime.dropped_runtime_assignment) -> entry.keeper_name)
-              degradation.dropped_assignments);
+              (fun (entry : Runtime.unavailable_runtime_assignment) -> entry.keeper_name)
+              degradation.unavailable_assignments);
          check (option string) "catalog-known assignment preserved"
            (Some "ollama.good")
            (Runtime.runtime_id_for_keeper "keeper_b");
@@ -4764,9 +4856,11 @@ let () =
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
+          test_case "assignment-only catalog gap isolates requests and recovers" `Quick
+            test_degraded_assignment_isolation_preserves_routing_and_recovers;
           test_case
-            "server degraded init rejects referenced uncatalogued runtimes"
-            `Quick test_server_degraded_init_rejects_referenced_uncatalogued_runtimes;
+            "server degraded init still rejects unavailable lane and media routes"
+            `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;
           test_case
             "server degraded init disables unreferenced uncatalogued runtimes"
             `Quick test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes;

@@ -615,7 +615,7 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
-type dropped_runtime_assignment =
+type unavailable_runtime_assignment =
   { keeper_name : string
   ; runtime_id : string
   }
@@ -635,7 +635,7 @@ type startup_degradation =
   ; configured_default_runtime_id : string
   ; effective_default_runtime_id : string
   ; disabled_runtime_ids : string list
-  ; dropped_assignments : dropped_runtime_assignment list
+  ; unavailable_assignments : unavailable_runtime_assignment list
   ; dropped_routes : dropped_runtime_route list
   ; dropped_media_failover : string list
   ; dropped_lane_candidates : dropped_runtime_lane list
@@ -650,7 +650,7 @@ type strict_init_error =
   | Runtime_config_error of string
   | Missing_catalog_models of missing_catalog_report
 
-let missing_catalog_model_label (missing : missing_catalog_model) =
+let missing_catalog_model_to_string (missing : missing_catalog_model) =
   Printf.sprintf
     "%s (provider_label=%s, model=%s)"
     missing.runtime_id
@@ -665,7 +665,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
      Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
-    (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
+    (String.concat ", " (List.map missing_catalog_model_to_string report.missing_models))
 ;;
 
 let strict_init_error_to_string = function
@@ -676,16 +676,15 @@ let strict_init_error_to_string = function
 let startup_degradation_to_string (degradation : startup_degradation) =
   Printf.sprintf
     "runtime catalog degraded boot: disabled %d uncatalogued runtime(s); \
-     configured default %S -> effective default %S; operator must add catalog \
-     rows for: %s"
+     configured default %S -> effective default %S; unavailable configured routes: %s"
     (List.length degradation.disabled_runtime_ids)
     degradation.configured_default_runtime_id
     degradation.effective_default_runtime_id
     (String.concat ", "
-       (List.map missing_catalog_model_label degradation.report.missing_models))
+       (List.map missing_catalog_model_to_string degradation.report.missing_models))
 ;;
 
-let dropped_assignment_to_yojson (entry : dropped_runtime_assignment) =
+let unavailable_assignment_to_yojson (entry : unavailable_runtime_assignment) =
   `Assoc
     [ "keeper_name", `String entry.keeper_name
     ; "runtime_id", `String entry.runtime_id
@@ -742,8 +741,8 @@ let startup_degradation_to_yojson = function
       ; ( "disabled_runtime_ids"
         , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
         )
-      ; ( "dropped_assignments"
-        , `List (List.map dropped_assignment_to_yojson degradation.dropped_assignments)
+      ; ( "unavailable_assignments"
+        , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
         )
       ; "dropped_routes", `List (List.map dropped_route_to_yojson degradation.dropped_routes)
       ; ( "dropped_media_failover"
@@ -755,9 +754,8 @@ let startup_degradation_to_yojson = function
       ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
-            "Add deployment rows to agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove \
-             those runtime.toml bindings; uncatalogued runtimes are disabled \
-             for this process." )
+            "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
+             Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch." )
       ]
 ;;
 
@@ -1093,7 +1091,7 @@ let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
 
 let runtime_default_route_name = "[runtime].default"
 
-let dropped_assignment_label (entry : dropped_runtime_assignment) =
+let unavailable_assignment_label (entry : unavailable_runtime_assignment) =
   Printf.sprintf "[runtime.assignments].%s=%S" entry.keeper_name entry.runtime_id
 ;;
 
@@ -1113,7 +1111,7 @@ let missing_reference_error
     ~(config_path : string)
     ~(configured_default_runtime_id : string)
     ~(default_drop : dropped_runtime_route option)
-    ~(dropped_assignments : dropped_runtime_assignment list)
+    ~(unavailable_assignments : unavailable_runtime_assignment list)
     ~(dropped_routes : dropped_runtime_route list)
     ~(dropped_media_failover : string list)
     ~(dropped_lane_candidates : dropped_runtime_lane list)
@@ -1121,7 +1119,7 @@ let missing_reference_error
   =
   let references =
     List.concat
-      [ List.map dropped_assignment_label dropped_assignments
+      [ List.map unavailable_assignment_label unavailable_assignments
       ; List.map dropped_route_label dropped_routes
       ; (match dropped_media_failover with
          | [] -> []
@@ -1188,14 +1186,11 @@ let degrade_loaded_for_missing_catalog
     |> List.map (fun (missing : missing_catalog_model) -> missing.runtime_id)
     |> List.sort_uniq String.compare
   in
-  let kept_assignments, dropped_assignments =
-    List.fold_right
-      (fun (keeper_name, runtime_id) (kept, dropped) ->
-         if is_missing runtime_id
-         then kept, { keeper_name; runtime_id } :: dropped
-         else (keeper_name, runtime_id) :: kept, dropped)
+  let unavailable_assignments =
+    List.filter_map
+      (fun (keeper_name, runtime_id) ->
+         if is_missing runtime_id then Some { keeper_name; runtime_id } else None)
       assignments
-      ([], [])
   in
   let default_drop =
     if is_missing configured_default.id
@@ -1252,8 +1247,7 @@ let degrade_loaded_for_missing_catalog
       ([], [])
   in
   let has_routing_references =
-    (not (List.is_empty dropped_assignments))
-    || (not (List.is_empty dropped_routes))
+    (not (List.is_empty dropped_routes))
     || (not (List.is_empty dropped_media_failover))
     || (not (List.is_empty dropped_lane_candidates))
     || not (List.is_empty dropped_lanes)
@@ -1271,7 +1265,7 @@ let degrade_loaded_for_missing_catalog
          ~config_path:report.config_path
          ~configured_default_runtime_id:configured_default.id
          ~default_drop
-         ~dropped_assignments
+         ~unavailable_assignments
          ~dropped_routes
          ~dropped_media_failover
          ~dropped_lane_candidates
@@ -1282,7 +1276,7 @@ let degrade_loaded_for_missing_catalog
       ; configured_default_runtime_id = configured_default.id
       ; effective_default_runtime_id = configured_default.id
       ; disabled_runtime_ids
-      ; dropped_assignments
+      ; unavailable_assignments
       ; dropped_routes
       ; dropped_media_failover
       ; dropped_lane_candidates
@@ -1292,7 +1286,7 @@ let degrade_loaded_for_missing_catalog
     Ok
       ( ( active_runtimes
         , configured_default
-        , kept_assignments
+        , assignments
         , kept_media_failover
         , kept_lanes
         , lsp_servers )
@@ -1641,7 +1635,7 @@ let runtimes_and_media_failover () =
    runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
    {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
    only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
-   [keeper_assignments_ref], never a module-level eager binding. *)
+   the immutable loaded-state assignment snapshot. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
   List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
 ;;
@@ -1743,21 +1737,28 @@ let max_context_of_runtime (rt : t) : int =
    An assignment naming a bare runtime gets a lane of its own rather than a
    bare dispatch target: the lane id is what keys sticky preference and quota
    demotion, so without one those mechanisms are simply off for that keeper.
-   [Missing] means the assignment does not name a known lane or runtime. *)
+   [Unavailable] retains a configured ID whose capability catalog entry is
+   absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =
-  match get_lane_by_id assigned_id with
+  let state = runtime_state () in
+  match find_declared_lane state.lanes assigned_id with
   | Some lane -> `Lane lane
   | None ->
-    (match get_runtime_by_id assigned_id with
+    (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
      | Some runtime ->
        let candidates =
-         match get_default_runtime () with
+         match state.default_runtime with
          | Some default ->
            with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
          | None -> [ runtime.id ]
        in
        `Lane (Runtime_lane.make ~id:runtime.id candidates)
-     | None -> `Missing)
+     | None ->
+       (match Option.bind state.startup_degradation (fun degradation ->
+          List.find_opt (fun (missing : missing_catalog_model) ->
+            String.equal missing.runtime_id assigned_id) degradation.report.missing_models) with
+        | Some missing -> `Unavailable missing
+        | None -> `Missing))
 ;;
 
 let resolve_max_context_of_runtime_id (id : string)

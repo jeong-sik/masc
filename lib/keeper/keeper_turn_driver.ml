@@ -527,7 +527,12 @@ let resolve_runtime_candidate id =
            provider_config
        in
        Ok runtime)
-  | None -> Error (runtime_candidate_missing_error id)
+  | None ->
+    (match Runtime.resolve_assignment id with
+     | `Unavailable missing ->
+       Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
+         ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
+     | `Missing | `Lane _ -> Error (runtime_candidate_missing_error id))
 
 let resolve_runtime_candidate_for_attempt ?on_missing id =
   match resolve_runtime_candidate id with
@@ -947,21 +952,23 @@ let run_named
       ~now:(Unix.gettimeofday ())
       candidates
   in
-  let lane_id_opt, lane_candidate_ids =
+  let* lane_id_opt, lane_candidate_ids =
     match deferred_runtime_lane with
     | Some hint ->
-      Some hint.assignment_id, deferred_runtime_ids hint
+      Ok (Some hint.assignment_id, deferred_runtime_ids hint)
     | None ->
       (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> None, []
+       | `Missing -> Ok (None, [])
+       | `Unavailable missing ->
+         Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
+           ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
-         ( Some lane_id
-         , (* Current candidate backpressure or credential quota evidence
-              takes precedence over the lane's remembered last success. *)
-           Runtime_lane_preference.prefer_order ~lane_id
-             (Runtime_lane.ordered_candidates lane)
-           |> demote_quota_exhausted ))
+         Ok
+           ( Some lane_id
+           , Runtime_lane_preference.prefer_order ~lane_id
+               (Runtime_lane.ordered_candidates lane)
+             |> demote_quota_exhausted ))
   in
   if lane_candidate_ids = []
   then

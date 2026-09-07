@@ -72,6 +72,14 @@ let build_runtime_execution
   if String.equal runtime_id "" then
     Error (Agent_core.Error.Internal "runtime_id must be non-empty")
   else
+  let ( let* ) = Result.bind in
+  let* assignment =
+    match Runtime.resolve_assignment runtime_id with
+    | `Unavailable missing ->
+        Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
+          ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
+    | (`Lane _ | `Missing) as assignment -> Ok assignment
+  in
   let log_pre_dispatch_error ~site detail =
     Log.Keeper.error
       "%s: pre_dispatch: %s failed for runtime_id=%s: %s"
@@ -109,7 +117,7 @@ let build_runtime_execution
        warning — it would serve a prompt shaped without its window
        either way, which is exactly the pre-#28765 behavior. *)
     let max_context_resolution =
-      match Runtime.resolve_assignment runtime_id with
+      match assignment with
       | `Missing -> entry_resolution
       | `Lane lane ->
         List.fold_left

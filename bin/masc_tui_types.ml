@@ -1403,6 +1403,20 @@ type runtime_detail_target =
   | Runtime_lane_candidate of { lane_id : string; runtime_id : string }
   | Runtime_catalog_entry of { runtime_id : string }
 
+type runtime_probe_annotation =
+  | Runtime_probe_note of string
+  | Runtime_probe_failure of string
+
+let runtime_probe_status_label = function
+  | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
+  | status -> Tui_decode.runtime_provider_status_to_string status
+
+let runtime_probe_annotation ~status detail =
+  Option.map (fun detail ->
+    match status with
+    | Tui_decode.Runtime_provider_skipped_cli -> Runtime_probe_note detail
+    | _ -> Runtime_probe_failure detail) detail
+
 (** Planning surface sub-mode *)
 type planning_mode =
   | Planning_list

@@ -28,8 +28,8 @@ let subscription_model_rows =
   ; "claude-fable-5", "claude-fable-5"
   ; "claude-sonnet-5", "claude-sonnet-5"
   ; "claude-haiku-4-5-20251001", "claude-haiku-4-5"
-  ; "gpt-5.6-sol", "gpt-5.6"
-  ; "gpt-5.6-terra", "gpt-5.6"
+  ; "gpt-5.6-sol", "gpt-5.6-sol"
+  ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
@@ -70,15 +70,18 @@ let test_subscription_models_resolve_their_own_rows () =
    row under test: a comparison that sources both sides from the catalog passes
    whatever the catalog happens to say, including a row that admits nothing. *)
 let subscription_model_efforts =
-  [ "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  [ None, "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
     (* Probed on /v1/responses 2026-09-07: sol, terra and luna each answer 400
        for "minimal" -- the message names the model -- and 200 for none, low,
        medium, high, xhigh and max. The list this replaces came from the
-       2026-06-29 gpt-5.1 reference and was wrong at both ends. *)
-  ; "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
-  ; "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
-  ; "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
+       2026-06-29 gpt-5.1 reference and was wrong at both ends. These observations
+       belong to the Responses provider, not the separate bare model rows. *)
+  ; Some "openai-responses", "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-5.6-terra", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-5.6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+  ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]
 ;;
 
@@ -88,8 +91,13 @@ let test_subscription_models_admit_their_reasoning_efforts () =
       ~suite:"subscription model efforts"
   in
   List.iter
-    (fun (model_id, expected) ->
-       match Model_catalog.lookup catalog model_id with
+    (fun (provider_name, model_id, expected) ->
+       let entry =
+         match provider_name with
+         | None -> Model_catalog.lookup catalog model_id
+         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+       in
+       match entry with
        | None -> failf "%s resolves to no catalog row" model_id
        | Some (entry : Model_catalog.model_entry) ->
          check

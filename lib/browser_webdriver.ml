@@ -174,6 +174,18 @@ let execute_unlocked t = function
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int (tab_id t session handle)) :: fields))
       | _ -> Error (Protocol "malformed elements observation"))
+  | Browser_lane.Page_screenshot {tab_id=id} ->
+    let* session = session t in
+    with_tab t session (Some id) (fun () ->
+      let* before = page_summary t session in
+      let* encoded = call t session `GET "/screenshot" None in
+      let* summary = page_summary t session in
+      let* () = if field "url" before = field "url" summary then Ok ()
+        else Error (Protocol "tab navigated during screenshot") in
+      match summary, encoded with
+      | `Assoc fields, `String base64 -> Ok (`Assoc
+          (["tabId",`Int id;"base64",`String base64] @ fields))
+      | _ -> Error (Protocol "invalid WebDriver screenshot response"))
   | Browser_lane.Page_read { tab_id; max_chars } ->
     let* session = session t in
     with_tab t session tab_id (fun () ->

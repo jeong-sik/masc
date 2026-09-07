@@ -3020,7 +3020,7 @@
 (test
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
- (libraries masc_test_deps masc.runtime))
+ (libraries masc_test_deps masc.runtime masc.browser_lane))
 
 (test
  (name test_keeper_image_dimensions)
@@ -4791,3 +4791,12 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_elements)))
+
+(rule
+ (alias runtest-test_browser_screenshot)
+ (deps test_browser_screenshot.cjs ../connectors/browser/extension/background.js)
+ (action (run node --test %{dep:test_browser_screenshot.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_screenshot)))

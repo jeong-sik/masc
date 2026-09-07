@@ -132,6 +132,17 @@ class NativeHost(unittest.TestCase):
                 self.process.stdin.flush()
             self.assertEqual(self.server.results.get(timeout=5), reply)
 
+    def test_screenshot_reply_larger_than_command_limit(self):
+        command = {"id": "screenshot", "verb": "page.screenshot", "args": {"tabId": 73}}
+        self.server.commands.put(command)
+        self.assertEqual(read_frame(self.process.stdout), command)
+        reply = {"id": "screenshot", "ok": True, "data": {
+            "tabId": 73, "base64": "A" * (2 * 1024 * 1024),
+            "url": "https://example.org", "title": "Screenshot"}}
+        self.process.stdin.write(encode_frame(reply))
+        self.process.stdin.flush()
+        self.assertEqual(self.server.results.get(timeout=10), reply)
+
     def test_unsupported_verb_is_not_forwarded(self):
         for verb, args in [
             ("page.goto", {"url": "https://example.com"}),
@@ -177,7 +188,7 @@ class NativeHost(unittest.TestCase):
         self.assertEqual(self.process.stdout.read(), b"")
 
     def test_oversized_frame_rejected_before_payload(self):
-        self.process.stdin.write(struct.pack("<I", 1024 * 1024 + 1))
+        self.process.stdin.write(struct.pack("<I", 8 * 1024 * 1024 + 1))
         self.process.stdin.flush()
         self.assertNotEqual(self.process.wait(timeout=2), 0)
         diagnostics = self.process.stderr.read()

@@ -50,6 +50,27 @@ Firefox is driven through Mozilla's [geckodriver](https://firefox-source-docs.mo
 
 Validation lives in `test_browser_controls`, `test_browser_webdriver`,
 `test_browser_lane`, and the tool registry tests. CI build/test results and live
-Firefox measurements must be recorded independently. Screenshots, frame/shadow
-root targeting, dialogs and download/upload workflows are separate capability
+Firefox measurements must be recorded independently. Frame/shadow root targeting, dialogs and download/upload workflows are separate capability
 increments; this document does not claim them implemented.
+
+## Screenshot to Vision
+
+`BrowserRead {"lane":"automation","tabId":73,"mode":"screenshot"}` captures
+the selected viewport as PNG. The same mode supports live Firefox through
+`tabs.captureTab`, without switching the operator's active tab. A changed URL across
+capture is rejected; same-URL page changes are not detected by this guard. The tool returns URL/title, dimensions and an
+`artifact` handle; `keeper_analyze_image {"artifact":<handle>,"query":<question>}` loads
+those stored pixels into the configured Vision reader. Encoded pixels do not
+ride in the browser tool's text response. This does not inject screenshots
+directly into the Keeper's own conversation.
+
+The native host retains Mozilla's 1 MiB command limit and accepts bounded 8 MiB
+replies, enough for the default 5 MiB Vision image after base64 encoding. The
+extension rejects oversized replies before writing a frame. Vision image size
+and format validation apply before persistence. This is a viewport capture,
+not a stitched full-page screenshot. See [Mozilla captureTab](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/captureTab)
+and [native message framing](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging).
+
+Screenshots require the authenticated in-process Keeper context. Generic tool
+dispatch does not treat an agent display name as Keeper ownership. The live
+8 MiB transport bound is independent of a larger configured Vision image limit.

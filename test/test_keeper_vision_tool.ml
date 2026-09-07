@@ -1426,7 +1426,58 @@ let test_truncated_structured_response_reads_as_truncation () =
   | Vt.Vo_ok text -> assert (text = "a red circle")
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
+let test_browser_screenshot_reaches_vision_reader () =
+  with_temp_base (fun _ ->
+    with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+      let meta = make_meta "browser-screenshot" in
+      let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let seen_image = ref false in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
+        seen_image := List.exists (fun (message : Agent_core.Types.message) ->
+          List.exists (function
+            | Agent_core.Types.Image {media_type="image/png";data;source_type=Base64} -> data=encoded
+            | _ -> false) message.content) messages;
+        Ok (ok_response "stored browser pixels reached vision") in
+      Eio_main.run (fun env ->
+        Time_compat.set_clock (Eio.Stdenv.clock env);
+        Eio.Switch.run (fun sw ->
+          Browser_lane.install_automation_executor (Some (function
+            | Browser_lane.Page_screenshot {tab_id=73} -> Browser_lane.Answered
+                (`Assoc ["ok",`Bool true;"data",`Assoc [
+                  "tabId",`Int 73;"url",`String "https://example.org/form";
+                  "title",`String "Form";"base64",`String encoded]])
+            | _ -> failwith "unexpected screenshot command"));
+          Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+          let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+            ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+          assert (result.disposition = Tool_result.Completed ());
+          let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
+          assert (not (String_util.contains_substring result.raw_output encoded));
+          let handle = assoc_string "artifact" data in
+          let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args:(artifact_args handle) () |> json_of_output in
+          assert (!seen_image);
+          assert (assoc_string "text" reader = "stored browser pixels reached vision")))))
+
+let test_browser_screenshot_requires_keeper_owner () =
+  let result = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.
+      (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+  match result with
+  | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")
+  | _ -> failwith "generic caller invented a Keeper screenshot owner"
+
+let test_browser_screenshot_rejects_bad_pixels () =
+  with_temp_base (fun _ ->
+    List.iter (fun encoded ->
+      let result = Masc.Browser_screenshot.persist ~keeper_name:"bad-browser-pixels"
+        (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
+          "title",`String "Page";"base64",`String encoded]) in
+      assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
+
 let () =
+  test_browser_screenshot_requires_keeper_owner ();
+  test_browser_screenshot_reaches_vision_reader ();
+  test_browser_screenshot_rejects_bad_pixels ();
   test_vision_output_tokens_default_and_env ();
   test_truncated_structured_response_reads_as_truncation ();
   test_truncated_of_stop_reason ();

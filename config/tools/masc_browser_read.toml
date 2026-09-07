@@ -27,6 +27,6 @@ default = "live"
 [[params]]
 name = "mode"
 type = "string"
-enum = ["text", "elements"]
+enum = ["text", "elements", "screenshot"]
 default = "text"
-description = "text reads the page; elements returns up to 200 visible controls with observed CSS selectors, labels and truncation."
+description = "text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."

@@ -22,6 +22,7 @@ type verb =
   | Page_goto of { url : string; tab_id : int option }
   | Page_elements of { tab_id : int option }
   | Page_act of Browser_action.t
+  | Page_screenshot of { tab_id : int }
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
@@ -31,6 +32,7 @@ let verb_to_string = function
   | Page_goto _ -> "page.goto"
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
+  | Page_screenshot _ -> "page.screenshot"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -60,6 +62,8 @@ let verb_json = function
   | Page_elements { tab_id } ->
     `Assoc ["verb", `String "page.elements"; "args", `Assoc
       (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
+  | Page_screenshot {tab_id} ->
+    `Assoc ["verb",`String "page.screenshot";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
 ;;
@@ -73,12 +77,12 @@ let verb_json = function
      Only the two readers — the live lane exists to be read; sessions own
      nothing there and a navigation acts with the operator's logins. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;
 
 let verb_allowed_on_live = function
-  | Tabs_list | Page_read _ | Page_elements _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_screenshot _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
 ;;
 

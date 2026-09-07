@@ -3,12 +3,12 @@
 
 let ( let* ) = Result.bind
 
-(* Mozilla permits 1 MiB from host to browser, 4 GiB in the other direction.
-   This reader deliberately applies the smaller resource bound both ways:
-   browser lane page reads are bounded, and an unbounded tab list must fail
-   explicitly rather than allocate a browser-controlled 4 GiB frame.
+(* Mozilla limits host-to-browser messages to 1 MiB. Browser-to-host frames
+   have a separate 8 MiB resource bound: this admits a 5 MiB Vision PNG after
+   base64 encoding plus its JSON envelope, without admitting a 4 GiB frame.
    https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging#app_side *)
-let frame_limit = 1024 * 1024
+let command_frame_limit = 1024 * 1024
+let reply_frame_limit = 8 * 1024 * 1024
 
 (* The server's long-poll window is 25 seconds. These transport deadlines
    leave it room to finish and bound a dead extension or HTTP connection. *)
@@ -16,7 +16,7 @@ let http_timeout_sec = 55.
 let extension_timeout_sec = 20.
 let reconnect_delay_sec = 5.
 
-type verb = Tabs_list | Page_read | Page_elements
+type verb = Tabs_list | Page_read | Page_elements | Page_screenshot
 type command = { id : string; verb : verb; args : Yojson.Safe.t }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
@@ -55,6 +55,7 @@ let decode_poll json =
       | "tabs.list" -> Ok (Forward { id; verb = Tabs_list; args })
       | "page.read" -> Ok (Forward { id; verb = Page_read; args })
       | "page.elements" -> Ok (Forward { id; verb = Page_elements; args })
+      | "page.screenshot" -> Ok (Forward { id; verb = Page_screenshot; args })
       | _ -> Ok (Reject id)
 
 let command_json command =
@@ -64,7 +65,8 @@ let command_json command =
         (match command.verb with
          | Tabs_list -> "tabs.list"
          | Page_read -> "page.read"
-         | Page_elements -> "page.elements")
+         | Page_elements -> "page.elements"
+         | Page_screenshot -> "page.screenshot")
     ; "args", command.args
     ]
 
@@ -92,8 +94,8 @@ let read_frame reader =
       let length =
         Int64.logand (Int64.of_int32 (Bytes.get_int32_le header 0)) 0xffff_ffffL
       in
-      if length = 0L || length > Int64.of_int frame_limit then
-        Error "native frame length is outside the 1 MiB limit"
+      if length = 0L || length > Int64.of_int reply_frame_limit then
+        Error "native frame length is outside the 8 MiB reply limit"
       else
         let* json = parse_json (Eio.Buf_read.take (Int64.to_int length) reader) in
         Ok (Some json)
@@ -104,7 +106,7 @@ let read_frame reader =
 let write_frame stdout json =
   let payload = Yojson.Safe.to_string json in
   let length = String.length payload in
-  if length > frame_limit then Error "command exceeds native frame limit"
+  if length > command_frame_limit then Error "command exceeds native frame limit"
   else (
     let header = Bytes.create 4 in
     Bytes.set_int32_le header 0 (Int32.of_int length);
@@ -196,7 +198,7 @@ let post ~clock ~client ~config ~token path json =
           let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
           if status <> 200 then Error (Http_status status)
           else
-            let body = Eio.Buf_read.of_flow body ~max_size:(frame_limit + 1) in
+            let body = Eio.Buf_read.of_flow body ~max_size:(command_frame_limit + 1) in
             parse_json (Eio.Buf_read.take_all body)
             |> Result.map_error (fun _ -> Response_invalid))
       with
@@ -208,7 +210,7 @@ let post ~clock ~client ~config ~token path json =
 let run env config =
   let clock = Eio.Stdenv.clock env in
   let client = Cohttp_eio.Client.make ~https:None (Eio.Stdenv.net env) in
-  let reader = Eio.Buf_read.of_flow (Eio.Stdenv.stdin env) ~max_size:(frame_limit + 4) in
+  let reader = Eio.Buf_read.of_flow (Eio.Stdenv.stdin env) ~max_size:(reply_frame_limit + 4) in
   (* Single Eio domain; reading/writing this cell has no suspension point.
      One pending command is the ownership contract of the serial live host. *)
   let pending : (string * Yojson.Safe.t Eio.Promise.u) option ref = ref None in

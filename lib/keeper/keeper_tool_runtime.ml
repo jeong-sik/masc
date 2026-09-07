@@ -391,7 +391,7 @@ let handle_in_process ctx descriptor args =
   | Tool_browser_tabs ->
     Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~args)
   | Tool_browser_read ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~meta:ctx.meta ~args)
   | Tool_browser_session ->
     Some (Keeper_tool_in_process_runtime.handle_browser_session_with_outcome ~args)
   | Tool_browser_goto ->

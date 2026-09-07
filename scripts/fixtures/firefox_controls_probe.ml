@@ -85,10 +85,11 @@ let () = Eio_main.run (fun _ ->
     check "screenshot target is the first fixture page"
       (member "url" (read first) = `String (fixture_url ^ "/first"));
     (* Capture the resulting real Firefox viewport using the same native transport. *)
-    let id = match !remote_session with Some id -> id | None -> failwith "missing owned session" in
-    (match request ~method_:`GET ~path:("/session/" ^ id ^ "/screenshot") ~body:None with
-     | Ok (`String png) -> let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in output_string oc png;close_out oc
-     | _ -> failwith "screenshot failed");
+    let screenshot = success (run (Browser_lane.Page_screenshot {tab_id=first})) in
+    check "native screenshot carries the selected tab" (member "tabId" screenshot = `Int first);
+    let png = member "base64" screenshot |> string in
+    let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in
+    output_string oc png; close_out oc;
     act first Browser_action.Close_tab;
     check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     let closed = success (run Browser_lane.Session_close) in

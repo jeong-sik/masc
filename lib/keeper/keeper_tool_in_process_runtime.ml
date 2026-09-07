@@ -461,9 +461,9 @@ let handle_browser_tabs_with_outcome ~args =
     (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
 ;;
 
-let handle_browser_read_with_outcome ~args =
+let handle_browser_read_with_outcome ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.0 args)
+    (Tool_misc_browser_lane.handle_read ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:0.0 args)
 ;;
 
 let handle_browser_session_with_outcome ~args =

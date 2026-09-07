@@ -1188,7 +1188,7 @@ let test_runtime_sweep_preserves_live_owner () =
     outcomes
 ;;
 
-let test_sweep_failure_does_not_poison_lifecycle () =
+let test_sweep_exception_does_not_poison_lifecycle raise_error =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
   Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
@@ -1200,10 +1200,24 @@ let test_sweep_failure_does_not_poison_lifecycle () =
       ~command_available:(String.equal "container")
       ~timeout_sec:1.0 ~is_pid_alive ~run_argv
   in
-  (try
-     ignore (sweep (fun ~timeout_sec:_ _ -> raise Exit));
-     Alcotest.fail "CLI exception must remain visible"
-   with Exit -> ());
+  let original = ref None in
+  let run_argv ~timeout_sec:_ _ =
+    try raise_error (); Alcotest.fail "expected an exception" with
+    | (Exit | Eio.Cancel.Cancelled _) as exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      original := Some exn;
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  let caught =
+    try
+      (* The sweep must propagate this exact exception after releasing the lock. *)
+      ignore (sweep run_argv);
+      Alcotest.fail "CLI exception must remain visible"
+    with
+    | (Exit | Eio.Cancel.Cancelled _) as caught -> caught
+  in
+  Alcotest.(check bool) "the original exception reaches the caller" true
+    (Option.exists (fun expected -> caught == expected) !original);
   let outcomes = sweep (fun ~timeout_sec:_ _ -> Unix.WEXITED 0, "[]") in
   Alcotest.(check int) "the lifecycle lock is reusable after a CLI failure"
     1 (List.length outcomes)
@@ -2110,7 +2124,12 @@ let () =
         ; Alcotest.test_case "startup sweep serializes inventory with boot" `Quick
             test_startup_sweep_serializes_inventory_with_boot
         ; Alcotest.test_case "sweep failure does not poison lifecycle" `Quick
-            test_sweep_failure_does_not_poison_lifecycle
+            (fun () -> test_sweep_exception_does_not_poison_lifecycle (fun () -> raise Exit))
+        ; Alcotest.test_case "sweep cancellation propagates without poisoning lifecycle" `Quick
+            (fun () -> test_sweep_exception_does_not_poison_lifecycle (fun () ->
+               Eio.Cancel.sub (fun cancel_context ->
+                 Eio.Cancel.cancel cancel_context Exit;
+                 Eio.Cancel.check cancel_context)))
         ; Alcotest.test_case "startup maintenance is owned by its switch" `Quick
             test_startup_maintenance_is_owned_by_its_switch
         ; Alcotest.test_case "runtime sweep preserves a live owner" `Quick

@@ -74,8 +74,16 @@ let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
        | Yojson.Json_error detail -> Error (Invalid_json_output { runtime_id; detail })))
 ;;
 
+let order_slots slots =
+  Runtime_quota_window.demote_order
+    ~now:(Time_compat.now ())
+    ~quota_scope_of:Runtime.quota_scope_of_runtime_id
+    slots
+;;
+
 let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt () =
-  let rec loop failures = function
+  let rec loop failures slots =
+    match order_slots slots with
     | [] -> Error (List.rev failures)
     | runtime_id :: rest ->
       (match run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with

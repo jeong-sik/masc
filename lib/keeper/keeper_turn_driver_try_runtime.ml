@@ -21,6 +21,31 @@ let accept_no_progress_should_try_next error =
   | None -> false
 ;;
 
+(* Access is a property of this candidate's provider/model binding. A different
+   declared candidate can serve the request. This is not a retry of the same
+   credential: the driver still requires its caller and effect-disposition
+   authorities before advancing to the next candidate. *)
+let candidate_access_should_try_next = function
+  | Agent_core.Error.Api
+      (Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _)
+    -> true
+  | Agent_core.Error.Api
+      ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
+      | Agent_core.Retry.ServerError _ | Agent_core.Retry.PaymentRequired _
+      | Agent_core.Retry.InvalidRequest _ | Agent_core.Retry.NotFound _
+      | Agent_core.Retry.ContextOverflow _ | Agent_core.Retry.InputCapacity _
+      | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
 let attempt_rejected_should_try_next = function
   | Agent_core.Error.Api
       (Agent_core.Retry.InvalidRequest

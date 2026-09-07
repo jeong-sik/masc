@@ -2350,10 +2350,16 @@ let add_routes ~sw ~clock router =
              ~extra_headers:(extra_headers @ Server_timing.extra_header timing)
              (fun () -> body) reqd
          | None ->
-           let json = Server_timing.measure timing Server_timing.Cache_compute
-             (fun () -> dashboard_execution_http_json ~state ~sw ~clock request) in
-           Http.Response.json_value ~compress:false ~request:req
-             ~extra_headers:(Server_timing.extra_header timing) json reqd
+           let response = Server_timing.measure timing Server_timing.Cache_compute
+             (fun () -> dashboard_execution_http_response ~state ~sw ~clock request) in
+           (match response with
+            | Execution_json json ->
+              Http.Response.json_value ~compress:false ~request:req
+                ~extra_headers:(Server_timing.extra_header timing) json reqd
+            | Execution_payload payload ->
+              Http.Response.json_lazy ~compress:false ~request:req ~etag:payload.etag
+                ~extra_headers:(Server_timing.extra_header timing)
+                (fun () -> payload.raw_json) reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->

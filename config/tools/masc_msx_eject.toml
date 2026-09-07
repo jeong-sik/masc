@@ -1,0 +1,7 @@
+name = "masc_msx_eject"
+description = """
+Power off the workspace MSX machine. The input ledger file stays on disk; \
+the next masc_msx_load starts a new one."""
+additional_properties = false
+
+defer_loading = true

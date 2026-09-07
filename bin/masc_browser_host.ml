@@ -323,6 +323,7 @@ let run env config =
   (match !observed_info, read_token config.token_file with
    | Some info, Ok token ->
      Eio.Fiber.first
+       (* See bounded EOF cleanup above: failed disconnect must not retain the native child. *)
        (fun () -> ignore (post ~clock ~client ~config ~info ~token "disconnect" (`Assoc [])))
        (fun () -> Eio.Time.sleep clock 0.25)
    | _ -> ());

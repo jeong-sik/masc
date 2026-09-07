@@ -26,6 +26,10 @@ let agent_core ?(kind = Observer.Tool_called) ?tool ?turn ?tool_use_id ~at
     ; at
     ; correlation = Some correlation
     ; parent = None
+    ; event_id = None
+    ; run_id = None
+    ; caused_by = None
+    ; execution_id = None
     }
 
 let settled ~at keeper : Observer.event =
@@ -78,6 +82,11 @@ let fixture : Pane.input =
               ; kt_duration_ms = Some 5.
               ; kt_disposition = Some "completed"
               ; kt_at = 905.
+      ; kt_tool_use_id = None
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = None
+      ; kt_tool_output_preview = None
               } )
         ; ( 980.
           , agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.

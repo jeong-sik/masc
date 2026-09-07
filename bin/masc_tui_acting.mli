@@ -170,3 +170,7 @@ val duration_of_completion :
 
 val elapsed_text : float -> string
 (** A duration in milliseconds as [32ms], [1.2s], or [2m05s]. *)
+
+val evidence_fields : entry -> (string * string option) list
+(** Producer references from one immutable observer event. Missing IDs and
+    input/output are explicit; no matching by name, time, or neighbouring row. *)

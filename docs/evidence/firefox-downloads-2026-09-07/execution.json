@@ -4,8 +4,8 @@
   "returncode": 0,
   "timed_out": false,
   "probe_sha256": null,
-  "driver_pgid": 69655,
-  "probe_pgid": 69656,
+  "driver_pgid": 37000,
+  "probe_pgid": 37010,
   "screenshot": {
     "width": 1366,
     "height": 683

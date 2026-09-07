@@ -6,7 +6,7 @@ and Browser_bidi_downloads with the installed native ws-direct-eio transport.
 The HTTP fixture adapter runs curl in a system thread so BiDi can process
 messages while Classic commands are pending. No repository build ran locally.
 
-The final run completed successfully, including session close and reopen.
+The final canonical Page_capture run completed successfully, including session close and reopen.
 `execution.json` records exit status; `sources.json` hashes every sampled source.
 `probe.log` records native interaction assertions; `downloads.json` preserves
 session/download UUIDs, descendant-frame correlation, filenames, verified paths
@@ -22,7 +22,10 @@ fixture and test_browser_downloads instead call the production durable publisher
 and keeper_artifact_read, reconstructing every byte through its paged interface.
 Their execution remains separate CI evidence; this directory does not claim
 those linked tests passed. Two reducer and two setup-lifecycle tests separately
-passed in the OCaml source interpreter. Public .mli constraints were also checked
+passed in the OCaml source interpreter. A fifth test used a real TCP peer closing
+during the WebSocket upgrade: typed EOF, remote-session rollback, and the parent
+Eio switch remained usable; removing the EOF classifier makes that test fail.
+Public .mli constraints were also checked
 in the interpreter, and changed files passed parser/stanza static checks.
 
 An earlier merged-source run passed interaction/download assertions but timed

@@ -1818,6 +1818,10 @@ type async_msg =
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
+  | Browser_lane_screenshot_ready of {
+      generation : int; image_generation : int;
+      result : (Browser_lane_view.screenshot * string, string) result;
+    }
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -4032,6 +4036,7 @@ let launch_browser_lane state ~mailbox operation =
   | Some view ->
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
+      let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4045,6 +4050,11 @@ let launch_browser_lane state ~mailbox operation =
         match operation with
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
+        | Screenshot tab_id -> Browser_lane_screenshot_ready {
+            generation; image_generation;
+            result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
+              ~host ~port ~source:view.source ~tab_id);
+          }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
       in
@@ -11759,6 +11769,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
+  | Browser_lane_screenshot_ready { generation; image_generation; result } ->
+      (match state.browser_lane with
+       | None -> ()
+       | Some view ->
+           let settled, screenshot = Browser_lane_view.accept_screenshot ~generation
+               (Result.map fst result) view in
+           state.browser_lane <- Some settled;
+           (* Any deliberate input cancels the overlay, including a URL edit.
+              It must not leave the matching browser operation busy forever. *)
+           if image_generation = state.image_request_generation
+              && Option.is_some (browser_lane_on_screen state) then
+             match screenshot, result with
+             | Some shot, Ok (_, bytes) ->
+                 let refuse detail =
+                   state.browser_lane <- Some { settled with load = Failed detail }
+                 in
+                 (match !terminal_draws_images with
+                  | Some false -> refuse terminal_draws_no_images
+                  | Some true | None ->
+                      draw_image state ~refuse ~title:("Browser screenshot · " ^ shot.title)
+                        ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
+                            (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms;
+                          shot.url] bytes)
+             | _ -> ())
   | Browser_lane_action_done (generation, result) ->
       (match state.browser_lane with
        | Some view ->
@@ -15439,6 +15473,21 @@ and is loaded on demand through keeper_skill.
               && not compact_viewport ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
+       | Some key when String.length key = 1 && Char.code key.[0] = 15
+                       && Option.is_some (browser_lane_on_screen state) ->
+           (match state.browser_lane with
+            | None -> ()
+            | Some view when Browser_lane_view.busy view -> ()
+            | Some view ->
+                let refuse detail =
+                  state.browser_lane <- Some { view with load = Failed detail }
+                in
+                match !terminal_draws_images, view.selected_tab with
+                | Some false, _ -> refuse terminal_draws_no_images
+                | _, None -> refuse "Read and select a Firefox tab before taking a screenshot"
+                | (Some true | None), Some tab_id ->
+                    launch_browser_lane state ~mailbox:async_messages
+                      (Browser_lane_view.Screenshot tab_id))
        | Some key
          when text_input_target state ~compact_viewport = Some Text_browser_url ->
            (match state.browser_lane with

@@ -13590,7 +13590,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.url_draft with
-      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
+      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None -> Masc_tui_keys.footer_hints_browser_lane)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -13598,6 +13598,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation Firefox…", Theme.info ()
+        | Loading (_, Screenshot _) -> "Capturing selected Firefox tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()

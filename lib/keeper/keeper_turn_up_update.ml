@@ -389,8 +389,7 @@ let finish_publication_after_runtime_failure ~supersession ctx detail =
       tool_result_error ~class_:Tool_result.Runtime_failure detail)
 ;;
 
-let update_keeper_using ~apply_profile ~after_preflight ~persist_with_publication
-    ?(preserve_prompt_defaults = false)
+let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     ~(expected_config_revision : Keeper_turn_up_config_persistence.config_revision)
     (ctx : _ context) (p : parsed_args)
     (old : keeper_meta) : tool_result
@@ -511,7 +510,6 @@ let update_keeper_using ~apply_profile ~after_preflight ~persist_with_publicatio
             tool_result_error ~class_:Tool_result.Runtime_failure
               (Keeper_shutdown_supersession.error_to_string error)
           | Ok supersession ->
-            after_preflight ();
             let publish runtime_transaction outcome =
               match
                 apply_profile
@@ -627,15 +625,13 @@ let update_keeper_using ~apply_profile ~after_preflight ~persist_with_publicatio
                            (outcome, config_publication_rollback_result detail)))
             in
             (match
-               (persist_with_publication
+               Keeper_turn_up_config_persistence.persist_with_publication
                  ~expected_revision:expected_config_revision
                  ~config:ctx.config
                  ~parsed:p
                  ~meta:updated
                  ~publish
                  ()
-                 : ( manifest_publication Keeper_turn_up_config_persistence.receipt
-                   , Keeper_turn_up_config_persistence.error ) result)
              with
              | Error
                  (Keeper_turn_up_config_persistence.Revision_conflict conflict) ->
@@ -702,9 +698,7 @@ let update_keeper_using ~apply_profile ~after_preflight ~persist_with_publicatio
                     ~applied:true))
 
 let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old =
-  update_keeper_using
-    ~after_preflight:(fun () -> ())
-    ~persist_with_publication:Keeper_turn_up_config_persistence.persist_with_publication
+  update_keeper_with
     ~apply_profile:(fun ~base_path ~keeper_name command ->
       Keeper_owner_registry.apply_meta ~base_path ~keeper_name command)
     ?preserve_prompt_defaults
@@ -718,18 +712,5 @@ module For_testing = struct
   let composite_reconciliation_required_data =
     composite_reconciliation_required_data
 
-  type update_stage =
-    | Preflight_completed
-    | Publication of
-        Keeper_turn_up_config_persistence.For_testing.publication_stage
-
-  let update_keeper_with_apply_profile ?(observe = fun _ -> ()) ~apply_profile
-      ?preserve_prompt_defaults ~expected_config_revision ctx p old =
-    update_keeper_using
-      ~apply_profile
-      ~after_preflight:(fun () -> observe Preflight_completed)
-      ~persist_with_publication:
-        (Keeper_turn_up_config_persistence.For_testing.persist_with_publication_observed
-           ~observe:(fun stage -> observe (Publication stage)))
-      ?preserve_prompt_defaults ~expected_config_revision ctx p old
+  let update_keeper_with_apply_profile = update_keeper_with
 end

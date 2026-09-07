@@ -49,20 +49,11 @@ val swap_keepalive_lane_fenced :
   result
 
 module For_testing : sig
-  type update_stage =
-    | Preflight_completed
-    | Publication of
-        Keeper_turn_up_config_persistence.For_testing.publication_stage
-
   val composite_reconciliation_required_data :
     Keeper_turn_up_config_persistence.composite_reconciliation ->
     Yojson.Safe.t
 
-  (** The observer is call-scoped and must not yield or raise; nested write
-      stages may run on a system thread and require atomic state. Both paths
-      execute the same update and publication cores as [update_keeper]. *)
   val update_keeper_with_apply_profile :
-    ?observe:(update_stage -> unit) ->
     apply_profile:
       (base_path:string ->
        keeper_name:string ->

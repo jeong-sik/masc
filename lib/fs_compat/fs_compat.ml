@@ -317,21 +317,6 @@ let save_file_atomic_strict path content =
 ;;
 
 module Atomic_replace_for_testing = struct
-  type stage = Atomic_write.Atomic_replace_for_testing.stage =
-    | Job_submitted
-    | Job_started
-    | Temporary_created
-    | Payload_written
-    | Payload_synced
-    | Target_renamed
-    | Parent_synced
-    | Job_returned
-
-  let save_file_atomic_observed ~observe path content =
-    Atomic_write.Atomic_replace_for_testing.save_file_atomic_observed
-      ~observe ~save_file:save_file_blocking path content
-  ;;
-
   let save_file_atomic_strict_staged ?sync_file ~sync_parent path content =
     Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ?sync_file

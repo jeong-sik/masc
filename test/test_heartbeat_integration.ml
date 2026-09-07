@@ -2460,17 +2460,14 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         | Ok owner -> owner
         | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
       in
-      let monotonic_seconds () =
-        Mtime_clock.elapsed () |> Mtime.Span.to_float_ns |> fun ns -> ns /. 1e9
-      in
-      let started_at = monotonic_seconds () in
-      let update_trace = Atomic.make [ `Waiting_to_start, 0.0 ] in
-      let rec record_update_stage stage =
-        let previous = Atomic.get update_trace in
-        let next = (stage, monotonic_seconds () -. started_at) :: previous in
-        if not (Atomic.compare_and_set update_trace previous next)
-        then record_update_stage stage
-      in
+      let fence_reached, resolve_fence_reached = Eio.Promise.create () in
+      Masc.Keeper_owner.For_testing.observe_state_changes ~sw:root_sw (fun () ->
+        match Masc.Keeper_owner.shutdown_operation_id owner with
+        | None -> ()
+        | Some operation_id ->
+          (* Further state notifications cannot replace the first exact fence. *)
+          (match Eio.Promise.try_resolve resolve_fence_reached operation_id with
+           | true | false -> ()));
       let update_switch, resolve_update_switch = Eio.Promise.create () in
       let update_done, resolve_update_done = Eio.Promise.create () in
       Eio.Fiber.fork ~sw:root_sw (fun () ->
@@ -2478,108 +2475,36 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
-            record_update_stage `Observing_revision;
-            let expected_config_revision = config_revision_exn config name in
-            record_update_stage `Before_profile_publication;
             let result =
-              Turn_up_update.For_testing.update_keeper_with_apply_profile
-                ~observe:(fun stage -> record_update_stage (`Publication_stage stage))
-                ~apply_profile:(fun ~base_path ~keeper_name command ->
-                  record_update_stage `Applying_owner_profile;
-                  let result =
-                    Keeper_owner_registry.apply_meta ~base_path ~keeper_name command
-                  in
-                  record_update_stage `After_owner_profile;
-                  result)
-                ~expected_config_revision
+              Turn_up_update.update_keeper
+                ~expected_config_revision:(config_revision_exn config name)
                 ctx
                 parsed
                 meta
             in
-            record_update_stage `Returned;
             `Returned result
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
         in
         Eio.Promise.resolve resolve_update_done disposition);
       let update_sw = Eio.Promise.await update_switch in
-      (match Eio.Time.with_timeout clock 1.0 (fun () ->
-        let rec await_lane_swap_fence () =
-          match
-            owner_shutdown_operation_id_exn
-              ~base_path:config.base_path
-              ~keeper_name:name
-          with
-          | Some _ -> ()
-          | None ->
-            (match Eio.Promise.peek update_done with
-             | Some (`Returned result) ->
-               failf "update returned before its lane swap fence: %s"
-                 (Tool_result.message result)
-             | Some `Cancelled -> fail "update was cancelled before the test cancelled it"
-             | None -> Eio.Fiber.yield ());
-            await_lane_swap_fence ()
-        in
-        await_lane_swap_fence ();
-        Ok ()) with
-       | Ok () -> ()
-       | Error `Timeout ->
-         let stage_to_string = function
-           | `Waiting_to_start -> "waiting_to_start"
-           | `Observing_revision -> "observing_revision"
-           | `Before_profile_publication -> "before_profile_publication"
-           | `Publication_stage Turn_up_update.For_testing.Preflight_completed ->
-             "preflight_completed"
-           | `Publication_stage (Turn_up_update.For_testing.Publication stage) ->
-             (match stage with
-              | Turn_up_config_persistence.For_testing.Manifest_lock_acquired ->
-                "manifest_lock_acquired"
-              | Runtime_lock_acquired -> "runtime_lock_acquired"
-              | Snapshot_read -> "snapshot_read"
-              | Existing_manifest_edit stage ->
-                (match stage with
-                 | Keeper_toml_loader.For_testing.Reread_started -> "toml_reread_started"
-                 | Reread_completed -> "toml_reread_completed"
-                 | Render_completed -> "toml_render_completed"
-                 | Atomic_write stage ->
-                   (match stage with
-                    | Fs_compat.Atomic_replace_for_testing.Job_submitted -> "write_job_submitted"
-                    | Job_started -> "write_job_started"
-                    | Temporary_created -> "write_temporary_created"
-                    | Payload_written -> "write_payload_written"
-                    | Payload_synced -> "write_payload_synced"
-                    | Target_renamed -> "write_target_renamed"
-                    | Parent_synced -> "write_parent_synced"
-                    | Job_returned -> "write_job_returned"))
-              | Manifest_write_completed -> "manifest_write_completed"
-              | Publish_entered -> "publish_entered")
-           | `Applying_owner_profile -> "applying_owner_profile"
-           | `After_owner_profile -> "after_owner_profile"
-           | `Returned -> "returned"
-         in
-         let trace = Atomic.get update_trace in
-         let stage =
-           match trace with
-           | (stage, _) :: _ -> stage_to_string stage
-           | [] -> fail "update stage trace lost its initial observation"
-         in
-         let history =
-           List.rev_map
-             (fun (stage, elapsed) ->
-               Printf.sprintf "%s@%.6fs" (stage_to_string stage) elapsed)
-             trace
-           |> String.concat " -> "
-         in
-         let projection = Masc.Keeper_owner.projection owner in
-         failf
-           "lane swap fence timed out: stage=%s elapsed=%.6fs trace=[%s] owner_mailbox=%d meta_committed=%b in_flight=%b shutdown_reserved=%b"
-           stage (monotonic_seconds () -. started_at) history
-           (Masc.Keeper_owner.For_testing.mailbox_depth owner)
-           (match projection.meta with
-            | Some current -> String.equal current.instructions "durable cancelled update"
-            | None -> false)
-           (Option.is_some (Masc.Keeper_owner.turn_in_flight owner))
-           (Option.is_some (Masc.Keeper_owner.shutdown_operation_id owner)));
+      (* Await the actual Owner publication. The CI trace with the runnable yield loop
+         showed successive system-thread completions in roughly 50ms steps; the unchanged one-second test boundary then expired
+         before the writer finished. Promise waiting lets I/O drive progress. *)
+      let observed_fence = Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Promise.await fence_reached)
+          (fun () -> match Eio.Promise.await update_done with
+            | `Returned result ->
+              failf "update returned before its lane swap fence: %s"
+                (Tool_result.message result)
+            | `Cancelled -> fail "update was cancelled before the test cancelled it"))
+      in
+      check bool "the exact published fence is still held before cancellation" true
+        (match Masc.Keeper_owner.shutdown_operation_id owner with
+         | Some current ->
+           Masc.Keeper_shutdown_types.Operation_id.equal current observed_fence
+         | None -> false);
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
       Eio.Promise.resolve resolve_release_librarian ();
       (match Eio.Promise.await update_done with

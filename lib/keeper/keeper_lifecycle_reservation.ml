@@ -84,9 +84,13 @@ let with_key_lock ~base_path ~keeper_name f =
   (* A use before [f] is not sufficient: [f] can suspend through a major GC.
      Retain the ephemeron key until the mutex has actually been released. *)
   match Cross_context_mutex.with_lock entry.mutex f with
-  | value -> ignore (Sys.opaque_identity entry.key); value
+  | value ->
+    (* See the ephemeron ownership above: keep the key live until mutex release. *)
+    ignore (Sys.opaque_identity entry.key);
+    value
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
+    (* See the normal-return barrier: exceptions must retain the same key through unlock. *)
     ignore (Sys.opaque_identity entry.key);
     Printexc.raise_with_backtrace exn backtrace
 ;;

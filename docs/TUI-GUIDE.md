@@ -9,8 +9,8 @@ server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
 Board, Planning, Fusion, Workspace, Config.
-Eleven more surfaces hang off parents instead of holding Tab stops:
-Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
+Additional surfaces hang off parents instead of holding Tab stops:
+Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
@@ -1002,9 +1002,8 @@ boundary.
 
 The scheduled-automation list: every wake the runtime has queued, active rows
 first by due time. This is the surface that answers "why is this keeper about
-to wake up". It is the fourth stop of Planning's `v` walk rather than a Tab
-stop; `v` moves on to Fusion, `Esc` returns to Planning, and the palette
-keeps `go Schedules`.
+to wake up". Open it through the `go Schedules` palette entry. The selected
+Keeper also exposes its automation in the Automation detail tab.
 
 ```
  MASC Schedules  [me]  10:44:57  [connected]
@@ -1056,8 +1055,7 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 ### Fusion
 
 The retained Fusion run registry is the list. Fusion is a top-level Tab stop
-and is also reachable through Planning's `v` walk or the `go Fusion` palette
-entry. After following a link, `Esc` returns directly to its origin. Otherwise
+and is also reachable through the `go Fusion` palette entry. After following a link, `Esc` returns directly to its origin. Otherwise
 it closes detail to the run list, then returns to Overview. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a

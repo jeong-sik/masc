@@ -495,7 +495,15 @@ let run_candidates_outcome
           ; detail = Runtime.request_body_cap_error_to_string error
           }
       | Ok cap_bytes ->
-        (match fit_request_to_cap ~req ~cache ~cap_bytes with
+        (* #34163 made the caller byte cap optional: [None] is no cap, so the
+           image needs no fitting and is sent as-is; [Some cap] fits it. This
+           mirrors validate_request_body_cap returning [Ok None] / [Ok (Some _)]. *)
+        let fitted_to_cap =
+          match cap_bytes with
+          | None -> Ok req
+          | Some cap_bytes -> fit_request_to_cap ~req ~cache ~cap_bytes
+        in
+        (match fitted_to_cap with
          | Error (actual_bytes, limit_bytes) ->
            record_vision_candidate_attempt
              ~runtime_id

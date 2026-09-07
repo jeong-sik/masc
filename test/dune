@@ -3769,6 +3769,46 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-code-memo)))
 
+; RFC-0429 §4 asks a chat PTY scenario to show the mermaid drawing reaching
+; the screen. test_tui_mermaid pins what the renderer produces; this pins that
+; the fence is routed to it at all, which a golden cannot see.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-mermaid-chat)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   mermaid-chat)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-mermaid-chat)))
+
+; RFC-0429 §1.3/§4: the WHAT column projects a recorded newline to one cell.
+; Its own lane because the default keyboard regression stops before the
+; Changes surface, so an assertion added there would never run.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-changes-newline)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   changes-newline)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-changes-newline)))
+
 (rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
@@ -4803,6 +4843,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_execute_shim_evidence)
+ (modules test_keeper_execute_shim_evidence)
+ (libraries masc_test_deps exec_ssh_protocol eio_main))
+
+(test
  (name test_keeper_github_login_lane)
  (modules test_keeper_github_login_lane)
  (libraries masc_test_deps exec_ssh_protocol eio_main))
@@ -4912,6 +4957,24 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_screenshot)))
+
+
+; The same scenario used by the local interpreter probe, linked against real
+; MASC interfaces for the CI-owned native Firefox run.
+(rule
+ (targets firefox_controls_probe.ml)
+ (deps ../scripts/fixtures/firefox_controls_probe.ml)
+ (action
+  (with-stdout-to %{targets}
+   (progn
+    (echo "module Driver = Masc.Browser_webdriver\nmodule Browser_action = Browser_lane.Action\n")
+    (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))
+
+(executable
+ (name firefox_controls_probe)
+ (modules firefox_controls_probe)
+ (libraries masc masc.browser_lane eio eio_main yojson unix))
+
 
 
 

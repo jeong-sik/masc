@@ -1419,8 +1419,11 @@ let test_timeout_envelope_recognizer ~clock () =
     `String "never_reached"
   in
   let timed_out () =
-    Dashboard_cache.get_or_compute_with_timeout "envelope_paths" ~ttl:1.0
-      ~clock ~timeout_sec:0.05 slow
+    let payload = Dashboard_cache.get_or_compute_payload_with_timeout
+      "envelope_paths" ~ttl:1.0 ~clock ~timeout_sec:0.05 slow in
+    Alcotest.(check bool) "timeout and circuit envelopes carry timeout provenance" true
+      (payload.origin = Dashboard_cache.Timeout);
+    payload.json
   in
   let owner = timed_out () in
   Alcotest.(check string) "owner kind" "owner" (timeout_kind owner);
@@ -1435,11 +1438,13 @@ let test_timeout_envelope_recognizer ~clock () =
     (Dashboard_cache.is_timeout_envelope circuit);
   Dashboard_cache.invalidate_all ();
   let computed =
-    Dashboard_cache.get_or_compute "envelope_control" ~ttl:1.0 (fun () ->
+    Dashboard_cache.get_or_compute_payload "envelope_control" ~ttl:1.0 (fun () ->
       `Assoc [ ("error", `String "not_a_timeout"); ("rows", `List []) ])
   in
+  Alcotest.(check bool) "computed error fields do not change producer provenance" true
+    (computed.origin = Dashboard_cache.Computed);
   Alcotest.(check bool) "computed payload is not an envelope" false
-    (Dashboard_cache.is_timeout_envelope computed)
+    (Dashboard_cache.is_timeout_envelope computed.json)
 
 (* -- Harness ---------------------------------------------------------------- *)
 

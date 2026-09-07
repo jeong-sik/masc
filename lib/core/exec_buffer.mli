@@ -45,6 +45,11 @@ val render : t -> string
     When truncation occurs, both head and tail are trimmed to UTF-8
     character boundaries so CJK and emoji output is never split mid-byte. *)
 
+val max_render_bytes : head_cap:int -> tail_cap:int -> int
+(** Upper bound for [render], including the largest truncation marker on this
+    platform. Caps must be nonnegative and their sum must leave room for the
+    marker within [max_int]. Useful when a second transport bounds a capture. *)
+
 val utf8_truncate : string -> int -> string
 (** [utf8_truncate s max_bytes] returns the prefix of [s] that fits
     within [max_bytes], breaking only at UTF-8 character boundaries.

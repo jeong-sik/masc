@@ -74,11 +74,13 @@ open Alcotest
 (* Firefox controls: the production TOML loader measured BrowserAct at 1,628
    bytes, BrowserRead mode growth at 202, and BrowserGoto shrinkage at 18.
    Preserve the MSX tool surface ceiling's headroom: 88,000 + 1,628 + 202 - 18. *)
+(* Contexts/dialogs/uploads add 862 measured schema bytes (BrowserRead +299,
+   BrowserAct +563 including the Keeper file boundary), preserving the preceding ceiling headroom. *)
 (* Main adds BrowserInteract: production TOML rendering is 1,394 bytes,
    or 1,388 with its public name, plus one list separator. BrowserGoto
    guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
 (* Explicit native client selection adds 1004 measured browser schema bytes. *)
-let ceiling_bytes = 92_238
+let ceiling_bytes = 93_100
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

@@ -20017,7 +20017,14 @@ and is loaded on demand through keeper_skill.
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _) -> frame.Frame_presenter.surface_key)
-               (fun () -> render state)
+               (fun () ->
+                 (* Event folding is frame preparation, so its cost belongs
+                    inside Build timing even though only the loop stores it. *)
+                 let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+                 (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
+                  | None -> ()
+                  | Some projection -> state.acting_chunk_projection <- Some projection);
+                 render state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied

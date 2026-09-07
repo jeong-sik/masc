@@ -1,7 +1,8 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
-type session = { id : string; mutable handles : (string * int) list }
+type session = { id : string; mutable handles : (string * int) list; uploads : Browser_lane.Upload_lease.owner }
 type t = { request : request; binary : string option; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
+
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -10,6 +11,12 @@ let string_field key json = match field key json with
 let error_message = function
   | Transport message | Protocol message -> message
   | Remote { code; message } -> code ^ ": " ^ message
+let error_at_tab tab_id error =
+  let context message = Printf.sprintf "tabId=%d: %s" tab_id message in
+  match error with
+  | Transport message -> Transport (context message)
+  | Protocol message -> Protocol (context message)
+  | Remote {code;message} -> Remote {code;message=context message}
 let decode_response ~status body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error detail -> Error (Protocol detail)
@@ -19,14 +26,17 @@ let decode_response ~status body =
     | Some value when status >= 200 && status < 300 -> Ok value
     | Some value ->
       let* code = string_field "error" value in
-      let* message = string_field "message" value in
+      let* message = match field "message" value with
+        | Some (`String message) -> Ok message
+        | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code; message })
 let create ?binary ~request () = { request; binary; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None
+   | Error (Remote { code = "invalid session id"; _ }) ->
+     t.session <- None; Browser_lane.Upload_lease.release_owner session.uploads
    | Ok _ | Error _ -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
@@ -43,7 +53,8 @@ let close_unlocked ?request t = match t.session with
     let request = Option.value ~default:t.request request in
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
-    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; Ok ()
+    | Ok _ | Error (Remote { code = "invalid session id"; _ }) ->
+      t.session <- None; Browser_lane.Upload_lease.release_owner session.uploads; Ok ()
     | Error error -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
@@ -60,7 +71,7 @@ let select t session handle =
   call t session `POST "/window" (Some (`Assoc ["handle", `String handle]))
 let with_tab t session tab_id f =
   match tab_id with
-  | None -> f ()
+  | None -> let* _ = call t session `POST "/frame" (Some (`Assoc ["id",`Null])) in f ()
   | Some id ->
     match List.find_opt (fun (_, known) -> known = id) session.handles with
     | None -> Error (Protocol "unknown tab id; refresh the tab list")
@@ -83,6 +94,21 @@ let element_id t session selector =
   | `List [] -> Error (Protocol "selector matched no element; read elements again")
   | `List _ -> Error (Protocol "selector is ambiguous; select exactly one element")
   | _ -> Error (Protocol "malformed WebDriver elements response")
+let enter_frames t session selectors =
+  let rec enter = function
+    | [] -> Ok ()
+    | selector :: rest ->
+      let* id = element_id t session selector in
+      let* _ = call t session `POST "/frame" (Some (`Assoc ["id",
+        `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id]])) in
+      enter rest in
+  enter selectors
+let dialog_text t session =
+  match call t session `GET "/alert/text" None with
+  | Ok (`String text) -> Ok (`Assoc ["open",`Bool true;"text",`String text])
+  | Error (Remote {code="no such alert";_}) -> Ok (`Assoc ["open",`Bool false])
+  | Ok _ -> Error (Protocol "invalid dialog text response")
+  | Error error -> Error error
 let element_call perform_effect id suffix body =
   perform_effect `POST ("/element/" ^ Uri.pct_encode id ^ suffix) (Some body)
 let interact t session ~perform_effect = function
@@ -108,6 +134,23 @@ let interact t session ~perform_effect = function
   | Browser_lane.Action.Scroll {x;y} ->
     perform_effect `POST "/execute/sync" (Some (`Assoc ["script", `String "window.scrollBy({left:arguments[0],top:arguments[1],behavior:'instant'}); return {x:window.scrollX,y:window.scrollY};"
       ; "args", `List [`Int x;`Int y]]))
+  | Browser_lane.Action.Upload {selector;paths} ->
+    let* id = element_id t session selector in
+    let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
+    let* is_file = script t session "return arguments[0].localName==='input' && arguments[0].type==='file';" [element] in
+    let* () = if is_file = `Bool true then Ok () else Error (Protocol "upload requires a file input") in
+    Browser_lane.Upload_lease.claim ~owner:session.uploads ~paths;
+    let* _ = element_call perform_effect id "/clear" (`Assoc []) in
+    element_call perform_effect id "/value" (`Assoc ["text",`String (String.concat "\n" paths)])
+  | Browser_lane.Action.Accept_dialog text ->
+    let* _ = call t session `GET "/alert/text" None in
+    let* _ = match text with
+      | None -> Ok `Null
+      | Some text -> perform_effect `POST "/alert/text" (Some (`Assoc ["text",`String text])) in
+    perform_effect `POST "/alert/accept" (Some (`Assoc []))
+  | Browser_lane.Action.Dismiss_dialog ->
+    let* _ = call t session `GET "/alert/text" None in
+    perform_effect `POST "/alert/dismiss" (Some (`Assoc []))
   | Browser_lane.Action.Back -> perform_effect `POST "/back" (Some (`Assoc []))
   | Browser_lane.Action.Forward -> perform_effect `POST "/forward" (Some (`Assoc []))
   | Browser_lane.Action.Reload -> perform_effect `POST "/refresh" (Some (`Assoc []))
@@ -122,21 +165,38 @@ let execute_action t action =
   | Browser_lane.Action.Open_tab url ->
     let* () = absolute_http_url url in
     let* session = session t in
+    let* _ = match call t session `GET "/window" None with
+      | Error (Remote {code="no such window";_}) ->
+        let* handles = call t session `GET "/window/handles" None in
+        (match handles with
+         | `List (`String handle :: _) -> select t session handle
+         | _ -> Error (Protocol "no surviving browser window; reopen the session"))
+      | result -> result in
     let* created = perform_effect session `POST "/window/new" (Some (`Assoc ["type",`String "tab"])) in
     let* handle = string_field "handle" created in
     let id = tab_id t session handle in
-    let* _ = select t session handle in
-    let* _ = call t session `POST "/url" (Some (`Assoc ["url",`String url])) in
-    let* summary = page_summary t session in
-    Ok (`Assoc ["tabId",`Int id;"page",summary])
-  | Browser_lane.Action.On_tab {tab_id=id;interaction} ->
+    let navigate () =
+      let* _ = select t session handle in
+      let* _ = call t session `POST "/url" (Some (`Assoc ["url",`String url])) in
+      page_summary t session in
+    (match navigate () with
+     | Ok summary -> Ok (`Assoc ["tabId",`Int id;"page",summary])
+     | Error (Remote {code="unexpected alert open";_}) ->
+       (* The tab was created, and its document is waiting on a user prompt.
+          Retain the identity without claiming that navigation completed. *)
+       Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
+     | Error error -> Error (error_at_tab id error))
+  | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
+      let* () = enter_frames t session frame_path in
       let* result = interact t session ~perform_effect:(perform_effect session) interaction in
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
-        (match result with `List [] -> t.session <- None | _ -> ());
+        (match result with `List [] ->
+          t.session <- None; Browser_lane.Upload_lease.release_owner session.uploads
+         | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | _ ->
         (* Do not issue another fallible browser request after an effect.
@@ -151,11 +211,13 @@ let execute_unlocked t = function
        let args = if Option.value ~default:true headless then [`String "-headless"] else [] in
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
          ["browserName", `String "firefox";
+          "unhandledPromptBehavior", `String "ignore";
           "moz:firefoxOptions", `Assoc (("args", `List args) ::
             (Option.map (fun path -> "binary", `String path) t.binary |> Option.to_list))]]] in
+
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
-       t.session <- Some { id; handles = [] };
+       t.session <- Some { id; handles = []; uploads = Browser_lane.Upload_lease.create_owner () };
        Ok (`Assoc ["opened", `Bool true; "reused", `Bool false; "backend", `String "firefox-webdriver"]))
   | Browser_lane.Session_close ->
     let* () = close_unlocked t in Ok (`Assoc ["closed", `Bool true])
@@ -175,6 +237,21 @@ let execute_unlocked t = function
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int (tab_id t session handle)) :: fields))
       | _ -> Error (Protocol "malformed elements observation"))
+  | Browser_lane.Page_context {tab_id=id;frame_path;mode} ->
+    let* session = session t in
+    with_tab t session (Some id) (fun () ->
+      let* () = enter_frames t session frame_path in
+      let* data = match mode with
+        | `Dialog -> dialog_text t session
+        | `Elements -> script t session Browser_page_script.elements []
+        | `Frames -> script t session Browser_page_script.frames []
+        | `Text cap ->
+          if cap < 1 || cap > 100_000 then Error (Protocol "maxChars must be between 1 and 100000")
+          else script t session
+            "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};" [`Int cap] in
+      match data with
+      | `Assoc fields -> Ok (`Assoc (["tabId",`Int id;"framePath",`List (List.map (fun s -> `String s) frame_path)] @ fields))
+      | _ -> Error (Protocol "invalid contextual observation"))
   | Browser_lane.Page_read { tab_id; max_chars } ->
     let* session = session t in
     with_tab t session tab_id (fun () ->
@@ -222,8 +299,9 @@ let execute_unlocked t = function
       let rec read acc = function
         | [] -> Ok (`List (List.rev acc))
         | `String handle :: rest ->
-          let* _ = select t session handle in
-          let* summary = page_summary t session in
+          let id = tab_id t session handle in
+          let* _ = select t session handle |> Result.map_error (error_at_tab id) in
+          let* summary = page_summary t session |> Result.map_error (error_at_tab id) in
           (match summary with
            | `Assoc fields ->
              let tab = `Assoc (("id", `Int (tab_id t session handle)) ::

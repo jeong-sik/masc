@@ -151,7 +151,7 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
       try
         let res = f () in
         Eio.Promise.resolve_ok r res
-      with exn ->  (* cancel-guard-ok: not a swallow — the exception, Cancelled included, is re-delivered to the awaiting domain via the promise *)
+      with exn ->  (* not a swallow: the exception, Cancelled included, is re-delivered to the awaiting domain via the promise below *)
         let bt = Printexc.get_raw_backtrace () in
         Eio.Promise.resolve_error r (exn, bt)
     in

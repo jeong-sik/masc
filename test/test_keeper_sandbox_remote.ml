@@ -85,15 +85,42 @@ let stub_main () =
   let frame = header ^ read_exact Unix.stdin body_len in
   save frame_path frame;
   (* The trailer answers in the request's own major, as the shim does. *)
-  let v =
+  let request =
     match Exec_ssh_protocol.decode_request frame with
-    | Ok (request, _) -> request.v
+    | Ok (request, _) -> request
     | Error error -> failwith ("container stub could not read the frame: " ^ error)
   in
+  let v = request.Exec_ssh_protocol.v in
   let trailer ?exit ?signal ?(timed_out = false) ?shim_error () =
     Exec_ssh_protocol.render_trailer { v; exit; signal; timed_out; shim_error }
   in
   match mode with
+  | "timeout-receipt" ->
+    let execution_receipt : Exec_ssh_protocol.execution_receipt =
+      { mode = request.mode; boundary = Sandbox_applied } in
+    write_all Unix.stderr
+      (Exec_ssh_protocol.render_trailer ~execution_receipt
+         { v; exit = None; signal = Some 15; timed_out = true; shim_error = None });
+    exit 0
+  | "receipt" ->
+    let code = match request.mode with
+      | Exec_ssh_protocol.Observe -> 0
+      | Effect -> 7
+      | Guest_local -> 3 in
+    let execution_receipt : Exec_ssh_protocol.execution_receipt =
+      { mode = request.mode; boundary = Sandbox_applied } in
+    write_all Unix.stderr
+      (Exec_ssh_protocol.render_trailer ~execution_receipt
+         { v; exit = Some code; signal = None; timed_out = false; shim_error = None });
+    exit 0
+  | "bad-receipt" ->
+    write_all Unix.stderr
+      ("\x1e" ^ Yojson.Safe.to_string
+         (`Assoc ["masc_exec_result", `Assoc
+           ["v", `Int (Exec_ssh_protocol.int_of_major v); "exit", `Int 3;
+            "signal", `Null; "timed_out", `Bool false; "shim_error", `Null;
+            "execution_receipt", `Null]]) ^ "\x1e");
+    exit 0
   | "exit3" | "probe-observe" | "probe-plain" | "probe-v2" ->
     write_all Unix.stdout "guest-out";
     write_all Unix.stderr ("guest-err" ^ trailer ~exit:3 ());
@@ -516,13 +543,90 @@ let test_preflight_unreachable_names_the_guest () =
     check bool "the guest is named" true (contains guest_name error)
 ;;
 
+let test_receipts_are_owned_by_each_transport_call () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"receipt" in
+  let state = make_state ~base_path ~cli in
+  let observe_receipts = ref [] and effect_receipts = ref [] in
+  let observe = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe
+      ~on_receipt:(fun receipt -> observe_receipts := receipt :: !observe_receipts)
+      ~timeout_sec:2.0 state in
+  let effect_runner = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Effect
+      ~on_receipt:(fun receipt -> effect_receipts := receipt :: !effect_receipts)
+      ~timeout_sec:2.0 state in
+  let observe_result, effect_result = Eio.Fiber.pair
+      (fun () -> run_request observe ()) (fun () -> run_request effect_runner ()) in
+  let check_receipt mode code = function
+    | [Keeper_sandbox_remote.Execution_observed (receipt, outcome)] ->
+      check bool "exact responding shim mode" true (receipt.mode = mode);
+      check bool "actual applied acknowledgement" true
+        (receipt.boundary = Exec_ssh_protocol.Sandbox_applied);
+      check (option int) "same response process exit" (Some code) outcome.exit
+    | _ -> fail "per-call receipt was missing or crossed concurrent calls"
+  in
+  check_receipt Exec_ssh_protocol.Observe 0 !observe_receipts;
+  check_receipt Exec_ssh_protocol.Effect 7 !effect_receipts;
+  let observe_status, _, _ = observe_result and effect_status, _, _ = effect_result in
+  check status_testable "Observe status remains real" (Unix.WEXITED 0) observe_status;
+  check status_testable "Effect status remains real" (Unix.WEXITED 7) effect_status;
+  ignore (run_request effect_runner ());
+  check int "multiple stages preserve every receipt" 2 (List.length !effect_receipts)
+;;
+
+let test_trusted_remote_timeout_retains_receipt () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"timeout-receipt" in
+  let observed = ref None in
+  let runner = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe
+      ~on_receipt:(fun receipt -> observed := Some receipt)
+      ~timeout_sec:2.0 (make_state ~base_path ~cli) in
+  (match runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+           ~argv:["/bin/true"] ~env:[||] ~cwd:None with
+   | Masc_exec.Sandbox_target.Transport_failed _ -> ()
+   | Ran _ -> fail "remote timeout became a successful transport result");
+  match !observed with
+  | Some (Keeper_sandbox_remote.Execution_observed (receipt, outcome)) ->
+    check bool "actual timeout outcome retained" true outcome.timed_out;
+    check (option int) "remote signal retained" (Some 15) outcome.signal;
+    check bool "same response's child acknowledgement retained" true
+      (receipt.mode = Exec_ssh_protocol.Observe
+       && receipt.boundary = Exec_ssh_protocol.Sandbox_applied)
+  | _ -> fail "validated remote timeout was mislabeled as missing transport evidence"
+;;
+
+let test_missing_and_invalid_receipts_keep_actual_status () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  List.iter (fun fixture ->
+    let cli, _ = make_stub ~dir:base_path ~mode:fixture in
+    let observed = ref None in
+    let runner = Keeper_sandbox_remote.runner
+        ~on_receipt:(fun receipt -> observed := Some receipt)
+        ~timeout_sec:2.0 (make_state ~base_path ~cli) in
+    let status, _, _ = run_request runner () in
+    check status_testable "receipt loss never rewrites payload exit" (Unix.WEXITED 3) status;
+    match fixture, !observed with
+    | "exit3", Some (Keeper_sandbox_remote.Execution_unavailable Peer_receipt_missing)
+    | "bad-receipt", Some (Keeper_sandbox_remote.Execution_unavailable (Invalid_receipt _)) -> ()
+    | _ -> fail "missing or malformed receipt became caller-inferred execution")
+    ["exit3"; "bad-receipt"]
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--container-stub"
   then stub_main ()
   else
     run "keeper_sandbox_remote"
       [ ( "container_exec"
-        , [ test_case "transport + probe argv" `Quick test_transport_and_probe_argv
+        , [ test_case "concurrent calls retain their own shim receipts" `Quick
+              test_receipts_are_owned_by_each_transport_call
+          ; test_case "missing and invalid receipts retain actual status" `Quick
+              test_missing_and_invalid_receipts_keep_actual_status
+          ; test_case "remote timeout retains its trusted receipt" `Quick
+              test_trusted_remote_timeout_retains_receipt
+          ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
           ; test_case "probe prefers probe_prefix when present" `Quick
               test_container_exec_probe_argv_prefers_probe_prefix
           ; test_case "openssh probe stays one word" `Quick

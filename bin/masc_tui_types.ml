@@ -3118,6 +3118,8 @@ type state = {
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* One event-derived projection; live presentation inputs are never cached. *)
+  mutable acting_chunk_projection: Masc_tui_acting.chunk_projection option;
   (* The selected keeper's recorded file changes, keyed by keeper name, for
      the pane's Changes tab. Refetched when the feed shows that keeper
      complete a tool call and on the operator cadence. *)
@@ -4708,6 +4710,7 @@ let create_state
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;

@@ -1384,6 +1384,34 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
             ; malformed = snapshot.fcs_malformed
             })
 
+let acting_pane_columns (state : state) ~terminal_cols =
+  let modal =
+    state.palette_open || state.context_inspector_open || state.help_open
+    || state.agenda_open || state.answering_open
+  in
+  if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
+  then 0
+  else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
+  then Masc_tui_acting_pane.pane_cols
+  else 0
+
+let recent_chunk_projection (state : state) =
+  let traces =
+    List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id) state.keepers
+  in
+  Masc_tui_acting.refresh_projection
+    ~previous:state.acting_chunk_projection ~traces state.acting
+
+(* Pure preparation shared with the loop. Terminal dimensions are the raw
+   cached measurement, before the surface strip and composer reserve rows. *)
+let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
+  let rows = surface_body_rows state ~terminal_rows:(max 1 (terminal_rows - 1)) in
+  if acting_pane_columns state ~terminal_cols = 0
+     || Render_schedule.Viewport.requires_compact_frame ~rows
+     || state.acting_pane_tab = Masc_tui_acting_pane.Tab_changes
+  then None
+  else Some (recent_chunk_projection state)
+
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
   let keepers =
@@ -1407,7 +1435,6 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
         ; mark_tone
         ; health = reading_of_health
-        ; trace_id = keeper.k_trace_id
         })
       state.keepers
   in
@@ -1417,6 +1444,15 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_opening -> Pane.Feed_opening
     | Observer_live { events; _ } -> Pane.Feed_live events
     | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+  in
+  (* This input is built only when the pane is visible. Changes does not
+     consume event chunks, so retain the previous projection without folding. *)
+  let chunks = match state.acting_pane_tab with
+    | Pane.Tab_changes -> []
+    | Pane.Tab_fleet ->
+      (* The loop normally prepared this projection. Direct render callers
+         still get current chunks on a miss, without changing their state. *)
+      Masc_tui_acting.projection_chunks (recent_chunk_projection state)
   in
   { Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
@@ -1441,7 +1477,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
               ; approval_tool = item.ap_delegated_tool
               })
         (Masc_tui_types.approval_items state)
-  ; entries = state.acting
+  ; chunks
   ; changes = acting_pane_changes state
   }
 
@@ -18963,16 +18999,7 @@ let render (state : state) =
      screen, so neither reserves the columns. *)
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-     let modal =
-       state.palette_open || state.context_inspector_open || state.help_open
-       || state.agenda_open || state.answering_open
-     in
-     if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state) then 0
-     else if
-       Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden
-         ~cols:terminal_cols
-     then Masc_tui_acting_pane.pane_cols
-     else 0);
+     acting_pane_columns state ~terminal_cols);
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)

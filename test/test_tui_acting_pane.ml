@@ -83,6 +83,7 @@ let fixture : Pane.input =
               ; kt_disposition = Some "completed"
               ; kt_at = 905.
       ; kt_tool_use_id = None
+      ; kt_schedule = None
       ; kt_tool_args = None
       ; kt_tool_result = None
       ; kt_tool_args_preview = None

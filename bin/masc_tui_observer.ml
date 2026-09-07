@@ -92,6 +92,7 @@ type keeper_tool_call = {
   kt_disposition : string option;
   kt_at : float;
   kt_tool_use_id : string option;
+  kt_schedule : (Agent_core.Tool_contract.schedule, string) result option;
   kt_tool_args : Yojson.Safe.t option;
   kt_tool_result : Yojson.Safe.t option;
   kt_tool_args_preview : string option;
@@ -263,6 +264,19 @@ let decode_keeper_turn_complete fields =
        ; tc_at
        })
 
+let keeper_schedule fields =
+  let fields =
+    List.filter
+      (fun (key, _) ->
+        match key with
+        | "planned_index" | "batch_index" | "batch_size" | "execution_mode" -> true
+        | _ -> false)
+      fields
+  in
+  match fields with
+  | [] -> None
+  | _ -> Some (Agent_core.Execution_tool_schedule.of_yojson (`Assoc fields))
+
 let decode_keeper_tool_call fields =
   let event = "keeper_tool_call" in
   let* kt_keeper = required string_field fields "name" ~event in
@@ -282,6 +296,7 @@ let decode_keeper_tool_call fields =
        ; kt_disposition = string_field fields "disposition"
        ; kt_at
        ; kt_tool_use_id
+       ; kt_schedule = keeper_schedule fields
        ; kt_tool_args
        ; kt_tool_result
        ; kt_tool_args_preview

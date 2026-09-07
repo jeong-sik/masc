@@ -395,7 +395,7 @@
  ; masc for the wire's own routing table: which event types are whole-projection
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
- (libraries masc masc_tui_keeper_chat_projection yojson))
+ (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_command)

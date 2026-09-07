@@ -248,12 +248,12 @@ let pid_exists pid =
 let sleep_poll seconds = if seconds > 0.0 then ignore (Unix.select [] [] [] seconds)
 
 let wait_for_pid_exit ?(poll_interval_sec = 0.1) ~timeout_sec pid =
-  let deadline = Unix.gettimeofday () +. max 0.0 timeout_sec in
+  let deadline = Monotonic_deadline.after ~seconds:(max 0.0 timeout_sec) in
   let rec loop () =
     if not (pid_exists pid)
     then true
     else (
-      let remaining = deadline -. Unix.gettimeofday () in
+      let remaining = Monotonic_deadline.remaining_seconds deadline in
       if remaining <= 0.0
       then false
       else (
@@ -312,14 +312,14 @@ let process_command pid =
 ;;
 
 let read_status_line fd ~timeout_sec =
-  let deadline = Unix.gettimeofday () +. max 0.0 timeout_sec in
+  let deadline = Monotonic_deadline.after ~seconds:(max 0.0 timeout_sec) in
   let scratch = Bytes.create 256 in
   let buf = Buffer.create 128 in
   let rec loop () =
     match status_line_from_buffer buf with
     | Some line -> Some line
     | None ->
-      let remaining = deadline -. Unix.gettimeofday () in
+      let remaining = Monotonic_deadline.remaining_seconds deadline in
       if remaining <= 0.0
       then None
       else (

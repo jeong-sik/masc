@@ -4695,3 +4695,8 @@
  (name test_tui_image_mosaic)
  (modules test_tui_image_mosaic)
  (libraries alcotest masc_tui_image_mosaic))
+
+(test
+ (name test_monotonic_deadline)
+ (modules test_monotonic_deadline)
+ (libraries alcotest masc.monotonic_deadline unix))

@@ -242,7 +242,7 @@ let test_source_avoids_mapfile_only_bash4_features () =
    still be there. What the check is for -- no bash-4-only builtins -- is the
    two above it. *)
 
-let test_script_runs_under_system_bash_without_watch () =
+let test_script_runs_under_system_bash () =
   with_temp_dir "pr-open-script" (fun dir ->
       init_repo_with_remote dir;
       let fake_gh_dir = make_fake_gh dir in
@@ -270,7 +270,6 @@ let test_script_runs_under_system_bash_without_watch () =
             "fix: macOS bash compatibility";
             "--body-file";
             body_file;
-            "--no-watch";
           ]
       in
       if code <> 0 then
@@ -283,7 +282,10 @@ let test_script_runs_under_system_bash_without_watch () =
       check bool "creates draft PR" true (String_util.contains_substring log "pr create");
       check bool "does not create legacy failing status" false
         (String_util.contains_substring log "api repos/example/test/statuses/abc123");
-      check bool "skips watched checks with --no-watch" false
+      (* #32227 took the watch out of the helper, and the flag that used to
+         switch it off with it. Not watching is what the script does now, so
+         this asks for it without asking for the flag. *)
+      check bool "does not watch checks" false
         (String_util.contains_substring log "pr checks");
       check bool "syncs commit lineage" true
         (String_util.contains_substring log "pr edit");
@@ -329,7 +331,6 @@ let test_script_restores_draft_when_create_returns_ready () =
             "fix: restore ready pr to draft";
             "--body-file";
             body_file;
-            "--no-watch";
           ]
       in
       if code <> 0 then
@@ -341,48 +342,6 @@ let test_script_restores_draft_when_create_returns_ready () =
         (String_util.contains_substring stderr "restoring draft state");
       check bool "prints PR url" true
         (String_util.contains_substring stdout "PR: https://github.com/example/test/pull/42"))
-
-let test_script_prints_final_status_after_watch () =
-  with_temp_dir "pr-open-script-watch-status" (fun dir ->
-      init_repo_with_remote dir;
-      let fake_gh_dir = make_fake_gh dir in
-      let gh_log = Filename.concat dir "gh.log" in
-      let gh_labels = Filename.concat dir "gh-labels.json" in
-      let body_file = Filename.concat dir "body.md" in
-      write_file body_file valid_pr_body;
-      let path =
-        Printf.sprintf "%s:%s" fake_gh_dir
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
-      in
-      let env =
-        [
-          ("PATH", path);
-          ("FAKE_GH_LOG", gh_log);
-          ("FAKE_GH_LABELS", gh_labels);
-          ("FAKE_GH_ALLOW_CHECKS", "1");
-        ]
-      in
-      let code, stdout, stderr =
-        run_pr_open ~cwd:dir ~env
-          [
-            "--repo";
-            "example/test";
-            "--title";
-            "fix: print final status";
-            "--body-file";
-            body_file;
-          ]
-      in
-      if code <> 0 then
-        failf "pr-open failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
-      check bool "runs watched checks" true
-        (String_util.contains_substring (read_file gh_log) "pr checks");
-      check bool "prints final status heading" true
-        (String_util.contains_substring stdout "PR status:");
-      check bool "prints final draft state" true
-        (String_util.contains_substring stdout "draft=true");
-      check bool "prints final merge state" true
-        (String_util.contains_substring stdout "mergeState=CLEAN"))
 
 let test_script_rejects_body_missing_required_sections () =
   with_temp_dir "pr-open-script-missing-sections" (fun dir ->
@@ -412,7 +371,6 @@ let test_script_rejects_body_missing_required_sections () =
             "fix: reject incomplete PR body";
             "--body-file";
             body_file;
-            "--no-watch";
           ]
       in
       check bool "command fails" true (code <> 0);
@@ -469,7 +427,6 @@ let test_script_rejects_body_missing_direct_evidence_schema () =
             "fix: reject direct evidence drift";
             "--body-file";
             body_file;
-            "--no-watch";
           ]
       in
       check bool "command fails" true (code <> 0);
@@ -512,7 +469,6 @@ let test_script_rejects_staged_changes_before_push () =
             "fix: reject staged changes";
             "--body-file";
             body_file;
-            "--no-watch";
           ]
       in
       check bool "command fails" true (code <> 0);
@@ -531,12 +487,10 @@ let () =
         [
           test_case "source avoids mapfile-only bash4 features" `Quick
             test_source_avoids_mapfile_only_bash4_features;
-          test_case "runs under system bash without watch" `Quick
-            test_script_runs_under_system_bash_without_watch;
+          test_case "runs under system bash" `Quick
+            test_script_runs_under_system_bash;
           test_case "restores draft when create returns ready" `Quick
             test_script_restores_draft_when_create_returns_ready;
-          test_case "prints final status after watch" `Quick
-            test_script_prints_final_status_after_watch;
           test_case "rejects body missing required sections" `Quick
             test_script_rejects_body_missing_required_sections;
           test_case "rejects body missing direct evidence schema" `Quick

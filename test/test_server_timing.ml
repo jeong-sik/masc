@@ -11,8 +11,16 @@ let test_single_phase_format () =
   let t = Server_timing.create () in
   Server_timing.record_ms t Server_timing.Cache_lookup 12.34;
   let header = Server_timing.to_header_value t in
-  (* Single decimal, RFC 8673 token grammar: ALPHA / DIGIT / "-" / "_" / "."  *)
-  Alcotest.(check string) "single entry rounded" "cache_lookup;dur=12.3" header
+  Alcotest.(check string) "microsecond precision" "cache_lookup;dur=12.340" header
+;;
+
+let test_sub_target_durations_remain_visible () =
+  let t = Server_timing.create () in
+  Server_timing.record_ms t Server_timing.Cache_lookup 0.004;
+  Server_timing.record_ms t Server_timing.Json_serialize 0.0996;
+  Alcotest.(check string) "sub-target phase and rounding boundary"
+    "cache_lookup;dur=0.004, json_serialize;dur=0.100"
+    (Server_timing.to_header_value t)
 ;;
 
 let test_multiple_phases_insertion_order () =
@@ -22,7 +30,7 @@ let test_multiple_phases_insertion_order () =
   Server_timing.record_ms t Server_timing.Json_serialize 2.5;
   let header = Server_timing.to_header_value t in
   Alcotest.(check string) "insertion order preserved"
-    "cache_lookup;dur=5.0, projection_status;dur=100.0, json_serialize;dur=2.5"
+    "cache_lookup;dur=5.000, projection_status;dur=100.000, json_serialize;dur=2.500"
     header
 ;;
 
@@ -32,7 +40,7 @@ let test_repeated_phase_accumulates () =
   Server_timing.record_ms t Server_timing.Projection_agents 7.5;
   let header = Server_timing.to_header_value t in
   Alcotest.(check string) "same phase accumulates"
-    "projection_agents;dur=17.5" header
+    "projection_agents;dur=17.500" header
 ;;
 
 let test_measure_records_elapsed () =
@@ -135,6 +143,7 @@ let () =
         [ Alcotest.test_case "empty header" `Quick test_empty_header ] );
       ( "format",
         [ Alcotest.test_case "single phase" `Quick test_single_phase_format;
+          Alcotest.test_case "sub-target durations visible" `Quick test_sub_target_durations_remain_visible;
           Alcotest.test_case "insertion order" `Quick test_multiple_phases_insertion_order;
           Alcotest.test_case "phase accumulates" `Quick test_repeated_phase_accumulates;
         ] );

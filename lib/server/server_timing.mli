@@ -52,7 +52,7 @@ val create : unit -> t
 
 val measure : t -> phase -> (unit -> 'a) -> 'a
 (** [measure t phase f] runs [f ()], accumulates the elapsed
-    wall-clock duration under [phase], and returns [f]'s result.  If
+    monotonic duration under [phase], and returns [f]'s result.  If
     [f] raises, the elapsed time is still recorded and the exception
     re-raised (so failure paths are still attributed). *)
 
@@ -63,7 +63,8 @@ val record_ms : t -> phase -> float -> unit
 
 val to_header_value : t -> string
 (** RFC 8673 [Server-Timing] field value, comma-separated.  Returns
-    [""] if no phases were recorded. *)
+    [""] if no phases were recorded. Durations are milliseconds with
+    three fractional digits. *)
 
 val extra_header : t -> (string * string) list
 (** [\[("Server-Timing", v)\]] when non-empty, otherwise [\[\]].

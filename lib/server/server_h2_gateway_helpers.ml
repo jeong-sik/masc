@@ -66,7 +66,12 @@ let h2_respond_bytes
   h2_respond_body ~status ~extra_headers ~compress ~content_type h2_reqd body
 
 let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
-  let headers = H2.Headers.of_list (("content-length", "0") :: extra_headers) in
+  (* A 304 has no body, but Content-Length: 0 would falsely describe the
+     selected 200 representation. Omit the field on conditional responses. *)
+  let headers = H2.Headers.of_list
+    (if status = `Not_modified then extra_headers
+     else ("content-length", "0") :: extra_headers)
+  in
   let response = H2.Response.create ~headers status in
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
   H2.Body.Writer.close writer

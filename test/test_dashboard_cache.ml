@@ -397,6 +397,140 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
 
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
+module Execution_http = Server_dashboard_http_execution_surfaces.For_testing
+
+let with_execution_http_fixture f =
+  let config = Workspace.default_config "/tmp/execution-http-preparation" in
+  let invalidate = Server_dashboard_http_execution_surfaces.invalidate_execution_cache in
+  invalidate ();
+  Fun.protect ~finally:invalidate (fun () -> f config)
+
+let publish_execution_fixture marker =
+  let generation = Execution_http.execution_publication_generation () in
+  Alcotest.(check bool) "publish snapshot" true
+    (Execution_http.publish_execution_success_if_current ~generation
+       (`Assoc [ "marker", `String marker; "data", `String (String.make 4000 'x') ]))
+
+let execution_request ?(target = "/api/v1/dashboard/execution") encoding =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ "accept-encoding", encoding ]) `GET target
+
+let test_execution_preparation_reuse_and_scope () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "first";
+    let preparations = ref 0 in
+    let prepare body = incr preparations; Http_response_payload.prepare body in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check int) "one preparation for repeated refreshes" 1 !preparations;
+    let read ?target encoding =
+      Execution_http.cached_representation ~config (execution_request ?target encoding)
+    in
+    (match read "gzip", read "identity" with
+     | Some (compressed, compressed_tag, headers), Some (body, tag, _) ->
+       Alcotest.(check string) "ETag identifies same snapshot" tag compressed_tag;
+       Alcotest.(check bool) "compressed response is smaller" true
+         (String.length compressed < String.length body);
+       Alcotest.(check (option string)) "wire encoding" (Some "gzip")
+         (List.assoc_opt "content-encoding" headers)
+     | _ -> Alcotest.fail "prepared snapshot not available");
+    List.iter (fun query ->
+      Alcotest.(check bool) "scoped request bypasses default bytes" true
+        (Option.is_none (read ~target:("/api/v1/dashboard/execution?" ^ query) "gzip")))
+      [ "full=true"; "force=true"; "fixture=sample"; "agent=alice" ];
+    Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+    Alcotest.(check bool) "mutation discards all representations" true
+      (Option.is_none (read "gzip")))
+
+let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "obsolete";
+    let prepare body =
+      Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+      Http_response_payload.prepare body
+    in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check bool) "worker result cannot undo mutation" true
+      (Option.is_none (Execution_http.cached_representation ~config
+                        (execution_request "gzip"))))
+
+let test_execution_preparation_rejects_replaced_source () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "old";
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    (* A new success must hide the old bytes before its own codecs are ready. *)
+    publish_execution_fixture "new";
+    Alcotest.(check bool) "new source hides old prepared bytes immediately" true
+      (Option.is_none (Execution_http.cached_representation ~config
+                        (execution_request "gzip")));
+    let prepare body =
+      publish_execution_fixture "latest";
+      Http_response_payload.prepare body
+    in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check bool) "superseded worker bytes stay hidden" true
+      (Option.is_none (Execution_http.cached_representation ~config
+                        (execution_request "identity")));
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    match Execution_http.cached_representation ~config (execution_request "identity") with
+    | None -> Alcotest.fail "latest snapshot was not prepared"
+    | Some (body, _, _) ->
+      Alcotest.(check string) "newest publication wins" "latest"
+        Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "marker" |> to_string))
+
+let test_execution_preparation_failure_releases_owner () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "recoverable";
+    let raised =
+      try
+        ignore (Execution_http.refresh_execution_default_light_http_body
+                  ~prepare:(fun _ -> raise Exit) ~config ());
+        false
+      with Exit -> true
+    in
+    Alcotest.(check bool) "preparation failure propagates" true raised;
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    Alcotest.(check bool) "later request can prepare" true
+      (Option.is_some (Execution_http.cached_representation ~config
+                        (execution_request "gzip"))))
+
+let test_execution_concurrent_polls_share_preparation () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "shared";
+    let preparations = ref 0 in
+    let prepare body =
+      incr preparations;
+      Eio.Fiber.yield ();
+      Http_response_payload.prepare body
+    in
+    let refresh () =
+      Execution_http.refresh_execution_default_light_http_body ~prepare ~config ()
+    in
+    let first, second = Eio.Fiber.pair refresh refresh in
+    Alcotest.(check int) "simultaneous polls prepare once" 1 !preparations;
+    check_json "both requests see same snapshot" first second)
+
+let test_execution_preparation_failure_wakes_waiter () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "retry";
+    let preparations = ref 0 in
+    let prepare body =
+      incr preparations;
+      if !preparations = 1 then (Eio.Fiber.yield (); raise Exit);
+      Http_response_payload.prepare body
+    in
+    let refresh () =
+      Execution_http.refresh_execution_default_light_http_body ~prepare ~config ()
+    in
+    let failed, _ = Eio.Fiber.pair
+      (fun () -> try ignore (refresh ()); false with Exit -> true) refresh
+    in
+    Alcotest.(check bool) "owner failed" true failed;
+    Alcotest.(check int) "waiter prepared after failure" 2 !preparations;
+    Alcotest.(check bool) "waiter published usable response" true
+      (Option.is_some (Execution_http.cached_representation ~config
+                        (execution_request "gzip"))))
+
 let test_stats () =
   Dashboard_cache.invalidate_all ();
   ignore (Dashboard_cache.get_or_compute "s1" ~ttl:10.0 (fun () -> `Null));
@@ -1003,6 +1137,14 @@ let () =
             test_board_write_invalidates_every_board_projection;
           test_case "task mutation invalidates every execution variant" `Quick
             test_task_mutation_hook_invalidates_all_execution_variants;
+          test_case "execution preparation reuse and request scope" `Quick
+            test_execution_preparation_reuse_and_scope;
+          test_case "execution preparation cannot undo invalidation" `Quick
+            test_execution_preparation_cannot_resurrect_invalidated_snapshot;
+          test_case "execution preparation rejects replaced source" `Quick
+            test_execution_preparation_rejects_replaced_source;
+          test_case "execution preparation failure releases owner" `Quick
+            test_execution_preparation_failure_releases_owner;
           test_case "stats" `Quick test_stats;
           test_case "stats detail surface" `Quick test_stats_detail_surface;
           test_case "stats empty table" `Quick test_stats_handles_empty_table;
@@ -1013,6 +1155,10 @@ let () =
       ( "concurrency",
         [
           test_case "stampede protection" `Quick test_stampede;
+          test_case "concurrent execution polls share preparation" `Quick
+            test_execution_concurrent_polls_share_preparation;
+          test_case "failed execution preparation wakes waiter" `Quick
+            test_execution_preparation_failure_wakes_waiter;
           test_case "runtime git cache stale-first refresh" `Quick
             (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git cache worker-domain stale hit" `Quick

@@ -3607,6 +3607,20 @@ max-request-body-bytes = 65536
         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error)) ["healthy"; "default-rider"];
       check int "healthy and default Keeper both reach the real HTTP provider" 2
         (Exact_output_fixture.post_count server);
+      (with_model_catalog_content (catalog ^ catalog_row "missing") @@ fun () ->
+      (match init () with Runtime.Initialized -> () | Runtime.Initialized_degraded _ -> fail "restored row stayed unavailable");
+      check (option string) "recovery did not rewrite the assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      check int "same assigned Keeper now reaches provider" 3 (Exact_output_fixture.post_count server);
+      let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+      check string "restored route used its own model, not default" "missing"
+        Yojson.Safe.Util.(body |> member "model" |> to_string));
+      (* Prove restoration before changing this assignment into a declared lane.
+         A successful lane candidate is sticky for the same assignment ID, so
+         running the shadow scenario first would exercise a different contract:
+         retaining that candidate when the lane becomes an implicit fallback. *)
+      with_model_catalog_content catalog @@ fun () ->
       let shadowed_lane_toml = runtime_toml ^
         "\n[runtime.lanes.\"fixture.missing\"]\ncandidates = [\"fixture.good\"]\n" in
       (with_temp_runtime_toml shadowed_lane_toml @@ fun shadow_path ->
@@ -3629,22 +3643,13 @@ max-request-body-bytes = 65536
         check string "Dashboard resolves the healthy shadowing lane" "lane"
           Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
         (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-        check int "healthy lane reaches the actual HTTP provider" 3
+        check int "healthy lane reaches the actual HTTP provider" 4
           (Exact_output_fixture.post_count server);
-        let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+        let body = List.nth (Exact_output_fixture.request_bodies server) 3 |> Yojson.Safe.from_string in
         check string "declared lane serves its healthy candidate" "good"
           Yojson.Safe.Util.(body |> member "model" |> to_string);
         check (float 0.000001) "actual provider sees the candidate temperature" 0.25
-          Yojson.Safe.Util.(body |> member "temperature" |> to_float));
-      with_model_catalog_content (catalog ^ catalog_row "missing") @@ fun () ->
-      (match init () with Runtime.Initialized -> () | Runtime.Initialized_degraded _ -> fail "restored row stayed unavailable");
-      check (option string) "recovery did not rewrite the assignment" (Some "fixture.missing")
-        (Runtime.runtime_id_for_keeper "affected");
-      (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-      check int "same assigned Keeper now reaches provider" 4 (Exact_output_fixture.post_count server);
-      let body = List.nth (Exact_output_fixture.request_bodies server) 3 |> Yojson.Safe.from_string in
-      check string "restored route used its own model, not default" "missing"
-        Yojson.Safe.Util.(body |> member "model" |> to_string))
+          Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
 let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
@@ -4014,7 +4019,9 @@ let test_structured_judge_runtime_key_is_rejected () =
          errors)
 
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
-  with_fake_runtime_model_catalog @@ fun () ->
+  let catalog_row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
+  with_model_catalog_content (catalog_row "chat" ^ catalog_row "libr") @@ fun () ->
   let snapshot =
     Exact_output_fixture.resolver_snapshot
       ~source:"runtime raw-save exact replacement"

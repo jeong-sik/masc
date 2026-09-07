@@ -5421,15 +5421,16 @@ let test_decode_runtime_resolved () =
            Alcotest.failf "expected one assignment, got %d" (List.length other))
 
 let test_decode_unavailable_runtime_assignment () =
-  let unavailable reason =
+  let with_resolution resolved =
     let assignment = `Assoc
       ["keeper", `String "affected"; "assignment_source", `String "explicit";
-       "resolved", `Assoc ["kind", `String "unavailable"; "id", `String "fixture.missing";
-                           "reason", reason]] in
+       "resolved", resolved] in
     match runtime_resolved_json with
     | `Assoc fields -> `Assoc (("assignments", `List [assignment]) :: List.remove_assoc "assignments" fields)
     | _ -> Alcotest.fail "runtime fixture is not an object"
   in
+  let unavailable reason = with_resolution (`Assoc
+    ["kind", `String "unavailable"; "id", `String "fixture.missing"; "reason", reason]) in
   let reason = `Assoc
     ["kind", `String "missing_catalog_model"; "message", `String "Capability catalog entry unavailable";
      "provider_id", `String "fixture"; "provider_label", `String "fixture"; "model_id", `String "missing"] in
@@ -5441,7 +5442,10 @@ let test_decode_unavailable_runtime_assignment () =
    | Ok _ -> Alcotest.fail "unavailable assignment lost"
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "missing reason cannot claim unavailable certainty" true
-    (Result.is_error (Tui_decode.decode_runtime_resolved (unavailable `Null)))
+    (Result.is_error (Tui_decode.decode_runtime_resolved (unavailable `Null)));
+  Alcotest.(check bool) "active assignment still requires an existing lane" true
+    (Result.is_error (Tui_decode.decode_runtime_resolved (with_resolution (`Assoc
+      ["kind", `String "lane"; "id", `String "fixture.missing"]))))
 
 let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
     ?(transport = "http") ?(http_status = `Int 200)

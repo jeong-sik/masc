@@ -6930,9 +6930,9 @@ let decode_runtime_resolved json =
     match
       List.find_opt
         (fun assignment ->
-           match assignment.ra_target_id with
-           | None -> false
-           | Some lane_id ->
+           match assignment.ra_target_id, assignment.ra_unavailable_reason with
+           | None, _ | Some _, Some _ -> false
+           | Some lane_id, None ->
                not
                  (List.exists
                     (fun lane -> String.equal lane.rrl_id lane_id)

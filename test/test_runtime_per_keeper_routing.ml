@@ -305,13 +305,15 @@ streaming = true
 let runtime_route_model_catalog =
   {|
 [[models]]
-id_prefix = "openai_compat/qwen"
+id_prefix = "qwen"
+provider_name = "runpod_mtp"
 base = "openai_chat"
 max_context_tokens = 128000
 supports_tools = true
 
 [[models]]
-id_prefix = "openai_compat/gpt"
+id_prefix = "gpt"
+provider_name = "openai"
 base = "openai_chat"
 max_context_tokens = 64000
 supports_tools = true
@@ -319,7 +321,8 @@ supports_response_format_json = true
 supports_structured_output = true
 
 [[models]]
-id_prefix = "openai_compat/small"
+id_prefix = "small"
+provider_name = "openai"
 base = "openai_chat"
 max_context_tokens = 32000
 supports_tools = true

@@ -111,11 +111,20 @@ def main() -> int:
     seed = []
     for directory, name in walk(root):
         if is_seed(directory, name):
-            # Not comment-stripped: a workflow's YAML comment marker is the
-            # same character a shell command's argument can carry, and a
-            # workflow that names a guard in a comment is not the failure this
-            # is about. The script-to-script edge is where a comment silences.
-            seed.append(read(os.path.join(directory, name)))
+            # Workflows are not comment-stripped: YAML's marker is the same
+            # character a shell command's argument can carry, and a workflow
+            # that names a guard in a comment is not the failure this is about.
+            #
+            # Dune files are. Their marker is ";", which carries no such double
+            # duty, and a comment there reads exactly like wiring to this scan:
+            # the root dune says "check-ocaml-compile-authority.sh asserts both
+            # flags stay here" and that sentence was the only thing in the tree
+            # naming that script. It had been failing since #32511 deleted the
+            # jobs its other half watched.
+            body = read(os.path.join(directory, name))
+            if name in ("dune", "dune-project") or name.endswith(".inc"):
+                body = "\n".join(line.split(";", 1)[0] for line in body.splitlines())
+            seed.append(body)
     seed_text = "\n".join(seed)
 
     reached = {p for base, p in by_name.items() if base in seed_text}

@@ -1038,27 +1038,24 @@ let check_done_notes ~notes_fields ~expected_notes () =
           failf "expected exactly one persisted task, got %d"
             (List.length tasks));
        let audit_entries = Masc.Audit_log.read_entries ~n:50 config in
-       let submission_notes =
-         List.find_map
+       let submission =
+         List.find_opt
            (fun (entry : Masc.Audit_log.audit_entry) ->
               match entry.action with
-              | Masc.Audit_log.Custom "task_submit_for_verification" ->
-                (match entry.details with
-                 | `Assoc kvs ->
-                   (match List.assoc_opt "notes" kvs with
-                    | Some (`String notes) -> Some notes
-                    | _ -> None)
-                 | _ -> None)
-              | _ -> None)
+              | Masc.Audit_log.Custom "task_submit_for_verification" -> true
+              | _ -> false)
            audit_entries
        in
-       (match submission_notes with
-        | Some notes ->
-          check string "declared notes reach the transition record"
-            expected_notes notes
-        | None ->
-          fail
-            "no task_submit_for_verification audit entry carries a notes field"))
+       match submission with
+       | None -> fail "no task submission audit entry"
+       | Some entry ->
+         (match entry.details with
+          | `Assoc fields ->
+            let expected = if expected_notes = "" then None else Some (`String expected_notes) in
+            check bool "audit retains authored notes without inventing empty content" true
+              (List.assoc_opt "notes" fields = expected)
+          | _ -> fail "submission details must be an object"))
+
 
 let test_done_passes_declared_notes_to_transition () =
   List.iter (fun text ->

@@ -13306,7 +13306,23 @@ def run_msx_palette_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        palette_go(process, master_fd, output, b"go msx", b"no machine loaded")
+        # The MSX screen paints the whole terminal itself, outside the frame
+        # presenter, so no frame-end marker follows it. Wait on the raw
+        # output for its title line, the way the Browser screenshot
+        # regression waits for its overlay.
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b":go msx\r")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"no machine loaded",
+            start=start,
+            timeout=3.0,
+        )
+        # Esc hands the terminal back to the presenter, whose frame ends the
+        # normal way, so the plain helper serves from here on.
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
         send_and_wait(
             process, master_fd, output, b"q", b"q: press again to quit"

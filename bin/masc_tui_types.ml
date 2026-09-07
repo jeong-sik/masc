@@ -2605,7 +2605,7 @@ type memory_state =
   | Memory_starving
   | Memory_read_error
 
-let memory_state (k : memory_keeper_health) =
+let memory_state (k : Tui_decode.memory_keeper_health) =
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
@@ -2622,7 +2622,7 @@ let memory_state (k : memory_keeper_health) =
   else if
     List.exists
       (fun alert ->
-        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
+        match Tui_decode.memory_alert_severity alert.Tui_decode.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
@@ -5204,6 +5204,7 @@ let memory_overview_query (state : state) =
 
 
 let visible_memory_keepers (state : state) =
+  let open Tui_decode in
   let raw_keepers =
     match state.memory_health with
     | None -> []

@@ -1829,6 +1829,7 @@ module For_testing = struct
   let bind_pending_repetition_scope_with_confirmation
         ~confirm_snapshot ~base_path ~keeper_name ~selections ~scope () =
     commit_transform ~confirm_snapshot ~strict_snapshot_durability:true
+      (* See the production wrapper: this fixture observes durability, not mutation delivery. *)
       ~base_path ~keeper_name ~after_commit:ignore (fun state ->
         State.bind_pending_repetition_scope ~selections ~scope state
         |> Result.map_error State.scope_binding_error_to_string)

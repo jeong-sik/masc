@@ -246,7 +246,14 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
     |> List.map String.trim
     |> List.filter (fun value -> value <> "")
   in
-  run_process ~cwd:base ~env:full_env ~unset_env "/bin/bash"
+  (* The suite fakes opam entirely, so an OPAM_SWITCH_PREFIX inherited from
+     the operator's shell would decide the outcome of tests that never
+     mention it -- and it did: the deps-guard cases passed where opam env was
+     loaded and exited 69 where it was not. [env_array] removes before it
+     applies overrides, so the tests that do set one still get theirs. *)
+  run_process ~cwd:base ~env:full_env
+    ~unset_env:("OPAM_SWITCH_PREFIX" :: unset_env)
+    "/bin/bash"
     (Array.of_list ("/bin/bash" :: script :: subcommand_argv))
 
 (* --- tests ------------------------------------------------------------ *)
@@ -770,8 +777,13 @@ let test_clean_subcommand_after_cache_check_probability_reaches_dune () =
 let setup_repo_with_missing_deps base =
   let bin_dir, dune_log = setup_fake_repo base in
   let opam_path = Filename.concat bin_dir "opam" in
+  (* This replaces the fake opam from [setup_fake_repo], so it has to keep
+     answering what that one answered. `var prefix` in particular: the
+     read-lease wrapper resolves the switch identity from OPAM_SWITCH_PREFIX
+     or, failing that, from this answer, and exits 69 with neither. *)
   let opam_script =
-    {|#!/bin/sh
+    Printf.sprintf
+      {|#!/bin/sh
 case "$1 $2 $3" in
   "list --installed")
     case "$5" in
@@ -779,9 +791,11 @@ case "$1 $2 $3" in
     esac
     exit 0 ;;
   "switch show "*) printf 'fake-switch\n' ;;
+  "var prefix "*) printf '%%s\n' %s ;;
 esac
 exit 0
 |}
+      (quote base)
   in
   write_executable opam_path opam_script;
   (bin_dir, dune_log)

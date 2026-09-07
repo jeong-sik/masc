@@ -67,7 +67,24 @@ identity_fields = ["author", "tenant"]
   match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
   | Error message -> failf "expected identity_fields to load, got error: %s" message
   | Ok { Tool_definition_toml.identity_fields; _ } ->
-    check (list string) "identity fields" [ "author"; "tenant" ] identity_fields
+    check
+      (option (list string))
+      "identity fields"
+      (Some [ "author"; "tenant" ])
+      identity_fields
+;;
+
+let test_identity_fields_absent_is_none () =
+  let contents =
+    {|name = "fixture_tool"
+description = "fixture"
+|}
+  in
+  match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
+  | Error message ->
+    failf "expected a file without identity_fields to load, got error: %s" message
+  | Ok { Tool_definition_toml.identity_fields; _ } ->
+    check (option (list string)) "absent identity_fields" None identity_fields
 ;;
 
 let test_identity_fields_are_fail_closed () =
@@ -1124,6 +1141,8 @@ let () =
             test_identity_fields_round_trip
         ; test_case "identity_fields decode is fail-closed" `Quick
             test_identity_fields_are_fail_closed
+        ; test_case "absent identity_fields is None, not an empty list" `Quick
+            test_identity_fields_absent_is_none
         ; test_case "no params yields empty properties" `Quick
             test_no_params_yields_empty_properties
         ; test_case "published JSON preserves the author's key order" `Quick

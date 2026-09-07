@@ -127,7 +127,17 @@ let load_declarations files =
         | Ok loaded -> Ok loaded
         | Error message -> Error (Printf.sprintf "%s: %s" path message)
       in
-      load ((board, declaration.Tool_definition_toml.identity_fields) :: acc) rest
+      let* fields =
+        match declaration.Tool_definition_toml.identity_fields with
+        | Some fields -> Ok fields
+        | None ->
+          Error
+            (Printf.sprintf
+               "%s: identity_fields is not declared; a board tool says which caller \
+                fields it binds, [] included"
+               path)
+      in
+      load ((board, fields) :: acc) rest
   in
   load [] Tool_name.Board_name.all
 ;;

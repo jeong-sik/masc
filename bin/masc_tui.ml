@@ -1787,6 +1787,7 @@ type async_msg =
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
+  | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
   (* Carries the keeper it was asked about: the browser can be closed or
      pointed at another keeper while a load is in flight, and a late answer
@@ -4436,6 +4437,27 @@ let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
    by "what has this keeper been doing"; the server's own ceiling is what the
    read costs, and it clamps anything wider. *)
 let changes_window_hours = 24.0
+
+let launch_workspace_activity state ~mailbox ~repo_id =
+  match Masc_tui_fetched.start ~equal:String.equal state.workspace_activity ~key:repo_id with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+      state.workspace_activity <- next;
+      let keepers = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
+        |> List.sort_uniq String.compare in
+      let run () =
+        let reads = List.map (fun keeper_name ->
+          let result = try Masc_tui_loader.load_keeper_file_changes
+              ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
+            with Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> Error (Printexc.to_string exn) in
+          (keeper_name, result)) keepers in
+        enqueue_async mailbox (Workspace_activity_loaded (request,
+          Ok {war_at = Unix.gettimeofday (); war_hours = changes_window_hours; war_keepers = reads}))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+      | None -> enqueue_async mailbox (Workspace_activity_loaded (request, Error "Eio switch is unavailable"))
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -11785,6 +11807,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
       end
+  | Workspace_activity_loaded (request, result) ->
+      state.workspace_activity <- Masc_tui_fetched.complete ~equal:String.equal
+        state.workspace_activity request result
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -15419,6 +15444,46 @@ and is loaded on demand through keeper_skill.
            (* The child owns its keys. In particular b/u must never mutate a
               hidden connector binding while Firefox content is on screen. *)
            ()
+       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open ->
+           (match state.repositories with
+            | None -> ()
+            | Some snapshot ->
+                Option.iter (fun (repo : Tui_decode.repository) ->
+                  state.workspace_activity_repo <- Some repo.rp_id;
+                  state.workspace_activity_cursor <- 0;
+                  launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
+                  (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
+       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           state.workspace_activity_repo <- None
+       | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
+             state.workspace_activity_repo
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
+           let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
+           state.workspace_activity_cursor <- max 0 (min (List.length (workspace_activity_rows state) - 1)
+             (state.workspace_activity_cursor + delta))
+       | Some ("\r" | "\n" | "right")
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+           (match List.nth_opt (workspace_activity_rows state) state.workspace_activity_cursor with
+            | None -> ()
+            | Some (change, path) ->
+                state.code_scope <- Code_scope_keeper change.Tui_decode.fc_keeper;
+                state.code_dir <- "";
+                state.code_cursor <- 0;
+                state.code_entries <- [];
+                state.code_entries_error <- None;
+                state.code_file <- Masc_tui_fetched.clear state.code_file;
+                state.code_focus_file <- Right_pane;
+                state.followed_from <- Some (state.view, None);
+                state.view <- Code;
+                Option.iter (fun repo_id -> launch_code_file_load state ~mailbox:async_messages
+                    ~path:(Playground_paths.bundle_relative_repo_path ~repo_id path))
+                  state.workspace_activity_repo)
+       | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
+           && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""

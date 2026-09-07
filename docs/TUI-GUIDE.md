@@ -1561,3 +1561,9 @@ recorded in Recent Events.
 The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
 
 Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
+
+### Workspace activity
+
+On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
+
+Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.

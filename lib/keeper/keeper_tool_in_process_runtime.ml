@@ -2110,7 +2110,10 @@ let masc_file_failure message =
 
 let handle_masc_file_with_outcome ~name ~args () =
   let require_env key =
-    match Sys.getenv_opt key with
+    (* The key is the caller's, but the floor is the same: a value set in
+       runtime.toml has to answer here too, or masc_file refuses a variable the
+       deployment did declare. *)
+    match Env_config_core.raw_value_opt key with
     | Some v when v <> "" -> Ok v
     | _ -> Error ("masc_file requires the " ^ key ^ " environment variable")
   in

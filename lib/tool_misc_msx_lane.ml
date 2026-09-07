@@ -73,7 +73,10 @@ let carts_available ~base_path =
 let resolve_roms_dir ~base_path args =
   match String.trim (get_string args "roms_dir" "") with
   | "" -> (
-    match Sys.getenv_opt "MSX_ROMS" with
+    (* Through the config floor, so a deployment can name the ROM directory in
+       runtime.toml the way it names everything else. [Sys.getenv_opt] reads
+       only what the parent process exported. *)
+    match Env_config_core.raw_value_opt "MSX_ROMS" with
     | Some dir when dir <> "" -> dir
     | Some _ | None ->
       let dir = bios_dir ~base_path in

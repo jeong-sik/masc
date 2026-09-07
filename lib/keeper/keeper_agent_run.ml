@@ -1139,7 +1139,7 @@ let run_turn
                            (match
                               repeated_exact_tool_call
                                 ~threshold:repeated_tool_call_yield_threshold
-                                s.acc.tool_calls
+                                (Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                             with
                             | Some (tool_name, repeated_count) ->
                               Log.Keeper.warn
@@ -1157,7 +1157,7 @@ let run_turn
                                  repeated_tool_call_input
                                    ~threshold:
                                      repeated_tool_call_input_yield_threshold
-                                   s.acc.tool_calls
+                                   (Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                                with
                                | Some (tool_name, repeated_count) ->
                                  Log.Keeper.warn

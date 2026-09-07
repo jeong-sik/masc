@@ -640,7 +640,12 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         # order complaint and sent one reader after the sort instead of after
         # the missing package (#33799).
         detail = compile.stderr.strip().splitlines()
-        detail = [line for line in detail if "[WARNING] Package" not in line]
+        # findlib writes several warning shapes -- "[WARNING] Package X:
+        # Deprecated", "[WARNING] Interface digestif.cmi occurs in several
+        # directories" -- and any of them ahead of the error becomes the
+        # summary line if only the package one is dropped.
+        detail = [line for line in detail if "findlib: [WARNING]" not in line
+                  and "[WARNING] Package" not in line]
         if not detail:
             return Outcome(None, "build failed")
         head = detail[:BUILD_DETAIL_LINES]

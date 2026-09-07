@@ -16201,7 +16201,12 @@ and is loaded on demand through keeper_skill.
       | Some "&" ->
            (* The MSX screen takes the whole terminal, like the image
               overlay: it draws itself and the loop yields until [esc]. *)
-           Masc_tui_msx.open_screen ~write:write_to_terminal state
+           (match Masc_tui_msx.open_screen ~write:write_to_terminal state with
+            | Ok () -> ()
+            | Error { path; detail } ->
+                report_action state "error"
+                  (Printf.sprintf "MSX load failed (%s): %s. Repair the file and press & to retry."
+                     path detail))
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0

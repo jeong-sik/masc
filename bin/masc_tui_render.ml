@@ -14651,7 +14651,8 @@ let render_acting_evidence (state : state) entry =
           | None -> ["  " ^ label ^ ": not carried"]
           | Some text ->
               ("  " ^ label ^ " (producer-redacted preview)")
-              :: (document_markdown ~width:(max 1 (cols - 6)) text
+              :: (document_markdown ~width:(max 1 (cols - 6))
+                    (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
         [""; "  INPUT / OUTPUT OBSERVATIONS"]
         @ json "Input" call.kt_tool_args

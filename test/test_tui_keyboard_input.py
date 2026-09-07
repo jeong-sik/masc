@@ -11701,6 +11701,14 @@ def observer_http_fixtures() -> HttpFixtures:
 def run_acting_call_evidence_regression(executable: str) -> None:
     release_next = threading.Event()
     keep_open = threading.Event()
+    binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+
+    def emit_frame(phase: str, output: bytearray) -> None:
+        print("ACTING_PTY_EVIDENCE " + json.dumps({
+            "phase": phase, "fixture": "synthetic exact-event inspector",
+            "binary_sha256": binary_sha256, "rows": 35, "columns": 140,
+            "encoding": "base64", "pty": base64.b64encode(output).decode(),
+        }), flush=True)
 
     def frame(value):
         return b"event: message\ndata: " + json.dumps(value).encode() + b"\n\n"
@@ -11711,7 +11719,7 @@ def run_acting_call_evidence_regression(executable: str) -> None:
         "tool_args": {"skill": "research-plan-exact"},
         "tool_result": {"receipt_sha256": "receipt-exact", "status": "served"},
         "tool_args_preview": "safe-input-preview-exact",
-        "tool_output_preview": "safe-output-preview-exact",
+        "tool_output_preview": "safe-output-preview-exact\n\n\x1b[2Jforged-preview-text",
     }
     core = {
         "type": "agent_core:tool_completed", "event_type": "tool_completed",
@@ -11749,6 +11757,13 @@ def run_acting_call_evidence_regression(executable: str) -> None:
             for needle in (b"skill-call-exact", b"research-plan-exact", b"receipt-exact", b"producer-redacted"):
                 if needle not in io_head + io_tail:
                     raise AssertionError(f"Selected Keeper event lost I/O evidence {needle!r}: {bytes(output)!r}")
+            visible_io = screen_text(bytes(output))
+            if b"\x1b[2Jforged-preview-text" in io_head + io_tail:
+                raise AssertionError("Tool output preview emitted a terminal clear command")
+            for needle in (b"safe-output-preview-exact", b"[2Jforged-preview-text"):
+                if needle not in visible_io:
+                    raise AssertionError(f"Terminal-safe multiline preview lost text {needle!r}: {visible_io!r}")
+            emit_frame("redacted-io", output)
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
             detail = send_and_wait(process, master_fd, output, b"k\r", b"Execution ID: exec-exact")
             for needle in (b"Event ID: event-exact", b"Run ID: run-exact", b"Parent event ID: parent-exact", b"Caused by: cause-exact", b"Correlation ID: trace-exact"):
@@ -11762,6 +11777,7 @@ def run_acting_call_evidence_regression(executable: str) -> None:
             plain = screen_text(bytes(output))
             if b"Execution ID: exec-exact" not in plain or b"new-call-must-not-replace" in plain:
                 raise AssertionError(f"New SSE event retargeted the open detail: {pinned!r}")
+            emit_frame("pinned-exact-event", output)
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Activity")
             # The newly arrived event is independently selectable after closing.
             latest = send_and_wait(process, master_fd, output, b"g\r", b"new-call-must-not-replace")

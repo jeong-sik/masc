@@ -6,7 +6,7 @@
 
 **판정:** 아래 count는 대표 로그 이벤트 수이며 서로 독립인 사고 수가 아니다. provider 실패→pipeline 실패→Keeper 실패는 중첩한다. 최종 행은 health의 별도 live acceptance 상태다.
 
-**실행 식별:** 첫 health binary b90d5f6182, 검토 source 8b804d8d5b. 다른 운영 작업이 진행 중이며 중간 재조회 binary는 8b804d8d5b. 본 세션이 배포했다고 주장하지 않는다.
+**실행 식별:** 첫 health binary b90d5f6182, 검토 source 8b804d8d5b. 다른 운영 작업이 진행 중이며 중간 재조회 binary는 8b804d8d5b. 이 초기 바이너리 교체는 본 세션이 수행하지 않았다. 이후 이 세션의 자산 적용과 ACK는 하단 시각별 증거로 구분한다.
 
 | # | 개선 대상 | 대표 관측 | 진행 |
 |---|---|---:|---|
@@ -20,7 +20,7 @@
 | 8 | Provider 연결 장애 | 51 | tested-code-fix |
 | 9 | 일반 문장의 @check·lint를 ID 오류로 기록 | 362 | code-fix |
 | 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
-| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | acknowledgement-stack |
+| 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | live-acknowledged |
 | 12 | Board candidate ledger schema 불일치 | 12 | retention-merged-tested |
 | 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-merged |
 | 14 | Dashboard build-stamp 누락 | 5 | distribution-stack |
@@ -52,7 +52,7 @@
 
 ### 3. Librarian exact 실패와 주간 한도
 
-- 조치: Codex luna 후보 추가 후에도 Claude의 claim_schema_mismatch가 남은 후보 시도를 막는 결함5건 확인. #33913의 head15b554f7a8에서63/63 원격 동작 테스트 PASS. probe 분류 후속31213cbd8c의 필수 CI 최초 attempt는 결제/한도로 미시작했으나 현재 재실행 중. 배포·실제후속선택은 미검증.
+- 조치: Codex luna 후보 추가 후에도 Claude claim_schema_mismatch가 남은 후보를 막는 결함5건 확인. #33913의15b554f7a8에서63/63 동작 테스트 PASS. 외부 최종headcfc1f173d8의 필수 검사 PASS 후d16c83de17로 병합됐다. 실제 후속 후보 선택과 failover 연속성은 미검증.
 - 관련 코드/경계: `lib/keeper/keeper_librarian_runtime.ml`
 - 최초 증거: `2026-09-06T21:21:58Z` / seq `25990215` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:272735`
 > memory os librarian failed lane=librarian_exact: librarian exact execution failed outward_effect=started cause=agent_core_execution_failed: slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":"you (yousleepwhen) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 329bef59-e725-4293-aa76-0e6556d9efec)"} ; flow=[slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219; slot=glm-coding.glm-5.3-flash call_id=66a83f8e233f25848cf44bbb48d40b33; advance=glm-coding.glm-5.3-flash->ollama_cloud.deepseek-v4-flash-0731 kind=execution_failed cause=provider refused (http_status=429 refusal=rate_limited) raw_response_sha256=41976dbd
@@ -84,7 +84,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 반복 루프는 미해결. #33950의 작업별 기록·checkpoint 복원 기반은72deb19a38에서6/6 PASS. bdc8852ccc는 관련 파일 동일·충돌 해소 후 필수 검사 진행 중. Context-only 상태 유실을 막는 #33953은 별도 검증 중이다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.
+- 조치: 08:03Z Execute count959로 반복 문제 미해결. #33950 기반6/6 PASS·필수 검사 PASS 후 이 세션이cf63fd467d로 병합. Context-only 저장 유실 수정 #33953도21/21·필수 검사 PASS 후8685db2478로 병합했다. 실제 생산자·HITL/Ask/Delegate/Composition 부모 연결·official-client 영속화는 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -118,7 +118,7 @@
 
 ### 11. 삭제된 new-keeper의 종료 복구 반복
 
-- 조치: ACK 도메인은 ad2af057c9에서103/103 PASS 후 외부가 cdae490f8774로 병합. HTTP는21500fe6d6에서34/34 PASS; 최종81c9f393967e는 ACK 파일 동일·필수 검사 PASS 후 외부가8ac44f2af180으로 병합. 실제 ACK는 미실행.
+- 조치: 도메인103/103·HTTP34/34 PASS와 외부 병합 후, 운영6db68b4bea에서 이 세션이08:27:04Z 부재 ACK를 적용했다. 재조회 revision4→5·operator_absence_acknowledged, 이전 종료 증거·정리 의도 보존 확인. 새 서버 시작에서의 재발 여부는 미측정.
 - 관련 코드/경계: `lib/keeper/keeper_shutdown_finalize.ml`
 - 최초 증거: `2026-09-06T23:26:03Z` / seq `26080010` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312530`
 > shutdown recovery failed keeper=new-keeper operation=shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7 error=Keeper shutdown admission release failed in operation shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7: Keeper owner not found: new-keeper
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 설치 resolver3d3695a1f3에서17/17·Web39/39 PASS. 외부가 관련 파일 동일한8a67c07c99를c328dbe8로 병합했다. Release34098251245의 Linux x64/ARM64 실제 설치·자산 응답·손상 거부 PASS, x64 패키지642개 파일 해시도 독립 확인. macOS는 진행 중이며 운영 설치는 미실행.
+- 조치: 설치 resolver56/56 PASS와 Linux x64/ARM64·macOS ARM64 실제 설치 smoke PASS. 운영6db68b4bea와 같은 소스의 별도 dashboard artifact34100510195를642파일 검증·백업 후08:29:52Z 적용해 HTTP200·health ok를 확인했다. 바이너리 설치·재시작은 하지 않았으며 설치 번들 방식의 운영 전환은 남아 있다.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: #33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 및 필수 검사 PASS 후 이 세션이d5e0685b38로 병합. 원본 시각과 큐 체류 시간을 구분하는 #33938도6a13f6a84a로 외부 병합; exact827803의6개 suite는34099718437에서 검증 중. 전체 FIFO 소비·현재 배포·장기 연속성은 미검증.
+- 조치: #33890은76/76 PASS와9c에서 batch 로그7회 관측. #33947은65개 번호 있는 테스트와 queue 시나리오 PASS 후 이 세션이d5e0685b38로 병합. #33938은 외부6a13f6a84a 병합 후 exact827803에서6개 suite PASS(156개 번호 있는 테스트와 queue·terminal-matrix 실행). 전체 FIFO 소비·장기 연속성은 미검증.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -377,19 +377,34 @@ Claude의 JSON이 파싱돼도 Librarian 선택 스키마를 만족하지 않으
 
 WebFetch의 exact120422bb9b [34095824585](https://github.com/jeong-sik/masc/actions/runs/34095824585)은14/14·bridge20/20 총34 PASS, 필수 검사도 PASS다. [결과 요약](web-fetch-upstream-ci-summary.txt). 다른 작업 주체가07:39:38Z에#33936을c7fe4f67a1로 병합했다. 이 세션의 병합으로 표시하지 않는다.
 
-ACK의 exact ad2af057c9 [34095886814](https://github.com/jeong-sik/masc/actions/runs/34095886814)는103/103 PASS, exact21500fe6d6 [34095899962](https://github.com/jeong-sik/masc/actions/runs/34095899962)는34/34 PASS다. 이후 외부 병합은 각각cdae490f8774와8ac44f2af180이다. HTTP 최종head81c9f393967e는 관련 파일이 동일하고 필수 검사가 통과했지만21500의 targeted를81c9 exact 결과로 이동시키지 않는다. 실제 운영 ACK는 수행하지 않았다.
+ACK의 exact ad2af057c9 [34095886814](https://github.com/jeong-sik/masc/actions/runs/34095886814)는103/103 PASS, exact21500fe6d6 [34095899962](https://github.com/jeong-sik/masc/actions/runs/34095899962)는34/34 PASS다. 이후 외부 병합은 각각cdae490f8774와8ac44f2af180이다. HTTP 최종head81c9f393967e는 관련 파일이 동일하고 필수 검사가 통과했지만21500의 targeted를81c9 exact 결과로 이동시키지 않는다. 이 08:01Z 관측 시점에는 실제 운영 ACK를 수행하지 않았다. 08:27Z 적용 결과는 아래 후속 절에 기록했다.
 
-설치 resolver의3d3695a1f3 [34095776029](https://github.com/jeong-sik/masc/actions/runs/34095776029)는 installed17/17·Web39/39 PASS다. 외부에서 관련 파일이 동일한8a67c07c99를c328dbe8로 병합하고 feature branch를 삭제했다. 이 세션은 branch를 복구하지 않고 검증된3d를 가리키는 verify/installed-dashboard-3d3695에서 [Release34098251245](https://github.com/jeong-sik/masc/actions/runs/34098251245)를 dispatch했다. non-tag workflow_dispatch라 공개 release 단계는 실행 대상이 아니다. Linux x64/ARM64 실제 설치 smoke는 SUCCESS다. macOS ARM64는 진행 중이며 해당 job이 may-fail인 것과 실제 성공 여부를 구별해야 한다. 운영 설치·재시작은 하지 않았다.
+설치 resolver의3d3695a1f3 [34095776029](https://github.com/jeong-sik/masc/actions/runs/34095776029)는 installed17/17·Web39/39 PASS다. 외부에서 관련 파일이 동일한8a67c07c99를c328dbe8로 병합하고 feature branch를 삭제했다. 이 세션은 branch를 복구하지 않고 검증된3d를 가리키는 verify/installed-dashboard-3d3695에서 [Release34098251245](https://github.com/jeong-sik/masc/actions/runs/34098251245)를 dispatch했다. non-tag workflow_dispatch라 공개 release 단계는 실행 대상이 아니다. Linux x64/ARM64 실제 설치 smoke는 SUCCESS다. 당시 macOS ARM64는 진행 중이었다. 이후 실제 SUCCESS는08:31Z 절과 통합 증거에 기록했다. 운영 설치·재시작은 하지 않았다.
 
-반복 scope 기반 [#33950](https://github.com/jeong-sik/masc/pull/33950) head72deb19a38는 별도 draft다. constructor·decoder의 공통 검증, Fresh 멱등성, A/B/A 보존, unknown Resume 거부, target 복원 충돌을 구현했고 실제 checkpoint codec과 기존 detector를 잇는6개 대상 [34098406950](https://github.com/jeong-sik/masc/actions/runs/34098406950)에서6/6 PASS를 확인했다. 이후 main 충돌을 해결한bdc8852ccc는 구현·인터페이스·테스트·stanza가 동일하며 필수 PR check34099857999가 진행 중이다. runtime caller·영속 자식-parent linkage·official-client 저장 연결은 아직 없으므로 원래7번을 해결로 표시하지 않는다.
+반복 scope 기반 [#33950](https://github.com/jeong-sik/masc/pull/33950) head72deb19a38는 당시 별도 draft였다. constructor·decoder의 공통 검증, Fresh 멱등성, A/B/A 보존, unknown Resume 거부, target 복원 충돌을 구현했고 실제 checkpoint codec과 기존 detector를 잇는6개 대상 [34098406950](https://github.com/jeong-sik/masc/actions/runs/34098406950)에서6/6 PASS를 확인했다. 이후 main 충돌을 해결한bdc8852ccc는 구현·인터페이스·테스트·stanza가 동일하며 당시 필수 PR check34099857999가 진행 중이었으며 이후 PASS·병합 결과는 아래에 기록했다. runtime caller·영속 자식-parent linkage·official-client 저장 연결은 아직 없으므로 원래7번을 해결로 표시하지 않는다.
 
 08:01:52Z health 재조회는 binary1f7ec8a587·started07:56:05Z·base~/me·masc_root~/me/.masc·dashboardstale·overalldegraded, pending10/counts_complete=true를 반환했다. 이 서버 시작과 바이너리 교체는 이 세션이 수행하지 않았다. 이 커밋은 최근 병합된 변경들의 운영 반영 증거가 아니다.
 
 
 ### 08:20Z checkpoint 저장 경계와 설치 검증 후속
 
-[#33953](https://github.com/jeong-sik/masc/pull/33953) exact e19fd32c2c는 최종 메시지와 turn_count가 같더라도 Context·설정·도구·usage 등이 달라졌으면 새 체크포인트를 저장한다. 기존 코드는 이전 값을 재사용해 Context-only 관측이 유실될 수 있었다. 메시지 본문은 재직렬화하지 않으며, 나머지 replay 상태는 소유 codec으로 비교한다. 실제 디스크 저장·복원 시나리오를 추가했고 독립 리뷰에서 차단할 정확성 문제는 없었다. metadata 비교 비용은 크기에 비례하며 성능은 미측정이다. [targeted34100025761](https://github.com/jeong-sik/masc/actions/runs/34100025761)은 진행 중이며 운영 배포나 반복 문제 전체 해결을 뜻하지 않는다.
+[#33953](https://github.com/jeong-sik/masc/pull/33953) exact e19fd32c2c는 최종 메시지와 turn_count가 같더라도 Context·설정·도구·usage 등이 달라졌으면 새 체크포인트를 저장한다. 기존 코드는 이전 값을 재사용해 Context-only 관측이 유실될 수 있었다. 메시지 본문은 재직렬화하지 않으며, 나머지 replay 상태는 소유 codec으로 비교한다. 실제 디스크 저장·복원 시나리오를 추가했고 독립 리뷰에서 차단할 정확성 문제는 없었다. metadata 비교 비용은 크기에 비례하며 성능은 미측정이다. [targeted34100025761](https://github.com/jeong-sik/masc/actions/runs/34100025761)은 당시 진행 중이었다. 이후21/21 PASS·병합 결과는08:31Z 절에 있으며 운영 배포나 반복 문제 전체 해결을 뜻하지 않는다.
 
-Release34098251245의 Linux x64와 ARM64는 checkout 밖에서 설치 서버를 실행해 정확한 commit·index와 참조 자산3개를 확인하고, index 손상·receipt 누락 시503을 확인했다. 다운로드한 x64 artifact10009693579도 binary·receipt·dashboard642개 파일의 해시/크기를 독립 검증했다. [패키지 검증](release-linux-x64-verification.json). macOS는 아직 실제 성공이 확인되지 않았다. 이 검증용3d 바이너리는 운영 서버에 설치하지 않았다.
+Release34098251245의 Linux x64와 ARM64는 checkout 밖에서 설치 서버를 실행해 정확한 commit·index와 참조 자산3개를 확인하고, index 손상·receipt 누락 시503을 확인했다. 다운로드한 x64 artifact10009693579도 binary·receipt·dashboard642개 파일의 해시/크기를 독립 검증했다. [패키지 검증](release-linux-x64-verification.json). 이08:20Z 관측 때는 macOS 성공이 확인되지 않았고, 이후08:31Z 절에 실제 성공 결과를 추가했다. 이 검증용3d 바이너리는 운영 서버에 설치하지 않았다.
 
 CLI 도메인 failover #33913은 외부 최종 head cfc1f173d8의 필수 검사 SUCCESS 후d16c83de17로 병합됐다. 기존63개 대상 검증은15b554f7a8의 결과이며 최종 head 전체 테스트로 재표기하지 않는다.
+
+
+### 08:31Z 실제 ACK·대시보드 복구와 코드 병합
+
+운영6db68b4bea에서 GET preview를 새로 읽고, 부재 ACK endpoint에 정확한 revision4/backlog4459로 요청했다. 서버가 모든 권위 있는 guard를 통과시킨 뒤08:27:04Z acknowledged를 반환했다. 독립 GET은 revision5의 operator_absence_acknowledged를 반환하며 이전 finalization·cleanup_intent·owned_task_ids·revision·updated_at을 보존한다. 기존 dashboard Admin 자격증명의 actor는dashboard이며 사람이 직접 API를 누른 것으로 표시하지 않는다. [실제 ACK 증거](absence-ack-live-proof.json). 재시작은 수행하지 않았다.
+
+[#33950](https://github.com/jeong-sik/masc/pull/33950)은 충돌을 해결한bdc8852ccc에서 필수 검사 모두 통과 후 이 세션이08:28:23Z cf63fd467d로 병합했다. 기반6개 동작 검증은 코드가 동일한72deb19a38의 결과다. [#33953](https://github.com/jeong-sik/masc/pull/33953)은 e19fd32c2c의21/21 동작 테스트와 필수 검사 모두 PASS 후 이 세션이08:30:51Z 8685db2478로 병합했다. 둘 다 운영6db 바이너리에 포함됐다는 증거는 없고, 원래 반복 문제의 caller 연결은 아직 남아 있다. [반복 실측 후속](repetition-live-followup.json)의08:03:36Z Execute count959도 실패한 독립 작업959개라는 뜻이 아니다.
+
+#33938 exact827803의 [34099718437](https://github.com/jeong-sik/masc/actions/runs/34099718437)은 health6·reaction28·bootstrap85·runtime TOML37=156개 번호 있는 테스트와 별도 queue 실행, terminal reason matrix147200건 mismatch0을 통과했다. 대시보드 UI 동작이나 실제 queue residence를 새로 측정한 결과는 아니다.
+
+Release34098251245의 macOS 실제 job도 SUCCESS이며 공개 release job은 SKIPPED다. [3개 플랫폼 설치 검증](installed-release-ci-proof.json). 별도로 운영 서버의 source commit6db68b4bea와 정확히 같은 [Dashboard artifact34100510195](https://github.com/jeong-sik/masc/actions/runs/34100510195)를 빌드하고, archive/index/642파일을 검증해 백업 후08:29:52Z 적용했다. HTTP index SHA a0d3037ff9d3e0e6d8b09219d54aeb9691ebee1fe2a75d076946a30f14de48c6과 health dashboard_surface.ok를 확인했다. [적용 영수증](dashboard-6db-deployment-receipt.json). 바이너리 설치·재시작은 없었으며 운영은 여전히 checkout 자산을 참조한다.
+
+실제 브라우저에서도08:30:43Z MASC Overview가 렌더됐고 실행 중 Keeper13/19가 표시됐다. 캡처 구간 page error0·HTTP4xx/5xx0을 관측했다. [화면](dashboard-6db-dashboard.png) · [브라우저 관측](dashboard-6db-browser-proof.json). 전체 런타임은 warning이며 probe와 paused Keeper 항목이 남아 있어 대시보드 자산 정상화와 fleet 전체 정상화를 구별한다.
+
+ACK 이후08:32:41Z까지5분37초의 로그에서 해당 new-keeper shutdown recovery 오류0건을 확인했다. [후속 로그 관측](absence-ack-post-apply-observation.json). 같은 프로세스의 짧은 구간이며 재시작 성공 증거로 확대하지 않는다.

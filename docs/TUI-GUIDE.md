@@ -1556,6 +1556,18 @@ keeper is in. The header's `N unread` counts the same rows.
 the count is not an observation. The failing call is printed on the same row and
 recorded in Recent Events.
 
+### Preset source and current settings
+
+Config Presets distinguishes the selected saved preset from a settings match. Its detail shows the server-resolved preset directory, whether the settings currently saved in the workspace match, and the actual Markdown path/current source for each overridden prompt. A selection alone does not apply a preset. A saved-settings match does not claim every Keeper has reloaded its instructions.
+
+Config Prompts labels whether the effective text comes from an override or the Markdown file. When an override is active, the displayed Markdown path identifies the base file, not the effective override storage.
+
+### Following a Fusion run
+
+Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
 ### Questions and Gate modes
 
 In Approvals, `a` opens the selected Ask in a dedicated answer reader. The header shows Ask and Question position plus answered count. Left/Right (or j/k) changes the question; PgUp/PgDn and the wheel scroll long prompts and choices. `[`/`]` changes the Ask, and Esc returns to Approvals. Choice digits apply only to the active question.
@@ -1573,12 +1585,6 @@ Planning shows net changes in completed Goals, completed Tasks, and pending Goal
 The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
 
 Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
-
-### Following a Fusion run
-
-Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
-
-Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
 
 ### Workspace activity
 

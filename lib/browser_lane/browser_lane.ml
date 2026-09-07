@@ -88,7 +88,10 @@ type lane =
   ; commands : issued Eio.Stream.t
   ; mutex : Eio.Mutex.t
   ; waiters : (string, Yojson.Safe.t Eio.Promise.t * Yojson.Safe.t Eio.Promise.u) Hashtbl.t
-  ; mutable last_seen : float
+  (* When the lane stops counting as connected, rather than when it last
+     polled. The predicate subtracted the wall clock from the stored reading,
+     so an NTP step decided whether a live lane existed. *)
+  ; mutable connected_until : Monotonic_deadline.t
   }
 
 let lanes : (string, lane) Hashtbl.t = Hashtbl.create 4
@@ -106,7 +109,7 @@ let lane_named ~name =
             ; commands = Eio.Stream.create 16
             ; mutex = Eio.Mutex.create ()
             ; waiters = Hashtbl.create 8
-            ; last_seen = 0.
+            ; connected_until = Monotonic_deadline.after ~seconds:0.
             }
           in
           Hashtbl.replace lanes name lane;
@@ -115,11 +118,16 @@ let lane_named ~name =
 
 (* The poll side: carry one command to the browser, or [None] after the
    window — the host loops and polls again. *)
+(* How long a poll keeps the lane connected. Long enough that a lane between
+   polls still counts, short enough that a lane that stopped polling drops. *)
+let lane_connected_window_sec = 120.
+
 let take_command ~lane_name ~window_sec =
   match lane_named ~name:lane_name with
   | None -> Error "unknown_lane"
   | Some lane ->
-    lane.last_seen <- Unix.gettimeofday ();
+    lane.connected_until <-
+      Monotonic_deadline.after ~seconds:lane_connected_window_sec;
     Ok
       (Eio.Fiber.first
          (fun () -> Some (Eio.Stream.take lane.commands))
@@ -159,7 +167,7 @@ let unregister_waiter lane id =
    says so instead of timing out into silence. *)
 let lane_connected ~lane_name =
   match Hashtbl.find_opt lanes lane_name with
-  | Some lane -> Unix.gettimeofday () -. lane.last_seen < 120.
+  | Some lane -> not (Monotonic_deadline.passed lane.connected_until)
   | None -> false
 ;;
 

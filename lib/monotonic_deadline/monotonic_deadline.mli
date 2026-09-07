@@ -30,3 +30,15 @@ val remaining_seconds : t -> float
 val passed : t -> bool
 (** Whether the deadline is behind us. [remaining_seconds t = 0.] says the
     same thing; this reads better in a guard. *)
+
+type stopwatch
+(** How long something has taken, on the same clock. Separate from {!t}
+    because the two answer different questions and a site that mixes them
+    stops building. *)
+
+val start : unit -> stopwatch
+(** A stopwatch reading zero. *)
+
+val elapsed_seconds : stopwatch -> float
+(** Seconds since {!start}. Unclamped: a run that overran the budget it was
+    checked against reports what it took, not the budget. *)

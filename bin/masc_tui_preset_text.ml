@@ -98,7 +98,17 @@ let contents_lines (d : D.preset_detail) =
              (List.map (fun (name, bytes) -> Printf.sprintf "%s(%dB)" name bytes) rows))
       ]
   in
-  sized "override" d.D.pd_overrides
+  [ "Preset directory: " ^ d.D.pd_directory
+  ; (match d.D.pd_settings_match with
+     | D.Preset_settings_match -> "Matches saved workspace settings (Keeper reload timing still applies)"
+     | D.Preset_settings_differ -> "Saved workspace settings differ from this preset"
+     | D.Preset_settings_unavailable reason -> "Settings comparison unavailable: " ^ reason)
+  ]
+  @ List.map (fun (key, path, source) ->
+      Printf.sprintf "Prompt %s · current effective %s · Markdown %s" key
+        (match source with D.Prompt_override -> "override" | D.Prompt_file -> "file" | D.Prompt_missing -> "missing")
+        (Option.value path ~default:"no file registered")) d.D.pd_prompt_files
+  @ sized "override" d.D.pd_overrides
   @ sized "지시문" d.D.pd_instructions
   @ (match d.D.pd_assignments with
      | [] -> []
@@ -119,7 +129,7 @@ let detail_lines ~(selected : D.preset_manifest option)
     match selected with
     | None -> [ "선택한 프리셋이 없습니다" ]
     | Some m ->
-      [ Printf.sprintf "%s · %s" m.D.pm_name (counts m)
+      [ Printf.sprintf "Selected: %s · %s" m.D.pm_name (counts m)
       ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
       ; "저장 시각 " ^ m.D.pm_created_at
       ; (* Which prompts, not how many. A count cannot be chosen between,

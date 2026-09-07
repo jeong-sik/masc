@@ -1527,11 +1527,17 @@ let int_field_or json key ~default =
   | _ -> required_int_field json key
 
 let required_display_field json key =
+  (* A bare epoch reaches us here when the server is too old to carry the ISO
+     twin. Render it as a date at the one place a display value is formatted,
+     so no pane shows a raw Unix epoch. *)
   match member key json with
   | `String value -> Ok value
-  | `Int value -> Ok (string_of_int value)
-  | `Intlit value -> Ok value
-  | `Float value -> Ok (Printf.sprintf "%.0f" value)
+  | `Int value -> Ok (Time_codec.rfc3339_of_unix (Float.of_int value))
+  | `Intlit value -> (
+      match float_of_string_opt value with
+      | Some epoch -> Ok (Time_codec.rfc3339_of_unix epoch)
+      | None -> Ok value)
+  | `Float value -> Ok (Time_codec.rfc3339_of_unix value)
   | `Null -> missing_field key
   | bad -> field_type_error key "a scalar display value" bad
 
@@ -7108,8 +7114,16 @@ type presets_snapshot =
 (* What a preset holds, from /api/v1/presets/show. Sizes rather than bodies:
    the pane is for deciding whether to apply, and a 4 KB prompt does not fit
    in it. The bodies are on the wire for a caller that wants them. *)
+type preset_settings_match =
+  | Preset_settings_match
+  | Preset_settings_differ
+  | Preset_settings_unavailable of string
+
 type preset_detail =
   { pd_name : string
+  ; pd_directory : string
+  ; pd_settings_match : preset_settings_match
+  ; pd_prompt_files : (string * string option * prompt_source) list
   ; pd_overrides : (string * int) list  (** prompt key, bytes *)
   ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
   ; pd_assignments : (string * string) list  (** keeper, runtime id *)
@@ -7207,6 +7221,22 @@ let decode_preset_manifest json =
 let decode_preset_detail json =
   let* preset = required_object_field json "preset" in
   let* pd_name = required_string_field preset "name" in
+  let* pd_directory = required_string_field json "directory" in
+  let* matching = required_object_field json "saved_settings" in
+  let* match_status = required_string_field matching "status" in
+  let* pd_settings_match = match match_status with
+    | "matches" -> Ok Preset_settings_match
+    | "differs" -> Ok Preset_settings_differ
+    | "unavailable" -> let* reason = required_string_field matching "reason" in Ok (Preset_settings_unavailable reason)
+    | value -> Error ("Unknown preset match status: " ^ value) in
+  let* files = required_list_field json "prompt_files" in
+  let* pd_prompt_files = decode_list "prompt_files" (fun item ->
+    let* key = required_string_field item "key" in
+    let* path = required_nullable_string_field item "path" in
+    let* source = required_string_field item "source" in
+    let* source = match source with "override" -> Ok Prompt_override | "file" -> Ok Prompt_file
+      | "missing" -> Ok Prompt_missing | value -> Error ("Unknown prompt source: " ^ value) in
+    Ok (key, path, source)) files in
   let pairs key name_field size_of =
     match Yojson.Safe.Util.member key preset with
     | `List items ->
@@ -7249,7 +7279,7 @@ let decode_preset_detail json =
         items
     | _ -> []
   in
-  Ok { pd_name; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
+  Ok { pd_name; pd_directory; pd_settings_match; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
 ;;
 
 let decode_name_reason_list json key ~name_key ~reason_key =

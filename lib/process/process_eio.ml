@@ -317,7 +317,16 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
     ~(on_error : string -> string -> 'a)
     ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
   let timeout_sec = validate_timeout_sec timeout_sec in
-  let started_at = Unix.gettimeofday () in
+  (* Both readings are taken in this process, so the interval between them is
+     the interval that elapsed. Off the wall clock it was not: a forward NTP
+     step retired this deadline early and killed a running command, and the
+     drain that follows was cut with it, so the tool's output came back
+     truncated under a timeout it never hit. A backward step withheld the
+     deadline and the wait sat. Taken where the wall-clock reading it replaces
+     was, so the budget still covers the spawn and not only the run. *)
+  let deadline =
+    Option.map (fun seconds -> Monotonic_deadline.after ~seconds) timeout_sec
+  in
   match argv with
   | [] ->
     (match on_refusal with
@@ -450,19 +459,16 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               in
               loop ()
             in
-            let deadline =
-              Option.map (fun seconds -> started_at +. seconds) timeout_sec
-            in
             let deadline_reached () =
               match deadline with
               | None -> false
-              | Some deadline -> Unix.gettimeofday () >= deadline
+              | Some deadline -> Monotonic_deadline.passed deadline
             in
             let select_wait () =
               match deadline with
               | None -> 0.05
               | Some deadline ->
-                min 0.05 (max 0.0 (deadline -. Unix.gettimeofday ()))
+                min 0.05 (Monotonic_deadline.remaining_seconds deadline)
             in
             let timed_out = ref false in
             let status_ref = ref None in

@@ -615,12 +615,12 @@ let inspect_outstanding ~path =
         ("SELECT " ^ select_columns ^ " FROM operations ORDER BY sequence")
         (fun stmt ->
           let rec read acc =
-            match Sqlite3.step stmt with
-            | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-            | Sqlite3.Rc.ROW ->
+            let rc = Sqlite3.step stmt in
+            if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+            else if rc = Sqlite3.Rc.ROW then
               let* operation = decode_operation stmt in
               read (if Operation.is_terminal operation.state then acc else operation :: acc)
-            | rc -> Error (Store_unavailable (sqlite_error db "inspect durable operations" rc))
+            else Error (Store_unavailable (sqlite_error db "inspect durable operations" rc))
           in read [])
     in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
@@ -639,7 +639,8 @@ let inspect_outstanding ~path =
   in
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_REG; _ } -> inspect_existing ()
-  | _ -> Error (Integrity_error "operation store path is not a regular file")
+  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error (Integrity_error "operation store path is not a regular file")
   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
     (* A journal without its database is damaged evidence, not an empty queue. *)
     let rec absent_companions = function

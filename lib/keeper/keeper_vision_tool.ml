@@ -397,7 +397,7 @@ let longest_edge bytes =
    the candidate's cap, a copy shrunk once to the edge the byte ratio
    predicts when it does not, and no request at all when neither fits. The
    client still measures the exact serialized body before dispatch. *)
-let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
+let fit_request_to_stated_cap ~(req : Va.request) ~cache ~cap_bytes =
   let query_bytes = String.length req.Va.query in
   let min_edge = Env_config_keeper.KeeperVision.max_dimension_floor in
   let plan_for bytes =
@@ -432,6 +432,23 @@ let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
                 ~query_bytes
             , cap_bytes )))
 ;;
+
+(* No cap means nothing to fit to. #34163 let a runtime dispatch without a
+   caller byte ceiling, which turned [validate_request_body_cap] into an
+   [int option] and left this call site reading it as an [int] -- main did not
+   compile. Absence is not a number to shrink towards: the request goes as it
+   is, and the client still measures the serialized body before dispatch.
+
+   Absence is also the common case, not an edge: 117 of the 155 runtime
+   bindings in this workspace state no max-request-body-bytes (2026-09-08). A
+   reading that treated [None] as a refusal would have stopped vision on all
+   of them. *)
+let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
+  match cap_bytes with
+  | None -> Ok req
+  | Some cap_bytes -> fit_request_to_stated_cap ~req ~cache ~cap_bytes
+;;
+
 
 (* The same kind the client raises when it measures the serialized body,
    so the walk's exhaustion classifies as capacity; the message says the
@@ -494,8 +511,15 @@ let run_candidates_outcome
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
           }
-      | Ok cap_bytes ->
-        (match fit_request_to_cap ~req ~cache ~cap_bytes with
+      | Ok declared_cap ->
+        (* A candidate that declares no cap (#34163) has nothing to fit to;
+           it gets the image as it is. *)
+        let fitted =
+          match declared_cap with
+          | None -> Ok req
+          | Some cap_bytes -> fit_request_to_cap ~req ~cache ~cap_bytes
+        in
+        (match fitted with
          | Error (actual_bytes, limit_bytes) ->
            record_vision_candidate_attempt
              ~runtime_id

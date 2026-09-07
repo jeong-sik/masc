@@ -1007,7 +1007,16 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
   in
   (* This observer runs after all fsyncs but before pending cancellation. It
      preserves the committed fact if cancellation interrupts the lock unwind. *)
-  let observe_commit () = ignore (publish []) in
+  let observe_commit () =
+    installed := Some { installed_ref = snapshot.reference; auxiliary = [] }
+  in
+  let recover_unwind exn backtrace =
+    match !installed with
+    | None -> Printexc.raise_with_backtrace exn backtrace
+    | Some value -> Installed
+        { value with auxiliary = value.auxiliary @
+            [Post_commit_unwind_interrupted (exn, backtrace)] }
+  in
   try
     with_checkpoint_cas_lock ~session_dir (fun session_dir ->
       match read_retained_locked ~session_dir ~reference:snapshot.reference with
@@ -1024,13 +1033,10 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
           | Ok Keeper_fs.Committed -> publish []
           | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
               publish [Commit_observer_failed failure])
-  with exn ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    match !installed with
-    | None -> Printexc.raise_with_backtrace exn backtrace
-    | Some value -> Installed
-        { value with auxiliary = value.auxiliary @
-            [Post_commit_unwind_interrupted (exn, backtrace)] }
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+      recover_unwind exn (Printexc.get_raw_backtrace ())
+  | exn -> recover_unwind exn (Printexc.get_raw_backtrace ())
 
 let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot

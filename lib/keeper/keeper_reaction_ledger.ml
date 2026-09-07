@@ -1120,6 +1120,76 @@ let unique_stimulus_ids stimulus_ids =
   |> List.rev
 ;;
 
+(* The dashboard asks this on every refresh, for every Keeper with a wake,
+   and the answer used to come from a full scan of that Keeper's ledger.
+   Measured 2026-09-07: 22 Keepers hold about 100 MB of reaction ledger, the
+   largest 33 MB, and the scan was 4.1% of the process's allocation - a share
+   that grows with the ledger, because a ledger only gets longer.
+
+   A day file is append-only, so an answer can be kept and advanced.
+   [Dated_jsonl.fold_range_appended] folds only what each file gained since
+   the cursors say it was read to, which is the same primitive
+   [Keeper_tool_call_log] uses for its trailing window.
+
+   What is kept per Keeper: the cursors, and one accumulator per stimulus the
+   dashboard has asked about. Not the ledger, and not every stimulus in it -
+   an id nobody asks about is never tracked. An accumulator is five booleans,
+   six timestamps, two counts, a reason and the event ids seen for that one
+   stimulus.
+
+   A stimulus asked about for the first time cannot be answered from a
+   partial read, so it clears the cursors and every tracked accumulator
+   restarts from an empty ledger read. That is the same full scan as before,
+   once per stimulus rather than once per refresh.
+
+   Bounding the scan by the wake's [started_at] would be wrong, and the
+   reason is not obvious: [Keeper_wake_enqueued] carries an
+   [occurrence_status], and [Keeper_wake_already_acked] means the wake is a
+   repeat for a stimulus enqueued much earlier. Starting the read there drops
+   that stimulus's evidence and the dashboard shows "no evidence" for a
+   reaction that happened (issue #33798). *)
+(* The read covers the whole ledger, so the range starts before any month
+   directory could exist. [Dated_jsonl] lists the month directories that are
+   there and ignores the rest of the range, so an early date costs nothing. *)
+let event_queue_reaction_evidence_epoch = "1970-01-01"
+
+type event_queue_reaction_evidence_cache =
+  { mutable cursors : (string * int) list
+  ; tracked : (string, event_queue_reaction_evidence_accumulator) Hashtbl.t
+  }
+
+(* Keyed by the store directory, so two base paths never share an entry and a
+   test working in its own directory starts with an empty cache. *)
+let event_queue_reaction_evidence_caches
+  : (string, event_queue_reaction_evidence_cache) Hashtbl.t
+  =
+  Hashtbl.create 8
+;;
+
+let event_queue_reaction_evidence_cache_mu = Stdlib.Mutex.create ()
+
+let restart_tracked_accumulators cache =
+  let ids = Hashtbl.fold (fun id _ ids -> id :: ids) cache.tracked [] in
+  List.iter
+    (fun id ->
+       Hashtbl.replace cache.tracked id (empty_event_queue_reaction_evidence_accumulator ()))
+    ids;
+  cache.cursors <- []
+;;
+
+(* A file shorter than its cursor was rotated or rewritten, and
+   [fold_range_appended] re-reads it from zero rather than skipping rows -
+   so the accumulators it just fed have counted those rows twice. The whole
+   cache for this Keeper is dropped and read again. *)
+let cursor_went_backwards ~previous ~next =
+  List.exists
+    (fun (path, boundary) ->
+       match List.assoc_opt path previous with
+       | Some earlier -> boundary < earlier
+       | None -> false)
+    next
+;;
+
 let event_queue_reaction_evidence_batch_result
       ~base_path
       ~keeper_name
@@ -1132,46 +1202,91 @@ let event_queue_reaction_evidence_batch_result
     match stimulus_ids with
     | [] -> Ok []
     | _ ->
-      let accumulators = Hashtbl.create (List.length stimulus_ids) in
-      let requested =
-        List.map
-          (fun stimulus_id ->
-             stimulus_id, empty_event_queue_reaction_evidence_accumulator ())
-          stimulus_ids
-      in
-      List.iter
-        (fun (stimulus_id, accumulator) ->
-           Hashtbl.add accumulators stimulus_id accumulator)
-        requested;
-      let note_parsed_row row =
-        match string_field "stimulus_id" row with
-        | Some stimulus_id ->
-          (match Hashtbl.find_opt accumulators stimulus_id with
-           | Some accumulator ->
-             note_event_queue_reaction_evidence_row
-               ~keeper_name
-               accumulator
-               row
-           | None -> ())
-        | None -> ()
-      in
       let store = store_for_base_path ~base_path ~keeper_name in
-      (match
-         Dated_jsonl.iter_all_entries_result store (function
-           | Dated_jsonl.Parsed row -> note_parsed_row row
-           | Dated_jsonl.Malformed_json _ -> ())
-       with
-       | Error error -> Error (Evidence_read_error error)
-       | Ok () ->
-         Ok
-           (List.map
-              (fun (stimulus_id, accumulator) ->
-                 ( stimulus_id
-                 , event_queue_reaction_evidence_of_accumulator
-                     ~keeper_name
-                     ~stimulus_id
-                     accumulator ))
-              requested))
+      let base_dir = Dated_jsonl.base_dir store in
+      let until = Jsonl_writer.day_key ~ts:(Time_compat.now ()) in
+      Stdlib.Mutex.protect event_queue_reaction_evidence_cache_mu (fun () ->
+        let cache =
+          match Hashtbl.find_opt event_queue_reaction_evidence_caches base_dir with
+          | Some cache -> cache
+          | None ->
+            let cache = { cursors = []; tracked = Hashtbl.create 8 } in
+            Hashtbl.replace event_queue_reaction_evidence_caches base_dir cache;
+            cache
+        in
+        let untracked =
+          List.filter (fun id -> not (Hashtbl.mem cache.tracked id)) stimulus_ids
+        in
+        if untracked <> []
+        then begin
+          List.iter
+            (fun id ->
+               Hashtbl.replace
+                 cache.tracked
+                 id
+                 (empty_event_queue_reaction_evidence_accumulator ()))
+            untracked;
+          restart_tracked_accumulators cache
+        end;
+        let advance () =
+          let previous = cache.cursors in
+          let (), next =
+            Dated_jsonl.fold_range_appended
+              store
+              ~since:event_queue_reaction_evidence_epoch
+              ~until
+              ~cursors:previous
+              ~init:()
+              ~f:(fun () row ->
+                match string_field "stimulus_id" row with
+                | Some stimulus_id ->
+                  (match Hashtbl.find_opt cache.tracked stimulus_id with
+                   | Some accumulator ->
+                     note_event_queue_reaction_evidence_row
+                       ~keeper_name
+                       accumulator
+                       row
+                   | None -> ())
+                | None -> ())
+          in
+          cache.cursors <- next;
+          cursor_went_backwards ~previous ~next
+        in
+        match advance () with
+        | exception Sys_error detail ->
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Error
+            (Evidence_read_error
+               (Dated_jsonl.Io_error
+                  { operation = Dated_jsonl.Read_file; path = base_dir; detail }))
+        | went_backwards ->
+          let rebuilt =
+            if went_backwards
+            then begin
+              restart_tracked_accumulators cache;
+              match advance () with
+              | exception Sys_error detail -> Error detail
+              | _ -> Ok ()
+            end
+            else Ok ()
+          in
+          (match rebuilt with
+           | Error detail ->
+             Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+             Error
+               (Evidence_read_error
+                  (Dated_jsonl.Io_error
+                     { operation = Dated_jsonl.Read_file; path = base_dir; detail }))
+           | Ok () ->
+             Ok
+               (List.map
+                  (fun stimulus_id ->
+                     ( stimulus_id
+                     , event_queue_reaction_evidence_of_accumulator
+                         ~keeper_name
+                         ~stimulus_id
+                         (Hashtbl.find cache.tracked stimulus_id) ))
+                  stimulus_ids)))
 ;;
 
 let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =

@@ -1317,6 +1317,68 @@ let test_fleet_summary_status_vocabulary_is_closed () =
     Masc.Keeper_reaction_ledger.fleet_summary_status_strings
 ;;
 
+(* The evidence read keeps its accumulators between calls and advances them
+   over what the ledger gained. Asking twice must not count a row twice, and
+   what a second call reports must match what a first call on the same ledger
+   reports - the same numbers a full scan gave before the cache existed. *)
+let test_repeated_evidence_reads_do_not_double_count () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "repeat-evidence-keeper" in
+    let stimulus = board_stimulus ~post_id:"post-repeat" () in
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    let read () =
+      require_complete_evidence
+        "repeated evidence read"
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id)
+    in
+    let first = read () in
+    check int "one row after the stimulus" 1 first.matched_record_count;
+    let second = read () in
+    check int "reading again counts the same row once" 1 second.matched_record_count;
+    check bool "the stimulus is still seen" true second.stimulus_seen;
+    (* A row appended between reads is picked up by the next read. *)
+    Keeper_reaction_ledger.record_event_queue_turn_started
+      ~base_path
+      ~keeper_name
+      stimulus;
+    let third = read () in
+    check bool "the turn start appended after the first read is seen" true
+      third.turn_started_seen;
+    check int "the appended row is counted once" 2 third.matched_record_count;
+    (* A ledger asked about a second stimulus rereads from zero, and the first
+       stimulus's answer must survive that unchanged. *)
+    let other = board_stimulus ~post_id:"post-repeat-other" () in
+    let other_id = Keeper_reaction_ledger.stimulus_id_of_event_queue other in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name other;
+    (match
+       Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+         ~base_path
+         ~keeper_name
+         ~stimulus_ids:[ stimulus_id; other_id ]
+     with
+     | Error error ->
+       failf
+         "batch read after a new stimulus failed: %s"
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+     | Ok pairs ->
+       check int "both stimuli answered" 2 (List.length pairs);
+       let evidence_for id =
+         require_complete_evidence "batch evidence" (Ok (List.assoc id pairs))
+       in
+       let first_again = evidence_for stimulus_id in
+       check int "the first stimulus keeps its two rows" 2
+         first_again.matched_record_count;
+       check bool "the first stimulus keeps its turn start" true
+         first_again.turn_started_seen;
+       let other_evidence = evidence_for other_id in
+       check int "the new stimulus has its one row" 1
+         other_evidence.matched_record_count))
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1429,6 +1491,10 @@ let () =
             "fleet summary status vocabulary is closed"
             `Quick
             test_fleet_summary_status_vocabulary_is_closed
+        ; test_case
+            "repeated evidence reads do not double count"
+            `Quick
+            test_repeated_evidence_reads_do_not_double_count
         ] )
     ]
 ;;

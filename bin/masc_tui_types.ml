@@ -3658,7 +3658,7 @@ type state = {
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
-  mutable tools_async_observation: Yojson.Safe.t option;
+  mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_lane_visibility: browser_lane_visibility;

@@ -74,6 +74,7 @@ type try_provider_ctx =
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
+  ; recovery_view : Keeper_recovery_transmission.t option
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
     (* Bound on the silent wait for the FIRST streaming provider event
@@ -931,6 +932,10 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
   in
   match config_result with
   | Error err -> Error err, None, None
+  | Ok _ when Option.is_some ctx.recovery_view
+      && Result.is_error (Keeper_recovery_transmission.require_reader ctx.tools) ->
+    Error (Keeper_recovery_transmission.to_core_error
+      Keeper_recovery_transmission.Source_reader_unavailable), None, None
   | Ok config ->
     (* Installed here rather than on the record above because the projection
        needs the provider config that record is still producing: it measures
@@ -939,9 +944,11 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     let config =
       { config with
         Runtime_agent.model_input_projection =
-          (match ctx.model_input_capacity_bytes with
-           | None -> ctx.model_input_projection
-           | Some capacity_bytes ->
+          (match ctx.recovery_view, ctx.model_input_capacity_bytes with
+           | Some view, _ -> Some (Keeper_recovery_transmission.model_input_projection view
+               ?after:ctx.model_input_projection)
+           | None, None -> ctx.model_input_projection
+           | None, Some capacity_bytes ->
              Some (bounded_model_input_projection ctx ~capacity_bytes
                ~provider_config:config.Runtime_agent.provider_cfg))
       }
@@ -1224,12 +1231,17 @@ let run_try_provider_with_context_overflow_shrink
       (ctx : try_provider_ctx)
       candidate
   =
-  match ctx.max_request_body_bytes with
-  | None ->
+  match ctx.recovery_view, ctx.max_request_body_bytes with
+  | Some _, _ ->
+    (* The validated semantic view owns retained source obligations. Retrying
+       the same view with a smaller arbitrary byte window cannot recover it.
+       Final serialized request admission still enforces the explicit cap. *)
+    run_try_provider ctx candidate
+  | None, None ->
     (* No caller byte policy means no invented byte window or shrink seed.
        Provider context refusals keep their typed result for lane recovery. *)
     run_try_provider ctx candidate
-  | Some max_capacity_bytes ->
+  | None, Some max_capacity_bytes ->
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
       ~keeper_name:ctx.keeper_name

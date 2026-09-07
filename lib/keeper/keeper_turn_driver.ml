@@ -240,6 +240,7 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
   then
     true
+  else if Keeper_recovery_transmission.should_try_next error then true
   else if Keeper_turn_driver_try_runtime.candidate_access_should_try_next error
   then
     true
@@ -845,6 +846,7 @@ let run_named
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?(initial_messages = [])
     ?model_input_projection
+    ?recovery_view
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
@@ -1166,6 +1168,13 @@ let run_named
           ()
       in
       match runtime.Runtime.execution with
+      | (Runtime_execution.Codex_app_server _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Antigravity_cli _) when Option.is_some recovery_view ->
+        (Error (Keeper_recovery_transmission.to_core_error
+          (Keeper_recovery_transmission.Client_projection_not_integrated
+            {runtime_id=attempt_runtime_id})), None,
+         Keeper_provider_attempt_effect.No_effect_observed)
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
           let on_transmitted_model_input transmitted =
@@ -1583,6 +1592,7 @@ let run_named
                      ~agent_cell ~built:agent_core_tools)
             ; initial_messages
             ; model_input_projection
+            ; recovery_view
             ; stream_idle_timeout_s
             ; first_event_timeout_s =
                 (* Keeper policy knob, injected from the resolved layer like

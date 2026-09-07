@@ -367,6 +367,29 @@ let test_projection_names_equal_turn_surface_authority () =
          (Keeper_tool_composition_surface.For_testing.instruction_skill_description
             instruction_entries)
          tool.schema.description;
+       (* The line carries what a call needs and stops there. The revision is
+          the larger half of a reference and is no longer asked for, so a line
+          still printing it would be spending the surface's bytes on a value
+          the tool ignores. RFC-0411 §4.1. *)
+       let contains needle text =
+         let needle_length = String.length needle in
+         let rec search index =
+           index + needle_length <= String.length text
+           && (String.equal (String.sub text index needle_length) needle
+               || search (index + 1))
+         in
+         search 0
+       in
+       check bool "the Available line names the identity" true
+         (contains
+            (Skill_reference.identity_to_yojson task_reference.Skill_reference.identity
+             |> Yojson.Safe.to_string)
+            tool.schema.description);
+       check bool "the Available line drops the revision" false
+         (contains
+            (Skill_reference.content_revision_to_string
+               task_reference.Skill_reference.content_revision)
+            tool.schema.description);
        let input_schema =
          match tool.schema.input_schema with
          | Some input_schema -> input_schema

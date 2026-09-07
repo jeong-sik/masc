@@ -291,6 +291,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-claude-setting-sources-opt-in | Claude Code settings layers as a keeper-profile opt-in | Implemented | - |
 | RFC-cli-runtimes-as-lane-slots | CLI runtimes as lane slots | Draft | - |
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
+| RFC-context-overflow-semantic-recovery | ContextOverflow 이후 원본을 보존하는 의미 기반 전송 복구 | Draft | - |
 | RFC-conversation-holds-the-turn-slot | 대화는 턴 슬롯을 보유한다 | Draft | - |
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |

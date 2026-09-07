@@ -13605,11 +13605,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)
       |> List.iter (fun line -> c.push_styled ~style:Ansi.reset ("  " ^ line));
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Esc:connectors"
+        (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Ctrl-G / Esc:hide lane"
            (if lines = [] then 0 else scroll + 1) (List.length lines)))
 
 let render_connectors (state : state) =
-  match state.browser_lane with
+  match browser_lane_on_screen state with
   | Some view -> render_browser_lane state view
   | None ->
   let terminal_rows, cols = get_terminal_size () in

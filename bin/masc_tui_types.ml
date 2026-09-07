@@ -2067,6 +2067,14 @@ type surface =
   | Tools
   | System_logs
 
+type browser_lane_visibility =
+  | Browser_lane_hidden
+  | Browser_lane_shown of {
+      return_surface : surface;
+      return_search : string option;
+      return_composer_focused : bool;
+    }
+
 (* The Tab cycle and the strip drawn above every surface share this order,
    so the strip cannot disagree with where Tab actually goes. Labels are the
    strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
@@ -3484,6 +3492,7 @@ type state = {
   mutable tools_async_observation: Yojson.Safe.t option;
   mutable tools_async_observation_error: string option;
   mutable browser_lane: Browser_lane_view.t option;
+  mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
@@ -3905,7 +3914,31 @@ type state = {
 (* Browser and Slack are operator readers inside Connectors. A retained
    reader model must not change chrome after the operator leaves its view. *)
 let browser_lane_on_screen (state : state) =
-  match state.view with Connectors -> state.browser_lane | _ -> None
+  match state.view, state.browser_lane_visibility with
+  | Connectors, Browser_lane_shown _ -> state.browser_lane
+  | _, Browser_lane_hidden | _, Browser_lane_shown _ -> None
+
+let show_browser_lane state app =
+  if Option.is_none (browser_lane_on_screen state) then
+    state.browser_lane_visibility <- Browser_lane_shown {
+      return_surface = state.view;
+      return_search = state.search;
+      return_composer_focused = state.composer_focused;
+    };
+  state.browser_lane <- Some (match state.browser_lane with
+    | Some view when view.Browser_lane_view.app = app -> view
+    | Some _ | None -> Browser_lane_view.create app);
+  state.view <- Connectors;
+  state.search <- None
+
+let hide_browser_lane state =
+  match state.browser_lane_visibility with
+  | Browser_lane_hidden -> ()
+  | Browser_lane_shown previous ->
+      state.browser_lane_visibility <- Browser_lane_hidden;
+      state.view <- previous.return_surface;
+      state.search <- previous.return_search;
+      state.composer_focused <- previous.return_composer_focused
 
 (* Discard belongs to this capture until it settles. A later stop/keep key
    must not revive a transcript whose recording the operator abandoned. *)
@@ -3966,7 +3999,7 @@ let text_input_target (state : state) ~compact_viewport =
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
   else if state.view = Connectors && not compact_viewport
-          && Option.is_some (Option.bind state.browser_lane (fun view -> view.Browser_lane_view.url_draft))
+          && Option.is_some (Option.bind (browser_lane_on_screen state) (fun view -> view.Browser_lane_view.url_draft))
   then Some Text_browser_url
   else if identity_surface && Option.is_some state.identity_app_form then
     Some Text_identity_app_form
@@ -4709,6 +4742,7 @@ let create_state
   tools_async_observation = None;
   tools_async_observation_error = None;
   browser_lane = None;
+  browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
@@ -5750,7 +5784,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.repository_changes with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rcs_changes)
-  | Connectors when Option.is_some state.browser_lane -> None
+  | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -6017,7 +6051,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
             List.map (fun k -> k.Tui_decode.mkh_keeper_id)
               (visible_memory_keepers state))
           state.memory_health
-  | Connectors when Option.is_some state.browser_lane -> None
+  | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
       Option.map
         (fun s ->
@@ -6260,6 +6294,7 @@ let gate_mode_label = function
 
 type palette_action =
   | Palette_browser_lane of Browser_lane_view.app
+  | Palette_hide_browser_lane
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6360,6 +6395,9 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  @ (match browser_lane_on_screen state with
+      | None -> []
+      | Some _ -> [ "hide Browser / Slack Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane Browser_lane_view.Browser;
       "go Slack Lane", Palette_browser_lane Browser_lane_view.Slack ]
   @ [ "go Logs", Palette_goto System_logs ]

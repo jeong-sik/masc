@@ -165,6 +165,11 @@ blocking_lints() {
   # the first, an OCaml constructor the TLA set does not carry trips the
   # second. --check-cross-spec is opt-in and nothing was opting in, so the
   # three cross-spec sets it compares were compared nowhere.
+  # Both were red on main until today, which is the proof they can fail:
+  # audit-path-ssot for one expanduser site (#34080), audit-odoc-refs for two
+  # references its own field pattern could not resolve (#34081).
+  run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
+  run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
   run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh
   run_lint "TLA annotation drift" \
     bash scripts/audit-tla-annotation-drift.sh --check-cross-spec

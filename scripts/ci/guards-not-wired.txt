@@ -34,8 +34,6 @@ scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc 
 scripts/audit-keeper-tool-boundary-matrix.sh  # tool
 scripts/audit-ocaml-phase-count.sh  # green
 scripts/audit-ocaml-spec-nav-line-refs.sh  # green, but 0 citations exist to check
-scripts/audit-odoc-refs.py  # red; #34081 makes it green
-scripts/audit-path-ssot.sh  # red; #34080 makes it green
 scripts/audit-rfc-closeout-lag.sh  # report
 scripts/audit-route-tool-catalog.sh  # green
 scripts/audit-shell-ir-consumption.sh  # green

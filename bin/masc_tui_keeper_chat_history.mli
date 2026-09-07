@@ -169,6 +169,7 @@ type attachment_note =
   ; att_bytes : int
   ; att_width : int option
   ; att_height : int option
+  ; att_image : Masc_tui_image_preview.preview
   }
 (** A file the row carries, named but not held: the bytes stay in the store.
     The pane's job is to say one is there, which it could not do while this

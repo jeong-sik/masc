@@ -230,11 +230,24 @@ let test_append_turn_roundtrip () =
       Alcotest.(check (option string)) "assistant has no tool id"
         None asst.tool_call_id)
 
-(* An attachment is measured once, at the moment its payload is swapped for
-   the [masc://] reference: after the swap the bytes are gone and the size is
-   no longer derivable. The loaded row carries the pixel size, the payload
-   itself reads as the reference, and the dashboard projection keeps the
-   size the row was persisted with. *)
+(* Appending an image retains both display metadata and the exact wire bytes
+   under a validated durable blob reference. *)
+let test_attachment_blob_failure_does_not_commit_chat () =
+  let base_dir = temp_base_path "keeper-chat-blob-failure" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    Unix.mkdir base_dir 0o700;
+    let masc_root = Common.masc_dir_from_base_path ~base_path:base_dir in
+    Unix.mkdir masc_root 0o700;
+    let blocker = open_out (Filename.concat masc_root "tool_blobs") in
+    close_out blocker;
+    let result = K.append_turn_result ~base_dir ~keeper_name:"blocked-image"
+        ~user_content:"look" ~assistant_content:"done"
+        ~user_attachments:[{K.id="blocked-att"; att_type="image"; name="image.png";
+          size=3; mime_type="image/png"; data="UE5H"; width=None; height=None}] () in
+    Alcotest.(check bool) "unretained attachment cannot be committed" true (Result.is_error result);
+    Alcotest.(check int) "no chat row points at missing bytes" 0
+      (List.length (K.load ~base_dir ~keeper_name:"blocked-image")))
+
 let test_attachment_dimensions_survive_the_reference_swap () =
   let base_dir = temp_base_path "keeper-chat-store-att" in
   Fun.protect
@@ -268,10 +281,23 @@ let test_attachment_dimensions_survive_the_reference_swap () =
              (Some 2) att.K.width;
            Alcotest.(check (option int)) "height measured at the swap"
              (Some 1) att.K.height;
-           Alcotest.(check bool) "payload reads as the reference" true
-             (String.starts_with
-                ~prefix:(Printf.sprintf "masc://attachment/%s/" att.K.id)
-                att.K.data);
+           (match Tool_output.decode_from_agent_core att.K.data with
+            | Tool_output.Decoded reference ->
+                Alcotest.(check (result (option string) string))
+                  "retained payload round trips through the blob store"
+                  (Ok (Some (Base64.encode_string png)))
+                  (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base_dir)
+                     ~sha256:reference.sha256
+                   |> Result.map_error Tool_blob_store.fetch_error_to_string);
+                Alcotest.(check string) "no inline image in marker preview"
+                  "attachment payload" reference.preview;
+                (match Tool_blob_maintenance.run ~base_path:base_dir ~mode:Tool_blob_maintenance.Observe_only with
+                 | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+                 | Ok report ->
+                     Alcotest.(check int) "chat attachment is a live blob consumer" 1 report.live_references;
+                     Alcotest.(check int) "sent payload is not a deletion candidate" 0 report.candidates_recorded)
+            | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+                Alcotest.fail "image has no valid durable payload reference");
            (* The dashboard row exposes the same size without re-measuring:
               the reference cannot be decoded again. *)
            (match K.to_json_array [ user ] with
@@ -3324,6 +3350,8 @@ let () =
         [
           Alcotest.test_case "append_turn roundtrip" `Quick
             test_append_turn_roundtrip;
+          Alcotest.test_case "blob failure does not commit attachment metadata"
+            `Quick test_attachment_blob_failure_does_not_commit_chat;
           Alcotest.test_case "attachment dimensions survive the reference swap"
             `Quick test_attachment_dimensions_survive_the_reference_swap;
           Alcotest.test_case "provider and canonical ids stay separate" `Quick

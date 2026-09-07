@@ -368,6 +368,7 @@ type msg_entry = {
       (** Structural producer position within one request. Inside that request,
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
+  me_image: Masc_tui_image_preview.preview;
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -2737,6 +2738,8 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  mutable image_request_generation: int;
+  (* Any new input cancels an outstanding asynchronous image preview. *)
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
      set the loop draws no frames and every key belongs to the emulator. The
      machine is [Option] so it exists only once the screen has been opened,
@@ -4089,6 +4092,7 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  image_request_generation = 0;
   msx_open = false;
   msx = None;
   palette_open = false;

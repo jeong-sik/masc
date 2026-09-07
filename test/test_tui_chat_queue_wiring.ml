@@ -49,6 +49,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
   ; me_gate = None
   ; me_submitted_at = None
@@ -73,6 +74,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_turn_sequence = turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = text
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = memory_summary
   ; me_gate = None
   ; me_submitted_at = None
@@ -2289,11 +2291,19 @@ let test_the_sending_rows_show_an_age () =
       n
 ;;
 
+let test_image_headers_sanitize_untrusted_attachment_names () =
+  check int "raw image headers pass through terminal sanitization" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"draw_image" ~callee:"Keeper_chat.terminal_safe_text")
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
     [ ( "wiring"
-      , [ test_case "an interrupt receipt is bound to the exact request" `Quick
+      , [ test_case "image headers sanitize attachment names" `Quick
+            test_image_headers_sanitize_untrusted_attachment_names
+        ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
         ; test_case "Enter during a turn queues" `Quick
             test_enter_during_a_turn_queues

@@ -1833,6 +1833,13 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Sent_image_ready of {
+      generation : int;
+      view : surface;
+      keeper_name : string option;
+      name : string;
+      result : (string, string) result;
+    }
   | Image_render_ready of {
       title : string;
       caption : string list;
@@ -2080,6 +2087,10 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_turn_sequence = None;
           me_operation_seq = operation_seq;
           me_text = text;
+          me_image = Masc_tui_image_preview.in_message ~text
+            ~attachments:(match role with
+              | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
+              | _ -> []);
           me_memory_summary = None;
           me_gate = None;
           me_submitted_at = submitted_at;
@@ -5521,14 +5532,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     then clock_text_of_unix source_at
     else "--:--:--"
   in
-  (* A file the row carries, said on a line of its own under the words. The
-     store has held these since the composer learned to stage one; the pane
-     never looked, so a message that arrived with a 70 KB image read as the
-     sentence beside it and nothing else.
-
-     Named, not drawn: the bytes stay where they are and [Ctrl-O] opens a path
-     the conversation mentions. What the reader needs here is to know a file
-     is there at all. *)
+  (* Display metadata without pulling image bytes into every history page.
+     The typed preview below is derived from the original text and refs. *)
   let text =
     Keeper_chat_history.text_with_attachments
       ~format_bytes:Masc_tui_context_inspector.format_bytes ~text
@@ -5547,6 +5552,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_image = Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
+      ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments)
   ; me_memory_summary =
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
@@ -5827,7 +5834,9 @@ let update_queued_history_text state (request : Keeper_chat.request) =
           (match entry.me_role with Message_user _ -> true | _ -> false)
           && String.equal entry.me_request_id request.Keeper_chat.request_id
           && String.equal entry.me_keeper_name request.keeper_name
-        then { entry with me_text = text }
+        then { entry with me_text = text;
+          me_image = Masc_tui_image_preview.in_message ~text:request.message
+            ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
         else entry)
       state.msg_history
 
@@ -6004,7 +6013,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                        | Message_autonomous | Message_status | Message_local
                        | Message_error | Message_tool | Message_skill _
                        | Message_thinking | Message_memory -> false
-                     then { entry with me_text = safe_text }
+                     then { entry with me_text = safe_text;
+                       me_image = Masc_tui_image_preview.in_message ~text:request.message
+                         ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
                      else entry)
                    state.msg_history;
                clear_current_message_draft state;
@@ -6235,6 +6246,7 @@ let chat_notice state ~keeper_name ~role text =
               me_turn_sequence = None;
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_image = Masc_tui_image_preview.No_image;
               me_memory_summary = None;
               me_gate = None;
               me_submitted_at = None;
@@ -6514,7 +6526,10 @@ let draw_image state ?(caption = []) ~refuse ~title data =
          site, URL). The image starts below the header and the footer sits on
          the last row, so the picture never overlaps the text. With no caption
          this is the old title-only layout. *)
-      let header_lines = title :: caption in
+      let header_lines =
+        List.map (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
+          (title :: caption)
+      in
       let header_rows = List.length header_lines in
       let box =
         { Masc_tui_graphics.columns = max 1 (columns - 2)
@@ -6780,19 +6795,8 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* The picture this conversation last named, if it named one. Newest first
-   because that is why the key is pressed: something just arrived. Older ones
-   stay reachable by their path through /image -- cycling would make this key
-   a cursor, and a cursor needs state that has to be told when the
-   conversation changed underneath it.
-
-   The row's position comes back with the path: when the composer is also
-   holding a staged image, Ctrl-O weighs the two by which arrived later, and
-   the position is what the weighing compares against the staging marker.
-
-   Read at the keystroke rather than kept beside the history: the scan costs
-   one pass over what is loaded, once, and a kept list would have to be
-   rewritten at every place a line is appended or a page is paged in. *)
+(* Read the newest typed image in this Keeper's loaded conversation. Display
+   labels are never parsed as paths. The row index preserves staging order. *)
 let newest_named_image state =
   let in_this_chat entry =
     match state.msg_target_keeper_name with
@@ -6804,11 +6808,9 @@ let newest_named_image state =
   |> List.find_mapi (fun from_newest entry ->
          if not (in_this_chat entry) then None
          else
-           match List.rev (Masc_tui_image_ref.paths entry.me_text) with
-           | [] -> None
-           (* Last named in the newest line: one message can carry several,
-              and the reader means the one nearest what they just read. *)
-           | last :: _ -> Some (length - 1 - from_newest, last))
+           match entry.me_image with
+           | Masc_tui_image_preview.No_image -> None
+           | image -> Some (length - 1 - from_newest, image))
 
 (* Both a named path and a staged attachment: which is newer. The marker left
    by [note_attachment_staged] anchors the row that was newest when the newest
@@ -6828,35 +6830,57 @@ let named_vs_staged_order state ~named_index =
       then Masc_tui_image_preview.Staged_is_newer
       else Masc_tui_image_preview.Named_is_newer)
 
-(* Ctrl-O. What it opens is chosen by [Masc_tui_image_preview.choose_preview]:
-   the newer of the path the conversation last named and the newest staged
-   attachment. A screenshot staged a keystroke ago never enters the
-   transcript, so when the staging is the newer act it is what the key was
-   pressed to see; when the naming message is newer, what the operator just
-   read wins. The refusal when there is neither is text for the pane rather
-   than a cleared screen: a key that did nothing and a key that found nothing
-   look the same otherwise, which is the shape of failure this whole surface
-   keeps having. *)
-let open_named_image state =
+(* Fetch retained wire bytes through the authenticated artifact endpoint. No
+   local filename or reference-supplied URL is ever opened. The render fiber
+   receives only the decoded image after network work completes. *)
+let open_stored_image state ~mailbox ~notice ~name reference =
+  if !terminal_draws_images = Some false then
+    notice ~role:Message_error terminal_draws_no_images
+  else begin
+    notice ~role:Message_local (Printf.sprintf "Loading sent image (any key cancels): %s" name);
+    let port = state.port in
+    let keeper_name = state.msg_target_keeper_name in
+    let generation = state.image_request_generation in
+    let view = state.view in
+    let run () =
+      let result =
+        Eio_guard.run_in_systhread ~label:"tui-sent-image-bytes" (fun () ->
+          let response = Masc_tui_http.get_json ~host:server_peer_host ~port
+              ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) in
+          Result.bind response (function
+            | `Assoc fields ->
+                (match List.assoc_opt "content" fields with
+                 | Some (`String payload) -> Masc_tui_image_preview.decode_payload payload
+                 | Some _ | None -> Error "sent image response has no payload")
+            | _ -> Error "invalid sent image response"))
+      in
+      enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> notice ~role:Message_error "sent image preview requires an active connection"
+  end
+
+let open_named_image state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let named, order =
+  let conversation, order =
     match newest_named_image state with
-    | Some (named_index, path) ->
-        Some path, named_vs_staged_order state ~named_index
-    | None -> None, Masc_tui_image_preview.Unordered
+    | Some (named_index, image) ->
+        image, named_vs_staged_order state ~named_index
+    | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
   in
   match
-    Masc_tui_image_preview.choose_preview ~named ~staged:state.msg_attachments
-      ~order
+    Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
   with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
-  | Masc_tui_image_preview.Staged attachment ->
-      open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Stored_attachment { name; reference } ->
+      open_stored_image state ~mailbox ~notice ~name reference
+  | Masc_tui_image_preview.Unavailable_attachment name ->
+      notice ~role:Message_error
+        (Printf.sprintf "Ctrl-O %s: this attachment has no retained image payload; attach it again to preview it" name)
   | Masc_tui_image_preview.No_image ->
-      notice ~role:Message_local
-        (Printf.sprintf
-           "Ctrl-O: this conversation names no %s to look at, and no image is staged for the next message"
-           Masc_tui_image_ref.extension)
+      notice ~role:Message_local "Ctrl-O: no image in this conversation or the composer"
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -9760,7 +9784,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state)
+                   ~open_named_image:(fun () -> open_named_image state ~mailbox)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
@@ -11123,6 +11147,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Sent_image_ready { generation; view; keeper_name; name; result } ->
+      if generation = state.image_request_generation
+         && view = state.view && keeper_name = state.msg_target_keeper_name then begin
+        let notice = chat_notice state ~keeper_name in
+        let refuse reason =
+          notice ~role:Message_error (Printf.sprintf "sent image %s: %s" name reason)
+        in
+        match result with
+        | Error reason -> refuse reason
+        | Ok data -> draw_image state ~refuse ~title:name data
+      end
   | Image_render_ready { title; caption; result } ->
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
@@ -13811,7 +13846,10 @@ and is loaded on demand through keeper_skill.
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
-      if Option.is_some input then Atomic.set interrupt_armed false;
+      if Option.is_some input then begin
+        Atomic.set interrupt_armed false;
+        state.image_request_generation <- state.image_request_generation + 1
+      end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
          here rather than inside the surfaces is what keeps a paste from
@@ -15716,7 +15754,7 @@ and is loaded on demand through keeper_skill.
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
                    ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state)
+                   ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->

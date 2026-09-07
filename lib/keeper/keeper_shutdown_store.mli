@@ -157,3 +157,22 @@ module For_testing : sig
     (unit -> 'a) ->
     ('a, error) result
 end
+
+type absence_acknowledgement_result =
+  | Absence_acknowledged of Keeper_shutdown_types.t
+  | Absence_already_acknowledged of Keeper_shutdown_types.t
+
+val acknowledge_absent_owner :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  expected_revision:int ->
+  check_inventory:(inventory_entry list -> (unit, 'error) result) ->
+  decide:(Keeper_shutdown_types.t -> inventory_entry list ->
+    (Keeper_shutdown_types.absent_owner_acknowledgement, 'error) result) ->
+  ((absence_acknowledgement_result, 'error) result, error) result
+(** Exact-revision acknowledgement under the existing inventory and operation
+    locks. [decide] must run only under the caller's intake, lifecycle-key and
+    authoritative backlog guards; it cannot re-enter this store. The snapshot
+    includes corrupt siblings. Original finalization evidence is immutable.
+    A repeated acknowledgement returns the retained record without [decide]. *)

@@ -1857,8 +1857,9 @@ let fresh_loopback_port () =
 (* Exercise the catalog-owned wire choice through the runtime TOML and real
    HTTP dispatch. No synthetic capability override or custom transport may
    bypass the provider-qualified model row or select a codec for this test.
-   The loopback responses prove local wire/parser behavior, not account access
-   or acceptance by OpenAI. *)
+   Explicit sampling values must survive binding and then be omitted by the
+   catalog-owned wire policy. The loopback responses prove local wire/parser
+   behavior, not account access or acceptance by OpenAI. *)
 let test_openai_responses_round_trip_through_runtime_toml () =
   let module Provider = Llm_provider.Provider_config in
   let module Types = Llm_provider.Types in
@@ -1938,6 +1939,8 @@ api-name = "%s"
 tools-support = true
 thinking-support = true
 reasoning-effort = "high"
+temperature = 0.3
+top-p = 0.8
 streaming = false
 [%s.fixture]
 is-default = true
@@ -1968,6 +1971,10 @@ is-default = true
        check (option string) "provider qualifier survives binding"
          (Some provider_id) config.provider_id;
        check string "model api-name survives binding" model_id config.model_id;
+       check (option (float 0.0001)) "explicit temperature survives binding"
+         (Some 0.3) config.temperature;
+       check (option (float 0.0001)) "explicit top_p survives binding"
+         (Some 0.8) config.top_p;
        check bool "no synthetic capability override" true
          (Option.is_none config.model_capabilities_override);
        (* This public accessor uses Some config.kind and disables bare-model
@@ -2024,6 +2031,14 @@ is-default = true
          Json.(body |> member "reasoning" |> member "effort" |> to_string);
        check string "wire model remains exact" model_id
          Json.(body |> member "model" |> to_string);
+       (match body with
+        | `Assoc fields ->
+          List.iter
+            (fun field ->
+               check bool (field ^ " is omitted rather than sent as null")
+                 false (List.mem_assoc field fields))
+            [ "temperature"; "top_p" ]
+        | _ -> fail "Responses request is not an object");
        check int "one input message" 1
          Json.(body |> member "input" |> to_list |> List.length);
        check bool "Chat input envelope absent" true (Json.member "messages" body = `Null);

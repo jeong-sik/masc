@@ -29,9 +29,12 @@ let with_observer f =
 
 let tool_result text =
   `Assoc
-    [ "event", `String "keeper_tool_call"
-    ; "keeper", `String "epoch-observer"
+    [ "type", `String "keeper_tool_call"
+    ; "name", `String "epoch-observer"
     ; "tool_name", `String "keeper_tasks_list"
+    ; "ts_unix", `Float 1.0
+    ; "duration_ms", `Int 1
+    ; "disposition", `String "completed"
     ; "tool_args", `Assoc [ "view", `String "compact" ]
     ; "tool_result", `Assoc [ "text", `String text ]
     ]

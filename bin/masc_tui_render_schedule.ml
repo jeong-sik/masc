@@ -803,7 +803,7 @@ let change_row ~op_style ~result_style ~summary_width values =
    fourteen in the row, so the column had no end where it was named and an
    invisible one where it was filled. *)
 
-let fusion_time_width = 8
+let fusion_time_width = 16
 let fusion_age_width = 7
 let fusion_state_width = 18
 let fusion_preset_width = 10
@@ -828,7 +828,7 @@ let fusion_no_values =
   }
 
 let fusion_cells ?(state_style = "") ~keeper_width ~run_width values =
-  [ Table.cell ~header:"TIME" ~width:fusion_time_width values.frow_time
+  [ Table.cell ~header:"STARTED" ~width:fusion_time_width values.frow_time
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
       values.frow_age
   ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width

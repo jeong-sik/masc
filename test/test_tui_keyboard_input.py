@@ -10759,6 +10759,7 @@ def fusion_run(
         "preset": "trio",
         "topology": "simple",
         "started_at": 1787557669.715736,
+        "finished_at": None if status == "running" else 1787557684.715736,
         "status": status,
     }
 
@@ -11257,7 +11258,7 @@ def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]
             b'event: message\n'
             b'data: {"type":"fusion_run_status","run":{"run_id":"fusion-target-601",'
             b'"keeper":"beta","preset":"trio","topology":"simple",'
-            b'"started_at":1787557669.7,"status":"completed"}}\n\n'
+            b'"started_at":1787557669.7,"finished_at":1787557684.7,"status":"completed"}}\n\n'
         ),
         content_type="text/event-stream",
     )

@@ -15414,6 +15414,47 @@ and is loaded on demand through keeper_skill.
            (* The child owns its keys. In particular b/u must never mutate a
               hidden connector binding while Firefox content is on screen. *)
            ()
+       | Some ("j" | "down" | "k" | "up" as move)
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs ->
+           let count = List.length (selected_keeper_runs state) in
+           let delta = if move = "j" || move = "down" then 1 else -1 in
+           state.keeper_run_cursor <- max 0 (min (count - 1) (state.keeper_run_cursor + delta));
+           state.detail_scroll <- state.keeper_run_cursor
+       | Some ("\r" | "\n" | "right")
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs ->
+           (match List.nth_opt (selected_keeper_runs state) state.keeper_run_cursor with
+            | None -> ()
+            | Some run ->
+                state.followed_from <- Some (state.view, None);
+                goto_surface state ~mailbox:async_messages Fusion;
+                state.fusion_mode <- Fusion_detail run.fur_run_id;
+                state.fusion_scroll <- 0;
+                launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "K" when state.view = Fusion ->
+           let run = match state.fusion_mode, state.fusion_runs with
+             | Fusion_detail id, Some snapshot -> List.find_opt (fun run -> run.fur_run_id = id) snapshot.fus_runs
+             | Fusion_list, Some snapshot -> List.nth_opt snapshot.fus_runs state.fusion_cursor
+             | _, None -> None in
+           (match Option.bind run (fun run -> List.find_index (fun k -> k.k_name = run.fur_keeper) state.keepers) with
+            | None -> add_event state "system" "The calling Keeper is not in the current roster"
+            | Some index ->
+                state.followed_from <- Some (state.view, None);
+                state.keeper_cursor <- index;
+                Option.iter (open_keeper_detail state ~base_path ~mailbox:async_messages) (selected_keeper state);
+                state.detail_tab <- Detail_runs)
+       | Some "B" when state.view = Fusion ->
+           (match state.fusion_mode, state.fusion_detail with
+            | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
+                (match detail.fud_evidence with
+                 | None -> add_event state "system" "No Board evidence has been recorded for this run"
+                 | Some evidence ->
+                     state.followed_from <- Some (state.view, Some id);
+                     state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_focus <- Right_pane;
+                     goto_surface state ~mailbox:async_messages Board;
+                     start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                       ~post_id:evidence.fe_post_id ~mailbox:async_messages)
+            | _ -> add_event state "system" "Open a Fusion run to follow its Board evidence")
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""

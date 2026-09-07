@@ -1555,3 +1555,9 @@ keeper is in. The header's `N unread` counts the same rows.
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
 recorded in Recent Events.
+
+### Following a Fusion run
+
+Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.

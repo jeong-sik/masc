@@ -4037,6 +4037,7 @@ let fusion_run_json ?(status = "completed") ?(topology = "simple")
      ; "preset", `String "trio"
      ; "topology", `String topology
      ; "started_at", `Float 1787557669.715736
+     ; "finished_at", (if status = "running" then `Null else `Float 1787557684.715736)
      ; "status", `String status
      ; "stage", `String stage
      ; "progress", progress

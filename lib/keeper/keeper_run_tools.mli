@@ -124,6 +124,7 @@ val prepare_agent_setup
        (** Frozen current+held exact selection captured beside the prompt.
            Setup must not reread mutable Workspace task state. *)
   -> trajectory_acc:Trajectory.accumulator option
+  -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t

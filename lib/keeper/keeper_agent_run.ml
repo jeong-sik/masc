@@ -295,6 +295,23 @@ let repeated_tool_call_input ~threshold tool_calls =
     else None
 ;;
 
+let direct_repetition_boundary ~execution ~tool_calls =
+  match Keeper_repetition_scope.Execution.failure execution with
+  | Some error ->
+    Error (Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+  | None ->
+    let repeated =
+      match repeated_exact_tool_call
+              ~threshold:repeated_tool_call_yield_threshold tool_calls with
+      | Some _ as repeated -> repeated
+      | None ->
+        repeated_tool_call_input
+          ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+    in
+    Ok (Option.map (fun (tool_name, repeated_count) ->
+      Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
+;;
+
 let assistant_text_is_blank text =
   String.for_all
     (fun ch -> ch = ' ' || ch = '\t' || ch = '\n' || ch = '\r')
@@ -545,7 +562,20 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
+let tool_boundary_before_repetition ~repetition_execution state =
+  match terminal_effect_boundary_decision state with
+  | Error _ as error -> error
+  | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+  | Ok Runtime_agent.Continue ->
+    match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
+    | Some error ->
+      Error (Agent_core.Error.Internal (Keeper_repetition_scope.error_to_string error))
+    | None -> Ok Runtime_agent.Continue
+;;
+
 module For_testing = struct
+  let tool_boundary_before_repetition = tool_boundary_before_repetition
+  let direct_repetition_boundary = direct_repetition_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
@@ -643,6 +673,7 @@ let run_turn
       ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context
+      ?repetition_execution
       ?event_bus
       ?trace_link
       ?continuation_channel
@@ -809,6 +840,7 @@ let run_turn
   in
   let setup =
     Keeper_run_tools.prepare_agent_setup
+      ?repetition_execution
       ~config
       ~meta
       ~profile_defaults
@@ -1116,6 +1148,12 @@ let run_turn
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
        let turn_result =
+         let on_official_client_tool_boundary =
+           Option.map (fun execution () ->
+             direct_repetition_boundary ~execution
+               ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc))
+             repetition_execution
+         in
          let cooperative_yield_probe =
            Some
              (fun (_ : Agent_core.Agent.Advanced.tool_boundary) ->
@@ -1125,7 +1163,8 @@ let run_turn
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
                   (match
-                     terminal_effect_boundary_decision (s.terminal_effect_state ())
+                     tool_boundary_before_repetition ~repetition_execution
+                       (s.terminal_effect_state ())
                    with
                    | Error _ as error -> error
                    | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
@@ -1302,6 +1341,7 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
+                      ?on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
                       ?event_bus
                       ?trace_link

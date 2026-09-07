@@ -382,7 +382,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
-    ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -549,6 +549,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run:None
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -653,6 +654,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -917,9 +919,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         | Error error -> Error error
         | Ok (`Stopped stop) ->
           recovery_failure := Session_store.Host_hook_failed;
-          (match !terminal_error with
-           | Some detail -> Error (internal_error detail)
-           | None -> settle_host_stop stop)
+          (match stop, !terminal_error with
+           | Host.Terminal_tool_boundary _, _
+          when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
+           | _, Some detail -> Error (internal_error detail)
+           | _, None -> settle_host_stop stop)
         | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
           (match turn.trajectory_error with
@@ -1084,6 +1088,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
@@ -1112,7 +1117,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
         ~context_injector
         ~context
         ~terminal_effect_state
-        ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
         ~event_bus
         ~raw_trace
         ~on_event

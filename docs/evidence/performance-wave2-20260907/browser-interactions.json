@@ -1,0 +1,618 @@
+{
+  "url": "http://127.0.0.1:8935/dashboard/#overview",
+  "title": "MASC · Overview",
+  "clicks": [
+    {
+      "label": "Keepers",
+      "start": 268.5,
+      "click_to_two_raf_ms": 44
+    },
+    {
+      "label": "개요",
+      "start": 727.6999999880791,
+      "click_to_two_raf_ms": 22.600000023841858
+    },
+    {
+      "label": "Keepers",
+      "start": 1132.699999988079,
+      "click_to_two_raf_ms": 19.69999998807907
+    },
+    {
+      "label": "개요",
+      "start": 1573.300000011921,
+      "click_to_two_raf_ms": 21.5
+    },
+    {
+      "label": "Keepers",
+      "start": 1976,
+      "click_to_two_raf_ms": 84.59999996423721
+    },
+    {
+      "label": "개요",
+      "start": 2472.699999988079,
+      "click_to_two_raf_ms": 13.699999988079071
+    }
+  ],
+  "longTasks": [
+    {
+      "start": 357.5,
+      "duration": 69
+    },
+    {
+      "start": 1177.0999999642372,
+      "duration": 110
+    },
+    {
+      "start": 1329,
+      "duration": 54
+    },
+    {
+      "start": 1406.5,
+      "duration": 53
+    },
+    {
+      "start": 1975.3999999761581,
+      "duration": 69
+    }
+  ],
+  "resources": [
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 12.5,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "duration": 19.80000001192093,
+      "transferSize": 404,
+      "encodedBodySize": 104,
+      "decodedBodySize": 111,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry",
+      "duration": 19.69999998807907,
+      "transferSize": 28627,
+      "encodedBodySize": 28327,
+      "decodedBodySize": 226314,
+      "serverTiming": [
+        {
+          "name": "telemetry_query",
+          "duration": 9.9,
+          "description": ""
+        },
+        {
+          "name": "json_serialize",
+          "duration": 0,
+          "description": ""
+        },
+        {
+          "name": "cache_lookup",
+          "duration": 12.4,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry/summary",
+      "duration": 5.200000047683716,
+      "transferSize": 5178,
+      "encodedBodySize": 4878,
+      "decodedBodySize": 52868,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/shell",
+      "duration": 23.69999998807907,
+      "transferSize": 4382,
+      "encodedBodySize": 4082,
+      "decodedBodySize": 20150,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "duration": 26.400000035762787,
+      "transferSize": 1403677,
+      "encodedBodySize": 1403377,
+      "decodedBodySize": 1403377,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/gate",
+      "duration": 32.39999997615814,
+      "transferSize": 18081,
+      "encodedBodySize": 17781,
+      "decodedBodySize": 65281,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "duration": 37.39999997615814,
+      "transferSize": 17400,
+      "encodedBodySize": 17100,
+      "decodedBodySize": 98001,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-probe",
+      "duration": 51.39999997615814,
+      "transferSize": 3323,
+      "encodedBodySize": 3023,
+      "decodedBodySize": 45307,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/project-snapshot",
+      "duration": 36.90000003576279,
+      "transferSize": 2716,
+      "encodedBodySize": 2416,
+      "decodedBodySize": 7315,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/planning",
+      "duration": 12,
+      "transferSize": 19831,
+      "encodedBodySize": 19531,
+      "decodedBodySize": 77597,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/goals",
+      "duration": 12,
+      "transferSize": 43091,
+      "encodedBodySize": 42791,
+      "decodedBodySize": 249063,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/briefing",
+      "duration": 18.400000035762787,
+      "transferSize": 3464,
+      "encodedBodySize": 3164,
+      "decodedBodySize": 32355,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "duration": 3.199999988079071,
+      "transferSize": 11482,
+      "encodedBodySize": 11182,
+      "decodedBodySize": 96473,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 88.40000003576279,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/tool-approvals",
+      "duration": 14.199999988079071,
+      "transferSize": 314,
+      "encodedBodySize": 14,
+      "decodedBodySize": 14,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/chat/history",
+      "duration": 668.6999999880791,
+      "transferSize": 82224,
+      "encodedBodySize": 81924,
+      "decodedBodySize": 378127,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/providers",
+      "duration": 13.699999988079071,
+      "transferSize": 10739,
+      "encodedBodySize": 10439,
+      "decodedBodySize": 293691,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/composite",
+      "duration": 215.80000001192093,
+      "transferSize": 2125,
+      "encodedBodySize": 1825,
+      "decodedBodySize": 4943,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/runtime-trace",
+      "duration": 278,
+      "transferSize": 0,
+      "encodedBodySize": 0,
+      "decodedBodySize": 0,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/config",
+      "duration": 416.80000001192093,
+      "transferSize": 17617,
+      "encodedBodySize": 17317,
+      "decodedBodySize": 78366,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/transitions",
+      "duration": 22.899999976158142,
+      "transferSize": 499,
+      "encodedBodySize": 199,
+      "decodedBodySize": 309,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/waiting-inventory",
+      "duration": 69.39999997615814,
+      "transferSize": 3907,
+      "encodedBodySize": 3607,
+      "decodedBodySize": 13663,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 5.599999964237213,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry",
+      "duration": 134.10000002384186,
+      "transferSize": 28629,
+      "encodedBodySize": 28329,
+      "decodedBodySize": 226314,
+      "serverTiming": [
+        {
+          "name": "telemetry_query",
+          "duration": 109.7,
+          "description": ""
+        },
+        {
+          "name": "json_serialize",
+          "duration": 0.3,
+          "description": ""
+        },
+        {
+          "name": "cache_lookup",
+          "duration": 126,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry/summary",
+      "duration": 5.399999976158142,
+      "transferSize": 5178,
+      "encodedBodySize": 4878,
+      "decodedBodySize": 52868,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "duration": 108.80000001192093,
+      "transferSize": 300,
+      "encodedBodySize": 1403377,
+      "decodedBodySize": 1403377,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/planning",
+      "duration": 34.90000003576279,
+      "transferSize": 300,
+      "encodedBodySize": 19531,
+      "decodedBodySize": 77597,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/goals",
+      "duration": 81.5,
+      "transferSize": 300,
+      "encodedBodySize": 42791,
+      "decodedBodySize": 249063,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 7.699999988079071,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/tool-approvals",
+      "duration": 13.100000023841858,
+      "transferSize": 314,
+      "encodedBodySize": 14,
+      "decodedBodySize": 14,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/runtime-trace",
+      "duration": 13.300000011920929,
+      "transferSize": 30877,
+      "encodedBodySize": 30577,
+      "decodedBodySize": 689781,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/composite",
+      "duration": 12.899999976158142,
+      "transferSize": 2125,
+      "encodedBodySize": 1825,
+      "decodedBodySize": 4943,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/transitions",
+      "duration": 13,
+      "transferSize": 499,
+      "encodedBodySize": 199,
+      "decodedBodySize": 309,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/config",
+      "duration": 507.19999998807907,
+      "transferSize": 17617,
+      "encodedBodySize": 17317,
+      "decodedBodySize": 78366,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/waiting-inventory",
+      "duration": 75.10000002384186,
+      "transferSize": 3907,
+      "encodedBodySize": 3607,
+      "decodedBodySize": 13664,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/tool-calls",
+      "duration": 419.80000001192093,
+      "transferSize": 49008,
+      "encodedBodySize": 48708,
+      "decodedBodySize": 447953,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 9.300000011920929,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry",
+      "duration": 67.69999998807907,
+      "transferSize": 28627,
+      "encodedBodySize": 28327,
+      "decodedBodySize": 226314,
+      "serverTiming": [
+        {
+          "name": "telemetry_query",
+          "duration": 9.4,
+          "description": ""
+        },
+        {
+          "name": "json_serialize",
+          "duration": 0,
+          "description": ""
+        },
+        {
+          "name": "cache_lookup",
+          "duration": 58.6,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry/summary",
+      "duration": 6.400000035762787,
+      "transferSize": 5178,
+      "encodedBodySize": 4878,
+      "decodedBodySize": 52868,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/planning",
+      "duration": 6.100000023841858,
+      "transferSize": 300,
+      "encodedBodySize": 19531,
+      "decodedBodySize": 77597,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "duration": 113.80000001192093,
+      "transferSize": 300,
+      "encodedBodySize": 1403377,
+      "decodedBodySize": 1403377,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/goals",
+      "duration": 61,
+      "transferSize": 43145,
+      "encodedBodySize": 42845,
+      "decodedBodySize": 249043,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 3.399999976158142,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/tool-approvals",
+      "duration": 15,
+      "transferSize": 314,
+      "encodedBodySize": 14,
+      "decodedBodySize": 14,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/runtime-trace",
+      "duration": 14.700000047683716,
+      "transferSize": 30877,
+      "encodedBodySize": 30577,
+      "decodedBodySize": 689781,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/composite",
+      "duration": 14.5,
+      "transferSize": 2125,
+      "encodedBodySize": 1825,
+      "decodedBodySize": 4943,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/transitions",
+      "duration": 14.199999988079071,
+      "transferSize": 499,
+      "encodedBodySize": 199,
+      "decodedBodySize": 309,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/keepers/lane-smith/waiting-inventory",
+      "duration": 111.5,
+      "transferSize": 3907,
+      "encodedBodySize": 3607,
+      "decodedBodySize": 13664,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/project-snapshot",
+      "duration": 3,
+      "transferSize": 2716,
+      "encodedBodySize": 2416,
+      "decodedBodySize": 7315,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/nav-event",
+      "duration": 33.80000001192093,
+      "transferSize": 311,
+      "encodedBodySize": 11,
+      "decodedBodySize": 11,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry/summary",
+      "duration": 24.700000047683716,
+      "transferSize": 5178,
+      "encodedBodySize": 4878,
+      "decodedBodySize": 52868,
+      "serverTiming": [
+        {
+          "name": "snapshot_read",
+          "duration": 0,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry",
+      "duration": 34.60000002384186,
+      "transferSize": 28483,
+      "encodedBodySize": 28183,
+      "decodedBodySize": 227204,
+      "serverTiming": [
+        {
+          "name": "telemetry_query",
+          "duration": 8.3,
+          "description": ""
+        },
+        {
+          "name": "json_serialize",
+          "duration": 0,
+          "description": ""
+        },
+        {
+          "name": "cache_lookup",
+          "duration": 11.3,
+          "description": ""
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "duration": 60.30000001192093,
+      "transferSize": 300,
+      "encodedBodySize": 1403377,
+      "decodedBodySize": 1403377,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/planning",
+      "duration": 24.099999964237213,
+      "transferSize": 300,
+      "encodedBodySize": 19531,
+      "decodedBodySize": 77597,
+      "serverTiming": []
+    },
+    {
+      "path": "/api/v1/dashboard/goals",
+      "duration": 29.099999964237213,
+      "transferSize": 300,
+      "encodedBodySize": 42845,
+      "decodedBodySize": 249043,
+      "serverTiming": []
+    }
+  ],
+  "storageKeys": [
+    "masc_keeper_chat_last_seen_v1",
+    "masc_dashboard_tab_visits"
+  ]
+}

@@ -323,13 +323,18 @@ let transition_task_outcome_r
           match new_status with
           | Masc_domain.AwaitingVerification
               { assignee; verification_id; intent = Masc_domain.Complete_task; _ } ->
-            if String.length (String.trim notes) = 0
+            let has_summary =
+              match handoff_context with
+              | Some context -> String.trim context.Masc_domain.summary <> ""
+              | None -> false
+            in
+            if String.trim notes = "" && not has_summary
             then
               Error
                 (Masc_domain.Task
                    (Masc_domain.Task_error.InvalidState
-                      "submit_for_verification requires non-empty notes describing the \
-                       deliverable and evidence references"))
+                      "submit_for_verification requires non-empty notes or handoff_context.summary \
+                       describing the deliverable and evidence references"))
             else
               Ok
                 (Some

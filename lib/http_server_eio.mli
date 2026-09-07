@@ -106,6 +106,12 @@ module Response : sig
   val weak_etag_value : string -> string
   (** Weak ETag value formatted as [W/"<hash>"] derived from the body string. *)
 
+  val client_tag_matches : etag:string -> client_tag:string -> bool
+  (** Shared conditional-request matching for H1 and H2 cached responses. *)
+
+  val json_revalidate_cache_control : string
+  (** Cache policy for JSON carrying a response validator. *)
+
   type json_conditional =
     | Untagged
     | Tagged of string

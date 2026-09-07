@@ -4768,3 +4768,8 @@
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
  (libraries masc_tui_runtime_config_view))
+
+(test
+ (name test_tui_runtime_listing)
+ (modules test_tui_runtime_listing)
+ (libraries alcotest masc masc_tui_types))

@@ -10485,6 +10485,7 @@ def runtime_resolved_response() -> HttpResponse:
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),
                 runtime_resolved_runtime("runtime-c", "Resolved C", "model-c"),
                 runtime_resolved_runtime("runtime-d", "Resolved D", "model-d"),
+                runtime_resolved_runtime("runtime-e", "Resolved E", "model-e"),
             ],
             "lanes": [
                 {
@@ -10654,6 +10655,10 @@ def runtime_surface_interaction(
                 b"Runtime ID: runtime-a",
                 b"Provider: Resolved A",
                 b"Model: model-a",
+                b"Effective context: 200000 tokens",
+                b"Context source: capability",
+                b"Max output: 8192 tokens",
+                b"Local runtime: no",
                 b"Used by lanes: primary",
                 b"Lane position: 1 of 2",
                 b"Probe status: reachable",
@@ -10684,10 +10689,14 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"p",
-                b"All runtimes (4)",
+                b"All runtimes (5)",
             )
             if b"runtime-a" not in CSI_RE.sub(b"", all_list):
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
+            if b"Lanes (3 lanes, 4 slots)" not in CSI_RE.sub(b"", all_list):
+                raise AssertionError("Runtime catalog counted runtimes as lane slots")
+            if b"ready / reachable" not in CSI_RE.sub(b"", all_list):
+                raise AssertionError("Runtime catalog omitted independent probe status")
             catalog_detail = send_and_wait(
                 process,
                 master_fd,
@@ -10708,7 +10717,7 @@ def runtime_surface_interaction(
                         f"Runtime catalog detail omitted {needle!r}: "
                         f"{catalog_detail_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\x1b", b"All runtimes (4)")
+            send_and_wait(process, master_fd, output, b"\x1b", b"All runtimes (5)")
             # b10d25cc12 turned [p] into a three-stop circuit: lanes tab,
             # catalog, then the standalone Lanes surface ("off the ring"),
             # and [p] there returns to the lanes tab. The old two-stop step
@@ -10748,12 +10757,25 @@ def runtime_surface_interaction(
             )
 
             fixtures[RUNTIME_PROBE_PATH] = (503, {"error": "probe refresh failed"})
-            send_and_wait(
+            read_available(master_fd, output)
+            refresh_start = len(output)
+            os.write(master_fd, b"r")
+            # Prove the key reached Runtime's forced-probe endpoint. A
+            # generic listing refresh used to intercept lowercase r, leaving
+            # only ordinary polls and never reaching this request.
+            wait_for_fixture_served(
                 process,
                 master_fd,
                 output,
-                b"r",
-                b"forced probe refresh failed",
+                force_probe,
+                after=0,
+                description="Runtime r forced provider probe",
+            )
+            # The next ordinary poll can replace the force failure's wording;
+            # both must leave the failed reading visible with the prior rows.
+            wait_for_output(
+                process, master_fd, output, b"runtime probe load failed",
+                start=refresh_start, timeout=3.0,
             )
             if force_probe.served != 1:
                 raise AssertionError(
@@ -10776,7 +10798,14 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\x1b", b"9:Runtime")
+            # Verify the selected parent pane and its Runtime entry remain
+            # visible at 99 columns, even when later pane names are clipped.
+            config_start = len(output)
+            send_and_wait(
+                process, master_fd, output, b"\x1b", "▸runtime.toml".encode()
+            )
+            if b"9:Runtime" not in CSI_RE.sub(b"", bytes(output[config_start:])):
+                raise AssertionError("Config hides its Runtime entry at 99 columns")
             os.write(master_fd, b"q")
             completed = True
         finally:

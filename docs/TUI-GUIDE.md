@@ -9,8 +9,8 @@ server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
 Board, Planning, Fusion, Workspace, Config.
-Eleven more surfaces hang off parents instead of holding Tab stops:
-Planning's `v` walks Task Review, Task Verdicts, Schedules, and Fusion;
+Additional surfaces hang off parents instead of holding Tab stops:
+Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
@@ -549,10 +549,12 @@ and emphasis keep their own hierarchy. Connector and agent origins remain in
 the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
-Chat opens in the clock-free compact layout: the speaker mark and label remain
-beside the prose while bookkeeping stays out of the reading path. `Ctrl-F`
-adds an inline clock, then a full timestamp/request-id heading; the header names
-those added projections as `metadata:inline` or `metadata:full`. A streaming
+Chat opens with a short clock beside the speaker mark and label. The clock is
+drawn only where the minute moved, so a run of rows inside one minute leaves
+the column blank and keeps its width. `Ctrl-F` walks the axis: a full
+timestamp/request-id heading, then the bare clock-free gutter, then back. The
+header names the two stops away from rest as `metadata:full` or
+`metadata:off`. A streaming
 row uses its actual start clock rather than the word `live`; the active-turn
 status below the history carries the live state and elapsed time. When
 one newest message is taller than the history pane, the live edge keeps its
@@ -1002,9 +1004,8 @@ boundary.
 
 The scheduled-automation list: every wake the runtime has queued, active rows
 first by due time. This is the surface that answers "why is this keeper about
-to wake up". It is the fourth stop of Planning's `v` walk rather than a Tab
-stop; `v` moves on to Fusion, `Esc` returns to Planning, and the palette
-keeps `go Schedules`.
+to wake up". Open it through the `go Schedules` palette entry. The selected
+Keeper also exposes its automation in the Automation detail tab.
 
 ```
  MASC Schedules  [me]  10:44:57  [connected]
@@ -1055,9 +1056,9 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
 
-The retained Fusion run registry is the list. It is the fifth stop of
-Planning's `v` walk rather than a Tab stop; `v` wraps back to Goals, `Esc`
-returns to Planning, and the palette keeps `go Fusion`. While a run is active, `STATE`
+The retained Fusion run registry is the list. Fusion is a top-level Tab stop
+and is also reachable through the `go Fusion` palette entry. After following a link, `Esc` returns directly to its origin. Otherwise
+it closes detail to the run list, then returns to Overview. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
 bounded decision and resolved-answer preview when the current producer wrote
@@ -1067,9 +1068,9 @@ what `Enter` opens.
 
 ```
  MASC Fusion (19 runs)  18:31:04  [connected]
-   TIME     AGE     STATE              KEEPER           PRESET     RUN
- > 16:42:11 14s     judge(2/1)         rw-e0-r9         trio       kmsg-386bed...
-   16:40:07 2m      completed          analyst          trio       kmsg-942ab1...
+   STARTED          AGE     STATE              KEEPER           PRESET     RUN
+ > 2026-09-07 16:42 14s     judge(2/1)         rw-e0-r9         trio       kmsg-386bed...
+   2026-09-07 16:40 2m      completed          analyst          trio       kmsg-942ab1...
   j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
 ```
 
@@ -1077,8 +1078,8 @@ The detail is a separate exact read. Lifecycle remains the Registry fact;
 evidence comes only from a Board post whose typed origin is
 `source=fusion` with the same `fusion_run_id`. The header repeats the current
 stage and its panel counts. `recorded` puts the judge result, resolved answer,
-and reason first, followed by the question and every panel answer or failure in
-server order. Question, successful panel answers, judge resolution, reason, and
+and reason alongside the original question and Board link, followed by every
+panel answer or failure in server order. Question, successful panel answers, judge resolution, reason, and
 the terminal summary use the TUI Markdown renderer; typed failures stay plain
 so their exact reason text is not reinterpreted. The panel header summarizes
 answered/failed counts and tokens; it does not calculate a majority, minimum

@@ -425,7 +425,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -608,6 +608,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run:None
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -699,6 +700,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -940,9 +942,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         (match client_result with
          | Error (Runtime_claude_code.Stopped_by_host { stop; usage }) ->
            recovery_failure := Session_store.Host_hook_failed;
-           (match !terminal_error with
-            | Some detail -> Error (internal_error detail)
-            | None -> settle_host_stop ~usage stop)
+           (match stop, !terminal_error with
+            | Host.Terminal_tool_boundary _, _
+          when Option.is_some on_official_client_tool_boundary -> settle_host_stop ~usage stop
+            | _, Some detail -> Error (internal_error detail)
+            | _, None -> settle_host_stop ~usage stop)
          | Error error ->
            context_overflow_retry_safe :=
              (match error with
@@ -1113,6 +1117,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
@@ -1219,7 +1224,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-        ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
             ~config)
         ())
   in

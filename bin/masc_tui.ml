@@ -1956,8 +1956,13 @@ type async_msg =
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
+  (* The scope travels with the directory. Without it a reply names a
+     relative path, which two scopes can both have, and the handler had no
+     way to tell a late answer for the scope just left from an answer for the
+     scope now open (#33946). *)
   | Code_entries_loaded of
-      string * (Masc.Tui_decode.workspace_tree_node list, string) result
+      (code_workspace_scope * string)
+      * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
@@ -3153,17 +3158,22 @@ let launch_code_entries_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
   let dir = state.code_dir in
+  (* Read here, not inside the daemon. The daemon runs later, and the scope it
+     read then was whichever one was current by then -- so a request made in
+     one scope could be sent under another. *)
+  let scope = state.code_scope in
+  let key = (scope, dir) in
   let run () =
     let result =
       try
-        let keeper, repo = code_scope_axes state in
+        let keeper, repo = code_scope_axes_of scope in
         Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
           ~path:dir ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Code_entries_loaded (dir, result))
+    enqueue_async mailbox (Code_entries_loaded (key, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3172,7 +3182,7 @@ let launch_code_entries_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Code_entries_loaded (dir, Error "Eio switch is unavailable"))
+        (Code_entries_loaded (key, Error "Eio switch is unavailable"))
 
 let launch_code_file_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
@@ -3224,16 +3234,10 @@ let code_history_entry_at_ms = function
   | Hist_keeper_change (change : Masc.Tui_decode.file_change) ->
     change.fc_at *. 1000.
 
-(* Scope and path together: the same relative path in two repositories is
-   two different histories. *)
-let code_history_key_equal (left_scope, left_path) (right_scope, right_path) =
-  left_scope = right_scope && String.equal left_path right_path
-;;
-
 let launch_code_history_load state ~mailbox ~path =
   let scope = state.code_scope in
   match
-    Masc_tui_fetched.start ~equal:code_history_key_equal state.code_history
+    Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_history
       ~key:(scope, path)
   with
   | Masc_tui_fetched.Already_loading -> ()
@@ -10677,8 +10681,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error detail ->
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
-  | Code_entries_loaded (dir, result) ->
-      if String.equal dir state.code_dir then (
+  | Code_entries_loaded (key, result) ->
+      if code_scope_path_equal key (state.code_scope, state.code_dir) then (
         match result with
         | Ok entries ->
             state.code_entries <- entries;
@@ -10831,12 +10835,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          operator has left cannot caption the file now open at the same
          relative path. *)
       let landed =
-        Masc_tui_fetched.is_current ~equal:code_history_key_equal state.code_history
+        Masc_tui_fetched.is_current ~equal:code_scope_path_equal state.code_history
           request
         && Result.is_ok result
       in
       state.code_history <-
-        Masc_tui_fetched.complete ~equal:code_history_key_equal state.code_history
+        Masc_tui_fetched.complete ~equal:code_scope_path_equal state.code_history
           request result;
       if landed then state.code_history_scroll <- 0
   | Resources_listed result -> (
@@ -16210,14 +16214,15 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0
        | Some "r"
          when (not message_mode)
+              && state.view <> Runtime
               && not (state.view = Keepers Keeper_detail && state.detail_tab = Detail_identity)
               && state.context_inspector_open = false ->
            (* The listing footers have promised [r:refresh] since the footer
               tables existed; no handler ever answered it. This arm makes the
               sheet true everywhere a listing draws it. The guards stay out
-              of the two surfaces that own their own r — the identity pane
-              and the context inspector — and out of the composer, where r
-              must type. *)
+              of the identity pane and context inspector, and out of the
+              composer, where r must type. Runtime also owns its refresh:
+              its r/R handler below forces a provider probe. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -16457,7 +16462,7 @@ and is loaded on demand through keeper_skill.
                      reading, or failed -- so opening the overlay shows what
                      there is rather than asking again. *)
                   (match Masc_tui_fetched.current_key state.code_history with
-                   | Some key when code_history_key_equal key (state.code_scope, path)
+                   | Some key when code_scope_path_equal key (state.code_scope, path)
                      -> ()
                    | Some _ | None ->
                        launch_code_history_load state

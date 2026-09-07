@@ -141,6 +141,13 @@ pinned_pkgs=()
 # later the switch this was written on still had the stock build. The check
 # reads one `opam pin list`, so adding a pin above is enough to cover it.
 pin_drift=()
+# A pin the developer aimed at a checkout on this machine. Kept apart from
+# drift because it is the opposite situation: drift means the switch quietly
+# holds a build nobody chose, while a path pin is a deliberate act -- someone
+# is editing that dependency. Failing on it was worse than useless, because
+# the only repair this script offers (--install) replaces the path pin with
+# the git one and throws the working copy out of the build.
+pin_local=()
 # One "name<TAB>target" line per live pin. A table rather than an associative
 # array: macOS ships bash 3.2, where `declare -A` does not exist.
 live_pin_table=""
@@ -158,6 +165,15 @@ live_pin_target() {
   printf '%s\n' "${live_pin_table}" | awk -F'\t' -v want="$1" '$1 == want { print $2; exit }'
 }
 
+# A target naming a place on this machine rather than a repository to fetch.
+# `opam pin list` writes these as `file:///path` for a path or rsync pin.
+is_local_pin_target() {
+  case "$1" in
+    file://* | /*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 check_pin() {
   local package="${1%%.*}"
   local want="$2"
@@ -166,7 +182,11 @@ check_pin() {
 
   if [[ -z "${have}" ]]; then
     pin_drift+=("${package}: not pinned; expected ${want}")
-  elif [[ "${have}" != "${want}" ]]; then
+  elif [[ "${have}" == "${want}" ]]; then
+    :
+  elif is_local_pin_target "${have}"; then
+    pin_local+=("${package}: your checkout at ${have}; this repo names ${want}")
+  else
     pin_drift+=("${package}: pinned to ${have}; expected ${want}")
   fi
 }
@@ -178,6 +198,21 @@ opam_pin_add() {
 
   if $do_check; then
     check_pin "${package}" "${source}"
+    return 0
+  fi
+
+  # A path pin is somebody's working copy, and re-pinning it to the named
+  # commit throws that out of the build -- which is what the check used to
+  # send people here to do, to fix an unrelated package. Left alone and said
+  # out loud; OPAM_PIN_REPLACE_LOCAL=1 asks for the named commit back.
+  local live
+  live="$(live_pin_target "${package%%.*}")"
+  if [[ -n "${live}" ]] \
+     && [[ "${live}" != "${source#git+}" ]] \
+     && is_local_pin_target "${live}" \
+     && [[ "${OPAM_PIN_REPLACE_LOCAL:-0}" != "1" ]]; then
+    echo "[opam-pin] keeping your checkout for ${package}: ${live}" >&2
+    echo "[opam-pin]   this repo names ${source#git+}; OPAM_PIN_REPLACE_LOCAL=1 to switch back" >&2
     return 0
   fi
 
@@ -203,9 +238,9 @@ opam_pin_add() {
   done
 }
 
-if $do_check; then
-  load_live_pins
-fi
+# Read for every mode. A pinning run needs it too, so it can tell a package
+# nobody has touched from one already aimed at a checkout on this machine.
+load_live_pins
 
 if $include_compact_protocol; then
   opam_pin_add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
@@ -238,6 +273,14 @@ if $include_bisect; then
 fi
 
 if $do_check; then
+  # Said whether or not anything failed, so a build off a working copy says so
+  # once per run instead of looking like a build of the named commit.
+  if [[ ${#pin_local[@]} -gt 0 ]]; then
+    echo "[opam-pin] built from a checkout on this machine, not the named commit:" >&2
+    printf '[opam-pin]   %s\n' "${pin_local[@]}" >&2
+    echo "[opam-pin] whatever is in that directory right now is what links." >&2
+    echo "[opam-pin] to go back to the named commit: bash scripts/opam-pin-external-deps.sh --install" >&2
+  fi
   if [[ ${#pin_drift[@]} -eq 0 ]]; then
     echo "[opam-pin] all ${#pinned_pkgs[@]} pins are in place"
     exit 0

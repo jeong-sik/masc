@@ -172,7 +172,7 @@ let live_lane_refused =
      automation lane"
 ;;
 
-let issue ~lane_name ~verb:v ~timeout_sec =
+let issue_queued ~lane_name ~verb:v ~timeout_sec =
   match Hashtbl.find_opt lanes lane_name with
   | Some lane when not (lane_connected ~lane_name) -> Lane_absent
   | None -> Lane_absent
@@ -195,3 +195,15 @@ let issue ~lane_name ~verb:v ~timeout_sec =
     unregister_waiter lane id;
     outcome
 ;;
+
+(* Installed by server bootstrap. Native automation owns its session directly;
+   the live extension continues to use the command queue. *)
+let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
+let install_automation_executor executor = Atomic.set automation_executor executor
+let issue ~lane_name ~verb ~timeout_sec =
+  match lane_name, Atomic.get automation_executor with
+  | "automation", Some execute ->
+    Eio.Fiber.first
+      (fun () -> execute verb)
+      (fun () -> Time_compat.sleep timeout_sec; Timed_out)
+  | _ -> issue_queued ~lane_name ~verb ~timeout_sec

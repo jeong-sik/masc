@@ -40,7 +40,7 @@ async function pageRead(args) {
     typeof args?.tabId === "number"
       ? args.tabId
       : (await browser.tabs.query({ active: true, currentWindow: true }))[0]?.id;
-  if (typeof tabId !== "number") return { error: "no_active_tab" };
+  if (typeof tabId !== "number") throw new Error("no_active_tab");
   const [res] = await browser.tabs.executeScript(tabId, {
     code: "document.body ? document.body.innerText : ''",
   });

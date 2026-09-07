@@ -549,10 +549,12 @@ and emphasis keep their own hierarchy. Connector and agent origins remain in
 the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
-Chat opens in the clock-free compact layout: the speaker mark and label remain
-beside the prose while bookkeeping stays out of the reading path. `Ctrl-F`
-adds an inline clock, then a full timestamp/request-id heading; the header names
-those added projections as `metadata:inline` or `metadata:full`. A streaming
+Chat opens with a short clock beside the speaker mark and label. The clock is
+drawn only where the minute moved, so a run of rows inside one minute leaves
+the column blank and keeps its width. `Ctrl-F` walks the axis: a full
+timestamp/request-id heading, then the bare clock-free gutter, then back. The
+header names the two stops away from rest as `metadata:full` or
+`metadata:off`. A streaming
 row uses its actual start clock rather than the word `live`; the active-turn
 status below the history carries the live state and elapsed time. When
 one newest message is taller than the history pane, the live edge keeps its

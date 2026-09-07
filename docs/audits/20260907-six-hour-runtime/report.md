@@ -126,7 +126,7 @@
 
 ### 12. Board candidate ledger schema 불일치
 
-- 조치: 현재 schema5 원본 두 파일을 보존. gondolin pending5, k3think pending12가 있어 삭제나 성공 처리하지 않음. 명시적 실패 보존/재조정 경로 필요.
+- 조치: 해석 불가 원문2파일30행을0600 복구 증거로 해시 검증 보존. 다음 쓰기가 거부 행을 삭제하던 결함 수정#33906, 원격 CI 중. 원래17Pending 및 기존 파티션 재접수는 별도 미완료.
 - 관련 코드/경계: `lib/keeper/keeper_board_attention_candidate.ml`
 - 집계 주의: 2 files across 6 boots; not 12 distinct corrupted files
 - 최초 증거: `2026-09-06T23:26:05Z` / seq `26080097` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312617`
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: 현재 서버 fe702d71da의 원격 artifact34085743562 성공. 642파일 해시 검증 후05:15:17Z 적용, 실제 build-stamp mtime 보존. health dashboard=ok 및 화면 경고 해소 확인.
+- 조치: 서버362f55b1 배포로 assets 경로가 ~/me/assets로 변경되어 missing 재발. 동일 커밋 artifact34087501979를642파일 검증 후05:44:58Z 적용해 dashboard=ok·새 화면 확인. 설치본 dashboard 배송 누락 근본 수정은 진행 중.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -287,3 +287,18 @@ health의 oldest 값은 후보 source timestamp를 사용해 실제 큐 입장 �
 05:12:44Z 추가 확인: geek-scout의 실제 `WebSearch` 도구 호출이 `outcome=ok`, 출력23,844자로 기록됐다. [원본 seq와 메시지](keeper-web-search-success.json)는 SearXNG 직접 질의와 별도로 Keeper 경유 성공을 증명한다. 로그가 선택 provider를 식별하지 않으므로 SearXNG에 성공 원인을 단정하지 않는다. 앞선 MCP policy 거절은 해당 운영자 도구 표면의 검증 제한이며 실제 Keeper 실패가 아니다.
 
 증거 검토 보정: 첨부 terminal join이 직접 증명하는 pr-updater 항목은1213/1214 두 건이다. 후보 첫 사례의 판정→전달은약109분이며 첨부 표본의 최대 지연은6,654.176초(약111분)이다.
+
+
+## 05:33–05:45Z 설치 바이너리 경로 변경과 재복구
+
+다른 작업 주체가 `~/.local/bin/masc`362f55b1을 cwd`~/me`에서05:33:14Z 시작했다. unbound dashboard 해석 경로가 `~/me/assets/dashboard`로 바뀌어 indexmissing이 재발했다. 05:37Z 기존 검증 번들을 새 경로에 원자적으로 복원한 뒤, 현재 바이너리와 같은362f55b1의 [원격artifact34087501979](https://github.com/jeong-sik/masc/actions/runs/34087501979) 성공 산출물을05:44:58Z 적용했다.642파일과 HTTPindex해시를 재검증했고 dashboard=ok다. [새 배포 영수증](dashboard-relocated-deploy-receipt.json), [health](health-dashboard-relocated.json), [화면](dashboard-relocated.png). 실제 stampmtime 보존, 원래 assets 보존, 서버 재시작 없음. 전체runtime은 여전히degraded다.
+
+소스 조사에서 release는 dashboard를 빌드하지만 설치 패키지에 배송하지 않고, 설치 binary의 unbound 실행은 cwd에서assets를 추측하는 결함을 확인했다. 이 반복 문제는 바이너리와 대시보드의 함께 배포 및 검증된 설치 바인딩으로 수정 중이다. 이번 수동 복구를 설치 경로의 근본 수정 완료로 계산하지 않는다.
+
+#33890은 다른 작업 주체가21889e3253으로05:34Z 병합했다. 현재362f55b1 바이너리는 그 이전 커밋이므로 Board drain 배포를 주장하지 않는다.
+
+## 05:40Z 해석 불가 후보의 원본 보존
+
+원래 gondolin-probe11행과k3think-probe19행은 schema5이고17Pending을 포함한다. 다음 정상 쓰기에서 해석 가능한 후보만 압축하면서 거부 행을 삭제하는 데이터 유실 경로를 발견했다. 먼저 두 원본을 runtime recovery 디렉터리에0600으로 보존하고 원문SHA256이 일치함을 확인했다. liveledger는 변경하지 않았다. [원문 없이 해시·경로만 담은 영수증](candidate-schema-backup-receipt.json).
+
+[수정#33906](https://github.com/jeong-sik/masc/pull/33906) head30a3b7500c은 거부 행이 있는 ledger의 압축을 보류하고 정상 append는 유지한다. 새 schema를 수용하거나Pending을Consumed로 변경하지 않는다. [원격CI34087951889](https://github.com/jeong-sik/masc/actions/runs/34087951889)는 실행 중이다. 기존 Ready/Running/Completed 파티션과17Pending의 재접수는 별도 조정이 필요하다.

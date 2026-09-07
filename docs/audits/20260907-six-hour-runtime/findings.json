@@ -302,7 +302,7 @@
     "count": 12,
     "note": "2 files across 6 boots; not 12 distinct corrupted files",
     "source": "lib/keeper/keeper_board_attention_candidate.ml",
-    "action": "현재 schema5 원본 두 파일을 보존. gondolin pending5, k3think pending12가 있어 삭제나 성공 처리하지 않음. 명시적 실패 보존/재조정 경로 필요.",
+    "action": "해석 불가 원문2파일30행을0600 복구 증거로 해시 검증 보존. 다음 쓰기가 거부 행을 삭제하던 결함 수정#33906, 원격 CI 중. 원래17Pending 및 기존 파티션 재접수는 별도 미완료.",
     "status": "pending-preserved",
     "first": {
       "seq": 26080097,
@@ -356,7 +356,7 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "현재 서버 fe702d71da의 원격 artifact34085743562 성공. 642파일 해시 검증 후05:15:17Z 적용, 실제 build-stamp mtime 보존. health dashboard=ok 및 화면 경고 해소 확인.",
+    "action": "서버362f55b1 배포로 assets 경로가 ~/me/assets로 변경되어 missing 재발. 동일 커밋 artifact34087501979를642파일 검증 후05:44:58Z 적용해 dashboard=ok·새 화면 확인. 설치본 dashboard 배송 누락 근본 수정은 진행 중.",
     "status": "deployed-verified",
     "first": {
       "seq": 26156709,

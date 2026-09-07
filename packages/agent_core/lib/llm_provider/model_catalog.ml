@@ -20,6 +20,7 @@ type model_entry =
   ; supports_parallel_tool_calls : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
   ; supports_reasoning_budget : bool option
@@ -329,6 +330,7 @@ let known_entry_keys =
   ; "supports_parallel_tool_calls"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
+  ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "supports_extended_thinking"
   ; "supports_reasoning_budget"
@@ -440,6 +442,13 @@ let parse_entry entry_toml =
       ~entry_id:id_prefix
       "chat_output_budget_field"
       ~allowed:Capability_vocab.chat_output_budget_field_values
+      entry_toml
+  in
+  let* tool_schema_conformance =
+    canonical_string_opt
+      ~entry_id:id_prefix
+      "tool_schema_conformance"
+      ~allowed:Capability_vocab.tool_schema_conformance_values
       entry_toml
   in
   let* supports_reasoning =
@@ -594,6 +603,7 @@ let parse_entry entry_toml =
     ; supports_parallel_tool_calls
     ; assistant_tool_content_format
     ; chat_output_budget_field
+    ; tool_schema_conformance
     ; supports_reasoning
     ; supports_extended_thinking
     ; supports_reasoning_budget

@@ -45,6 +45,10 @@ type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
+  | Rich_json_schema
+  | Conformant_subset_required
+
 type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
@@ -116,6 +120,10 @@ type capabilities =
         [max_tokens] or the reasoning-era [max_completion_tokens] OpenAI's
         gpt-5 family requires. Field name only; the #2517 omit/clamp receipt
         policy is unchanged. *)
+  ; tool_schema_conformance : tool_schema_conformance
+    (** Whether the provider rejects enum/oneOf/anyOf/allOf inside function
+        parameter schemas; when conformant-only, the serializer projects tool
+        schemas to the allowed subset. *)
   ; (* Thinking / reasoning *)
     supports_reasoning : bool
   ; supports_extended_thinking : bool

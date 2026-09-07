@@ -3,7 +3,7 @@
     The record [Unix.tcsetattr] takes has no IEXTEN field and no c_cc array, so
     a key the tty layer claims for itself cannot be reclaimed through it -- and
     cannot be handed back through it either. That is not a gap worth a whole
-    termios binding: it is one key, taken at session start and returned at the
+    termios binding: the keys are taken at session start and returned at the
     end. *)
 
 val disable_literal_next : Unix.file_descr -> bool
@@ -32,3 +32,15 @@ val literal_next : Unix.file_descr -> int
 val set_literal_next : Unix.file_descr -> int -> bool
 (** Put the literal-next character back. [false] when [fd] is not a terminal
     or the kernel refused. *)
+
+val discard_output : Unix.file_descr -> int
+(** Current VDISCARD character, or [-1] if unavailable. Snapshot before raw
+    mode: Unix.terminal_io cannot preserve this character. *)
+
+val set_discard_output : Unix.file_descr -> int -> bool
+(** Restore a previously captured VDISCARD character. *)
+
+val disable_discard_output : Unix.file_descr -> bool
+(** Disable VDISCARD so Ctrl-O reaches the Browser screenshot handler on BSD
+    terminals. Apply after every Unix.tcsetattr and restore at every release,
+    including suspend and editor handoff. Other extended tty keys stay intact. *)

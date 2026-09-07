@@ -58,6 +58,10 @@ type agent_core = {
   at : float;
   correlation : string option;
   parent : string option;
+  event_id : string option;
+  run_id : string option;
+  caused_by : string option;
+  execution_id : string option;
 }
 
 type keeper_heartbeat = {
@@ -87,6 +91,11 @@ type keeper_tool_call = {
   kt_duration_ms : float option;
   kt_disposition : string option;
   kt_at : float;
+  kt_tool_use_id : string option;
+  kt_tool_args : Yojson.Safe.t option;
+  kt_tool_result : Yojson.Safe.t option;
+  kt_tool_args_preview : string option;
+  kt_tool_output_preview : string option;
 }
 
 type event =
@@ -162,6 +171,12 @@ let required reader fields name ~event =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s carries no %s" event name)
 
+let optional_string_field fields name ~event =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> Error (Printf.sprintf "%s carries a non-string %s" event name)
+
 let agent_core_kind_of_event_type = function
   | "tool_called" -> Tool_called
   | "tool_completed" -> Tool_completed
@@ -189,6 +204,10 @@ let decode_agent_core ~type_name fields =
      list payload; it is still an event of the family, with no agent. *)
   let agent = string_field fields "agent_name" in
   let payload = Option.value ~default:[] (assoc_field fields "payload") in
+  let* event_id = optional_string_field fields "event_id" ~event:type_name in
+  let* run_id = optional_string_field fields "run_id" ~event:type_name in
+  let* caused_by = optional_string_field fields "caused_by" ~event:type_name in
+  let* execution_id = optional_string_field payload "execution_id" ~event:type_name in
   let batch =
     match (int_field payload "batch_index", int_field payload "batch_size") with
     | Some index, Some size -> Some (index, size)
@@ -206,6 +225,10 @@ let decode_agent_core ~type_name fields =
        ; at
        ; correlation = string_field fields "correlation_id"
        ; parent = string_field fields "parent_event_id"
+       ; event_id
+       ; run_id
+       ; caused_by
+       ; execution_id
        })
 
 let decode_keeper_heartbeat fields =
@@ -245,6 +268,11 @@ let decode_keeper_tool_call fields =
   let* kt_keeper = required string_field fields "name" ~event in
   let* kt_tool = required string_field fields "tool_name" ~event in
   let* kt_at = required float_field fields "ts_unix" ~event in
+  let* kt_tool_use_id = optional_string_field fields "tool_use_id" ~event in
+  let* kt_tool_args_preview = optional_string_field fields "tool_args_preview" ~event in
+  let* kt_tool_output_preview = optional_string_field fields "tool_output_preview" ~event in
+  let kt_tool_args = List.assoc_opt "tool_args" fields in
+  let kt_tool_result = List.assoc_opt "tool_result" fields in
   Ok
     (Keeper_tool_call
        { kt_keeper
@@ -253,6 +281,11 @@ let decode_keeper_tool_call fields =
        ; kt_duration_ms = float_field fields "duration_ms"
        ; kt_disposition = string_field fields "disposition"
        ; kt_at
+       ; kt_tool_use_id
+       ; kt_tool_args
+       ; kt_tool_result
+       ; kt_tool_args_preview
+       ; kt_tool_output_preview
        })
 
 (* The [ag_ui_event] frame names itself in [type]; only CUSTOM adds a [name],

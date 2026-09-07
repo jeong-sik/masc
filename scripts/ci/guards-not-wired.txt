@@ -56,10 +56,8 @@ scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-boundary-guard-mli-pairs.sh  # green; diff-driven on BASE_REF, and no
 #   planted violation has been shown to fail it yet
 scripts/check-boundary-guard.sh
-scripts/check-keeper-runtime-setting-registry.sh  # red
 scripts/check-ollama-model-context.py
 scripts/check-pr-hygiene.sh
 scripts/check-pr-sync.sh
 scripts/check-release-train-guard.sh
-scripts/ci/check-env-snapshot-default-drift.py  # red
 scripts/lib/worktree-cleanup-guards.sh

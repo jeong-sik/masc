@@ -325,6 +325,19 @@ blocking_pr_lints() {
   run_lint "TLA harness coverage" bash scripts/ci/check-tla-harness-coverage.sh
   run_lint "Opam lock covers declared deps" \
     bash scripts/check-opam-lock-covers-deps.sh
+  # Two more from the same list, both annotated red on 2026-09-07 and both
+  # green now -- the annotations go stale, which is its own reason to run
+  # them from CI rather than by hand once.
+  #
+  #   check-keeper-runtime-setting-registry  MASC_KEEPER_PROBE_UNREGISTERED
+  #                                          added to env_config_keeper.ml
+  #   check-env-snapshot-default-drift       the snapshot's stated 1000 for
+  #                                          MASC_CACHE_MAX_ENTRIES against a
+  #                                          reader that applies 1000
+  run_lint "Keeper runtime setting registry" \
+    bash scripts/check-keeper-runtime-setting-registry.sh
+  run_lint "Env snapshot default drift" \
+    python3 scripts/ci/check-env-snapshot-default-drift.py
 }
 
 advisory_lints() {

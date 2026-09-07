@@ -11704,10 +11704,23 @@ def run_acting_call_evidence_regression(executable: str) -> None:
     binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
 
     def emit_frame(phase: str, output: bytearray) -> None:
+        captured = bytes(output)
+        end = captured.rfind(FRAME_END)
+        if end < 0:
+            raise AssertionError("Acting evidence has no completed terminal frame")
+        end += len(FRAME_END)
+        redraw = captured.rfind(FULL_REDRAW, 0, end)
+        start = captured.rfind(FRAME_START, 0, redraw) if redraw >= 0 else -1
+        if start < 0:
+            raise AssertionError("Acting evidence has no complete redraw origin")
+        # A full redraw replaces every row; only its frame and later complete
+        # deltas are needed to reproduce this exact screen. Session history
+        # made the second evidence record exceed Dune's output allowance.
+        current_frame = captured[start:end]
         print("ACTING_PTY_EVIDENCE " + json.dumps({
             "phase": phase, "fixture": "synthetic exact-event inspector",
             "binary_sha256": binary_sha256, "rows": 35, "columns": 140,
-            "encoding": "base64", "pty": base64.b64encode(output).decode(),
+            "encoding": "base64", "pty": base64.b64encode(current_frame).decode(),
         }), flush=True)
 
     def frame(value):
@@ -11716,6 +11729,7 @@ def run_acting_call_evidence_regression(executable: str) -> None:
     keeper = {
         "type": "keeper_tool_call", "name": "alpha", "tool_name": "keeper_skill",
         "ts_unix": 100.0, "turn": 7, "tool_use_id": "skill-call-exact",
+        "planned_index": 3, "batch_index": 1, "batch_size": 2, "execution_mode": "concurrent",
         "tool_args": {"skill": "research-plan-exact"},
         "tool_result": {"receipt_sha256": "receipt-exact", "status": "served"},
         "tool_args_preview": "safe-input-preview-exact",
@@ -11753,9 +11767,12 @@ def run_acting_call_evidence_regression(executable: str) -> None:
                 raise AssertionError("Aggregated turn opened as an exact call")
             send_and_wait(process, master_fd, output, b"f", b"actions)")
             io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
-            # At 35 rows the complete I/O already fits: PgDn is a no-op and
-            # must not be expected to emit the same terminal bytes again.
-            # Narrow the viewport so this step actually exercises paging.
+            for scheduling in (b"Execution mode: concurrent", b"Planned index (zero-based): 3",
+                               b"Batch index (zero-based) / size: 1 / 2"):
+                if scheduling not in io_head:
+                    raise AssertionError(f"Keeper scheduling evidence missing: {scheduling!r}")
+            # Narrow the viewport so the I/O requires scrolling even when
+            # scheduling metadata is present above it.
             resize_and_wait(process, master_fd, output, rows=22, columns=140,
                             needle=b"ACTING EVENT EVIDENCE")
             io_tail = send_and_wait(process, master_fd, output, b"\x1b[6~", b"safe-output-preview-exact")
@@ -12854,8 +12871,70 @@ def run_project_changes_regression(executable: str) -> None:
     )
 
 
+def run_browser_client_picker_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    firefox = "11111111-1111-4111-8111-111111111111"
+    zen = "22222222-2222-4222-8222-222222222222"
+    active = [{"clientId": firefox, "browser": "firefox"}, {"clientId": zen, "browser": "zen"}]
+    reads: list[dict[str, object]] = []
+
+    def read(body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        reads.append(request)
+        client = request.get("clientId")
+        if client not in [row["clientId"] for row in active]:
+            return 409, {"ok": False, "error": "client_not_connected"}
+        text = "Zen selected page" if client == zen else "Firefox selected page"
+        return 200, {"ok": True, "data": {
+            "source": "live", "clientId": client, "elapsed_ms": 1.0,
+            "tabs": [{"id": 2, "title": text, "url": "https://example.org/", "active": True}],
+            "page": {"tabId": 2, "title": text, "url": "https://example.org/",
+                     "text": text, "chars": len(text), "truncated": False}}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = SequencedHttpResponse([
+        (200, {"ok": True, "data": {"clients": list(active)}}),
+        (200, {"ok": True, "data": {"clients": list(active)}}),
+        (200, {"ok": True, "data": {"clients": [active[1]]}}),
+    ])
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+
+    def interact(process, master_fd, slave_fd, output, _base):
+        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose a connected browser")
+        if reads:
+            raise AssertionError("unselected multi-client view sent a browser read")
+        os.write(master_fd, b"j")
+        wait_for_terminal_input_consumed(slave_fd)
+        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
+        if reads != [{"lane": "live", "clientId": zen}]:
+            raise AssertionError("Zen choice did not pin its client ID")
+        read_available(master_fd, output)
+        chooser_start = len(output)
+        send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
+        # b clears the displayed inventory until discovery settles. Require a
+        # row from this request, not Firefox text in an earlier chooser frame.
+        wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
+        send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
+        if reads[-1] != {"lane": "live", "clientId": firefox}:
+            raise AssertionError("browser switch reused the old browser's tab ID")
+        active[:] = [active[1]]
+        send_and_wait(process, master_fd, output, b"r", b"Selected browser disconnected")
+        if len(reads) != 2:
+            raise AssertionError("stale Firefox pin silently rebound to the remaining Zen client")
+        if b"Firefox selected page" in screen_text(bytes(output)):
+            raise AssertionError("disconnected browser content remained under the chooser")
+        send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
+        if reads[-1] != {"lane": "live", "clientId": zen}:
+            raise AssertionError("explicit reconnect carried the stale tab ID")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(executable, description="Browser client pinning and disconnected selection",
+        interact=interact, http_fixtures=fixtures)
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
+    client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []
     png = [""]
     requested, release = threading.Event(), threading.Event()
@@ -12869,7 +12948,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         tab_id = request.get("tabId", 2)
         title = "first" if tab_id == 1 else "second"
         return 200, {"ok": True, "data": {
-            "source": request["lane"], "elapsed_ms": 12.5,
+            "source": request["lane"], "clientId": request.get("clientId"), "elapsed_ms": 12.5,
             "tabs": [{"id": n, "title": name, "url": "https://example.org/", "active": n == 2}
                      for n, name in [(1, "first"), (2, "second")]],
             "page": {"tabId": tab_id, "title": title, "url": "https://example.org/",
@@ -12885,9 +12964,10 @@ def run_browser_screenshot_regression(executable: str) -> None:
         if len(requests) == 4:
             return 404, {"ok": False, "error": "selected Firefox tab closed"}
         return 200, {"ok": True, "data": {
-            "source": request["lane"], "tabId": request["tabId"], "title": "selected Firefox tab",
+            "source": request["lane"], "clientId": request.get("clientId"), "tabId": request["tabId"], "title": "selected Firefox tab",
             "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
 
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
 
@@ -12908,7 +12988,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
                 raise AssertionError("screenshot did not use the PNG image viewer")
 
         capture()
-        if requests != [{"lane": "live", "tabId": 2}]:
+        if requests != [{"lane": "live", "clientId": client_id, "tabId": 2}]:
             raise AssertionError(f"screenshot did not bind the selected live tab: {requests!r}")
         send_and_wait(process, master_fd, output, b"j", b"second page body")
         send_and_wait(process, master_fd, output, b"a", b"second page body")
@@ -13603,6 +13683,7 @@ def main() -> None:
         return
     if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
         run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
+        run_browser_client_picker_regression(os.path.abspath(sys.argv[1]))
         print("tui Browser screenshot regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "config":

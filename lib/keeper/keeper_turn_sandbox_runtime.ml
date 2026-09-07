@@ -733,9 +733,7 @@ let failed_exec_state_probe_error ~status ~output detail =
 ;;
 
 let resolve_image (t : t) =
-  match t.meta.sandbox_image with
-  | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_sandbox.Runtime.docker_image ()
+  Env_config_sandbox.Runtime.image_declared_or_default t.meta.sandbox_image
 ;;
 
 (* A microvm guest mounts its work volume, the shim, runtime config, and its

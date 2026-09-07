@@ -72,24 +72,24 @@ echo "Head: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 section "Typed Boundary Metadata"
 legacy_helper_pattern='is_main_''worktree_''boundary_''exempt'
 legacy_phrase_pattern='main-''worktree ''boundary|worktree ''boundary'
-tool_catalog_candidates=(
+tool_catalog_files=(
   lib/tool/tool_catalog.ml
   lib/tool/tool_catalog.mli
-  lib/tool_catalog.ml
-  lib/tool_catalog.mli
 )
-tool_catalog_files=()
-for file in "${tool_catalog_candidates[@]}"; do
-  [ -f "$file" ] && tool_catalog_files+=("$file")
+for file in "${tool_catalog_files[@]}"; do
+  # Without this the two checks below print "PASS: ... is absent" over a scan
+  # of nothing, which is what they said while the catalog sat in lib/tool/ and
+  # this list still named lib/.
+  [ -f "$file" ] || {
+    echo "audit-hardcoding-truth: scan target is gone: $file" >&2
+    exit 1
+  }
 done
 
-legacy_boundary_matches=""
-if [ "${#tool_catalog_files[@]}" -gt 0 ]; then
-  legacy_boundary_matches="$(
-    rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
-      "${tool_catalog_files[@]}" 2>/dev/null || true
-  )"
-fi
+legacy_boundary_matches="$(
+  rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
+    "${tool_catalog_files[@]}" 2>/dev/null || true
+)"
 if [ -n "$legacy_boundary_matches" ]; then
   mark_confirmed "legacy checkout follow-up helper surface still exists"
   printf '%s\n' "$legacy_boundary_matches"
@@ -98,8 +98,7 @@ else
 fi
 
 legacy_effect_pattern='effect_''domain|effect''Domain'
-if [ "${#tool_catalog_files[@]}" -gt 0 ] \
-  && rg -q "$legacy_effect_pattern" "${tool_catalog_files[@]}"; then
+if rg -q "$legacy_effect_pattern" "${tool_catalog_files[@]}"; then
   mark_confirmed "Tool_catalog still exposes generic effect-domain metadata"
 else
   echo "PASS: generic Tool_catalog effect-domain metadata is absent."

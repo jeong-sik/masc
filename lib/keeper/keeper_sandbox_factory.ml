@@ -42,9 +42,7 @@ let normalize p =
   |> strip_trailing_slashes
 
 let runtime_image (meta : Keeper_meta_contract.keeper_meta) =
-  match meta.sandbox_image with
-  | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_sandbox.Runtime.docker_image ()
+  Env_config_sandbox.Runtime.image_declared_or_default meta.sandbox_image
 
 let in_playground_of_cwd (t : t) ~meta ~cwd =
   let host_root =

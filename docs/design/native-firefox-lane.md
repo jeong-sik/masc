@@ -41,3 +41,7 @@ Validation: lifecycle/crash-recovery scenarios are registered in
 `test_browser_webdriver`. Local builds are excluded by the execution protocol;
 compilation and execution evidence must come from CI, followed by a deployed
 binary run. Source changes alone do not prove native runtime behavior.
+
+Interaction, explicit tab targeting, and screenshot/Vision contracts are described in
+[Firefox interaction support](firefox-controls.md). See [usage examples](browser-lane-examples.md)
+for the supported live and automation capabilities.

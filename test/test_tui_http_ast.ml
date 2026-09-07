@@ -570,6 +570,25 @@ let test_keeper_chat_uses_current_async_contract () =
      >= 1)
 ;;
 
+(* Every pane draws this footer. Build provenance includes repository reads
+   and executable hashing; neither belongs on the render dependency path just
+   to compare the TUI's embedded generation with the server's snapshot. *)
+let test_footer_uses_embedded_identity_without_provenance_io () =
+  let render_path = "bin/masc_tui_render.ml" in
+  check int "footer does not collect full build provenance" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"footer_line"
+       ~callee:"Masc.Build_identity.current");
+  check int "footer refreshes only the embedded commit age" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"footer_line"
+       ~callee:"Masc.Build_identity.embedded_commit_age_seconds");
+  check bool "embedded age projection only performs age arithmetic" true
+    (Ast_grep.direct_call_sequence_matches_in_value_binding
+       ~module_path:"lib/build_identity.ml"
+       ~binding_name:"embedded_commit_age_seconds" ~callees:[ "age_seconds" ])
+;;
+
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
   let render_path = "bin/masc_tui_render.ml" in
@@ -2385,6 +2404,9 @@ let () =
           "keeper chat uses current async contract"
           `Quick
           test_keeper_chat_uses_current_async_contract;
+        test_case
+          "footer uses embedded identity without provenance IO"
+          `Quick test_footer_uses_embedded_identity_without_provenance_io;
         test_case
           "user message background has one render snapshot"
           `Quick

@@ -81,6 +81,22 @@ let test_binary_identity_survives_without_checkout () =
     details.binary_commit;
   Alcotest.(check (option string)) "no ambient checkout" None details.repo_head_commit
 
+let test_embedded_identity_preserves_binary_authority_and_current_age () =
+  let full = Build_identity.current () in
+  Alcotest.(check (option string)) "same embedded authority"
+    full.binary_commit Build_identity.embedded_commit;
+  let check_age now expected =
+    Alcotest.(check (option int)) "embedded commit age"
+      expected (Build_identity.embedded_commit_age_seconds ~now)
+  in
+  (match full.binary_commit_unix_ts with
+   | None -> check_age 0.0 None; check_age 100.0 None
+   | Some timestamp ->
+     check_age (timestamp -. 10.0) (Some 0);
+     check_age (timestamp +. 10.75) (Some 10);
+     check_age (timestamp +. 70.75) (Some 70));
+  check_age infinity None
+
 let test_current_started_at_is_stable () =
   let first = Build_identity.current () in
   Unix.sleepf 0.01;
@@ -109,9 +125,8 @@ let test_runtime_cwd_is_resolver_backed_snapshot () =
    runbook stopped before it began.
 
    The test process is itself a direct launch, so this is that case. *)
-(* current () runs on every TUI render frame. When the self-hash was not
-   memoised it read and digested the whole 60 MB executable each time, and the
-   TUI sat at 88% of a core with sha256_do_chunk on top of the sample. *)
+(* Repeated full identity observations share the executable digest. The
+   lightweight TUI footer uses embedded identity without requesting this hash. *)
 let test_repeated_current_does_not_rehash_the_executable () =
   let first = Build_identity.current () in
   let started = Unix.gettimeofday () in
@@ -783,6 +798,8 @@ let () =
           Alcotest.test_case
             "binary identity survives without checkout" `Quick
             test_binary_identity_survives_without_checkout;
+          Alcotest.test_case "embedded identity preserves authority and current age"
+            `Quick test_embedded_identity_preserves_binary_authority_and_current_age;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
           Alcotest.test_case "executable provenance requires exact identity" `Quick

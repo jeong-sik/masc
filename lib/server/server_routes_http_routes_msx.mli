@@ -21,4 +21,11 @@ val carts_json : base_path:string -> Yojson.Safe.t
 val load_result_json : ok:bool -> message:string -> Yojson.Safe.t
 (** The load response body: [{ok, message}]. Exposed for the route test. *)
 
+val msx_tick_default_frames : int
+(** Frames a [POST /api/v1/msx/tick] advances when the body names none. *)
+
+val clamp_tick_frames : int -> int
+(** A tick's frame count, clamped to [1..Msx_lane.max_frames_per_call] so a
+    poll never steps zero or overruns the per-call cap. Exposed for the test. *)
+
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

@@ -169,6 +169,41 @@ let frame_json () : Yojson.Safe.t =
       ]
 ;;
 
+(* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
+   poll this advances ~54 frames a second, close enough to the machine's 60 Hz
+   that a game reads as live without a server-side ticker. *)
+let msx_tick_default_frames = 18
+
+let clamp_tick_frames requested = max 1 (min Msx_lane.max_frames_per_call requested)
+
+(* The realtime driver (RFC-0439 §3.2, poll-cadence tick). The spectating TUI
+   posts this a few times a second to advance the shared machine, so a game
+   flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
+   1..max_frames_per_call; the answer is the advanced frame, so one call both
+   steps and reads. A write, gated like press. *)
+let handle_tick request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+      let respond ~status json = respond_json_value_with_cors ~status request reqd json in
+      let requested =
+        match Yojson.Safe.from_string body with
+        | exception Yojson.Json_error _ -> msx_tick_default_frames
+        | json -> int_field "frames" ~default:msx_tick_default_frames json
+      in
+      match Msx_lane.step ~frames:(clamp_tick_frames requested) with
+      (* No machine -> frame_json is loaded:false; the spectator reads that as
+         "nothing to watch", the same as the frame route. *)
+      | Ok _ | Error Msx_lane.No_machine -> respond ~status:`OK (frame_json ())
+      (* [clamp_tick_frames] keeps the count in 1..cap, so [step]'s range check
+         never fires, and [step] never reads a file; the two arms below are
+         unreachable here but map the errors honestly rather than a catch-all. *)
+      | Error (Msx_lane.Invalid_request _ as e) ->
+        respond ~status:`Bad_request
+          (`Assoc [ ("ok", `Bool false); ("message", `String (Msx_lane.error_to_string e)) ])
+      | Error (Msx_lane.Unreadable _ as e) ->
+        respond ~status:`Internal_server_error
+          (`Assoc [ ("ok", `Bool false); ("message", `String (Msx_lane.error_to_string e)) ]))
+;;
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
@@ -192,5 +227,9 @@ let add_routes router =
          (fun state _req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            handle_load ~base_path request reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_msx_step"
+         (fun _state _req reqd -> handle_tick request reqd)
          request reqd)
 ;;

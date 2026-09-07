@@ -103,5 +103,30 @@ let () =
             check (option string) "and carries the message" (Some "unknown cartridge")
               (match member "message" bad with Some (`String m) -> Some m | _ -> None))
         ] )
+    ; ( "tick"
+      , [ test_case "a tick's frame count stays in 1..cap" `Quick (fun () ->
+            check int "zero clamps up to one" 1 (Route.clamp_tick_frames 0);
+            check int "the default passes through" Route.msx_tick_default_frames
+              (Route.clamp_tick_frames Route.msx_tick_default_frames);
+            check int "an overrun clamps to the cap" Lane.max_frames_per_call
+              (Route.clamp_tick_frames (Lane.max_frames_per_call * 10)))
+        ; test_case "a tick advances the machine by the clamped frames" `Quick
+            (fun () ->
+              let dir = Filename.temp_dir "msx-tick-route-" "" in
+              (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None with
+               | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
+              let number () =
+                match member "number" (Route.frame_json ()) with
+                | Some (`Int n) -> n | _ -> -1
+              in
+              let before = number () in
+              (match
+                 Lane.step ~frames:(Route.clamp_tick_frames Route.msx_tick_default_frames)
+               with
+               | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
+              check int "the frame advanced by the tick size"
+                Route.msx_tick_default_frames (number () - before);
+              ignore (Lane.eject () : (unit, Lane.error) result))
+        ] )
     ]
 ;;

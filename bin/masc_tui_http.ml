@@ -63,6 +63,7 @@ let msx_frame_path = "/api/v1/msx/frame"
 let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
 let msx_load_path = "/api/v1/msx/load"
+let msx_tick_path = "/api/v1/msx/tick"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -264,25 +265,31 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
 (* The workspace MSX frame (RFC-0439 §3.7). [None] on any of: transport error,
    non-object body, [loaded:false], or a payload that does not decode -- the
    spectator treats all of them as "nothing to watch right now". *)
+(* Decode a frame payload ([{loaded, number, width, height, mode, cartridge,
+   rgb_base64}]). [None] for [loaded:false] or a payload that does not decode --
+   the spectator treats both as "nothing to watch". Shared by the frame poll and
+   the tick, which return the same shape. *)
+let frame_of_json json : Masc_tui_types.msx_frame option =
+  let open Yojson.Safe.Util in
+  match member "loaded" json with
+  | `Bool true -> (
+    try
+      Some
+        { Masc_tui_types.msx_number = member "number" json |> to_int
+        ; msx_width = member "width" json |> to_int
+        ; msx_height = member "height" json |> to_int
+        ; msx_mode = member "mode" json |> to_string
+        ; msx_cartridge = member "cartridge" json |> to_string_option
+        ; msx_rgb = member "rgb_base64" json |> to_string |> Base64.decode_exn
+        }
+    with _ -> None)
+  | _ -> None
+
 let fetch_msx_frame ~(host : string) ~(port : int) :
     Masc_tui_types.msx_frame option =
   match get_json ~host ~port ~path:msx_frame_path with
   | Error _ -> None
-  | Ok json -> (
-    let open Yojson.Safe.Util in
-    match member "loaded" json with
-    | `Bool true -> (
-      try
-        Some
-          { Masc_tui_types.msx_number = member "number" json |> to_int
-          ; msx_width = member "width" json |> to_int
-          ; msx_height = member "height" json |> to_int
-          ; msx_mode = member "mode" json |> to_string
-          ; msx_cartridge = member "cartridge" json |> to_string_option
-          ; msx_rgb = member "rgb_base64" json |> to_string |> Base64.decode_exn
-          }
-      with _ -> None)
-    | _ -> None)
+  | Ok json -> frame_of_json json
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -345,6 +352,18 @@ let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
     | `Bool true -> Ok ()
     | _ -> (
       match member "message" json with `String m -> Error m | _ -> Error "load refused"))
+;;
+
+(* Advance the shared machine one poll-cadence step and read back the frame it
+   lands on (RFC-0439 §3.2, poll-cadence tick). The spectator poll calls this
+   instead of a plain frame read so a game flows even when no keeper is pressing.
+   The step size is the server's default -- the cadence policy lives there, not
+   here -- so the body carries no frame count. [None] on any transport or shape
+   error, same as a frame read. Auth rides [post_json]'s operator bearer. *)
+let tick_msx ~(host : string) ~(port : int) : Masc_tui_types.msx_frame option =
+  match post_json ~host ~port ~path:msx_tick_path ~body:"{}" with
+  | Error _ -> None
+  | Ok json -> frame_of_json json
 ;;
 
 

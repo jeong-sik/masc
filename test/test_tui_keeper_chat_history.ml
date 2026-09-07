@@ -988,7 +988,7 @@ let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
              [ "Execute"; "Read" ] skill.actions;
            let rows = Transcript.skill_rows ~full:true skill in
            check string "the strongest evidence state is bold"
-             "**ci-red-attribution** \xc2\xb7 **DELIVERED \xc2\xb7 USED** \xc2\xb7 2 actions"
+             "**쓰임** \xc2\xb7 **ci-red-attribution** \xc2\xb7 2 actions"
              (List.hd rows);
            check bool "the exact turn proof is visible" true
              (List.exists
@@ -1031,7 +1031,7 @@ let test_served_skill_without_delivery_does_not_claim_use () =
       check bool "served is weaker than delivered" true
         (skill.state = Transcript.Skill_served_only);
       check (list string) "the UI says delivery was not recorded"
-        [ "**ci-red-attribution** \xc2\xb7 **SERVED ONLY \xc2\xb7 DELIVERY NOT RECORDED**" ]
+        [ "**보냈지만 도착 기록 없음** \xc2\xb7 **ci-red-attribution**" ]
         (Transcript.skill_rows ~full:false skill)
   | rows ->
       failf "expected one served-only Skill row, got %d: %s" (List.length rows)

@@ -650,15 +650,45 @@ let skill_activity_of_tool (activity : tool_activity) =
         (make_skill_activity ?skill_tool_use_id:activity.call_id
            ~skill_name ~state ~actions:[] ())
 
+(* One phrase per state, and no interpunct inside one.
+
+   The separator on this row does three jobs at once -- it parts the skill
+   name from the state, the state from the action count, and it parted a
+   state's own two words from each other. So "SERVED ONLY · DELIVERY NOT
+   RECORDED" gave the reader no way to tell, from the row, whether that was
+   one state or two.
+
+   "DELIVERED · NO ACTION OBSERVED" lost its second half outright: the row
+   already carries the action count, so an absent count is what "no action
+   observed" was there to say. It said it twice.
+
+   Korean, like the Gate row's phases beside it. These read as the arc they
+   are -- 보냄, 도착함, 쓰임 -- and the two that leave the arc say where it
+   stopped instead of naming a stage that did not happen. *)
+(* One phrase per state, and no interpunct inside one.
+
+   The separator on this row does three jobs at once: it parts the state from
+   the skill name, the name from the action count, and it used to part a
+   state's own two words from each other. So "SERVED ONLY · DELIVERY NOT
+   RECORDED" gave a reader no way to tell, from the row, whether that was one
+   state or two.
+
+   "DELIVERED · NO ACTION OBSERVED" lost its second half outright: the row
+   already carries the action count, and an absent count is the whole of what
+   "no action observed" was there to say.
+
+   Korean, like the Gate row's phases beside it, and written as itself rather
+   than as byte escapes -- that is how the Gate wording is written, and a
+   hand-typed escape is a syllable nobody can proofread. *)
 let skill_state_label = function
-  | Skill_calling -> "CALLING"
-  | Skill_served_pending -> "SERVED \xc2\xb7 DELIVERY PENDING"
-  | Skill_served_only -> "SERVED ONLY \xc2\xb7 DELIVERY NOT RECORDED"
-  | Skill_delivered -> "DELIVERED \xc2\xb7 NO ACTION OBSERVED"
-  | Skill_used -> "DELIVERED \xc2\xb7 USED"
-  | Skill_failed -> "FAILED"
-  | Skill_evidence_missing -> "EVIDENCE MISSING"
-  | Skill_evidence_unavailable -> "EVIDENCE UNAVAILABLE"
+  | Skill_calling -> "부르는 중"
+  | Skill_served_pending -> "보냄"
+  | Skill_served_only -> "보냈지만 도착 기록 없음"
+  | Skill_delivered -> "도착함"
+  | Skill_used -> "쓰임"
+  | Skill_failed -> "실패"
+  | Skill_evidence_missing -> "증거 없음"
+  | Skill_evidence_unavailable -> "증거 못 읽음"
 
 let short_proof value =
   let value = safe_line value in
@@ -669,10 +699,15 @@ let short_proof value =
 
 let skill_rows ~full (activity : skill_activity) =
   let action_count = List.length activity.actions in
+  (* State, then which skill, then what came of it -- the Gate row's order,
+     because the pane should not read left to right one way on one kind of row
+     and the other way on the next. The name led before, and a skill name is
+     the part a reader can already see repeated down the column; the state is
+     the part that differs, so it is the part a narrow pane keeps. *)
   let summary =
     Printf.sprintf "**%s** \xc2\xb7 **%s**%s"
-      activity.skill_name
       (skill_state_label activity.state)
+      activity.skill_name
       (if action_count = 0 then ""
        else Printf.sprintf " \xc2\xb7 %s" (plural action_count "action"))
   in

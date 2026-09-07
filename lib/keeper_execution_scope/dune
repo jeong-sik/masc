@@ -3,5 +3,5 @@
  (name masc_keeper_execution_scope)
  (public_name masc.keeper_execution_scope)
  (wrapped false)
- (modules keeper_execution_scope_id)
- (libraries masc.keeper_chat_operations uuidm yojson))
+ (modules keeper_execution_scope_id keeper_repetition_snapshot)
+ (libraries masc.keeper_operation_identity digestif uuidm yojson))

@@ -1,5 +1,5 @@
 (** Server_slack_poll_lane — the in-process Slack collection fiber
-    (docs/design/slack-lane.md, task-1418).
+    (docs/design/slack-poll-checkpoints.md).
 
     Spawned once during server bootstrap next to the Socket Mode gateway.
     Every poll interval it reads the channel→keeper bindings — the same
@@ -17,9 +17,8 @@
     previous checkpoint replayable; unreadable checkpoints refuse collection.
     Slack_lane remains a bounded in-memory recent-message view, not an archive.
 
-    Board posting is deliberately absent here: the external bridge poller
-    (jeong-sik/me#1291) owns the digest circuit until the cutover
-    described in the design doc, so the two never double-post.
+    This optional REST reader is independent of the Browser-based Slack TUI.
+    It publishes observations to Slack_lane and sends no Slack or Board messages.
 
     Off by default: the lane starts only when SLACK_BOT_TOKEN is set and
     [slack] poll_enabled is true in the resolved runtime.toml. A

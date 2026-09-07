@@ -272,8 +272,7 @@ let collect ~now ~cursor ~fetch ~save ~publish =
   | Some state -> run max_pages_per_cycle state
 
 (* ── filtering ─────────────────────────────────────────────────── *)
-(* The bridge poller's contract, stated once more: only plain
-   human-authored top-level messages. Mentions stay on the socket path —
+(* Collect plain human-authored messages. Mentions stay on the socket path —
    app_mention is the subscribed event, and re-collecting a mention here
    would double it. *)
 

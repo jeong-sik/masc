@@ -212,6 +212,10 @@ let names_input names =
   `Assoc [ "names", `List (List.map (fun n -> `String n) names) ]
 ;;
 
+let test_nothing_attached_offers_no_tool () =
+  check bool "no tool" true (Option.is_none (search []))
+;;
+
 let test_the_listing_names_every_attached_tool () =
   let tool = the_tool (offered [ "jira_search", "Search issues"; "page_create", "Make a page" ]) in
   let description = tool.Agent_core.Tool.schema.description in
@@ -518,6 +522,21 @@ let already_used ?history ?carry_window ?receipts offering =
 
 let two_offered =
   [ "jira_search", "Search issues"; "confluence_search", "Search pages" ]
+;;
+
+(* A tool already placed with its schema need not also occupy the deferred
+   listing. The other offered tools remain discoverable there. *)
+let test_a_carried_tool_is_not_also_named_in_the_listing () =
+  let tool =
+    match search ~history:[ called "atlassian_jira_search" ] (offered two_offered) with
+    | Some tool -> tool
+    | None -> fail "expected a listing tool"
+  in
+  let description = tool.Agent_core.Tool.schema.description in
+  check bool "the carried tool is not listed again" false
+    (contains description "atlassian_jira_search");
+  check bool "the tool that was not carried is still listed" true
+    (contains description "atlassian_confluence_search")
 ;;
 
 (* Omitted from the prose, not from the surface: a model that names a tool it

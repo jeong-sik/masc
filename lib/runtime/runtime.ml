@@ -1552,49 +1552,36 @@ let init_default_strict ~config_path =
   init_default_strict_report ~config_path
   |> Result.map_error strict_init_error_to_string
 
-let initialize_degraded_loaded ~config_path = function
-  | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
-    let verifier_exact_slot_ids =
-      verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
-    in
-    (match missing_runtime_model_capabilities ~config_path runtimes with
-     | None ->
-       (match validate_runtime_max_context ~config_path runtimes with
-        | Error msg -> Error (Runtime_config_error msg)
-        | Ok () ->
-          (match
-             validate_keeper_dispatch_request_caps
-               ~config_path
-               ~verifier_exact_slot_ids
-               loaded
-           with
-           | Error msg -> Error (Runtime_config_error msg)
-           | Ok () ->
-             set_loaded ~config_path loaded;
-             Ok Initialized))
-     | Some report ->
-       (match degrade_loaded_for_missing_catalog loaded report with
-        | Error msg -> Error (Runtime_config_error msg)
-        | Ok
-            (((active_runtimes, _, _, _, _, _) as degraded_loaded), degradation)
-          ->
-          (match validate_runtime_max_context ~config_path active_runtimes with
-           | Error msg -> Error (Runtime_config_error msg)
-           | Ok () ->
-             (match
-                validate_keeper_dispatch_request_caps
-                  ~config_path
-                  ~verifier_exact_slot_ids
-                  degraded_loaded
-              with
-              | Error msg -> Error (Runtime_config_error msg)
-              | Ok () ->
-                set_loaded
-                  ~startup_degradation:degradation
-                  ~config_path
-                  degraded_loaded;
-                Ok (Initialized_degraded degradation)))))
+(* Prepare one immutable runtime publication. Boot and config edits share the
+   same catalog exclusion so a save cannot reactivate an unavailable route. *)
+let prepare_degraded_loaded ~config_path
+    (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+  let* loaded, startup_degradation =
+    match missing_runtime_model_capabilities ~config_path runtimes with
+    | None -> Ok (loaded, None)
+    | Some report ->
+        let* loaded, degradation = degrade_loaded_for_missing_catalog loaded report in
+        Ok (loaded, Some degradation)
+  in
+  let active_runtimes, _, _, _, _, _ = loaded in
+  let* () = validate_runtime_max_context ~config_path active_runtimes in
+  let* () = validate_keeper_dispatch_request_caps ~config_path
+      ~verifier_exact_slot_ids:(verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
+      loaded in
+  Ok (loaded, exact_output_lane_decls, startup_degradation)
+;;
+
+let initialize_degraded_loaded ~config_path parsed =
+  let* parsed = Result.map_error (fun msg -> Runtime_config_error msg) parsed in
+  let* loaded, _, startup_degradation =
+    prepare_degraded_loaded ~config_path parsed
+    |> Result.map_error (fun msg -> Runtime_config_error msg)
+  in
+  set_loaded ?startup_degradation ~config_path loaded;
+  Ok (match startup_degradation with
+    | None -> Initialized
+    | Some degradation -> Initialized_degraded degradation)
+;;
 
 let init_default_degraded_report ~config_path =
   load_list_internal ~config_path ~validate_max_context:false
@@ -2288,7 +2275,7 @@ let materialize_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  materialize_config ~config_path cfg
+  materialize_config ~validate_max_context:false ~config_path cfg
 ;;
 
 let runtime_config_commit_order = ref Int64.zero
@@ -2390,18 +2377,8 @@ let parse_and_validate_config_text ~config_path content =
            "; "
            (List.map Skill_source_config.diagnostic_to_string diagnostics))
   in
-  let* loaded, exact_output_lanes =
-    materialize_runtime_config_text ~config_path content
-  in
-  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
-  let* () =
-    validate_keeper_dispatch_request_caps
-      ~config_path
-      ~verifier_exact_slot_ids:
-        (verifier_exact_slot_ids_of_lane_decls exact_output_lanes)
-      loaded
-  in
-  Ok (loaded, exact_output_lanes)
+  let* parsed = materialize_runtime_config_text ~config_path content in
+  prepare_degraded_loaded ~config_path parsed
 ;;
 
 let commit_runtime_config_text
@@ -2410,7 +2387,7 @@ let commit_runtime_config_text
     content
   =
   let observation = config_observation ~path content in
-  let* loaded, exact_output_lanes =
+  let* loaded, exact_output_lanes, startup_degradation =
     parse_and_validate_config_text ~config_path:path content
   in
   match
@@ -2419,7 +2396,7 @@ let commit_runtime_config_text
   | Error Runtime_exact_output_registry.Registry_not_published ->
     (match replace_file path content with
      | Ok () ->
-       set_loaded ~config_path:path loaded;
+       set_loaded ?startup_degradation ~config_path:path loaded;
        Ok (committed_receipt ~observation ~durability:Durable)
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
@@ -2429,7 +2406,7 @@ let commit_runtime_config_text
             ~observation
             failure
         | Fs_compat.After_rename ->
-          set_loaded ~config_path:path loaded;
+          set_loaded ?startup_degradation ~config_path:path loaded;
           runtime_config_atomic_failure
             ~replacement_visible:true
             ~observation
@@ -2446,7 +2423,7 @@ let commit_runtime_config_text
            (runtime_config_write_outcome
               ~replace_file
               ~on_replacement_visible:(fun () ->
-                set_loaded ~config_path:path loaded)
+                set_loaded ?startup_degradation ~config_path:path loaded)
               ~path
               content)
      with
@@ -2511,7 +2488,7 @@ let edit_config_text ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* _loaded, _exact_output_lanes =
+  let* _loaded, _exact_output_lanes, _degradation =
     parse_and_validate_config_text ~config_path:path content
   in
   Ok ()

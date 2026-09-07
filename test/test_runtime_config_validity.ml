@@ -2402,7 +2402,33 @@ let test_edit_config_text_reads_the_file_and_commits_the_edit () =
               "theme = \"gruvbox-dark\""))
 ;;
 
+let with_model_catalog_content content f =
+  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+       Llm_provider.Model_catalog.clear_global ();
+       (try Sys.remove path with
+        | _ -> ())
+       )
+    (fun () ->
+       match Llm_provider.Model_catalog.load_file path with
+       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
+       | Ok catalog ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+
+(* Config edits now publish the same catalog-validated state as bootstrap.
+   These cap/official-client cases declare their synthetic HTTP models too. *)
+let with_config_save_model_catalog f =
+  let row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
+  with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
+
 let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
+  with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2461,6 +2487,7 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
    load undeclared, and the Agent_core side must still reject. Without the
    second half, deleting the whole check would also pass. *)
 let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+  with_config_save_model_catalog @@ fun () ->
   let content ~bound ~agent_core_cap =
     Printf.sprintf
       "[providers.local]\n\
@@ -2546,6 +2573,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
+  with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2754,24 +2782,6 @@ let with_fake_runtime_model_catalog f =
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
-       | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
-         f ())
-
-let with_model_catalog_content content f =
-  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
-       (try Sys.remove path with
-        | _ -> ())
-       )
-    (fun () ->
-       match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
@@ -3577,6 +3587,15 @@ max-request-body-bytes = 65536
           ~meta:affected_meta ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta affected_meta));
       assert_unavailable (run "affected");
       check int "no provider request for unavailable assignment" 0 (Exact_output_fixture.post_count server);
+      (match Runtime.edit_config_text ~runtime_config_path:path
+          (fun source -> source ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n") with
+       | Ok _ -> () | Error detail -> fail detail);
+      check (option string) "unrelated config save retains exact assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match Runtime.resolve_assignment "fixture.missing" with
+       | `Unavailable _ -> () | `Missing | `Lane _ -> fail "config save reactivated unavailable assignment");
+      assert_unavailable (run "affected");
+      check int "unrelated save cannot permit a provider request" 0 (Exact_output_fixture.post_count server);
       List.iter (fun keeper -> match run keeper with
         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error)) ["healthy"; "default-rider"];
       check int "healthy and default Keeper both reach the real HTTP provider" 2

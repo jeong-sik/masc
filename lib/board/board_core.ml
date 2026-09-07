@@ -43,6 +43,19 @@ let find_post_by_run_id store ~run_id : post option =
     | Some pid -> Hashtbl.find_opt store.posts pid)
 ;;
 
+let list_posts_by_run_origin store =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    Hashtbl.fold (fun _ pid posts ->
+      match Hashtbl.find_opt store.posts pid with
+      | Some post -> post :: posts
+      | None -> posts) store.posts_by_run_id [])
+  |> List.sort (fun (left : post) (right : post) ->
+       match Float.compare right.created_at left.created_at with
+       | 0 -> String.compare (Post_id.to_string left.id) (Post_id.to_string right.id)
+       | order -> order)
+;;
+
 (* Reads post + comments under a single critical section. The previous
    two-call sequence (get_post then get_comments) acquired
    [store.mutex] twice with [maybe_sweep] dispatching to the flusher

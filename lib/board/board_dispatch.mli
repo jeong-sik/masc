@@ -204,6 +204,9 @@ val update_post :
 
 val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
 
+val list_posts_by_run_origin : unit -> Board.post list
+(** Exact run-origin index snapshot, newest publication first. *)
+
 val find_post_by_run_id : run_id:string -> Board.post option
 (** Exact O(1) lookup through the Board typed-origin [fusion_run_id] index.
     Returns [None] on a miss; does not scan post text or [meta_json]. *)

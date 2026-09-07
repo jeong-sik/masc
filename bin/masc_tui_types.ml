@@ -4282,6 +4282,23 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
+  List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
+  @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
+      snapshot.fus_historical_evidence
+
+let fusion_list_entries (state : state) =
+  match state.fusion_runs with
+  | None -> []
+  | Some snapshot -> fusion_snapshot_entries snapshot
+
+let fusion_entry_identity = function
+  | Tui_decode.Fusion_retained_run run -> "run:" ^ run.fur_run_id
+  | Tui_decode.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
+
+let selected_fusion_entry state =
+  List.nth_opt (fusion_list_entries state) state.fusion_cursor
+
 let selected_keeper_runs (state : state) =
   match selected_keeper state, state.fusion_runs with
   | Some keeper, Some snapshot ->

@@ -207,6 +207,7 @@ let replay path =
   }
 ;;
 
+let replay_status t = Store.replay_status t.store
 let max_completed_retained = Store.max_completed_retained
 let cut_replay_log ~execute path = Store.cut_replay_log ~execute path
 

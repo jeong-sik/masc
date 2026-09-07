@@ -1,0 +1,32 @@
+{
+  "pr_number": 34055,
+  "head_sha": "9c98d378e4304493cea6d99c91c5fbc064e3b9b1",
+  "observed_at": "2026-09-07T14:31:57.674724+00:00",
+  "run_id": 34132861473,
+  "conclusion": "success",
+  "passed_total": 71,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "model_catalog_default",
+      "passed": 14
+    },
+    {
+      "suite": "runtime_provider_auth_headers",
+      "passed": 57
+    }
+  ],
+  "ci_workflow": {
+    "run_id": 34132430603,
+    "conclusion": "success"
+  },
+  "initial_target_run": {
+    "run_id": 34132427456,
+    "conclusion": "failure",
+    "reason": "Root selected nonexistent test_runtime_toml; no target behavior ran."
+  },
+  "limits": [
+    "Existing catalog/path tests do not provide the complete new Responses runtime-to-HTTP scenario.",
+    "No permission repair, live configuration change or deployed acceptance proof."
+  ]
+}

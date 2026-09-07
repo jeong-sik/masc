@@ -5,6 +5,8 @@ Requires a unique slug, name, and description. Owner is auto-filled from \
 the caller's agent identity. Members restrict posting when access is \
 members_only."""
 
+identity_fields = ["owner"]
+
 [[params]]
 name = "slug"
 type = "string"

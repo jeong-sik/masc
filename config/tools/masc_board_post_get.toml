@@ -10,6 +10,8 @@ masc_board_search, or visible board context. If no post_id is visible, call \
 masc_board_list or masc_board_search first; never call this tool with empty \
 arguments."""
 
+identity_fields = []
+
 [[params]]
 name = "post_id"
 type = "string"

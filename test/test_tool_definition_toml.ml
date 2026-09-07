@@ -57,6 +57,36 @@ let check_rejects ~name ~contents needle =
       (contains ~needle message)
 ;;
 
+let test_identity_fields_round_trip () =
+  let contents =
+    {|name = "fixture_tool"
+description = "fixture"
+identity_fields = ["author", "tenant"]
+|}
+  in
+  match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
+  | Error message -> failf "expected identity_fields to load, got error: %s" message
+  | Ok { Tool_definition_toml.identity_fields; _ } ->
+    check (list string) "identity fields" [ "author"; "tenant" ] identity_fields
+;;
+
+let test_identity_fields_are_fail_closed () =
+  let wrong_shape =
+    {|name = "fixture_tool"
+description = "fixture"
+identity_fields = "author"
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents:wrong_shape "identity_fields";
+  let wrong_element =
+    {|name = "fixture_tool"
+description = "fixture"
+identity_fields = ["author", 1]
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents:wrong_element "identity_fields[1]"
+;;
+
 (* ── Round trips ──────────────────────────────────────────────────────── *)
 
 (* Every JSON Schema element the board tool literals use today: enum,

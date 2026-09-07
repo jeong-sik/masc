@@ -557,6 +557,7 @@ let loading_to_string = function
 type loaded =
   { schema : Masc_domain.tool_schema
   ; title : string option
+  ; identity_fields : string list
   ; keeper_projection : Masc_domain.tool_schema option
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
@@ -802,6 +803,11 @@ let tool_of_pairs ~name pairs =
       let* text = as_non_empty_string ~context:"title" value in
       Ok (Some text)
   in
+  let* identity_fields =
+    match List.assoc_opt "identity_fields" pairs with
+    | None -> Ok []
+    | Some value -> as_string_list ~context:"identity_fields" value
+  in
   let* additional_properties =
     match List.assoc_opt "additional_properties" pairs with
     | None -> Ok None
@@ -882,6 +888,7 @@ let tool_of_pairs ~name pairs =
         [ "name"
         ; "description"
         ; "title"
+        ; "identity_fields"
         ; "additional_properties"
         ; "params"
         ; "one_of"
@@ -908,6 +915,7 @@ let tool_of_pairs ~name pairs =
             assemble_input_schema ~params ~additional_properties ~alternatives
         }
     ; title
+    ; identity_fields
     ; keeper_projection
     ; agent_core_projection
     ; help

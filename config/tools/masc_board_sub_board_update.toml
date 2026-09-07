@@ -3,6 +3,8 @@ description = """
 Update an existing SubBoard by slug or ID. Only provided fields are changed; \
 slug and owner remain immutable."""
 
+identity_fields = ["owner"]
+
 [[params]]
 name = "sub_board_id"
 type = "string"

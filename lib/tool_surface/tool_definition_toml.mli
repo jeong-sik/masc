@@ -68,6 +68,9 @@ type loaded =
     (** From the file's [title] key; [None] when absent. The human-readable
         name MCP clients show for the tool — [None] leaves the consumer its
         mechanical fallback. *)
+  ; identity_fields : string list
+    (** From the file's [identity_fields] top-level string array; absent means
+        the tool declares no caller identity fields. *)
   ; keeper_projection : Masc_domain.tool_schema option
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
@@ -95,7 +98,8 @@ val load
     renamed file cannot silently redefine a different tool.
 
     Accepted top-level keys: [name], [description] (non-empty),
-    [title] (non-empty when present), [additional_properties] (bool),
+    [title] (non-empty when present), [identity_fields] (string list),
+    [additional_properties] (bool),
     [[params]], [keeper_projection]
     (a table of [description] / [additional_properties] / [[params]]),
     [agent_core_projection] (the same table grammar), [defer_loading]

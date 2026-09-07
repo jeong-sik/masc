@@ -8,6 +8,15 @@
 ;; dispatch registration. This adapter is the composition boundary that knows
 ;; both sides.
 
+(rule
+ (target board_tool_registry_generated.ml)
+ (deps
+  (glob_files ../../config/tools/masc_board_*.toml))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:../../bin/gen_board_tool_registry.exe} %{deps}))))
+
 (library
  (name board_tool_adapter)
  (public_name masc.board_tool_adapter)
@@ -25,6 +34,7 @@
   board_tool_handlers
   board_tool_post
   board_tool_registry
+  board_tool_registry_generated
   board_tool_schemas
   board_tool_sub_board)
  (libraries

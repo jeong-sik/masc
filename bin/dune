@@ -161,6 +161,15 @@
   masc_types
   yojson))
 
+;; Generate the Board identity-field mirror from the production TOML loader.
+(executable
+ (name gen_board_tool_registry)
+ (modules gen_board_tool_registry)
+ (libraries
+  masc.masc_tool_surface
+  masc.tool_types
+  masc_types))
+
 ;; Manual-only regeneration entry point for the tool parity baselines
 ;; (task-1363). NOTE (task-1409, from PR #33770 review): this alias action
 ;; runs the generator with the dune sandbox root as its working directory,

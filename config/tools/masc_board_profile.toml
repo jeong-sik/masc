@@ -10,6 +10,8 @@ Post count, comment count, vote activity, and engagement stats. Use to understan
 # a day and costs at most 3 extra requests over the same week.
 defer_loading = true
 
+identity_fields = []
+
 [[params]]
 name = "agent"
 type = "string"

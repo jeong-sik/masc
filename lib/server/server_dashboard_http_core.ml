@@ -393,8 +393,13 @@ let dashboard_shell_payload_json
     let persisted_keepers, persisted_keepers_ms =
       measure_ms "persisted_keepers" (fun () -> keeper_count config)
     in
-    let configured_keepers, configured_keepers_ms =
-      measure_ms "configured_keepers" (fun () -> configured_keeper_count config)
+    let (configured_keepers, profile_snapshot), configured_keepers_ms =
+      measure_ms "configured_keepers" (fun () ->
+        if light then
+          let snapshot = Keeper_types_profile.read_keeper_profile_snapshot
+              ~base_path:config.Workspace.base_path in
+          List.length (Keeper_types_profile.snapshot_configured_keeper_names snapshot), Some snapshot
+        else configured_keeper_count config, None)
     in
     let config_resolution_r = ref (`Null, 0) in
     let runtime_resolution_r = ref (`Null, 0) in
@@ -403,7 +408,7 @@ let dashboard_shell_payload_json
       then (
         let runtime_resolution_json, runtime_resolution_ms =
           measure_json_projection "runtime_resolution" (fun () ->
-            Server_dashboard_http_runtime_info.light_runtime_resolution_json config)
+            Server_dashboard_http_runtime_info.light_runtime_resolution_json ?profile_snapshot config)
         in
         runtime_resolution_r := (runtime_resolution_json, runtime_resolution_ms);
         ( Option.value

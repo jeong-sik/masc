@@ -119,8 +119,8 @@ let log_toml_discovery_error_once ~file ~error =
     true
   end
 
-let discover_keepers_toml (dir : string)
-    : keeper_toml_discovery list =
+let discover_keepers_toml_with_paths (dir : string)
+    : (string * keeper_toml_discovery) list =
   if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
   else
     dir
@@ -130,7 +130,7 @@ let discover_keepers_toml (dir : string)
     |> List.sort String.compare
     |> List.map (fun f ->
          let path = Filename.concat dir f in
-         match load_keeper_toml path with
+         let discovery = match load_keeper_toml path with
          | Ok (keeper_name, defaults) -> Loaded { keeper_name; defaults }
          | Error e ->
            let _emitted =
@@ -141,4 +141,8 @@ let discover_keepers_toml (dir : string)
            Invalid
              { keeper_name = Filename.remove_extension f
              ; error = e
-             })
+             }
+         in path, discovery)
+
+let discover_keepers_toml dir =
+  discover_keepers_toml_with_paths dir |> List.map snd

@@ -13362,12 +13362,15 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       (screen_title (" MASC " ^ label)) (source_name view.source)
       (connection_badge state) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:Masc_tui_keys.footer_hints_browser_lane
+    ~hints:(match view.url_draft with
+      | Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear"
+      | None -> Masc_tui_keys.footer_hints_browser_lane)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Read) -> "Reading Firefox…", Theme.info ()
         | Loading (_, Open_session) -> "Opening automation Firefox…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation Firefox…", Theme.info ()
+        | Loading (_, Goto _) -> "Navigating automation Firefox…", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
@@ -13375,10 +13378,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
       in
       c.push_styled ~style ("  " ^ status);
-      c.push_styled ~style:(Theme.recede ())
-        (match view.source with
-         | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
-         | Automation -> "  Automation Firefox • o:open / x:close session • l:live");
+      c.push_styled ~style:(Theme.info ())
+        (match view.url_draft with
+         | Some draft -> browser_lane_url_line ~cols draft
+         | None -> match view.source with
+             | Live -> "  Live Firefox • B:Browser / S:Slack • a:automation"
+             | Automation -> "  Automation Firefox • g:URL • o:open / x:close • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

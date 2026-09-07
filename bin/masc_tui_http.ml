@@ -2450,17 +2450,18 @@ let fetch_browser_lane ~host ~port view =
   | Error detail -> Error detail
   | Ok json -> Masc_tui_types.Browser_lane_view.decode json
 
-let browser_lane_session ~host ~port operation =
+let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
-  match operation with
-  | Read -> Error "read is not a session operation"
-  | Open_session | Close_session ->
-      let action = match operation with Open_session -> "open" | Close_session -> "close" | Read -> "read" in
-      let body = Yojson.Safe.to_string (`Assoc ["action", `String action]) in
-      (* Native Firefox startup has a 60s request deadline. *)
-      match post_json_with_timeout ~timeout_sec:65.0 ~host ~port
-              ~path:"/api/v1/dashboard/browser-lane/session" ~body with
-      | Error detail -> Error detail
-      | Ok json ->
-          let* ok = get boolean "ok" json in
-          if ok then Ok () else let* detail = get string "error" json in Error detail
+  let request = match operation with
+    | Read -> Error "read is not a browser action"
+    | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
+    | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
+  in
+  let* endpoint, json, timeout_sec = request in
+  let body = Yojson.Safe.to_string json in
+  (* Native startup allows 60s; navigation may include Firefox loading. *)
+  let* json = post_json_with_timeout ~timeout_sec ~host ~port
+      ~path:("/api/v1/dashboard/browser-lane/" ^ endpoint) ~body in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail

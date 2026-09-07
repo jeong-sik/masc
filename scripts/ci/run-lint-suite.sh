@@ -101,6 +101,10 @@ blocking_lints() {
     scripts/lint/guard-scan-targets-exist.sh \
     bash scripts/lint/guard-scan-targets-exist.sh --self-test
   run_lint "Guard scan targets exist" bash scripts/lint/guard-scan-targets-exist.sh --fail
+  run_self_test_when_changed "Shim stub set agrees self-test" \
+    scripts/lint/shim-stub-set-agrees.sh \
+    bash scripts/lint/shim-stub-set-agrees.sh --self-test
+  run_lint "Shim stub set agrees" bash scripts/lint/shim-stub-set-agrees.sh --fail
   run_lint "Opam cache freshness ratchet" bash scripts/ci/opam-cache-freshness.sh --check
   run_self_test_when_changed "Opam cache freshness self-test" \
     scripts/ci/opam-cache-freshness.sh \

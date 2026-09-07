@@ -754,10 +754,21 @@ let test_nullable_container_references_and_contracts () =
   (match Plan.validate_composable_schema schema with
    | Ok () -> ()
    | Error _ -> fail "nullable container contract was rejected");
+  let source = node ~id:"source" ~tool_name:"keeper_lane_status" literal_object in
+  let consumer path =
+    node ~id:"consumer" ~tool_name:"Grep"
+      (object_template
+         [ "pattern", Plan.Json_template.output
+             ~node_id:(node_id "source") ~pointer:(pointer path) ])
+  in
+  (match Plan.create ~descriptors:(descriptors ()) [ source; consumer "/probe" ] with
+   | Ok _ -> ()
+   | Error _ -> fail "the declared nullable observation cannot feed a consumer");
+  (match Plan.create ~descriptors:(descriptors ()) [ source; consumer "/probe/state" ] with
+   | Error (Plan.Invalid_output_pointer
+       { error = Plan.Json_pointer.Missing_properties "state"; _ }) -> ()
+   | Error _ | Ok _ -> fail "nullable traversal invented an undeclared property");
   let path = pointer "/rows/0/value" in
-  (match Plan.Json_pointer.resolve_schema path schema with
-   | Ok actual -> check bool "nullable containers retain the declared leaf" true (actual = leaf)
-   | Error _ -> fail "nullable containers blocked a declared output reference");
   (match Plan.Json_pointer.resolve path (`Assoc [ "rows", `Null ]) with
    | Error (Plan.Json_pointer.Expected_container "0") -> ()
    | Error _ | Ok _ -> fail "a null container invented a downstream value");

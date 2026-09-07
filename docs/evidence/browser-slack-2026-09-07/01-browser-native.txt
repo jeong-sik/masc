@@ -1,0 +1,43 @@
+ Overview  Activity  ▸Keepers  Memory  Board  Planning  Fusion  Workspace  Runtime  Config
+   MASC Browser Lane  automation  [connected]                                                                                                          
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Read 7.1 ms • 1 tabs                                                                                                                               
+    Automation Firefox • g:URL • o:open / x:close • l:live                                                                                             
+    [1/1] Example Domain (active)  [ / ]:select tab                                                                                                    
+    https://example.org/ • 129 chars                                                                                                                   
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Example Domain                                                                                                                                     
+                                                                                                                                                       
+    This domain is for use in documentation examples without needing permission. Avoid use in operations.                                              
+                                                                                                                                                       
+    Learn more                                                                                                                                         
+    Text 1/5 • j/k:scroll • r:refresh • Esc:connectors                                                                                                 
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+  B / S:Browser / Slack  l / a:live / automation  [ / ]:tab  j/k:text  Esc:connectors  g:URL  o / x:open / close session  r:refresh  | Port: 8958
+Browser Lane · automation · Firefox page reader                                                                                                        

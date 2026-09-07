@@ -196,6 +196,7 @@ let enter_joining_lanes ~config operation =
   | Reconciliation_required _
   | Finalized _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> Error (Join_phase_mismatch operation)
 ;;
 
@@ -386,6 +387,7 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
   | Reconciliation_required _
   | Finalized _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ ->
   match current_entry ~config entry with
   | Error error -> Error error

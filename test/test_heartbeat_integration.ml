@@ -1514,6 +1514,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
@@ -3316,6 +3317,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "idle lane did not reach Joined_idle");
       check bool
         "shutdown operation records lane join evidence"
@@ -3559,6 +3561,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "not-started lane did not reach Joined_idle");
       (match Lane.peek_exit entry.lane with
        | Some { outcome = Lane.Shutdown_before_start; cleanup_error = None } -> ()
@@ -3823,6 +3826,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "shutdown did not reach Finalized");
       (match
          begin_owner_shutdown_exn

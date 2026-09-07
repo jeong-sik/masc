@@ -25,6 +25,18 @@ type inventory =
   }
 
 val database_file : string
+val path_for_keeper : keepers_runtime_dir:string -> keeper_name:string -> string
+
+type outstanding_snapshot =
+  | Missing_store
+  | Stored_operations of Operation.t list
+
+val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
+(** Read-only schema/integrity checked snapshot of queued and running operations.
+    Never creates, initializes, or recovers a store. Missing files remain distinct
+    from a validated empty queue. Callers authorizing lifecycle changes must
+    exclude the sole writer and its creation for the whole enclosing commit. *)
+
 val open_or_create : path:string -> (t, error) result
 val close : t -> (unit, error) result
 val path : t -> string

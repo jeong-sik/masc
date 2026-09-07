@@ -310,6 +310,7 @@ let finalize_if_ready ~config ~entry (operation : Keeper_shutdown_types.t) =
   | Joining_lanes
   | Reconciliation_required _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> ()
 ;;
 
@@ -344,6 +345,7 @@ let run_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
   | Finalized _ -> finalize_if_ready ~config ~entry operation
   | Reconciliation_required _
   | Blocked _
+  | Operator_absence_acknowledged _
   | Superseded _ -> ()
 ;;
 
@@ -562,6 +564,7 @@ let recover_operation
     | Cleanup_ready _
     | Finalized _
     | Blocked _
+    | Operator_absence_acknowledged _
     | Superseded _ -> Ok operation
   in
   match operation_result with
@@ -582,6 +585,7 @@ let recover_operation
      | Joining_lanes
      | Reconciliation_required _
      | Blocked _
+     | Operator_absence_acknowledged _
      | Superseded _ -> Ok recovered)
 ;;
 
@@ -618,6 +622,12 @@ let recover_operation_with_corrupt_owner_fence
   let successor_operation_id =
     Option.map (fun fence -> fence.operation_id) corrupt_owner_fence
   in
+  (* Acknowledgement is retained audit evidence. In particular it has no
+     authority over a same-name owner created after the observation. Corrupt
+     siblings are still handled by restore_inventory_admission. *)
+  match operation.phase with
+  | Operator_absence_acknowledged _ -> Ok operation
+  | _ ->
   match recover_operation ~config ?successor_operation_id operation with
   | Error _ as error -> error
   | Ok recovered ->

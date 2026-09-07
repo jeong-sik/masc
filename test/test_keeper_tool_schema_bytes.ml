@@ -119,6 +119,7 @@ let measured () =
    A tool added or removed still fails here, and now says which one. *)
 let all_surface_golden_names =
   [ "BrowserGoto"
+  ; "BrowserInteract"
   ; "BrowserRead"
   ; "BrowserSession"
   ; "BrowserTabs"

@@ -3,7 +3,7 @@ description = """
 Navigate the automation lane's browser to one http(s) URL and answer with \
 the landing url, title and status. The automation browser keeps its own \
 profile with no operator logins. The live lane refuses navigation verbs — \
-it is read-only. Read the page afterwards with masc_browser_read \
+use BrowserInteract for explicit-tab interaction. Read the page afterwards with masc_browser_read \
 lane=automation."""
 additional_properties = false
 

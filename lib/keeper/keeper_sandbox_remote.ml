@@ -720,7 +720,8 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
            in
            let settle record triple =
              (match record with
-              | Payload_finished _ | Dispatch_failed { failure = Shim_refused; _ } ->
+              | Payload_finished _
+              | Dispatch_failed { failure = (Shim_refused | Remote_timeout); _ } ->
                 observation :=
                   (match Exec_ssh_protocol.parse_trailer raw_stderr,
                          Exec_ssh_protocol.parse_execution_receipt raw_stderr with

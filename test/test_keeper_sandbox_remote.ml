@@ -95,6 +95,13 @@ let stub_main () =
     Exec_ssh_protocol.render_trailer { v; exit; signal; timed_out; shim_error }
   in
   match mode with
+  | "timeout-receipt" ->
+    let execution_receipt : Exec_ssh_protocol.execution_receipt =
+      { mode = request.mode; boundary = Sandbox_applied } in
+    write_all Unix.stderr
+      (Exec_ssh_protocol.render_trailer ~execution_receipt
+         { v; exit = None; signal = Some 15; timed_out = true; shim_error = None });
+    exit 0
   | "receipt" ->
     let code = match request.mode with
       | Exec_ssh_protocol.Observe -> 0
@@ -567,6 +574,28 @@ let test_receipts_are_owned_by_each_transport_call () =
   check int "multiple stages preserve every receipt" 2 (List.length !effect_receipts)
 ;;
 
+let test_trusted_remote_timeout_retains_receipt () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"timeout-receipt" in
+  let observed = ref None in
+  let runner = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe
+      ~on_receipt:(fun receipt -> observed := Some receipt)
+      ~timeout_sec:2.0 (make_state ~base_path ~cli) in
+  (match runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+           ~argv:["/bin/true"] ~env:[||] ~cwd:None with
+   | Masc_exec.Sandbox_target.Transport_failed _ -> ()
+   | Ran _ -> fail "remote timeout became a successful transport result");
+  match !observed with
+  | Some (Keeper_sandbox_remote.Execution_observed (receipt, outcome)) ->
+    check bool "actual timeout outcome retained" true outcome.timed_out;
+    check (option int) "remote signal retained" (Some 15) outcome.signal;
+    check bool "same response's child acknowledgement retained" true
+      (receipt.mode = Exec_ssh_protocol.Observe
+       && receipt.boundary = Exec_ssh_protocol.Sandbox_applied)
+  | _ -> fail "validated remote timeout was mislabeled as missing transport evidence"
+;;
+
 let test_missing_and_invalid_receipts_keep_actual_status () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -595,6 +624,8 @@ let () =
               test_receipts_are_owned_by_each_transport_call
           ; test_case "missing and invalid receipts retain actual status" `Quick
               test_missing_and_invalid_receipts_keep_actual_status
+          ; test_case "remote timeout retains its trusted receipt" `Quick
+              test_trusted_remote_timeout_retains_receipt
           ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
           ; test_case "probe prefers probe_prefix when present" `Quick
               test_container_exec_probe_argv_prefers_probe_prefix

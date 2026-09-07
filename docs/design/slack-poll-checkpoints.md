@@ -38,6 +38,14 @@ ring keeps only its configured recent-message capacity. This is collection
 continuity, not a durable Slack archive or a promise that all historical messages
 remain visible. Existing human-message and mention filters still apply.
 
+The current staging implementation keeps the entire unfinished window in memory
+and in the JSON checkpoint, without a separate message-count or byte cap. Every
+page rewrites the checkpoint, including staged windows for other channels, so
+large backlogs increase memory use, disk space, and write cost. The four-page
+cycle limit bounds requests per channel per cycle; it does not bound cumulative
+staging size. Disk write failures stop collection for replay, but this mechanism
+does not establish a memory ceiling or archival capacity guarantee.
+
 Protocol source checked 2026-09-07: [Slack conversations.history pagination by
 time](https://docs.slack.dev/reference/methods/conversations.history/#pagination-by-time).
 Slack documents exclusive timestamp boundaries and setting the final message's

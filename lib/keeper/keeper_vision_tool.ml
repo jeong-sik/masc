@@ -94,7 +94,14 @@ let vision_runtime_candidates ()
       (fun (rt : Runtime.t) -> not (List.mem rt.Runtime.id media_failover))
       runtimes
   in
+  let rec unique_runtimes seen = function
+    | [] -> []
+    | (rt : Runtime.t) :: rest ->
+      if List.mem rt.id seen then unique_runtimes seen rest
+      else rt :: unique_runtimes (rt.id :: seen) rest
+  in
   from_failover @ rest
+  |> unique_runtimes []
   |> List.filter_map (fun (rt : Runtime.t) ->
        match rt.Runtime.execution with
        | Runtime_execution.Codex_app_server _
@@ -293,20 +300,15 @@ let vision_text_of_response (response : Agent_core.Types.api_response) =
 ;;
 
 let outcome_of_response (response : Agent_core.Types.api_response) =
+  (* A length stop is authoritative even when the prefix happens to form
+     valid, nonempty JSON. Accepting that prefix would publish a partial
+     extraction as success and prevent the next candidate from finishing it. *)
+  if truncated_of_stop_reason response.stop_reason then Vo_truncated
+  else
   match vision_text_of_response response with
-  | Error detail ->
-    (* A reply the model truncated mid-JSON fails the structured parse before
-       its text can be read, so vision_text_of_response reports a parse error
-       even though the cause is a MaxTokens cut. Consult the stop reason first:
-       a length cut is truncation (remediation: a larger budget), which we
-       report as such instead of a malformed-reply parser fault that would
-       misdirect the operator. A parse error with a non-length stop reason is
-       a genuine structured failure. *)
-    if truncated_of_stop_reason response.stop_reason then Vo_truncated
-    else Vo_invalid_structured_response detail
+  | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->
-    let truncated = truncated_of_stop_reason response.stop_reason in
-    (match Va.classify ~truncated ~content:text with
+    (match Va.classify ~truncated:false ~content:text with
      | Ok t -> Vo_ok t
      | Error Va.Empty_extraction -> Vo_empty
      | Error Va.Truncated_extraction -> Vo_truncated)
@@ -335,6 +337,11 @@ let sleep_before_next_candidate ~clock ~attempt_index =
   if delay > 0.0 then Eio.Time.sleep clock delay
 ;;
 
+type candidate_failure =
+  | Candidate_timeout
+  | Candidate_provider_error of Llm_provider.Http_client.http_error
+  | Candidate_output_limit
+
 let run_candidates_outcome
     ?complete
     ~sw
@@ -349,8 +356,9 @@ let run_candidates_outcome
     | [] ->
       (match last_error with
        | None -> Vo_no_runtime "no schema-capable image runtime configured"
-       | Some (`Timeout _runtime_id) -> Vo_timeout
-       | Some (`Provider_error err) ->
+       | Some Candidate_timeout -> Vo_timeout
+       | Some Candidate_output_limit -> Vo_truncated
+       | Some (Candidate_provider_error err) ->
          Vo_provider
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
@@ -385,7 +393,7 @@ let run_candidates_outcome
               ~runtime_id
               ~result:"error"
               ~reason:"timeout";
-            continue_with (`Timeout runtime_id)
+            continue_with Candidate_timeout
        | Error err ->
             if candidate_capacity_http_error err
             then (
@@ -396,7 +404,7 @@ let run_candidates_outcome
               (* Another attempt on this binding cannot change its hard limit;
                  advance without transient-outage backoff or rewriting pixels. *)
               loop
-                ~last_error:(Some (`Provider_error err))
+                ~last_error:(Some (Candidate_provider_error err))
                 ~attempt_index:(attempt_index + 1)
                 rest)
             else if terminal_policy_http_error err
@@ -415,7 +423,7 @@ let run_candidates_outcome
                 ~runtime_id
                 ~result:"error"
                 ~reason:"transient_provider_error";
-              continue_with (`Provider_error err))
+              continue_with (Candidate_provider_error err))
             else (
               record_vision_candidate_attempt
                 ~runtime_id
@@ -426,11 +434,26 @@ let run_candidates_outcome
                 ; detail = Provider_http_error.to_message err
                 })
        | Ok response ->
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"ok"
-              ~reason:"provider_response";
-            outcome_of_response response)
+            (match outcome_of_response response with
+             | Vo_truncated ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"error"
+                 ~reason:"output_token_limit";
+               (* A typed length stop is candidate-local. Keep the same pixels
+                  and query, and let the next serializer enforce its own
+                  declared ceiling. Equal ceilings are still worth trying:
+                  models differ in how much reasoning precedes the answer. *)
+               loop
+                 ~last_error:(Some Candidate_output_limit)
+                 ~attempt_index:(attempt_index + 1)
+                 rest
+             | outcome ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"ok"
+                 ~reason:"provider_response";
+               outcome))
   in
   loop ~last_error ~attempt_index candidates
 

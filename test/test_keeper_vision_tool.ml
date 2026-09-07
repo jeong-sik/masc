@@ -1391,6 +1391,160 @@ let truncated_json_response ~stop_reason : Agent_core.Types.api_response =
   ; telemetry = None
   }
 
+let vision_output_limit_runtime_toml =
+  {|
+[runtime]
+default = "p1.vision-a"
+media_failover = ["p1.vision-a", "p1.vision-a", "p2.vision-b"]
+[providers.p1]
+protocol = "openai-compatible-http"
+endpoint = "https://p1.example/v1"
+[providers.p2]
+protocol = "openai-compatible-http"
+endpoint = "https://p2.example/v1"
+[models.vision-a]
+api-name = "vision-a"
+max-context = 131072
+[models.vision-a.capabilities]
+max-output-tokens = 32768
+supports-image-input = true
+supports-multimodal-inputs = true
+[models.vision-b]
+api-name = "vision-b"
+max-context = 131072
+[models.vision-b.capabilities]
+max-output-tokens = 49152
+supports-image-input = true
+supports-multimodal-inputs = true
+[p1.vision-a]
+max-tokens = 65536
+max-request-body-bytes = 65536
+[p2.vision-b]
+max-tokens = 60000
+max-request-body-bytes = 65536
+|}
+
+let test_max_tokens_failover_preserves_image_and_candidate_wire_limits () =
+  let well_formed_cut =
+    { (ok_response "partial answer") with stop_reason = Agent_core.Types.MaxTokens }
+  in
+  List.iter
+    (fun cut ->
+      with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+        let calls = ref [] in
+        let first_messages = ref None in
+        let limit_labels =
+          [ "runtime_id", "p1.vision-a"; "result", "error"; "reason", "output_token_limit" ]
+        in
+        let before_limit =
+          metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels
+        in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages ?tools:_ () =
+          let requested, ceiling =
+            match config.Llm_provider.Provider_config.model_id with
+            | "vision-a" -> 65536, 32768
+            | "vision-b" -> 60000, 49152
+            | _ -> failwith "unexpected vision candidate"
+          in
+          assert (config.max_tokens = Some requested);
+          let wire =
+            Llm_provider.Backend_openai.build_request_assoc ~config ~messages ()
+          in
+          assert (Yojson.Safe.Util.member "max_tokens" wire = `Int ceiling);
+          calls := config.model_id :: !calls;
+          match !first_messages with
+          | None -> first_messages := Some messages; Ok cut
+          | Some original ->
+            assert (messages = original);
+            assert
+              (Runtime_agent.For_testing.required_modalities_of_messages messages
+               = [ "image" ]);
+            Ok (ok_response "complete screenshot reading")
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+                ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+        assert_metric_increment "one output limit despite duplicate configured candidate"
+          before_limit
+          (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels);
+        assert (outcome = Vt.Vo_ok "complete screenshot reading")))
+    [ truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens; well_formed_cut ]
+
+let test_max_tokens_exhaustion_remains_visible_tool_failure () =
+  with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-output-exhausted" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+        calls := config.Llm_provider.Provider_config.model_id :: !calls;
+        Ok (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env) ~meta ~args:(artifact_args handle) ()))
+      in
+      let json = json_of_output raw in
+      assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+      assert (assoc_string "error" json = "truncated_extraction");
+      assert (assoc_string "failure_class" json = "runtime_failure")))
+
+let test_non_length_response_does_not_trigger_vision_failover () =
+  List.iter
+    (fun stop_reason ->
+      with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          incr calls;
+          Ok (truncated_json_response ~stop_reason)
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+                ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        assert (!calls = 1);
+        match outcome with
+        | Vt.Vo_invalid_structured_response _ -> ()
+        | _ -> failwith "non-length terminal response must retain its original classification"))
+    [ Agent_core.Types.EndTurn; Agent_core.Types.Refusal; Agent_core.Types.ContentFilter ]
+
+let test_length_failover_keeps_http_policy_terminal_and_rate_limit_retryable () =
+  List.iter
+    (fun code ->
+      with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+        with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "0" (fun () ->
+          let calls = ref 0 in
+          let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+            incr calls;
+            if !calls = 1 then
+              Error (Llm_provider.Http_client.HttpError
+                { code; body = "max_tokens request rejected"; retry_after_header = None })
+            else Ok (ok_response "rate-limit fallback")
+          in
+          let outcome =
+            Eio_main.run (fun env ->
+              Eio.Switch.run (fun sw ->
+                Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                  ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+                  ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+          in
+          match code, outcome with
+          | 429, Vt.Vo_ok "rate-limit fallback" -> assert (!calls = 2)
+          | (400 | 422), Vt.Vo_provider { failure_class = Tool_result.Policy_rejection; _ } ->
+            assert (!calls = 1)
+          | _ -> failwith "typed length failover must not reinterpret HTTP error prose")))
+    [ 400; 422; 429 ]
+
 let test_vision_output_tokens_default_and_env () =
   (* Reasoning models count thinking as output tokens; a 4096 cap let the
      reasoning phase truncate the answer (2026-08-27 MiniMax M3 live probe).
@@ -1522,6 +1676,10 @@ let () =
   test_browser_screenshot_rejects_bad_pixels ();
   test_vision_output_tokens_default_and_env ();
   test_truncated_structured_response_reads_as_truncation ();
+  test_max_tokens_failover_preserves_image_and_candidate_wire_limits ();
+  test_max_tokens_exhaustion_remains_visible_tool_failure ();
+  test_non_length_response_does_not_trigger_vision_failover ();
+  test_length_failover_keeps_http_policy_terminal_and_rate_limit_retryable ();
   test_truncated_of_stop_reason ();
   test_message_of_request ();
   test_first_vision_runtime_id_total ();

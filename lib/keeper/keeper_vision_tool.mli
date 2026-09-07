@@ -54,13 +54,14 @@ val message_of_request
 val provider_for_vision
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** A one-shot, non-thinking vision config: thinking off (avoids the
-    2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
+(** A one-shot vision config with thinking left uncontrolled,
     [response_format = Off]; its prompt specifies the JSON object and the
     response parser validates it, [tool_choice = None], the selected provider
     config's exact temperature
     (including omission), and a fallback [max_tokens] only when the selected
-    runtime has not configured one. *)
+    runtime has not configured one. The provider serializer applies that
+    candidate's resolved output ceiling; failover never raises a declared
+    request budget or copies another model's ceiling. *)
 
 val sniff_image_media_type : string -> (string, string) result
 (** Identify an image's media type from its leading bytes. [Error] names the
@@ -73,7 +74,9 @@ val sniff_image_media_type : string -> (string, string) result
 val vision_runtime_ids : unit -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order
     first, then declaration order. The handler tries these candidates in order
-    for timeout/provider failures within one cumulative tool deadline. *)
+    for timeout/provider failures and output-token truncation. Capacity and
+    output-token failures advance immediately; transient failures retain the
+    configured backoff. There is no tool-owned cumulative deadline. *)
 
 val first_vision_runtime_id : unit -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
@@ -125,9 +128,12 @@ val run_vision
     Non-cancellation exceptions are converted to
     [Vo_provider]; provider success whose text is malformed structured output
     is [Vo_invalid_structured_response] — unless the stop reason is a MaxTokens
-    cut, which reads as [Vo_truncated] because the parse only failed on a reply
-    the budget cut short. Either way eager ingestion can keep the turn alive
-    with a typed unread placeholder. *)
+    cut. A [MaxTokens] response advances to the next candidate with the same
+    image and query, including when a partial JSON object cannot be parsed.
+    Each candidate is attempted at most once; exhausting output-limited
+    candidates returns [Vo_truncated]. Other invalid structured responses and
+    terminal policy rejections do not trigger this output-limit failover.
+    Eager ingestion can keep the turn alive with a typed unread placeholder. *)
 
 val handle
   :  ?complete:complete_fn

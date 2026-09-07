@@ -168,17 +168,6 @@ let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
-(* A 400/422 (or a refused Accept) is this binding's verdict on this request:
-   a parameter range, a media type, a field it does not take. It says nothing
-   about the next candidate, which speaks a different wire -- glm-4.6v refused
-   max_tokens 40960 on 2026-09-07 while the local runtime behind it would have
-   taken the same pixels, and the walk stopped at the refusal. So this class
-   ends the candidate, not the walk; it still names the failure class when
-   every candidate has been tried. *)
-let candidate_policy_http_error = function
-  | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
-  | _ -> false
-
 (* AcceptRejected is the caller's own transport wiring refused before dispatch
    (a missing clock, an invalid deadline). Every candidate would refuse the
    same wiring, so this one still ends the walk. *)
@@ -197,6 +186,23 @@ let candidate_capacity_http_error = function
           | Llm_provider.Http_client.Context_overflow _)
       ; _
       } -> true
+  | _ -> false
+
+(* Every other 4xx is this binding's verdict on this request: a parameter
+   range (glm-4.6v refused max_tokens 40960 on 2026-09-07), a media type, a
+   key it does not accept (401), a model its plan does not serve (403/404).
+   It says nothing about the next candidate, which has its own key and its
+   own wire, so this class ends the candidate, not the walk. Transient codes
+   (408/409/429) and capacity (413) are classified before it and keep their
+   own handling; it still names the failure class once every candidate has
+   answered. *)
+let candidate_policy_http_error err =
+  match err with
+  | Llm_provider.Http_client.HttpError { code; _ } ->
+    code >= 400
+    && code < 500
+    && (not (candidate_capacity_http_error err))
+    && not (Runtime_attempt_fsm.should_try_next err)
   | _ -> false
 
 let failure_class_of_http_error = function

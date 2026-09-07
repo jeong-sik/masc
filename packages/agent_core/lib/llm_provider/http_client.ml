@@ -915,10 +915,11 @@ let classify_eio_backend_error = function
 ;;
 
 let rec classify_eio_error = function
-  | Eio.Net.E _ ->
-    (* Eio 1.3 exposes the typed network envelope but not the finer constructors
-       introduced later. Preserve typed control flow without guessing from text. *)
-    Unknown
+  | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) -> Connection_refused
+  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) -> Dns_failure
+  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.Timeout) -> Timeout
+  | Eio.Net.E (Eio.Net.Connection_reset backend) ->
+    Option.value (classify_eio_backend_error backend) ~default:End_of_file
   | Eio.Exn.X backend ->
     Option.value (classify_eio_backend_error backend) ~default:Unknown
   | Eio.Exn.Multiple_io errors ->
@@ -1636,10 +1637,10 @@ let cache_return (cache : cache) origin (entry : cache_entry) : unit =
 let resolve_origin net (origin : validated_uri) =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
   let service = Int.to_string origin.port in
-  let* addr =
+  let* addresses =
     try
       match Eio.Net.getaddrinfo_stream ~service net origin.host with
-      | ip :: _ -> Ok ip
+      | (_ :: _ as addresses) -> Ok addresses
       | [] ->
         Error
           (NetworkError
@@ -1670,7 +1671,7 @@ let resolve_origin net (origin : validated_uri) =
       Some wrap
     | Http -> Ok None
   in
-  Ok (net, addr, tls_wrap)
+  Ok (net, addresses, tls_wrap)
 ;;
 
 (** Build a reusable client with explicit lifetime control.
@@ -1678,14 +1679,19 @@ let resolve_origin net (origin : validated_uri) =
     created by this client. The client is NOT bound to any switch; the
     caller decides when to close it or park it in a cache. *)
 let make_client ~net ~origin =
-  let+ net, addr, tls_wrap = resolve_origin net origin in
+  let+ net, addresses, tls_wrap = resolve_origin net origin in
   let tracked_transports : connection list Atomic.t = Atomic.make [] in
   let connect ~sw:conn_sw _uri =
-    let sock = Eio.Net.connect ~sw:conn_sw net addr in
+    let sock = Tcp_address_race.connect ~sw:conn_sw ~net addresses in
     let transport : connection =
-      match tls_wrap with
-      | Some wrap -> (wrap origin.uri sock :> connection)
-      | None -> (sock :> connection)
+      try
+        match tls_wrap with
+        | Some wrap -> (wrap origin.uri sock :> connection)
+        | None -> (sock :> connection)
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Resource.close sock;
+        Printexc.raise_with_backtrace exn bt
     in
     let rec push () =
       let prev = Atomic.get tracked_transports in
@@ -1730,13 +1736,18 @@ let make_client ~net ~origin =
 (** Create a single transport connection bound to [sw]. This is the unit
     stored in the connection cache and reused across requests. *)
 let make_connection ~sw ~net ~origin : (connection, http_error) result =
-  let* net, addr, tls_wrap = resolve_origin net origin in
+  let* net, addresses, tls_wrap = resolve_origin net origin in
   try
-    let sock = Eio.Net.connect ~sw net addr in
+    let sock = Tcp_address_race.connect ~sw ~net addresses in
     let conn : connection =
-      match tls_wrap with
-      | Some wrap -> (wrap origin.uri sock :> connection)
-      | None -> (sock :> connection)
+      try
+        match tls_wrap with
+        | Some wrap -> (wrap origin.uri sock :> connection)
+        | None -> (sock :> connection)
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Resource.close sock;
+        Printexc.raise_with_backtrace exn bt
     in
     Diag.debug "http_client" "make_connection: new connection for %s" origin.url;
     Ok conn

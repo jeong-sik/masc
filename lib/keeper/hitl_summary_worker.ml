@@ -1265,7 +1265,8 @@ let try_cli_slots
       | Error error ->
         Error (Keeper_approval_queue.exact_attempt_error_to_string error)
     in
-    let rec walk ~bound ~released_entry_binding ~last_cli_failure = function
+    let rec walk ~bound ~released_entry_binding ~last_cli_failure slots =
+      match Keeper_lane_cli_oneshot.order_slots slots with
       | [] ->
         (match bound, last_cli_failure with
          | Some identity, Some failure ->

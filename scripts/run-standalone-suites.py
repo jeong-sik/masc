@@ -594,10 +594,24 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
     os.makedirs(workdir, exist_ok=True)
     sources: list[str] = []
 
+    # Module name -> the directory it was staged from. Flattening several
+    # libraries into one directory is what makes this runner simple, and it is
+    # also the one thing dune's wrapping exists to prevent: two libraries may
+    # each have a types.ml, and here the second copy lands on the first.
+    # agent_core has exactly that -- base/types.ml and llm_provider/types.ml --
+    # and the compile then says "Unbound module Types" about a types.ml that is
+    # staged and right there, because it is the other one.
+    staged_from: dict[str, str] = {}
+    collisions: list[str] = []
+
     def stage(directory: str, module: str) -> None:
         origin = os.path.join(root, directory, module + ".ml")
         if not os.path.exists(origin):
             return
+        previous = staged_from.get(module)
+        if previous is not None and previous != directory:
+            collisions.append(f"{module}.ml: {previous} and {directory}")
+        staged_from[module] = directory
         # The interface too, when there is one. Without it every abstract type
         # arrives concrete and the suite compiles against a wider signature
         # than dune gives it -- which is how it would pass here and fail there.
@@ -691,8 +705,21 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         # Ahead of the compiler, because the compiler is describing the
         # consequence: unsorted, it stops at the first module that names one
         # behind it and calls that module unbound.
+        # Both reasons go ahead of the compiler, and the collision ahead of
+        # the sort: a name that means two files is why the sort could not be
+        # made, and the sort not being made is why the compiler stopped where
+        # it did. Reported on a failure rather than on staging, because a
+        # suite that never reaches the shadowed module builds and passes, and
+        # refusing that would lose coverage to a hazard it did not meet.
         if unsorted_reason is not None:
             head.insert(0, "  " + unsorted_reason)
+        if collisions:
+            head.insert(
+                0,
+                "  %d module name(s) staged from two libraries, so one copy"
+                " shadows the other: %s"
+                % (len(collisions), "; ".join(sorted(collisions)[:3])),
+            )
         return Outcome(None, head[0], "\n".join(head[1:]))
 
     # Run inside its own directory: alcotest writes its per-case output under

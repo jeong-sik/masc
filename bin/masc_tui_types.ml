@@ -6540,6 +6540,7 @@ let gate_mode_label = function
 type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
+  | Palette_msx
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6644,6 +6645,7 @@ let palette_entries (state : state) =
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
+  @ [ "go MSX", Palette_msx ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

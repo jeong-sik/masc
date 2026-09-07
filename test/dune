@@ -3812,6 +3812,22 @@
  (deps (alias runtest-test_tui_keyboard_input-theme-scheme)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-msx-palette)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   msx-palette)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-msx-palette)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-planning-review)
  (deps
   test_tui_keyboard_input.py
@@ -4722,6 +4738,12 @@
  (name test_exec_shim)
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
+
+(test
+ (name test_exec_shim_observe)
+ (modules test_exec_shim_observe)
+ (enabled_if (= %{system} linux))
+ (libraries alcotest exec_shim unix))
 
 (test
  (name test_shim_clock)

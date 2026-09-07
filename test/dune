@@ -4738,7 +4738,7 @@
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries masc_tui_types))
+ (libraries masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_webdriver.inc)
 

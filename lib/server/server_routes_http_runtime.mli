@@ -291,6 +291,7 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     Otel_metric_store. *)
 
 val keeper_fleet_runtime_resolution_light_fields :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   unit -> (string * Yojson.Safe.t) list
 (** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
     reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]

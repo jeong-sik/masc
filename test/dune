@@ -3991,6 +3991,21 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-acting-call-evidence)))
 
+(rule
+ (alias runtest-test_tui_build_identity)
+ (deps
+  test_tui_build_identity.py
+  ../bin/masc_tui.exe
+  ../lib/build_commit/build_commit_generated.ml)
+ (action
+  (run python3 %{dep:test_tui_build_identity.py}
+   %{dep:../bin/masc_tui.exe}
+   %{dep:../lib/build_commit/build_commit_generated.ml})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_build_identity)))
+
 ; Python unit suites over the scripts/ tree. These suites were first wired
 ; into runtest after the #32245 review found several of them running with no
 ; rule, no workflow, and no caller; a later sweep adopted the rest. Every

@@ -1156,6 +1156,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  ;; The CLI reports the build rule's stamp, without a runtime repository probe.
+  masc.build_commit
   masc_tui_task_flow
   masc.masc_tool_blob_store
   masc_tui_agenda

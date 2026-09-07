@@ -123,8 +123,57 @@ let test_authority_precedence () = with_fixture (fun _ root binary _ ->
     (match select state with Installed.Not_installed -> true | _ -> false))
     [Masc.Build_identity.Bound_valid root;
      Masc.Build_identity.Bound_invalid Masc.Build_identity.Source_root_inode_differs])
+let replace_entry_field key value = function
+  | `Assoc fields -> `Assoc (List.map (function
+      | "files", `List files -> "files", `List (List.map (function
+          | `Assoc entry -> `Assoc ((key, value) :: List.remove_assoc key entry)
+          | json -> json) files)
+      | field -> field) fields)
+  | json -> json
+let test_invalid_numeric_receipt () =
+  List.iter (fun (name, key, value) ->
+    with_fixture ~change_receipt:(replace_entry_field key value) (fun _ _ binary _ ->
+      check bool name true (match inspect binary with
+        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false)))
+    ["finite outside civil-time range", "mtime", `Float 1e308;
+     "timestamp NaN", "mtime", `Float nan;
+     "timestamp positive infinity", "mtime", `Float infinity;
+     "timestamp negative infinity", "mtime", `Float neg_infinity;
+     "negative timestamp", "mtime", `Int (-1);
+     "timestamp string", "mtime", `String "1577836800";
+     "timestamp null", "mtime", `Null;
+     "timestamp boolean", "mtime", `Bool true;
+     "timestamp int outside OCaml int", "mtime", `Intlit "999999999999999999999999999999";
+     "size negative", "size", `Int (-1);
+     "size float", "size", `Float 1.;
+     "size string", "size", `String "1";
+     "size boolean", "size", `Bool true]
+let test_civil_time_boundaries () =
+  let last_second = Ptime.to_float_s (Ptime.truncate ~frac_s:0 Ptime.max) in
+  List.iter (fun value -> with_fixture ~change_receipt:(replace_entry_field "mtime" (`Float value))
+    (fun _ _ binary _ ->
+      let b = bound binary in
+      check (option (float 0.)) "valid boundary retained" (Some value) (Installed.build_stamp_mtime b);
+      check bool "health timestamp renders" true (String.length (Time_codec.rfc3339_of_unix value) > 0)))
+    [0.; last_second];
+  with_fixture ~change_receipt:(replace_entry_field "mtime" (`Float (last_second +. 1.)))
+    (fun _ _ binary _ -> check bool "next civil year rejected" true (match inspect binary with
+      | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false))
+let test_read_only_install () = with_fixture (fun _ root binary _ ->
+  let files = ["release.json"; "assets/dashboard/index.html"; "assets/dashboard/.build-stamp"] in
+  let dirs = [root; Filename.concat root "assets"; Filename.concat root "assets/dashboard"] in
+  Fun.protect ~finally:(fun () -> List.iter (fun dir -> Unix.chmod dir 0o700) dirs)
+    (fun () ->
+      List.iter (fun file -> Unix.chmod (Filename.concat root file) 0o444) files;
+      Unix.chmod binary 0o555;
+      List.iter (fun dir -> Unix.chmod dir 0o555) dirs;
+      check (result string error) "read-only installed release serves" (Ok "<p>exact release</p>")
+        (Installed.load (bound binary) "index.html")))
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)
-  ["source authority precedence", test_authority_precedence;
+  ["malformed numeric fields", test_invalid_numeric_receipt;
+   "civil-time boundaries", test_civil_time_boundaries;
+   "read-only installed files", test_read_only_install;
+   "source authority precedence", test_authority_precedence;
    "exact release and original timestamp", test_exact_release;
    "pointer switch", test_pointer_switch; "receipt removed", test_receipt_removed;
    "asset corruption", test_asset_corruption; "asset symlink", test_asset_symlink;

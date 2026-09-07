@@ -42,6 +42,10 @@ let parse_entry json =
     | Some (`Float n) when Float.is_finite n && n >= 0. -> Ok n
     | Some (`Int n) when n >= 0 -> Ok (float_of_int n)
     | _ -> Error Invalid_receipt in
+  (* Health renders RFC3339 civil time. A finite float alone does not prove
+     representability; Ptime owns the supported civil-time range. *)
+  let* () = match Ptime.of_float_s mtime with
+    | Some _ -> Ok () | None -> Error Invalid_receipt in
   if safe_path path && hex 64 sha256 then Ok {path; sha256; size; mtime}
   else Error Invalid_receipt
 let parse body =

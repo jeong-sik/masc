@@ -45,7 +45,8 @@ selects installed authority even when its receipt is missing or invalid. The
 receipt SHA must match its directory, its source commit must match the embedded
 binary commit, and its binary and every declared asset must match their SHA-256.
 Strict parsing rejects unknown or duplicate fields, unsafe paths, and missing
-index/stamp entries. Owned exact reads reject symlinked files or parent components.
+index/stamp entries. Receipt timestamps must be representable in Ptime's civil-time
+range before health may render RFC3339. Owned exact reads reject symlinked files or parent components.
 
 The selected release root is frozen for the process lifetime. Replacing the
 installer's `masc` pointer does not redirect an already running process. Each asset

@@ -22,6 +22,7 @@ type t =
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
+  | Interrupt_keeper_turn of string
   | Steer_turn of string
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
@@ -97,8 +98,8 @@ let catalog =
     ; summary = "open recorded file changes for this keeper"
     }
   ; { word = "interrupt"
-    ; args = ""
-    ; summary = "signal the streaming turn to stop"
+    ; args = "[keeper]"
+    ; summary = "signal a streaming turn to stop: this pane's, or the named keeper's"
     }
   ; { word = "steer"
     ; args = "<message>"
@@ -249,7 +250,8 @@ let parse text =
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
-    | "interrupt", _ -> Interrupt_turn
+    | "interrupt", "" -> Interrupt_turn
+    | "interrupt", name -> Interrupt_keeper_turn name
     | "steer", "" -> Steer_missing_message
     | "steer", message ->
         Steer_turn

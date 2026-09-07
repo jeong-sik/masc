@@ -54,6 +54,11 @@ type t =
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)
+  | Interrupt_keeper_turn of string
+      (** [/interrupt <name>] — stop a turn belonging to a keeper this pane
+          is not showing. Every other way in needs that keeper on screen,
+          and the key that would put it there is refused while any request
+          is in flight, which is exactly when one is running (#33852). *)
   | Steer_turn of string
       (** [/steer <message>] — interrupt the streaming turn, then dispatch
           this exact message before ordinary next-turn input. *)

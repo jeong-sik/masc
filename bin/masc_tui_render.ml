@@ -9992,12 +9992,19 @@ let render_keeper_message (state : state) =
            mine;
          List.iter
            (fun entry ->
+             (* The row names the way to stop it. Esc and /interrupt both
+                read [msg_live], which is this pane's turn and not this one,
+                and the key that would put that keeper on screen is refused
+                while any request is in flight -- so an operator reading
+                this row had no key at all (#33852). *)
              box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-               (Printf.sprintf "  (also sending to %s: %s%s)"
+               (Printf.sprintf "  (also sending to %s: %s%s -- /interrupt %s)"
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
-                  (sending_age entry)))
+                  (sending_age entry)
+                  (Keeper_chat.terminal_safe_text
+                     entry.sent_request.keeper_name)))
            others);
     (match state.msg_loaded_error with
      | Some detail ->

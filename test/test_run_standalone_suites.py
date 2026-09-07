@@ -32,16 +32,16 @@ class NamespaceFixtures(unittest.TestCase):
             "lib/alpha/helper.ml": "let value = Util.value + 1\n",
             "lib/alpha/util.ml": "let value = 10\n",
             "lib/alpha/util.mli": "val value : int\n",
-            "lib/beta/dune": "(library (name beta) (modules helper util))",
-            "lib/beta/helper.ml": "let value = Util.value + 1\n",
+            "lib/beta/dune": "(library (name beta) (modules helper util) (libraries test.alpha))",
+            "lib/beta/helper.ml": "let value = Util.value + Alpha.answer\n",
             "lib/beta/util.ml": "let value = 100\n",
-            "test/test_namespace.ml": "let () = assert (Alpha.answer = 21); assert (Beta.Helper.value = 101)\n",
+            "test/test_namespace.ml": "let () = assert (Alpha.answer = 21); assert (Beta.Helper.value = 121)\n",
         }
         for name, body in files.items():
             self.write(name, body)
         libraries = runner.collect_libraries(str(self.root))
         self.resolver = runner.Resolver(libraries, str(self.root))
-        self.plan, blocker = self.resolver.plan("test_namespace", ["test.alpha", "alpha", "beta"])
+        self.plan, blocker = self.resolver.plan("test_namespace", ["beta", "test.alpha", "alpha"])
         self.assertIsNone(blocker)
 
     def write(self, name, body):
@@ -181,7 +181,7 @@ class NamespaceFixtures(unittest.TestCase):
         self.write("test/test_namespace.ml", "let () = ignore Alpha.Util.value\n")
         result = runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
         self.assertIsNone(result.built, "hidden internal module unexpectedly compiled")
-        self.assertIn("Alpha.Util", result.summary + result.detail)
+        self.assertIn("Unbound module Alpha.Util", result.summary + result.detail)
 
 
 class GeneratedSourceFixtures(unittest.TestCase):

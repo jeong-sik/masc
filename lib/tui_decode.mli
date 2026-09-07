@@ -2729,3 +2729,46 @@ val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
 
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_probe_for_id : runtime_surface_snapshot -> runtime_id:string -> runtime_provider_probe option
+
+(** Decoded durable async inventory. Malformed counters are errors, never zero.
+    The active inventory contains queued, running and cancelling requests only. *)
+type async_request_phase = Async_queued | Async_running | Async_cancelling
+
+type async_request_ownership = Async_runtime_owned | Async_ownership_unknown
+
+type async_request_row =
+  { ar_request_id : string
+  ; ar_keeper_name : string
+  ; ar_phase : async_request_phase
+  ; ar_elapsed_sec : float option
+  ; ar_ownership : async_request_ownership
+  }
+
+type async_request_summary =
+  { ars_active : int
+  ; ars_runtime_owned : int
+  ; ars_ownership_unknown : int
+  ; ars_record_errors : int
+  }
+
+type async_recovery_report =
+  { arr_lost : int
+  ; arr_finalized : int
+  ; arr_cleaned : int
+  ; arr_unreadable : int
+  ; arr_failed : int
+  ; arr_staging_inspected : int
+  ; arr_staging_deleted : int
+  ; arr_staging_preserved : int
+  }
+
+type async_request_observation =
+  | Async_ready of
+      { summary : async_request_summary
+      ; requests : async_request_row list
+      ; recovery : async_recovery_report option
+      }
+  | Async_unavailable of { kind : string; reason : string option }
+
+val decode_async_request_observation :
+  Yojson.Safe.t -> (async_request_observation, string) result

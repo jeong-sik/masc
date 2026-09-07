@@ -30,6 +30,25 @@ Its durable pagination checkpoints are described in
 [slack-poll-checkpoints.md](slack-poll-checkpoints.md). That collection path
 remains independent of the Browser integration.
 
+To use only Firefox reads, set this in the resolved configuration directory's
+`runtime.toml`, then restart MASC:
+
+```toml
+[slack]
+enabled = false
+```
+
+This master switch disables the API connector: Socket Mode, outbound bot REST
+calls, and the bound-channel collector even if `poll_enabled = true`. Inherited
+`SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` cannot override it. The connector status
+explains that it is disabled. Credentials are not deleted. Firefox Browser Lane
+and the separate OAuth identity configuration do not consult this setting.
+
+Missing `enabled` preserves the existing enabled behavior; `true` enables it.
+Non-boolean values, malformed TOML, or an unreadable existing configuration file
+disable the API connector with a configuration error. Changes apply at startup;
+this is not a hot disconnect switch.
+
 Native automation uses stock Firefox through OCaml WebDriver; see
 [native-firefox-lane.md](native-firefox-lane.md). It has an isolated profile,
 so Slack authentication in the operator's browser belongs to the `live` lane.

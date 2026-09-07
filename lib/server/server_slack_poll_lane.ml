@@ -363,8 +363,11 @@ end
 let start ~sw ~env ~state =
   match Env_config_slack.bot_token_opt () with
   | None ->
-    Log.Server.warn
-      "slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started"
+    (match Env_config_slack.unavailable_reason () with
+     | Some reason -> Log.Server.info "slack-lane: %s; poll lane not started" reason
+     | None ->
+       Log.Server.warn
+         "slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started")
   | Some token -> (
     let resolution = Config_dir_resolver.resolve () in
     let toml_path =

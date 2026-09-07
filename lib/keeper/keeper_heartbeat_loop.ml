@@ -559,7 +559,7 @@ let run_keepalive_unified_turn
     in
     try
       (match
-         Keeper_board_attention_worker.settle_one_completed
+         Keeper_board_attention_worker.settle_completed_snapshot
            ~base_path:ctx.config.base_path
            ~keeper_name:meta_after_triage.name
        with
@@ -574,7 +574,7 @@ let run_keepalive_unified_turn
            (Keeper_board_attention_worker.Partition_settled
               { candidate_id; continuation_wake = _ }) ->
          Log.Keeper.info
-           "Board attention completed judgment settled on owner lane keeper=%s candidate=%s"
+           "Board attention completed snapshot settled on owner lane keeper=%s last_candidate=%s"
            meta_after_triage.name
            candidate_id);
       let event_intake =

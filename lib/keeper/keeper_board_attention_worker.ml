@@ -1689,47 +1689,10 @@ let replay_completed_owner_wake
     Ok (Some (wake_owner ~base_path ~keeper_name))
 ;;
 
-(* What this boundary rations is admission into the Keeper, and only a
-   [Relevant] verdict admits anything: [Candidate.consume_judged] enqueues a
-   stimulus and wakes the owner for [Relevant], and writes one consumed record
-   for [Not_relevant]. Counting a discarded signal against the same per-turn
-   slot puts every relevant verdict behind however many irrelevant ones share
-   its [created_at] order, which is the shape RFC-0334 removed when it deleted
-   the fanout limit and arrival window. Settle the discards, stop on the
-   delivery. *)
-let settles_without_admitting (item : Partition.completed_item) =
-  match item.judgment.Candidate.verdict.Keeper_board_attention_judgment.decision with
-  | Keeper_board_attention_judgment.Not_relevant -> true
-  | Keeper_board_attention_judgment.Relevant -> false
-;;
-
-(* Each settlement performs at least the candidate-consumption write and the
-   partition transition write, so one owner turn performs at most twice the
-   configured settlement bound (default 8, see Keeper_config) such durability
-   operations before persisting a continuation wake for the remainder.
-   This is deliberately a settlement bound, not a scan or arrival-window
-   heuristic: every successful iteration removes one exact Completed
-   partition.
-
-   This is a batch-size knob, not a workaround cap: continuation_wake
-   re-wakes the owner for exactly one more Completed partition per
-   heartbeat cycle rather than moving remaining work off-turn, so the
-   choice is cycle-count vs per-cycle-blocking-time, not block-vs-don't
-   (masc#27054 adversarial review). See Keeper_config for the runtime_params
-   registration and its value derivation. *)
-let max_completed_settlements_per_owner_turn () =
-  Keeper_config.keeper_board_attention_settlements_per_turn ()
-
-(* [Eio.Fiber.yield] raises [Effect.Unhandled] when no Eio event loop is
-   running — the Alcotest suite drives [settle_one_completed] directly without
-   [Eio_main.run]. Production heartbeats always run under Eio, so the yield is
-   effective there; end-to-end drain behavior is tracked by masc#27055. *)
-let yield_between_discard_settlements () =
-  try Eio.Fiber.yield () with
-  | Effect.Unhandled _ -> ()
-;;
-
-let settle_one_completed
+(* Only the captured list is drained: workers may complete more partitions
+   while this owner yields, but those belong to the next admission snapshot.
+   Yield outside each durable transaction so other fibers remain runnable. *)
+let settle_completed_snapshot
       ~base_path
       ~keeper_name
   =
@@ -1758,26 +1721,20 @@ let settle_one_completed
          leaves the same [Completed] item to be handed to this function again
          next cycle, permanently, since the ledger it depends on cannot come
          back (masc, board attention finalizer, 2026-08-16). Discarded rather
-         than [settles_without_admitting item]: no stimulus reached the
-         Keeper regardless of what the lost judgment's verdict was, so the
-         owner-turn batch must keep draining instead of stopping as if this
-         had been an admission. *)
-      let discarded_only =
-        match delivery with
-        | Candidate.Candidate_absent ->
-          Log.Keeper.error
-            "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
-            keeper_name
-            partition.partition_id
-            item.candidate_id;
-          true
-        | Candidate.Delivered (_ : Candidate.candidate) ->
-          settles_without_admitting item
-      in
+         than admitting anything: the missing candidate has no delivery
+         obligation that can be fulfilled by retrying this partition. *)
+      (match delivery with
+       | Candidate.Candidate_absent ->
+         Log.Keeper.error
+           "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
+           keeper_name
+           partition.partition_id
+           item.candidate_id
+       | Candidate.Delivered (_ : Candidate.candidate) -> ());
       let* settled =
         Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
       in
-      Ok (settled, discarded_only)
+      Ok settled
     | Partition.Ready
     | Partition.Running _
     | Partition.Settled _
@@ -1786,37 +1743,24 @@ let settle_one_completed
         ("completed partition query returned non-Completed state: "
          ^ partition.partition_id)
   in
-  (* Terminates within the owner-turn bound: every iteration settles one
-     partition out of [completed]. Completions beyond the bound, including ones
-     the worker adds while this runs, are left for the continuation wake. *)
-  let rec settle_until_admission ~last_settled ~discarded = function
-    | [] -> Ok (last_settled, discarded)
-    | _ when discarded >= max_completed_settlements_per_owner_turn () ->
-      Ok (last_settled, discarded)
+  let rec settle_snapshot last_settled = function
+    | [] -> Ok last_settled
     | partition :: rest ->
-      let* settled, discarded_only = settle_head partition in
-      if discarded_only
-      then (
-        yield_between_discard_settlements ();
-        settle_until_admission
-          ~last_settled:settled
-          ~discarded:(discarded + 1)
-          rest)
-      else Ok (settled, discarded)
+      let* settled = settle_head partition in
+      (match rest with
+       | [] -> ()
+       | _ :: _ -> Eio_guard.fair_yield ());
+      settle_snapshot settled rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
   match completed with
   | [] -> Ok No_completed_partition
   | first :: _ ->
-    let* settled, discarded =
-      settle_until_admission ~last_settled:first ~discarded:0 completed
-    in
-    if discarded > 0
-    then
-      Log.Keeper.info
-        "board_attention_discards_settled keeper=%s count=%d"
-        keeper_name
-        discarded;
+    let* settled = settle_snapshot first completed in
+    Log.Keeper.info
+      "board_attention_completed_snapshot_settled keeper=%s count=%d"
+      keeper_name
+      (List.length completed);
     let* remaining = completed_in_order ~base_path ~keeper_name in
     let continuation_wake =
       match remaining with

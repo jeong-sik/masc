@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 """Build and run test suites with ocamlfind instead of dune.
 
-A suite whose dune stanza names only single-module libraries under bin/ or
-test_lib/ does not need the masc library, and therefore does not need a build
-of it. This script reads those stanzas, works out which modules the suite
-actually reaches, compiles them in dependency order with ocamlfind, and runs
-the result.
+This is a bounded runner for static OCaml library sources, not a replacement
+for Dune rules or preprocessing. --generate explicitly enables the supported
+embedded_config recipe; other generated modules still require Dune.
+Wrapped units use their library namespace, and authored main modules and
+interfaces remain unchanged. Dependency analysis determines the compile order;
+its failure is reported as an unbuilt suite, never an invented test verdict.
+C stubs are compiled separately in their owning library's staging directory.
 
-Why it is worth having: a targeted CI dispatch answers in about eight minutes,
-and alcotest stops at the first failed assertion inside a case, so a case with
-three stale assertions costs three dispatches. The same suites answer here in
-well under a second each. Measured 2026-09-07: 91 suites built and ran in 119
-seconds.
-
-A library's C stubs are compiled alongside its modules, and its
-(c_library_flags ...) reach the linker as -cclib. Without that the suite gets
-as far as the linker and dies on an undefined symbol -- an answer that looks
-like a verdict and is not.
-
-The suites this cannot reach are the ones that name `masc` (or a sublibrary of
-it). Building those from source is the local dune build this exists to avoid;
-they stay on the CI dispatch.
+Findlib packages are passed as declared. An archive-less package may aggregate
+other packages; it does not identify a virtual implementation. Installed
+Dune metadata supplies virtual/default-implementation declarations, and a
+suite explicitly naming an implementation overrides that declared default.
 
 DUNE_SOURCEROOT is set to the checkout being read, so a suite that reads source
 files -- every Ast_grep structural guard does -- can be pointed at main and at a
@@ -58,15 +50,16 @@ class Library:
     stubs: tuple[str, ...]
     c_library_flags: tuple[str, ...]
     wrapped: bool
+    needs_dune: str | None = None
 
 
 @dataclass
 class Plan:
     suite: str
-    modules: list[tuple[str, str]] = field(default_factory=list)
+    libraries: list[Library] = field(default_factory=list)
     packages: list[str] = field(default_factory=list)
-    stubs: list[tuple[str, str]] = field(default_factory=list)
     link_flags: list[str] = field(default_factory=list)
+    generated: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def strip_comments(text: str) -> str:
@@ -150,13 +143,48 @@ def field_words(form: str, name: str) -> list[str] | None:
 def modules_in(root: str, directory: str) -> list[str]:
     """Every module in [directory], the set dune takes when (modules) is absent."""
     paths = glob.glob(os.path.join(root, directory, "*.ml"))
-    return sorted(os.path.basename(path)[: -len(".ml")] for path in paths)
+    paths += glob.glob(os.path.join(root, directory, "*.mli"))
+    return sorted({os.path.splitext(os.path.basename(path))[0] for path in paths})
+
+
+def source_contract_reason(form: str, directory_text: str) -> str | None:
+    # These declarations alter source identity, visibility or compilation.
+    # Warning-only flags are intentionally left to Dune's warning checks.
+    for feature in ("preprocess", "virtual_modules", "implements", "root_module",
+                    "private_modules", "ocamlc_flags", "ocamlopt_flags",
+                    "foreign_archives", "library_flags"):
+        if field_words(form, feature) is not None:
+            return f"{feature} requires Dune"
+    subdirs = field_words(directory_text, "include_subdirs")
+    if subdirs not in (None, ["no"]):
+        return "include_subdirs requires Dune"
+    stub_form = next(sexp_forms(form, "(foreign_stubs"), None)
+    if stub_form is not None:
+        if field_words(stub_form, "language") not in (None, ["c"]):
+            return "foreign_stubs language requires Dune"
+        for feature in ("flags", "include_dirs", "extra_deps", "mode"):
+            if field_words(stub_form, feature) is not None:
+                return f"foreign_stubs {feature} require Dune"
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name)
+               for name in (field_words(stub_form, "name") or [])):
+            return "foreign_stubs name expression requires Dune"
+    flags = field_words(form, "flags") or []
+    index = 0
+    while index < len(flags):
+        if flags[index] == ":standard":
+            index += 1
+        elif flags[index] in ("-w", "-warn-error") and index + 1 < len(flags):
+            index += 2
+        else:
+            return "compiler flags beyond warning settings require Dune"
+    return None
 
 
 def read_libraries(dune_path: str, directory: str, root_dir: str) -> dict[str, Library]:
     if not os.path.exists(dune_path):
         return {}
-    text = strip_comments(open(dune_path, encoding="utf-8").read())
+    with open(dune_path, encoding="utf-8") as source:
+        text = strip_comments(source.read())
     out: dict[str, Library] = {}
     for form in sexp_forms(text, "(library"):
         names = field_words(form, "name")
@@ -185,18 +213,13 @@ def read_libraries(dune_path: str, directory: str, root_dir: str) -> dict[str, L
             for word in (field_words(form, "c_library_flag") or [])
             if word.strip("()")
         ]
-        # dune wraps a library's modules in a generated alias module unless
-        # the stanza says otherwise, and nothing here generates that module.
-        # Compiling one anyway gives every consumer an unbound module, so a
-        # wrapped library is refused by name instead.
-        #
-        # One shape escapes that: a library whose only module carries the
-        # library's own name is its own main module, and dune generates no
-        # alias for it. Compiling the file gives exactly the module every
-        # consumer names, so wrapping costs nothing there. time_compat,
-        # dated_jsonl and fs_compat are that shape, and 71 suites link them.
-        declared = (field_words(form, "wrapped") or ["true"])[0] != "false"
-        wrapped = declared and modules != [name]
+        wrapping = field_words(form, "wrapped") or ["true"]
+        unsupported = source_contract_reason(form, text)
+        if wrapping not in (["true"], ["false"]):
+            unsupported = "wrapped transition requires Dune"
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_']*", m) for m in modules):
+            unsupported = "module expression requires Dune"
+        wrapped = wrapping == ["true"]
         library = Library(
             name,
             directory,
@@ -205,6 +228,7 @@ def read_libraries(dune_path: str, directory: str, root_dir: str) -> dict[str, L
             tuple(stubs),
             tuple(c_flags),
             wrapped,
+            unsupported,
         )
         out[name] = library
         # A consumer names a library by whichever of the two the author wrote,
@@ -238,7 +262,8 @@ def needs_dune_reason(form: str) -> str | None:
 
 
 def read_suites(root: str) -> dict[str, Suite]:
-    text = strip_comments(open(os.path.join(root, "test/dune"), encoding="utf-8").read())
+    with open(os.path.join(root, "test/dune"), encoding="utf-8") as source:
+        text = strip_comments(source.read())
     for included in sorted(glob.glob(os.path.join(root, "test/stanzas/*.inc"))):
         text += "\n" + strip_comments(open(included, encoding="utf-8").read())
     out: dict[str, Suite] = {}
@@ -265,16 +290,15 @@ def collect_libraries(root: str) -> dict[str, Library]:
     libraries.update(read_libraries(os.path.join(root, "test/dune"), "test", root))
     for included in sorted(glob.glob(os.path.join(root, "test/stanzas/*.inc"))):
         libraries.update(read_libraries(included, "test", root))
-    # Libraries under lib/ as well. Whether one can be built from source is
-    # decided per library below -- a wrapped one cannot -- rather than by
-    # keeping only the leaves here, which used to exclude fs_compat and every
-    # public name.
-    # packages/ holds agent_core and its sublibraries, which nine suites name
-    # as masc.agent_core. Unread, they were blocked on a name the index did
-    # not carry; read, the report says the library is wrapped, which is the
-    # thing that would have to change.
-    library_dunes = sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True)) + sorted(
-        glob.glob(os.path.join(root, "packages/**/dune"), recursive=True)
+    # Index source libraries by both private and public names. Whether a
+    # library needs Dune is determined from its stanza and source inventory.
+    library_dunes = (
+        sorted(glob.glob(os.path.join(root, "lib/**/dune"), recursive=True))
+        + sorted(glob.glob(os.path.join(root, "packages/**/dune"), recursive=True))
+        # proto/ holds masc_proto, which 319 suites link. Unread, they were
+        # all blocked on a name the index did not carry, which reads as "the
+        # library is missing" rather than what it is.
+        + sorted(glob.glob(os.path.join(root, "proto/dune")))
     )
     for path in library_dunes:
         directory = os.path.relpath(os.path.dirname(path), root)
@@ -283,10 +307,74 @@ def collect_libraries(root: str) -> dict[str, Library]:
     return libraries
 
 
+@dataclass(frozen=True)
+class PackageMetadata:
+    virtual: bool
+    default_implementation: str | None
+    implements: str | None
+
+
+def read_package_metadata(text: str, name: str) -> PackageMetadata | None:
+    for form in sexp_forms(text, "(library"):
+        if field_words(form, "name") != [name]:
+            continue
+        default = field_words(form, "default_implementation")
+        implements = field_words(form, "implements")
+        return PackageMetadata(field_words(form, "kind") == ["virtual"],
+                               default[0] if default else None,
+                               implements[0] if implements else None)
+    return None
+
+
+@dataclass(frozen=True)
+class GenerationFailure:
+    reason: str
+
+
 class Resolver:
-    def __init__(self, libraries: dict[str, Library]):
+    def __init__(self, libraries: dict[str, Library], root: str, generate: bool = False):
         self.libraries = libraries
+        self.root = root
+        self.generate = generate
+        # A generator is evaluated at most once per owner during this run.
+        # Failures remain failures with their original diagnostic for every
+        # suite that reaches the same source, instead of rerunning the tool.
+        self._generation_results: dict[tuple[str, str], str | GenerationFailure] = {}
         self._findlib: dict[str, bool] = {}
+        self.substitutions: dict[str, str] = {}
+        self._metadata: dict[str, PackageMetadata | None] = {}
+
+    def generate_module(self, library: Library, module: str) -> str | GenerationFailure:
+        key = (library.name, module)
+        # One supported recipe, matching lib/embedded_config/dune. This is
+        # not a generic Dune action interpreter or a basename fallback.
+        supported = library.name == "embedded_config" and module_name(module) == "Embedded_config"
+        if not supported:
+            return GenerationFailure("source absent; no supported generator (requires Dune)")
+        if not self.generate:
+            return GenerationFailure("source absent; pass --generate for the embedded_config recipe")
+        if key not in self._generation_results:
+            config = os.path.join(self.root, "config")
+            if not os.path.isdir(config):
+                result = GenerationFailure(f"generator input directory absent: {config}")
+            else:
+                try:
+                    crunch = subprocess.run(
+                        ["ocaml-crunch", "-m", "plain", config],
+                        capture_output=True, text=True, check=False,
+                    )
+                    if crunch.returncode != 0:
+                        diagnostic = crunch.stderr.strip() or "no stderr"
+                        result = GenerationFailure(
+                            f"ocaml-crunch exited {crunch.returncode}: {diagnostic}")
+                    elif not crunch.stdout:
+                        result = GenerationFailure("ocaml-crunch succeeded but produced no source")
+                    else:
+                        result = crunch.stdout
+                except OSError as error:
+                    result = GenerationFailure(f"ocaml-crunch could not start: {error}")
+            self._generation_results[key] = result
+        return self._generation_results[key]
 
     def installed(self, name: str) -> bool:
         if name not in self._findlib:
@@ -296,46 +384,117 @@ class Resolver:
             self._findlib[name] = probe.returncode == 0
         return self._findlib[name]
 
+    def package_metadata(self, name: str) -> PackageMetadata | None:
+        if name not in self._metadata:
+            probe = subprocess.run(
+                ["ocamlfind", "query", "-format", "%m", name],
+                capture_output=True, text=True, check=False,
+            )
+            metadata = None
+            if probe.returncode == 0:
+                path = os.path.join(os.path.dirname(probe.stdout.strip()), "dune-package")
+                if os.path.isfile(path):
+                    with open(path, encoding="utf-8") as source:
+                        metadata = read_package_metadata(source.read(), name)
+            self._metadata[name] = metadata
+        return self._metadata[name]
+
+    def resolve_packages(self, packages: list[str]) -> list[str]:
+        if not packages:
+            return []
+        probe = subprocess.run(
+            ["ocamlfind", "query", "-recursive", "-predicates", "native", "-format", "%p"] + packages,
+            capture_output=True, text=True, check=False,
+        )
+        if probe.returncode != 0:
+            raise StagingError("findlib dependency query failed: " + probe.stderr.strip())
+        closure = list(dict.fromkeys(probe.stdout.split() + packages))
+        metadata = {name: self.package_metadata(name) for name in closure}
+        selected: dict[str, str] = {}
+        # Existing explicit implementations (including required packages) win
+        # over defaults. Two implementations of one virtual library cannot be
+        # linked into the same executable.
+        for name, info in metadata.items():
+            if info is not None and info.implements is not None:
+                prior = selected.get(info.implements)
+                if prior is not None and prior != name:
+                    raise StagingError(f"conflicting implementations for {info.implements}: {prior}, {name}")
+                selected[info.implements] = name
+        for name, info in metadata.items():
+            if info is None or not info.virtual:
+                continue
+            implementation = selected.get(name, info.default_implementation)
+            if implementation is None:
+                continue
+            target = self.package_metadata(implementation)
+            if target is None or target.implements != name:
+                raise StagingError(f"invalid declared implementation {implementation} for {name}")
+            selected[name] = implementation
+        self.substitutions.update(selected)
+        # Implementations precede clients whose META requires only the virtual
+        # package. findlib then orders each implementation's own dependencies.
+        return list(dict.fromkeys(list(selected.values()) + packages))
+
     def plan(self, suite: str, deps: list[str]) -> tuple[Plan | None, str | None]:
-        ordered: list[str] = []
+        ordered: list[Library] = []
+        complete: set[str] = set()
+        visiting: set[str] = set()
         packages: list[str] = []
+        generated: dict[tuple[str, str], str] = {}
         blocker: str | None = None
 
         def visit(name: str) -> bool:
             nonlocal blocker
-            if name in ordered:
-                return True
             library = self.libraries.get(name)
-            if library is not None and library.wrapped:
-                blocker = blocker or f"{name} (wrapped)"
-                return False
             if library is None:
-                if self.installed(name):
-                    if name not in packages:
-                        packages.append(name)
-                    return True
-                blocker = blocker or name
+                if not self.installed(name):
+                    blocker = name
+                    return False
+                if name not in packages:
+                    packages.append(name)
+                return True
+            key = library.name
+            if key in complete:
+                return True
+            if key in visiting:
+                blocker = f"library dependency cycle at {name}"
                 return False
+            if library.needs_dune:
+                blocker = f"{name} ({library.needs_dune})"
+                return False
+            for module in library.modules:
+                origin = source_stem(self.root, library, module)
+                missing_embedded_implementation = (
+                    library.name == "embedded_config"
+                    and module_name(module) == "Embedded_config"
+                    and (origin is None or not os.path.isfile(origin + ".ml"))
+                )
+                if origin is None or missing_embedded_implementation:
+                    result = self.generate_module(library, module)
+                    if isinstance(result, GenerationFailure):
+                        blocker = f"{name}.{module}: {result.reason}"
+                        return False
+                    generated[(library.name, module)] = result
+            visiting.add(key)
             for dependency in library.deps:
                 if not visit(dependency):
                     return False
-            ordered.append(name)
+            visiting.remove(key)
+            complete.add(key)
+            ordered.append(library)
             return True
 
         for dependency in deps:
             if not visit(dependency):
                 return None, blocker
-        plan = Plan(suite)
-        for name in ordered:
-            library = self.libraries[name]
-            for module in library.modules:
-                plan.modules.append((library.directory, module))
-            for stub in library.stubs:
-                plan.stubs.append((library.directory, stub))
+        try:
+            resolved = self.resolve_packages(packages)
+        except (OSError, StagingError) as error:
+            return None, str(error)
+        plan = Plan(suite, libraries=ordered, packages=resolved, generated=generated)
+        for library in ordered:
             for flag in library.c_library_flags:
-                # -lncurses reaches the C linker through the OCaml driver.
                 plan.link_flags += ["-cclib", flag]
-        plan.packages = packages
         return plan, None
 
 
@@ -349,36 +508,163 @@ class Outcome:
     detail: str = ""
 
 
+def module_name(name: str) -> str:
+    return name[:1].upper() + name[1:]
+
+
+def source_stem(root: str, library: Library, module: str) -> str | None:
+    for stem in dict.fromkeys((module, module[:1].lower() + module[1:])):
+        path = os.path.join(root, library.directory, stem)
+        if os.path.isfile(path + ".ml") or os.path.isfile(path + ".mli"):
+            return path
+    return None
+
+
+class StagingError(Exception):
+    """No test verdict can be drawn from an invalid source/command plan."""
+
+
+@dataclass(frozen=True)
+class SourceGroup:
+    directory: str
+    sources: tuple[str, ...]
+    stubs: tuple[str, ...] = ()
+    alias: str | None = None
+    opened: str | None = None
+
+
+@dataclass(frozen=True)
+class StagedPlan:
+    groups: tuple[SourceGroup, ...]
+    packages: tuple[str, ...]
+    link_flags: tuple[str, ...]
+    executable: str
+
+
+def stage_plan(plan: Plan, root: str, workdir: str) -> StagedPlan:
+    # --keep may be reused. A fresh namespace also excludes previous .cmi/.cmx
+    # files, so a removed source cannot be satisfied by an earlier build.
+    staging = os.path.relpath(tempfile.mkdtemp(prefix=".standalone-", dir=workdir), workdir)
+    groups: list[SourceGroup] = []
+    unit_owners: dict[str, str] = {}
+
+    def reserve(unit: str, owner: str) -> None:
+        if unit in unit_owners:
+            raise StagingError(f"compilation unit {unit} belongs to both {unit_owners[unit]} and {owner}")
+        unit_owners[unit] = owner
+
+    for library in plan.libraries:
+        main = module_name(library.name)
+        directory = os.path.join(staging, library.name)
+        os.makedirs(os.path.join(workdir, directory))
+        has_main = any(module_name(m) == main for m in library.modules)
+        members = [m for m in library.modules if module_name(m) != main]
+        wrapped = library.wrapped and bool(members)
+        alias_unit = main + "__" if has_main else main
+        alias = None
+        if wrapped:
+            reserve(alias_unit, library.name)
+            alias = os.path.join(directory, alias_unit + ".ml")
+            with open(os.path.join(workdir, alias), "w", encoding="utf-8") as out:
+                for member in members:
+                    out.write(f"module {module_name(member)} = {main}__{module_name(member)}\n")
+        sources: list[str] = []
+        for module in library.modules:
+            public = module_name(module)
+            unit = main + "__" + public if wrapped and public != main else public
+            reserve(unit, library.name)
+            origin = source_stem(root, library, module)
+            generated = plan.generated.get((library.name, module))
+            if origin is None and generated is None:
+                raise StagingError(f"source absent: {library.directory}/{module}")
+            for extension in (".mli", ".ml"):
+                target = os.path.join(directory, unit + extension)
+                if extension == ".ml" and generated is not None:
+                    with open(os.path.join(workdir, target), "w", encoding="utf-8") as source:
+                        source.write(generated)
+                    sources.append(target)
+                elif origin is not None and os.path.isfile(origin + extension):
+                    shutil.copyfile(origin + extension, os.path.join(workdir, target))
+                    sources.append(target)
+        stubs: list[str] = []
+        stub_directory = os.path.join(directory, "stubs")
+        if library.stubs:
+            os.makedirs(os.path.join(workdir, stub_directory))
+        for stub in library.stubs:
+            target = os.path.join(stub_directory, stub + ".c")
+            shutil.copyfile(os.path.join(root, library.directory, stub + ".c"), os.path.join(workdir, target))
+            stubs.append(target)
+        if library.stubs:
+            for header in glob.glob(os.path.join(root, library.directory, "*.h")):
+                shutil.copyfile(header, os.path.join(workdir, stub_directory, os.path.basename(header)))
+        groups.append(SourceGroup(directory, tuple(sources), tuple(stubs), alias,
+                                  alias_unit if wrapped else None))
+
+    directory = os.path.join(staging, "suite")
+    os.makedirs(os.path.join(workdir, directory))
+    reserve(module_name(plan.suite), "test suite")
+    target = os.path.join(directory, plan.suite + ".ml")
+    shutil.copyfile(os.path.join(root, "test", plan.suite + ".ml"), os.path.join(workdir, target))
+    groups.append(SourceGroup(directory, (target,)))
+    return StagedPlan(tuple(groups), tuple(["alcotest"] + plan.packages),
+                      tuple(plan.link_flags), plan.suite + ".exe")
+
+
+def compile_commands(staged: StagedPlan, workdir: str) -> list[list[str]]:
+    """Compile each real unit once; -open never leaks to another library.
+
+    The alias is compiled first with -no-alias-deps. ocamldep's -map resolves
+    short internal names to their namespaced units, including interface edges:
+    https://ocaml.org/manual/5.5/depend.html . An authored main is a normal
+    source in this order, never a generated map or an inferred public API.
+    """
+    packages = ",".join(staged.packages)
+    base = ["ocamlfind", "ocamlopt", "-package", packages, "-w", "-a", "-no-alias-deps"]
+    commands: list[list[str]] = []
+    objects: list[str] = []
+    includes: list[str] = []
+    for group in staged.groups:
+        includes += ["-I", group.directory]
+        for stub in group.stubs:
+            obj = os.path.splitext(stub)[0] + ".o"
+            commands.append(base + ["-c", stub, "-o", obj])
+            objects.append(obj)
+        if group.alias:
+            obj = os.path.splitext(group.alias)[0] + ".cmx"
+            commands.append(base + includes + ["-c", group.alias, "-o", obj])
+            objects.append(obj)
+        opened = ["-open", group.opened] if group.opened else []
+        if group.sources:
+            mapping = ["-map", group.alias] if group.alias else []
+            probe = subprocess.run(
+                ["ocamlfind", "ocamldep", "-package", packages] + includes
+                + mapping + opened + ["-sort"] + list(group.sources),
+                cwd=workdir, capture_output=True, text=True, check=False,
+            )
+            if probe.returncode != 0:
+                raise StagingError("dependency analysis failed: " + probe.stderr.strip())
+            ordered = probe.stdout.split()
+            if len(ordered) != len(group.sources) or set(ordered) != set(group.sources):
+                raise StagingError("dependency analysis omitted or duplicated source files")
+            for source in ordered:
+                extension = ".cmi" if source.endswith(".mli") else ".cmx"
+                obj = os.path.splitext(source)[0] + extension
+                commands.append(base + includes + opened + ["-c", source, "-o", obj])
+                if extension == ".cmx":
+                    objects.append(obj)
+    commands.append(base + includes + ["-linkpkg"] + objects
+                    + list(staged.link_flags) + ["-o", staged.executable])
+    return commands
+
+
 def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> Outcome:
     workdir = keep or tempfile.mkdtemp(prefix=f"{plan.suite}-")
     os.makedirs(workdir, exist_ok=True)
-    sources: list[str] = []
-
-    def stage(directory: str, module: str) -> None:
-        origin = os.path.join(root, directory, module + ".ml")
-        if not os.path.exists(origin):
-            return
-        # The interface too, when there is one. Without it every abstract type
-        # arrives concrete and the suite compiles against a wider signature
-        # than dune gives it -- which is how it would pass here and fail there.
-        interface = origin + "i"
-        if os.path.exists(interface):
-            shutil.copy(interface, workdir)
-            sources.append(module + ".mli")
-        shutil.copy(origin, workdir)
-        sources.append(module + ".ml")
-
-    # The C sources come first on the command line: ocamlfind compiles them
-    # and hands the objects to the linker with the modules that call them.
-    for directory, stub in plan.stubs:
-        origin = os.path.join(root, directory, stub + ".c")
-        if os.path.exists(origin):
-            shutil.copy(origin, workdir)
-            sources.append(stub + ".c")
-    for directory, module in plan.modules:
-        stage(directory, module)
-    shutil.copy(os.path.join(root, "test", plan.suite + ".ml"), workdir)
-    sources.append(plan.suite + ".ml")
+    try:
+        staged = stage_plan(plan, root, workdir)
+        commands = compile_commands(staged, workdir)
+    except (OSError, StagingError) as error:
+        return Outcome(None, str(error))
 
     # Some suites read a path relative to the working directory rather than
     # through DUNE_SOURCEROOT -- test_tool_name_prefix_boundary opens
@@ -393,26 +679,34 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         if not os.path.exists(link) and not os.path.islink(link):
             os.symlink(os.path.join(source_root, entry), link)
 
-    packages = ",".join(["alcotest"] + plan.packages)
-    # -w -a: the suite and its libraries are built with the repo's own flags by
-    # dune, and CI is where a warning has to be answered. Repeating them here
-    # would only turn an unrelated warning into a failure to run at all.
-    compile = subprocess.run(
-        ["ocamlfind", "ocamlopt", "-package", packages, "-linkpkg", "-w", "-a"]
-        + sources
-        + plan.link_flags
-        + ["-o", plan.suite + ".exe"],
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    for command in commands:
+        compile = subprocess.run(command, cwd=workdir, capture_output=True,
+                                 text=True, check=False)
+        if compile.returncode != 0:
+            break
     if compile.returncode != 0:
         # Reported apart from a test failure: a suite that will not build says
         # nothing about the code it tests, and counting it as red would put a
         # gap in this harness on the same line as a real defect.
+        # The whole error, bounded, not its last line. ocamlopt writes a
+        # "No implementation provided for the following modules:" over three
+        # lines, and reporting the last one alone printed the continuation --
+        # "Capability_recovery_reconciler (…cmx)" -- which reads as a link
+        # order complaint and sent one reader after the sort instead of after
+        # the missing package (#33799).
         detail = compile.stderr.strip().splitlines()
-        return Outcome(None, detail[-1] if detail else "build failed")
+        # findlib writes several warning shapes -- "[WARNING] Package X:
+        # Deprecated", "[WARNING] Interface digestif.cmi occurs in several
+        # directories" -- and any of them ahead of the error becomes the
+        # summary line if only the package one is dropped.
+        detail = [line for line in detail if "findlib: [WARNING]" not in line
+                  and "[WARNING] Package" not in line]
+        if not detail:
+            return Outcome(None, "build failed")
+        head = detail[:BUILD_DETAIL_LINES]
+        if len(detail) > BUILD_DETAIL_LINES:
+            head.append("  ... (truncated)")
+        return Outcome(None, head[0], "\n".join(head[1:]))
 
     # Run inside its own directory: alcotest writes its per-case output under
     # the working directory, and a shared one has suites overwriting each other.
@@ -433,7 +727,7 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         return Outcome(True, summary)
     failures = [line.strip() for line in output.splitlines() if line.startswith("FAIL")]
     summary = "; ".join(failures) if failures else "failed"
-    return Outcome(False, summary, failure_detail(output))
+    return Outcome(False, summary, failure_detail(output) or output_tail(output))
 
 
 # What alcotest printed under each failed assertion, bounded. The names alone
@@ -445,8 +739,26 @@ DETAIL_LINES = 40
 # Alcotest prints the pair a couple of blank lines under the FAIL line, then a
 # backtrace. Stop at the backtrace: it names alcotest's own frames, not the
 # assertion, and it is the longest part of the block.
+BUILD_DETAIL_LINES = 8
 SKIP_REASONS_SHOWN = 10
 DETAIL_STOP = ("Raised at", "ASSERT", "FAIL", "Logs saved to", "Testing ")
+
+
+def output_tail(output: str) -> str:
+    """The end of a run that failed without naming an assertion.
+
+    A suite need not be alcotest, and one that exits non-zero with no FAIL
+    line left the report as the bare word "failed" -- which is what a reader
+    of a CI log got for test_ci_run_tests_script, a Linux-only red with
+    nothing to act on. The tail is where a shell suite says what happened.
+    """
+    lines = [line.rstrip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return "the suite exited non-zero and wrote nothing"
+    tail = lines[-DETAIL_LINES:]
+    if len(lines) > DETAIL_LINES:
+        tail.insert(0, "  ... (earlier output omitted)")
+    return "\n".join(tail)
 
 
 def failure_detail(output: str) -> str:
@@ -495,6 +807,10 @@ def main() -> int:
         metavar="DIR",
         help="build in DIR and leave it there, instead of a temporary directory",
     )
+    parser.add_argument(
+        "--generate", action="store_true",
+        help="run the supported ocaml-crunch embedded_config recipe into owned staging sources",
+    )
     args = parser.parse_args()
 
     root = subprocess.run(
@@ -506,7 +822,7 @@ def main() -> int:
     source_root = os.path.abspath(args.source_root or root)
 
     suites = read_suites(root)
-    resolver = Resolver(collect_libraries(root))
+    resolver = Resolver(collect_libraries(root), root, generate=args.generate)
 
     if args.all_matching:
         wanted = sorted(
@@ -538,7 +854,7 @@ def main() -> int:
 
     if args.list:
         for plan in plans:
-            print(f"buildable  {plan.suite}  ({len(plan.modules)} modules)")
+            print(f"buildable  {plan.suite}  ({sum(len(lib.modules) for lib in plan.libraries)} modules)")
         for name, why in blocked:
             print(f"blocked    {name}  {why}")
         print(f"\n{len(plans)} buildable, {len(blocked)} blocked")
@@ -563,9 +879,11 @@ def main() -> int:
             for line in outcome.detail.splitlines():
                 print(f"      {line}")
     # One line per skip buries the verdicts: a full run skips over a thousand
-    # suites, each because a library it links is wrapped. Name them
+    # suites with dependencies requiring Dune. Name them
     # individually only when the caller asked for particular suites; otherwise
     # count them by reason, which is also the list of what to unblock first.
+    for package, implementation in sorted(resolver.substitutions.items()):
+        print(f"note  declared implementation for {package}: {implementation}")
     if args.suites:
         for name, why in blocked:
             print(f"skip  {name}: {why}")

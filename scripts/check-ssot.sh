@@ -102,13 +102,29 @@ check_rule "R2-loopback-literal" 0 \
   'masc_network_defaults|server_auth|graphql_endpoint' \
   lib
 
-# SSOT-R4 — config filename literal.
-# Tracked: #8414. Helper to be added (Config_filenames) in the fix.
-# No exclusion — every site should eventually route through the helper.
+# SSOT-R4 — config filename literal bypasses Config_dir_resolver.
+# Tracked: #8414 (closed 2026-04-19).
+# Excluded: the helper's own file, and dune files -- a build rule cannot call
+# an OCaml value, and lib/embedded_config/dune names runtime.toml as an
+# example of the lookup-key shape its generator produces.
+#
+# The pattern used to name runtime.json, keeper_runtime.toml and
+# tool_policy.toml, and its stated fix was to add a Config_filenames module.
+# That module was never built, and all three names are gone from lib and bin:
+# runtime.json as a repo config source is retired, with
+# test_runtime_config_validity asserting its absence, and the two toml names
+# survive only in CHANGELOG, one RFC and the dashboard prototypes. The rule
+# had one hit left, on a preset bundle's own runtime.json in prompt_preset.ml,
+# which is a different file that happens to share a name.
+#
+# So it was watching three dead names while the live one drifted.
+# Config_dir_resolver.runtime_toml_filename exists and five modules use it;
+# three more spelled "runtime.toml" by hand, and two of those produced a wire
+# field that the third compared against by literal.
 check_rule "R4-config-filename" 0 \
-  "Config_filenames.<name> (add helper per #8414)" \
-  '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
-  '' \
+  "Config_dir_resolver.runtime_toml_filename" \
+  '"runtime\.toml"' \
+  'config_dir_resolver|/dune:' \
   lib
 
 # SSOT-R5 — health path literal bypasses Server_health_paths helper.

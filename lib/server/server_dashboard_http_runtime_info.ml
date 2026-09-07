@@ -722,7 +722,7 @@ type dashboard_runtime_provider_probe =
   ; skipped : bool
   }
 
-let runtime_inventory_source = "runtime.toml"
+let runtime_inventory_source = Config_dir_resolver.runtime_toml_filename
 
 let dashboard_runtime_probe_timeout_sec_float =
   Float.of_int dashboard_runtime_probe_timeout_sec

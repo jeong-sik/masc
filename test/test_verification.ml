@@ -433,6 +433,149 @@ let test_scan_scope_limits_a_submission_to_its_own_verification () =
     (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
 
 
+(* Release each real retry fiber explicitly, so simultaneous deferrals and
+   arrivals during dispatch are exercised without a wall-clock delay. *)
+let with_retry_interval f =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+    Eio.Switch.run (fun sw ->
+      let timers = Eio.Stream.create 4 in
+      let waits = ref 0 in
+      let wait () =
+        incr waits;
+        let released, release = Eio.Promise.create () in
+        Eio.Stream.add timers release;
+        Eio.Promise.await released
+      in
+      f ~sw ~wait ~waits ~timers))
+
+let retry_key task_id verification_id : CA.For_testing.review_key =
+  { task_id; verification_id }
+
+let retry_scope_names scope entries =
+  CA.For_testing.entries_in_scope ~scope entries
+  |> List.map (fun ((key : CA.For_testing.review_key), _) ->
+       key.task_id ^ "/" ^ key.verification_id)
+  |> List.sort String.compare
+
+let test_retry_batch_keeps_concurrent_verifications () =
+  let a = retry_key "task-a" "vrf-1" in
+  let b = retry_key "task-b" "vrf-1" in
+  let c = retry_key "task-a" "vrf-2" in
+  List.iter
+    (fun keys ->
+      with_retry_interval (fun ~sw ~wait ~waits ~timers ->
+        let delivered = Eio.Stream.create 1 in
+        let schedule =
+          CA.For_testing.make_retry_scheduler ~sw ~wait
+            ~dispatch:(Eio.Stream.add delivered)
+        in
+        let accepted =
+          Eio.Fiber.List.map
+            (fun key -> schedule (CA.For_testing.Targets [ key ])) keys
+        in
+        Alcotest.(check (list bool)) "each concurrent deferral is retained"
+          (List.map (fun _ -> true) keys) accepted;
+        Alcotest.(check bool) "same verification shares its pending retry" false
+          (schedule (CA.For_testing.Targets [ a ]));
+        let release = Eio.Stream.take timers in
+        Alcotest.(check int) "all pending keys share one interval" 1 !waits;
+        Eio.Promise.resolve release ();
+        let scope = Eio.Stream.take delivered in
+        let entries =
+          List.map (fun key -> key, ())
+            (retry_key "task-a" "vrf-older" :: keys)
+        in
+        Alcotest.(check (list string)) "only the exact deferred verifications retry"
+          (retry_scope_names (CA.For_testing.Targets keys) entries)
+          (retry_scope_names scope entries)))
+    [ [ a; b ]; [ a; b; c ] ]
+
+let test_retry_batch_keeps_backlog_read_recovery () =
+  let a = retry_key "task-a" "vrf-1" in
+  let b = retry_key "task-b" "vrf-2" in
+  let open CA.For_testing in
+  List.iter
+    (fun scopes ->
+      with_retry_interval (fun ~sw ~wait ~waits ~timers ->
+        let delivered = Eio.Stream.create 1 in
+        let schedule = make_retry_scheduler ~sw ~wait ~dispatch:(Eio.Stream.add delivered) in
+        List.iter
+          (fun scope ->
+            Alcotest.(check bool) "new retry scope is admitted" true (schedule scope))
+          scopes;
+        Alcotest.(check bool) "repeated read failure shares the sweep" false
+          (schedule Whole_backlog);
+        let release = Eio.Stream.take timers in
+        Alcotest.(check int) "read recovery and named retries share one timer" 1 !waits;
+        Eio.Promise.resolve release ();
+        Alcotest.(check bool) "backlog read failure retains a whole-backlog retry" true
+          (Eio.Stream.take delivered = Whole_backlog)))
+    [ [ Targets [ a ]; Whole_backlog; Targets [ b ] ]
+    ; [ Whole_backlog; Targets [ a ]; Targets [ b ] ]
+    ]
+
+let test_retry_arrival_during_drain_keeps_its_next_batch () =
+  let a = retry_key "task-a" "vrf-1" in
+  let b = retry_key "task-b" "vrf-2" in
+  let c = retry_key "task-c" "vrf-3" in
+  with_retry_interval (fun ~sw ~wait ~waits ~timers ->
+    let delivered = Eio.Stream.create 2 in
+    let during_dispatch = ref None in
+    let dispatch scope =
+      Eio.Stream.add delivered scope;
+      match !during_dispatch with
+      | None -> ()
+      | Some enqueue ->
+        during_dispatch := None;
+        Alcotest.(check bool) "an arrival during dispatch starts the next batch" true
+          (enqueue (CA.For_testing.Targets [ b ]))
+    in
+    let schedule = CA.For_testing.make_retry_scheduler ~sw ~wait ~dispatch in
+    during_dispatch := Some schedule;
+    Alcotest.(check bool) "first retry is admitted" true
+      (schedule (CA.For_testing.Targets [ a ]));
+    Eio.Promise.resolve (Eio.Stream.take timers) ();
+    let entries = [ a, (); b, (); c, () ] in
+    Alcotest.(check (list string)) "first drain owns only its detached batch"
+      [ "task-a/vrf-1" ] (retry_scope_names (Eio.Stream.take delivered) entries);
+    let release_next = Eio.Stream.take timers in
+    Alcotest.(check bool) "a third deferral joins the new batch" true
+      (schedule (CA.For_testing.Targets [ c ]));
+    Alcotest.(check bool) "new batch still owns its first arrival" false
+      (schedule (CA.For_testing.Targets [ b ]));
+    Eio.Promise.resolve release_next ();
+    Alcotest.(check (list string)) "the next drain keeps both new arrivals"
+      [ "task-b/vrf-2"; "task-c/vrf-3" ]
+      (retry_scope_names (Eio.Stream.take delivered) entries);
+    Alcotest.(check int) "one interval per drained batch" 2 !waits)
+
+let test_cancelled_retry_does_not_publish_into_a_fresh_runtime () =
+  let observed = ref [] in
+  let dispatch scope = observed := scope :: !observed in
+  (try
+     with_retry_interval (fun ~sw ~wait ~waits:_ ~timers ->
+       let schedule = CA.For_testing.make_retry_scheduler ~sw ~wait ~dispatch in
+       Alcotest.(check bool) "retry is pending before cancellation" true
+         (schedule
+            (CA.For_testing.Targets [ retry_key "task-awaiting" "vrf-awaiting" ]));
+       let (_ : unit Eio.Promise.u) = Eio.Stream.take timers in
+       Eio.Switch.fail sw Exit)
+   with
+   | Exit -> ());
+  Alcotest.(check int) "cancelled timer never dispatches" 0 (List.length !observed);
+  with_retry_interval (fun ~sw ~wait ~waits:_ ~timers ->
+    let delivered, resolve_delivered = Eio.Promise.create () in
+    let schedule =
+      CA.For_testing.make_retry_scheduler ~sw ~wait
+        ~dispatch:(fun scope -> dispatch scope; Eio.Promise.resolve resolve_delivered scope)
+    in
+    Alcotest.(check bool) "fresh runtime admits recovery of awaiting tasks" true
+      (schedule CA.For_testing.Whole_backlog);
+    Eio.Promise.resolve (Eio.Stream.take timers) ();
+    Alcotest.(check bool) "recovery is the fresh whole-backlog scope" true
+      (Eio.Promise.await delivered = CA.For_testing.Whole_backlog))
+
 (* RFC-0417 §4.1/§6.3: the system lane's authority ends where a cancellation
    begins. The routing is pure and read off the status; the runtime path
    consults it before any review starts, records a cancel claim as
@@ -996,7 +1139,6 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
-          CA.start ~sw ~clock ~config;
           (match
              W.transition_task_r
                config
@@ -1008,6 +1150,10 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+          (* A cancelled runtime leaves this durable awaiting state behind.
+             Starting after submission proves boot recovery without relying
+             on the submission hook or a surviving interval timer. *)
+          CA.start ~sw ~clock ~config;
           Eio.Time.with_timeout_exn clock 5.0 (fun () ->
             Eio.Promise.await reviewer_called;
             Eio.Promise.await verdict_committed;
@@ -3258,6 +3404,14 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "concurrent verification retries share one timer without losing keys" `Quick
+        test_retry_batch_keeps_concurrent_verifications;
+      Alcotest.test_case "named retries retain a concurrent failed-backlog sweep" `Quick
+        test_retry_batch_keeps_backlog_read_recovery;
+      Alcotest.test_case "arrivals during retry dispatch keep the next batch" `Quick
+        test_retry_arrival_during_drain_keeps_its_next_batch;
+      Alcotest.test_case "cancelled retries do not publish into a fresh runtime" `Quick
+        test_cancelled_retry_does_not_publish_into_a_fresh_runtime;
       Alcotest.test_case "a cancel claim is routed to the operator" `Quick
         test_cancel_claim_is_routed_to_the_operator;
       Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
@@ -3274,7 +3428,7 @@ let () =
         test_system_llm_rejection_prefers_registered_producer_binding;
       Alcotest.test_case "system LLM rejection does not derive unregistered Keeper" `Quick
         test_system_llm_rejection_does_not_derive_unregistered_keeper;
-      Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
+      Alcotest.test_case "boot recovery commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
       Alcotest.test_case "system LLM invalid contract remains pending" `Quick
         test_system_llm_agent_defers_invalid_contract_without_rejecting_task;

@@ -113,8 +113,19 @@ let test_developer_binary () =
   check bool "ordinary binary remains source/unbound authority" true (match
     Installed.inspect ~executable_path:"/tmp/checkout/_build/default/bin/main_eio.exe" ~binary_commit:None with
     | Installed.Not_installed -> true | _ -> false)
+let test_authority_precedence () = with_fixture (fun _ root binary _ ->
+  let installed = Installed.Bound (bound binary) in
+  let select state = Masc.Web_dashboard.For_testing.select_installed_authority
+      ~launch_source_root_state:state ~installed in
+  check bool "unbound selects installed" true (match select Masc.Build_identity.Unbound with
+    | Installed.Bound _ -> true | _ -> false);
+  List.iter (fun state -> check bool "explicit source remains authoritative" true
+    (match select state with Installed.Not_installed -> true | _ -> false))
+    [Masc.Build_identity.Bound_valid root;
+     Masc.Build_identity.Bound_invalid Masc.Build_identity.Source_root_inode_differs])
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)
-  ["exact release and original timestamp", test_exact_release;
+  ["source authority precedence", test_authority_precedence;
+   "exact release and original timestamp", test_exact_release;
    "pointer switch", test_pointer_switch; "receipt removed", test_receipt_removed;
    "asset corruption", test_asset_corruption; "asset symlink", test_asset_symlink;
    "binary replacement", test_binary_replaced; "embedded commit", test_wrong_commit;

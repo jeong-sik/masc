@@ -108,17 +108,20 @@ let check_binding b =
   let* contents = read b.root path in
   let* () = check_digest path b.receipt_sha256 contents.content in
   if root_matches b then Ok () else Error Root_identity_changed
-let load b relative =
-  let* () = check_binding b in
-  let* entry = match List.find_opt (fun e -> e.path = relative) b.receipt.files with
-    | Some entry -> Ok entry | None -> Error Not_manifested in
+let read_entry b entry =
   let path = Filename.concat (dashboard_root b) entry.path in
   let* contents = read b.root path in
   let* () = if String.length contents.content = entry.size then Ok ()
     else Error (Size_mismatch entry.path) in
   let* () = check_digest entry.path entry.sha256 contents.content in
-  let* () = check_binding b in
   Ok contents.content
+let load b relative =
+  let* () = check_binding b in
+  let* entry = match List.find_opt (fun e -> e.path = relative) b.receipt.files with
+    | Some entry -> Ok entry | None -> Error Not_manifested in
+  let* body = read_entry b entry in
+  let* () = check_binding b in
+  Ok body
 
 let inspect ~executable_path ~binary_commit =
   let root = Filename.dirname executable_path in
@@ -143,9 +146,13 @@ let inspect ~executable_path ~binary_commit =
       let* binary = read root executable_path in
       let* () = check_digest "masc" receipt.binary_sha256 binary.content in
       let b = {root; device = info.st_dev; inode = info.st_ino; receipt_sha256; receipt; binary_snapshot = binary.snapshot} in
+      (* Pin the receipt/root/binary around the complete startup scan. Re-reading
+         the full receipt twice per file would make manifest I/O quadratic. *)
+      let* () = check_binding b in
       let* () = List.fold_left (fun result entry ->
-        let* () = result in Result.map (fun _ -> ()) (load b entry.path))
+        let* () = result in Result.map (fun _ -> ()) (read_entry b entry))
           (Ok ()) receipt.files in
+      let* () = check_binding b in
       Ok b
     in
     match result with Ok b -> Bound b | Error e -> Unavailable e

@@ -75,6 +75,11 @@ val load_dashboard_asset : string -> (string, asset_load_error) result
     returning bytes. Invalid/replaced bindings fail closed. *)
 
 module For_testing : sig
+  val select_installed_authority :
+    launch_source_root_state:Build_identity.launch_source_root_state ->
+    installed:Installed_dashboard.selection -> Installed_dashboard.selection
+  (** Explicit source bindings, including invalid ones, take precedence. *)
+
   val surface_recovery :
     asset_resolution:Build_identity.dashboard_asset_resolution ->
     loaded_index:(string, asset_load_error) result ->

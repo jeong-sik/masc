@@ -1,0 +1,52 @@
+{
+  "observed_at": "2026-09-07T12:39:09.217453+00:00",
+  "repository": "jeong-sik/masc",
+  "pr_number": 34021,
+  "head_sha": "87243f1fd1ec4ce634195ed92eae5c2baea4a360",
+  "run_id": 34115337665,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34115337665",
+  "conclusion": "success",
+  "test_step_conclusion": "success",
+  "suites": [
+    {
+      "suite": "test_keeper_semantic_execution_store",
+      "passed": 23,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_chat_operation_store",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_repetition_scope",
+      "passed": 12,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_shutdown_ownerless_admission_release",
+      "passed": 23,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_owner",
+      "passed": 45,
+      "failed": 0
+    }
+  ],
+  "passed_total": 114,
+  "failed_total": 0,
+  "required_checks": {
+    "lint suite": "SUCCESS",
+    "dune build @check": "SUCCESS",
+    "dashboard typecheck": "SUCCESS"
+  },
+  "pr_observation": {
+    "state": "OPEN",
+    "draft": true,
+    "merged_at": null
+  },
+  "limits": [
+    "Exact-head selected-suite evidence only; no native caller integration, deployment, or live repetition-resolution claim."
+  ]
+}

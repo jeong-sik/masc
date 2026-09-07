@@ -32,7 +32,7 @@
     "count": 617,
     "note": "",
     "source": "lib/keeper/keeper_runtime_attempt.ml",
-    "action": "provider 반환 Retry-After·reset과 실제 후보 선택을 대조. 동시 호출/queued wake에 의한 재시도 증폭을 별도 재현해야 함.",
+    "action": "실제 HTTP429는 Api(Retry.RateLimited)로 전달되지만 Keeper 후보 순서 관측은 Provider(RateLimit|HardQuota)만 처리하는 불일치를 확인했다. 실제 전송 오류를 사용하는 테스트와 수정 진행 중. 원래617은 diagnostic pair617쌍이며 최근1시간33쌍이 남았다. unknown scope를 계정 한도 소진으로 단정하지 않고 다른 후보가 진행하도록 구분해야 한다. 실제 fallback 성공은 미검증이다.",
     "status": "investigate",
     "first": {
       "seq": 25985072,
@@ -167,7 +167,7 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "직접 요청 scope #33967은124/125 PASS(기존 Antigravity 전송 관측1 FAIL) 후 외부 병합. 후속 #33982는94/94, #33994 Codex·Claude는205/205 PASS 후 외부 병합됐다. 큐 binding #33984는77/77 PASS 및 필수 검사 후 외부 병합. source-batch #33990은122/124 PASS. #34012에서 실제 HITL 사례9/9 PASS지만 lane 전환의 fence 대기 실패는 남아 원인 조사 중. journal #34021의 첫 CI는 컴파일 경고 오류로 실패했고 직접/자율 작업 식별자를 함께 보존하도록 수정 중이며, 자동 스케줄러·자식/세션 연결·중단 실행 증거 재조정은 남아 있다.",
+    "action": "직접 scope #33967은124/125 PASS 후 외부 병합, 전송 후속 #33982는94/94·#33994는205/205 PASS. 큐 binding #33984는77/77 PASS. semantic journal #34021의 수정87243은114/114 PASS와 필수 검사 PASS, checkpoint 보존 #34036의58f590은55/55 PASS지만 lint 실패 대응 중. source-batch의 HITL은9/9 PASS이나 lane 전환은60/61 PASS·게시 전 대기 원인 조사 중. SDK 재개 경계 전달 #34041은117/118 PASS(이번 diff에 없는 output probe1건 실패)이며 공유 대화를 되감지 않는 native 연결·원래입력·자식/세션관계·중단 effect 복구는 남아 있다.",
     "status": "direct-scope-tested-autonomous-pending",
     "first": {
       "seq": 25984123,

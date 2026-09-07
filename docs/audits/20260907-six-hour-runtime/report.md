@@ -46,7 +46,7 @@
 
 ### 2. GLM 요청 제한
 
-- 조치: provider 반환 Retry-After·reset과 실제 후보 선택을 대조. 동시 호출/queued wake에 의한 재시도 증폭을 별도 재현해야 함.
+- 조치: 실제 HTTP429는 Api(Retry.RateLimited)로 전달되지만 Keeper 후보 순서 관측은 Provider(RateLimit|HardQuota)만 처리하는 불일치를 확인했다. 실제 전송 오류를 사용하는 테스트와 수정 진행 중. 원래617은 diagnostic pair617쌍이며 최근1시간33쌍이 남았다. unknown scope를 계정 한도 소진으로 단정하지 않고 다른 후보가 진행하도록 구분해야 한다. 실제 fallback 성공은 미검증이다.
 - 관련 코드/경계: `lib/keeper/keeper_runtime_attempt.ml`
 - 최초 증거: `2026-09-06T21:05:50Z` / seq `25985072` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267592`
 > [agent_core:http_client] {"event":"http_client_4xx_request_header_profile","url":"https://api.z.ai/api/coding/paas/v4/chat/completions","status":429,"response_server":null,"cf_ray":null,"request_header_count":4,"total_request_header_bytes":148,"max_single_header_bytes":73,"cdn_per_header_limit_bytes":8192,"header_sizes":[{"name":"Authorization","bytes":73},{"name":"Content-Type","bytes":32},{"name":"content-length","bytes":24},{"name":"connection","bytes":19}],"note":"4xx from an LLM endpoint. Header VALUES omitted (may carry credentials); sizes only. A cloudflare/RunPod edge rejects a single header line over cdn_per_header_limit_bytes with an opaque 400 before the origin — compare max_single_header_bytes."}
@@ -86,7 +86,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: 직접 요청 scope #33967은124/125 PASS(기존 Antigravity 전송 관측1 FAIL) 후 외부 병합. 후속 #33982는94/94, #33994 Codex·Claude는205/205 PASS 후 외부 병합됐다. 큐 binding #33984는77/77 PASS 및 필수 검사 후 외부 병합. source-batch #33990은122/124 PASS. #34012에서 실제 HITL 사례9/9 PASS지만 lane 전환의 fence 대기 실패는 남아 원인 조사 중. journal #34021의 첫 CI는 컴파일 경고 오류로 실패했고 직접/자율 작업 식별자를 함께 보존하도록 수정 중이며, 자동 스케줄러·자식/세션 연결·중단 실행 증거 재조정은 남아 있다.
+- 조치: 직접 scope #33967은124/125 PASS 후 외부 병합, 전송 후속 #33982는94/94·#33994는205/205 PASS. 큐 binding #33984는77/77 PASS. semantic journal #34021의 수정87243은114/114 PASS와 필수 검사 PASS, checkpoint 보존 #34036의58f590은55/55 PASS지만 lint 실패 대응 중. source-batch의 HITL은9/9 PASS이나 lane 전환은60/61 PASS·게시 전 대기 원인 조사 중. SDK 재개 경계 전달 #34041은117/118 PASS(이번 diff에 없는 output probe1건 실패)이며 공유 대화를 되감지 않는 native 연결·원래입력·자식/세션관계·중단 effect 복구는 남아 있다.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -451,3 +451,24 @@ Antigravity #33982의 [수정 head f97d8de9c8 증거](antigravity-transmission-c
 
 
 11:04Z [새 읽기 전용 관측](runtime-stuck-followup-1104.json)의 직전1시간28,225행에서 exact-tool 반복10건, browser lane 부재2건, Claude quota1건이 다시 관측됐다. 이전09:40Z 실제 브라우저 왕복 성공은 당시 성공이며 지속 가용성을 보장하지 않는다. 현재 실행 binary는2fc09f02d9, 외부 재시작10:41:44Z, runtime root는~/me/.masc이며 overall degraded·dashboard stale다. 이 세션은 해당 재시작이나 자산 교체를 수행하지 않았다. 관측 구간에 배포가 섞여 있어 전후 개선율로 해석하지 않는다.
+
+
+## 실행 기록·checkpoint 보존 검증과 공유 대화 경계
+
+[#34021 exact87243](semantic-journal-87243-ci-summary.json)의 [34115337665](https://github.com/jeong-sik/masc/actions/runs/34115337665)는 semantic23/chat11/scope12/shutdown23/Owner45=114/114 PASS이며 같은 head의 필수 검사도 통과했다. 초기 e14의 컴파일 실패를 고친 후의 결과다. 관측 당시 draft/open이며 native admission·scheduler·HITL 연결과 운영 배포는 하지 않았다.
+
+[#34036 exact58f590](owned-checkpoint-58f590-ci-summary.json)의 [34123162730](https://github.com/jeong-sik/masc/actions/runs/34123162730)는 owned checkpoint10/stale guard27/purge18=55/55 PASS다. 실제20회 B 저장과12개 rolling history 정리 후에도 A의 정확한 bytes를 읽었다. 손상 bytes 보존, 잘못된 reference, 쓰기 실패·fsync 불확실성·취소를 검증했다. 당시 필수 lint는 실패했고 @check는 진행 중이므로 merge-ready로 표시하지 않는다. 전체 session 삭제에 대한 journal 소유권 보호는 아직 연결되지 않았다.
+
+공유 Keeper에서 A의 옛 checkpoint 전체를 복원하면 B 이후 대화와 전역 turn watermark를 되돌릴 수 있다. SDK Advanced.continue는 checkpoint의 messages·turn_count·usage를 그대로 이어가므로, 보존된 A는 정확한 당시 증거로 쓰되 다음 호출의 공유 대화는 최신 상태를 유지해야 한다. A의 원래 입력·scope와 완료된 도구 경계의 typed witness를 별도로 연결한다. #34041 exact797b117d2a는 runtime이 버리던 SDK turn/stage를 Keeper 결과까지 전달하며 [34124088524](https://github.com/jeong-sik/masc/actions/runs/34124088524) 검증 중이다. 이 boundary 자체는 fsync나 재실행 승인이 아니다.
+
+#34012 exact e650의 진단도 heartbeat60/61 PASS이며 실패 지점은 before_profile_publication, Owner mailbox0·metadata미게시·실행중turn없음·shutdown예약없음이다. 모델이나 Librarian 대기까지 도달하지 않았다. 독립 소스 검토로 lock inversion을 증명하지 못해 실제 publication 단계별 관측을 추가하며, deadline을 늘리거나 해결로 표시하지 않는다.
+
+
+#34041의 [exact797b 결과](cooperative-boundary-797b117-ci-summary.json)는 dispatch66/67·advanced5/5·official host46/46=117/118 PASS다. 새 SDK 경계3개와 Gate 보류 후 정상 완료 사례는 실제 통과했다. 전체 run은 keeper_lane_status의 composable output producer probe가 없는 검사1건 때문에 실패다. 해당 등록·출력 계약은 이번 diff에 없으며 별도 baseline 실행은 하지 않았다. #34036의 lint2건은 bd0f2ebe5a에서 observer 반환값 처리와 취소 catch를 명시적으로 고쳐 재검증 중이며, 기존55 PASS를 새 head 결과로 옮기지 않는다.
+
+
+## GLM429 실제 오류 전달 경로 재검토
+
+[집계와 소스 근거](glm429-source-and-live-followup.json)에서 원래617은 header-profile617행과 request-shape617행의 diagnostic pair이며1,234개의 독립 호출이 아니다. 11:54:35–12:54:35Z6,328행에는33쌍이 남았다. 실제 rawHTTP429는 SDK에서 Api(Retry.RateLimited)로 전달되지만 Keeper driver의 순서 관측은 Provider(RateLimit|HardQuota)만 처리해 이 경로를 놓친다. 기존 테스트는 중간에 Provider variant로 직접 변환해 결함을 가렸다. 원래2번의 수정 대상으로 삼는다.
+
+raw429의 실패 소유권은 unknown이고 Retry-After는 존재할 때 보존된다. 현재 로그로 hint 부재·동시성 제한·hard quota를 확정할 수 없다. 수정은 unknown backpressure와 계정 소유 quota를 구분해야 하며, 실제 다른 후보 성공이나 새 운영 반영은 아직 검증하지 않았다.

@@ -418,6 +418,45 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
       [ "glm-coding"; "glm" ])
 ;;
 
+(* The bare row and its two provider-scoped twins are three catalog keys
+   ((provider_name, id_prefix) is the duplicate check), so nothing in the
+   loader keeps them in step. They describe one Z.AI model; pin the limits
+   and the vision flags to the same values so a later edit to one row cannot
+   leave a runtime on a different ceiling than the bare-id callers see. *)
+let test_glm_vision_rows_agree () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision row agreement"
+  in
+  let rows =
+    List.filter
+      (fun (entry : Model_catalog.model_entry) -> String.equal entry.id_prefix "glm-4.6v")
+      (Model_catalog.model_entries catalog)
+  in
+  check
+    (list (option string))
+    "glm-4.6v has the bare row and its two provider-scoped twins"
+    [ None; Some "glm"; Some "glm-coding" ]
+    (List.sort
+       compare
+       (List.map (fun (entry : Model_catalog.model_entry) -> entry.provider_name) rows));
+  List.iter
+    (fun (entry : Model_catalog.model_entry) ->
+      let label =
+        match entry.provider_name with
+        | Some provider -> provider
+        | None -> "bare"
+      in
+      check (option int) (label ^ " output ceiling") (Some 32_768) entry.max_output_tokens;
+      check (option int) (label ^ " context window") (Some 128_000) entry.max_context_tokens;
+      check (option bool) (label ^ " image input") (Some true) entry.supports_image_input;
+      check
+        (option bool)
+        (label ^ " multimodal inputs")
+        (Some true)
+        entry.supports_multimodal_inputs)
+    rows
+;;
+
 let () =
   run
     "model catalog default"
@@ -471,6 +510,10 @@ let () =
             "glm vision rows reach a runtime lookup"
             `Quick
             test_glm_vision_rows_reach_a_runtime_lookup
+        ; test_case
+            "glm vision rows agree"
+            `Quick
+            test_glm_vision_rows_agree
         ] )
     ]
 ;;

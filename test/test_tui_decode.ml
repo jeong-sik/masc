@@ -4157,9 +4157,8 @@ let test_historical_fusion_original_and_observations () =
          "board-sink-author" original.fhd_author;
        Alcotest.(check string) "original body is intact"
          "# Original Fusion answer\nThe retained original." original.fhd_body;
-       Alcotest.(check (option (pair int int))) "observed tokens"
-         (Some (9321, 17721)) original.fhd_usage;
-       Alcotest.(check bool) "unknown price is not zero" true (original.fhd_cost_usd = None);
+       Alcotest.(check bool) "observed tokens with unknown price"
+         true (original.fhd_observations = Ok (Some (9321, 17721), None));
        (match original.fhd_evidence with
         | Error error -> Alcotest.fail error
         | Ok evidence ->
@@ -4170,12 +4169,12 @@ let test_historical_fusion_original_and_observations () =
             (historical_fusion_post_json ~usage ~cost ()) with
     | Ok original -> original
     | Error error -> Alcotest.fail error in
-  Alcotest.(check bool) "absent usage is unknown" true ((read ()).fhd_usage = None);
+  Alcotest.(check bool) "absent usage is unknown" true ((read ()).fhd_observations = Ok (None, None));
   let zero = read
       ~usage:["observed_usage", `Assoc ["input_tokens", `Int 0; "output_tokens", `Int 0]]
       ~cost:["cost_usd", `Int 0] () in
-  Alcotest.(check (option (pair int int))) "measured zero tokens survive" (Some (0, 0)) zero.fhd_usage;
-  Alcotest.(check bool) "measured zero cost survives" true (zero.fhd_cost_usd = Some 0.)
+  Alcotest.(check bool) "measured zero tokens and cost survive"
+    true (zero.fhd_observations = Ok (Some (0, 0), Some 0.))
 
 let test_historical_fusion_exact_identity_and_strict_metadata () =
   let expect_error label reference post =
@@ -4189,11 +4188,24 @@ let test_historical_fusion_exact_identity_and_strict_metadata () =
     { historical_fusion_reference with fhe_run_id = "other-run" } post;
   expect_error "an omitted exact post is not an empty original"
     historical_fusion_reference (`Assoc ["post", `Null]);
-  expect_error "text tokens are not measurements" historical_fusion_reference
+  let expect_observation_error post =
+    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference post with
+    | Error error -> Alcotest.failf "usage error hid original: %s" error
+    | Ok original ->
+        Alcotest.(check string) "usage failure preserves original"
+          "# Original Fusion answer\nThe retained original." original.fhd_body;
+        (match original.fhd_observations with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "invalid usage became a measurement") in
+  expect_observation_error
     (historical_fusion_post_json
        ~usage:["observed_usage", `Assoc ["input_tokens", `String ""; "output_tokens", `Int 0]] ());
-  expect_error "negative cost is not a measurement" historical_fusion_reference
+  expect_observation_error
     (historical_fusion_post_json ~cost:["cost_usd", `Int (-1)] ());
+  expect_observation_error
+    (match post with
+     | `Assoc fields -> `Assoc (List.remove_assoc "meta" fields)
+     | _ -> Alcotest.fail "invalid Fusion fixture");
   let malformed = match post with
     | `Assoc fields -> `Assoc (List.map (function
         | "meta", `Assoc fields -> "meta", `Assoc (List.remove_assoc "tool_trace" fields)

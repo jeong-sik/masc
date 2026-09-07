@@ -415,8 +415,7 @@ type fusion_historical_detail = {
   fhd_author : string;
   fhd_title : string;
   fhd_body : string;
-  fhd_usage : (int * int) option;
-  fhd_cost_usd : float option;
+  fhd_observations : ((int * int) option * float option, string) result;
   fhd_evidence : (fusion_evidence, string) result;
 }
 
@@ -6156,21 +6155,24 @@ let decode_fusion_historical_detail ~reference json =
   let* fhd_author = required_string_field post "author" in
   let* fhd_title = required_string_field post "title" in
   let* fhd_body = required_string_field post "body" in
-  let* meta = required_object_field post "meta" in
-  let* fhd_usage = match Json_util.assoc_member_opt "observed_usage" meta with
+  let fhd_observations =
+    let* meta = required_object_field post "meta" in
+    let* usage = match Json_util.assoc_member_opt "observed_usage" meta with
     | None -> Ok None
     | Some usage ->
         let* input = required_nonnegative_int_field usage "input_tokens" in
         let* output = required_nonnegative_int_field usage "output_tokens" in
         Ok (Some (input, output))
   in
-  let* fhd_cost_usd = match Json_util.assoc_member_opt "cost_usd" meta with
+  let* cost_usd = match Json_util.assoc_member_opt "cost_usd" meta with
     | None | Some `Null -> Ok None
     | Some (`Int n) when n >= 0 -> Ok (Some (float_of_int n))
     | Some (`Float n) when Float.is_finite n && n >= 0. -> Ok (Some n)
     | Some bad -> field_type_error "cost_usd" "a finite nonnegative number or null" bad
   in
-  Ok { fhd_reference = reference; fhd_author; fhd_title; fhd_body; fhd_usage; fhd_cost_usd;
+    Ok (usage, cost_usd)
+  in
+  Ok { fhd_reference = reference; fhd_author; fhd_title; fhd_body; fhd_observations;
        fhd_evidence = decode_fusion_evidence ~run_id post }
 
 let decode_fusion_detail json =

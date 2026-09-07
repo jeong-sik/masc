@@ -15896,12 +15896,19 @@ and is loaded on demand through keeper_skill.
               && (match state.fusion_mode with
                   | Fusion_detail _ | Fusion_historical_detail _ -> true
                   | Fusion_list -> false) ->
-           step_detail_cursor
-             ~count:(List.length (fusion_list_entries state))
-             ~cursor:state.fusion_cursor
-             ~delta:(if bracket = "]" then 1 else -1)
-             ~set_cursor:(fun n -> state.fusion_cursor <- n)
-             ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages)
+           (match fusion_detail_entry_index state with
+            | None ->
+                state.fusion_mode <- Fusion_list;
+                state.fusion_scroll <- 0;
+                state.fusion_detail_error <- None;
+                state.fusion_detail_generation <- state.fusion_detail_generation + 1
+            | Some cursor ->
+                step_detail_cursor
+                  ~count:(List.length (fusion_list_entries state))
+                  ~cursor
+                  ~delta:(if bracket = "]" then 1 else -1)
+                  ~set_cursor:(fun n -> state.fusion_cursor <- n)
+                  ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages))
        (* Approvals holds no id -- the detail is a flag over the row under the
           cursor -- so stepping is the cursor move, and the pane follows. *)
        | Some (("[" | "]") as bracket)

@@ -12366,18 +12366,23 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
 
 let fusion_historical_lines ~width (detail : fusion_historical_detail) =
   [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
-  ; Theme.warn (), "  Execution status and finish time: not retained"
+  ; Theme.warn (), "  This Board evidence does not provide execution status or finish time"
   ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
   ; Ansi.reset, "  Board author: " ^ Terminal_text.single_line detail.fhd_author
   ; Theme.info (), "  Board: " ^ Link.reference Board_post detail.fhd_reference.fhe_post_id
   ; Ansi.reset, "  Title: " ^ Terminal_text.single_line detail.fhd_title
-  ; Ansi.reset, (match detail.fhd_usage with
-      | None -> "  Observed tokens: not recorded"
-      | Some (input, output) -> Printf.sprintf "  Observed tokens: %d input / %d output" input output)
-  ; Ansi.reset, (match detail.fhd_cost_usd with
-      | None -> "  Observed cost: not recorded"
-      | Some cost -> Printf.sprintf "  Observed cost: $%.4f" cost)
-  ; Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
+  ]
+  @ (match detail.fhd_observations with
+     | Error error ->
+         [ Theme.bad (), "  Observed usage could not be decoded: " ^ Terminal_text.single_line error ]
+     | Ok (usage, cost_usd) ->
+         [ Ansi.reset, (match usage with
+             | None -> "  Observed tokens: not recorded"
+             | Some (input, output) -> Printf.sprintf "  Observed tokens: %d input / %d output" input output)
+         ; Ansi.reset, (match cost_usd with
+             | None -> "  Observed cost: not recorded"
+             | Some cost -> Printf.sprintf "  Observed cost: $%.4f" cost) ])
+  @ [ Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
   ; Ansi.dim, "" ]
   @ (match detail.fhd_evidence with
      | Ok evidence -> fusion_evidence_lines ~width evidence
@@ -12470,8 +12475,12 @@ let render_fusion_detail (state : state) run_id =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
+      (* No list row is selected when its original remains open after the
+         refreshed inventory omits it. The sidebar's index API uses -1 for
+         no matching row; the domain selection stays optional. *)
+      let selected = Option.value (fusion_detail_entry_index state) ~default:(-1) in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
-        ~focused:false ~labels ~selected:state.fusion_cursor;
+        ~focused:false ~labels ~selected;
       let answer =
         fusion_detail_pane state ~rows ~cols:(cols - left_cols) run_id
           right_buf

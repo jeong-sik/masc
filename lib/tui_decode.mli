@@ -1477,8 +1477,7 @@ type fusion_historical_detail = {
   fhd_author : string;
   fhd_title : string;
   fhd_body : string;
-  fhd_usage : (int * int) option;
-  fhd_cost_usd : float option;
+  fhd_observations : ((int * int) option * float option, string) result;
   fhd_evidence : (fusion_evidence, string) result;
 }
 

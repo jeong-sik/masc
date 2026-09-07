@@ -4364,6 +4364,17 @@ let fusion_entry_identity = function
 let selected_fusion_entry state =
   List.nth_opt (fusion_list_entries state) state.fusion_cursor
 
+let fusion_detail_entry_index state =
+  fusion_list_entries state
+  |> List.find_index (fun entry ->
+      match state.fusion_mode, entry with
+      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+          String.equal id run.fur_run_id
+      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+          String.equal reference.fhe_post_id candidate.fhe_post_id
+          && String.equal reference.fhe_run_id candidate.fhe_run_id
+      | _ -> false)
+
 let selected_keeper_runs (state : state) =
   match selected_keeper state, state.fusion_runs with
   | Some keeper, Some snapshot ->

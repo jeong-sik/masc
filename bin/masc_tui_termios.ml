@@ -9,3 +9,11 @@ external set_literal_next : Unix.file_descr -> int -> bool
 
 external disable_literal_next : Unix.file_descr -> bool
   = "masc_tui_termios_disable_literal_next"
+
+external discard_output : Unix.file_descr -> int = "masc_tui_termios_discard_output"
+
+external set_discard_output : Unix.file_descr -> int -> bool
+  = "masc_tui_termios_set_discard_output"
+
+external disable_discard_output : Unix.file_descr -> bool
+  = "masc_tui_termios_disable_discard_output"

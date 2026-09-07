@@ -2533,6 +2533,7 @@
 (include stanzas/test_normalized_actor.inc)
 
 
+(include stanzas/test_keeper_provider_timeout_labels.inc)
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
 (include stanzas/test_runtime_agent_close_cancel_source.inc)

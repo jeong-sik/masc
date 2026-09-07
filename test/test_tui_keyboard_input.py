@@ -12833,6 +12833,11 @@ def run_browser_screenshot_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
+        if hasattr(termios, "VDISCARD"):
+            cc = termios.tcgetattr(_slave_fd)[6][termios.VDISCARD]
+            discard = cc if isinstance(cc, int) else cc[0]
+            if discard != os.fpathconf(_slave_fd, "PC_VDISABLE"):
+                raise AssertionError("raw mode did not reclaim Ctrl-O from VDISCARD")
         palette_go(process, master_fd, output, b"go Browser Lane", b"second page body")
 
         def capture() -> None:
@@ -12862,8 +12867,8 @@ def run_browser_screenshot_regression(executable: str) -> None:
         wait_for_terminal_input_consumed(_slave_fd)
         drain_until_quiet(process, master_fd, output)
         retained = resize_and_wait(process, master_fd, output,
-            rows=31, columns=101, needle=draft + b"x", controls=(FULL_REDRAW,))
-        if b"Enter after completion" not in CSI_RE.sub(b"", retained):
+            rows=31, columns=101, needle=b"Enter after completion", controls=(FULL_REDRAW,))
+        if draft + b"x" not in CSI_RE.sub(b"", retained):
             raise AssertionError("pending screenshot lost the URL or its deferred Enter explanation")
         read_available(master_fd, output)
         cancelled_from = len(output)
@@ -12876,7 +12881,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         restored = send_and_wait(process, master_fd, output, b" ", draft + b"x")
         if draft + b"x " in CSI_RE.sub(b"", restored).split(b"\xe2\x96\x8f")[0]:
             raise AssertionError("image dismissal typed into the retained URL draft")
-        send_and_wait(process, master_fd, output, b"\x1b", b"second page body")
+        send_and_wait(process, master_fd, output, b"\x1b", b"g:URL")
         send_and_wait(process, master_fd, output, b"]", b"first page body")
         send_and_wait(process, master_fd, output, b"\x0f", b"selected Firefox tab closed")
         if requests[-1] != {"lane": "automation", "tabId": 1}:

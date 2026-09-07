@@ -4754,3 +4754,9 @@
 (include stanzas/test_execute_file_artifact.inc)
 
 (include stanzas/test_keeper_execute_output_files.inc)
+
+(test
+ (name test_installed_dashboard)
+ (modules test_installed_dashboard)
+ (libraries masc_test_deps))
+

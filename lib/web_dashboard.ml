@@ -48,7 +48,18 @@ let select_assets_root
          | [] -> Some (Filename.concat cwd "assets")))
 ;;
 
+let installed_selection () =
+  match Build_identity.launch_source_root_state () with
+  | Build_identity.Unbound -> Installed_dashboard.current ()
+  | Build_identity.Bound_valid _ | Build_identity.Bound_invalid _ ->
+    Installed_dashboard.Not_installed
+;;
+
 let assets_root () =
+  match installed_selection () with
+  | Installed_dashboard.Bound binding -> Some (Installed_dashboard.assets_root binding)
+  | Installed_dashboard.Unavailable _ -> None
+  | Installed_dashboard.Not_installed ->
   let is_dir path =
     try (Unix.stat path).Unix.st_kind = Unix.S_DIR with
     | Unix.Unix_error _ -> false
@@ -78,6 +89,7 @@ let mtime_of path =
 
 type asset_load_error =
   | Asset_binding_invalid of Build_identity.dashboard_asset_invalid_reason
+  | Asset_installed_invalid of Installed_dashboard.error
   | Asset_build_unavailable
   | Asset_not_manifested
   | Asset_exact_read_failed of string
@@ -85,6 +97,7 @@ type asset_load_error =
 let asset_error_http_status = function
   | Asset_not_manifested -> `Not_found
   | Asset_binding_invalid _
+  | Asset_installed_invalid _
   | Asset_build_unavailable
   | Asset_exact_read_failed _ -> `Service_unavailable
 ;;
@@ -164,6 +177,13 @@ let load_and_verify_dashboard_blob
 ;;
 
 let load_dashboard_asset relative_path =
+  match installed_selection () with
+  | Installed_dashboard.Unavailable e -> Error (Asset_installed_invalid e)
+  | Installed_dashboard.Bound binding ->
+    Result.map_error (function
+      | Installed_dashboard.Not_manifested -> Asset_not_manifested
+      | e -> Asset_installed_invalid e) (Installed_dashboard.load binding relative_path)
+  | Installed_dashboard.Not_installed ->
   match Build_identity.resolve_dashboard_asset relative_path with
   | Build_identity.Dashboard_asset_bound
       { path
@@ -232,6 +252,13 @@ type bundle_freshness =
     the stamp path, so a broken assets_root resolution is never silently
     treated as fresh. *)
 let bundle_freshness () =
+  match installed_selection () with
+  | Installed_dashboard.Unavailable _ -> Missing_stamp
+  | Installed_dashboard.Bound binding ->
+    (match Installed_dashboard.load binding ".build-stamp" with
+     | Ok _ -> Fresh
+     | Error _ -> Missing_stamp)
+  | Installed_dashboard.Not_installed ->
   match Build_identity.resolve_dashboard_asset "index.html" with
   | Build_identity.Dashboard_asset_bound _ ->
     (match Build_identity.resolve_dashboard_asset ".build-stamp" with
@@ -308,7 +335,8 @@ let surface_recovery
   | Build_identity.Dashboard_asset_bound _ ->
     (match loaded_index, freshness with
      | Ok _, Fresh -> No_recovery
-     | Error (Asset_binding_invalid _), _ ->
+     | Error (Asset_binding_invalid _), _
+     | Error (Asset_installed_invalid _), _ ->
        Repair_exact_artifacts_and_restart Binding_invalid
      | Error Asset_not_manifested, _ ->
        Repair_exact_artifacts_and_restart Manifest_entry_missing
@@ -387,7 +415,11 @@ let surface_status_json () =
         ] )
     | Fresh ->
       let stamp_field =
-        match Option.bind (build_stamp_path ()) mtime_of with
+        let stamp_mtime = match installed_selection () with
+          | Installed_dashboard.Bound binding -> Installed_dashboard.build_stamp_mtime binding
+          | Installed_dashboard.Unavailable _ -> None
+          | Installed_dashboard.Not_installed -> Option.bind (build_stamp_path ()) mtime_of in
+        match stamp_mtime with
         | Some stamp_mtime ->
           [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime)) ]
         | None -> []
@@ -401,9 +433,27 @@ let surface_status_json () =
     else if index_present then freshness_status
     else "missing"
   in
-  let recovery = surface_recovery ~asset_resolution ~loaded_index ~freshness in
+  let installed = installed_selection () in
+  let status, recovery, installed_evidence =
+    match installed with
+    | Installed_dashboard.Not_installed ->
+      status, surface_recovery ~asset_resolution ~loaded_index ~freshness, `Null
+    | Installed_dashboard.Unavailable _ ->
+      "unavailable", Repair_exact_artifacts_and_restart Binding_invalid,
+      Installed_dashboard.evidence installed
+    | Installed_dashboard.Bound binding ->
+      let verified = match loaded_index with
+        | Error (Asset_installed_invalid e) -> Error e
+        | Error _ -> Error Installed_dashboard.Not_manifested
+        | Ok _ -> Result.map (fun _ -> ()) (Installed_dashboard.load binding ".build-stamp") in
+      (match verified with
+       | Ok () -> "ok", No_recovery, Installed_dashboard.evidence installed
+       | Error e -> "unavailable", Repair_exact_artifacts_and_restart Exact_read_failed,
+           Installed_dashboard.evidence (Installed_dashboard.Unavailable e))
+  in
   `Assoc
     ([ ("schema", `String "masc.dashboard_surface.v1")
+     ; ("installed_release", installed_evidence)
      ; ("status", `String status)
      ; ("index_present", `Bool index_present)
      ; ("assets_root", Json_util.string_opt_to_json (assets_root ()))

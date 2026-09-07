@@ -28,6 +28,7 @@ module Dashboard_execution = Dashboard_execution
 module Dashboard_briefing = Dashboard_briefing
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
+module Installed_dashboard = Masc.Installed_dashboard
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Graphql_api = Masc.Graphql_api
@@ -895,6 +896,9 @@ let run_cmd host port cli_base_path accept_store_quarantine =
   Log.Server.info "MASC MCP: Shutdown complete."
 
 let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode =
+  let identity = Build_identity.current () in
+  Installed_dashboard.initialize ~executable_path:identity.executable_path
+    ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
     run_cmd host port base_path accept_store_quarantine;

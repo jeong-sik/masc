@@ -473,6 +473,14 @@ let decode_board_post ?(require_body = false) json =
      fact. Absent reads as the creation time, which is what an untouched post's
      [updated_at] holds anyway -- so a server too old to send it degrades to
      "as old as it looks" rather than to a blank column. *)
+  let created_at_epoch =
+    match Yojson.Safe.Util.member "created_at" json with
+    | `Float value -> Some value
+    | `Int value -> Some (Float.of_int value)
+    | `Intlit raw -> float_of_string_opt raw
+    | `String value -> float_of_string_opt value
+    | _ -> None
+  in
   let updated_at =
     match Yojson.Safe.Util.member "updated_at" json with
     | `Float value -> Some value
@@ -504,7 +512,7 @@ let decode_board_post ?(require_body = false) json =
       bp_updated_at =
         (match updated_at with
          | Some updated_at -> updated_at
-         | None -> Option.value (float_of_string_opt bp_created_at) ~default:0.);
+         | None -> Option.value created_at_epoch ~default:0.);
       bp_hearth;
       bp_kind;
     }

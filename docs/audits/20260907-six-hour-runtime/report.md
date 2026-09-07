@@ -10,32 +10,32 @@
 
 | # | 개선 대상 | 대표 관측 | 진행 |
 |---|---|---:|---|
-| 1 | Claude quota 반복과 잘못된 effect fence | 1698 | diagnostic-fix |
+| 1 | Claude quota 반복과 잘못된 effect fence | 1698 | quota-code-fix |
 | 2 | GLM 요청 제한 | 617 | investigate |
-| 3 | Librarian exact 실패와 주간 한도 | 48 | external+investigate |
+| 3 | Librarian exact 실패와 주간 한도 | 48 | config-applied |
 | 4 | DeepSeek tool-call 응답 누락 | 224 | code-fix |
 | 5 | 중첩 tool-cycle checkpoint 저장 실패 | 21 | related-code-fix |
 | 6 | 복합 도구는 성공하지만 실행 증거 저장 실패 | 5 | code-fix |
-| 7 | 재개 후 반복 도구 루프 | 231 | investigate |
-| 8 | Provider 연결 장애 | 51 | investigate |
+| 7 | 재개 후 반복 도구 루프 | 231 | partial-code-fix |
+| 8 | Provider 연결 장애 | 51 | tested-code-fix |
 | 9 | 일반 문장의 @check·lint를 ID 오류로 기록 | 362 | code-fix |
-| 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | client-repair |
+| 10 | MCP 인증 누락·Dashboard token 불일치 | 373 | hint-fixed-client-pending |
 | 11 | 삭제된 new-keeper의 종료 복구 반복 | 6 | data-reconciliation |
-| 12 | Board candidate ledger schema 불일치 | 12 | data-reconciliation |
-| 13 | Dashboard snapshot 장시간 갱신 | 111 | performance |
-| 14 | Dashboard build-stamp 누락 | 5 | artifact-rebuild |
-| 15 | microVM sweep가 전체 Keeper 부팅을 막음 | 68 | code-fix |
+| 12 | Board candidate ledger schema 불일치 | 12 | pending-preserved |
+| 13 | Dashboard snapshot 장시간 갱신 | 111 | performance-code-fix |
+| 14 | Dashboard build-stamp 누락 | 5 | artifact-code-fix |
+| 15 | microVM sweep가 전체 Keeper 부팅을 막음 | 68 | tested-code-fix |
 | 16 | microsandbox가 요구 격리 보장을 표현 못함 | 5 | backend-capability |
-| 17 | 브라우저 live lane 미연결 | 12 | operator-connection |
+| 17 | 브라우저 live lane 미연결 | 12 | host-code-repair |
 | 18 | Discord 삭제·권한 없는 channel 바인딩 | 28 | external-binding |
-| 19 | WebSearch 전 provider 실패와 WebFetch HTTP 오류 | 19 | external+client |
+| 19 | WebSearch 전 provider 실패와 WebFetch HTTP 오류 | 19 | search-service-recovered |
 | 20 | 실행 가능한 owner의 durable queue 정체 | health: pending33 oldest4893s at initial capture | live-acceptance |
 
 ## 항목별 증거와 다음 완료 조건
 
 ### 1. Claude quota 반복과 잘못된 effect fence
 
-- 조치: PR #33839: typed API error diagnostic frame를 실제 모델 응답과 분리. 실제 text/tool effect는 보존. 쿼터 자체와 exact-lane 재시도 전략은 별도 잔여.
+- 조치: API diagnostic 수정은 배포 관측. #33855는 typed CLI quota scope와 후보 순서를 공유하도록 병합됐으며 fixture 후속 #33873 검증 중.
 - 관련 코드/경계: `lib/runtime/runtime_claude_code.ml`
 - 집계 주의: 1698 quota events; propagated fences are overlapping observations
 - 최초 증거: `2026-09-06T21:05:47Z` / seq `25985026` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:267546`
@@ -52,7 +52,7 @@
 
 ### 3. Librarian exact 실패와 주간 한도
 
-- 조치: 48 failure events 중 46에 weekly quota. 새 스냅샷 commit 성공까지 확인; 실패했다고 기존 메모리를 지우면 안 됨.
+- 조치: Librarian/Board/HITL CLI 후보에 Codex luna 추가. 04:25:28Z durable 적용 영수증과 파일 재조회 일치. Codex schema2/2 성공; 실제 lane의 Codex 선택은 미확인.
 - 관련 코드/경계: `lib/keeper/keeper_librarian_runtime.ml`
 - 최초 증거: `2026-09-06T21:21:58Z` / seq `25990215` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:272735`
 > memory os librarian failed lane=librarian_exact: librarian exact execution failed outward_effect=started cause=agent_core_execution_failed: slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":"you (yousleepwhen) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 329bef59-e725-4293-aa76-0e6556d9efec)"} ; flow=[slot=ollama_cloud.deepseek-v4-flash-0731 call_id=b64a83fb7e9e127ad4fdab36d5748219; slot=glm-coding.glm-5.3-flash call_id=66a83f8e233f25848cf44bbb48d40b33; advance=glm-coding.glm-5.3-flash->ollama_cloud.deepseek-v4-flash-0731 kind=execution_failed cause=provider refused (http_status=429 refusal=rate_limited) raw_response_sha256=41976dbd
@@ -84,7 +84,7 @@
 
 ### 7. 재개 후 반복 도구 루프
 
-- 조치: yield 자체는 보호 동작. 동일 Execute/surface/context 호출을 재개 뒤 반복하는 목적·툴 결과·후속 checkpoint를 함께 검증; 임의 횟수 cap 추가하지 않음.
+- 조치: #33857: 과거 도구 이력을 현재 실행 증거와 분리, 39/39 테스트 통과. 반복 판정 자체는 여전히 전체 이력을 사용하므로 Fresh/Resume의 명시적 영속 scope가 남음.
 - 관련 코드/경계: `lib/keeper/keeper_agent_run.ml`
 - 최초 증거: `2026-09-06T21:00:25Z` / seq `25984123` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266643`
 > yielding repeated exact tool loop tool=Execute count=6
@@ -92,7 +92,7 @@
 
 ### 8. Provider 연결 장애
 
-- 조치: IPv6 connect timeout, DNS/reset을 구분. 아래 별도 HTTP4/HTTP6 read-only 측정은 새로운 관측이며 과거 원인 확정 아님.
+- 조치: #33856 병합. DNS 모든 주소의 TCP 연결을 경합시키고 실패/취소 소켓 소유권 정리. 새10/10, 캐시19/19 PASS; broader HTTP suite는 기존 zero-length Eio read 사례1개 실패.
 - 관련 코드/경계: `agent_core network transport / runtime failure route`
 - 최초 증거: `2026-09-06T22:15:02Z` / seq `26004046` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:286566`
 > pipeline stage failed stage=route error="[route] Network error: Eio.Io Net Connection_reset Unix_error (Connection reset by peer, \"readv\", \"\")"
@@ -108,7 +108,7 @@
 
 ### 10. MCP 인증 누락·Dashboard token 불일치
 
-- 조치: 인증 거절은 정상. 오래된 client credential의 주체를 확인하고 해당 client에서 갱신; 서버 인증 완화로 해결하지 않음.
+- 조치: #33871: 잘못된 localStorage 안내를 실제 sessionStorage 키로 정정. 사용자 브라우저의 거절된 자격 증명은 아직 수정하지 않음.
 - 관련 코드/경계: `lib/server/server_mcp_transport_http_respond.ml:149; lib/server/server_auth.ml`
 - 집계 주의: MCP347 + dashboard26
 - 최초 증거: `2026-09-06T21:02:53Z` / seq `25984474` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266994`
@@ -126,7 +126,7 @@
 
 ### 12. Board candidate ledger schema 불일치
 
-- 조치: gondolin-probe 11행, k3think-probe19행 원본 보존. 활성 owner/미소비 의도를 판정한 뒤 명시적 quarantine; 호환 파서 추가나 무단 삭제하지 않음.
+- 조치: 현재 schema5 원본 두 파일을 보존. gondolin pending5, k3think pending12가 있어 삭제나 성공 처리하지 않음. 명시적 실패 보존/재조정 경로 필요.
 - 관련 코드/경계: `lib/keeper/keeper_board_attention_candidate.ml`
 - 집계 주의: 2 files across 6 boots; not 12 distinct corrupted files
 - 최초 증거: `2026-09-06T23:26:05Z` / seq `26080097` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312617`
@@ -135,7 +135,7 @@
 
 ### 13. Dashboard snapshot 장시간 갱신
 
-- 조치: 실측 구간의 component별 시간·할당량으로 좁혀야 함. TTL=0 자체만 보고 cache를 강제로 늘리면 fresh 상태가 달라짐.
+- 조치: #33877: 한 shell projection에서 TOML 선언 snapshot을 공유, 반복 읽기 제거. 기존 실측 runtime_resolution3468/3873ms 및1215/1292ms. 개선 후 지연/UI는 미측정.
 - 관련 코드/경계: `lib/dashboard/dashboard_snapshot.ml`
 - 집계 주의: shell_light70 among111; other18 slow render not added
 - 최초 증거: `2026-09-06T23:26:05Z` / seq `26080100` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312620`
@@ -144,7 +144,7 @@
 
 ### 14. Dashboard build-stamp 누락
 
-- 조치: health와 실제 browser에서 missing 확인. 정식 bundle artifact 빌드·배포 provenance가 필요. 이 세션은 constitution의 로컬 빌드 금지를 유지.
+- 조치: #33867: 직접 Vite 빌드도 stamp 생성, 원격 번들/소스 영수증 workflow 추가. 기본 브랜치에 workflow가 없어 dispatch404; 실제 artifact/build/deploy 미확인.
 - 관련 코드/경계: `scripts/build-dashboard-if-needed.sh`
 - 최초 증거: `2026-09-07T00:47:21Z` / seq `26156709` / `/Users/dancer/me/.masc/logs/system_log_2026-09-07.jsonl:13573`
 > bundle build-stamp unavailable at /Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp — dashboard assets may be missing or unbuilt; inspect /health dashboard_surface.recovery
@@ -152,7 +152,7 @@
 
 ### 15. microVM sweep가 전체 Keeper 부팅을 막음
 
-- 조치: PR #33846: Keeper 필수 startup barrier에서 분리하되 기존 microVM lifecycle lock으로 listing→delete 전부 보호. 같은 guest 이름 재생성 경합을 독립 리뷰에서 발견.
+- 조치: #33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 최신 배포에는 미포함.
 - 관련 코드/경계: `lib/server/server_runtime_bootstrap.ml`
 - 집계 주의: 68 wait lines, 23 WARN, max119.4s
 - 최초 증거: `2026-09-06T23:26:08Z` / seq `26080169` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:312689`
@@ -169,7 +169,7 @@
 
 ### 17. 브라우저 live lane 미연결
 
-- 조치: operator 브라우저 extension과 host의 연결 완료가 필요. 진단용 headless screenshot은 Keeper live lane 연결의 증거가 아님.
+- 조치: native host가 설치 토큰 파일을 읽지 않고 wrapper는 과거 worktree를 참조하는 결함 확인. 수정 중. 실제 Firefox/Zen extension 연결은 별도 검증 필요.
 - 관련 코드/경계: `connectors/browser`
 - 최초 증거: `2026-09-06T22:12:34Z` / seq `26003629` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:286149`
 > keeper:analyst tool_call tool=BrowserTabs source=- params=[lane] input_shape=[lane=string:4] outcome=error out_len=341 failed_params={"lane":"live"} error_preview=no browser lane connected: the live lane needs the operator's browser running with the browser-lane extension and host (connectors/browser) failure_class=workflow_rejection — The current state does not admit this action; it is a rule, ...
@@ -186,7 +186,7 @@
 
 ### 19. WebSearch 전 provider 실패와 WebFetch HTTP 오류
 
-- 조치: 검색 endpoint curl7 + Ollama429. fetch401/404는 주소/인증 원인도 존재. 대체 검색 provider readiness와 URL 정확성을 독립 검증.
+- 조치: localhost:8888 connection refused 확인 후 공식 SearXNG digest 고정 서비스 복구. 직접 질의2.355초/37결과. MASC 내부 WebSearch 경유와 별도 WebFetch401/404는 아직 미검증.
 - 관련 코드/경계: `lib/tool_misc_web_search.ml`
 - 집계 주의: search6 + fetch13; one query may fail two providers
 - 최초 증거: `2026-09-06T21:02:53Z` / seq `25984475` / `/Users/dancer/me/.masc/logs/system_log_2026-09-06.jsonl:266995`
@@ -195,7 +195,7 @@
 
 ### 20. 실행 가능한 owner의 durable queue 정체
 
-- 조치: 운영 목표: 실제 FIFO 소비·다음 턴 성공·outbox 결과 수신. queued 감소만으로 소비 성공 판정하지 않음. 현재 해결 미확인.
+- 조치: 04:40:49Z binary1ec84be0a4 재조회: runnable27 oldest4595초, degraded. 큐 감소로 소비/효과 전달을 성공 처리하지 않음.
 - 관련 코드/경계: `keeper_event_queue.work_liveness`
 - 집계 주의: health: pending33 oldest4893s at initial capture
 
@@ -229,13 +229,13 @@ IPv4 api.z.ai: HTTP301, connect 0.030s. IPv6: curl7 연결 실패. 인증 없는
 
 로컬 Dune build/test는 constitution에 따라 실행하지 않았다. Test workflow의 원격 runner가 실제로 컴파일하고 실행했다.
 
-## 네트워크 수정 검토 결과
+## 추가 수정의 원격 검증
 
-http_client 및 exact_output_measurement_transport가 getaddrinfo 첫 주소만 고르는 점은 source로 확인했다. 단순 순차 fallback을 넣으면 설치 Eio_posix에서 실패한 connect socket이 caller switch에 남아 cache 종료까지 쌓일 수 있다. 요청 replay 없이 연결만 대체하고, 실패 socket 수명을 정리하는 설계/측정이 함께 필요해 이 변경은 적용하지 않았다. IPv6 blackhole 대기시간 문제도 별도이다.
-
-## 다섯 번째 수정
-
-[PR #33846](https://github.com/jeong-sik/masc/pull/33846), head cd7c2ffe3e. microVM 정리를 전체 Keeper 준비 단계에서 분리하고 같은 lifecycle lock으로 목록 조회부터 삭제까지 보호한다. fake CLI를 사용한 실제 boot 진입 대기, live owner 보존, 실패 후 lock 재사용, switch 소유 취소 테스트를 추가했다. 보호된 sweep 자체의 취소는 해당 pass가 끝날 때까지 지연된다. 성공적인 VM 생성은 이 테스트가 검증하지 않는다. [targeted CI 34079859096](https://github.com/jeong-sik/masc/actions/runs/34079859096) 결과 확인 전.
+- #33846: head642df022c9, [34082014565](https://github.com/jeong-sik/masc/actions/runs/34082014565), sandbox55/55 및 startup85/85 PASS. 이후 main merge head985f7dbac0에서 대상 구현은 동일하며 PR은57ca6d5399로 병합됐다. 성공 VM 생성은 미검증.
+- #33857: headec07fcf653, [34083036685](https://github.com/jeong-sik/masc/actions/runs/34083036685), 현재 실행 증거 분리 포함 outcome39/39 PASS. 기존 hooks48개 중 paused adoption1개 실패하므로 실행 전체는 FAIL.
+- #33856: headb812ea7266, [34083423286](https://github.com/jeong-sik/masc/actions/runs/34083423286), 새 연결/취소/FD10개와 캐시19개 PASS. quota13개도 PASS. 기존 HTTP43개 중 zero-length buffer를 Eio.Flow.single_read에 넘기는1개가 Eio precondition에서 실패, 전체 실행 FAIL. 해당 기존 함수는 이번 diff 밖이며 기준 실행 비교는 미측정.
+- #33855/#33873: Claude UUID, Antigravity usage/TOML timeout/OAuth/cwd, Claude assistant model 등의 fixture 누락을 고쳤다. 최종 후속 heada92c1b6859의 [34084021921](https://github.com/jeong-sik/masc/actions/runs/34084021921) 진행 중. 검증 전 성공으로 집계하지 않는다.
+- #33877: per-projection TOML snapshot의 [34084240453](https://github.com/jeong-sik/masc/actions/runs/34084240453) 진행 중.
 
 두 원본 system JSONL 파일을 전체 스캔한 결과 JSON 파싱 실패0행, timestamp 누락0행이었다. CI summary 파일은 해당 실행 로그의 판정 줄을 추출하고 후행 공백만 정리했다.
 
@@ -246,3 +246,13 @@ http_client 및 exact_output_measurement_transport가 getaddrinfo 첫 주소만 
 가장 최근 health는 runnable pending61, oldest2292초(약38분)이며 여전히 stalled/degraded이다. 직전 관측 pending115/oldest6471초에서 줄었지만 감소만으로 FIFO 소비·효과 전달 성공을 판정하지 않는다. dashboard stamp는 여전히 missing. 최신 health-final.json과 post-deployment-observation.json 참고.
 
 동일한 새 배포 관측 창에서 started_at이 배포 이후이고 recorded_at이 창 종료 이전인 영수증도 별도 조회했다. polisher1, rondo7, geek-scout12, pr-updater6개의 receipt_done이 있었다. jazz-developer는 같은 조건의 완료 영수증0개여서 재개 완료로 선언하지 않는다. 이 결과는 응답 품질·기억 연속성·모든 pending event 소비 증명과 다르다. post-deployment-receipts.json에 원본 파일/행과 terminal 필드를 기록했다.
+
+## 04:25–04:40Z 운영 조치와 남은 경계
+
+Board/Librarian/HITL의 기존 두 CLI 후보는 같은 Claude 계정이었다. 독립 Codex luna의 실호출 schema2/2 성공과 무스키마 대조를 확인하고, 세 목록에 luna를 추가했다. 서버 preview 유효, durable commit order4, revision5fbae10e…와 디스크/GET 재조회가 일치했다. HTTP raw-save API는 호출자 CAS를 지원하지 않으므로 적용 직전 원문 일치 확인만 했으며 CAS라고 주장하지 않는다. 원문 설정/인증 토큰은 이 보고서에 포함하지 않는다.
+
+이후 관측한 Board 판정은 GLM/Ollama HTTP 후보였다. Codex 새 경로가 해당 판정을 성공시켰다고 주장하지 않는다. 04:26:33Z Librarian snapshot revision1239 commit도 있었으나 새 CLI 구성과의 인과는 미확인이다.
+
+설정된 검색 endpoint localhost8888에는 listener가 없었다. [공식 SearXNG 설치 문서](https://docs.searxng.org/admin/installation-docker)에 따라 digest55e1fa15…의 서비스를 loopback8888에 복구했다. 직접 검색은37결과/2.355초. 두 upstream engine CAPTCHA/parse 오류는 응답에 보존돼 있다. 공개 MCP40개 목록에는 WebSearch가 없어 내부 도구 경유 성공까지 주장하지 않는다. 서비스 구성은 runtime services/searxng에 영속했고 영수증에 digest를 기록했다.
+
+최신 health04:40:49Z binary1ec84be0a4, started04:39:48Z. 배포는 다른 작업 주체가 수행했다. 이 바이너리에 이번 추가 수정 전체가 들어갔다고 주장하지 않는다. runnable backlog27, oldest4595초이며 dashboard stamp도 missing이다. 20항목 전체 해결/연속 턴/기억/표면 전달 완료는 아직 아니다.

@@ -5,8 +5,8 @@
     "count": 1698,
     "note": "1698 quota events; propagated fences are overlapping observations",
     "source": "lib/runtime/runtime_claude_code.ml",
-    "action": "PR #33839: typed API error diagnostic frame를 실제 모델 응답과 분리. 실제 text/tool effect는 보존. 쿼터 자체와 exact-lane 재시도 전략은 별도 잔여.",
-    "status": "diagnostic-fix",
+    "action": "API diagnostic 수정은 배포 관측. #33855는 typed CLI quota scope와 후보 순서를 공유하도록 병합됐으며 fixture 후속 #33873 검증 중.",
+    "status": "quota-code-fix",
     "first": {
       "seq": 25985026,
       "ts": "2026-09-06T21:05:47Z",
@@ -59,8 +59,8 @@
     "count": 48,
     "note": "",
     "source": "lib/keeper/keeper_librarian_runtime.ml",
-    "action": "48 failure events 중 46에 weekly quota. 새 스냅샷 commit 성공까지 확인; 실패했다고 기존 메모리를 지우면 안 됨.",
-    "status": "external+investigate",
+    "action": "Librarian/Board/HITL CLI 후보에 Codex luna 추가. 04:25:28Z durable 적용 영수증과 파일 재조회 일치. Codex schema2/2 성공; 실제 lane의 Codex 선택은 미확인.",
+    "status": "config-applied",
     "first": {
       "seq": 25990215,
       "ts": "2026-09-06T21:21:58Z",
@@ -167,8 +167,8 @@
     "count": 231,
     "note": "",
     "source": "lib/keeper/keeper_agent_run.ml",
-    "action": "yield 자체는 보호 동작. 동일 Execute/surface/context 호출을 재개 뒤 반복하는 목적·툴 결과·후속 checkpoint를 함께 검증; 임의 횟수 cap 추가하지 않음.",
-    "status": "investigate",
+    "action": "#33857: 과거 도구 이력을 현재 실행 증거와 분리, 39/39 테스트 통과. 반복 판정 자체는 여전히 전체 이력을 사용하므로 Fresh/Resume의 명시적 영속 scope가 남음.",
+    "status": "partial-code-fix",
     "first": {
       "seq": 25984123,
       "ts": "2026-09-06T21:00:25Z",
@@ -194,8 +194,8 @@
     "count": 51,
     "note": "",
     "source": "packages/agent_core/lib/llm_provider/http_client.ml; exact_output_measurement_transport.ml",
-    "action": "DNS 첫 주소만 선택하는 결함 확인. IPv4 301/IPv6 curl7 재측정. 단순 retry는 실패 소켓의 cache switch 잔류 문제가 있어 적용 보류. per-attempt cleanup·connect-only fallback·요청 1회 증명 필요.",
-    "status": "investigate",
+    "action": "#33856 병합. DNS 모든 주소의 TCP 연결을 경합시키고 실패/취소 소켓 소유권 정리. 새10/10, 캐시19/19 PASS; broader HTTP suite는 기존 zero-length Eio read 사례1개 실패.",
+    "status": "tested-code-fix",
     "first": {
       "seq": 26004046,
       "ts": "2026-09-06T22:15:02Z",
@@ -248,8 +248,8 @@
     "count": 373,
     "note": "MCP347 + dashboard26",
     "source": "lib/server/server_mcp_transport_http_respond.ml:149; lib/server/server_auth.ml",
-    "action": "인증 거절은 정상. 오래된 client credential의 주체를 확인하고 해당 client에서 갱신; 서버 인증 완화로 해결하지 않음.",
-    "status": "client-repair",
+    "action": "#33871: 잘못된 localStorage 안내를 실제 sessionStorage 키로 정정. 사용자 브라우저의 거절된 자격 증명은 아직 수정하지 않음.",
+    "status": "hint-fixed-client-pending",
     "first": {
       "seq": 25984474,
       "ts": "2026-09-06T21:02:53Z",
@@ -302,8 +302,8 @@
     "count": 12,
     "note": "2 files across 6 boots; not 12 distinct corrupted files",
     "source": "lib/keeper/keeper_board_attention_candidate.ml",
-    "action": "gondolin-probe 11행, k3think-probe19행 원본 보존. 활성 owner/미소비 의도를 판정한 뒤 명시적 quarantine; 호환 파서 추가나 무단 삭제하지 않음.",
-    "status": "data-reconciliation",
+    "action": "현재 schema5 원본 두 파일을 보존. gondolin pending5, k3think pending12가 있어 삭제나 성공 처리하지 않음. 명시적 실패 보존/재조정 경로 필요.",
+    "status": "pending-preserved",
     "first": {
       "seq": 26080097,
       "ts": "2026-09-06T23:26:05Z",
@@ -329,8 +329,8 @@
     "count": 111,
     "note": "shell_light70 among111; other18 slow render not added",
     "source": "lib/dashboard/dashboard_snapshot.ml",
-    "action": "실측 구간의 component별 시간·할당량으로 좁혀야 함. TTL=0 자체만 보고 cache를 강제로 늘리면 fresh 상태가 달라짐.",
-    "status": "performance",
+    "action": "#33877: 한 shell projection에서 TOML 선언 snapshot을 공유, 반복 읽기 제거. 기존 실측 runtime_resolution3468/3873ms 및1215/1292ms. 개선 후 지연/UI는 미측정.",
+    "status": "performance-code-fix",
     "first": {
       "seq": 26080100,
       "ts": "2026-09-06T23:26:05Z",
@@ -356,8 +356,8 @@
     "count": 5,
     "note": "",
     "source": "scripts/build-dashboard-if-needed.sh",
-    "action": "health와 실제 browser에서 missing 확인. 정식 bundle artifact 빌드·배포 provenance가 필요. 이 세션은 constitution의 로컬 빌드 금지를 유지.",
-    "status": "artifact-rebuild",
+    "action": "#33867: 직접 Vite 빌드도 stamp 생성, 원격 번들/소스 영수증 workflow 추가. 기본 브랜치에 workflow가 없어 dispatch404; 실제 artifact/build/deploy 미확인.",
+    "status": "artifact-code-fix",
     "first": {
       "seq": 26156709,
       "ts": "2026-09-07T00:47:21Z",
@@ -383,8 +383,8 @@
     "count": 68,
     "note": "68 wait lines, 23 WARN, max119.4s",
     "source": "lib/server/server_runtime_bootstrap.ml",
-    "action": "PR #33846: sweep를 Keeper 필수 startup barrier에서 분리. 기존 lifecycle lock으로 전체 listing/delete 보호해 stable guest-name 교체 경합 방지. CLI 예외는 lock 밖에서 rethrow해 poison 방지. 보호된 sweep 중 취소는 완료까지 지연.",
-    "status": "code-fix",
+    "action": "#33846 병합. 교정 head642df022c9 원격 sandbox55/55, startup85/85 PASS. 병합 head985f7dbac0는 main merge를 포함하며 대상 구현 diff는 없음. 최신 배포에는 미포함.",
+    "status": "tested-code-fix",
     "first": {
       "seq": 26080169,
       "ts": "2026-09-06T23:26:08Z",
@@ -437,8 +437,8 @@
     "count": 12,
     "note": "",
     "source": "connectors/browser",
-    "action": "operator 브라우저 extension과 host의 연결 완료가 필요. 진단용 headless screenshot은 Keeper live lane 연결의 증거가 아님.",
-    "status": "operator-connection",
+    "action": "native host가 설치 토큰 파일을 읽지 않고 wrapper는 과거 worktree를 참조하는 결함 확인. 수정 중. 실제 Firefox/Zen extension 연결은 별도 검증 필요.",
+    "status": "host-code-repair",
     "first": {
       "seq": 26003629,
       "ts": "2026-09-06T22:12:34Z",
@@ -491,8 +491,8 @@
     "count": 19,
     "note": "search6 + fetch13; one query may fail two providers",
     "source": "lib/tool_misc_web_search.ml",
-    "action": "검색 endpoint curl7 + Ollama429. fetch401/404는 주소/인증 원인도 존재. 대체 검색 provider readiness와 URL 정확성을 독립 검증.",
-    "status": "external+client",
+    "action": "localhost:8888 connection refused 확인 후 공식 SearXNG digest 고정 서비스 복구. 직접 질의2.355초/37결과. MASC 내부 WebSearch 경유와 별도 WebFetch401/404는 아직 미검증.",
+    "status": "search-service-recovered",
     "first": {
       "seq": 25984475,
       "ts": "2026-09-06T21:02:53Z",
@@ -518,7 +518,7 @@
     "count": null,
     "note": "health: pending33 oldest4893s at initial capture",
     "source": "keeper_event_queue.work_liveness",
-    "action": "운영 목표: 실제 FIFO 소비·다음 턴 성공·outbox 결과 수신. queued 감소만으로 소비 성공 판정하지 않음. 현재 해결 미확인.",
+    "action": "04:40:49Z binary1ec84be0a4 재조회: runnable27 oldest4595초, degraded. 큐 감소로 소비/효과 전달을 성공 처리하지 않음.",
     "status": "live-acceptance"
   }
 ]

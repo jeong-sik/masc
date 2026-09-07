@@ -50,4 +50,14 @@ val prune :
 
     Any uncertainty while reading or decoding the reachability root returns
     [Error] before deletion (fail-open). Individual unlink failures are
-    collected in [summary] and never fail the Keeper turn. *)
+    collected in [summary] and never fail the Keeper turn.
+
+    After reference validation, the blocking directory scan and deletion run
+    together on an awaited system thread. Accepted cleanup finishes before
+    the caller resumes, including when its cancellation is pending. *)
+
+module For_testing : sig
+  val with_before_scan : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Pause inside the syscall job after reference validation. The hook must
+      perform only blocking/Unix work, never Eio effects. *)
+end

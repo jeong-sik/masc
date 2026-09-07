@@ -190,6 +190,7 @@
   (re_export runtime_events)
   (re_export sqlite3)
   (re_export str)
+  (re_export threads)
   (re_export time_compat)
   (re_export unix)
   (re_export uri)

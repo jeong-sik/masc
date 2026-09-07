@@ -57,13 +57,15 @@ let make_test_meta () : Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
-let with_workspace f =
+let with_workspace_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
-    (fun () -> f (Workspace.default_config dir))
+    (fun () -> f ~env (Workspace.default_config dir))
+
+let with_workspace f = with_workspace_env (fun ~env:_ config -> f config)
 
 let ok_or_fail label = function
   | Ok v -> v
@@ -403,10 +405,9 @@ let test_prune_fails_open_on_incompatible_turn_record () =
     (Keeper_types_support.keeper_turn_record_store config keeper_name)
     (`Assoc []);
   (match
-     Keeper_raw_trace_retention.prune
-       ~config
-       ~keeper_name
-       ()
+     Keeper_raw_trace_retention.For_testing.with_before_scan
+       (fun () -> Alcotest.fail "invalid reference root reached the syscall job")
+       (fun () -> Keeper_raw_trace_retention.prune ~config ~keeper_name ())
    with
    | Error (Keeper_raw_trace_retention.Incompatible_turn_record _) -> ()
    | Error error ->
@@ -416,6 +417,72 @@ let test_prune_fails_open_on_incompatible_turn_record () =
   | Ok _ -> Alcotest.fail "incompatible TurnRecord must skip cleanup");
   Alcotest.(check bool) "orphan survives fail-open cleanup" true
     (Sys.file_exists orphan)
+
+let test_prune_syscalls_yield_and_finish_before_cancelled_caller () =
+  with_workspace_env @@ fun ~env config ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let meta = make_test_meta () in
+  let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+  Fs_compat.mkdir_p dir;
+  let referenced = Filename.concat dir "referenced.jsonl" in
+  let orphan = Filename.concat dir "orphan.jsonl" in
+  write_file referenced "{}\n";
+  write_file orphan "{}\n";
+  write_turn_record config ~meta ~turn:1 ~raw_trace_path:referenced;
+  let caller_thread = Thread.id (Thread.self ()) in
+  let observed_thread = Atomic.make None in
+  let mutex = Mutex.create () in
+  let condition = Condition.create () in
+  let released = ref false in
+  let release () =
+    Mutex.lock mutex;
+    released := true;
+    Condition.broadcast condition;
+    Mutex.unlock mutex
+  in
+  let before_scan () =
+    Atomic.set observed_thread (Some (Thread.id (Thread.self ())));
+    if Thread.id (Thread.self ()) = caller_thread then
+      Alcotest.fail "syscall stage blocked the caller thread";
+    Mutex.lock mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) (fun () ->
+      while not !released do Condition.wait condition mutex done)
+  in
+  let context, context_u = Eio.Promise.create () in
+  let finished, finished_u = Eio.Promise.create () in
+  Keeper_raw_trace_retention.For_testing.with_before_scan before_scan @@ fun () ->
+  Fun.protect ~finally:release @@ fun () ->
+  Eio.Fiber.fork ~sw (fun () ->
+    let outcome =
+      try
+        Eio.Cancel.sub (fun cc ->
+          Eio.Promise.resolve context_u cc;
+          ignore (prune_or_fail config));
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ -> Ok ()
+      | exn -> Error exn
+    in
+    Eio.Promise.resolve finished_u outcome);
+  Eio.Time.with_timeout_exn clock 2. (fun () ->
+    while Option.is_none (Atomic.get observed_thread) do Eio.Time.sleep clock 0.001 done);
+  Alcotest.(check bool) "scan is on another system thread" true
+    (Option.get (Atomic.get observed_thread) <> caller_thread);
+  let cc = Eio.Promise.await context in
+  Eio.Cancel.cancel cc (Failure "cancel accepted cleanup");
+  Eio.Time.sleep clock 0.01;
+  Alcotest.(check bool) "cancelled caller waits for accepted cleanup" false
+    (Eio.Promise.is_resolved finished);
+  Alcotest.(check bool) "orphan exists while syscall job is paused" true
+    (Sys.file_exists orphan);
+  release ();
+  (match Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await finished) with
+   | Ok () -> () | Error exn -> raise exn);
+  Alcotest.(check bool) "cleanup completed before caller released ownership" false
+    (Sys.file_exists orphan);
+  Alcotest.(check bool) "referenced trace survives cancelled cleanup" true
+    (Sys.file_exists referenced)
 
 (* The shared 200-row boundary is exact: a reference in row 1 falls out when
    row 201 commits, while rows 2..201 remain protected. *)
@@ -699,6 +766,8 @@ let () =
             test_prune_preserves_current_references_and_removes_orphans;
           Alcotest.test_case "retention fails open on incompatible record" `Quick
             test_prune_fails_open_on_incompatible_turn_record;
+          Alcotest.test_case "retention syscalls yield and finish before cancelled caller" `Quick
+            test_prune_syscalls_yield_and_finish_before_cancelled_caller;
           Alcotest.test_case "retention shares reader's exact window" `Quick
             test_prune_uses_shared_turn_record_window;
           Alcotest.test_case "post-commit cleanup is reference-aware" `Quick

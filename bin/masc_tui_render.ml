@@ -7573,8 +7573,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    add_row "Turn Ref:"
                      (Terminal_text.single_line observation.turn_ref)
                | Observation_layout.Context_partial observation ->
+                   (* The one reading in this row that printed a bare number.
+                      The row also carries a cumulative figure, which says
+                      "cumulative usage" in its own sentence, and a measured
+                      one, which carries a percentage and a window -- so a
+                      number alone was the only thing here a reader had to
+                      guess the scope of, and the two differ by an order of
+                      magnitude (#33791). This one is occupancy: the
+                      projection emits an observation only once it has
+                      confirmed the turn's own usage. *)
                    add_row "Context:"
-                     (Printf.sprintf "%d tokens; context window not observed"
+                     (Printf.sprintf
+                        "%d tokens in context; window not observed"
                         observation.tokens);
                    add_row "Observed:"
                      (Terminal_text.short_timestamp observation.observed_at);

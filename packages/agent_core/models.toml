@@ -17,7 +17,14 @@ provider_name = "openai"
 chat_output_budget_field = "max_completion_tokens"
 thinking_control_format = "reasoning_effort"
 accepted_reasoning_efforts = ["low", "medium", "high"]
-max_context_tokens = 272000
+# 2026-09-07 probe, this key: a 1.2M-character prompt (~300K tokens) was not
+# refused for length -- the 400 named the output budget -- and larger ones came
+# back 429 "for limit gpt-5.5-long-context ... tokens per min", a rate limit
+# rather than a context one. So the ceiling is the family's, which
+# developers.openai.com/api/docs/models states as 1.05M for the gpt-5.6 and
+# gpt-6 rows beside it and which this catalog's own bare gpt-5.5 row already
+# carries. 272000 was the conservative value this row started at.
+max_context_tokens = 1050000
 max_output_tokens = 128000
 supports_tools = true
 supports_tool_choice = false

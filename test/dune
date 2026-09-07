@@ -2156,6 +2156,8 @@
 
 (include stanzas/test_slack_read_tool.inc)
 
+(include stanzas/test_msx_tools.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)

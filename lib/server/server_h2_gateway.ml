@@ -1006,8 +1006,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/execution" ->
           with_h2_public_read h2_reqd (fun state ->
-            match dashboard_execution_cached_http_representation ~state httpun_request with
-            | Some (body, etag, headers) ->
+            let respond_cached ~body ~etag ~headers =
               let extra_headers =
                 cors @ headers
                 @ [ "etag", etag
@@ -1023,9 +1022,15 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
               else
                 h2_respond_json h2_reqd body ~compress:false ~extra_headers
+            in
+            match dashboard_execution_cached_http_representation ~state httpun_request with
+            | Some (body, etag, headers) -> respond_cached ~body ~etag ~headers
             | None ->
-              let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
-              h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors)
+              (match dashboard_execution_http_response ~state ~sw ~clock httpun_request with
+               | Execution_json json ->
+                 h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors
+               | Execution_payload payload ->
+                 respond_cached ~body:payload.raw_json ~etag:payload.etag ~headers:[]))
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
           with_h2_public_read h2_reqd (fun state ->

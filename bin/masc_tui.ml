@@ -15606,7 +15606,10 @@ and is loaded on demand through keeper_skill.
             | _ ->
                 let terminal_rows, cols = get_terminal_size () in
                 let step = match key with
-                  | "pageup" | "pagedown" -> max 1 (terminal_rows - 8)
+                  | "pageup" | "pagedown" ->
+                      (* Match the status surface's five chrome rows after
+                         composer/agenda space has been reserved. *)
+                      max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
                   | _ -> 1
                 in
                 let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in

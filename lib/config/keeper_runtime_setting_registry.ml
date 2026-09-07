@@ -163,6 +163,14 @@ let all =
       ~category:"lifecycle"
       "User message an autonomous turn is woken with, before any keeper override"
   ; setting
+      ~env_name:"MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+      ~exposure:(Toml_and_env "keeper.model_input_demotion_enabled")
+      ~value_kind:Boolean
+      ~default:"true"
+      ~consumers:[ "Keeper_turn_driver_try_provider" ]
+      ~category:"lifecycle"
+      "Kill-switch for RFC-0363 aged-tool-result demotion (issue #27268 A/B measurement)"
+  ; setting
       ~range:(int_range ~min:1 ())
       ~env_name:"MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       ~exposure:(Toml_and_env "heartbeat.interval_sec")

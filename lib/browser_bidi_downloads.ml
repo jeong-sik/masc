@@ -149,6 +149,9 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
       let result =
         try setup () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
+        (* A peer can accept TCP and close before sending its HTTP upgrade
+           response. ws-direct's handshake reader raises EOF directly. *)
+        | End_of_file -> Error "EOF during Firefox BiDi setup"
         | Eio.Io _ as exn -> Error (Printexc.to_string exn)
         | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
         | Sys_error detail | Failure detail -> Error detail

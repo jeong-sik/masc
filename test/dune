@@ -4763,6 +4763,7 @@
  (libraries masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
+(include stanzas/test_browser_bidi_lifecycle.inc)
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_controls.inc)
 
@@ -4830,4 +4831,4 @@
 (executable
  (name firefox_controls_probe)
  (modules firefox_controls_probe)
- (libraries masc masc.browser_lane eio eio_main yojson unix base64))
+ (libraries masc masc.browser_lane eio eio_main eio.unix yojson unix base64))

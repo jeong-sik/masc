@@ -418,6 +418,43 @@ let test_exact_event_references_and_keeper_io () =
   | [Observer.Undecodable _] -> ()
   | _ -> fail "malformed identity became missing identity"
 
+let test_keeper_scheduling_keeps_io_when_metadata_is_invalid () =
+  let observe extra =
+    let json = `Assoc
+      ([ "type", `String "keeper_tool_call"; "name", `String "alpha"
+       ; "tool_name", `String "keeper_skill"; "ts_unix", `Int 100
+       ; "tool_result", `Assoc [ "receipt", `String "retained" ] ] @ extra)
+    in
+    match decode_all ["data: " ^ Yojson.Safe.to_string json ^ "\n\n"] with
+    | [Observer.Event (Observer.Keeper_tool_call event)] ->
+        check bool "call result survives scheduling metadata" true
+          (event.kt_tool_result = Some (`Assoc ["receipt", `String "retained"]));
+        event.kt_schedule
+    | _ -> fail "schedule metadata discarded the call evidence"
+  in
+  check bool "absent is not invented serial" true (observe [] = None);
+  List.iter
+    (fun mode ->
+      let schedule : Agent_core.Tool_contract.schedule =
+        { planned_index = 3; batch_index = 1; batch_size = 2; execution_mode = mode }
+      in
+      let fields = match Agent_core.Execution_tool_schedule.to_yojson schedule with
+        | `Assoc fields -> fields
+        | _ -> fail "schedule contract did not encode an object"
+      in
+      check bool "canonical schedule survives" true
+        (observe fields = Some (Ok schedule)))
+    [Agent_core.Tool_contract.Concurrent; Agent_core.Tool_contract.Serial];
+  List.iter
+    (fun fields ->
+      match observe fields with
+      | Some (Error _) -> ()
+      | Some (Ok _) | None -> fail "partial or invalid scheduling became missing or valid")
+    [ ["batch_index", `Int 0]
+    ; ["planned_index", `Int 0; "batch_index", `Int 0; "batch_size", `Int 1;
+       "execution_mode", `String "unknown"]
+    ]
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -427,7 +464,9 @@ let () =
             test_the_initialize_body_names_the_method_and_the_client
         ] )
     ; ( "events"
-      , [ test_case "exact event references and redacted Keeper I/O survive" `Quick
+      , [ test_case "Keeper scheduling preserves call evidence" `Quick
+            test_keeper_scheduling_keeps_io_when_metadata_is_invalid
+        ; test_case "exact event references and redacted Keeper I/O survive" `Quick
             test_exact_event_references_and_keeper_io
         ; test_case "a tool call decodes with its turn and batch" `Quick
             test_a_tool_call_decodes_with_its_turn_and_batch

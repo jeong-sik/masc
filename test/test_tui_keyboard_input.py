@@ -11729,6 +11729,7 @@ def run_acting_call_evidence_regression(executable: str) -> None:
     keeper = {
         "type": "keeper_tool_call", "name": "alpha", "tool_name": "keeper_skill",
         "ts_unix": 100.0, "turn": 7, "tool_use_id": "skill-call-exact",
+        "planned_index": 3, "batch_index": 1, "batch_size": 2, "execution_mode": "concurrent",
         "tool_args": {"skill": "research-plan-exact"},
         "tool_result": {"receipt_sha256": "receipt-exact", "status": "served"},
         "tool_args_preview": "safe-input-preview-exact",
@@ -11766,9 +11767,12 @@ def run_acting_call_evidence_regression(executable: str) -> None:
                 raise AssertionError("Aggregated turn opened as an exact call")
             send_and_wait(process, master_fd, output, b"f", b"actions)")
             io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
-            # At 35 rows the complete I/O already fits: PgDn is a no-op and
-            # must not be expected to emit the same terminal bytes again.
-            # Narrow the viewport so this step actually exercises paging.
+            for scheduling in (b"Execution mode: concurrent", b"Planned index (zero-based): 3",
+                               b"Batch index (zero-based) / size: 1 / 2"):
+                if scheduling not in io_head:
+                    raise AssertionError(f"Keeper scheduling evidence missing: {scheduling!r}")
+            # Narrow the viewport so the I/O requires scrolling even when
+            # scheduling metadata is present above it.
             resize_and_wait(process, master_fd, output, rows=22, columns=140,
                             needle=b"ACTING EVENT EVIDENCE")
             io_tail = send_and_wait(process, master_fd, output, b"\x1b[6~", b"safe-output-preview-exact")

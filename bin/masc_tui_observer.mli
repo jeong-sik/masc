@@ -115,6 +115,9 @@ type keeper_tool_call = {
   kt_disposition : string option;  (** [completed], as the server writes it *)
   kt_at : float;
   kt_tool_use_id : string option;
+  kt_schedule : (Agent_core.Tool_contract.schedule, string) result option;
+      (** None means no scheduling metadata was supplied. Invalid metadata
+          remains an Error so the caller can still inspect the call's I/O. *)
   kt_tool_args : Yojson.Safe.t option;
   kt_tool_result : Yojson.Safe.t option;
   kt_tool_args_preview : string option;

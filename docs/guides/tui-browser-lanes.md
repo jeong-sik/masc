@@ -13,6 +13,7 @@ Slack tabs; it does not send Slack messages or change channel bindings.
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Refresh tabs and page |
+| `g` | Enter a URL in automation Firefox; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation Firefox session while automation is selected |
 | Esc / Left | Return to connector routing |
 
@@ -22,6 +23,11 @@ pending refresh labels retained content as a previous read. Source switches clea
 that content; generation-stamped replies prevent an earlier request from
 populating a later app or source. Reads happen on entry, tab selection and explicit
 refresh, so a periodic TUI tick does not continually select Firefox tabs.
+
+The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Its typed
+and pasted characters belong to the URL field, so letters cannot activate lane
+commands or enter the Keeper composer. Navigation uses the automation session;
+server URL validation errors remain visible on the lane view.
 
 Requests use the existing authenticated TUI HTTP client. The read deadline is
 45 seconds for the server's tab-list and page-read phases; automation session

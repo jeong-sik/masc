@@ -816,6 +816,7 @@ let footer_hints_browser_lane =
     ; b Navigate "l / a" "live / automation"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
+    ; b Act "g" "URL"
     ; b Act "o / x" "open / close session"
     ; b Act "r" "refresh"
     ; b Navigate "Esc" "connectors"

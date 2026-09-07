@@ -1,5 +1,5 @@
 (** Server_slack_poll_lane — the in-process Slack collection fiber
-    (docs/design/slack-lane.md, task-1418).
+    (docs/design/slack-poll-checkpoints.md).
 
     Spawned once during server bootstrap next to the Socket Mode gateway.
     Every poll interval it reads the channel→keeper bindings — the same
@@ -9,21 +9,16 @@
     mentions stay on the socket path (app_mention is the subscribed event),
     and bot/subtype rows are not conversation.
 
-    The cursor (.gate/runtime/slack/poll-cursor.json, channel_id → last
-    ts seen) is durable across restarts and advances only to the OLDEST
-    message actually fetched: a cycle whose window exceeds the page cap
-    collects the newest part and leaves the rest reachable for the next
-    cycle, so a failed or truncated cycle retries rather than skips. A
-    failed cycle holds the cursor; an unreadable or corrupt cursor file
-    logs loudly and restarts every channel from now (that window is lost,
-    not silently bridged). The lane refuses to start when auth.test
-    cannot resolve the bot identity: without it the mention filter is
-    unenforceable and collected mentions would double against the socket
-    path.
+    The checkpoint holds either a committed high-water mark, an unfinished
+    time window with staged messages, or a completed window awaiting publication.
+    Pagination moves latest backwards while oldest stays fixed. A cycle cap
+    yields to other channels without discarding its checkpoint. Only a completed,
+    published window advances high-water. Failed writes or fetches leave the
+    previous checkpoint replayable; unreadable checkpoints refuse collection.
+    Slack_lane remains a bounded in-memory recent-message view, not an archive.
 
-    Board posting is deliberately absent here: the external bridge poller
-    (jeong-sik/me#1291) owns the digest circuit until the cutover
-    described in the design doc, so the two never double-post.
+    This optional REST reader is independent of the Browser-based Slack TUI.
+    It publishes observations to Slack_lane and sends no Slack or Board messages.
 
     Off by default: the lane starts only when SLACK_BOT_TOKEN is set and
     [slack] poll_enabled is true in the resolved runtime.toml. A
@@ -58,11 +53,23 @@ module For_testing : sig
      socket path owns them), legacy [<@id|label>] mention rendering
      included. *)
 
-  val cursor_advance_of :
-    Slack_rest_client.history_message list -> string option
-  (** The cursor decision: the OLDEST ts of the fetched (newest-first)
-     page set, or [None] when nothing was fetched. Advancing to the oldest
-     — not the newest — is what keeps a truncated backlog reachable. *)
+  type checkpoint
+  type collect_error = Fetch_failed of string | Checkpoint_failed of string | Page_invalid of string
+  val idle : string -> checkpoint
+  val high_water : checkpoint -> string
+  val encode : checkpoint -> Yojson.Safe.t
+  val decode : Yojson.Safe.t -> (checkpoint, string) result
+  val read_checkpoints : path:string -> ((string * checkpoint) list, string) result
+  val collect :
+    now:float ->
+    cursor:checkpoint option ->
+    fetch:(oldest:string -> latest:string -> (Slack_rest_client.conversations_history_ok, string) result) ->
+    save:(checkpoint -> (unit, string) result) ->
+    publish:(Slack_rest_client.history_message list -> unit) ->
+    (unit, collect_error) result
+  (** The real per-channel cycle with injected I/O. Every successful page is
+      checkpointed; a completed window is checkpointed before publication. *)
+
 end
 
 val start :

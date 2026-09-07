@@ -57,8 +57,10 @@ val sync
     [Embedded_config.file_list], passed in by the server bootstrap so this
     module stays asset-source agnostic (and unit-testable).
 
-    Deletion is fail-closed: an empty embedded set or an unreadable runtime
-    tree records an explicit [failed] entry and no path is removed.
+    Every embedded relative path is validated before scanning or mutating
+    the runtime tree. An unsafe path or empty embedded set records explicit
+    [failed] entries and leaves runtime assets and the manifest untouched.
+    An unreadable runtime tree also prevents deletion.
     [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded in
     [failed] without aborting the pass. *)
 

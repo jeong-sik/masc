@@ -262,6 +262,16 @@ let sync ~domain ~read ~files ~dest_dir () =
   let current =
     List.fold_left (fun acc (_, rel) -> String_set.add rel acc) String_set.empty assets
   in
+  let invalid_paths =
+    List.filter_map
+      (fun (embedded_rel, runtime_rel) ->
+        if relative_asset_path runtime_rel then None
+        else
+          Some
+            ( embedded_rel
+            , Printf.sprintf "unsafe embedded %s asset path" (noun domain) ))
+      assets
+  in
   (* The embedded tree is the managed set. Until #31283 a hand-written
      [managed-assets.json] beside the assets declared the same list a second
      time, and five releases in a row shipped with a file on one side and not
@@ -273,7 +283,10 @@ let sync ~domain ~read ~files ~dest_dir () =
      step that lost the tree. Without a second list that case is caught on
      its own, and refused, because every domain ships assets and projecting
      an empty set would delete the operator's whole runtime directory. *)
-  if String_set.is_empty current
+  (* Validate the complete authority set before removing absent runtime files
+     or writing even a valid asset that precedes an invalid one. *)
+  if invalid_paths <> [] then { initial with failed = invalid_paths }
+  else if String_set.is_empty current
   then
     { initial with
       failed =

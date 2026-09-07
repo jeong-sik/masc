@@ -151,6 +151,39 @@ let test_empty_embedded_set_fails_closed () =
                   "embedded prompt asset set is empty; refusing to project an empty tree")
            result.Managed_asset_sync.failed))
 
+let test_unsafe_embedded_paths_preserve_runtime_tree () =
+  List.iter
+    (fun unsafe_path ->
+      with_temp_prompts_dir (fun dir ->
+        let existing = Filename.concat dir "keeper.existing.md" in
+        Out_channel.with_open_text existing (fun oc ->
+          Out_channel.output_string oc "existing runtime content\n");
+        write_runtime_manifest dir [ "keeper.existing.md" ];
+        let manifest_path = Filename.concat dir "managed-assets.json" in
+        let before_manifest = read_file manifest_path in
+        let read_called = ref false in
+        let result =
+          Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+            ~read:(fun _ -> read_called := true; Some "new embedded content\n")
+            ~files:[ "prompts/new.md"; "prompts/" ^ unsafe_path ]
+            ~dest_dir:dir ()
+        in
+        check (list string) "nothing copied" [] result.Managed_asset_sync.copied;
+        check (list string) "nothing overwritten" [] result.Managed_asset_sync.overwritten;
+        check (list string) "nothing removed" [] result.Managed_asset_sync.removed;
+        check (list (pair string string)) "unsafe path is reported"
+          [ "prompts/" ^ unsafe_path, "unsafe embedded prompt asset path" ]
+          result.Managed_asset_sync.failed;
+        check bool "no embedded reads before complete path validation" false !read_called;
+        check bool "existing asset remains" true (Sys.file_exists existing);
+        check string "existing content is unchanged" "existing runtime content\n"
+          (read_file existing);
+        check string "runtime manifest is unchanged" before_manifest
+          (read_file manifest_path);
+        check bool "valid preceding asset is not written" false
+          (Sys.file_exists (Filename.concat dir "new.md"))))
+    [ "../outside.md"; "/absolute.md"; "nested/../outside.md"; "."; "nested//file.md"; "" ]
+
 let test_removed_managed_file_is_deleted () =
   with_temp_prompts_dir (fun dir ->
       let removed = Filename.concat dir "keeper.removed.md" in
@@ -384,6 +417,8 @@ let () =
             test_an_operator_file_reaches_the_log_line;
           test_case "empty embedded set fails closed" `Quick
             test_empty_embedded_set_fails_closed;
+          test_case "unsafe embedded paths preserve runtime assets and manifest" `Quick
+            test_unsafe_embedded_paths_preserve_runtime_tree;
           test_case "removed managed file is deleted" `Quick
             test_removed_managed_file_is_deleted;
           test_case "current managed leaf symlink is replaced without following"

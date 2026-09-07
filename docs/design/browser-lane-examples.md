@@ -13,6 +13,7 @@
 ## 0. 세팅 (운영자, 한 번)
 
 ```
+export MASC_BASE_PATH="/path/to/masc-base"        # 서버와 같은 base
 bash connectors/browser/install-host.sh          # 토큰 + live 호스트 등록
 # B(live): Firefox/Zen → about:debugging → 임시 확장 적재
 # A(automation): npm i playwright && npx playwright install firefox

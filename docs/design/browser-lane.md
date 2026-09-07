@@ -67,7 +67,8 @@ MVP 범위: 읽기 동사 + session.open/close + page.goto까지. page.goto는
 - background: `browser.runtime.connectNative("masc_browser_host")`로 상시 연결.
   메시지 {id, verb, args} 수신 → tabs.query / scripting으로 실행 → {id, ok, data}
 - host 등록: `~/Library/Application Support/Mozilla/NativeMessagingHosts/masc_browser_host.json`
-  (Zen은 Mozilla 경로를 따른다; 다르면 Zen 전용 경로에도 복사 — 설치 스크립트가 처리)
+  host 코드와 launcher도 이 디렉터리 아래 설치되며 체크아웃 이동과 독립적이다.
+  확장 연결은 별도 단계다. 설치·인증 규칙은 [connector README](../../connectors/browser/README.md)를 따른다.
 
 ## A 데몬 (MVP)
 

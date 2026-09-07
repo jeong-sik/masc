@@ -18,14 +18,9 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const args = process.argv.slice(2);
-function argOf(name) {
-  const i = args.indexOf(name);
-  return i >= 0 && args[i + 1] ? args[i + 1] : null;
-}
-const BASE = argOf("--base") || process.env.MASC_BROWSER_LANE_BASE || "/tmp/masc-browser-lane";
+const { resolveBase, readToken } = require("../lane-config.js");
+const BASE = resolveBase();
 const POLL_URL = process.env.MASC_BROWSER_LANE_POLL || "http://127.0.0.1:8935/browser-lane/poll";
-const TOKEN = fs.existsSync(`${BASE}/token`) ? fs.readFileSync(`${BASE}/token`, "utf8").trim() : process.env.MASC_BROWSER_LANE_TOKEN || "";
 const PROFILE_DIR = path.join(BASE, "profile");
 const READ_CAP = 50000;
 const GOTO_TIMEOUT_MS = 30000;
@@ -41,6 +36,7 @@ function log(line) {
 
 function post(p, body) {
   return new Promise((resolve, reject) => {
+    const token = readToken(BASE);
     const url = new URL(POLL_URL);
     const req = http.request(
       {
@@ -51,7 +47,7 @@ function post(p, body) {
         headers: {
           "content-type": "application/json",
           "x-lane": "automation",
-          ...(TOKEN ? { "x-lane-token": TOKEN } : {}),
+          "x-lane-token": token,
         },
       },
       (res) => {

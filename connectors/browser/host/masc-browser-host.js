@@ -7,17 +7,17 @@
 //   --self-test  send one tabs.list to the extension, print the reply, exit
 //   (default)    long-poll the masc server for lane commands and bridge them
 //
-// The lane server endpoint does not exist yet on this branch; the default
-// mode retries until it does, so the host can be installed ahead of the
-// server work.
+// The installer copies this host and its lane configuration helper outside
+// the checkout. GUI launches receive the configured base through --base.
 
 "use strict";
 
 const http = require("http");
+const { resolveBase, readToken } = require("../lane-config.js");
+const BASE = resolveBase();
 
 const POLL_URL = process.env.MASC_BROWSER_LANE_POLL || "http://127.0.0.1:8935/browser-lane/poll";
 const LANE = process.env.MASC_BROWSER_LANE_ID || "live";
-const TOKEN = process.env.MASC_BROWSER_LANE_TOKEN || "";
 const POLL_TIMEOUT_MS = 55000;
 const VERB_TIMEOUT_MS = 20000;
 
@@ -97,8 +97,8 @@ if (process.argv.includes("--self-test") || process.env.MASC_BROWSER_LANE_SELFTE
       at: new Date().toISOString(),
     };
     try {
-      fs.mkdirSync("/tmp/masc-browser-lane", { recursive: true });
-      fs.writeFileSync("/tmp/masc-browser-lane/selftest.json", JSON.stringify(verdict, null, 2));
+      fs.mkdirSync(BASE, { recursive: true });
+      fs.writeFileSync(require("path").join(BASE, "selftest.json"), JSON.stringify(verdict, null, 2));
     } catch {}
     process.stderr.write(`self-test: ${JSON.stringify(verdict).slice(0, 1500)}\n`);
     process.exit(verdict.tabs_ok && verdict.unknown_refused ? 0 : 1);
@@ -110,6 +110,7 @@ if (process.argv.includes("--self-test") || process.env.MASC_BROWSER_LANE_SELFTE
 
 function post(path, body) {
   return new Promise((resolve, reject) => {
+    const token = readToken(BASE);
     const url = new URL(POLL_URL);
     const req = http.request(
       {
@@ -120,7 +121,7 @@ function post(path, body) {
         headers: {
           "content-type": "application/json",
           "x-lane": LANE,
-          ...(TOKEN ? { "x-lane-token": TOKEN } : {}),
+          "x-lane-token": token,
         },
       },
       (res) => {

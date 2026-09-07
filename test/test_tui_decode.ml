@@ -5806,6 +5806,45 @@ let test_decode_prompts_reads_the_live_shape () =
     Alcotest.(check (list string)) "template input names"
       [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
 
+(* The field the wire has carried since the registry started quarantining
+   overrides, and the snapshot dropped until 2026-09-07. A held-back key
+   renders from its file, so the reader's only clue that an override exists
+   and is not running comes from here. *)
+let held_back_payload =
+  `Assoc
+    [ ("prompts", `List [])
+    ; ( "held_back"
+      , `List
+          [ `Assoc
+              [ ("key", `String "keeper")
+              ; ("bytes", `Int 1240)
+              ; ("contract_revision", `String "01e7760f")
+              ]
+          ] )
+    ]
+
+let test_decode_prompts_reads_held_back () =
+  match Tui_decode.decode_prompts held_back_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "one held back" 1
+      (List.length snapshot.Tui_decode.ps_held_back);
+    let entry = List.hd snapshot.Tui_decode.ps_held_back in
+    Alcotest.(check string) "key" "keeper" entry.Tui_decode.hbo_key;
+    Alcotest.(check int) "saved bytes" 1240 entry.Tui_decode.hbo_bytes;
+    Alcotest.(check string) "the revision it was pinned to" "01e7760f"
+      entry.Tui_decode.hbo_contract_revision
+
+(* A server with nothing quarantined omits the field, and so does one that
+   predates it. Neither is an error, and both mean the same thing to a
+   reader. *)
+let test_decode_prompts_absent_held_back_is_empty () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "no held back" 0
+      (List.length snapshot.Tui_decode.ps_held_back)
+
 let test_decode_prompts_reads_runtime_assets () =
   match Tui_decode.decode_prompts prompts_payload with
   | Error detail -> Alcotest.fail detail
@@ -8185,6 +8224,10 @@ let () =
           test_a_json_refusal_shows_its_sentence_not_the_envelope;
         Alcotest.test_case "reads separate read-only runtime assets" `Quick
           test_decode_prompts_reads_runtime_assets;
+        Alcotest.test_case "reads the held-back overrides" `Quick
+          test_decode_prompts_reads_held_back;
+        Alcotest.test_case "an absent held_back is empty, not an error" `Quick
+          test_decode_prompts_absent_held_back_is_empty;
         Alcotest.test_case "hides assembly fragments by default" `Quick
           test_prompt_rows_hide_fragments_by_default;
         Alcotest.test_case "legacy rows default to primary" `Quick

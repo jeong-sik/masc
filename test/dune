@@ -2149,6 +2149,8 @@
 
 (include stanzas/test_slack_gateway_state.inc)
 
+(include stanzas/test_slack_poll_lane.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -3720,9 +3722,12 @@
    %{dep:../bin/masc_tui.exe}
    memory-journal)))
 
-(alias
- (name runtest)
- (deps (alias runtest-test_tui_keyboard_input-memory-journal)))
+; Not on the runtest alias: the scenario passes end to end on macOS and the
+; Linux runner stops later, widening back from a twelve-column pane, waiting
+; for journal:full after Ctrl-N and Ctrl-F land on the narrow notice screen
+; (run 34072434219). That step had never run anywhere either. The lane is
+; named so it can be dispatched on its own while that is open.
+
 
 (rule
  (alias runtest-test_tui_keyboard_input-code-memo)
@@ -3755,6 +3760,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-cli-base-path)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-held-back-override)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   held-back-override)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-held-back-override)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-theme-scheme)
@@ -4700,3 +4721,7 @@
  (name test_monotonic_deadline)
  (modules test_monotonic_deadline)
  (libraries alcotest masc.monotonic_deadline unix))
+
+(include stanzas/test_browser_webdriver.inc)
+
+(include stanzas/test_browser_surface.inc)

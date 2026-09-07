@@ -730,18 +730,8 @@ let lazy_startup_plan () =
     [
       {
         group_name = "cleanup";
-        (* Parallel, because removing a guest is a VM shutdown at roughly a
-           minute each and jsonl_prune finishes in milliseconds. Run serially
-           the sweep held the whole group, and keeper boot waits for the
-           group: measured on 2026-08-28, autoboot logged
-           "waiting for lazy startup tasks" for 30s behind a single guest.
-
-           Boot is still the right moment. The sweep only removes guests
-           whose owning server is gone, and this process owns none yet, so
-           every candidate belongs to an earlier server -- one still running
-           keeps its own pid alive and its guests are not candidates. *)
         execution = Parallel;
-        task_names = [ "jsonl_prune"; "microvm_guest_sweep" ];
+        task_names = [ "jsonl_prune" ];
       };
     ]
   in
@@ -1370,7 +1360,6 @@ let start_owner_lazy_tasks ~sw state =
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-    | "microvm_guest_sweep" -> fun () -> startup_sweep_microvm_guests state
     | task_name ->
       raise
         (Invalid_argument
@@ -1480,6 +1469,8 @@ let start_post_ready_owner_lanes
      observe or resume AwaitingVerification work. *)
   start_completion_authority ~sw ~clock state;
   start_goal_verifier ~sw state;
+  start_microvm_guest_maintenance ~sw
+    ~sweep:(fun () -> startup_sweep_microvm_guests state);
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =
@@ -1759,6 +1750,12 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
          Discord one. Off unless SLACK_APP_TOKEN is set; the start function
          logs a warning and skips otherwise, leaving the server unaffected. *)
       Server_slack_in_process_gateway.start ~sw ~env ~state;
+      (* slack-lane (task-1418): in-process collection fiber for bound
+         channels without app event subscriptions. Off unless
+         [slack] poll_enabled is set in runtime.toml; the start function
+         logs and skips otherwise, leaving the server unaffected. *)
+      Server_slack_poll_lane.start ~sw ~env ~state;
+      Server_browser_webdriver.start ~sw ~env;
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

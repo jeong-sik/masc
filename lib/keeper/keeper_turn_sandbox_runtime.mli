@@ -23,6 +23,14 @@ val create :
   t
 
 val host_root : t -> string
+
+val github_identity_secret_files : t -> string list
+(** Credential files of the microvm identity snapshots already bound to this
+    runtime, including retained snapshots. Reads the in-memory binding only:
+    no token refresh, boot or guest replacement. A boxed execution has already
+    acquired that binding; inspecting its output must not prepare a different
+    identity after the command ran. *)
+
 val prepare_github_identity_secret_files :
   ?timeout_sec:float -> t -> (string list, string) result
 (** After authorization, observe and bind the container to the current GitHub
@@ -250,3 +258,15 @@ val teardown_keeper_sandbox :
     shutdown finalization. A missing container is a successful teardown.
     The MicroVM identity snapshot is released only after its guest has
     stopped and been deleted. *)
+
+val sweep_abandoned_microvm_guests :
+  base_path:string ->
+  command_available:(string -> bool) ->
+  timeout_sec:float ->
+  is_pid_alive:(int -> bool) ->
+  run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
+  (Keeper_microvm_backend.t * Keeper_sandbox_microvm.sweep_outcome) list
+(** Collect abandoned guests under the same lifecycle lock as boot and
+    teardown. The lock covers listing through deletion: stable guest names
+    may otherwise be reused between observing a dead owner and removing it.
+    Guest commands and unrelated Keeper lanes do not acquire this lock. *)

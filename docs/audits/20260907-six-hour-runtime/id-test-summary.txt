@@ -1,0 +1,14 @@
+test suite	Test	2026-09-07T03:18:26.6879853Z [targeted] test_board_dispatch: stanza env
+test suite	Test	2026-09-07T03:18:26.6898734Z [targeted] test_board_dispatch: start 2026-09-07T03:18:26Z
+test suite	Test	2026-09-07T03:18:27.4772575Z Test Successful in 0.747s. 85 tests run.
+test suite	Test	2026-09-07T03:18:27.4816552Z [targeted] test_board_dispatch: OK in 1s
+test suite	Test	2026-09-07T03:18:27.5086900Z [targeted] test_validation: stanza env
+test suite	Test	2026-09-07T03:18:27.5105817Z [targeted] test_validation: start 2026-09-07T03:18:27Z
+test suite	Test	2026-09-07T03:18:27.5182897Z Test Successful in 0.001s. 20 tests run.
+test suite	Test	2026-09-07T03:18:27.5183816Z [targeted] test_validation: OK in 0s
+test suite	Test	2026-09-07T03:18:27.5443228Z [targeted] test_validation_coverage: stanza env
+test suite	Test	2026-09-07T03:18:27.5461527Z [targeted] test_validation_coverage: start 2026-09-07T03:18:27Z
+test suite	Test	2026-09-07T03:18:27.5567908Z │ [FAIL]        edge_cases                 8   agent dot only.                 │
+test suite	Test	2026-09-07T03:18:27.5571701Z │ [FAIL]        edge_cases                 9   agent single dot.               │
+test suite	Test	2026-09-07T03:18:27.5574298Z 2 failures! in 0.004s. 44 tests run.
+test suite	Test	2026-09-07T03:18:27.5574937Z [targeted] test_validation_coverage: FAIL exit 1 in 0s

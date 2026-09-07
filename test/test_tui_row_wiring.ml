@@ -18,9 +18,17 @@
 
 let render = "bin/masc_tui_render.ml"
 
-let reads ~binding_name ~fields =
+(* The Memory surface draws itself from here. Only the screen title stayed
+   behind in [render]; the state, the row and the context moved out with the
+   table cell that carries its own colour (#32870). *)
+let render_memory_module = "bin/masc_tui_render_memory.ml"
+
+let reads_in ~module_path ~binding_name ~fields =
   Ast_grep.count_field_accesses_outside_calls_in_value_binding
-    ~module_path:render ~binding_name ~callees:[] ~fields
+    ~module_path ~binding_name ~callees:[] ~fields
+
+let reads ~binding_name ~fields =
+  reads_in ~module_path:render ~binding_name ~fields
 
 (* The detail under the list is three rows, and [boxed_surface_chrome_rows]
    budgets one for the selected row's own line. Every kind takes that one
@@ -262,8 +270,10 @@ let test_memory_surface_keeps_the_starvation_axes () =
      source-only. Keep all three axes in the renderer. *)
   List.iter
     (fun field ->
-      Alcotest.(check bool) ("memory_row_style reads " ^ field) true
-        (reads ~binding_name:"memory_row_style" ~fields:[ field ] > 0))
+      Alcotest.(check bool) ("memory_state reads " ^ field) true
+        (reads_in ~module_path:render_memory_module ~binding_name:"memory_state"
+           ~fields:[ field ]
+         > 0))
     [ "mkh_snapshot_present"
     ; "mkh_source_snapshot_present"
     ; "mkh_librarian_failures"
@@ -278,10 +288,23 @@ let test_memory_surface_keeps_the_starvation_axes () =
     (reads ~binding_name:"render_memory"
        ~fields:[ "mhs_total_support_invalidations" ]
      > 0);
+  (* The source snapshot has four numbers and the row has one cell for them,
+     so it carries the three that identify the snapshot -- which revision, how
+     stale, how big -- and the fact count goes to the context pane below,
+     which has a line to spell all four out. *)
   List.iter
     (fun field ->
       Alcotest.(check bool) ("memory row reads " ^ field) true
-        (reads ~binding_name:"memory_row_line" ~fields:[ field ] > 0))
+        (reads_in ~module_path:render_memory_module
+           ~binding_name:"memory_row_line" ~fields:[ field ]
+         > 0))
+    [ "mkh_source_revision"; "mkh_source_invalidations"; "mkh_source_snapshot_bytes" ];
+  List.iter
+    (fun field ->
+      Alcotest.(check bool) ("memory context reads " ^ field) true
+        (reads_in ~module_path:render_memory_module
+           ~binding_name:"memory_context_lines" ~fields:[ field ]
+         > 0))
     [ "mkh_source_revision"
     ; "mkh_source_facts"
     ; "mkh_source_invalidations"
@@ -290,7 +313,9 @@ let test_memory_surface_keeps_the_starvation_axes () =
   List.iter
     (fun field ->
       Alcotest.(check bool) ("memory context reads " ^ field) true
-        (reads ~binding_name:"memory_context_lines" ~fields:[ field ] > 0))
+        (reads_in ~module_path:render_memory_module
+           ~binding_name:"memory_context_lines" ~fields:[ field ]
+         > 0))
     [ "mkh_vision_ingest_errors"
     ; "mkh_vision_ingest_error_reasons"
     ; "mkh_observed_facts"

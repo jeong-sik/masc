@@ -260,65 +260,65 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
 
 
-(** Collect microvm guests whose owning server is gone.
-
-    Boot is the honest moment for it. A guest is keeper-lifetime, so nothing
-    about its age or its idleness says it is abandoned; what does is its
-    [masc.mcp.owner_pid] naming a process that no longer exists. At boot this
-    process owns no guest yet, so every candidate belongs to an earlier
-    server -- and any of those still running keeps its own pid alive, which
-    is what stops a second server from collecting a first one's guests.
-
-    Failure is logged, not fatal. A leaked guest costs memory; a boot that
-    refuses to finish costs the whole fleet.
-
-    Removing a guest is a VM shutdown and takes about a minute each
-    (measured 63-67s on container 1.3.0), so this is not something keeper
-    boot should wait behind -- see the group it is registered in. *)
+(** Collect abandoned guests without making unrelated Keeper readiness wait
+    for VM shutdown. The runtime serializes the entire inventory/removal pass
+    with boot and teardown, since a stable name can be reused after restart.
+    Live owners remain outside the collection set. *)
 let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
-  try
-    let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
-    let config = Mcp_server.workspace_config state in
-    let outcomes =
-      Keeper_sandbox_microvm.sweep_abandoned_guests
-        ~base_path:config.base_path
-        ~command_available:Executable_path.command_available
-        ~timeout_sec
-        ~is_pid_alive:Keeper_sandbox_runtime.pid_alive
-        ~run_argv:(fun ~timeout_sec argv ->
-          Process_eio.run_argv_with_status ~timeout_sec argv)
-    in
-    match outcomes with
-    | [] ->
-      Log.Misc.info
-        "startup microvm sweep swept no runtime: none of %s has both its CLI on \
-         PATH and a guest listing this build can scope to a base path"
-        (String.concat ", " Keeper_microvm_backend.valid_strings)
-    | outcomes ->
-      List.iter
-        (fun (backend, (outcome : Keeper_sandbox_microvm.sweep_outcome)) ->
-           (match outcome.removed with
-            | [] -> ()
-            | removed ->
-              Log.Misc.info
-                "startup sweep: removed %d %s guest(s) whose server is gone: %s"
-                (List.length removed)
+  let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
+  let config = Mcp_server.workspace_config state in
+  let outcomes =
+    Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:config.base_path
+      ~command_available:Executable_path.command_available
+      ~timeout_sec
+      ~is_pid_alive:Keeper_sandbox_runtime.pid_alive
+      ~run_argv:(fun ~timeout_sec argv ->
+        Process_eio.run_argv_with_status ~timeout_sec argv)
+  in
+  match outcomes with
+  | [] ->
+    Log.Misc.info
+      "startup microvm sweep swept no runtime: none of %s has both its CLI on \
+       PATH and a guest listing this build can scope to a base path"
+      (String.concat ", " Keeper_microvm_backend.valid_strings)
+  | outcomes ->
+    List.iter
+      (fun (backend, (outcome : Keeper_sandbox_microvm.sweep_outcome)) ->
+         (match outcome.removed with
+          | [] -> ()
+          | removed ->
+            Log.Misc.info
+              "startup sweep: removed %d %s guest(s) whose server is gone: %s"
+              (List.length removed)
+              (Keeper_microvm_backend.to_string backend)
+              (String.concat ", " removed));
+         List.iter
+           (fun (container_id, detail) ->
+              Log.Misc.warn
+                "startup sweep: %s guest %s survived removal: %s"
                 (Keeper_microvm_backend.to_string backend)
-                (String.concat ", " removed));
-           List.iter
-             (fun (container_id, detail) ->
-                Log.Misc.warn
-                  "startup sweep: %s guest %s survived removal: %s"
-                  (Keeper_microvm_backend.to_string backend)
-                  container_id
-                  detail)
-             outcome.failed)
-        outcomes
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Misc.warn
-      "startup microvm sweep failed: %s (next boot retries; a leaked guest \
-       costs memory, a refused boot costs the fleet)"
-      (Printexc.to_string exn)
+                container_id
+                detail)
+           outcome.failed)
+      outcomes
+;;
+
+let start_microvm_guest_maintenance ~sw ~sweep =
+  Eio.Fiber.fork ~sw (fun () ->
+    let started_at = Unix.gettimeofday () in
+    Log.Server.info "startup maintenance: starting microvm_guest_sweep";
+    try
+      sweep ();
+      Eio.Fiber.check ();
+      Log.Server.info
+        "startup maintenance: finished microvm_guest_sweep elapsed_s=%.3f"
+        (Unix.gettimeofday () -. started_at)
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+      Log.Server.info "startup maintenance: cancelled microvm_guest_sweep";
+      raise exn
+    | exn ->
+      Log.Server.warn "startup maintenance: microvm_guest_sweep failed: %s"
+        (Printexc.to_string exn))
 ;;

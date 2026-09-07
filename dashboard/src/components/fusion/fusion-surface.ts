@@ -1373,8 +1373,8 @@ export function FusionSurface() {
   return html`
     <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
       <div class="fus-reality-notice" data-testid="fusion-reality-notice" role="status">
-        <strong>부분 지원</strong>
-        <span>보드 sink + registry 관측 · live JoJ judges 미구성 시 fail-closed</span>
+        <strong>Fusion 관측</strong>
+        <span>패널과 Judge의 결과 및 보드 원문</span>
       </div>
       <details class="fus-block"><summary>호출 방식</summary><p>Keeper는 도구 <code>masc_fusion</code>을 호출해 preset의 패널과 심판을 실행합니다.
         별도의 instruction Skill이 아니며, 결과는 비동기로 도착해 보드 원문과 연결됩니다.
@@ -1411,7 +1411,7 @@ export function FusionSurface() {
               : null}
             <span
               class="fus-list-truth"
-              title="보드 sink · registry 관측 — judges 미구성 시 live JoJ는 fail-closed"
+              title="레지스트리 실행 기록과 보드 원문 관측"
             >관측</span>
             <button
               type="button"

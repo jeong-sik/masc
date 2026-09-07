@@ -7,7 +7,6 @@ import { navigate } from '../../router'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { asRecord } from '../common/normalize'
-import { firstNumber, normalizeFusionUsage } from '../../lib/fusion-meta'
 
 export function FusionReplayNotice({ replay }: { replay: FusionReplay | null }) {
   let text: string
@@ -33,11 +32,16 @@ function HistoricalUsage({ post }: { post: BoardPost }) {
   const meta = asRecord(post.meta) ?? {}
   // Read the existing observation without inferring missing provider usage
   // from a panel count or turning an absent dollar figure into zero.
-  const usage = normalizeFusionUsage(meta)
-  const cost = firstNumber(meta, ['cost_usd', 'costUsd', 'observed_cost_usd'])
+  const observed = asRecord(meta.observed_usage) ?? {}
+  const number = (value: unknown, integer = false): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+      && (!integer || Number.isInteger(value)) ? value : null
+  const input = number(observed.input_tokens, true)
+  const output = number(observed.output_tokens, true)
+  const cost = number(meta.cost_usd)
   return html`<dl class="fus-kpis" data-testid="fusion-historical-usage">
-    <div class="fus-kpi"><dt class="k">입력 토큰 (관측)</dt><dd class="v">${usage.inputTokens?.toLocaleString('en-US') ?? '미관측'}</dd></div>
-    <div class="fus-kpi"><dt class="k">출력 토큰 (관측)</dt><dd class="v">${usage.outputTokens?.toLocaleString('en-US') ?? '미관측'}</dd></div>
+    <div class="fus-kpi"><dt class="k">입력 토큰 (관측)</dt><dd class="v">${input?.toLocaleString('en-US') ?? '미관측'}</dd></div>
+    <div class="fus-kpi"><dt class="k">출력 토큰 (관측)</dt><dd class="v">${output?.toLocaleString('en-US') ?? '미관측'}</dd></div>
     <div class="fus-kpi"><dt class="k">비용 (관측)</dt><dd class="v">${cost === null ? '미관측' : `$${cost.toFixed(4)}`}</dd></div>
     <div class="fus-kpi"><dt class="k">증거 출처</dt><dd class="v">보드 원문</dd></div>
   </dl>`
@@ -59,7 +63,9 @@ export function FusionHistoricalDetail({ evidence }: { evidence: FusionHistorica
       if (current) setRead({ state: 'failed', detail: error instanceof Error ? error.message : String(error) })
     })
     return () => { current = false }
-  }, [evidence.postId, evidence.runId, attempt])
+  // A new registry snapshot must refresh the exact post even when both IDs
+  // stayed the same. Cleanup prevents a superseded read from replacing it.
+  }, [evidence, attempt])
 
   return html`<div class="fus-run-scroll" data-testid="fusion-historical-detail">
     <div class="fus-run-head">

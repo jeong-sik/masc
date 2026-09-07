@@ -653,9 +653,122 @@ let capture_response_uses_finalized_replay_text () =
     [ "visible" ]
     (List.rev !captured)
 
+(* The digest joins manifest and capture records. Check the byte contract
+   against an independent implementation, including empty and multipart texts. *)
+let digest_histories () =
+  let open Agent_core.Types in
+  [ []; [ user_msg "" ]; [ user_msg ""; user_msg "" ];
+    [ user_msg "first\nline"; assistant_msg "한글"; user_msg "" ];
+    [ { (user_msg "") with content = [ Text "a"; Text "b" ] };
+      user_msg "c" ] ]
+
+let check_history_digest history =
+  let expected =
+    history |> List.map Agent_core.Types.text_of_message
+    |> String.concat "\n" |> Digest.string |> Digest.to_hex
+  in
+  Alcotest.(check string) "manifest/capture digest bytes" expected
+    (Context_digest.message_texts_as_joined history)
+
+let digest_without_pool_preserves_bytes () =
+  Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+    List.iter check_history_digest (digest_histories ()))
+
+let with_digest_pool f =
+  Eio_main.run (fun env ->
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        let pool =
+          Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+          |> Domain_pool.executor_pool
+        in
+        Executor_pool_ref.For_testing.with_pool pool (fun () -> f sw))))
+
+let digest_worker_and_nested_worker_preserve_bytes () =
+  with_digest_pool (fun _sw ->
+    List.iter check_history_digest (digest_histories ());
+    (* A one-domain pool would deadlock if the digest resubmitted from its worker. *)
+    Executor_pool_ref.submit_or_inline (fun () ->
+      List.iter check_history_digest (digest_histories ())))
+
+let with_occupied_digest_worker ~sw f =
+  let entered, mark_entered = Eio.Promise.create () in
+  let release, allow_worker = Eio.Promise.create () in
+  let occupying = Eio.Fiber.fork_promise ~sw (fun () ->
+    Executor_pool_ref.submit_or_inline (fun () ->
+      Eio.Promise.resolve mark_entered ();
+      Eio.Promise.await release))
+  in
+  let result = Fun.protect
+    ~finally:(fun () -> Eio.Promise.resolve allow_worker ())
+    (fun () -> Eio.Promise.await entered; f ())
+  in
+  Eio.Promise.await_exn occupying;
+  result
+
+let digest_waits_for_worker_without_blocking_caller () =
+  with_digest_pool (fun sw ->
+    let digest = with_occupied_digest_worker ~sw (fun () ->
+      (* Empty history has no CPU workload and must not queue behind the worker. *)
+      check_history_digest [];
+      let started, mark_started = Eio.Promise.create () in
+      let published = ref false in
+      let digest = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Promise.resolve mark_started ();
+        let result = Context_digest.message_texts_as_joined
+            [ Agent_core.Types.user_msg "queued history" ] in
+        published := true;
+        result)
+      in
+      Eio.Promise.await started;
+      Eio.Fiber.yield ();
+      Alcotest.(check bool) "caller runs while digest waits for occupied worker"
+        false !published;
+      digest)
+    in
+    Alcotest.(check string) "completed digest published after worker available"
+      (Digest.to_hex (Digest.string "queued history"))
+      (Eio.Promise.await_exn digest))
+
+let digest_cancelled_while_queued_does_not_publish () =
+  with_digest_pool (fun sw ->
+    let published = ref false in
+    with_occupied_digest_worker ~sw (fun () ->
+      let context, mark_context = Eio.Promise.create () in
+      let cancelled = Eio.Fiber.fork_promise ~sw (fun () ->
+        try
+          Eio.Cancel.sub (fun cc ->
+            Eio.Promise.resolve mark_context cc;
+            ignore (Context_digest.message_texts_as_joined
+              [ Agent_core.Types.user_msg "cancelled history" ]);
+            published := true);
+          false
+        with Eio.Cancel.Cancelled _ -> true)
+      in
+      let cc = Eio.Promise.await context in
+      Eio.Fiber.yield ();
+      Eio.Cancel.cancel cc (Failure "cancel queued digest");
+      Alcotest.(check bool) "queued caller receives cancellation before worker release"
+        true (Eio.Promise.await_exn cancelled);
+      Alcotest.(check bool) "cancelled digest is never published" false !published);
+    check_history_digest [ Agent_core.Types.user_msg "after cancellation" ];
+    Alcotest.(check bool) "worker recovery does not publish cancelled history"
+      false !published)
+
 let () =
   Alcotest.run "keeper_wire_capture"
     [
+      ( "history_digest",
+        [
+          Alcotest.test_case "no-pool byte contract" `Quick
+            digest_without_pool_preserves_bytes;
+          Alcotest.test_case "worker and nested worker byte contract" `Quick
+            digest_worker_and_nested_worker_preserve_bytes;
+          Alcotest.test_case "occupied worker leaves caller responsive" `Quick
+            digest_waits_for_worker_without_blocking_caller;
+          Alcotest.test_case "queued cancellation does not publish a digest" `Quick
+            digest_cancelled_while_queued_does_not_publish;
+        ] );
       ( "enabled",
         [
           Alcotest.test_case "env flag parsing" `Quick enabled_parsing;

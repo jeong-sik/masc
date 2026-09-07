@@ -69,6 +69,29 @@ class Plan:
     link_flags: list[str] = field(default_factory=list)
 
 
+def strip_comments(text: str) -> str:
+    """dune source with its `;` comments blanked out.
+
+    A comment inside a field list is otherwise read as content: the words of
+    `; masc_tui_message_layout owns the span ladder` join the libraries list,
+    and a suite is then reported as needing `;`. A comment carrying an
+    unbalanced paren also throws off the form reader below.
+    """
+    out: list[str] = []
+    for line in text.splitlines(keepends=True):
+        quoted = False
+        cut = len(line)
+        for index, char in enumerate(line):
+            if char == '"':
+                quoted = not quoted
+            elif char == ";" and not quoted:
+                cut = index
+                break
+        stripped = line[:cut]
+        out.append(stripped if cut == len(line) else stripped + "\n")
+    return "".join(out)
+
+
 def sexp_forms(text: str, head: str):
     """Every parenthesised form in [text] starting with [head], balanced.
 
@@ -95,15 +118,30 @@ def sexp_forms(text: str, head: str):
         index = end + 1
 
 
+# `(libraries (re_export piaf) unix)` -- a library can be listed inside a
+# nested form. The marker names no library of its own; what it wraps does.
+NESTED_LIBRARY_MARKERS = ("re_export",)
+
+
 def field_words(form: str, name: str) -> list[str] | None:
-    match = re.search(rf"\({name}s?\s+([^)]*)\)", form)
-    return match.group(1).split() if match else None
+    """The words of `(name ...)` in [form], read to its matching paren.
+
+    Stopping at the first `)` instead would truncate a field whose value
+    nests -- `(libraries (re_export piaf) unix)` read that way yields
+    `(re_export piaf` and loses `unix` entirely.
+    """
+    field = next(sexp_forms(form, f"({name}"), None)
+    if field is None:
+        return None
+    body = field[field.index(" ") + 1 : -1] if " " in field else ""
+    words = body.replace("(", " ").replace(")", " ").split()
+    return [word for word in words if word not in NESTED_LIBRARY_MARKERS]
 
 
 def read_libraries(dune_path: str, directory: str) -> dict[str, Library]:
     if not os.path.exists(dune_path):
         return {}
-    text = open(dune_path, encoding="utf-8").read()
+    text = strip_comments(open(dune_path, encoding="utf-8").read())
     out: dict[str, Library] = {}
     for form in sexp_forms(text, "(library"):
         names = field_words(form, "name")
@@ -168,6 +206,10 @@ def read_suites(root: str) -> dict[str, list[str]]:
 def collect_libraries(root: str) -> dict[str, Library]:
     libraries = read_libraries(os.path.join(root, "bin/dune"), "bin")
     libraries.update(read_libraries(os.path.join(root, "test_lib/dune"), "test_lib"))
+    # test/deps holds masc_test_deps, which 806 suites link. Left out, every
+    # one of them was reported as blocked on a library this index had never
+    # heard of, which says nothing about what to unblock first.
+    libraries.update(read_libraries(os.path.join(root, "test/deps/dune"), "test/deps"))
     # Libraries under lib/ as well. Whether one can be built from source is
     # decided per library below -- a wrapped one cannot -- rather than by
     # keeping only the leaves here, which used to exclude fs_compat and every
@@ -341,6 +383,7 @@ DETAIL_LINES = 40
 # Alcotest prints the pair a couple of blank lines under the FAIL line, then a
 # backtrace. Stop at the backtrace: it names alcotest's own frames, not the
 # assertion, and it is the longest part of the block.
+SKIP_REASONS_SHOWN = 10
 DETAIL_STOP = ("Raised at", "ASSERT", "FAIL", "Logs saved to", "Testing ")
 
 
@@ -454,8 +497,23 @@ def main() -> int:
         if outcome.detail:
             for line in outcome.detail.splitlines():
                 print(f"      {line}")
-    for name, why in blocked:
-        print(f"skip  {name}: {why}")
+    # One line per skip buries the verdicts: a full run skips over a thousand
+    # suites, each because a library it links is wrapped. Name them
+    # individually only when the caller asked for particular suites; otherwise
+    # count them by reason, which is also the list of what to unblock first.
+    if args.suites:
+        for name, why in blocked:
+            print(f"skip  {name}: {why}")
+    elif blocked:
+        reasons: dict[str, int] = {}
+        for _name, why in blocked:
+            reasons[why] = reasons.get(why, 0) + 1
+        ranked = sorted(reasons.items(), key=lambda pair: -pair[1])
+        for why, count in ranked[:SKIP_REASONS_SHOWN]:
+            print(f"skip  {count} suites: {why}")
+        rest = len(ranked) - SKIP_REASONS_SHOWN
+        if rest > 0:
+            print(f"skip  ... and {rest} further reasons")
     print(
         f"\n{len(plans) - failed - unbuilt} passed, {failed} failed,"
         f" {unbuilt} would not build, {len(blocked)} skipped"

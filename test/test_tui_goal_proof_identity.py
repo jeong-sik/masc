@@ -67,7 +67,7 @@ def run(executable: str, scenario: str) -> None:
     expected = b"primary-ledger-unavailable" if scenario == "unreadable" else evidence
 
     def interact(process, master, _slave, output, _base):
-        h.open_loaded_planning(process, master, output)
+        h.palette_go(process, master, output, b"go Planning", b"plan-alpha-29424")
         h.send_and_wait(process, master, output, b"\x1b[C", expected)
         h.read_available(master, output)
         before = len(output)

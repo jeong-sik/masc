@@ -204,13 +204,17 @@ let dispatch ctx ~name ~args : Tool_result.result option =
         (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start
            ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_msx_screen ->
-      Some (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start args)
+      Some
+        (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start
+           ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_msx_press ->
       Some
         (Tool_misc_msx_lane.handle_press ~tool_name:name ~start_time:start
            ~who:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_msx_step ->
-      Some (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start args)
+      Some
+        (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start
+           ~agent_name:ctx.agent_name args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

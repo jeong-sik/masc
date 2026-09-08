@@ -1,5 +1,7 @@
 (* The workspace MSX machine and its input ledger. See msx_lane.mli. *)
 
+module Msx_png = Msx_png
+
 type key = Msx.key
 
 type sprite = { index : int; x : int; y : int; pattern : int; color : int }
@@ -14,6 +16,7 @@ type observation = {
   sprites : sprite list;
   cartridge : string option;
   disk : string option;
+  image_png : string option;
 }
 
 type entry = { at_frame : int; who : string; key_name : string; down : bool }
@@ -150,7 +153,7 @@ let sprites_of m (mode : Msx.display_mode) =
     go 0 []
 ;;
 
-let observe st =
+let observe ?(image = false) st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
   ; mode = Msx.display_mode_to_string mode
@@ -161,6 +164,11 @@ let observe st =
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
   ; disk = st.disk
+  ; image_png =
+      (if image then
+         let w, h = Msx.frame_dims st.m in
+         Some (Msx_png.encode ~width:w ~height:h ~rgb:(Msx.frame_rgb st.m))
+       else None)
   }
 ;;
 
@@ -286,7 +294,7 @@ let eject () =
       Ok ())
 ;;
 
-let screen () = with_machine (fun st -> Ok (observe st))
+let screen ?(image = false) () = with_machine (fun st -> Ok (observe ~image st))
 
 let check_frames ~what n =
   if n < 1 || n > max_frames_per_call then
@@ -301,13 +309,13 @@ let advance st n =
   st.frame <- st.frame + n
 ;;
 
-let step ~frames =
+let step ?(image = false) ~frames () =
   with_machine (fun st ->
     match check_frames ~what:"frames" frames with
     | Error e -> Error e
     | Ok () ->
       advance st frames;
-      Ok (observe st))
+      Ok (observe ~image st))
 ;;
 
 (* Press everything or nothing: a key without a matrix place is refused
@@ -328,7 +336,7 @@ let press_all st keys =
   go [] keys
 ;;
 
-let press ~who ~keys ~hold_frames ~step_frames =
+let press ?(image = false) ~who ~keys ~hold_frames ~step_frames () =
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else
@@ -356,7 +364,7 @@ let press ~who ~keys ~hold_frames ~step_frames =
                 { at_frame = st.frame; who; key_name = key_to_string k; down = false })
             keys;
           advance st (step_frames - hold_frames);
-          Ok (observe st)))
+          Ok (observe ~image st)))
 ;;
 
 let ledger () =

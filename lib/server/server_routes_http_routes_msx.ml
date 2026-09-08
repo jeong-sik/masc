@@ -91,6 +91,7 @@ let handle_press request reqd =
             Msx_lane.press ~who:(presser_of request) ~keys
               ~hold_frames:(int_field "hold_frames" ~default:5 json)
               ~step_frames:(int_field "frames" ~default:15 json)
+              ()
           in
           match result with
           | Ok obs -> respond ~status:`OK (press_result_json ~ok:true (Some obs))
@@ -231,7 +232,7 @@ let tick_response ~body =
        work inline. Strict submission never retries or falls back to the HTTP
        domain. The worker owns both emulation and the frame's serialization. *)
     match Executor_pool_ref.submit_strict (fun () ->
-      match Msx_lane.step ~frames with
+      match Msx_lane.step ~frames () with
       | Ok _ | Error Msx_lane.No_machine -> `OK, frame_json ()
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)

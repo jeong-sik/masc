@@ -339,7 +339,7 @@ let disk_swap_fixture base_path =
 
 let read_guest_disk expected =
   let result = Msx_lane.press ~who:"disk-test" ~keys:[Msx_lane.key_of_string "space" |> Result.get_ok]
-    ~hold_frames:1 ~step_frames:2 |> lane_observation "guest disk read" in
+    ~hold_frames:1 ~step_frames:2 () |> lane_observation "guest disk read" in
   check char "guest reads retained disk bytes" expected result.screen_text.[0]
 ;;
 
@@ -533,12 +533,76 @@ let test_two_keepers_share_one_machine () =
     (List.map (fun (e : Msx_lane.entry) -> e.who) downs)
 ;;
 
+(* image = true pins the frame into the caller's vision store (RFC-0414) and
+   the JSON carries the handle; without it the observation stays text-only.
+   The artifact is read back through the store itself — the same read
+   analyze_image makes — so the case holds the real store path, not a
+   re-encode of bytes the test made itself. *)
+let png_bytes_of_handle ~agent handle_string =
+  let handle = Multimodal.Vision_artifact_store.of_string handle_string in
+  let dir = Keeper_vision_tool.vision_store_dir ~keeper_name:agent in
+  match Multimodal.Vision_artifact_store.load ~dir handle with
+  | Ok bytes -> bytes
+  | Error m -> fail ("artifact load: " ^ m)
+;;
+
+let test_screen_image_stores_a_readable_png () =
+  with_workspace @@ fun base_path ->
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load completes without ROMs" true (is_completed r);
+  let r = dispatch ~base_path "masc_msx_screen" [] in
+  check bool "without image the observation stays text-only" true
+    (Option.is_none (member "image_artifact" (Tool_result.data r)));
+  let agent = "msx-image-test" in
+  let r = dispatch ~base_path ~agent "masc_msx_screen" [ ("image", `Bool true) ] in
+  check bool "screen completes with image" true (is_completed r);
+  check string "media type says png" "image/png"
+    (match member "image_media_type" (Tool_result.data r) with
+     | Some (`String m) -> m
+     | _ -> fail "no image_media_type");
+  let handle =
+    match member "image_artifact" (Tool_result.data r) with
+    | Some (`String h) -> h
+    | _ -> fail "no image_artifact"
+  in
+  let png = png_bytes_of_handle ~agent handle in
+  check bool "the stored artifact is a PNG" true
+    (String.length png > 8 && String.sub png 0 8 = "\x89PNG\r\n\x1a\n");
+  (* The store is content-addressed, so an unchanged frame gives the same
+     handle — what a keeper polling a waiting screen relies on. *)
+  let r2 = dispatch ~base_path ~agent "masc_msx_screen" [ ("image", `Bool true) ] in
+  check bool "the same frame stores to the same handle" true
+    (match member "image_artifact" (Tool_result.data r2) with
+     | Some (`String h2) -> h2 = handle
+     | _ -> false)
+;;
+
+let test_press_image_carries_the_frame_after_the_key () =
+  with_workspace @@ fun base_path ->
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load completes without ROMs" true (is_completed r);
+  let agent = "msx-image-test" in
+  let r =
+    dispatch ~base_path ~agent "masc_msx_press"
+      [ ("keys", `List [ `String "space" ]); ("image", `Bool true); ("frames", `Int 10) ]
+  in
+  check bool "press completes with image" true (is_completed r);
+  check bool "the frame after the key is stored" true
+    (match member "image_artifact" (Tool_result.data r) with
+     | Some (`String _) -> true
+     | _ -> false)
+;;
+
 let () =
   run "msx tools"
     [ ( "lane"
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "load, step, screen, eject" `Quick test_load_and_clock
         ; test_case "press writes the ledger" `Quick test_press_ledger
+        ; test_case "screen image stores a readable PNG" `Quick
+            test_screen_image_stores_a_readable_png
+        ; test_case "press image carries the frame after the key" `Quick
+            test_press_image_carries_the_frame_after_the_key
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "disk image loads into the drive" `Quick test_disk_load

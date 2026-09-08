@@ -7,7 +7,10 @@
     [masc_msx_eject] ends it. The machine is {!Msx_lane}'s: one per
     workspace, in this process, shared by every caller. The observation is
     text first — mode, name table, sprite table — because a keeper without a
-    vision runtime cannot read pixels (RFC-0414). *)
+    vision runtime cannot read pixels (RFC-0414). With [image = true] the
+    observation also carries the frame as PNG in the caller's vision store,
+    which a keeper reads with analyze_image: a GRAPHIC6 title draws its
+    menus into a bitmap, and there the name table reads as noise. *)
 
 open Tool_args
 
@@ -49,6 +52,40 @@ let of_lane ?(extra = []) ~tool_name ~start_time
   | Error (Msx_lane.Unreadable _ as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       (Msx_lane.error_to_string e)
+;;
+
+(* [image = true] asks the lane for the frame as PNG. A tool result is text
+   on the wire, so the bytes go into the caller's vision store and the JSON
+   carries the artifact handle — the path a browser screenshot takes
+   (RFC-0414): the keeper reads the handle with analyze_image. A refused
+   store keeps the rest of the observation and says why in image_error. *)
+let image_fields ~agent_name (o : Msx_lane.observation) =
+  match o.image_png with
+  | None -> []
+  | Some png -> (
+    let dir = Keeper_vision_tool.vision_store_dir ~keeper_name:agent_name in
+    match Keeper_vision_tool.validate_image_size png with
+    | Error message ->
+      Log.MsxLog.warn "msx frame image rejected by the vision size limit: %s" message;
+      [ ("image_error", `String message) ]
+    | Ok () -> (
+      match Keeper_vision_tool.store_artifact ~dir png with
+      | Error message ->
+        Log.MsxLog.warn "msx frame image store refused: %s" message;
+        [ ("image_error", `String message) ]
+      | Ok handle ->
+        [ ( "image_artifact"
+          , `String (Multimodal.Vision_artifact_store.to_string handle) )
+        ; ("image_media_type", `String "image/png")
+        ; ("image_bytes", `Int (String.length png))
+        ]))
+;;
+
+let of_lane_with_image ~agent_name ~tool_name ~start_time
+    (result : (Msx_lane.observation, Msx_lane.error) result) =
+  match result with
+  | Ok o -> of_lane ~extra:(image_fields ~agent_name o) ~tool_name ~start_time (Ok o)
+  | Error _ as e -> of_lane ~tool_name ~start_time e
 ;;
 
 (* The lane's files live under <.masc>/msx: the ledger, and the two
@@ -202,12 +239,16 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
   | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
 ;;
 
-let handle_screen ~tool_name ~start_time _args =
-  of_lane ~tool_name ~start_time (Msx_lane.screen ())
+let handle_screen ~tool_name ~start_time ~agent_name args =
+  of_lane_with_image ~agent_name ~tool_name ~start_time
+    (Msx_lane.screen ~image:(get_bool args "image" false) ())
 ;;
 
-let handle_step ~tool_name ~start_time args =
-  of_lane ~tool_name ~start_time (Msx_lane.step ~frames:(get_int args "frames" 60))
+let handle_step ~tool_name ~start_time ~agent_name args =
+  of_lane_with_image ~agent_name ~tool_name ~start_time
+    (Msx_lane.step ~image:(get_bool args "image" false)
+       ~frames:(get_int args "frames" 60)
+       ())
 ;;
 
 let handle_press ~tool_name ~start_time ~who args =
@@ -222,10 +263,11 @@ let handle_press ~tool_name ~start_time ~who args =
   match parse [] names with
   | Error message -> reject ~tool_name ~start_time message
   | Ok keys ->
-    of_lane ~tool_name ~start_time
-      (Msx_lane.press ~who ~keys
+    of_lane_with_image ~agent_name:who ~tool_name ~start_time
+      (Msx_lane.press ~image:(get_bool args "image" false) ~who ~keys
          ~hold_frames:(get_int args "hold_frames" 5)
-         ~step_frames:(get_int args "frames" 30))
+         ~step_frames:(get_int args "frames" 30)
+         ())
 ;;
 
 (* Checkpoints use names within saves/, never caller-provided host paths. *)

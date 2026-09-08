@@ -13,6 +13,12 @@
 
 type key = Msx.key
 
+module Msx_png = Msx_png
+(** The PNG encoder for frame images: re-exported so tool layers can store
+    a frame as a vision artifact without linking the module privately.
+    Kept as a submodule because only [encode] is interesting at the lane
+    boundary; see {!Msx_png}. *)
+
 val key_of_string : string -> (key, string) result
 (** Names a caller may send: [up down left right space esc return
     trigger_a trigger_b f1 f2 f3 f4 f5], or one printable character. The
@@ -45,6 +51,11 @@ type observation = {
       (** floppy image file name (.dsk), if one is in the drive. A disk boots
           through the interface ROM that takes the cartridge slot, so a disk
           and a cartridge cannot both run — see {!load}. *)
+  image_png : string option;
+      (** The frame as a PNG byte string when the caller passed [~image:true]
+          — [None] otherwise. GRAPHIC6 titles draw their text into a bitmap,
+          so {!screen_text} reads as noise exactly where reading the screen
+          matters; this is the pixels a vision model sees. *)
 }
 
 type entry = { at_frame : int; who : string; key_name : string; down : bool }
@@ -89,20 +100,26 @@ val load :
     loading alone is not evidence that a game reaches an interactive screen. *)
 
 val eject : unit -> (unit, error) result
-val screen : unit -> (observation, error) result
+val screen : ?image:bool -> unit -> (observation, error) result
+(** [~image:true] also fills {!observation.image_png} with the frame as PNG —
+    the reading a vision model needs where the name table is not a font. *)
 
-val step : frames:int -> (observation, error) result
-(** Advances [frames] (1..{!max_frames_per_call}) with no key held. *)
+val step : ?image:bool -> frames:int -> unit -> (observation, error) result
+(** Advances [frames] (1..{!max_frames_per_call}) with no key held.
+    [~image:true] fills {!observation.image_png} after the advance. *)
 
 val press :
+  ?image:bool ->
   who:string ->
   keys:key list ->
   hold_frames:int ->
   step_frames:int ->
+  unit ->
   (observation, error) result
 (** Holds [keys] for [hold_frames], then runs the rest of [step_frames]
     released. [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key
-    the matrix has no place for is refused before anything is pressed. *)
+    the matrix has no place for is refused before anything is pressed.
+    [~image:true] fills {!observation.image_png} after the last release. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

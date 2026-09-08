@@ -82,7 +82,7 @@ let test_checkpoint_route () =
       Executor_pool_ref.For_testing.with_pool pool (fun () ->
         let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
         check bool "save through executor succeeds" true (status = `OK);
-        ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
+        ignore (Lane.step ~frames:12 () : (Lane.observation, Lane.error) result);
         let status, _ = Route.checkpoint_response ~base_path ~restore:true ~body:"{}" in
         check bool "restore through executor succeeds" true (status = `OK);
         check int "saved clock restored" before (frame_number (Route.frame_json ()));
@@ -130,7 +130,7 @@ let () =
             (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
              | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
             (match Lane.press ~who:"operator" ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
-                     ~hold_frames:2 ~step_frames:6 with
+                     ~hold_frames:2 ~step_frames:6 () with
              | Ok obs ->
                let j = Route.press_result_json ~ok:true (Some obs) in
                check (option bool) "ok true" (Some true)

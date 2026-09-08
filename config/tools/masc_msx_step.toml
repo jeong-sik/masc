@@ -14,3 +14,9 @@ description = "Frames to run. Default 60 (one second)."
 minimum = 1
 maximum = 300
 default = 60
+
+[[params]]
+name = "image"
+type = "boolean"
+description = "Also store the frame after this call as a PNG in your vision store and return its image_artifact handle; read that handle with analyze_image. A bitmap mode (GRAPHIC4-7) draws text into pixels, where the name table reads as noise."
+default = false

@@ -4,7 +4,15 @@ Read the workspace MSX machine without moving time: frame count, display \
 mode, program counter, halted flag, the name table as text (meaningful \
 when the game uses a font), the 24x32 tile grid as hex pairs (GRAPHIC1/2/3 \
 and MULTICOLOR; '..' is tile 0), and the sprite table. Tile numbers mean \
-what the game says they mean; learn them by playing."""
+what the game says they mean; learn them by playing. Pass image = true to \
+also store the frame as a PNG in your vision store (image_artifact handle, \
+read it with analyze_image) — the only way to read a bitmap mode's text."""
 additional_properties = false
 
 defer_loading = true
+
+[[params]]
+name = "image"
+type = "boolean"
+description = "Also store the frame after this call as a PNG in your vision store and return its image_artifact handle; read that handle with analyze_image. A bitmap mode (GRAPHIC4-7) draws text into pixels, where the name table reads as noise."
+default = false

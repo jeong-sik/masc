@@ -33,3 +33,9 @@ description = "Total frames this call advances, including the hold. Default 30 (
 minimum = 1
 maximum = 300
 default = 30
+
+[[params]]
+name = "image"
+type = "boolean"
+description = "Also store the frame after this call as a PNG in your vision store and return its image_artifact handle; read that handle with analyze_image. A bitmap mode (GRAPHIC4-7) draws text into pixels, where the name table reads as noise."
+default = false

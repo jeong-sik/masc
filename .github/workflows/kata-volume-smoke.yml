@@ -2,15 +2,22 @@ name: Kata volume smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      release_run:
+        description: 'Optional completed successful Release run ID for installed Kata first-turn acceptance'
+        type: string
+        default: ''
   pull_request:
     paths:
       - '.github/workflows/kata-volume-smoke.yml'
       - 'scripts/smoke-nerdctl-kata-volume.sh'
+      - 'scripts/keeper-first-turn-smoke.py'
       - 'lib/keeper/keeper_sandbox_microvm.ml'
       - 'lib/keeper/keeper_sandbox_microvm.mli'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   kata-volume:
@@ -32,6 +39,9 @@ jobs:
       PROOF_IMAGE: docker.io/library/debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
     steps:
       - uses: actions/checkout@v7
+
+      - name: Validate canonical checkpoint acceptance
+        run: python3 test/test_keeper_first_turn_harness.py
 
       - name: Require real KVM
         run: |
@@ -115,6 +125,80 @@ jobs:
           sudo env PATH=/usr/local/bin:/usr/bin:/bin \
             bash scripts/smoke-nerdctl-kata-volume.sh "$PROOF_IMAGE" \
             2>&1 | tee kata-evidence/volume-smoke.log
+
+      - name: Fetch a completed release for installed Keeper acceptance
+        if: github.event_name == 'workflow_dispatch' && inputs.release_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN: ${{ inputs.release_run }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN" =~ ^[0-9]+$ ]]
+          mkdir -p "$RUNNER_TEMP/kata-release-dist"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN" > kata-evidence/installed-release-run.json
+          release_sha="$(python3 - <<'PY'
+          import json
+          run = json.load(open('kata-evidence/installed-release-run.json'))
+          assert run['name'] == 'Release' and run['status'] == 'completed' and run['conclusion'] == 'success', run
+          print(run['head_sha'])
+          PY
+          )"
+          gh run download "$RELEASE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name masc-linux-x64 --dir "$RUNNER_TEMP/kata-release-dist"
+          git fetch origin "$release_sha"
+          git show "$release_sha:scripts/install.sh" > "$RUNNER_TEMP/kata-release-install.sh"
+          echo "KATA_RELEASE_COMMIT=$release_sha" >> "$GITHUB_ENV"
+
+      - name: Install the CI release through its matching installer
+        if: github.event_name == 'workflow_dispatch' && inputs.release_run != ''
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq ca-certificates curl python3 libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+          dist="$RUNNER_TEMP/kata-release-dist"
+          chmod +x "$dist/masc-linux-x64"
+          test "$("$dist/masc-linux-x64" build-commit)" = "$KATA_RELEASE_COMMIT"
+          version="v$("$dist/masc-linux-x64" --version | tail -1)"
+          stage="$RUNNER_TEMP/kata-release-mirror/$version"
+          mkdir -p "$stage"
+          find "$dist" -maxdepth 1 -type f -exec cp {} "$stage/" \;
+          (cd "$stage" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          MASC_RELEASE_BASE_URL="file://$RUNNER_TEMP/kata-release-mirror" \
+            bash "$RUNNER_TEMP/kata-release-install.sh" --version "$version" \
+            --prefix "$RUNNER_TEMP/kata-installed/bin" --base-path "$RUNNER_TEMP/kata-install-workspace" \
+            --no-wizard > kata-evidence/installed-release.log 2>&1
+          test "$("$RUNNER_TEMP/kata-installed/bin/masc" build-commit)" = "$KATA_RELEASE_COMMIT"
+
+      - name: Build embedded general recipe and import it into the isolated Kata store
+        if: github.event_name == 'workflow_dispatch' && inputs.release_run != ''
+        run: |
+          set -euo pipefail
+          image="masc-kata-installed-proof:${{ github.run_id }}"
+          "$RUNNER_TEMP/kata-installed/bin/masc" sandbox-image --tag "$image" \
+            > kata-evidence/general-image-build.log 2>&1
+          docker image inspect "$image" > kata-evidence/general-image-docker.json
+          docker save "$image" -o "$RUNNER_TEMP/general-kata-proof.tar"
+          sudo /usr/local/bin/nerdctl load -i "$RUNNER_TEMP/general-kata-proof.tar" \
+            > kata-evidence/general-image-import.log 2>&1
+          sudo /usr/local/bin/nerdctl image inspect --mode native "$image" > kata-evidence/general-image-kata.json
+          # Bind the imported content to Docker's actual config digest, across
+          # their explicitly different stores (containerd is isolated above).
+          python3 - <<'PY'
+          import json
+          docker = json.load(open('kata-evidence/general-image-docker.json'))[0]
+          kata = json.load(open('kata-evidence/general-image-kata.json'))
+          assert kata and all(row['ImageConfigDesc']['digest'] == docker['Id'] for row in kata), kata
+          PY
+          rm "$RUNNER_TEMP/general-kata-proof.tar"
+
+      - name: Installed Kata Keeper model to Execute to persisted volume proof
+        if: github.event_name == 'workflow_dispatch' && inputs.release_run != ''
+        run: |
+          sudo env PATH=/usr/local/bin:/usr/bin:/bin \
+            python3 scripts/keeper-first-turn-smoke.py \
+            --backend nerdctl_kata --binary "$RUNNER_TEMP/kata-installed/bin/masc" \
+            --guest-shim "$RUNNER_TEMP/kata-install-workspace/.masc/microvm/shim/masc-exec-shim" \
+            --image "masc-kata-installed-proof:${{ github.run_id }}" \
+            --output-dir "$GITHUB_WORKSPACE/kata-evidence/installed-first-turn"
 
       - name: Collect daemon evidence
         if: always()

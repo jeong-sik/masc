@@ -17,6 +17,7 @@ type rotate_class =
   | No_progress_empty
   | No_progress_thinking_only
   | No_progress_truncated
+  | Attempt_rejected
 
 type terminal_class =
   | Deterministic_request
@@ -179,7 +180,23 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.NotFound _ -> rotate Model_unavailable
   | Llm_provider.Retry.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Retry.Timeout _ -> observe_retry Provider_timeout
-  | Llm_provider.Retry.InvalidRequest _ -> exhaust_failure Deterministic_request
+  (* [Attempt_rejected] is masc's own pre-wire refusal (the candidate's
+     reasoning-effort ladder or an explicit disable, folded through
+     [Http_client.AcceptRejected]); the driver rotates on it, and a route
+     that called it deterministic labelled a rotating failure as terminal
+     (#33057). The provider-side reasons stay terminal: a body the provider
+     itself refused does not change on the next candidate. *)
+  | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; _ } ->
+    rotate Attempt_rejected
+  | Llm_provider.Retry.InvalidRequest
+      { reason =
+          ( Llm_provider.Retry.Json_parse_error
+          | Llm_provider.Retry.Request_body_too_large _
+          | Llm_provider.Retry.Request_body_refused_by_provider _
+          | Llm_provider.Retry.Unknown_invalid_request )
+      ; _
+      } ->
+    exhaust_failure Deterministic_request
   | Llm_provider.Retry.ContextOverflow _ -> exhaust_failure Context_overflow
   | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
 
@@ -278,6 +295,7 @@ let rotate_class_label = function
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
+  | Attempt_rejected -> "attempt_rejected"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"

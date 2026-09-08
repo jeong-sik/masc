@@ -54,6 +54,13 @@ type rotate_class =
           was empty, thinking-only, or cut at [MaxTokens] after the
           continuation on this runtime did not deliver; a different model may
           make progress *)
+  | Attempt_rejected
+      (** the request was refused before the wire by this candidate's own
+          policy (a reasoning-effort ladder, an explicit disable) rather than
+          by the provider; the driver's [attempt_rejected_should_try_next]
+          moves the lane to its next declared candidate in the same turn, so
+          the route names that rotation instead of calling the failure
+          deterministic *)
 
 (** Typed terminal classes that mechanical retry or rotation cannot change. *)
 type terminal_class =

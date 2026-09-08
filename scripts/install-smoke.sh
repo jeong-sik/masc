@@ -135,18 +135,27 @@ for f in runtime.toml agent-core-models-overlay.toml; do
   [ -f "$base/.masc/config/$f" ] || {
     echo "install-smoke: installer seeded no $f" >&2; exit 1; }
 done
-# The roster is the operator's. A seed that hands over keepers would autoboot
-# them into a sandbox this host does not have.
-if [ -n "$(ls -A "$base/.masc/config/keepers" 2>/dev/null)" ]; then
-  echo "install-smoke: installer seeded keeper manifests into an untouched workspace" >&2
-  ls -A "$base/.masc/config/keepers" >&2
-  exit 1
-fi
+# A fresh workspace ships one Keeper, but must not start it before the
+# operator configures a model and sandbox. Parse the installed manifest so
+# an absent, misplaced, or non-boolean opt-out cannot pass this check.
+python3 - "$base/.masc/config/keepers" <<'PY_ROSTER'
+from pathlib import Path
+import sys
+import tomllib
+
+roster = Path(sys.argv[1])
+if sorted(path.name for path in roster.iterdir()) != ["imp.toml"]:
+    raise SystemExit("install-smoke: expected exactly the first Keeper manifest imp.toml")
+with (roster / "imp.toml").open("rb") as source:
+    manifest = tomllib.load(source)
+if manifest.get("keeper", {}).get("autoboot_enabled") is not False:
+    raise SystemExit("install-smoke: first Keeper must wait for manual start (autoboot_enabled = false)")
+PY_ROSTER
 for f in SKILL.md references/connection.md references/advanced.md references/verification.md; do
   [ -f "$base/.masc/skills/browser-lanes/$f" ] || {
     echo "install-smoke: missing builtin browser Skill file $f" >&2; exit 1; }
 done
-echo "install-smoke: installer seeded config and builtin Skills, and left the keeper roster empty"
+echo "install-smoke: installer seeded config and builtin Skills, and one Keeper waiting for manual start"
 
 # Built-in skill packages come from the verified binary, not a source checkout.
 for file in SKILL.md references/advanced.md references/connection.md references/verification.md; do

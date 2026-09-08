@@ -47,13 +47,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
-    ; api_name = "deepseek-v4-flash:0731"
-    ; context = 1048576
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
     ; api_name = "deepseek-v4-pro"
     ; context = 1048576
@@ -1310,9 +1303,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -1324,7 +1317,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731" ])
+  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")

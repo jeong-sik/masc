@@ -331,12 +331,40 @@ let tab_pill ~active tab =
   if active then { text = "[" ^ tab_label tab ^ "]"; tone = Accent }
   else { text = tab_label tab; tone = Dim }
 
+(* The pane answers "what is every keeper doing right now", and a keeper with no
+   agent present is doing nothing. Offline rows are dropped so the ones that are
+   working are not read past.
+
+   Only Health_offline. Zombie, stale and degraded are keepers that should be
+   running and are not -- the readings an operator most needs to see -- and a
+   filter that took them too would hide the fleet's problems and call it tidier.
+   A keeper whose health did not read at all stays: no reading is not a reading
+   of "offline", and dropping those empties the pane whenever the roster fails. *)
+let is_offline keeper =
+  match keeper.health with
+  | Some Reading.Health_offline -> true
+  | Some
+      ( Reading.Health_running | Reading.Health_idle | Reading.Health_stale
+      | Reading.Health_degraded | Reading.Health_zombie )
+  | None -> false
+
+let working_keepers input = List.filter (fun k -> not (is_offline k)) input.keepers
+let offline_count input = List.length (List.filter is_offline input.keepers)
+
 let header_line ~cols input =
   (* Beside the roster the count is the roster's own title; the header then
      says only what the roster cannot, the feed's state. *)
   let count =
     match input.scope with
-    | Whole_fleet -> plural (List.length input.keepers) "keeper" ^ middle_dot
+    | Whole_fleet ->
+      (* Counted over what the pane draws, and the hidden ones said out loud.
+         A count of the whole fleet beside a shorter list reads as a drawing
+         bug, and a count of the drawn rows alone hides that anything was
+         dropped. *)
+      let hidden = offline_count input in
+      plural (List.length (working_keepers input)) "keeper"
+      ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden)
+      ^ middle_dot
     | Selected_only -> ""
   in
   let feed =
@@ -384,7 +412,7 @@ let fleet_order input newest =
     | None, Some chunk -> (2, -. chunk.Acting.ck_at)
     | None, None -> (3, 0.)
   in
-  List.stable_sort (fun a b -> compare (rank a) (rank b)) input.keepers
+  List.stable_sort (fun a b -> compare (rank a) (rank b)) (working_keepers input)
 
 let fleet_row ~cols input keeper chunk =
   let approval = approval_for input.approvals keeper.name in

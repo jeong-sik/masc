@@ -70,9 +70,10 @@ class KeeperCreateExitTest(unittest.TestCase):
         self.exercise(200, {'name': 'fixture'}, 'already existed', backend='nerdctl_kata')
 
     def test_backend_flag_conflicts_with_editor(self):
-        result = subprocess.run([BINARY, 'keeper-create', '--edit',
-                                 '--microvm-backend', 'nerdctl_kata'],
-                                text=True, capture_output=True, timeout=15)
+        with tempfile.TemporaryDirectory() as base:
+            result = subprocess.run([BINARY, 'keeper-create', '--base-path', base, '--edit',
+                                     '--microvm-backend', 'nerdctl_kata'],
+                                    text=True, capture_output=True, timeout=15)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('cannot be combined', result.stderr)
 

@@ -369,6 +369,12 @@ blocking_pr_lints() {
   # regression, so the baseline moves to 50 in this commit. Planting
   # `text-[13px] bg-zinc-800` reports two patterns over baseline.
   run_lint "Dashboard styling drift" bash scripts/dashboard-drift-check.sh
+  # Was listed as a report on the strength of a grep for `exit 1`. It exits 2,
+  # and that 2 is the verdict, not a usage error: a dashboard line that names
+  # a prompt key config/prompts and prompt_names.ml do not carry decodes to an
+  # empty block. Planting 'fusion.judge.probe_absent' on a promptKeys line
+  # reports it.
+  run_lint "Dashboard prompt keys" bash scripts/audit-dashboard-prompt-keys.sh
   # Two line-reference validators with nothing to validate: no spec preamble
   # and no keeper docstring currently cites a line number. They were written
   # after four citations in a retired queue model drifted 245 to 413 lines

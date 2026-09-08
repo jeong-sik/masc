@@ -73,9 +73,33 @@ let test_backfill_repairs_only_startup_required () =
   check int "second call is a no-op" 0
     (Seed.backfill_startup_required_from_embedded ~config_root)
 
+let test_builtin_skill_package () =
+  let base_path = fresh_dst () in
+  check int "one complete first-party package" 1
+    (Seed.seed_missing_builtin_skills ~base_path);
+  let root = Filename.concat base_path ".masc/skills" in
+  List.iter
+    (fun rel ->
+       match Embedded_skills.read rel with
+       | None -> fail "embedded listing must resolve"
+       | Some expected ->
+         check string rel expected (read_file (Filename.concat root rel)))
+    Embedded_skills.file_list;
+  let body = Filename.concat root "browser-lanes/SKILL.md" in
+  Fs_compat.save_file body "operator's own skill";
+  let resource = Filename.concat root "browser-lanes/references/advanced.md" in
+  Sys.remove resource;
+  check int "existing package is not refilled" 0
+    (Seed.seed_missing_builtin_skills ~base_path);
+  check string "operator body survives" "operator's own skill" (read_file body);
+  check bool "operator resource deletion survives" false (Sys.file_exists resource);
+  check (list string) "no staging residue" [ "browser-lanes" ] (entries_of root)
+
 let () =
   run "Config root embedded seed"
-    [ ( "seed_missing_from_embedded"
+    [ ( "builtin_skills"
+      , [ test_case "complete package and operator ownership" `Quick test_builtin_skill_package ] )
+    ; ( "seed_missing_from_embedded"
       , [ test_case "writes runtime.toml and prompts" `Quick
             test_writes_runtime_toml
         ; test_case "writes no keeper manifests" `Quick

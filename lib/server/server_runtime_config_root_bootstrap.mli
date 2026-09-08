@@ -21,3 +21,8 @@ val backfill_startup_required_from_embedded : config_root:string -> int
 val bootstrap_base_path_config_root : base_path:string -> unit
 
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
+
+val seed_missing_builtin_skills : base_path:string -> int
+(** Seed complete first-party packages from the binary into [.masc/skills].
+    Existing package directories are preserved as a whole, including operator
+    resource deletions. Returns the number of newly installed packages. *)

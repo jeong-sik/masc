@@ -217,6 +217,49 @@ let backfill_startup_required_from_embedded ~config_root =
   |> write_missing_embedded ~dst:config_root
 ;;
 
+(* SKILL.md and its resources form one package. Publish a complete staged
+   directory, never backfill individual resources into an operator's package. *)
+let seed_missing_builtin_skills ~base_path =
+  let root = Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills" in
+  let packages =
+    Embedded_skills.file_list
+    |> List.filter_map (fun path ->
+      match String.split_on_char '/' path with
+      | [ package; "SKILL.md" ] -> Some package
+      | [] | _ :: _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  Fs_compat.mkdir_p root;
+  List.fold_left
+    (fun installed package ->
+       let target = Filename.concat root package in
+       if Sys.file_exists target then installed
+       else
+         let staging =
+           Filename.temp_dir ~temp_dir:(Filename.dirname root) ".skill-seed-" ""
+         in
+         Common.protect ~module_name:"builtin_skills" ~finally_label:"staging"
+           ~finally:(fun () -> Fs_compat.remove_tree staging)
+           (fun () ->
+              let prefix = package ^ "/" in
+              Embedded_skills.file_list
+              |> List.filter (String.starts_with ~prefix)
+              |> List.iter (fun path ->
+                match Embedded_skills.read path with
+                | None -> invalid_arg ("missing embedded Skill asset: " ^ path)
+                | Some content ->
+                  let rel = String.sub path (String.length prefix)
+                      (String.length path - String.length prefix) in
+                  let destination = Filename.concat staging rel in
+                  Fs_compat.mkdir_p (Filename.dirname destination);
+                  Fs_compat.save_file destination content);
+              if Sys.file_exists target then installed
+              else (
+                Fs_compat.rename staging target;
+                installed + 1)))
+    0 packages
+;;
+
 let bootstrap_base_path_config_root ~base_path =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ())
@@ -303,6 +346,8 @@ let bootstrap_base_path_config_root ~base_path =
             "bootstrapped minimal base-path config root without versioned source \
              and no embedded assets: %s"
             config_root);
+    if mode = `Auto then
+      ignore (seed_missing_builtin_skills ~base_path : int);
     Config_dir_resolver.reset ())
 ;;
 

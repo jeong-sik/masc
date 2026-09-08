@@ -1279,6 +1279,8 @@ let init_cmd_exit base_path force =
       { written = 0; skipped = 0; failed = 0 }
       (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list)
   in
+  let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
+  Printf.printf "init: %d builtin Skill package(s) installed\n" skills;
   Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
     result.written result.skipped result.failed target_root;
   if result.failed > 0 then 1 else 0
@@ -1286,9 +1288,11 @@ let init_cmd_exit base_path force =
 let init_cmd =
   let doc =
     "Seed default .masc/config/ from binary-embedded assets. Writes runtime \
-     settings, prompts, tool definitions and connector declarations, and leaves \
+     settings, prompts, tool definitions, connector declarations and first-party \
+     Skills in .masc/skills/, and leaves \
      keepers/ empty for you to declare -- the same split the server makes when \
-     it creates a config root itself. Existing files are kept unless --force."
+     it creates a config root itself. Existing config files are kept unless --force; \
+     existing Skill packages are always preserved."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)

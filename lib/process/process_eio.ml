@@ -876,7 +876,8 @@ let ignore_chunk (_ : string) = ()
 let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
       ?stdin:stdin_source
       ~stdout:stdout_w
       argv
@@ -912,7 +913,8 @@ let spawn_and_drain_both ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_sour
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
       ?stdin:stdin_source
       ~stdout:stdout_w
       ~stderr:stderr_w
@@ -947,7 +949,8 @@ let spawn_and_drain_both_streaming ?phase_ref ?output_capture ~sw pm ~cwd ?env ?
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
       ?stdin:stdin_source
       ~stdout:stdout_w
       ~stderr:stderr_w
@@ -1001,7 +1004,8 @@ let spawn_and_drain_both_with_stdin_held_open
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env ~stdin:stdin_r ~stdout:stdout_w
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env ~stdin:stdin_r ~stdout:stdout_w
       ~stderr:stderr_w argv
   in
   Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
@@ -1493,7 +1497,9 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
            let* err = output_plumbing ~sw ~fs pm stderr in
            let run () =
              let proc =
-               Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
+               Eio.Process.spawn ~sw
+                 (Posix_spawn_process_mgr.foreground_mgr ~clock:clk
+                    ~grace_seconds:child_exit_grace_seconds) ~cwd:effective_cwd ?env
                  ?stdin:stdin_source
                  ~stdout:out.child_flow
                  ~stderr:err.child_flow
@@ -1913,7 +1919,8 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        let proc =
                          Eio.Process.spawn
                            ~sw
-                           pm
+                           (Posix_spawn_process_mgr.foreground_mgr ~clock:clk
+                              ~grace_seconds:child_exit_grace_seconds)
                            ~cwd:(effective_cwd default_cwd stage.cwd)
                            ?env:stage.env
                            ?stdin

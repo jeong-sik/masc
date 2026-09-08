@@ -6,6 +6,9 @@
 
 (** {1 Global init (call once from main_eio.ml)} *)
 
+(** Native foreground commands own a separate process group through the
+    foreground manager. [proc_mgr] supplies pipe plumbing; direct callers of
+    that manager (LSP and official clients) retain their own lifecycle. *)
 val init :
   cwd_default:Eio.Fs.dir_ty Eio.Path.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->

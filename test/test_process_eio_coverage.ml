@@ -972,7 +972,7 @@ let timeout_with_a_grandchild_holding_stdout run =
          (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
        check string "nothing printed after the budget comes back" "" stdout;
        check bool
-         "the call came back while the grandchild still held stdout"
+         "timed-out group did not produce its late completion marker"
          false
          (Sys.file_exists released))
 ;;

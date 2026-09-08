@@ -27,6 +27,7 @@ let minimal_flags : C.flags =
   ; instructions = "Search the web."
   ; sandbox_profile = "docker"
   ; network_mode = Some "inherit"
+  ; microvm_backend = None
   ; remote_endpoint = None
   ; mention_targets = []
   ; skills = None
@@ -40,6 +41,7 @@ let every_flag : C.flags =
   ; instructions = "Search the web."
   ; sandbox_profile = "remote_ssh"
   ; network_mode = Some "inherit"
+  ; microvm_backend = None
   ; remote_endpoint = Some "gondolin"
   ; mention_targets = [ "scout" ]
   ; skills = Some [ "web-search" ]
@@ -128,6 +130,17 @@ let test_behaviours_cover_every_network_mode () =
 (* A flag the server would reject as [turn_up_arg_unknown]. That drift is what
    put the descriptor and the parser out of step in the first place, so it is
    caught here rather than by an operator. *)
+let test_declaration_carries_explicit_microvm_backend () =
+  let json = declaration_exn "microvm backend"
+      { minimal_flags with sandbox_profile = "microvm";
+                           microvm_backend = Some "nerdctl_kata" } in
+  check (option string) "backend is passed explicitly" (Some "nerdctl_kata")
+    (match field "backend" "microvm_backend" json with
+     | Some (`String value) -> Some value | _ -> None);
+  check bool "backend is a server-owned argument" true
+    (List.mem "microvm_backend" Masc.Keeper_turn_up_args.known_turn_up_args)
+;;
+
 let test_declaration_keys_are_all_known_turn_up_args () =
   let keys = object_keys "every flag" (declaration_exn "every flag" every_flag) in
   List.iter
@@ -359,6 +372,8 @@ let () =
             "every key is a known keeper_up argument"
             `Quick
             test_declaration_keys_are_all_known_turn_up_args
+        ; test_case "explicit backend reaches the declaration" `Quick
+            test_declaration_carries_explicit_microvm_backend
         ; test_case
             "every creation stem field is reachable by flag"
             `Quick

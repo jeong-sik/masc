@@ -22,6 +22,9 @@ type parsed_args =
   ; max_context_override_present : bool
   ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
+  ; microvm_backend_patch : Keeper_microvm_backend.t option option
+        (** None omits the edit; Some None clears it; Some (Some backend)
+            selects the parsed backend, only for a microvm profile. *)
   ; remote_endpoint_opt : string option
   ; remote_endpoint_present : bool
   ; network_mode_opt : string option

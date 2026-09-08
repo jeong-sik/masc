@@ -175,6 +175,12 @@ masc keeper-create --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 89
 웹·Git 원격 작업에는 `inherit` 등 작업에 맞는 네트워크 설정이 필요합니다.
 같은 이름으로 다시 실행하면 기존 Keeper를 재설정합니다.
 
+첫 도구 실행이 대기하면 채팅의 pending tool approval을 확인하고 승인에 응답하세요.
+Keeper 채팅의 도구 승인(Auto/Yolo 및 도구별 승인)은 workspace Gate의
+`auto_judge`/`manual`과 외부 서비스 승인 경로와 별개입니다. per-Keeper Gate를
+`always_allow`로 바꿔도 workspace의 `auto_judge`를 완화할 수 없습니다.
+승인 대기를 모델 연결이나 설치 실패로 오해하지 않도록 각 승인 상태를 확인하세요.
+
 Keeper는 설정된 모델로 턴을 수행하고, sandbox에서 도구를 실행하며, 작업·보드·채팅을
 통해 협업합니다. 일정 실행, 승인 판단, 외부 connector와 브라우저 조작은 해당
 runtime/credential/backend 설정이 있어야 합니다. 브라우저는 별도
@@ -204,6 +210,22 @@ masc sandbox-image --runtime apple_container
 # nerdctl/Kata Keeper의 별도 이미지 저장소
 masc sandbox-image --runtime nerdctl_kata
 ```
+
+Linux에서 실행 중인 서버와 같은 base path를 지정하여 Keeper를 생성합니다.
+먼저 위 Kata runtime·이미지와 서버의 모델 설정을 준비하고 admin credential로
+로그인해야 합니다. CLI가 선택한 backend를 서버에 전달하고 Keeper TOML에 저장합니다.
+
+```bash
+masc keeper-create --base-path "$HOME/masc-workspace" \
+  --agent local-admin --name linux-worker \
+  --sandbox-profile microvm --microvm-backend nerdctl_kata \
+  --network-mode none --no-autoboot --no-proactive \
+  --instructions "지정된 작업을 수행하고 실행 결과와 증거를 보고한다."
+```
+
+`--microvm-backend`는 `microvm`에만 유효합니다. 생략하면 기존 backend를
+유지하며, 새 Linux Keeper에는 host 기본값이 없으므로 명시해야 합니다.
+`--edit`와 함께 지정하면 다른 선언 flag와 동일하게 충돌로 거부합니다.
 
 `--runtime`만 바꿔도 hypervisor나 daemon을 설치하지는 않습니다.
 Docker store에 있는 이미지는 Apple Container/nerdctl store에 자동 복사되지 않습니다.

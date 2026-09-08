@@ -20,6 +20,7 @@ type flags =
   ; instructions : string
   ; sandbox_profile : string
   ; network_mode : string option
+  ; microvm_backend : string option
   ; remote_endpoint : string option
   ; mention_targets : string list
   ; skills : string list option

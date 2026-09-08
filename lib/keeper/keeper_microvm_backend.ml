@@ -43,9 +43,7 @@ type recipe_delivery =
   | In_a_context_directory
   | Builds_no_images
 
-(* nerdctl is the one taken on this codebase's own word rather than a local
-   reading: it speaks Docker's grammar, which is why the inspect parse for it
-   is Docker's too. *)
+(* nerdctl accepts a Dockerfile recipe on stdin. *)
 let recipe_delivery = function
   | Apple_container -> In_a_context_directory
   | Microsandbox -> Builds_no_images

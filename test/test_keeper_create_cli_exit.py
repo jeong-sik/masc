@@ -16,7 +16,7 @@ BINARY = str(Path(sys.argv.pop(1)).resolve())
 
 
 class KeeperCreateExitTest(unittest.TestCase):
-    def exercise(self, status, body, expected_text):
+    def exercise(self, status, body, expected_text, backend=None):
         received = []
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -47,8 +47,9 @@ class KeeperCreateExitTest(unittest.TestCase):
                 result = subprocess.run(
                     [BINARY, 'keeper-create', '--base-path', base, '--host', '127.0.0.1',
                      '--port', str(server.server_port), '--token', 'fixture-token',
-                     '--name', 'fixture', '--sandbox-profile', 'docker',
-                     '--network-mode', 'none', '--instructions', 'Read the fixture.'],
+                     '--name', 'fixture', '--sandbox-profile', 'microvm' if backend else 'docker',
+                     '--network-mode', 'none', '--instructions', 'Read the fixture.']
+                    + (['--microvm-backend', backend] if backend else []),
                     text=True, capture_output=True, timeout=15)
             self.assertEqual(result.returncode == 0, status == 200, result.stdout + result.stderr)
             self.assertIn(expected_text, result.stdout + result.stderr)
@@ -56,6 +57,7 @@ class KeeperCreateExitTest(unittest.TestCase):
             self.assertEqual(received[0][0], '/api/v1/keepers/fixture/up')
             self.assertEqual(received[0][1], 'Bearer fixture-token')
             self.assertEqual(received[0][2]['name'], 'fixture')
+            self.assertEqual(received[0][2].get('microvm_backend'), backend)
         finally:
             server.shutdown()
             server.server_close()
@@ -63,6 +65,16 @@ class KeeperCreateExitTest(unittest.TestCase):
 
     def test_success_response_exits_with_idle_connection(self):
         self.exercise(200, {'name': 'fixture'}, 'already existed')
+
+    def test_explicit_linux_backend_reaches_server(self):
+        self.exercise(200, {'name': 'fixture'}, 'already existed', backend='nerdctl_kata')
+
+    def test_backend_flag_conflicts_with_editor(self):
+        result = subprocess.run([BINARY, 'keeper-create', '--edit',
+                                 '--microvm-backend', 'nerdctl_kata'],
+                                text=True, capture_output=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('cannot be combined', result.stderr)
 
     def test_unauthorized_response_exits_with_idle_connection(self):
         self.exercise(401, {'error': 'fixture refusal'}, 'fixture refusal')

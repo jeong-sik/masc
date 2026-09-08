@@ -470,7 +470,7 @@ let stage_release_mirror base_path =
   "file://" ^ Filename.concat base_path ".release"
 ;;
 
-let run_install_status ?(extra_env = "") args base_path =
+let run_install_status ?(extra_env = "") ?(seed_config = false) args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
@@ -479,7 +479,7 @@ let run_install_status ?(extra_env = "") args base_path =
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf
-      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
+      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified %s --base-path %s %s 2>&1"
       extra_env
       (if String.equal extra_env "" then "" else " ")
       (Filename.quote release_base_url)
@@ -487,6 +487,7 @@ let run_install_status ?(extra_env = "") args base_path =
       (Filename.quote (release_tag ()))
       (Filename.quote base_path)
       (Filename.quote script)
+      (if seed_config then "" else "--no-seed")
       (Filename.quote base_path)
       quoted_args
   in
@@ -514,31 +515,30 @@ let run_install args base_path =
 ;;
 
 let test_config_seed_skips_each_existing_file_without_force () =
-  let script = install_script () in
-  assert_contains
-    "per-file seed helper exists"
-    script
-    "seed_config_if_missing()";
-  assert_contains
-    "existing config file skips without force"
-    script
-    {|if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then|};
-  assert_contains
-    "runtime uses per-file seed"
-    script
-    {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
-  assert_contains
-    "model catalog overlay has config-root destination"
-    script
-    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"|};
-  assert_contains
-    "model catalog overlay uses config release seed"
-    script
-    {|seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
-  assert_not_contains
-    "legacy full model catalog is not seeded"
-    script
-    {|seed_raw_if_missing "agent-core-models.toml"|};
+  let base_path = Filename.temp_dir "masc-install-skills-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let config = Filename.concat base_path ".masc/config" in
+    let init = String.concat " "
+        (List.map Filename.quote [ real_masc_binary (); "init"; "--base-path"; base_path ]) in
+    check int "existing config prepared" 0 (Sys.command (init ^ " >/dev/null"));
+    Fs_compat.remove_tree (Filename.concat base_path ".masc/skills");
+    let runtime = Filename.concat config "runtime.toml" in
+    let edited = read_file runtime ^ "\n# operator config survives\n" in
+    write_file runtime edited;
+    let omitted = Filename.concat config "prompts/keeper.md" in
+    Sys.remove omitted;
+    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
+    check bool output true (status = Unix.WEXITED 0);
+    let body = Filename.concat base_path ".masc/skills/browser-lanes/SKILL.md" in
+    check bool "upgrade installs builtin Skill" true (Sys.file_exists body);
+    check bool "upgrade installs reference" true
+      (Sys.file_exists (Filename.concat (Filename.dirname body) "references/advanced.md"));
+    check string "runtime bytes preserved" edited (read_file runtime);
+    check bool "omitted prompt stays absent" false (Sys.file_exists omitted);
+    write_file body "operator's browser skill";
+    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
+    check bool output true (status = Unix.WEXITED 0);
+    check string "reinstall preserves Skill edit" "operator's browser skill" (read_file body))
 ;;
 
 (* What follows [instructions =] in a keeper TOML, with the TOML string

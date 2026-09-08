@@ -346,8 +346,10 @@ let bootstrap_base_path_config_root ~base_path =
             "bootstrapped minimal base-path config root without versioned source \
              and no embedded assets: %s"
             config_root);
-    if mode = `Auto then
-      ignore (seed_missing_builtin_skills ~base_path : int);
+    if mode = `Auto then (
+      let installed = seed_missing_builtin_skills ~base_path in
+      if installed > 0 then
+        Log.Server.info "installed %d builtin Skill package(s)" installed);
     Config_dir_resolver.reset ())
 ;;
 

@@ -8,13 +8,14 @@ module Reading = Masc.Tui_decode
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
    the configured names whole that the roster's window keeps whole. The
    reading's budget holds the event clock and its count authority:
-   [~ network_read · 3 seen · evt 12.4s] and
-   [■ 5 total · 38.2k tok · evt 41.0s] fit without widening the pane. *)
+   [~ network_read · 3 seen · evt 12.4s] and, with both token parts, a
+   two-digit settled row [■ 12 total · 3.4M+12k tok · evt 24.8s] at 37
+   cells. *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
 let gap_cells = 1
-let reading_cells = 36
+let reading_cells = 38
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
 (* What the roster pane leaves a surface is the least a surface lays out
@@ -123,6 +124,7 @@ type row_target =
   | Target_keeper of string
   | Target_more
   | Target_file of int
+  | Target_calls of string
 
 type rendering = {
   rows : line list;
@@ -160,7 +162,15 @@ let compact_count n =
     Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
   else string_of_int n
 
+(* Input and output as two parts. The input part is what a turn re-sends on
+   every call, so it is what makes a twelve-call turn read in the millions;
+   a reader who sees [3.4M+12k] can tell that from a long answer. *)
 let tokens_text = function
+  | None, None -> ""
+  | Some i, Some o -> compact_count i ^ "+" ^ compact_count o ^ " tok"
+  | Some n, None | None, Some n -> compact_count n ^ " tok"
+
+let tokens_sum_text = function
   | None, None -> ""
   | Some i, Some o -> compact_count (i + o) ^ " tok"
   | Some n, None | None, Some n -> compact_count n ^ " tok"
@@ -190,7 +200,10 @@ let chunk_calls_text (chunk : Acting.chunk) =
     match chunk.Acting.ck_calls with
     | Some count -> Printf.sprintf "%d total" count
     | None -> "total ?"
-  else Printf.sprintf "%d seen" (List.length (Acting.chunk_tools chunk))
+  else
+    match List.length (Acting.chunk_tools chunk) with
+    | 0 -> "none seen"
+    | seen -> Printf.sprintf "%d seen" seen
 
 type record_state = Record_open | Record_unfinished | Record_settled
 
@@ -218,14 +231,20 @@ let record_state ~health (chunk : Acting.chunk) =
     | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_stale
            | Reading.Health_degraded) | None -> Record_open
 
-let record_label = function
-  | Record_open -> ("open/gap", Dim)
-  | Record_unfinished -> ("unfinished", Warn)
+(* The focus header has the room the fleet row lacks, so it says what the
+   state word means: an unsettled record is a turn no settle has closed, and
+   [unfinished] adds that the process is gone, so none will. The fleet row
+   keeps the bare word in [keeper_state_text]. *)
+let record_explanation = function
+  | Record_open -> ("open/gap: no settle yet", Dim)
+  | Record_unfinished -> ("unfinished: process gone", Warn)
   | Record_settled -> ("settled", Dim)
 
 let unfinished_glyph = "!"
 
-let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
+let keeper_state_text ?(compact = false) ~now ~health ~approval
+    (chunk : Acting.chunk option) =
+  let tokens = if compact then tokens_sum_text else tokens_text in
   match approval, chunk with
   | Some tool, _ ->
       [ { text = attention_glyph ^ " "; tone = Warn }
@@ -241,7 +260,7 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
         | Record_unfinished ->
           (unfinished_glyph, join [ "unfinished"; chunk_calls_text chunk ], Warn)
         | Record_settled ->
-          (settled_glyph, join [ chunk_calls_text chunk; tokens_text chunk.Acting.ck_tokens ], Dim)
+          (settled_glyph, join [ chunk_calls_text chunk; tokens chunk.Acting.ck_tokens ], Dim)
       in
       [ { text = glyph ^ " "; tone }
       ; { text = detail; tone = (if state = Record_unfinished then Warn else Plain) }
@@ -250,6 +269,17 @@ let keeper_state_text ~now ~health ~approval (chunk : Acting.chunk option) =
   | None, None -> [ { text = quiet_glyph ^ " no events"; tone = Dim } ]
 
 (* ── Lines ─────────────────────────────────────────────────────────────── *)
+
+let spans_width spans =
+  List.fold_left (fun acc span -> acc + Layout.display_width span.text) 0 spans
+
+(* The first candidate that fits, else the last: a row states less before
+   it clips a figure mid-number. *)
+let rec first_fitting ~room = function
+  | [] -> []
+  | [ last ] -> last
+  | candidate :: rest ->
+      if spans_width candidate <= room then candidate else first_fitting ~room rest
 
 (* Exactly [cols] cells: cut the spans that overflow, pad what falls short.
    Retained spans keep their measured cells; only a clipped span is remeasured. *)
@@ -346,6 +376,10 @@ let fleet_row ~cols input keeper chunk =
     | Some name -> String.equal name keeper.name
     | None -> false
   in
+  let reading ~compact =
+    keeper_state_text ~compact ~now:input.now ~health:keeper.health ~approval chunk
+  in
+  let room = cols - border_cells - mark_cells - name_cells - gap_cells in
   ( fit_line ~cols
       (with_border
          ([ { text = Layout.fit_width keeper.mark mark_cells; tone = keeper.mark_tone }
@@ -354,7 +388,7 @@ let fleet_row ~cols input keeper chunk =
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
           ]
-          @ keeper_state_text ~now:input.now ~health:keeper.health ~approval chunk))
+          @ first_fitting ~room [ reading ~compact:false; reading ~compact:true ]))
   , Target_keeper keeper.name )
 
 let more_line ~cols n =
@@ -439,26 +473,34 @@ let turn_summary_line ~cols ~now ~health (chunk : Acting.chunk) =
     | Record_open -> { text = open_record_glyph ^ " open/gap"; tone = Dim }
     | Record_unfinished -> { text = unfinished_glyph ^ " unfinished"; tone = Warn }
   in
+  let line ~tokens ~cost ~age =
+    with_border
+      ( [ prefix ]
+      @ named
+      @ [ { text = middle_dot ^ join [ chunk_calls_text chunk; tokens; cost ]; tone = Dim } ]
+      @
+      if age then [ { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim } ]
+      else [] )
+  in
+  let parts = tokens_text chunk.Acting.ck_tokens
+  and sum = tokens_sum_text chunk.Acting.ck_tokens
+  and cost = cost_text chunk.Acting.ck_cost_usd in
+  (* What an earlier turn gives up first is the age of its settle's receipt:
+     the header carries the record that is current, and the turns below it
+     are ordered newest first. The cost goes next and the token parts last,
+     since the parts are what the row is read for. *)
   fit_line ~cols
-    (with_border
-       ( [ prefix ]
-       @ named
-       @ [ { text =
-               middle_dot
-               ^ join
-                   [ chunk_calls_text chunk
-                   ; tokens_text chunk.Acting.ck_tokens
-                   ; cost_text chunk.Acting.ck_cost_usd
-                   ]
-           ; tone = Dim
-           }
-         ; { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim }
-         ] ))
+    (first_fitting ~room:cols
+       [ line ~tokens:parts ~cost ~age:true
+       ; line ~tokens:parts ~cost ~age:false
+       ; line ~tokens:parts ~cost:"" ~age:false
+       ; line ~tokens:sum ~cost:"" ~age:false
+       ])
 
 let focus_header_line ~cols ~now ~health name current =
   match current with
   | Some (current : Acting.chunk) ->
-      let state_word, state_tone = record_label (record_state ~health current) in
+      let state_word, state_tone = record_explanation (record_state ~health current) in
       let named =
         match turn_name current with
         | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
@@ -721,9 +763,10 @@ let materialize_row ~cols input = function
   | Focus_header (name, current, health) ->
       focus_header_line ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
-  | Tool_row (chunk, tool, state) -> tool_line ~cols ~state chunk tool, Target_none
+  | Tool_row (chunk, tool, state) ->
+      tool_line ~cols ~state chunk tool, Target_calls chunk.Acting.ck_keeper
   | Earlier_turn (chunk, health) ->
-      turn_summary_line ~cols ~now:input.now ~health chunk, Target_none
+      turn_summary_line ~cols ~now:input.now ~health chunk, Target_calls chunk.Acting.ck_keeper
   | Rule -> rule_line ~cols, Target_none
   | More n -> more_line ~cols n
   | Indicator (direction, n) ->
@@ -732,19 +775,24 @@ let materialize_row ~cols input = function
   | File_row (index, file) -> file_line ~cols ~now:input.now index file
   | Formatted_status (line, target) -> line, target
 
+(* Two clocks share the screen and the legend says which is which: the
+   pane's ages count from when this pane received the keeper's newest event,
+   the roster's LAST column from the server's last turn. The second row
+   names the two call counts and what the token figure adds up. Each fits
+   the 57 text cells the pane has beside its border. *)
+let clock_legend = "evt=age of newest event here · roster LAST=last turn"
+let count_legend = "seen=feed saw · total=settle said · tok=in+out per turn"
+
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
   if rows = 0 then { rows = []; targets = []; scroll_max = 0 }
   else
     let header = (header_line ~cols input, Target_next_tab) in
+    let legend text = (fit_line ~cols (with_border [ { text; tone = Dim } ]), Target_none) in
     let headers =
       match input.tab with
-      | Tab_fleet when rows >= 2 ->
-        [ header
-        ; (fit_line ~cols
-             (with_border [ { text = "evt=since receipt · seen/total=tool calls"; tone = Dim } ]),
-           Target_none)
-        ]
+      | Tab_fleet when rows >= 3 -> [ header; legend clock_legend; legend count_legend ]
+      | Tab_fleet when rows = 2 -> [ header; legend clock_legend ]
       | Tab_fleet | Tab_changes -> [ header ]
     in
     let below = rows - List.length headers in

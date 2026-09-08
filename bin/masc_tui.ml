@@ -7216,6 +7216,23 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
           | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
               ()))
+  | Masc_tui_acting_pane.Target_calls keeper_name -> (
+      (* A call row is the keeper's calls surface by another hand, the way
+         [t] opens it from the roster: the cursor lands on that keeper so the
+         surface names the right one, and the snapshot is asked for afresh. *)
+      match
+        List.find_index
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers
+      with
+      | None -> ()
+      | Some index ->
+          state.keeper_cursor <- index;
+          state.keeper_calls <- None;
+          state.keeper_calls_error <- None;
+          state.keeper_calls_scroll <- 0;
+          launch_keeper_calls_load state ~mailbox keeper_name;
+          state.view <- Keepers Keeper_calls)
   | Masc_tui_acting_pane.Target_keeper keeper_name -> (
       match
         List.find_index

@@ -147,6 +147,9 @@ type row_target =
           scrolls into the full list *)
   | Target_file of int
       (** a changes row: the index of the file in [Changes_ready.files] *)
+  | Target_calls of string
+      (** a call row or an earlier-turn row in the focus block: the keeper
+          whose calls it draws; a press opens that keeper's calls surface *)
 
 type rendering = {
   rows : line list;
@@ -161,8 +164,14 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     are joined: a line that would overflow is cut at the right edge, a short
     one is padded, and rows the content does not need are blank. The header
     row carries the two tabs and the feed's transport state on both tabs.
-    The Recent tab reserves a second header row for the event-age and count
-    legend. Changes keeps its single header row.
+    The Recent tab reserves two legend rows under the header (one when only
+    two rows exist): {!clock_legend} says which clock the pane's ages follow
+    and which the roster's LAST column follows, {!count_legend} what [seen],
+    [total] and [tok] count. Changes keeps its single header row.
+
+    A row states less before it clips a figure: a fleet row that cannot fit
+    both token parts shows their sum, and an earlier-turn row gives up its
+    receipt age, then its cost, then the token parts, in that order.
 
     Recent tab, two layouts. At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
@@ -178,20 +187,32 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     file, windowed the same way. *)
 
 val keeper_state_text :
+  ?compact:bool ->
   now:float ->
   health:Masc.Tui_decode.keeper_health_reading option ->
   approval:string option ->
   Masc_tui_acting.chunk option ->
   span list
 (** The fleet row's recent observation: approval first, then the newest
-    record's tool and observed count ([seen]) or settled count ([total]).
-    Unknown settled totals stay unknown. [evt] is elapsed since the newest
-    locally received event, not turn duration. Unclosed records are [open/gap]
-    or [unfinished] when the process is gone; neither asserts current work. *)
+    record's tool and observed count ([seen], or [none seen]) or settled
+    count ([total]). Unknown settled totals stay unknown. [evt] is elapsed
+    since the newest locally received event, not turn duration. Unclosed
+    records are [open/gap] or [unfinished] when the process is gone; neither
+    asserts current work. [compact] draws the token sum instead of its
+    parts. *)
 
 val tokens_text : int option * int option -> string
-(** Input and output tokens as one compact figure ([38.2k tok], [412 tok]);
-    empty when neither is known. *)
+(** Input and output tokens as two parts when both are known
+    ([73.9k+358 tok]), one figure when one is ([412 tok]); empty when
+    neither is. *)
+
+val tokens_sum_text : int option * int option -> string
+(** The same tokens summed ([74.2k tok]), for a row that cannot afford the
+    parts. *)
+
+val clock_legend : string
+val count_legend : string
+(** The two legend rows, as drawn. *)
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)

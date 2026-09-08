@@ -810,7 +810,10 @@ let test_exit_reason_classifies_the_timeout_status () =
    watcher that returns as soon as the child says it is running. *)
 let with_process_runtime f =
   Eio_main.run @@ fun env ->
-  let proc_mgr = Eio.Stdenv.process_mgr env in
+  (* Match server_runtime_bootstrap's manager. eio_linux v1.3 immediately
+     KILLs from its cancelled reap daemon, before this finalizer can grant
+     grace; that foreign owner's policy is not the installed runtime's. *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
   Process_eio.init ~cwd_default ~proc_mgr ~clock;

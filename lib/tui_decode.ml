@@ -76,14 +76,15 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
+type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
+
 type keeper_runtime = {
   kr_name : string;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
-  kr_autoboot_enabled : bool;
-  kr_proactive_enabled : bool;
+  kr_activation_mode : keeper_activation_mode;
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   (* Declared, not observed. It answers "which sandbox is this keeper set
@@ -5278,8 +5279,13 @@ let decode_keeper_runtime json =
     | bad -> field_type_error "next_action" "a string or null" bad
   in
   let* kr_keepalive_running = required_bool_field json "keepalive_running" in
-  let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
-  let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
+  let* raw_activation_mode = required_string_field json "activation_mode" in
+  let* kr_activation_mode = match raw_activation_mode with
+    | "manual" -> Ok Activation_manual
+    | "on_demand" -> Ok Activation_on_demand
+    | "autonomous" -> Ok Activation_autonomous
+    | value -> Error ("unknown keeper activation mode: " ^ value)
+  in
   let* kr_runtime_id = required_string_field json "runtime_id" in
   (* Under [meta] because the row already carries the keeper's own
      declaration there; a second top-level copy would be a second place to
@@ -5301,8 +5307,7 @@ let decode_keeper_runtime json =
     ; kr_paused
     ; kr_next_action
     ; kr_keepalive_running
-    ; kr_autoboot_enabled
-    ; kr_proactive_enabled
+    ; kr_activation_mode
     ; kr_runtime_id
     ; kr_phase
     ; kr_sandbox_profile

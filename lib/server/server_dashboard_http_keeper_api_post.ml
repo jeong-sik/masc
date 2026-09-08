@@ -580,8 +580,7 @@ let dashboard_config_string_fields =
 
 let dashboard_config_bool_fields =
   [
-    "autoboot_enabled";
-    "proactive_enabled";
+    "activation_mode";
   ]
 
 let dashboard_config_string_list_fields =

@@ -20,7 +20,6 @@ let contains needle haystack =
   scan 0
 ;;
 
-let no_booleans : C.booleans = { autoboot = None; proactive = None }
 
 let minimal_flags : C.flags =
   { name = "scout"
@@ -32,7 +31,7 @@ let minimal_flags : C.flags =
   ; mention_targets = []
   ; skills = None
   ; max_context_override = None
-  ; booleans = no_booleans
+  ; activation_mode = None
   }
 ;;
 
@@ -46,7 +45,7 @@ let every_flag : C.flags =
   ; mention_targets = [ "scout" ]
   ; skills = Some [ "web-search" ]
   ; max_context_override = Some 120_000
-  ; booleans = { autoboot = Some true; proactive = Some false }
+  ; activation_mode = Some "on_demand"
   }
 ;;
 
@@ -173,10 +172,8 @@ let test_every_creation_stem_field_is_reachable_by_flag () =
     stem_keys
 ;;
 
-(* A two-valued flag would settle [autoboot_enabled] by default, and the
-   config writer persists whatever the meta holds — so an operator who named
-   neither spelling would find a decision written for them. *)
-let test_declaration_omits_unset_booleans () =
+(* An omitted mode leaves the declaration unchanged. *)
+let test_declaration_omits_unset_activation_mode () =
   let keys = object_keys "minimal" (declaration_exn "minimal" minimal_flags) in
   List.iter
     (fun key ->
@@ -185,7 +182,7 @@ let test_declaration_omits_unset_booleans () =
          (Printf.sprintf "%s is absent when neither flag was passed" key)
          false
          (List.exists (String.equal key) keys))
-    [ "autoboot_enabled"; "proactive_enabled" ]
+    [ "activation_mode" ]
 ;;
 
 (* A second copy of the profile enum in this command is how the descriptor and
@@ -219,7 +216,7 @@ let created_body =
               ~name:"scout"
               ~trace_id:"trace-fixture"
               ~instructions:"Search the web."
-              ~proactive_enabled:false
+              ~activation_mode:Keeper_activation_mode.On_demand
               ~max_context_override:None
               ~sandbox_profile:Keeper_types_profile_sandbox.Docker
               ~network_mode:Keeper_types_profile_sandbox.Network_inherit
@@ -379,9 +376,9 @@ let () =
             `Quick
             test_every_creation_stem_field_is_reachable_by_flag
         ; test_case
-            "unset booleans stay out of the declaration"
+            "unset activation mode stays out of the declaration"
             `Quick
-            test_declaration_omits_unset_booleans
+            test_declaration_omits_unset_activation_mode
         ; test_case
             "an unrecognised sandbox profile passes through"
             `Quick

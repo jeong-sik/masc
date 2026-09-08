@@ -124,9 +124,26 @@ class ModelFixture:
                 except (SmokeError, ValueError, KeyError) as error:
                     fixture.error = str(error)
                     response, status = {'error': {'message': str(error)}}, 500
-                data = json.dumps(response).encode()
+                content_type = 'application/json'
+                if status == 200 and request.get('stream'):
+                    choice = response['choices'][0]
+                    delta = choice['message'].copy()
+                    if 'tool_calls' in delta:
+                        delta['tool_calls'] = [dict(call, index=index)
+                                               for index, call in enumerate(delta['tool_calls'])]
+                    chunks = [dict(id=response['id'], object='chat.completion.chunk',
+                                   model=response['model'], choices=[dict(index=0, delta=delta,
+                                                                         finish_reason=None)]),
+                              dict(id=response['id'], object='chat.completion.chunk',
+                                   model=response['model'], choices=[dict(index=0, delta={},
+                                       finish_reason=choice['finish_reason'])], usage=response['usage'])]
+                    data = (''.join('data: ' + json.dumps(chunk) + '\n\n' for chunk in chunks)
+                            + 'data: [DONE]\n\n').encode()
+                    content_type = 'text/event-stream'
+                else:
+                    data = json.dumps(response).encode()
                 self.send_response(status)
-                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -153,6 +170,23 @@ def request(url, token=None, body=None, timeout=30):
     data = None if body is None else json.dumps(body).encode()
     with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers), timeout=timeout) as response:
         return response.read()
+
+
+def chat_request(url, token, body, output):
+    # SSE heartbeats reset a socket read timeout indefinitely. Bound the
+    # acceptance process itself and preserve partial events on failure.
+    with output.open('wb') as stream:
+        try:
+            result = subprocess.run(
+                ['curl', '--silent', '--show-error', '--fail-with-body', '--no-buffer',
+                 '--config', '-', '--data-binary', json.dumps(body), url],
+                input=('header = "Content-Type: application/json"\n'
+                       'header = "Authorization: Bearer ' + token + '"\n').encode(),
+                stdout=stream, stderr=subprocess.PIPE, timeout=180)
+        except subprocess.TimeoutExpired as error:
+            raise SmokeError('first-turn stream exceeded 180s; partial events saved') from error
+    if result.returncode:
+        raise SmokeError('first-turn stream failed: ' + result.stderr.decode())
 
 
 def wait_until(description, action, server, timeout=60):
@@ -210,7 +244,9 @@ def run(args):
         if not docker_host:
             contexts = json.loads(command(['docker', 'context', 'inspect'], docker_env))
             docker_host = contexts[0]['Endpoints']['docker']['Host']
-        with tempfile.TemporaryDirectory(prefix='masc-first-turn-') as directory:
+        # Desktop/Colima share the user's home by default, while macOS's
+        # /private/var temporary tree need not be visible to the Docker VM.
+        with tempfile.TemporaryDirectory(prefix='masc-first-turn-', dir=Path.home()) as directory:
             base = Path(directory).resolve()
             home = base / 'home'
             home.mkdir()
@@ -232,6 +268,14 @@ def run(args):
                     raise SmokeError('release runtime fixture endpoint contract changed')
                 content = content.replace('http://127.0.0.1:9/v1', endpoint)
                 content = content.replace('streaming = true', 'streaming = false')
+                if name == 'agent-core-models-overlay.toml':
+                    # The boot-only fixture supplies exact-output lanes but
+                    # leaves the fleet provider's embedded credentials intact.
+                    # Bind that provider to this fixture too before any turn.
+                    content += ('\n[[providers]]\nid = "ollama_cloud"\n'
+                                'kind = "openai_compat"\nbase_url = ' + json.dumps(endpoint)
+                                + '\nrequest_path = "/chat/completions"\napi_key_env = ""\n'
+                                'capabilities_base = "openai_chat"\n')
                 (config / name).write_text(content)
             keepers = config / 'keepers'
             keepers.mkdir(exist_ok=True)
@@ -251,7 +295,8 @@ def run(args):
                 try:
                     def health():
                         try:
-                            return json.loads(request(url + '/health?full=1', timeout=2))
+                            snapshot = json.loads(request(url + '/health?full=1', timeout=2))
+                            return snapshot if snapshot.get('startup', {}).get('state_ready') is True else None
                         except (urllib.error.URLError, TimeoutError):
                             return None
                     healthy = wait_until('isolated server health', health, server)
@@ -280,14 +325,20 @@ def run(args):
                             (output / 'direct-up-diagnostic.txt').write_text(detail)
                         raise error
                     (output / 'keeper-create.txt').write_text(creation)
-                    mode = json.loads(request(url + '/api/v1/keepers/tool-approval-mode', token,
-                                              {'name': keeper, 'mode': 'yolo'}))
-                    if mode.get('keeper') != keeper or mode.get('mode') != 'yolo':
+                    # Only this disposable workspace is affected. The proof
+                    # tests execution wiring, not the approval judge model.
+                    mode = json.loads(request(url + '/api/v1/dashboard/gate/mode', token,
+                                              {'mode': 'always_allow'}))
+                    (output / 'approval-mode.json').write_text(json.dumps(mode, indent=2))
+                    if mode.get('ok') is not True or mode.get('mode') != 'always_allow':
                         raise SmokeError('approval mode was not applied')
-                    body = request(url + '/api/v1/keepers/chat/stream', token,
+                    tool_mode = json.loads(request(url + '/api/v1/keepers/tool-approval-mode', token,
+                                                   {'name': keeper, 'mode': 'yolo'}))
+                    if tool_mode.get('keeper') != keeper or tool_mode.get('mode') != 'yolo':
+                        raise SmokeError('tool approval mode was not applied')
+                    chat_request(url + '/api/v1/keepers/chat/stream', token,
                         {'name': keeper, 'message': 'Run the isolated Docker proof once, then report completion.',
-                         'request_id': 'kmsg-' + marker}, timeout=180)
-                    (output / 'chat-stream.txt').write_bytes(body)
+                         'request_id': 'kmsg-' + marker}, output / 'chat-stream.txt')
                     if fixture.error:
                         raise SmokeError(fixture.error)
                     if fixture.proof is None or len(fixture.requests) != (3 if fixture.search_requested else 2):

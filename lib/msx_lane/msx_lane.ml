@@ -10,6 +10,7 @@ type observation = {
   pc : int;
   halted : bool;
   screen_text : string;
+  screen_view : string;
   tiles : string list;
   sprites : sprite list;
   cartridge : string option;
@@ -150,6 +151,47 @@ let sprites_of m (mode : Msx.display_mode) =
     go 0 []
 ;;
 
+(* A coarse text picture of the frame, so a keeper with no vision runtime can
+   still recognise the screen (a title, a menu, a map) in any mode. Each cell is
+   the average luminance of the pixels under it, mapped to a ramp. Not a
+   replacement for [screen_text] -- that reads a text-mode name table and is
+   exact when the pattern set is a font; [screen_view] works in every mode,
+   including the bitmap modes where the name table is not characters. *)
+let screen_view_cols = 64
+let screen_view_rows = 24
+let screen_view_ramp = " .:-=+*#%@"
+
+let ascii_view rgb ~w ~h =
+  if w <= 0 || h <= 0 || String.length rgb < w * h * 3 then ""
+  else begin
+    let ramp = screen_view_ramp in
+    let levels = String.length ramp in
+    let cols = screen_view_cols and rows = screen_view_rows in
+    let buf = Buffer.create (rows * (cols + 1)) in
+    for ry = 0 to rows - 1 do
+      let y0 = ry * h / rows and y1 = (ry + 1) * h / rows in
+      for cx = 0 to cols - 1 do
+        let x0 = cx * w / cols and x1 = (cx + 1) * w / cols in
+        let sum = ref 0 and n = ref 0 in
+        for y = y0 to max y0 (y1 - 1) do
+          for x = x0 to max x0 (x1 - 1) do
+            let i = ((y * w) + x) * 3 in
+            let r = Char.code rgb.[i]
+            and g = Char.code rgb.[i + 1]
+            and b = Char.code rgb.[i + 2] in
+            sum := !sum + (((r * 30) + (g * 59) + (b * 11)) / 100);
+            incr n
+          done
+        done;
+        let lum = if !n = 0 then 0 else !sum / !n in
+        Buffer.add_char buf ramp.[lum * (levels - 1) / 255]
+      done;
+      Buffer.add_char buf '\n'
+    done;
+    Buffer.contents buf
+  end
+;;
+
 let observe st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
@@ -161,6 +203,9 @@ let observe st =
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
   ; disk = st.disk
+  ; screen_view =
+      (let w, h = Msx.frame_dims st.m in
+       ascii_view (Msx.frame_rgb st.m) ~w ~h)
   }
 ;;
 

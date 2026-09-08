@@ -236,8 +236,11 @@ Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 insp
 공간은 호스트 filesystem을 따릅니다. 이 차이는 부팅 로그에 표시합니다.
 Apple에서 측정한 host descriptor 특성이 Linux에서도 같다고 보장하지 않습니다.
 `network_mode=none` 또는 `inherit`를 사용하며 Linux의 `policy`는 지원하지 않습니다.
-실제 Kata 환경 검증에는 `scripts/smoke-nerdctl-kata-volume.sh`를 사용합니다.
-이 검증 전에는 Linux microVM 지원 완료로 판단하지 않습니다.
+`scripts/smoke-nerdctl-kata-volume.sh`는 Kata의 볼륨·격리를 검사합니다.
+설치된 Keeper까지 검증하려면 `Kata volume smoke` workflow의 `release_run`에
+Linux x64 작업이 성공한 Release 실행 번호를 지정합니다. 이 경로는 해당 바이너리와
+shim을 설치하고 이미지 생성·Keeper 도구 실행·정본 checkpoint·게스트 재생성 후
+파일 보존을 확인합니다. 단순 볼륨 검사 통과만으로 설치된 Keeper 실행을 보장하지 않습니다.
 [Apple Container](https://github.com/apple/container#requirements)는 Apple Silicon과
 macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-containers/blob/main/docs/installation.md)는
 호스트 가상화 조건을 확인해야 합니다. Microsandbox의 현재 MASC 연결은 필수 격리

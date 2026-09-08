@@ -1,0 +1,19 @@
+{
+  "result": "passed",
+  "clientId": "74b54fd3-5882-4aba-afb7-3c6ddaeb9f4e",
+  "script_sha256": "4791c4ca0dcedb377f5800481e75a33df055468cdb8a7dcece1c37b4599d2484",
+  "tui_sha256": "3b451b608baab7162ec58312f64ee38cda9616683d89a967b0cf60c1d5a0087a",
+  "transport": "real production live Zen selected fixture screenshot through TUI",
+  "terminal": "PTY with Kitty capability response and 140x42 cells",
+  "tty_override_applied": false,
+  "text_verified": [
+    "Zen terminal canvas"
+  ],
+  "image": {
+    "path": "zen-through-tui.png",
+    "bytes": 397248,
+    "sha256": "cd7e52720ff60e824a5f5566019bdf85643f7f47808cf2d00410ef95030953c2"
+  },
+  "normal_exit_code": 0,
+  "termios_restoration_measured_here": false
+}

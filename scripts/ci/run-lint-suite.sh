@@ -363,6 +363,13 @@ blocking_pr_lints() {
   # concept walking back in unnoticed, but it is the first place to look if
   # the lint job gets slow.
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
+  # Promoted out of the advisory lane. It already ran there with --strict, and
+  # --strict is the mode that fails, so the only thing "advisory" bought was
+  # that nobody had to look: the count sits exactly at its baseline of 15, and
+  # a 16th knob would have been reported and merged. Adding a get_int to the
+  # Dashboard module reports it.
+  run_lint "Dashboard env knob count" \
+    bash scripts/lint-timeout-env-count.sh --strict
   # A per-pattern ratchet over dashboard/src for Tailwind spellings whose
   # replacement already exists. It was reporting one unit of slack --
   # text-px-literal measured 50 against a baseline of 51 -- which is one free
@@ -381,7 +388,16 @@ blocking_pr_lints() {
 }
 
 advisory_lints() {
-  run_lint "Dashboard env knob count (advisory)" bash scripts/lint-timeout-env-count.sh --strict
+  # The two that stay here, with the number that keeps them here. Both have an
+  # enforcing mode and both are red in it, so "advisory" is not a policy choice
+  # about their subject -- it is where they sit until the count comes down.
+  #
+  #   lint-magic-number --strict     80 (file, literal) pairs at >= 5 repeats
+  #   exhaustive-guard BLOCKING=1    826 fragile matches; the script's own
+  #                                  header says Phase 5 flips this "once the
+  #                                  codemod has closed the bulk of inventory
+  #                                  and allowlist is narrowed", and 826 is not
+  #                                  that
   run_lint "Magic number repetition (advisory)" bash scripts/lint-magic-number.sh
   run_lint "Fragile-match (advisory, RFC-0071 Phase 1)" bash scripts/lint/exhaustive-guard.sh
 }

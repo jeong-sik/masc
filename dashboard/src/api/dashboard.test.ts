@@ -3574,6 +3574,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
           config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
@@ -3616,6 +3617,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3653,6 +3655,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3688,6 +3691,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: null },
@@ -3732,6 +3736,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },

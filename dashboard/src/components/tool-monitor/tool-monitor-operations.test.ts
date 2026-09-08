@@ -78,7 +78,7 @@ vi.mock('../fleet-health-panel', () => ({
   }),
   keepersNotRunning: (fleet: any) => {
     const executable = new Set(fleet?.executable_keeper_names ?? [])
-    return (fleet?.activation_mode_keeper_names ?? [])
+    return (fleet?.autoboot_enabled_keeper_names ?? [])
       .filter((name: string) => !executable.has(name))
       .sort()
   },

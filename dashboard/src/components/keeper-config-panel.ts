@@ -353,6 +353,14 @@ export function keeperConfigActivationProjection(c: KeeperConfig): KeeperConfigA
     : { kind: 'drift', configured, live: observed, defaultSource: 'toml', defaultManifestPath: evidence.default_manifest_path }
 }
 
+function activationConfigHint(c: KeeperConfig): string {
+  const projection = keeperConfigActivationProjection(c)
+  if (projection.kind === 'drift') {
+    return `TOML ${projection.configured} / live meta ${projection.live}`
+  }
+  return '수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행'
+}
+
 function activationConfigValue(c: KeeperConfig): KeeperActivationMode {
   const projection = keeperConfigActivationProjection(c)
   return projection.kind === 'configured' || projection.kind === 'drift' ? projection.configured : projection.live
@@ -2272,7 +2280,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
     <${SectionHeader} title="실행 방식" />
     ${rd && runtimeCanEdit ? html`
-      <${SetRow} label="실행 방식" hint="수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행" dirty=${dirtyFlags.activation_mode}>
+      <${SetRow} label="실행 방식" hint=${activationConfigHint(c)} dirty=${dirtyFlags.activation_mode}>
         <select aria-label="실행 방식" value=${rd.activation_mode}
           onChange=${(event: Event) => updateRuntimeDraft('activation_mode', requireKeeperActivationMode((event.currentTarget as HTMLSelectElement).value))}>
           ${KEEPER_ACTIVATION_MODES.map(mode => html`<option value=${mode}>${KEEPER_ACTIVATION_LABELS[mode]}</option>`)}

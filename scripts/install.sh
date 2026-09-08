@@ -10,7 +10,8 @@
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
-#   --base-path DIR    .masc seed target (default: $PWD)
+#   --base-path DIR    Workspace containing .masc (asked in a terminal;
+#                      noninteractive default: $PWD)
 #   --no-seed          Skip writing default config files
 #   --force            Refresh existing binaries; preserve workspace config
 #   --reset-config     Overwrite seeded config and selected team preset files
@@ -799,6 +800,20 @@ maybe_run_wizard() {
 # Prompts use stderr; stdout is captured by $(prompt_provider).
 is_tty() { [ -t 0 ] && [ -t 2 ]; }
 
+choose_install_base_path() {
+  [ -z "$BASE_PATH" ] || return 0
+  local suggested="$PWD" answer
+  if [ "$WIZARD" != "0" ] && is_tty; then
+    [ -d "$PWD/.masc/config" ] || suggested="$HOME"
+    printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
+    printf '? Workspace directory [%s]: ' "$suggested" >&2
+    IFS= read -r answer || die "workspace selection cancelled"
+    BASE_PATH="${answer:-$suggested}"
+  else
+    BASE_PATH="$suggested"
+  fi
+}
+
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
 [ -t 1 ] || { c_red=""; c_yel=""; c_grn=""; c_dim=""; c_off=""; }
@@ -861,7 +876,7 @@ if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
   die "--sandbox requires --team; existing keepers use their own sandbox_profile"
 fi
 
-[ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
+choose_install_base_path
 
 # --- macOS dependency bootstrap ---
 installer_python_ready() {
@@ -992,6 +1007,9 @@ if [ "$DRY_RUN" -eq 1 ] && ! macos_formula_ready "" python; then
 fi
 require python3
 PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$PREFIX")"
+BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
+log "workspace: $BASE_PATH"
+log "configuration and data: $BASE_PATH/.masc"
 
 # --- checksum helpers ---------------------------------------------------------
 has_sha256sum() { command -v sha256sum >/dev/null 2>&1; }

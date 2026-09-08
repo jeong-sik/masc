@@ -46,6 +46,8 @@ type t =
   | Preset_save_missing_name
   | Preset_restore of string
   | Preset_restore_missing_name
+  | Preset_show of string
+  | Preset_show_missing_name
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
@@ -139,8 +141,10 @@ let catalog =
     ; summary = "stage an image reference; the provider fetches it"
     }
   ; { word = "preset"
-    ; args = "[save <name> [description] | restore <name>]"
-    ; summary = "list prompt presets; save the live state; restore one (autosaves first)"
+    ; args = "[show <name> | save <name> [description] | restore <name>]"
+    ; summary =
+        "list prompt presets; show what one holds; save the live state; restore one \
+         (autosaves first)"
     }
   ; { word = "help"; args = ""; summary = "this list" }
   ; { word = "about"
@@ -292,6 +296,8 @@ let parse text =
             Preset_save { name; description }
         | "restore", "" -> Preset_restore_missing_name
         | "restore", name -> Preset_restore name
+        | "show", "" -> Preset_show_missing_name
+        | "show", name -> Preset_show name
         | verb, _ -> Unknown ("preset " ^ verb))
     | word, _ -> Unknown word
 
@@ -512,7 +518,9 @@ let known_sub_arguments ~keeper_names word =
   match word with
   | "thinking" -> [ "hidden"; "folded"; "full" ]
   | "tools" -> [ "compact"; "full" ]
-  | "preset" -> [ "save"; "restore" ]
+  (* [show] goes last: [save] is the older word and shares its first
+     letter, so leading with [show] would move where "/preset s" lands. *)
+  | "preset" -> [ "save"; "restore"; "show" ]
   | "keeper" -> keeper_names
   | _ -> []
 

@@ -164,11 +164,24 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
 
 (* A leases term sat between these two. It could not contribute since #25969
    moved production to peek/ack and left [State.of_yojson] restoring no leases,
-   so demand is decided by pending work and the transition outbox. *)
-let owner_has_durable_demand state =
-  not
-    (Keeper_event_queue.is_empty
-       (Keeper_event_queue_state.pending state))
+   so demand is decided by pending work and the transition outbox.
+
+   Only undelivered work counts. This sweep replaces a wake hint that did not
+   survive a restart; a pending entry whose [checkpoint_retentions] is above
+   zero already reached a turn, and that turn chose to keep it (Connector
+   attention takes no evidence-free Ignored label, #32114). Asking whether the
+   queue is non-empty made a deliberate retention read the same as work the
+   owner has never been handed, so the minute sweep re-woke the owner for the
+   same entry without end: sangsu held a Discord attention entry at 336
+   retentions across 5.7 hours -- one wake every 61 s against a 600 s
+   cadence -- and ran 454 turns in eight hours, the most of seventeen Keepers.
+   New work does not depend on this sweep; [wakeup_keeper ~stimulus] flips the
+   hint as it enqueues. #32277 closed the same churn for board rows. *)
+let owner_has_undelivered_durable_demand state =
+  List.exists
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       selection.checkpoint_retentions = 0)
+    (Keeper_event_queue_state.pending_selections state)
   || Keeper_event_queue_state.transition_outbox state <> []
 ;;
 
@@ -217,7 +230,7 @@ let load_durable_demand_meta ~base_path ~config ~keeper_name =
           ~keeper_name
       with
       | Error detail -> Error (Demand_unknown detail)
-      | Ok state when not (owner_has_durable_demand state) -> Ok None
+      | Ok state when not (owner_has_undelivered_durable_demand state) -> Ok None
       | Ok _state ->
         (match Keeper_meta_store.read_effective_meta config keeper_name with
          | Error detail -> Error (Owner_unknown detail)
@@ -487,6 +500,10 @@ module Recovery_for_testing = struct
   let durable_demand_recovery_action = durable_demand_recovery_action
   let load_durable_demand_meta = load_durable_demand_meta
   let consume_owner_projection_batch = consume_owner_projection_batch
+
+  let owner_has_undelivered_durable_demand =
+    owner_has_undelivered_durable_demand
+  ;;
 end
 
 let latest_keeper_msg_recovery = Atomic.make None

@@ -1250,9 +1250,8 @@ let initialize_owner_state_blocking
 (* Copies and deletions are two events, so they get two lines with two
    sample budgets. One line held both and cut the shared sample at ten: a
    version bump copies enough to fill it, and the deleted paths never
-   reached the line. For [Tools] those names are the whole message, since a
-   definition an operator drops into the runtime directory is deleted at the
-   next boot and nothing else says so. *)
+   reached the line. A deletion is a distribution asset retiring, and its
+   name is the whole message. *)
 let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
   let sync =
     Managed_asset_sync.sync

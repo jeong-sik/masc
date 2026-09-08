@@ -1377,7 +1377,7 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
       | _ ->
         match decide current inventory with
         | Error error -> Ok (Error error)
-        | Ok acknowledgement ->
+        | Ok (acknowledgement : absent_owner_acknowledgement) ->
           let* () =
             match current.phase with
             | Finalized evidence when evidence = acknowledgement.finalization -> Ok ()

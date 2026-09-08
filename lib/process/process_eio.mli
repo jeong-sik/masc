@@ -234,7 +234,7 @@ type spawn_refusal =
       (** argv[0], as the caller gave it, resolved to no file. Eio's spawner
           does the PATH resolution and raises
           [Eio.Process.Executable_not_found]; the Unix fallback learns the
-          same from [Unix.create_process_env] raising [ENOENT] at the spawn. *)
+          same from its group-owning [posix_spawnp] raising [ENOENT] at the spawn. *)
   | Spawn_failed of
       { executable : string
       ; error : Unix.error

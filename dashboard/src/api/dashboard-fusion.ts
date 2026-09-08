@@ -2,7 +2,7 @@
 // Extracted from dashboard.ts (domain split). Public symbols are re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { isRecord, asInt, asNumber, asRecordArray, asString } from '../components/common/normalize'
+import { isRecord, asInt, asString } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 
 /** Status of a tracked fusion deliberation, mirroring the backend
@@ -27,16 +27,6 @@ const FUSION_TOPOLOGIES: readonly FusionTopologyLabel[] = [
   'staged_judge_of_judges',
 ]
 
-// Unlike `status`, an unrecognized topology is not mapped onto a member of the
-// enum: topology is displayed, never used to judge health, so inventing
-// `simple` for an unknown value would report a shape the run did not run.
-// `null` lets the UI omit the chip instead.
-function asFusionTopology(value: unknown): FusionTopologyLabel | null {
-  return typeof value === 'string' && (FUSION_TOPOLOGIES as readonly string[]).includes(value)
-    ? (value as FusionTopologyLabel)
-    : null
-}
-
 /** One row of the fusion run registry from GET /api/v1/dashboard/fusion-runs.
     The registry tracks what the board-post view cannot: an in-progress
     deliberation has no board post yet, so only the registry shows it as
@@ -48,7 +38,7 @@ export interface FusionRunRecord {
   // The deliberation shape this run executed. The registry is the only place
   // that survives delivery (the obligation record carrying it is removed once
   // the result lands), so a completed run's topology is readable only here.
-  // `null` for rows written before the registry tracked it.
+  // The decoder requires the topology emitted by the current registry.
   topology: FusionTopologyLabel | null
   startedAt: number // unix seconds
   status: FusionRunStatusLabel
@@ -86,7 +76,6 @@ function nonnegativeNumber(value: unknown, field: string, integer = false): numb
 }
 
 function parseFusionReplay(raw: unknown): FusionReplay | null {
-  if (raw === undefined) return null
   if (!isRecord(raw)) throw new Error('Invalid Fusion replay observation')
   switch (raw.status) {
     case 'not_replayed': case 'absent': return { status: raw.status }
@@ -101,7 +90,6 @@ function parseFusionReplay(raw: unknown): FusionReplay | null {
 }
 
 function parseHistoricalEvidence(raw: unknown): FusionHistoricalEvidence[] {
-  if (raw === undefined) return []
   if (!Array.isArray(raw)) throw new Error('Invalid Fusion historical evidence list')
   return raw.map(row => {
     if (!isRecord(row) || typeof row.run_id !== 'string' || !row.run_id.trim()
@@ -113,34 +101,46 @@ function parseHistoricalEvidence(raw: unknown): FusionHistoricalEvidence[] {
   })
 }
 
-// The backend emits a closed three-label enum, so an unrecognized value can only
-// come from a protocol break. Map it to `failed` (conservative: never let a
-// garbled row pose as a healthy `completed` or an active `running`) rather than
-// to a convenient default — see CLAUDE.md "Unknown → Permissive Default".
-function asFusionRunStatus(value: unknown): FusionRunStatusLabel {
-  return value === 'running' || value === 'completed' || value === 'failed' ? value : 'failed'
+function requiredRunString(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new Error(`Invalid Fusion ${field}: expected a string`)
+  return value
+}
+
+function parseFusionRun(raw: unknown, index: number): FusionRunRecord {
+  const context = `runs[${index}]`
+  if (!isRecord(raw)) throw new Error(`Invalid Fusion ${context}: expected an object`)
+  const runId = requiredRunString(raw.run_id, `${context}.run_id`)
+  if (!runId.trim()) throw new Error(`Invalid Fusion ${context}.run_id: empty identity`)
+  const keeper = requiredRunString(raw.keeper, `${context}.keeper`)
+  const preset = requiredRunString(raw.preset, `${context}.preset`)
+  const topology = requiredRunString(raw.topology, `${context}.topology`)
+  if (!(FUSION_TOPOLOGIES as readonly string[]).includes(topology)) throw new Error(`Unknown Fusion ${context}.topology: ${topology}`)
+  const startedAt = nonnegativeNumber(raw.started_at, `${context}.started_at`)
+  const status = raw.status
+  if (status !== 'running' && status !== 'completed' && status !== 'failed') {
+    throw new Error(`Unknown Fusion ${context}.status: ${String(status)}`)
+  }
+  const error = status === 'failed' ? requiredRunString(raw.error, `${context}.error`) : undefined
+  const failureCode = status === 'failed' ? requiredRunString(raw.failure_code, `${context}.failure_code`) : undefined
+  if (status !== 'failed' && (raw.error != null || raw.failure_code != null)) {
+    throw new Error(`Invalid Fusion ${context}: only failed runs may carry failure attribution`)
+  }
+  return { runId, keeper, preset, topology: topology as FusionTopologyLabel, startedAt, status, error, failureCode }
 }
 
 export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsResponse {
-  const root = isRecord(raw) ? raw : {}
-  const runs: FusionRunRecord[] = asRecordArray(root.runs)
-    .map(row => ({
-      runId: asString(row.run_id) ?? '',
-      keeper: asString(row.keeper) ?? '',
-      preset: asString(row.preset) ?? '',
-      topology: asFusionTopology(row.topology),
-      startedAt: asNumber(row.started_at) ?? 0,
-      status: asFusionRunStatus(row.status),
-      error: asString(row.error),
-      failureCode: asString(row.failure_code),
-    }))
-    .filter(run => run.runId.length > 0)
+  if (!isRecord(raw)) throw new Error('Invalid Fusion response: expected an object')
+  if (!Array.isArray(raw.runs)) throw new Error('Invalid Fusion runs: expected an array')
+  const runs = raw.runs.map(parseFusionRun)
+  const count = nonnegativeNumber(raw.count, 'count', true)
+  if (count !== runs.length) throw new Error(`Invalid Fusion count: ${count} does not match ${runs.length} rows`)
+  if (new Set(runs.map(run => run.runId)).size !== runs.length) throw new Error('Invalid Fusion runs: duplicate run_id')
   return {
     runs,
-    count: asInt(root.count) ?? runs.length,
-    generatedAt: asString(root.generated_at) ?? null,
-    replay: parseFusionReplay(root.replay),
-    historicalEvidence: parseHistoricalEvidence(root.historical_evidence),
+    count,
+    generatedAt: requiredRunString(raw.generated_at, 'generated_at'),
+    replay: parseFusionReplay(raw.replay),
+    historicalEvidence: parseHistoricalEvidence(raw.historical_evidence),
   }
 }
 

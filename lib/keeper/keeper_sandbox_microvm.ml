@@ -1715,17 +1715,14 @@ let live_containers_of_json ~base_path ~keeper_name = function
     not in the answer, and msb keeps labels in [inspect] under
     [active_config.labels] -- one call per guest rather than one listing.
 
-    [nerdctl] has no [list] subcommand (it is [ps]), and its command
-    reference does document [--format=json]. What the reference does not
-    document for those rows is a [.Labels] field, so the nested labels object
-    this scoping reads has no established nerdctl shape; nerdctl is not
-    installed on this host, so it could not be measured either.
-
-    Naming the gap rather than running the Apple argv is the point: read as
-    "no guests", an unscopable listing is exactly the answer that leaves a
-    guest running with nothing able to reap it. *)
+    Nerdctl's ListItem exposes LabelsMap to Go templates even though its
+    ordinary JSON representation excludes that field. Request an explicit
+    flat record, including the runtime identity; do not pretend its status
+    prose is Apple's structured running state.
+    Source: nerdctl v2.3.5 pkg/cmd/container/list.go:107-125,182-193. *)
 type container_listing =
   | Labelled_json_array of string list
+  | Nerdctl_labelled_json_lines of string list
   | Listing_not_established of string
 
 let container_listing_for backend =
@@ -1741,11 +1738,138 @@ let container_listing_for backend =
        cannot be read back from the listing; msb keeps labels in `inspect` \
        under active_config.labels, one call per guest"
   | Backend.Nerdctl_kata ->
-    Listing_not_established
-      "nerdctl has no `list` subcommand (it is `ps`), and while its reference \
-       documents `--format=json` it documents no .Labels field on those rows, \
-       so the nested labels object this scoping reads has no established \
-       nerdctl shape"
+    Nerdctl_labelled_json_lines
+      (command_argv_for backend @ [ "ps"; "-a"; "--no-trunc"; "--format";
+        {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ])
+;;
+
+type nerdctl_inventory_entry =
+  { nerdctl_id : string
+  ; nerdctl_name : string
+  ; nerdctl_image : string
+  ; nerdctl_status : string
+  ; nerdctl_created_at : string
+  ; nerdctl_runtime : string
+  ; nerdctl_labels : (string * string) list
+  }
+
+let nerdctl_inventory_of_json_lines raw =
+  let ( let* ) = Result.bind in
+  let object_fields = function
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names = List.length (List.sort_uniq String.compare names)
+      then Ok fields else Error "nerdctl inventory contains duplicate fields"
+    | _ -> Error "nerdctl inventory row must be an object"
+  in
+  let required_string fields name =
+    match List.assoc_opt name fields with
+    | Some (`String value) -> Ok value
+    | _ -> Error ("nerdctl inventory requires string field " ^ name)
+  in
+  let decode line =
+    let* json =
+      try Ok (Yojson.Safe.from_string line)
+      with Yojson.Json_error detail -> Error ("invalid nerdctl inventory JSON: " ^ detail)
+    in
+    let* fields = object_fields json in
+    let* nerdctl_id = required_string fields "id" in
+    (* --no-trunc returns the complete containerd id: accepting an empty or
+       option-shaped id could make a removal target somebody else's guest. *)
+    let* () =
+      if String.length nerdctl_id = 64
+         && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) nerdctl_id
+      then Ok () else Error "nerdctl inventory requires a full hexadecimal container id"
+    in
+    let* nerdctl_name = required_string fields "name" in
+    let* nerdctl_image = required_string fields "image" in
+    let* nerdctl_status = required_string fields "status" in
+    let* nerdctl_created_at = required_string fields "created_at" in
+    let* nerdctl_runtime = required_string fields "runtime" in
+    let* labels =
+      match List.assoc_opt "labels" fields with
+      | Some `Null -> Ok [] (* Go marshals a nil map as null; it owns no labels. *)
+      | Some value -> object_fields value
+      | None -> Error "nerdctl inventory requires labels"
+    in
+    let* nerdctl_labels =
+      List.fold_right (fun (key, value) acc ->
+        let* rest = acc in
+        match value with
+        | `String value -> Ok ((key, value) :: rest)
+        | _ -> Error "nerdctl inventory label values must be strings") labels (Ok [])
+    in
+    Ok { nerdctl_id; nerdctl_name; nerdctl_image; nerdctl_status;
+         nerdctl_created_at; nerdctl_runtime; nerdctl_labels }
+  in
+  let* rows =
+    String.split_on_char '\n' raw
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+    |> fun lines -> List.fold_right (fun line acc ->
+         let* row = decode line in
+         let* rest = acc in
+         Ok (row :: rest)) lines (Ok [])
+  in
+  let ids = List.map (fun row -> row.nerdctl_id) rows in
+  if List.length ids = List.length (List.sort_uniq String.compare ids)
+  then Ok rows else Error "nerdctl inventory contains duplicate container ids"
+;;
+
+let nerdctl_label row name = List.assoc_opt name row.nerdctl_labels
+
+let nerdctl_belongs_to_base ~base_path row =
+  let exact name expected = nerdctl_label row name = Some expected in
+  String.equal row.nerdctl_runtime Backend.kata_containerd_shim
+  && exact Keeper_sandbox_runtime.sandbox_component_label_key
+       Keeper_sandbox_runtime.sandbox_component_label_value
+  && exact Keeper_sandbox_runtime.sandbox_base_path_hash_label_key
+       (Keeper_sandbox_runtime.base_path_hash base_path)
+  && exact Keeper_sandbox_runtime.sandbox_kind_label_key keeper_vm_container_kind
+;;
+
+let nerdctl_owner_pid row =
+  match Option.bind
+          (nerdctl_label row Keeper_sandbox_runtime.sandbox_owner_pid_label_key)
+          int_of_string_opt with
+  | Some pid when pid > 0 -> Some pid
+  | Some _ | None -> None
+;;
+
+let nerdctl_live_containers_of_json_lines ~base_path ~keeper_name raw =
+  let expected_keeper = Keeper_sandbox_runtime.sanitize_label_value keeper_name in
+  Result.map (fun rows ->
+    List.filter_map (fun row ->
+      if not (nerdctl_belongs_to_base ~base_path row)
+         || nerdctl_label row Keeper_sandbox_runtime.sandbox_keeper_label_key <> Some expected_keeper
+      then None
+      else
+        let label = nerdctl_label row in
+        let float_label key = Option.bind (label key) float_of_string_opt in
+        Some ({ id = row.nerdctl_id; name = row.nerdctl_name; image = row.nerdctl_image;
+                status = row.nerdctl_status; running = None;
+                created_at = Some row.nerdctl_created_at;
+                keeper_name = label Keeper_sandbox_runtime.sandbox_keeper_label_key;
+                container_kind = label Keeper_sandbox_runtime.sandbox_kind_label_key;
+                network_label = label Keeper_sandbox_runtime.sandbox_network_label_key;
+                owner_pid = nerdctl_owner_pid row;
+                started_at = float_label Keeper_sandbox_runtime.sandbox_started_at_label_key;
+                ttl_sec = float_label Keeper_sandbox_runtime.sandbox_ttl_sec_label_key;
+                cpus = None; memory_bytes = None; hostname = None;
+                ipv4_address = None; ipv6_address = None; gateway = None }
+              : Keeper_sandbox_runtime.live_container)) rows)
+    (nerdctl_inventory_of_json_lines raw)
+;;
+
+let nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive raw =
+  Result.map (fun rows ->
+    List.filter_map (fun row ->
+      let keeper_name = nerdctl_label row Keeper_sandbox_runtime.sandbox_keeper_label_key in
+      match nerdctl_belongs_to_base ~base_path row, keeper_name, nerdctl_owner_pid row with
+      | true, Some name, Some pid when String.trim name <> "" && not (is_pid_alive pid) ->
+        Some { container_id = row.nerdctl_id; keeper_name; owner_pid = Some pid }
+      | _ -> None) rows)
+    (nerdctl_inventory_of_json_lines raw)
 ;;
 
 let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
@@ -1756,13 +1880,32 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
          "microvm_container_listing_unsupported: %s: %s"
          (Backend.to_string backend)
          reason)
-  | Labelled_json_array argv ->
+  | (Labelled_json_array argv | Nerdctl_labelled_json_lines argv) as listing ->
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, stdout, _ ->
-       (match Yojson.Safe.from_string stdout with
-        | json -> live_containers_of_json ~base_path ~keeper_name json
-        | exception Yojson.Json_error detail ->
-          Error ("microvm container list returned invalid JSON: " ^ detail))
+       (match listing with
+        | Nerdctl_labelled_json_lines _ ->
+          let ( let* ) = Result.bind in
+          let* containers = nerdctl_live_containers_of_json_lines ~base_path ~keeper_name stdout in
+          (* ps Status is display prose. Ask the existing typed bool inspect
+             for each scoped guest so status does not misreport unknown as idle. *)
+          List.fold_right (fun (container : Keeper_sandbox_runtime.live_container) acc ->
+            let* rest = acc in
+            match Process_eio.run_argv_with_status_split ~timeout_sec
+                    (inspect_argv_for backend ~container_name:container.id) with
+            | Unix.WEXITED 0, state, _ ->
+              let* running = running_of_nerdctl_state_json state in
+              Ok ({ container with running = Some running } :: rest)
+            | status, out, err ->
+              Error (Printf.sprintf "nerdctl inventory state for %s failed (%s): %s"
+                       container.id (Keeper_sandbox_exec_failure.status_label status)
+                       (output_for_log ~stdout:out ~stderr:err))) containers (Ok [])
+        | Labelled_json_array _ ->
+          (match Yojson.Safe.from_string stdout with
+           | json -> live_containers_of_json ~base_path ~keeper_name json
+           | exception Yojson.Json_error detail ->
+             Error ("microvm container list returned invalid JSON: " ^ detail))
+        | Listing_not_established reason -> Error reason)
      | status, stdout, stderr ->
        Error
          (Printf.sprintf
@@ -1824,9 +1967,17 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
   match run_argv ~timeout_sec listing with
   | Unix.WEXITED 0, out ->
     let candidates =
-      match Yojson.Safe.from_string out with
-      | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
-      | exception Yojson.Json_error _ -> []
+      match backend with
+      | Backend.Nerdctl_kata ->
+        (match nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive out with
+         | Ok candidates -> candidates
+         | Error detail ->
+           Log.Keeper.warn "nerdctl abandoned guest inventory rejected: %s" detail;
+           [])
+      | Backend.Apple_container | Backend.Microsandbox ->
+        (match Yojson.Safe.from_string out with
+         | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
+         | exception Yojson.Json_error _ -> [])
     in
     List.fold_left
       (fun acc candidate ->
@@ -1840,7 +1991,10 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
           { acc with failed = (candidate.container_id, detail) :: acc.failed })
       { removed = []; failed = [] }
       candidates
-  | _, _ -> { removed = []; failed = [] }
+  | status, detail ->
+    Log.Keeper.warn "microvm abandoned guest inventory failed backend=%s status=%s: %s"
+      (Backend.to_string backend) (Keeper_sandbox_exec_failure.status_label status) detail;
+    { removed = []; failed = [] }
 ;;
 
 (** Remove every abandoned guest, per runtime.
@@ -1863,7 +2017,7 @@ let sweep_abandoned_guests
       else (
         match container_listing_for backend with
         | Listing_not_established _ -> None
-        | Labelled_json_array listing ->
+        | Labelled_json_array listing | Nerdctl_labelled_json_lines listing ->
           Some
             ( backend
             , sweep_one_backend

@@ -779,7 +779,7 @@ let materialize_row ~cols input = function
    pane's ages count from when this pane received the keeper's newest event,
    the roster's LAST column from the server's last turn. The second row
    names the two call counts and what the token figure adds up. Each fits
-   the pane's 55 text cells. *)
+   the 57 text cells the pane has beside its border. *)
 let clock_legend = "evt=age of newest event here · roster LAST=last turn"
 let count_legend = "seen=feed saw · total=settle said · tok=in+out per turn"
 

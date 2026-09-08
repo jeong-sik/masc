@@ -896,31 +896,59 @@ let test_fleet_row_shows_the_token_sum_when_the_parts_overflow () =
   check bool "the parts are not drawn" false (contains "+" row);
   check bool "the age is whole" true (contains "evt 10.0s" row)
 
-(* sangsu's turn 41 settled twenty seconds ago and turn 6 has opened since:
-   the earlier turn draws under the header with both token parts and its
-   cost, and gives up the age of its settle's receipt to fit them. *)
-let earlier_turn_input =
+(* sangsu's turn 3141 settled twenty seconds ago and turn 6 has opened
+   since: the earlier turn draws under the header. With the fixture's
+   tokens and cost the full row is 60 cells against a 58-cell pane, so the
+   age of the settle's receipt is what it gives up. *)
+let settled_earlier ?(calls = 3) ?(input = 73_877) ?(output = 358) ?(cost = 0.0258) () =
+  match settled ~at:980. "sangsu" with
+  | Observer.Keeper_turn_complete value ->
+    Observer.Keeper_turn_complete
+      { value with
+        tc_turn = Some 3141
+      ; tc_tool_calls = Some calls
+      ; tc_input_tokens = Some input
+      ; tc_output_tokens = Some output
+      ; tc_cost_usd = Some cost
+      }
+  | _ -> fail "settled fixture must carry a turn completion"
+
+let earlier_turn_input ?calls ?input ?output ?cost () =
   { fixture with
     Pane.keepers = [ keeper "sangsu" ]; approvals = []
   ; chunks = chunks [ "sangsu" ] @@ entries
       [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
           ~correlation:"trace-sangsu" lane
-      ; 980., settled ~at:980. "sangsu"
+      ; 980., settled_earlier ?calls ?input ?output ?cost ()
       ]
   }
 
+let earlier_turn_row input =
+  find_row_in (List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows) "turn 3141"
+
 let test_earlier_turn_row_gives_up_its_age_before_its_parts () =
-  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 earlier_turn_input).Pane.rows in
-  let row = find_row_in texts "turn 41" in
+  let row = earlier_turn_row (earlier_turn_input ()) in
   check bool "both token parts" true (contains "73.9k+358 tok" row);
   check bool "the cost" true (contains "$0.0258" row);
   check bool "the receipt age is what it gave up" false (contains "evt" row);
   check bool "the count" true (contains "3 total" row)
 
+(* Three-digit calls, two large parts and a five-figure cost: 59 cells
+   without the age, so the cost goes too and the parts stay. *)
+let test_earlier_turn_row_gives_up_its_cost_before_its_parts () =
+  let row =
+    earlier_turn_row
+      (earlier_turn_input ~calls:123 ~input:999_900 ~output:999_900 ~cost:123456.789 ())
+  in
+  check bool "both token parts" true (contains "999.9k+999.9k tok" row);
+  check bool "the cost is what it gave up" false (contains "$" row);
+  check bool "and the age before it" false (contains "evt" row);
+  check bool "the count" true (contains "123 total" row)
+
 let test_an_earlier_turn_row_opens_the_keepers_calls () =
-  let value = Pane.lines ~rows ~cols ~scroll:0 earlier_turn_input in
+  let value = Pane.lines ~rows ~cols ~scroll:0 (earlier_turn_input ()) in
   let texts = List.map text value.Pane.rows in
-  let index = index_of_in texts "turn 41" in
+  let index = index_of_in texts "turn 3141" in
   check string "the turn row opens the calls surface" "calls:sangsu"
     (target_text (List.nth value.Pane.targets index))
 
@@ -1014,5 +1042,7 @@ let () =
             test_fleet_row_shows_the_token_sum_when_the_parts_overflow
         ; test_case "earlier turn row gives up its age before its parts" `Quick
             test_earlier_turn_row_gives_up_its_age_before_its_parts
+        ; test_case "earlier turn row gives up its cost before its parts" `Quick
+            test_earlier_turn_row_gives_up_its_cost_before_its_parts
         ] )
     ]

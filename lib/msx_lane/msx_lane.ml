@@ -87,6 +87,8 @@ type machine = {
   mutable frame : int;
   cart : string option;
   disk : string option;
+  disk_id : string option;
+  media : (string * string) list;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
 }
@@ -221,6 +223,14 @@ let load_disk = function
     else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
 ;;
 
+let media_id bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+
+let media_json media =
+  `List (List.map (fun (id, bytes) -> `Assoc
+    ["id", `String id; "sha256", `String (media_id bytes);
+     "bytes", `String (Base64.encode_string bytes)]) media)
+;;
+
 let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
   locked (fun () ->
     match load_roms roms_dir, load_cart cart_path, load_disk disk_path with
@@ -257,6 +267,8 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
               (if Option.is_some disk then None
                else Option.map (fun (path, _) -> Filename.basename path) cart)
           ; disk = Option.map (fun (path, _) -> Filename.basename path) disk
+          ; disk_id = Option.map (fun (_, bytes) -> media_id bytes) disk
+          ; media = []
           ; ledger_path
           ; entries = []
           }
@@ -400,6 +412,8 @@ let save ~path =
         ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
         ; "cartridge", named st.cart
         ; "disk", named st.disk
+        ; "disk_id", named st.disk_id
+        ; "media", media_json st.media
         ; "ledger", `List (List.map entry_json (List.rev st.entries))
         ] in
       try
@@ -417,12 +431,30 @@ let decode_checkpoint json =
     if member "version" json <> `Int 1 then invalid "unsupported version"
     else
       match Base64.decode (member "machine" json |> to_string) with
-      | Error message -> invalid message
+      | Error (`Msg message) -> invalid message
       | Ok bytes -> (
         match Msx.restore ~state:bytes with
         | Error message -> invalid message
         | Ok m ->
           let cart = named (member "cartridge" json) and disk = named (member "disk" json) in
+          let disk_id = named (member "disk_id" json) in
+          let valid_id id = String.length id = 64 && String.for_all (function
+            | '0'..'9' | 'a'..'f' -> true | _ -> false) id in
+          let media = member "media" json |> to_list |> List.map (fun item ->
+            let id = member "id" item |> to_string in
+            let hash = member "sha256" item |> to_string in
+            let encoded = member "bytes" item |> to_string in
+            match Base64.decode encoded with
+            | Error (`Msg message) -> raise (Type_error (message, item))
+            | Ok bytes ->
+              if not (valid_id id) || media_id bytes <> hash then
+                raise (Type_error ("invalid saved disk identity or checksum", item));
+              id, bytes) in
+          if List.length (List.sort_uniq String.compare (List.map fst media)) <> List.length media then
+            raise (Type_error ("duplicate saved disk identity", json));
+          if (Option.is_some disk <> Option.is_some disk_id)
+             || not (Option.fold ~none:true ~some:valid_id disk_id) then
+            raise (Type_error ("saved disk has no valid original identity", json));
           let frame = Msx.frame_number m in
           let entries = member "ledger" json |> to_list |> List.map (fun e ->
             let at_frame = member "frame" e |> to_int in
@@ -437,7 +469,7 @@ let decode_checkpoint json =
             | e :: rest -> e.at_frame >= previous && e.at_frame <= frame
                 && Result.is_ok (key_of_string e.key_name) && valid_edges e.at_frame rest in
           if not (valid_edges 0 entries) then invalid "ledger does not match saved frame"
-          else Ok (m, frame, cart, disk, entries))
+          else Ok (m, frame, cart, disk, disk_id, media, entries))
   with Type_error (message, _) -> invalid message
 ;;
 
@@ -448,13 +480,13 @@ let restore ~path ~ledger_dir =
     | Yojson.Json_error message -> Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
   match decoded with
   | Error e -> Error e
-  | Ok (m, frame, cart, disk, entries) ->
+  | Ok (m, frame, cart, disk, disk_id, media, entries) ->
     locked (fun () ->
       let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
       try
         let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
         atomic_write ledger_path ledger_bytes;
-        let st = {m; frame; cart; disk; ledger_path; entries = List.rev entries} in
+        let st = {m; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
         state := Some st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))

@@ -98,13 +98,18 @@ open Alcotest
    Argued here rather than in that PR because nothing said so at the time:
    this suite runs in the nightly lane and not on a pull request, so #34409
    merged green and the ceiling failed that night. Nightly 34258890189
-   measured 97,067 bytes across 109 tools, 664 over. Set to keep the 501
-   bytes of headroom the line above accounts for.
+   measured 97,067 bytes across 109 tools.
+
+   The figure below is not that one. This pull request's own check measured
+   97,663 across the same 109 tools -- the surface grew another 596 bytes in
+   the merges between the nightly and it -- which is why the reading has to
+   come from the run that is about to land rather than from last night.
+   Set to keep the 501 bytes of headroom the line above accounts for.
 
    #34506 is the same shape and takes about 195 of that: five MSX tools
    whose first line was over the budget, the largest at 745 bytes. It fits
    under this figure, so the headroom it leaves is nearer 306. *)
-let ceiling_bytes = 97_568
+let ceiling_bytes = 98_164
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

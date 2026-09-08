@@ -298,7 +298,8 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
           let outside_old = Filename.concat outside "old.md" in
           Out_channel.with_open_text outside_old (fun oc ->
               Out_channel.output_string oc "outside must survive\n");
-          Unix.symlink outside (Filename.concat dir "link");
+          let link = Filename.concat dir "link" in
+          Unix.symlink outside link;
           let assets = [ "prompts/link/current.md", "current embedded body\n" ] in
           write_runtime_manifest dir [ "link/current.md"; "link/old.md" ];
           let result =
@@ -308,15 +309,22 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
               ~dest_dir:dir
               ()
           in
-          check (list string) "ancestor symlink removed"
-            [ "prompts/link" ]
-            result.Managed_asset_sync.removed;
+          (* The link is the operator's: no manifest placed it, so the sync
+             neither follows it nor removes it. The managed asset under it
+             cannot be written without crossing the link, and that is
+             reported rather than done. *)
+          check (list string) "nothing removed" [] result.Managed_asset_sync.removed;
+          check bool "the link stays" true
+            ((Unix.lstat link).Unix.st_kind = Unix.S_LNK);
           check bool "outside managed file survives" true
             (Sys.file_exists outside_old);
           check string "outside content unchanged" "outside must survive\n"
             (read_file outside_old);
-          check int "no boundary failure after exact-tree purge" 0
-            (List.length result.Managed_asset_sync.failed)))
+          check bool "nothing written through the link" false
+            (Sys.file_exists (Filename.concat outside "current.md"));
+          check (list string) "the asset behind the link is reported, not written"
+            [ "prompts/link/current.md" ]
+            (List.map fst result.Managed_asset_sync.failed)))
 
 let test_unreadable_embedded_entry_is_failed () =
   with_temp_prompts_dir (fun dir ->

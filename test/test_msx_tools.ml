@@ -199,6 +199,41 @@ let test_disk_load () =
   check bool "the full file name resolves too" true (is_completed r)
 ;;
 
+let test_rejected_disk_preserves_machine () =
+  with_workspace @@ fun base_path ->
+  let loaded = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "initial machine load completes" true (is_completed loaded);
+  let pressed = dispatch ~base_path "masc_msx_press"
+    [ ("keys", `List [ `String "space" ]); ("hold_frames", `Int 2); ("frames", `Int 4) ]
+  in
+  check bool "initial input completes" true (is_completed pressed);
+  let before = dispatch ~base_path "masc_msx_screen" [] |> frame_of in
+  let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
+  let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+  let ledger_before = In_channel.with_open_bin ledger_path In_channel.input_all in
+  check bool "input ledger contains prior progress" true (ledger_before <> "");
+  let check_preserved () =
+    check int "rejected disk preserves current frame" before
+      (dispatch ~base_path "masc_msx_screen" [] |> frame_of);
+    check string "rejected disk does not truncate input ledger" ledger_before
+      (In_channel.with_open_bin ledger_path In_channel.input_all)
+  in
+  List.iter (fun size ->
+    let disk_path = Filename.concat base_path (Printf.sprintf "short-%d.dsk" size) in
+    Out_channel.with_open_bin disk_path (fun oc -> output_string oc (String.make size '\000'));
+    (match Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:(Some disk_path) with
+     | Error (Msx_lane.Invalid_request _) -> ()
+     | Error e -> fail (Msx_lane.error_to_string e)
+     | Ok _ -> fail "unreadable boot sector must reject load");
+    check_preserved ()
+  ) [0; 511];
+  let failed_load = dispatch ~base_path "masc_msx_load"
+    [ ("roms_dir", `String ""); ("cart", `String (Filename.concat base_path "short-0.dsk")) ]
+  in
+  check bool "public load reports disk boot rejection" true (rejected failed_load);
+  check_preserved ()
+;;
+
 (* With a BIOS and a real .dsk on this host, the boot chain runs: the load
    itself carries the warm-up replay (disk_boot_frames + boot_frames), then
    the machine keeps stepping and the clock advances frame by frame. CI has no
@@ -354,6 +389,7 @@ let () =
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "disk image loads into the drive" `Quick test_disk_load
+        ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "registration" `Quick test_registration

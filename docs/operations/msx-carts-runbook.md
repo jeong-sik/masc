@@ -16,9 +16,10 @@ directory, or `.masc/msx/bios/` when it holds `cbios_main_msx2.rom`.
 
 ## What the machine accepts
 
-A plain cartridge image of 16 KB or 32 KB. The machine maps it at `0x4000`
-in slot 2, the address C-BIOS checks for the `AB` header, and it has no
-MegaROM mapper. A 48 KB image or a mapper-based one does not run.
+The core maps plain cartridges and supports ASCII8, ASCII16, Konami,
+Konami-SCC banking and Koei ASCII8 SRAM variants. Mapper detection is not
+a compatibility guarantee: loading an image and seeing a title do not prove
+that menus, gameplay, sound or persistent saves work.
 
 ## Disk images (.dsk)
 
@@ -26,9 +27,9 @@ MegaROM mapper. A 48 KB image or a mapper-based one does not run.
 extension can be left off) loads into the drive instead of the slot, from
 the same `carts/` inventory. The load itself runs the C-BIOS warm-up and
 replays the Disk ROM's second-stage call, so the first observation is
-already the game loader running — a Keeper steps `masc_msx_step` from
-there and the title comes up (Sangokushi II reaches its SCREEN7 title
-around frame 3000). The observation names the image under `disk`;
+the result of the boot-sector handoff. A Keeper can step `masc_msx_step`
+from there; a successful load does not establish game compatibility.
+The observation names the image under `disk`;
 `cartridge` reads null while a disk runs.
 
 There is no fetch script for disks: a commercial `.dsk` is the operator's
@@ -59,8 +60,8 @@ A file already present with the pinned digest is left alone, so the script
 is safe to rerun. It never fetches a commercial ROM image. Anything else an
 operator places in `carts/` is the operator's own responsibility.
 
-XRacing (GPL-3.0) and Westen House (Apache-2.0) by the same author are 48 KB
-images and are left out for the reason above, not for licensing.
+XRacing (GPL-3.0) and Westen House (Apache-2.0) by the same author are
+not in the pinned, verified inventory. Their compatibility is unverified.
 
 ## Checked
 
@@ -69,3 +70,27 @@ On 2026-09-08 each of the four images was booted for 400 frames on the
 --frames 400`) with C-BIOS 0.29a. NOBORUNOCA reached its title screen;
 the three Brain Games titles were still on the publisher's splash at frame
 400, which is where they are at that point on real hardware too.
+
+## Sangokushi II compatibility boundary
+
+The 2026-09-08 investigation reproduced an opening sequence followed by a
+failed file open and a terminal `PC=01a7` loop on the existing core. The disk
+contained `MUSIC.CIM`, which the same run had already opened earlier. At the
+later failure, the filename began with the preceding `RET` instruction byte.
+A CPU write trace then showed the original file loaded correctly, followed
+by the game restoring its code from VRAM. The VDP read buffer returned the
+first byte twice, shifting the restored RAM contents. The filename pointer
+and disk file were correct; replacing the image or normalizing the malformed
+filename would conceal the actual VRAM read defect. [ocaml-msx PR #15](https://github.com/jeong-sik/ocaml-msx/pull/15) corrects the
+prefetch sequence; gameplay recovery still needs a replay on that binary.
+
+The mapper pin from MASC PR #34167 was already included in server source
+`5ebfc257c55a6a771ace0ab412051a3d5e5cce44`; the older “redeploy pending”
+report must not be used as current deployment status.
+
+Campaign acceptance still requires readable interactive menus, starting a
+scenario, taking turns, completing a battle, saving progress, restarting and
+restoring that progress, and an observed ending. Record source/binary identity,
+image and BIOS hashes, frame-numbered inputs and screenshots at these stages.
+The current in-memory machine and input ledger are not a persistent save:
+reloading/ejecting replaces it, and the core's save-state API is unimplemented.

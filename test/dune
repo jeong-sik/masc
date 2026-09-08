@@ -5344,3 +5344,5 @@
  (name test_dashboard_task_preview)
  (modules test_dashboard_task_preview)
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
+
+(include stanzas/test_h2_json_worker.inc)

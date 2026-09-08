@@ -184,6 +184,18 @@ module Response : sig
     -> Httpun.Reqd.t
     -> unit
 
+  (** Serialize, select validators and encode one immutable JSON response on
+      the shared CPU executor. Request selection and socket writes remain on
+      the caller fiber. Falls back inline when no executor is installed. *)
+  val json_value_on_cpu
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> Yojson.Safe.t
+    -> Httpun.Reqd.t
+    -> unit
+
   (** HTML response with ETag + conditional 304 support.  When
       the request If-None-Match header matches the quoted etag
       value, returns [`Not_modified] with no body; otherwise

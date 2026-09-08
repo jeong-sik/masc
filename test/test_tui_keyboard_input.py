@@ -1152,8 +1152,7 @@ def keeper_runtime_http_fixtures(
                     "paused": False,
                     "phase": "running",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": True,
+                    "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                 },
                 {
@@ -1165,8 +1164,7 @@ def keeper_runtime_http_fixtures(
                     "paused": True,
                     "phase": "paused",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": False,
+                    "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                 },
             ],
@@ -10637,7 +10635,7 @@ def enter_outside_changes_interaction(
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
-    if "Turn" not in back_plain:
+    if "TURN" not in back_plain:
         raise AssertionError(
             "returning to Changes did not draw the list columns; Enter on "
             f"Acting armed a view it does not own: {back_plain!r}"
@@ -10939,7 +10937,7 @@ def code_lane_interaction(
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
             )
-    if "Esc:code" not in history_plain:
+    if "Left / Esc:back" not in history_plain:
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
@@ -10974,12 +10972,15 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
-    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
+    if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
+            or "▸ y" not in choices_plain
+            or re.search(r"│\s+x\s+│", choices_plain) is None):
         raise AssertionError(
             f"the candidate list missed the second name: {choices!r}"
         )
-    # Enter alone runs the highlighted candidate (def y): the answer names
+    # Enter alone runs the highlighted candidate (y): the answer names
     # the location and the cursor jumps to it.
     picked = send_and_wait(
         process, master_fd, output, b"\r", b"y: lib/a.ml:1"

@@ -44,7 +44,7 @@ let invoke tool id input =
   tool.Agent_core.Tool.handler (Agent_core.Tool.Execution_env.create ~invocation ()) input
 
 let content = function
-  | Ok output -> output.Agent_core.Llm_provider.Types.content
+  | Ok (output : Agent_core.Llm_provider.Types.tool_output) -> output.content
   | Error error -> fail error.Agent_core.Llm_provider.Types.message
 
 let reference snapshot =

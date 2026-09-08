@@ -1,3 +1,7 @@
+(** Whether owner activation is unsolicited or backed by existing durable
+    requested work. This is a call intent, not a second configuration knob. *)
+type activation_intent = Spontaneous | Requested_work
+
 type autonomous_blocker =
   | Lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Autoboot_disabled

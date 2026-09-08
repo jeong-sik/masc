@@ -680,8 +680,9 @@ let launch_supervised_fiber
       reg
 ;;
 
-let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
+let supervise_keepalive ?(intent = Keeper_activation_readiness.Spontaneous) ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
   Keeper_supervisor_supervise_keepalive.supervise_keepalive
+    ~intent
     ~publish_lifecycle
     ~launch_supervised_fiber:(fun ~intake_token ->
       launch_supervised_fiber ~intake_token)
@@ -704,7 +705,8 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
   =
   Keeper_supervisor_reconcile_keepalive.reconcile_keepalive_keepers
     ~publish_lifecycle
-    ~supervise_keepalive
+    ~supervise_keepalive:(fun ~proactive_warmup_sec ctx meta ->
+      supervise_keepalive ~proactive_warmup_sec ctx meta)
     ~load_or_materialize_keeper_meta
     ctx
 ;;

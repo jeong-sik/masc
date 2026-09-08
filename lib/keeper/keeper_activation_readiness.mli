@@ -1,3 +1,7 @@
+(** Whether owner activation is unsolicited or backed by existing durable
+    requested work. This is a call intent, not a second configuration knob. *)
+type activation_intent = Spontaneous | Requested_work
+
 (** Shared readiness predicates for autonomous keeper work.
 
     Used by both keeper preflight tools and dashboard fleet projections so

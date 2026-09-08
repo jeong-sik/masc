@@ -1062,7 +1062,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
        in
        let name = "supervised-operation-ready" in
-       let meta = make_meta name in
+       let meta = { (make_meta name) with activation_mode = Masc.Keeper_activation_mode.Manual } in
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
@@ -1147,6 +1147,10 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          ~proactive_warmup_sec:0
          ctx
          meta;
+       check bool "manual mode does not spontaneously launch" false (Atomic.get runner_ready);
+       KSS.supervise_keepalive
+         ~intent:Masc.Keeper_activation_readiness.Requested_work
+         ~publish_lifecycle ~launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta;
        let executor_started_in_time =
          wait_until
            ~clock

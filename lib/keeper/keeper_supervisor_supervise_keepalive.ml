@@ -49,6 +49,7 @@ module For_testing = struct
 end
 
 let supervise_keepalive
+      ?(intent = Keeper_activation_readiness.Spontaneous)
       ~(publish_lifecycle :
          event:Keeper_lifecycle_events.lifecycle_event ->
          string -> string -> unit -> unit)
@@ -76,7 +77,11 @@ let supervise_keepalive
       Keeper_activation_readiness.Unknown
         (Keeper_owner_registry.lookup_error_to_string error)
     | Ok shutdown_operation_id ->
-      Keeper_activation_readiness.classify_owner_execution
+      let classify = match intent with
+        | Keeper_activation_readiness.Spontaneous -> Keeper_activation_readiness.classify_owner_execution
+        | Keeper_activation_readiness.Requested_work -> Keeper_activation_readiness.classify_durable_demand_execution
+      in
+      classify
         ~shutdown_operation_id
         ~runtime:
           (Keeper_activation_readiness.owner_runtime_of_registry_entry

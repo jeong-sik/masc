@@ -93,9 +93,9 @@ readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
 # core development; SHA-pinned here for CI.
-# 4697528 = ocaml-msx #18: non-rebooting disk replacement, preserving DMA;
-# includes #16 machine snapshots and #15 VRAM restoration fixes.
-readonly OCAML_MSX_SHA="46975289edcf4545dec4b3e4f0e133a2e365ba58"
+# 6822f2e = ocaml-msx #19: DOS file creation and FAT12 block writes;
+# retains disk swapping, snapshots and corrected VRAM reads.
+readonly OCAML_MSX_SHA="6822f2eb51dc0dc464994181478dc3d4d402704e"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

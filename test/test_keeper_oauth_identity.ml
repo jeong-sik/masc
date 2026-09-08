@@ -1026,7 +1026,12 @@ let test_where_the_grammar_stops_is_named () =
       ("Bearer realm=\"a\001b\"", Www.Bad_quoted_character 15);
       ({|="x"|}, Www.Expected_token 0);
       ({|Bearer/|}, Www.Expected_delimiter 6);
-      ("Bearer\trealm=x", Www.Expected_delimiter 7) ]
+      ("Bearer\trealm=x", Www.Expected_delimiter 7);
+      (* Byte 15 is where the value would have been whole: "Bearer token68"
+         is a scheme and its token68, and a comma there starts the next
+         challenge. What follows instead is neither, and reading it as a
+         second challenge is what let a malformed header name a location. *)
+      ({|Bearer token68 resource_metadata="x"|}, Www.Expected_delimiter 15) ]
 
 let test_a_terminating_slash_in_the_issuer_is_removed () =
   (* RFC 8414 3.1. Every Google Workspace MCP server names its authorization

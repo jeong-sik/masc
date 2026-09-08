@@ -634,7 +634,9 @@ let test_repeated_reopen_preserves_a_new_refuted_proof () =
   ignore (must_succeed "reopen" (transition ctx goal_id "reopen"));
   ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
   ignore (must_succeed "new refutation"
-    (verifier_transition config goal_id Workspace_goals.Proof_refuted "new work is not proven"));
+    (verifier_transition config goal_id
+      (Workspace_goals.Proof_refuted { reason = "new work is not proven" })
+      "new work is not proven"));
   let path = Goal_verification.verifications_path config in
   let before = Fs_compat.load_file path in
   let history = goal_events_text config in

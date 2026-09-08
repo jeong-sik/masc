@@ -602,7 +602,7 @@ let reconcile_committed_proof config ~goal_id =
           | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
           | Ok (Goal_phase.Move_to phase) ->
             Ok (goal_after_proof goal phase note, (Reconciled phase, Some verdict)))) in
-  Result.map (fun (goal, (outcome, verdict)) ->
+  Result.map (fun ((goal : Goal_store.goal), (outcome, verdict)) ->
     Option.iter (fun verdict -> emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
       ~payload:(gate_event_payload ctx ~phase:goal.phase verdict)) verdict;
     outcome) result

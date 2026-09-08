@@ -35,6 +35,7 @@
   workspace_task_create
   workspace_task_lifecycle
   workspace_task_receipts
+  workspace_task_rejection_outbox
   workspace_task_schedule
   workspace_task_transition_executor
   workspace_task_transitions

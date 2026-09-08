@@ -1823,7 +1823,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
   in
   (match Tool_schemas_misc.misc_operation_of_tool_name name with
    | Some Tool_schemas_misc.Misc_msx_screen ->
-     Some (Tool_misc_msx_lane.handle_keeper_screen ~keeper_name:meta.name
+     Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | _ -> Tool_misc.dispatch ctx ~name ~args)
   |> dispatch_option_to_execution ~name

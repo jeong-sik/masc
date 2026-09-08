@@ -1127,9 +1127,9 @@ let unique_stimulus_ids stimulus_ids =
    that grows with the ledger, because a ledger only gets longer.
 
    A day file is append-only, so an answer can be kept and advanced.
-   [Dated_jsonl.fold_range_appended] folds only what each file gained since
-   the cursors say it was read to, which is the same primitive
-   [Keeper_tool_call_log] uses for its trailing window.
+   [Dated_jsonl.fold_range_appended_result] folds only what each file gained since
+   the cursor says it was read to. Unlike a byte-only cursor, it verifies
+   file identities and surfaces strict directory/open/read failures.
 
    What is kept per Keeper: the cursors, and one accumulator per stimulus the
    dashboard has asked about. Not the ledger, and not every stimulus in it -
@@ -1154,7 +1154,7 @@ let unique_stimulus_ids stimulus_ids =
 let event_queue_reaction_evidence_epoch = "1970-01-01"
 
 type event_queue_reaction_evidence_cache =
-  { mutable cursors : (string * int) list
+  { mutable cursor : Dated_jsonl.append_cursor option
   ; tracked : (string, event_queue_reaction_evidence_accumulator) Hashtbl.t
   }
 
@@ -1174,20 +1174,7 @@ let restart_tracked_accumulators cache =
     (fun id ->
        Hashtbl.replace cache.tracked id (empty_event_queue_reaction_evidence_accumulator ()))
     ids;
-  cache.cursors <- []
-;;
-
-(* A file shorter than its cursor was rotated or rewritten, and
-   [fold_range_appended] re-reads it from zero rather than skipping rows -
-   so the accumulators it just fed have counted those rows twice. The whole
-   cache for this Keeper is dropped and read again. *)
-let cursor_went_backwards ~previous ~next =
-  List.exists
-    (fun (path, boundary) ->
-       match List.assoc_opt path previous with
-       | Some earlier -> boundary < earlier
-       | None -> false)
-    next
+  cache.cursor <- None
 ;;
 
 let event_queue_reaction_evidence_batch_result
@@ -1210,7 +1197,7 @@ let event_queue_reaction_evidence_batch_result
           match Hashtbl.find_opt event_queue_reaction_evidence_caches base_dir with
           | Some cache -> cache
           | None ->
-            let cache = { cursors = []; tracked = Hashtbl.create 8 } in
+            let cache = { cursor = None; tracked = Hashtbl.create 8 } in
             Hashtbl.replace event_queue_reaction_evidence_caches base_dir cache;
             cache
         in
@@ -1229,64 +1216,58 @@ let event_queue_reaction_evidence_batch_result
           restart_tracked_accumulators cache
         end;
         let advance () =
-          let previous = cache.cursors in
-          let (), next =
-            Dated_jsonl.fold_range_appended
-              store
-              ~since:event_queue_reaction_evidence_epoch
-              ~until
-              ~cursors:previous
-              ~init:()
-              ~f:(fun () row ->
-                match string_field "stimulus_id" row with
-                | Some stimulus_id ->
-                  (match Hashtbl.find_opt cache.tracked stimulus_id with
-                   | Some accumulator ->
-                     note_event_queue_reaction_evidence_row
-                       ~keeper_name
-                       accumulator
-                       row
-                   | None -> ())
-                | None -> ())
-          in
-          cache.cursors <- next;
-          cursor_went_backwards ~previous ~next
+          Dated_jsonl.fold_range_appended_result
+            store
+            ~since:event_queue_reaction_evidence_epoch
+            ~until
+            ~cursor:cache.cursor
+            ~init:()
+            ~f:(fun () row ->
+              match string_field "stimulus_id" row with
+              | Some stimulus_id ->
+                (match Hashtbl.find_opt cache.tracked stimulus_id with
+                 | Some accumulator ->
+                   note_event_queue_reaction_evidence_row ~keeper_name accumulator row
+                 | None -> ())
+              | None -> ())
         in
-        match advance () with
-        | exception Sys_error detail ->
+        let refresh () =
+          match advance () with
+          | Error _ as error -> error
+          | Ok (Dated_jsonl.Appended _ as value) -> Ok value
+          | Ok Dated_jsonl.Cursor_invalidated ->
+            restart_tracked_accumulators cache;
+            advance ()
+        in
+        match refresh () with
+        | exception exn ->
+          (* A callback/cancellation may interrupt a partially advanced mutable
+             accumulator. Never retain it with the old cursor for a retry. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Printexc.raise_with_backtrace exn backtrace
+        | Error error ->
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Error (Evidence_read_error error)
+        | Ok Dated_jsonl.Cursor_invalidated ->
           Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
           Error
             (Evidence_read_error
                (Dated_jsonl.Io_error
-                  { operation = Dated_jsonl.Read_file; path = base_dir; detail }))
-        | went_backwards ->
-          let rebuilt =
-            if went_backwards
-            then begin
-              restart_tracked_accumulators cache;
-              match advance () with
-              | exception Sys_error detail -> Error detail
-              | _ -> Ok ()
-            end
-            else Ok ()
-          in
-          (match rebuilt with
-           | Error detail ->
-             Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
-             Error
-               (Evidence_read_error
-                  (Dated_jsonl.Io_error
-                     { operation = Dated_jsonl.Read_file; path = base_dir; detail }))
-           | Ok () ->
-             Ok
-               (List.map
-                  (fun stimulus_id ->
-                     ( stimulus_id
-                     , event_queue_reaction_evidence_of_accumulator
-                         ~keeper_name
-                         ~stimulus_id
-                         (Hashtbl.find cache.tracked stimulus_id) ))
-                  stimulus_ids)))
+                  { operation = Dated_jsonl.Read_file; path = base_dir;
+                    detail = "fresh reaction evidence cursor was invalidated" }))
+        | Ok (Dated_jsonl.Appended ((), cursor)) ->
+          cache.cursor <- Some cursor;
+          Ok
+            (List.map
+               (fun stimulus_id ->
+                  ( stimulus_id
+                  , event_queue_reaction_evidence_of_accumulator
+                      ~keeper_name
+                      ~stimulus_id
+                      (Hashtbl.find cache.tracked stimulus_id) ))
+               stimulus_ids))
+
 ;;
 
 let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =

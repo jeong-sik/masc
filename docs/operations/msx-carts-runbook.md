@@ -20,6 +20,21 @@ A plain cartridge image of 16 KB or 32 KB. The machine maps it at `0x4000`
 in slot 2, the address C-BIOS checks for the `AB` header, and it has no
 MegaROM mapper. A 48 KB image or a mapper-based one does not run.
 
+## Disk images (.dsk)
+
+`cart` also takes a raw `.dsk` floppy image: a name ending in `.dsk` (the
+extension can be left off) loads into the drive instead of the slot, from
+the same `carts/` inventory. The load itself runs the C-BIOS warm-up and
+replays the Disk ROM's second-stage call, so the first observation is
+already the game loader running — a Keeper steps `masc_msx_step` from
+there and the title comes up (Sangokushi II reaches its SCREEN7 title
+around frame 3000). The observation names the image under `disk`;
+`cartridge` reads null while a disk runs.
+
+There is no fetch script for disks: a commercial `.dsk` is the operator's
+own image, the same responsibility line as any file placed in `carts/`
+beyond the pinned table below.
+
 ## Open-source cartridges
 
 `scripts/msx-fetch-homebrew-carts.sh` fills the inventory with games whose

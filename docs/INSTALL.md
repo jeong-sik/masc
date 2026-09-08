@@ -1,8 +1,9 @@
 # Install, use and upgrade MASC
 
-이 문서는 **0.34.0 릴리스 후보**의 설치 계약입니다. 현재 공개 버전은
+이 문서는 **0.34.0** 설치 계약입니다. 공개된 최신 버전은
 [GitHub Releases](https://github.com/jeong-sik/masc/releases/latest)에서 확인합니다.
-태그가 게시되기 전에는 아래 `v0.34.0` 다운로드가 동작하지 않습니다.
+아래 `v0.34.0` 다운로드는 2026-09-08에 게시된 태그를 가리킵니다. `main` 소스
+빌드가 0.34.0과 다른 점(기본 Keeper `imp`)은 본문에 따로 적었습니다.
 
 ## 플랫폼과 준비물
 
@@ -290,9 +291,11 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 
 ## 초기 프롬프트·skills·Keeper
 
-기본 설치는 **자동 시작하지 않는 Keeper `imp` 1명**과 내장 스킬
-`browser-lanes`, `browser-design`, `frontend-implement`, `frontend-verify`,
-`evidence-review`를 준비합니다. 모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
+공개된 0.34.0 바이너리는 Keeper 를 만들지 않고 내장 스킬 `browser-lanes`만
+준비합니다. 그 뒤의 `main` 소스 빌드와 다음 릴리스는 **자동 시작하지 않는
+Keeper `imp` 1명**과 내장 스킬 `browser-lanes`, `browser-design`,
+`frontend-implement`, `frontend-verify`, `evidence-review`를 함께 준비합니다.
+모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
 
 Task·Goal 검증 에이전트도 workspace에 게시된 instruction Skill을
 `keeper_skill`로 읽을 수 있습니다. 기본 `evidence-review`는 계약·실행 로그·리비전을

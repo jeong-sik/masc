@@ -1,6 +1,11 @@
 name: Release
 
 on:
+  workflow_call:
+    inputs:
+      candidate_verification:
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*'
@@ -10,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: ${{ inputs.candidate_verification && format('candidate-release-{0}', github.run_id) || format('release-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -315,12 +320,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: masc-${{ matrix.arch }}
+          overwrite: ${{ inputs.candidate_verification == true }}
           path: dist/*
 
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 15
 
     steps:
@@ -331,6 +336,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: masc-*
           merge-multiple: true
 
       - name: Verify advertised release assets
@@ -388,7 +394,15 @@ jobs:
            done) >> SHA256SUMS
           cat SHA256SUMS
 
+      - name: Upload assembled distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-distribution-attempt-${{ github.run_attempt }}
+          path: release-assets/*
+          if-no-files-found: error
+
       - name: Create Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
         uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*

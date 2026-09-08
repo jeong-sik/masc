@@ -1785,7 +1785,7 @@ type async_msg =
       string * int * (float * string) option *
       (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
-      string * (Masc.Tui_decode.lane_run_detail, string) result
+      string * int * (Masc.Tui_decode.lane_run_detail, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -4978,6 +4978,8 @@ let launch_lane_runs_load ?before state ~mailbox ~lane_id =
         (Lane_runs_loaded (lane_id, generation, before, Error "Eio switch is unavailable"))
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
+  state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
+  let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4986,7 +4988,7 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lane_run_detail_loaded (run_id, result))
+    enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4995,7 +4997,7 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Lane_run_detail_loaded (run_id, Error "Eio switch is unavailable"))
+        (Lane_run_detail_loaded (run_id, generation, Error "Eio switch is unavailable"))
 
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
@@ -12484,13 +12486,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
        | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
-  | Lane_run_detail_loaded (run_id, result) ->
+  | Lane_run_detail_loaded (run_id, generation, result) ->
       (match state.lanes_mode with
-       | Lanes_run_detail (_, open_run) when String.equal open_run run_id ->
+       | Lanes_run_detail (_, open_run)
+         when generation = state.lane_run_detail_generation
+              && String.equal open_run run_id ->
            (match result with
-            | Ok detail ->
+            | Ok detail when String.equal detail.Tui_decode.lrd_run_id run_id ->
                 state.lane_run_detail <- Some detail;
                 state.lane_run_detail_error <- None
+            | Ok _ ->
+                state.lane_run_detail_error <-
+                  Some "lane run detail response does not match the requested run"
             | Error detail -> state.lane_run_detail_error <- Some detail)
        | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Harness_loaded result -> (

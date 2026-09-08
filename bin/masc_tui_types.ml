@@ -3827,6 +3827,7 @@ type state = {
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
@@ -5160,6 +5161,7 @@ let create_state
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;
+  lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
   keeper_secrets = [];

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import {
   classifyFusionJudgeShape,
@@ -99,16 +98,16 @@ describe('normalizeFusionPanel', () => {
     const panel = normalizeFusionPanel([
       { name: 'claude', status: '', usage: { input_tokens: '10', output_tokens: 20 } },
     ])
-    expect(panel[0].model).toBe('claude')
-    expect(panel[0].status).toBe('unknown')
-    expect(panel[0].inputTokens).toBe(10)
-    expect(panel[0].outputTokens).toBe(20)
+    expect(panel[0]!.model).toBe('claude')
+    expect(panel[0]!.status).toBe('unknown')
+    expect(panel[0]!.inputTokens).toBe(10)
+    expect(panel[0]!.outputTokens).toBe(20)
   })
 
   it('drops non-record entries and assigns a fallback name when model is missing', () => {
     const panel = normalizeFusionPanel(['not-a-record', {}])
     expect(panel).toHaveLength(1)
-    expect(panel[0].model).toBe('panel-2')
+    expect(panel[0]!.model).toBe('panel-2')
   })
 })
 
@@ -278,8 +277,8 @@ describe('normalizeFusionJudgeNodes', () => {
   it('drops non-record elements and defaults a missing role/identity', () => {
     const nodes = normalizeFusionJudgeNodes([null, 'x', { input_tokens: 1 }])
     expect(nodes).toHaveLength(1)
-    expect(nodes[0].role).toBe('judge')
-    expect(nodes[0].identity).toBe('judge-3')
+    expect(nodes[0]!.role).toBe('judge')
+    expect(nodes[0]!.identity).toBe('judge-3')
   })
 
   it('carries per-node decision + resolved-answer summary for a synthesized node, none for a failed node', () => {
@@ -294,18 +293,18 @@ describe('normalizeFusionJudgeNodes', () => {
       },
       { role: 'first', identity: 'domain', status: 'failed', error: 'timeout' },
     ])
-    expect(nodes[0].decision).toBe('recommend — patch first')
-    expect(nodes[0].summary).toBe('Patch the compact isolation first.')
+    expect(nodes[0]!.decision).toBe('recommend — patch first')
+    expect(nodes[0]!.summary).toBe('Patch the compact isolation first.')
     // a failed node carries neither verdict nor summary (Judge_failed emits neither)
-    expect(nodes[1].decision).toBeUndefined()
-    expect(nodes[1].summary).toBeUndefined()
+    expect(nodes[1]!.decision).toBeUndefined()
+    expect(nodes[1]!.summary).toBeUndefined()
   })
 
   it('falls back to synthesis when a synthesized node has no resolved_answer', () => {
     const [node] = normalizeFusionJudgeNodes([
       { role: 'first', identity: 'lit', decision: 'insufficient — missing: data', synthesis: '**Decision**: insufficient' },
     ])
-    expect(node.summary).toBe('**Decision**: insufficient')
+    expect(node!.summary).toBe('**Decision**: insufficient')
   })
 
   it('extracts failure_code / elapsed_s / timed_out from a Judge_failed node', () => {
@@ -336,15 +335,15 @@ describe('normalizeFusionJudgeNodes', () => {
     const [node] = normalizeFusionJudgeNodes([
       { role: 'first', identity: 'gpt-4o', input_tokens: 100, output_tokens: 10 },
     ])
-    expect(node.failureCode).toBeUndefined()
-    expect(node.elapsedS).toBeUndefined()
-    expect(node.timedOut).toBeUndefined()
+    expect(node!.failureCode).toBeUndefined()
+    expect(node!.elapsedS).toBeUndefined()
+    expect(node!.timedOut).toBeUndefined()
   })
 })
 
 describe('classifyFusionJudgeShape', () => {
   // role values match fusion_sink.ml judge_role_fields: single | refine | first | meta.
-  const node = role => ({ role, identity: 'm', failed: false })
+  const node = (role: string) => ({ role, identity: 'm', failed: false })
 
   it('a lone single node -> single', () => {
     expect(classifyFusionJudgeShape([node('single')])).toBe('single')

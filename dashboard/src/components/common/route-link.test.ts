@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -17,7 +16,7 @@ vi.mock('../../router', () => ({
 describe('RouteLink', () => {
   it('renders anchor with href', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, children: 'Home' }), container)
     const a = container.querySelector('a')
     expect(a?.getAttribute('href')).toBe('#home')
     expect(a?.classList.contains('v2-mobile-operator-target')).toBe(true)
@@ -25,34 +24,34 @@ describe('RouteLink', () => {
 
   it('renders children', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, children: 'Home' }), container)
     expect(container.textContent).toContain('Home')
   })
 
   it('applies class', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any, class: 'my-link' }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, class: 'my-link', children: 'Home' }), container)
     const a = container.querySelector('a')
     expect(a?.classList.contains('my-link')).toBe(true)
   })
 
   it('applies title', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any, title: 'Go home' }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, title: 'Go home', children: 'Home' }), container)
     const a = container.querySelector('a')
     expect(a?.getAttribute('title')).toBe('Go home')
   })
 
   it('applies aria-current', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any, ariaCurrent: 'page' }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, ariaCurrent: 'page', children: 'Home' }), container)
     const a = container.querySelector('a')
     expect(a?.getAttribute('aria-current')).toBe('page')
   })
 
   it('passes accessible names through for icon-only nav links', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any, 'aria-label': 'Home surface' }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, 'aria-label': 'Home surface', children: 'Home' }), container)
     const a = container.querySelector('a')
     expect(a?.getAttribute('aria-label')).toBe('Home surface')
     expect(a?.getAttribute('role')).toBeNull()
@@ -60,7 +59,7 @@ describe('RouteLink', () => {
 
   it('uses the dashboard accent focus ring instead of the old blue ring', () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, children: 'Home' }), container)
     const className = container.querySelector('a')?.getAttribute('class') ?? ''
     expect(className).toContain('focus-visible:ring-[var(--accent-45)]')
     expect(className).not.toContain('71,184,255')
@@ -68,7 +67,7 @@ describe('RouteLink', () => {
 
   it('calls navigate on left click', async () => {
     const container = document.createElement('div')
-    render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)
+    render(h(RouteLink, { tab: 'home' as any, children: 'Home' }), container)
     const a = container.querySelector('a') as HTMLElement
     a.click()
     await new Promise((r) => setTimeout(r, 0))

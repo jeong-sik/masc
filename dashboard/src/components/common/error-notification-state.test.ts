@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import {
   errors,
@@ -18,7 +17,8 @@ function makeError(overrides: Partial<DashboardError> = {}): DashboardError {
     agentName: 'Alpha',
     taskId: null,
     message: 'a',
-    errorCode: 'internal_error',
+    errorCode: 'exception',
+    domain: 'internal',
     severity: 'critical',
     timestamp: Date.now(),
     acknowledged: false,
@@ -61,8 +61,8 @@ describe('error-notification-state', () => {
       makeError({ id: '2', message: 'b', acknowledged: false }),
     ]
     acknowledgeError('1')
-    expect(errors.value[0].acknowledged).toBe(true)
-    expect(errors.value[1].acknowledged).toBe(false)
+    expect(errors.value[0]!.acknowledged).toBe(true)
+    expect(errors.value[1]!.acknowledged).toBe(false)
     expect(unacknowledgedCount.value).toBe(1)
   })
 
@@ -71,7 +71,7 @@ describe('error-notification-state', () => {
       makeError({ id: '1', message: 'a', acknowledged: false }),
     ]
     acknowledgeError('999')
-    expect(errors.value[0].acknowledged).toBe(false)
+    expect(errors.value[0]!.acknowledged).toBe(false)
     expect(unacknowledgedCount.value).toBe(1)
   })
 
@@ -124,7 +124,7 @@ describe('error-notification-state', () => {
       vi.advanceTimersByTime(60 * 1000)
 
       expect(errors.value.length).toBe(1)
-      expect(errors.value[0].id).toBe('1')
+      expect(errors.value[0]!.id).toBe('1')
 
       stopErrorCleanup()
       vi.useRealTimers()

@@ -5416,10 +5416,14 @@ def chat_steer_interaction(
         send_and_wait(
             process, master_fd, output, steer, composer_showing(steer)
         )
-        steered = send_and_wait(
-            process, master_fd, output, b"\r", b"STEER 1"
-        )
-        plain = CSI_RE.sub(b"", frame_containing(steered, b"STEER 1"))
+        send_and_wait(process, master_fd, output, b"\r", b"STEER 1")
+        # Read the screen, not the frame the steer arrived in. Queueing the
+        # steer renumbers the ordinary entry's header row -- NEXT 1 becomes
+        # NEXT 2 -- but leaves its body row alone, and a frame carries only
+        # the rows that changed. So the frame holds three of these four
+        # strings and the fourth has been sitting on screen since it was
+        # queued.
+        plain = screen_text(bytes(output))
         expected_rows = (
             b"STEER 1",
             b"corrected-course",

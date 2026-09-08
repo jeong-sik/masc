@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -82,7 +81,7 @@ describe('CytoscapeFsm', () => {
   })
 
   it('shows error when cytoscape throws', async () => {
-    const cytoscape = (await import('cytoscape')).default
+    const cytoscape = vi.mocked((await import('cytoscape')).default)
     cytoscape.mockImplementationOnce(() => {
       throw new Error('fail')
     })
@@ -124,10 +123,11 @@ describe('CytoscapeFsm', () => {
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
 
-    const cytoscape = (await import('cytoscape')).default
+    const cytoscape = vi.mocked((await import('cytoscape')).default)
     await waitFor(() => expect(cytoscape).toHaveBeenCalled())
-    const options = cytoscape.mock.calls.at(-1)?.[0]
-    const nodeStyle = options.style.find((block) => block.selector === 'node').style
+    type StyleBlock = { selector: string; style: Record<string, string> }
+    const options = cytoscape.mock.calls.at(-1)?.[0] as unknown as { style: StyleBlock[] }
+    const nodeStyle = options.style.find(block => block.selector === 'node')!.style
     expect(nodeStyle.color).toBe('rgb(1, 2, 3)')
     expect(nodeStyle['background-color']).toBe('rgb(4, 5, 6)')
     expect(nodeStyle['border-color']).toBe('#4a4137')

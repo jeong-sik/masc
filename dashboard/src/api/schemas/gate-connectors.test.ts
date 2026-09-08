@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import {
   parseGateConnectorsData,
@@ -22,12 +21,12 @@ describe('parseGateConnectorsData', () => {
   it('parses minimal valid data', () => {
     const result = parseGateConnectorsData(minimalOuter)
     expect(result.connectors).toHaveLength(1)
-    expect(result.connectors[0].connector_id).toBe('c1')
-    expect(result.connectors[0].capabilities).toEqual([])
-    expect(result.connectors[0].trigger_policy).toBeNull()
-    expect(result.connectors[0].available).toBe(false)
-    expect(result.connectors[0].guild_count).toBe(0)
-    expect(result.connectors[0].source_health).toEqual({
+    expect(result.connectors[0]!.connector_id).toBe('c1')
+    expect(result.connectors[0]!.capabilities).toEqual([])
+    expect(result.connectors[0]!.trigger_policy).toBeNull()
+    expect(result.connectors[0]!.available).toBe(false)
+    expect(result.connectors[0]!.guild_count).toBe(0)
+    expect(result.connectors[0]!.source_health).toEqual({
       storage_paths: 'fallback',
       runtime_summary: 'fallback',
       binding_summary: 'fallback',
@@ -44,7 +43,7 @@ describe('parseGateConnectorsData', () => {
       connectors: [{ ...minimalConnector, trigger_policy: 'all' }],
       discord_trigger_policy: 'mention_only',
     })
-    expect(result.connectors[0].trigger_policy).toBe('all')
+    expect(result.connectors[0]!.trigger_policy).toBe('all')
     expect('discord_trigger_policy' in result).toBe(false)
   })
 
@@ -57,8 +56,8 @@ describe('parseGateConnectorsData', () => {
       ],
     })
     expect(result.connectors).toHaveLength(1)
-    expect(result.connectors[0].connector_id).toBe('c2')
-    expect(result.connectors[0].trigger_policy).toBeNull()
+    expect(result.connectors[0]!.connector_id).toBe('c2')
+    expect(result.connectors[0]!.trigger_policy).toBeNull()
   })
 
   it('throws GateConnectorsSchemaDriftError when generated_at is empty', () => {
@@ -115,8 +114,8 @@ describe('parseGateConnectorsData', () => {
       generated_at: '2024-01-01T00:00:00Z',
     })
     expect(result.connectors).toHaveLength(2)
-    expect(result.connectors[0].connector_id).toBe('c1')
-    expect(result.connectors[1].connector_id).toBe('c2')
+    expect(result.connectors[0]!.connector_id).toBe('c1')
+    expect(result.connectors[1]!.connector_id).toBe('c2')
   })
 
   it('parses configured_bindings filtering invalid entries', () => {
@@ -137,8 +136,8 @@ describe('parseGateConnectorsData', () => {
       active_count: 1,
       generated_at: '2024-01-01T00:00:00Z',
     })
-    expect(result.connectors[0].configured_bindings).toHaveLength(1)
-    expect(result.connectors[0].configured_bindings[0]).toEqual({
+    expect(result.connectors[0]!.configured_bindings).toHaveLength(1)
+    expect(result.connectors[0]!.configured_bindings[0]).toEqual({
       channel_id: 'ch1',
       keeper_name: 'k1',
     })
@@ -170,13 +169,13 @@ describe('parseGateConnectorsData', () => {
       active_count: 1,
       generated_at: '2024-01-01T00:00:00Z',
     })
-    expect(result.connectors[0].recent_audit).toHaveLength(1)
-    expect(result.connectors[0].recent_audit[0].previous_keeper).toBe('old_k')
+    expect(result.connectors[0]!.recent_audit).toHaveLength(1)
+    expect(result.connectors[0]!.recent_audit[0]!.previous_keeper).toBe('old_k')
   })
 
   it('parses storage_paths with defaults for missing input', () => {
     const result = parseGateConnectorsData(minimalOuter)
-    expect(result.connectors[0].storage_paths).toEqual({
+    expect(result.connectors[0]!.storage_paths).toEqual({
       status_path: '',
       binding_store_path: '',
       audit_path: '',
@@ -199,17 +198,17 @@ describe('parseGateConnectorsData', () => {
       active_count: 1,
       generated_at: '2024-01-01T00:00:00Z',
     })
-    expect(result.connectors[0].storage_paths).toEqual({
+    expect(result.connectors[0]!.storage_paths).toEqual({
       status_path: '/status',
       binding_store_path: '/bindings',
       audit_path: '/audit',
     })
-    expect(result.connectors[0].source_health.storage_paths).toBe('present')
+    expect(result.connectors[0]!.source_health.storage_paths).toBe('present')
   })
 
   it('parses runtime_summary with defaults when missing', () => {
     const result = parseGateConnectorsData(minimalOuter)
-    expect(result.connectors[0].runtime_summary).toEqual({
+    expect(result.connectors[0]!.runtime_summary).toEqual({
       available: false,
       connected: false,
       stale: false,
@@ -260,11 +259,11 @@ describe('parseGateConnectorsData', () => {
       active_count: 1,
       generated_at: '2024-01-01T00:00:00Z',
     })
-    expect(result.connectors[0].runtime_summary.available).toBe(true)
-    expect(result.connectors[0].runtime_summary.connected).toBe(true)
-    expect(result.connectors[0].runtime_summary.stale_after_sec).toBe(300)
-    expect(result.connectors[0].runtime_summary.gate_healthy).toBe(true)
-    expect(result.connectors[0].source_health.runtime_summary).toBe('present')
+    expect(result.connectors[0]!.runtime_summary.available).toBe(true)
+    expect(result.connectors[0]!.runtime_summary.connected).toBe(true)
+    expect(result.connectors[0]!.runtime_summary.stale_after_sec).toBe(300)
+    expect(result.connectors[0]!.runtime_summary.gate_healthy).toBe(true)
+    expect(result.connectors[0]!.source_health.runtime_summary).toBe('present')
   })
 
   it('parses binding_summary with cross-field default for configured_bindings_count', () => {
@@ -282,9 +281,9 @@ describe('parseGateConnectorsData', () => {
       active_count: 1,
       generated_at: '2024-01-01T00:00:00Z',
     })
-    expect(result.connectors[0].binding_summary.configured_bindings_count).toBe(2)
-    expect(result.connectors[0].binding_summary.binding_source).toBe('')
-    expect(result.connectors[0].binding_summary.runtime_bindings_count).toBe(0)
+    expect(result.connectors[0]!.binding_summary.configured_bindings_count).toBe(2)
+    expect(result.connectors[0]!.binding_summary.binding_source).toBe('')
+    expect(result.connectors[0]!.binding_summary.runtime_bindings_count).toBe(0)
   })
 
   it('parses binding_summary retaining provided configured_bindings_count', () => {
@@ -306,16 +305,16 @@ describe('parseGateConnectorsData', () => {
       active_count: 1,
       generated_at: '2024-01-01T00:00:00Z',
     })
-    expect(result.connectors[0].binding_summary.configured_bindings_count).toBe(5)
-    expect(result.connectors[0].binding_summary.binding_source).toBe('config')
-    expect(result.connectors[0].binding_summary.runtime_bindings_count).toBe(3)
-    expect(result.connectors[0].source_health.binding_summary).toBe('present')
+    expect(result.connectors[0]!.binding_summary.configured_bindings_count).toBe(5)
+    expect(result.connectors[0]!.binding_summary.binding_source).toBe('config')
+    expect(result.connectors[0]!.binding_summary.runtime_bindings_count).toBe(3)
+    expect(result.connectors[0]!.source_health.binding_summary).toBe('present')
   })
 
   it('parses observed_channel as null when missing', () => {
     const result = parseGateConnectorsData(minimalOuter)
-    expect(result.connectors[0].observed_channel).toBeNull()
-    expect(result.connectors[0].source_health.observed_channel).toBe('missing')
+    expect(result.connectors[0]!.observed_channel).toBeNull()
+    expect(result.connectors[0]!.source_health.observed_channel).toBe('missing')
   })
 
   it('preserves total and active_count from input', () => {

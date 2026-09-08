@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -8,7 +7,7 @@ describe('CollapsibleSection', () => {
   it('renders title and children', () => {
     const container = document.createElement('div')
     render(
-      h(CollapsibleSection, { title: 'Section A' }, h('p', null, 'Content')),
+      h(CollapsibleSection, { title: 'Section A', children: h('p', null, 'Content') }),
       container,
     )
     expect(container.textContent).toContain('Section A')
@@ -18,7 +17,7 @@ describe('CollapsibleSection', () => {
   it('respects mountWhenOpen and hides children initially', () => {
     const container = document.createElement('div')
     render(
-      h(CollapsibleSection, { title: 'T', mountWhenOpen: true }, h('p', null, 'Hidden')),
+      h(CollapsibleSection, { title: 'T', mountWhenOpen: true, children: h('p', null, 'Hidden') }),
       container,
     )
     expect(container.textContent).not.toContain('Hidden')
@@ -29,8 +28,7 @@ describe('CollapsibleSection', () => {
     render(
       h(
         CollapsibleSection,
-        { title: 'T', open: true, mountWhenOpen: true },
-        h('p', null, 'Visible'),
+        { title: 'T', open: true, mountWhenOpen: true, children: h('p', null, 'Visible') },
       ),
       container,
     )
@@ -40,7 +38,7 @@ describe('CollapsibleSection', () => {
   it('renders badge in summary', () => {
     const container = document.createElement('div')
     render(
-      h(CollapsibleSection, { title: 'T', badge: h('span', null, '3') }, 'Content'),
+      h(CollapsibleSection, { title: 'T', badge: h('span', null, '3'), children: 'Content' }),
       container,
     )
     expect(container.textContent).toContain('3')
@@ -49,7 +47,7 @@ describe('CollapsibleSection', () => {
   it('applies custom class', () => {
     const container = document.createElement('div')
     render(
-      h(CollapsibleSection, { title: 'T', class: 'my-section' }, 'Content'),
+      h(CollapsibleSection, { title: 'T', class: 'my-section', children: 'Content' }),
       container,
     )
     const details = container.querySelector('details')
@@ -59,7 +57,7 @@ describe('CollapsibleSection', () => {
   it('applies id', () => {
     const container = document.createElement('div')
     render(
-      h(CollapsibleSection, { title: 'T', id: 'sect-1' }, 'Content'),
+      h(CollapsibleSection, { title: 'T', id: 'sect-1', children: 'Content' }),
       container,
     )
     const details = container.querySelector('details')
@@ -69,7 +67,7 @@ describe('CollapsibleSection', () => {
   it('mounts children on toggle open when mountWhenOpen=true', async () => {
     const container = document.createElement('div')
     render(
-      h(CollapsibleSection, { title: 'T', mountWhenOpen: true }, h('p', null, 'Lazy')),
+      h(CollapsibleSection, { title: 'T', mountWhenOpen: true, children: h('p', null, 'Lazy') }),
       container,
     )
     const details = container.querySelector('details') as HTMLDetailsElement

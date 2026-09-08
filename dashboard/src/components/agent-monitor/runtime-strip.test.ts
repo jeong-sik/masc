@@ -1,8 +1,12 @@
-// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, h } from 'preact'
 import { AgentRuntimeStrip } from './runtime-strip'
+import type { runtimeCatalogState } from '../../lib/runtime-catalog-resource'
+
+// Bound to the real signal's value type so a shape change in the resource
+// breaks this file instead of leaving a stale mock that still passes.
+type RuntimeCatalogValue = (typeof runtimeCatalogState)['value']
 
 const mockFindKeeper = vi.hoisted(() => vi.fn())
 const mockKeeperDisplayRuntime = vi.hoisted(() => vi.fn())
@@ -10,7 +14,9 @@ const mockKeeperActivityDisplay = vi.hoisted(() => vi.fn())
 const mockFormatDuration = vi.hoisted(() => vi.fn((s: number) => `${s}s`))
 const mockFindRuntimeCatalogEntry = vi.hoisted(() => vi.fn())
 const mockLoadRuntimeCatalog = vi.hoisted(() => vi.fn())
-const mockRuntimeCatalogState = vi.hoisted(() => ({ value: { status: 'idle' } }))
+const mockRuntimeCatalogState = vi.hoisted<{ value: RuntimeCatalogValue }>(
+  () => ({ value: { status: 'idle' } }),
+)
 const mockRuntimeCatalogSnapshotFacts = vi.hoisted(() => vi.fn())
 const mockRuntimeCatalogEffectiveCapabilities = vi.hoisted(() => vi.fn())
 
@@ -129,7 +135,7 @@ describe('AgentRuntimeStrip', () => {
   })
 
   it('renders runtime catalog facts when a catalog entry is loaded', () => {
-    const entry = { runtime_id: 'agentCore.primary' }
+    const entry = { provider: 'agentCore', models: [], runtime_id: 'agentCore.primary' }
     mockFindKeeper.mockReturnValue({
       pipeline_stage: null,
       context_ratio: null,

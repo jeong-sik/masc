@@ -90,41 +90,86 @@ let test_overwrites_stale_copy () =
       check string "converged content"
         "---\ndescription: example\n---\nbody v2\n" (read_file stale))
 
-let test_runtime_extra_files_are_removed () =
-  with_temp_prompts_dir (fun dir ->
-      let extra = Filename.concat dir "operator.custom.md" in
-      Out_channel.with_open_text extra (fun oc ->
-          Out_channel.output_string oc "local-only\n");
-      let (_ : Managed_asset_sync.sync_result) = sync ~prompts_dir:dir in
-      check bool "runtime extra removed" false (Sys.file_exists extra))
+let mentions ~line needle =
+  let nl = String.length needle and hl = String.length line in
+  let rec scan i = i + nl <= hl && (String.sub line i nl = needle || scan (i + 1)) in
+  scan 0
 
-(* The deletion above is the only thing that happens to a file an operator
-   puts in the runtime directory, and the boot log is the only place it is
-   announced. That log reads [removed], so the two have to be checked
-   together: the case above dropped the result and asserted on the
-   filesystem, which passes just as well when [removed] comes back empty and
-   the operator is told nothing. *)
-let test_an_operator_file_reaches_the_log_line () =
+(* A prompt file the operator wrote into the runtime directory was in no
+   manifest, so it is not the distribution's to remove. It survives the
+   first pass (no manifest yet), a pass with a manifest that lists only the
+   managed files, and a pass on which a managed asset retires beside it. *)
+let test_an_operator_file_survives_every_pass () =
   with_temp_prompts_dir (fun dir ->
       let extra = Filename.concat dir "operator.custom.md" in
       Out_channel.with_open_text extra (fun oc ->
           Out_channel.output_string oc "local-only\n");
+      let first = sync ~prompts_dir:dir in
+      check (list string) "first pass removes nothing" [] first.Managed_asset_sync.removed;
+      check bool "first pass leaves it" true (Sys.file_exists extra);
+      let second = sync ~prompts_dir:dir in
+      check (list string) "a pass with a manifest removes nothing" []
+        second.Managed_asset_sync.removed;
+      check bool "no log line for a file that stayed" true
+        (Option.is_none (Managed_asset_sync.removed_line ~label:"prompt" second));
+      let retired = Filename.concat dir "keeper.retired.md" in
+      Out_channel.with_open_text retired (fun oc ->
+          Out_channel.output_string oc "distribution copy\n");
+      write_runtime_manifest dir
+        [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ];
+      let third = sync ~prompts_dir:dir in
+      check (list string) "only the retired asset goes" [ "prompts/keeper.retired.md" ]
+        third.Managed_asset_sync.removed;
+      check bool "the operator's file is still there" true (Sys.file_exists extra);
+      check string "with its content" "local-only\n" (read_file extra))
+
+(* The boot log is the only place a retirement is announced. That log
+   reads [removed], so the two are checked together: asserting on the
+   filesystem alone passes just as well when [removed] comes back empty and
+   the operator is told nothing. *)
+let test_a_retired_asset_reaches_the_log_line () =
+  with_temp_prompts_dir (fun dir ->
+      let retired = Filename.concat dir "keeper.retired.md" in
+      Out_channel.with_open_text retired (fun oc ->
+          Out_channel.output_string oc "distribution copy\n");
+      write_runtime_manifest dir
+        [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ];
       let result = sync ~prompts_dir:dir in
-      check (list string) "removed names the operator's file"
-        [ "prompts/operator.custom.md" ] result.Managed_asset_sync.removed;
+      check (list string) "removed names the retired asset"
+        [ "prompts/keeper.retired.md" ] result.Managed_asset_sync.removed;
       match Managed_asset_sync.removed_line ~label:"prompt" result with
       | None -> failf "a deleted file produced no log line"
       | Some line ->
-          let mentions needle =
-            let nl = String.length needle and hl = String.length line in
-            let rec scan i =
-              i + nl <= hl && (String.sub line i nl = needle || scan (i + 1))
-            in
-            scan 0
-          in
-          check bool "the line names the file" true
-            (mentions "operator.custom.md");
-          check bool "and says why it went" true (mentions "embedded"))
+          check bool "the line names the file" true (mentions ~line "keeper.retired.md");
+          check bool "and says why it went" true (mentions ~line "no longer embedded"))
+
+(* A manifest another domain wrote, or one that does not read, owns
+   nothing here: the pass copies and overwrites as usual, deletes nothing,
+   and says what was wrong with the manifest. *)
+let test_a_foreign_or_broken_manifest_retires_nothing () =
+  List.iter
+    (fun (name, content) ->
+      with_temp_prompts_dir (fun dir ->
+          let stray = Filename.concat dir "keeper.stray.md" in
+          Out_channel.with_open_text stray (fun oc ->
+              Out_channel.output_string oc "whatever was here\n");
+          Out_channel.with_open_text (Filename.concat dir "managed-assets.json")
+            (fun oc -> Out_channel.output_string oc content);
+          let result = sync ~prompts_dir:dir in
+          check (list string) (name ^ ": removed") [] result.Managed_asset_sync.removed;
+          check bool (name ^ ": the stray file stays") true (Sys.file_exists stray);
+          check (list string) (name ^ ": managed assets still copied")
+            [ "prompts/behavior/contract.md"; "prompts/keeper.example.md" ]
+            (List.sort compare result.Managed_asset_sync.copied);
+          check bool (name ^ ": the manifest problem is reported") true
+            (List.exists
+               (fun (rel, _) -> String.equal rel "prompts/managed-assets.json")
+               result.Managed_asset_sync.failed)))
+    [ "tool-domain manifest", manifest ~schema:"masc.tool-managed-assets.v1" [ "keeper.stray.md" ]
+    ; "not JSON", "{ this is not json"
+    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v1"}|}
+    ; "unsafe path", manifest [ "../keeper.stray.md" ]
+    ]
 
 (* An embedded tree with nothing under prompts/ is the crunch-lost-the-tree
    state. Every domain ships assets, so the sync refuses to project the
@@ -411,10 +456,12 @@ let () =
           test_case "second run is a no-op" `Quick test_second_run_is_noop;
           test_case "overwrites stale runtime copy" `Quick
             test_overwrites_stale_copy;
-          test_case "runtime extra files are removed" `Quick
-            test_runtime_extra_files_are_removed;
-          test_case "an operator's file reaches the log line" `Quick
-            test_an_operator_file_reaches_the_log_line;
+          test_case "an operator's file survives every pass" `Quick
+            test_an_operator_file_survives_every_pass;
+          test_case "a retired asset reaches the log line" `Quick
+            test_a_retired_asset_reaches_the_log_line;
+          test_case "a foreign or broken manifest retires nothing" `Quick
+            test_a_foreign_or_broken_manifest_retires_nothing;
           test_case "empty embedded set fails closed" `Quick
             test_empty_embedded_set_fails_closed;
           test_case "unsafe embedded paths preserve runtime assets and manifest" `Quick

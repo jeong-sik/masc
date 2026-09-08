@@ -1,0 +1,42 @@
+{
+  "jobs": [
+    {
+      "completed_at": "2026-09-08T06:19:46Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34192837971/job/101954246889",
+      "id": 101954246889,
+      "name": "build (ubuntu-24.04-arm, linux-arm64, arm64)",
+      "started_at": "2026-09-08T06:00:44Z",
+      "status": "completed"
+    },
+    {
+      "completed_at": "2026-09-08T06:17:12Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34192837971/job/101954247098",
+      "id": 101954247098,
+      "name": "build (ubuntu-24.04, linux-x64, amd64)",
+      "started_at": "2026-09-08T06:01:42Z",
+      "status": "completed"
+    },
+    {
+      "completed_at": "2026-09-08T06:11:33Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34192837971/job/101954247103",
+      "id": 101954247103,
+      "name": "build (macos-14, macos-arm64)",
+      "started_at": "2026-09-08T06:00:40Z",
+      "status": "completed"
+    },
+    {
+      "completed_at": null,
+      "conclusion": null,
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34192837971/job/101954247128",
+      "id": 101954247128,
+      "name": "build (macos-15-intel, macos-x64)",
+      "started_at": "2026-09-08T06:00:38Z",
+      "status": "in_progress"
+    }
+  ],
+  "release_run": 34192837971,
+  "source_commit": "215517f229fd74c5300ee7fc4aae91f29da1db4c"
+}

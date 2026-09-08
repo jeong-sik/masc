@@ -18,8 +18,8 @@ val run_named_with_masc_tools :
   ?goal_blocks:Agent_core.Types.content_block list ->
   base_path:string ->
   system_prompt:string ->
-  masc_tools:Masc_domain.tool_schema list ->
   ?native_tools:Agent_core.Tool.t list ->
+  masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->

@@ -5240,4 +5240,5 @@
 (test
  (name test_standalone_skill_tools)
  (modules test_standalone_skill_tools)
- (libraries masc_test_deps masc.skill_snapshot_service))
+ (libraries masc_test_deps masc.skill_reference masc.skill_snapshot
+  masc.skill_snapshot_service))

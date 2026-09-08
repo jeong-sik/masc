@@ -239,7 +239,7 @@ def stop_server(server):
             server.wait()
 
 
-def kata_proof(args, fixture, base, output, runtime_env, server, owned_volumes):
+def kata_proof(args, fixture, base, output, runtime_env, server):
     ids = command(['nerdctl', 'ps', '-aq', '--no-trunc', '--filter',
                    'label=masc.mcp.keeper=' + args.keeper], runtime_env).split()
     if len(ids) != 1:
@@ -250,18 +250,23 @@ def kata_proof(args, fixture, base, output, runtime_env, server, owned_volumes):
     spec = container['Spec']
     if container['Runtime']['Name'] != 'io.containerd.kata.v2':
         raise SmokeError('Keeper container did not use the Kata runtime')
+    # nerdctl v2.3.5 labels.Networks is JSON-encoded []string.
+    if json.loads(container.get('Labels', {}).get('nerdctl/networks', 'null')) != ['none']:
+        raise SmokeError('original Kata guest network is not none')
     if spec.get('hostname') != fixture.proof['hostname']:
         raise SmokeError('ToolResult hostname differs from the actual Kata guest')
     if spec.get('root', {}).get('readonly') is not True:
         raise SmokeError('Kata guest rootfs is not read-only')
     user = spec['process']['user']
-    if user['uid'] != fixture.proof['uid'] or spec['process'].get('capabilities', {}).get('effective'):
+    if user['uid'] != os.getuid() or user['uid'] != fixture.proof['uid'] or spec['process'].get('capabilities', {}).get('effective'):
         raise SmokeError('guest UID or capability boundary differs from the actual tool')
     mounts = spec['mounts']
     work_mount = next((mount for mount in mounts if mount['destination'] == '/masc-work'), None)
     shim_mount = next((mount for mount in mounts if mount['destination'] == '/opt/masc-exec-shim'), None)
     if not work_mount or not shim_mount:
         raise SmokeError('Kata work volume or release shim mount is absent')
+    if 'ro' not in shim_mount.get('options', []) or 'rw' in shim_mount.get('options', []):
+        raise SmokeError('guest release shim mount is not read-only')
     if Path(shim_mount['source']).resolve() != base / '.masc/microvm/shim':
         raise SmokeError('guest did not mount this workspace release shim')
     tool_results = [m for req in fixture.requests for m in req.get('messages', [])
@@ -293,7 +298,6 @@ def kata_proof(args, fixture, base, output, runtime_env, server, owned_volumes):
     if len(matching) != 1:
         raise SmokeError('Kata work mount is not an identified managed named volume')
     volume = matching[0]['Name']
-    owned_volumes.append(volume)
     (output / 'work-volume.json').write_text(json.dumps(matching[0], indent=2))
     checkpoint, data = wait_until('canonical final Kata checkpoint',
                                  lambda: checkpoint_proof(base, fixture), server)
@@ -304,7 +308,8 @@ def kata_proof(args, fixture, base, output, runtime_env, server, owned_volumes):
                          'label=masc.mcp.keeper=' + args.keeper], runtime_env).split()
     if remaining:
         command(['nerdctl', 'rm', '-f', *remaining], runtime_env)
-    reread = json.loads(command(['nerdctl', 'run', '--rm', '--runtime', 'io.containerd.kata.v2',
+    reread = json.loads(command(['nerdctl', 'run', '--rm', '--name', args.keeper + '-persistence',
+        '--label', 'masc.mcp.keeper=' + args.keeper, '--runtime', 'io.containerd.kata.v2',
         '--pull', 'never', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--tmpfs', '/tmp',
         '--user', identity, '-v', volume + ':/masc-work', args.image, 'cat', proof_path], runtime_env))
     if reread != fixture.proof:
@@ -327,7 +332,7 @@ def run(args):
     server = None
     docker_env = os.environ.copy()
     owned = []
-    owned_volumes = []
+    owned_volumes = ['masc-keeper-work-' + keeper] if args.backend == 'nerdctl_kata' else []
     try:
         docker_host = None
         if args.backend == 'docker':
@@ -337,6 +342,8 @@ def run(args):
                 contexts = json.loads(command(['docker', 'context', 'inspect'], docker_env))
                 docker_host = contexts[0]['Endpoints']['docker']['Host']
         else:
+            if os.getuid() <= 0:
+                raise SmokeError('installed Kata acceptance must run as a nonroot host user')
             if not args.guest_shim:
                 raise SmokeError('--backend nerdctl_kata requires --guest-shim from the installed release')
             images = json.loads(command(['nerdctl', 'image', 'inspect', '--mode', 'native', args.image], docker_env))
@@ -460,7 +467,7 @@ def run(args):
                         raise SmokeError('expected exactly tool-request then actual ToolResult/final response')
                     if args.backend == 'nerdctl_kata':
                         container_id, checkpoint, data = kata_proof(
-                            args, fixture, base, output, docker_env, server, owned_volumes)
+                            args, fixture, base, output, docker_env, server)
                     else:
                         ids = command(['docker', 'ps', '-aq', '--filter', 'label=masc.mcp.keeper=' + keeper], docker_env).split()
                         if not ids:
@@ -509,8 +516,11 @@ def run(args):
                     owned = list(set(owned + ids))
                     if owned:
                         command([runtime, 'rm', '-fv' if runtime == 'docker' else '-f', *owned], docker_env)
-                    for volume in owned_volumes:
-                        command([runtime, 'volume', 'rm', volume], docker_env)
+                    if owned_volumes:
+                        existing_volumes = command([runtime, 'volume', 'ls', '--format', '{{.Name}}'], docker_env).splitlines()
+                        for volume in owned_volumes:
+                            if volume in existing_volumes:
+                                command([runtime, 'volume', 'rm', volume], docker_env)
     finally:
         model_server.shutdown()
         model_server.server_close()

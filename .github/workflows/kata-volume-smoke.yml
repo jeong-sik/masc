@@ -193,7 +193,13 @@ jobs:
       - name: Installed Kata Keeper model to Execute to persisted volume proof
         if: github.event_name == 'workflow_dispatch' && inputs.release_run != ''
         run: |
-          sudo env PATH=/usr/local/bin:/usr/bin:/bin \
+          mkdir -p "$RUNNER_TEMP/kata-cli-bin"
+          cat > "$RUNNER_TEMP/kata-cli-bin/nerdctl" <<'SH'
+          #!/bin/sh
+          exec sudo /usr/local/bin/nerdctl "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/kata-cli-bin/nerdctl"
+          PATH="$RUNNER_TEMP/kata-cli-bin:$PATH" \
             python3 scripts/keeper-first-turn-smoke.py \
             --backend nerdctl_kata --binary "$RUNNER_TEMP/kata-installed/bin/masc" \
             --guest-shim "$RUNNER_TEMP/kata-install-workspace/.masc/microvm/shim/masc-exec-shim" \

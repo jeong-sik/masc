@@ -131,7 +131,10 @@ def slow_poll(binary, binary_sha, source):
     resumed = threading.Event()
     tick_count = 0
     tick_lock = threading.Lock()
-    health = fixtures["/health?full=1"]
+    # Every full refresh probes compact server identity before loading the
+    # surface. Fleet health (/health?full=1) is view-specific and is never
+    # requested by Schedules, so it cannot witness that screen's timer.
+    health = fixtures.get("/health", (200, {}))
 
     def health_read():
         nonlocal tick_count
@@ -148,7 +151,7 @@ def slow_poll(binary, binary_sha, source):
             resumed.set()
         return result
 
-    fixtures["/health?full=1"] = health_read
+    fixtures["/health"] = health_read
 
     def interact(process, master, _slave, output, _base):
         try:

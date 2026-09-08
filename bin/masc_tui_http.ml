@@ -2569,8 +2569,9 @@ let fetch_browser_lane_screenshot ~host ~port ~view ~tab_id =
   | Ok bytes -> Ok (screenshot, bytes)
 
 let scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y =
-  let body = Masc_tui_types.Browser_lane_view.viewport_request ~tab_id ~expected_url ~y view
-    |> Yojson.Safe.to_string in
+  (* The view module carries the [let*] the two neighbours open it for. *)
+  let open Masc_tui_types.Browser_lane_view in
+  let body = viewport_request ~tab_id ~expected_url ~y view |> Yojson.Safe.to_string in
   let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
     ~path:"/api/v1/dashboard/browser-lane/interact" ~body in
   let* ok = get boolean "ok" json in

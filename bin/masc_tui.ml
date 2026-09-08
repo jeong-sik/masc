@@ -14352,6 +14352,14 @@ and is loaded on demand through keeper_skill.
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
           then invalidate_frame_for_resize frame_presenter render_schedule
+      | Some (("+" | "=" | "-" | "_") as size_key) -> (
+          (* The spectator's own controls arrive here rather than in its
+             [consume], because every other key is a game key for the shared
+             machine (RFC-0439 3.3): + and - change only how big this
+             terminal draws the cached frame and never reach the machine. *)
+          Masc_tui_msx.adjust_size
+            (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
+          Masc_tui_msx.render ~write:write_to_terminal state.msx_frame)
       | Some name -> (
           (* A game key: send it to the shared server machine (RFC-0439 §3.3),
              then re-fetch so the human sees the result of their own press

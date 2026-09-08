@@ -16,6 +16,9 @@
 #   --force            Refresh existing binaries; preserve workspace config
 #   --reset-config     Overwrite seeded config and selected team preset files
 #   --dry-run          Print what would happen, do not write
+#   --uninstall        Remove installed executables/releases; stop MASC first
+#   --purge-data       Also remove <base-path>/.masc; requires --uninstall and
+#                      an explicit --base-path. Homebrew dependencies remain.
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
 #   --no-wizard        Skip the provider setup wizard
@@ -64,6 +67,10 @@ SEED_CONFIG=1
 FORCE=0
 RESET_CONFIG=0
 DRY_RUN=0
+UNINSTALL=0
+PURGE_DATA=0
+BASE_PATH_EXPLICIT=0
+INSTALL_ACTION_FLAGS=()
 GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
@@ -831,13 +838,19 @@ require_flag_value() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --uninstall|--purge-data|--prefix|--base-path|--dry-run|-h|--help) ;;
+    *) INSTALL_ACTION_FLAGS+=("$1") ;;
+  esac
+  case "$1" in
     --version) require_flag_value "$1" "${2-}"; VERSION="$2"; shift 2 ;;
     --prefix)  require_flag_value "$1" "${2-}"; PREFIX="$2";  shift 2 ;;
-    --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; shift 2 ;;
+    --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; BASE_PATH_EXPLICIT=1; shift 2 ;;
     --no-seed) SEED_CONFIG=0; shift ;;
     --force)   FORCE=1; shift ;;
     --reset-config) RESET_CONFIG=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --purge-data) PURGE_DATA=1; shift ;;
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
@@ -849,6 +862,50 @@ while [ $# -gt 0 ]; do
     *) die "unknown flag: $1 (try --help)" ;;
   esac
 done
+
+# Uninstall runs before platform/dependency checks and all downloads. Only the
+# installation's named entries are owned; neither the prefix nor its parent is.
+uninstall_masc() {
+  [ "${#INSTALL_ACTION_FLAGS[@]}" -eq 0 ] ||
+    die "--uninstall cannot be combined with install options: ${INSTALL_ACTION_FLAGS[*]}"
+  if [ "$PURGE_DATA" -eq 1 ] && [ "$BASE_PATH_EXPLICIT" -ne 1 ]; then
+    die "--purge-data requires an explicit --base-path"
+  fi
+  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name
+  case "$uninstall_prefix" in /*) ;; *) uninstall_prefix="$PWD/$uninstall_prefix" ;; esac
+  if [ -e "$uninstall_prefix/.masc-install-transaction" ] || [ -L "$uninstall_prefix/.masc-install-transaction" ]; then
+    die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
+  fi
+  local targets=()
+  for name in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+    target="$uninstall_prefix/$name"
+    [ ! -d "$target" ] || [ -L "$target" ] || die "refusing to remove unexpected executable directory: $target"
+    targets+=("$target")
+  done
+  targets+=("$uninstall_prefix/.masc-releases")
+  if [ "$PURGE_DATA" -eq 1 ]; then
+    case "$uninstall_base" in /*) ;; *) uninstall_base="$PWD/$uninstall_base" ;; esac
+    targets+=("$uninstall_base/.masc")
+  fi
+  log "stop running MASC servers and TUI sessions before uninstalling; no processes will be killed"
+  for target in "${targets[@]}"; do
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would remove: $target"
+    else
+      # No trailing slash: rm removes a symlink itself, never its target tree.
+      rm -rf -- "$target" || die "could not remove: $target"
+      log "removed: $target"
+    fi
+  done
+  [ "$PURGE_DATA" -eq 1 ] || log "workspace .masc data preserved (use --purge-data --base-path PATH to remove it)"
+  log "Homebrew and runtime dependencies preserved"
+}
+
+if [ "$UNINSTALL" -eq 1 ]; then
+  uninstall_masc
+  exit 0
+fi
+[ "$PURGE_DATA" -eq 0 ] || die "--purge-data is only valid with --uninstall"
 
 case "$ALLOW_UNVERIFIED" in
   0|1) ;;

@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import uuid
@@ -442,8 +443,12 @@ def run(args):
                 (config / name).write_text(content)
             keepers = config / 'keepers'
             keepers.mkdir(exist_ok=True)
-            if list(keepers.glob('*.toml')):
-                raise SmokeError('fresh init unexpectedly seeded a Keeper')
+            if sorted(path.name for path in keepers.iterdir()) != ['imp.toml']:
+                raise SmokeError('fresh init must seed exactly the first Keeper manifest imp.toml')
+            with (keepers / 'imp.toml').open('rb') as source:
+                manifest = tomllib.load(source)
+            if manifest.get('keeper', {}).get('autoboot_enabled') is not False:
+                raise SmokeError('first Keeper must wait for manual start (autoboot_enabled = false)')
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]

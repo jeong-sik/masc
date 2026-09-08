@@ -73,9 +73,24 @@ let test_backfill_repairs_only_startup_required () =
   check int "second call is a no-op" 0
     (Seed.backfill_startup_required_from_embedded ~config_root)
 
+(* The packages the binary ships are whatever the embedded listing holds, so
+   the expectation is read from that listing rather than typed in: a typed
+   count went stale twice as packages were added (#34256 shipped five,
+   #34480 and #34498 made it seven). *)
+let embedded_packages () =
+  Embedded_skills.file_list
+  |> List.filter_map (fun rel ->
+       match String.index_opt rel '/' with
+       | Some slash -> Some (String.sub rel 0 slash)
+       | None -> None)
+  |> List.sort_uniq String.compare
+
 let test_builtin_skill_package () =
   let base_path = fresh_dst () in
-  check int "five complete first-party packages" 5
+  let packages = embedded_packages () in
+  check bool "the embedded listing names at least one package" true (packages <> []);
+  check int "every embedded package is a complete first-party package"
+    (List.length packages)
     (Seed.seed_missing_builtin_skills ~base_path);
   let root = Filename.concat base_path ".masc/skills" in
   List.iter
@@ -94,7 +109,7 @@ let test_builtin_skill_package () =
   check string "operator body survives" "operator's own skill" (read_file body);
   check bool "operator resource deletion survives" false (Sys.file_exists resource);
   check (list string) "all packages present without staging residue"
-    [ "browser-design"; "browser-lanes"; "evidence-review"; "frontend-implement"; "frontend-verify" ]
+    packages
     (List.sort String.compare (entries_of root))
 
 let () =

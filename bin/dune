@@ -521,6 +521,15 @@
  (modules masc_tui_esc_interrupt)
  (libraries masc_tui_keeper_chat_transcript))
 
+;; The process signals that end a session, recorded by the handlers and read
+;; by the loop once per pass. Own library so the rule -- a terminate outranks
+;; a Ctrl-C, a second Ctrl-C quits, a key withdraws the first -- runs under a
+;; test with no terminal and no signal delivery.
+(library
+ (name masc_tui_exit_signals)
+ (wrapped false)
+ (modules masc_tui_exit_signals))
+
 (library
  (name masc_tui_file_icon)
  (wrapped false)
@@ -1222,6 +1231,7 @@
   masc_tui_runtime_config_view
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
+  masc_tui_exit_signals
   masc.runtime
   masc.keeper_registry
   masc_skill_reference

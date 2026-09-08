@@ -330,9 +330,19 @@ image for MASC development, not part of a regular install.
 
 ## Initial prompts, skills, and Keepers
 
-A default install prepares **one Keeper, `imp`, that does not start on its
-own** and the built-in skill `browser-lanes`. Configure a model and a sandbox,
+The published 0.34.0 binary creates no Keeper and prepares only the built-in
+skill `browser-lanes`. A `main` source build after it, and the next release,
+also prepare **one Keeper, `imp`, that does not start on its own** and the
+built-in skills `browser-lanes`, `browser-design`, `frontend-implement`,
+`frontend-verify`, and `evidence-review`. Configure a model and a sandbox,
 then start the Keeper.
+
+Task and Goal verification agents can also read the instruction Skills
+published in the workspace through `keeper_skill`. The default
+`evidence-review` walks through comparing the contract, the execution log,
+and the revision. A Skill supplies a way to look things up; it grants no new
+tool and no execution permission. With no Skill installed, verification
+continues with the existing evidence lookups.
 
 For prompts, there are only three places to tell apart.
 

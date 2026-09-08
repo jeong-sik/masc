@@ -97,7 +97,7 @@ Use named checkpoints for persistence; the input ledger alone is not a save.
 ## Checkpoints
 
 In the TUI game view, **F6** saves the `quick` checkpoint and **F7** restores
-it. The result remains visible in the footer. Keepers can use
+it. The result remains visible above the game image. Keepers can use
 `masc_msx_save {"slot":"campaign"}` and
 `masc_msx_restore {"slot":"campaign"}` for named checkpoints. Names contain
 1–64 letters, digits, underscores or hyphens; the default is `quick`.
@@ -125,7 +125,22 @@ A → B → A reinserts the modified A, rather than rereading its original bytes
 Named checkpoints retain all those disk versions, so restoring the campaign
 restores its off-drive media too. Original files in the inventory are unchanged.
 
-The operator-provided Sangokushi II A image reached the new-game and scenario
-menus with the corrected core, then requested B media. The B image and actual
-campaign/ending verification are still outstanding; do not substitute another
-game image or treat the disk prompt as a completed playthrough.
+The operator-provided Sangokushi II A and B images were verified through
+scenario and ruler selection into the first game turn (January 220). The B
+image was present in an operator-owned download archive and was inserted
+without rebooting. Full campaign/ending verification remains separate; a
+successful disk prompt or first turn is not a completed playthrough.
+
+## Game-created data disks
+
+The core supports MSX-DOS FCB file creation (16h) and random block writes
+(26h) on valid formatted FAT12 media. The Sangokushi II D-disk creation menu
+was verified with the core CI runner: it created `SANGOKU2.SAV` (257,040 bytes)
+through 91 block writes and then requested A media, instead of entering its
+`DISK I/O ERROR` loop. This proves data-disk creation, not a campaign save or
+load later in the game.
+
+A zero-filled unformatted image is not a formatted DOS disk. Supply formatted
+blank media when the game requests a new data disk. Guest file writes remain
+in the emulated disk; save a named checkpoint or switch disks (which saves
+`before-disk-change`) to persist them. Inventory source images stay unchanged.

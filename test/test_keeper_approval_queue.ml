@@ -1972,6 +1972,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow
         | Gate.Readonly_sandbox
+        | Gate.Local_output
         | Gate.Observed_in_box _ ->
           Alcotest.fail "different exact input consumed the grant");
        (match
@@ -1990,6 +1991,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow
         | Gate.Workspace_always_allow
         | Gate.Readonly_sandbox
+        | Gate.Local_output
         | Gate.Observed_in_box _ ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
        (match
@@ -2004,6 +2006,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow
         | Gate.Readonly_sandbox
+        | Gate.Local_output
         | Gate.Observed_in_box _ ->
           Alcotest.fail "one-shot grant was consumed more than once");
        AQ.For_testing.reset_runtime_state ();

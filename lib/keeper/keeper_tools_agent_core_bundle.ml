@@ -461,35 +461,7 @@ let make_tool_bundle_for_descriptors_with_policy
   in
   let composition_tools =
     let instruction_skills =
-      Keeper_skill_catalog.skills skill_catalog
-      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
-           match skill.reference, skill.surface with
-           | Some reference, Keeper_skill_catalog.Instruction ->
-             let resource_location =
-               match skill.provenance with
-               | Some
-                   { source_root = Some source_root
-                   ; resource_read_max_bytes = Some resource_read_max_bytes
-                   ; directory
-                   ; _
-                   } ->
-                 Some
-                   Keeper_tool_composition_surface.
-                     { source_root; directory; resource_read_max_bytes }
-               | Some { source_root = None; _ }
-               | Some { resource_read_max_bytes = None; _ }
-               | None ->
-                 None
-             in
-             Some
-               (Keeper_tool_composition_surface.instruction_skill
-                  ?resource_location
-                  ~reference
-                  ~description:skill.description
-                  ~body:skill.body
-                  ())
-           | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
-             None)
+      Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
     let composition_skills =
       Keeper_skill_catalog.skills skill_catalog

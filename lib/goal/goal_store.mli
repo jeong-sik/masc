@@ -120,6 +120,12 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
+val get_goal_result :
+  Workspace_utils.config -> goal_id:string -> (goal option, string) result
+(** Read only the primary Goal store for mutation authorization. Recovery
+    snapshots are not authoritative. [Ok None] means the readable primary
+    store does not contain this id; missing or undecodable primary is an error. *)
+
 type conditional_update =
   | Goal_updated of goal
   | Goal_phase_mismatch of Goal_phase.t

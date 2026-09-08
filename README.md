@@ -77,10 +77,12 @@ The wizard reports two axes:
   cloud provider is keyed by its environment variable; the local server is
   probed at its health path and shown `reachable` or `not running`. Templates
   for llama-server, vLLM, MLX, and the subscription CLIs (Claude Code, Codex,
-  Antigravity) sit commented out in the same file; uncomment one and the
+  Antigravity) sit commented out in the same file. Uncomment one and the
   wizard lists it, showing a CLI as `installed` when it is on `PATH` and
-  `signed in` when its own login check passes. Anthropic and OpenAI have no
-  seeded block yet. `--provider <id>` picks one without prompting.
+  `signed in` when its own login check passes; a template with more than
+  one model binding (Claude Code) also needs `wizard-default = true` on one
+  of them, or the wizard skips it. Anthropic and OpenAI have no seeded block
+  yet. `--provider <id>` picks one without prompting.
 - **Execution sandbox.** Which of `docker`, `microvm`, and `remote_ssh` this
   host can offer. The wizard reports and does not choose. The sandbox is set
   per Keeper, or by a `--team <preset>` that carries its own choice.

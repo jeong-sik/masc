@@ -78,6 +78,24 @@ type retained_run =
   | Task_verification_run of Verification_run_registry.run
   | Goal_verification_run of Goal_verification_run_registry.run
 
+type run_kind = Exact_output | Task_verification | Goal_verification
+
+let run_kind_of_string = function
+  | "exact_output" -> Ok Exact_output
+  | "task_verification" -> Ok Task_verification
+  | "goal_verification" -> Ok Goal_verification
+  | value ->
+    Error (Printf.sprintf
+      "unknown standalone run kind %S; expected exact_output, task_verification, or goal_verification"
+      value)
+;;
+
+let retained_run_kind = function
+  | Exact_run _ -> Exact_output
+  | Task_verification_run _ -> Task_verification
+  | Goal_verification_run _ -> Goal_verification
+;;
+
 type detail_lookup =
   | Detail_found of Yojson.Safe.t
   | Detail_not_found
@@ -280,6 +298,7 @@ let recent_run_page_json_with
       ~limit
       ~before
       ~lane
+      ~run_kind
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs
@@ -288,7 +307,13 @@ let recent_run_page_json_with
   | Some lane_id when not (known_lane lane_id) ->
     Error (Printf.sprintf "unknown standalone lane %S" lane_id)
   | None | Some _ ->
-    let all = retained_runs ~exact_runs ~verification_runs ~goal_verification_runs in
+    let all =
+      retained_runs ~exact_runs ~verification_runs ~goal_verification_runs
+      |> List.filter (fun run ->
+        match run_kind with
+        | None -> true
+        | Some kind -> retained_run_kind run = kind)
+    in
     let relevant =
       match lane with
       | None -> all
@@ -309,11 +334,12 @@ let recent_run_page_json_with
         ])
 ;;
 
-let recent_run_page_json ~limit ~before ~lane =
+let recent_run_page_json ~limit ~before ~lane ~run_kind =
   recent_run_page_json_with
     ~limit
     ~before
     ~lane
+    ~run_kind
     ~exact_runs:
       (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
     ~verification_runs:

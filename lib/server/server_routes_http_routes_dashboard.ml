@@ -1457,7 +1457,7 @@ let add_routes ~sw ~clock router =
               reqd)
          request
          reqd)
-  (* Paged, and without detail payloads. [lane=] filters BEFORE pagination so
+  (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response
      246 MB for 5,908 runs; [exact-lane-runs/<run_id>] carries the exact prompt
@@ -1487,12 +1487,20 @@ let add_routes ~sw ~clock router =
              (Server_utils.query_param req "lane" |> Option.map String.trim)
              (fun value -> if String.equal value "" then None else Some value)
          in
-         match before with
-         | Error message -> respond_dashboard_error ~request:req reqd message
-         | Ok before ->
+         let run_kind =
+           match Server_utils.query_param req "run_kind" with
+           | None -> Ok None
+           | Some value ->
+             Server_standalone_lane_projection.run_kind_of_string value
+             |> Result.map Option.some
+         in
+         match before, run_kind with
+         | Error message, _ | _, Error message ->
+           respond_dashboard_error ~request:req reqd message
+         | Ok before, Ok run_kind ->
            (match
               Server_standalone_lane_projection.recent_run_page_json
-                ~limit ~before ~lane
+                ~limit ~before ~lane ~run_kind
             with
             | Error message ->
               respond_dashboard_error ~request:req reqd message

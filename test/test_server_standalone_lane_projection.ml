@@ -452,6 +452,7 @@ let test_verifier_runs_are_filtered_before_pagination () =
   let goal = goal_verification_run ~run_id:"goal-run-4" ~started_at:90. in
   let page =
     Projection.For_testing.recent_run_page_json_with
+      ~run_kind:None
       ~limit:1
       ~before:None
       ~lane:(Some Runtime.verifier_exact_lane_id)
@@ -476,6 +477,7 @@ let test_verifier_runs_are_filtered_before_pagination () =
     (first |> Yojson.Safe.Util.member "subject_id" |> Yojson.Safe.Util.to_string);
   let next =
     Projection.For_testing.recent_run_page_json_with
+      ~run_kind:None
       ~limit:1
       ~before:(Some (100., "vrf-9"))
       ~lane:(Some Runtime.verifier_exact_lane_id)
@@ -492,6 +494,94 @@ let test_verifier_runs_are_filtered_before_pagination () =
     (second |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
   check string "goal review kind" "goal_verification"
     (second |> Yojson.Safe.Util.member "run_kind" |> Yojson.Safe.Util.to_string)
+;;
+
+let test_native_kind_filter_preserves_quiet_pages_and_mixed_readers () =
+  let exact_runs =
+    [ exact_run ~run_id:"native-a" ~lane:Exact.Librarian ~started_at:100.
+        ~status:Exact.Running
+    ; exact_run ~run_id:"native-b" ~lane:Exact.Board_attention ~started_at:100.
+        ~status:Exact.Running
+    ]
+  in
+  let verification_runs =
+    List.init 4 (fun index ->
+      task_verification_run ~verification_id:(Printf.sprintf "task-%d" index)
+        ~started_at:(200. +. float_of_int index))
+  in
+  let goal_verification_runs =
+    List.init 3 (fun index ->
+      goal_verification_run ~run_id:(Printf.sprintf "goal-%d" index)
+        ~started_at:(300. +. float_of_int index))
+  in
+  let page ~kind ~before ~lane =
+    let kind =
+      match kind with
+      | None -> Ok None
+      | Some value -> Projection.run_kind_of_string value |> Result.map Option.some
+    in
+    Result.bind kind (fun run_kind ->
+      Projection.For_testing.recent_run_page_json_with
+        ~limit:1 ~before ~lane ~run_kind ~exact_runs ~verification_runs
+        ~goal_verification_runs)
+  in
+  let field name json = Yojson.Safe.Util.member name json in
+  let rows json = field "runs" json |> Yojson.Safe.Util.to_list in
+  let first json = List.hd (rows json) in
+  let id row = field "run_id" row |> Yojson.Safe.Util.to_string in
+  let page_one =
+    page ~kind:(Some "exact_output") ~before:None ~lane:None |> run_page_or_fail
+  in
+  check string "newer reviews do not hide the first native run" "native-b"
+    (id (first page_one));
+  check string "native page keeps its declared wire kind" "exact_output"
+    (field "run_kind" (first page_one) |> Yojson.Safe.Util.to_string);
+  check int "native retained total excludes both verifier registries" 2
+    (field "total" page_one |> Yojson.Safe.Util.to_int);
+  check bool "native tail remains pageable" true
+    (field "has_more" page_one |> Yojson.Safe.Util.to_bool);
+  let cursor =
+    field "started_at" (first page_one) |> Yojson.Safe.Util.to_float,
+    id (first page_one)
+  in
+  let page_two =
+    page ~kind:(Some "exact_output") ~before:(Some cursor) ~lane:None
+    |> run_page_or_fail
+  in
+  check string "the exact ID breaks a timestamp tie on the next page" "native-a"
+    (id (first page_two));
+  check int "total remains the whole selected kind across cursor pages" 2
+    (field "total" page_two |> Yojson.Safe.Util.to_int);
+  check bool "the native page ends without a foreign cursor" false
+    (field "has_more" page_two |> Yojson.Safe.Util.to_bool);
+  let librarian =
+    page ~kind:(Some "exact_output") ~before:None ~lane:(Some "librarian_exact")
+    |> run_page_or_fail
+  in
+  check int "kind and lane filters intersect before total" 1
+    (field "total" librarian |> Yojson.Safe.Util.to_int);
+  check string "the lane-filtered native run remains reachable" "native-a"
+    (id (first librarian));
+  List.iter
+    (fun (kind, expected_total, newest_id) ->
+      let selected = page ~kind:(Some kind) ~before:None ~lane:None |> run_page_or_fail in
+      check int (kind ^ " has its own retained total") expected_total
+        (field "total" selected |> Yojson.Safe.Util.to_int);
+      check string (kind ^ " selects its own newest record") newest_id
+        (id (first selected));
+      check string (kind ^ " preserves the matching wire kind") kind
+        (field "run_kind" (first selected) |> Yojson.Safe.Util.to_string))
+    [ "task_verification", 4, "task-3"; "goal_verification", 3, "goal-2" ];
+  let mixed = page ~kind:None ~before:None ~lane:None |> run_page_or_fail in
+  check int "omitted kind preserves the mixed TUI collection" 9
+    (field "total" mixed |> Yojson.Safe.Util.to_int);
+  check string "mixed chronology remains unchanged" "goal-2" (id (first mixed));
+  List.iter
+    (fun kind ->
+      match page ~kind:(Some kind) ~before:None ~lane:None with
+      | Error detail -> check bool "invalid query has an explicit reason" true (String.length detail > 0)
+      | Ok _ -> fail "unknown run kind must not become an empty or mixed success")
+    [ ""; "made_up" ]
 ;;
 
 let test_verifier_detail_keeps_verdict_reason_and_tools () =
@@ -563,6 +653,7 @@ let test_every_retained_run_kind_projects_skill_evidence () =
 let test_unknown_lane_and_duplicate_identity_fail_explicitly () =
   (match
      Projection.For_testing.recent_run_page_json_with
+      ~run_kind:None
        ~limit:10
        ~before:None
        ~lane:(Some "invented")
@@ -679,6 +770,10 @@ let () =
             "verifier runs are filtered before pagination"
             `Quick
             test_verifier_runs_are_filtered_before_pagination
+        ; test_case
+            "native kind filtering preserves quiet cursor pages and mixed readers"
+            `Quick
+            test_native_kind_filter_preserves_quiet_pages_and_mixed_readers
         ; test_case
             "verifier detail keeps verdict reason and tools"
             `Quick

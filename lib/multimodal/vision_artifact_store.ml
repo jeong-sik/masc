@@ -49,9 +49,11 @@ let store ~dir (raw : string) : (handle, string) result =
        that the destination still exists and contains this image. A failed
        comparison falls through to the existing atomic repair/write path. *)
     let already_stored =
-      try String.equal (Fs_compat.load_file path) raw with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Sys_error _ | Unix.Unix_error _ | End_of_file -> false
+      match Fs_compat.load_owned_regular_file_prefix
+              ~ownership_root:dir ~max_bytes:(String.length raw) path with
+      | Ok (Some existing) ->
+          not existing.truncated && String.equal existing.content raw
+      | Ok None | Error _ -> false
     in
     if already_stored then Ok h
     else

@@ -56,6 +56,21 @@ let test_repeated_store_preserves_and_repairs () =
   Unix.unlink path;
   ignore (ok (S.store ~dir bytes));
   assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
+  (* Matching prefix is not an exact image. The bounded reader must detect
+     the extra suffix and repair it instead of accepting truncated content. *)
+  Out_channel.with_open_bin path (fun oc ->
+    output_string oc bytes;
+    output_string oc (String.make 1_000_000 'x'));
+  ignore (ok (S.store ~dir bytes));
+  assert ((Unix.stat path).Unix.st_size = String.length bytes);
+  assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
+  Unix.unlink path;
+  Unix.mkfifo path 0o600;
+  (* No writer exists: opening this FIFO with a blocking reader would hang.
+     The owned regular-file reader rejects it and atomic storage replaces it. *)
+  ignore (ok (S.store ~dir bytes));
+  assert ((Unix.lstat path).Unix.st_kind = Unix.S_REG);
+  assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
   Unix.unlink path;
   Unix.mkdir path 0o700;
   match S.store ~dir bytes with

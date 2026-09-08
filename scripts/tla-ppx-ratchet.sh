@@ -68,6 +68,29 @@ count_fsm_guard_files() {
   )
 }
 
+# The two counts above are of files. The hint on each says a decrease means a
+# derived ADT was hand-written or an invariant lost, which is a statement
+# about annotations, and a file keeps its place in the count while all but one
+# of its annotations go: 11 files carry 16 [@@deriving tla] and 6 carry 20
+# [@@fsm_guard], so 19 of the 36 could be deleted without either floor
+# noticing. These two count the annotations, and the file counts stay for the
+# breadth they do measure.
+count_deriving_tla_attributes() {
+  ( set +o pipefail
+    cd "$REPO_ROOT"
+    rg -c '\[@@deriving tla\]' lib/ --glob '*.ml' --glob '!*.mli' 2>/dev/null \
+      | awk -F: '{ s += $2 } END { print s + 0 }'
+  )
+}
+
+count_fsm_guard_attributes() {
+  ( set +o pipefail
+    cd "$REPO_ROOT"
+    rg -c '\[@@fsm_guard' lib/ --glob '*.ml' 2>/dev/null \
+      | awk -F: '{ s += $2 } END { print s + 0 }'
+  )
+}
+
 count_lib_subdirs_with_ppx() {
   # Count distinct lib/ subdirectories containing at least one .ml
   # with [@@deriving tla] or [@@fsm_guard]. Higher is better.
@@ -89,6 +112,8 @@ count_lib_subdirs_with_ppx() {
 STRICT_METRICS=(
   "ppx_deriving_tla_modules|count_deriving_tla_modules|Modules using [@@deriving tla]. Decrease means a derived ADT was hand-written or inlined — open a follow-up issue."
   "ppx_fsm_guard_files|count_fsm_guard_files|Files with [@@fsm_guard]. Decrease means runtime invariant coverage shrank — explain in the PR."
+  "ppx_deriving_tla_attributes|count_deriving_tla_attributes|[@@deriving tla] annotations, not the files holding them. Catches the last-but-one being deleted from a file that stays in the count above."
+  "ppx_fsm_guard_attributes|count_fsm_guard_attributes|[@@fsm_guard] annotations, same reason."
 )
 
 DESCRIPTIVE_METRICS=(

@@ -729,6 +729,23 @@ let has_completion_work goal_id work =
   List.exists (fun item -> String.equal item.Agent.goal_id goal_id) work
 ;;
 
+let test_scan_preserves_source_failure () =
+  with_workspace @@ fun config ->
+  (match Goal_store.upsert_goal config ~title:"Review source"
+      ~metric:"cases" ~target_value:"1" () with
+   | Ok _ -> () | Error detail -> fail detail);
+  let path = Goal_store.goals_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  Fs_compat.save_file path "unreadable primary";
+  (match Agent.collect_pending config with
+   | Error detail -> check bool "scan preserves source cause" true (String.length detail > 0)
+   | Ok _ -> fail "unavailable source was reported as a successful scan");
+  check string "scan does not repair primary" "unreadable primary"
+    (Fs_compat.load_file path);
+  check string "scan preserves mirror" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
 let test_committed_proven_proof_reconciles_without_review () =
   with_workspace
   @@ fun config ->
@@ -1070,7 +1087,8 @@ let () =
             test_refuted_proof_returns_to_executing
         ] )
     ; ( "non-verdicts keep evidence"
-      , [ test_case "lane unavailable keeps the pending row" `Quick
+      , [ test_case "scan preserves source failure" `Quick test_scan_preserves_source_failure
+        ; test_case "lane unavailable keeps the pending row" `Quick
             test_lane_unavailable_keeps_the_pending_row
         ; test_case "malformed reply fails over to the next slot" `Quick
             test_malformed_reply_fails_over_to_the_next_slot

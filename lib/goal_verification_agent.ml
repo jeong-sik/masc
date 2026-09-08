@@ -60,7 +60,9 @@ let group_pending_by_goal work =
    ordinary criterion edit must not become an implicit completion request. *)
 
 let collect_pending config : (pending_work list, string) result =
-  let goals = Goal_store.list_goals config ~phase:Goal_phase.Verifying () in
+  match Goal_store.list_goals_result config ~phase:Goal_phase.Verifying () with
+  | Error _ as error -> error
+  | Ok goals ->
   let rec collect acc = function
     | [] -> Ok (List.rev acc)
     | (goal : Goal_store.goal) :: rest ->

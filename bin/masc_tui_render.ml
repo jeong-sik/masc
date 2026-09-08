@@ -3602,7 +3602,12 @@ let render_board_compose (state : state) =
       in
       Printf.sprintf "s:send  e:edit in $EDITOR%s  d:discard  esc:keep writing" hearth_hint
     else
-      "type to write  Ctrl-E:$EDITOR  esc:menu  Tab:surfaces  q:quit"
+      (* No [q] here. While the draft has the keys, [q] is a printable
+         scalar and goes into the draft like any other letter; the footer
+         offered it as quit, so the operator who took the offer got a [q]
+         in their post. Leaving the pane is [esc] and then [d], which the
+         armed footer above names. *)
+      "type to write  Ctrl-E:$EDITOR  esc:menu  Tab:surfaces"
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   let cursor =
@@ -6725,13 +6730,23 @@ let render_lane_run_list (state : state) ~lane_id =
     | Some runs -> runs
   in
   let shown = List.length runs in
+  let coverage =
+    let count = match state.lane_runs_total with
+      | Some total -> Printf.sprintf "%d loaded / %d retained" shown total
+      | None -> Printf.sprintf "%d loaded" shown in
+    let continuation =
+      if state.lane_runs_loading then " · loading"
+      else match state.lane_runs_next with
+        | Some _ -> " · ] older"
+        | None -> if Option.is_some state.lane_runs then " · end" else "" in
+    count ^ continuation in
   let header =
-    Printf.sprintf "%s · %s (%d runs)  %s"
+    Printf.sprintf "%s · %s (%s)  %s"
       (screen_title " MASC Lanes")
       (fit_width
          (Terminal_text.single_line (standalone_lane_label state lane_id))
          20)
-      shown (connection_badge state)
+      coverage (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

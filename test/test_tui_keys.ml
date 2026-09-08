@@ -452,7 +452,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
 
 let test_lanes_run_list_footer_names_the_drill_down () =
   check str "the standalone lane run list names open and back"
-    "j/k:move  Right / Enter:prompt  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  Right / Enter:prompt  ]:older  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_lanes_run_list
 
 (* [compare], not [scroll]: #32270 stacked Input and Output into one list that

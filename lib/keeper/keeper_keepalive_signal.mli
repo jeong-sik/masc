@@ -170,3 +170,8 @@ val dispatch_keepalive_event :
   ctx:'a context -> keeper_name:string ->
   Keeper_state_machine.event -> unit
 
+
+type periodic_cadence = Initial_due of float | After_periodic of float
+val periodic_remaining : now:float -> interval:float -> periodic_cadence -> float
+val periodic_is_due : now:float -> interval:float -> periodic_cadence -> bool
+val consume_periodic : now:float -> periodic_cadence

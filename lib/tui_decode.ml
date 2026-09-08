@@ -7889,6 +7889,7 @@ type lane_run_summary =
 type lane_run_page =
   { lrpg_runs : lane_run_summary list
   ; lrpg_next : (float * string) option
+  ; lrpg_total : int option
   }
 
 type lane_run_detail =
@@ -7940,6 +7941,10 @@ let decode_lane_run_summary json =
 let decode_lane_run_page ~lane json =
   let* runs_json = required_list_field json "runs" in
   let* has_more = required_bool_field json "has_more" in
+  let* lrpg_total = optional_int_field json "total" in
+  let* () = match lrpg_total with
+    | Some total when total < 0 -> Error "exact lane page total must be nonnegative"
+    | Some _ | None -> Ok () in
   let* runs = decode_list "runs" decode_lane_run_summary runs_json in
   let lrpg_runs =
     List.filter (fun run -> String.equal run.lrs_lane lane) runs
@@ -7952,7 +7957,7 @@ let decode_lane_run_page ~lane json =
       | [] -> Error "exact lane page says has_more but has no cursor row"
       | last :: _ -> Ok (Some (last.lrs_started_at, last.lrs_run_id))
   in
-  Ok { lrpg_runs; lrpg_next }
+  Ok { lrpg_runs; lrpg_next; lrpg_total }
 ;;
 
 let decode_lane_run_detail json =

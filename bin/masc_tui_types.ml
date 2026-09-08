@@ -3600,6 +3600,9 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* Successful reads of each owning endpoint, independent of roster refresh.
+     A failed refresh keeps both the receipt and the previous rows. *)
+  mutable keeper_tool_approvals_observed: bool;
   (* Which keepers are mid-turn right now, from GET /api/v1/keepers/turns.
      Rides the same tick as the approvals above, for the same reason: the
      "answering now" badge is drawn from every surface, so it cannot wait
@@ -3619,10 +3622,13 @@ type state = {
   mutable gate_rules: Tui_decode.gate_rule list;
   mutable gate_rules_unavailable: string option;
   mutable gate_error: string option;
+  mutable gate_snapshot_observed: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
   mutable keeper_yolo_names: string list;
+  mutable keeper_tool_modes_observed: bool;
+  mutable keeper_tool_modes_error: string option;
   (* Durable per-keeper Gate settings, as (keeper, value) pairs. Only keepers
      somebody singled out are here, so absence means "follows the workspace"
      rather than "unknown". Distinct from [keeper_yolo_names], which is the
@@ -3769,6 +3775,10 @@ type state = {
   mutable lanes_standalone_cursor: int;
   mutable lane_runs: Tui_decode.lane_run_summary list option;
   mutable lane_runs_error: string option;
+  mutable lane_runs_next: (float * string) option;
+  mutable lane_runs_total: int option;
+  mutable lane_runs_loading: bool;
+  mutable lane_runs_generation: int;
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
@@ -5010,6 +5020,7 @@ let create_state
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  keeper_tool_approvals_observed = false;
   keeper_turns = [];
   keeper_turns_error = None;
   gate_pending = [];
@@ -5018,7 +5029,10 @@ let create_state
   gate_rules = [];
   gate_rules_unavailable = None;
   gate_error = None;
+  gate_snapshot_observed = false;
   keeper_yolo_names = [];
+  keeper_tool_modes_observed = false;
+  keeper_tool_modes_error = None;
   runtime_params = [];
   runtime_params_error = None;
   runtime_params_loading = false;
@@ -5089,6 +5103,10 @@ let create_state
   lanes_standalone_cursor = 0;
   lane_runs = None;
   lane_runs_error = None;
+  lane_runs_next = None;
+  lane_runs_total = None;
+  lane_runs_loading = false;
+  lane_runs_generation = 0;
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;

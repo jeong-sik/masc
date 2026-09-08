@@ -76,6 +76,7 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
+  ?wake:Keeper_world_observation.cycle_wake ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
@@ -196,6 +197,7 @@ val failure_reason_after_turn_status :
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)
 val run_keepalive_unified_turn :
+  wake:Keeper_world_observation.cycle_wake ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->

@@ -907,19 +907,23 @@ let lane_run_list_limit = 50
    would truncate anyway. *)
 let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
 
-(** Recent run summaries of one standalone lane, newest first. *)
-let fetch_lane_runs ~(host : string) ~(port : int) ~(lane : string) :
-    (Masc.Tui_decode.lane_run_summary list, string) result =
+(** One server-filtered page, with the exact continuation cursor retained. *)
+let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
+    (Masc.Tui_decode.lane_run_page, string) result =
   let open Result.Syntax in
+  let cursor = match before with
+    | None -> ""
+    | Some (started_at, run_id) ->
+      Printf.sprintf "&before_started_at=%.17g&before_run_id=%s"
+        started_at (percent_encode_path_segment run_id) in
   let path =
     Printf.sprintf
-      "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s"
+      "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s%s"
       lane_run_list_limit
-      (percent_encode_path_segment lane)
+      (percent_encode_path_segment lane) cursor
   in
   let* listing = get_json ~host ~port ~path in
-  let* page = Masc.Tui_decode.decode_lane_run_page ~lane listing in
-  Ok page.lrpg_runs
+  Masc.Tui_decode.decode_lane_run_page ~lane listing
 
 (** The full record of one standalone-lane run, including exact prompt/output
     or Verifier request/verdict/tool evidence. *)

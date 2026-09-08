@@ -835,10 +835,9 @@
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
-; Extracted from the big (tests ...) group above: the keeper fixture TOMLs
-; seed sandbox_profile = "local" (incidental — the suite measures mention
-; wakeup/delivery policy, not sandbox isolation), and keeper-up validation
-; now rejects Local fail-closed without the hatch.
+; Extracted from the big (tests ...) group above: this suite measures mention
+; wakeup and delivery policy, not sandbox isolation, so its keeper fixture
+; TOMLs declare a profile only because config load requires one.
 (test
  (name test_broadcast_wakeup_policy)
  (modules test_broadcast_wakeup_policy)

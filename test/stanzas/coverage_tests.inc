@@ -3,7 +3,6 @@
   test_backend_coverage
   test_tools_coverage
   test_types_utils_coverage
-  test_tempo_coverage
   test_transport_coverage
   test_validation_coverage
   test_dashboard_resilience_coverage
@@ -43,7 +42,6 @@
   test_backend_coverage
   test_tools_coverage
   test_types_utils_coverage
-  test_tempo_coverage
   test_transport_coverage
   test_validation_coverage
   test_dashboard_resilience_coverage

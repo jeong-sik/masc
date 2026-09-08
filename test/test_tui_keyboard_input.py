@@ -4380,7 +4380,16 @@ def screen_rows(drawn: bytes) -> dict[int, bytes]:
     something writes it again. Replaying every absolute row address in
     arrival order and keeping the last write to each row reconstructs what
     is on screen. The pane never scrolls the terminal -- it addresses rows
-    absolutely -- so nothing moves a row's text to another row behind this."""
+    absolutely -- so nothing moves a row's text to another row behind this.
+
+    A clear ends that inheritance. Everything painted before the last
+    FULL_REDRAW is gone from the terminal, and a row the redraw has not
+    reached yet is blank rather than holding what it said before -- a
+    resize redraws the top of a surface first and the rest a frame later.
+    Replaying across a clear reported text the reader could no longer see."""
+    cleared = drawn.rfind(FULL_REDRAW)
+    if cleared >= 0:
+        drawn = drawn[cleared:]
     rows: dict[int, bytes] = {}
     addresses = list(CURSOR_ROW_RE.finditer(drawn))
     for index, address in enumerate(addresses):
@@ -6858,9 +6867,12 @@ def context_inspector_interaction() -> Interaction:
             columns=109,
             needle=b"SELECTED BLOCK",
         )
-        # The whole screen, not the frame the resize returned. A frame holds
-        # the rows that changed, and the evidence rows below the selection do
-        # not change when the width does.
+        # The whole screen, not the frame the resize returned: a frame holds
+        # only the rows it wrote, and the resize repaints the map over more
+        # than one. The clear it starts with makes the wait matter -- until
+        # the later frames land, the evidence rows are blank rather than
+        # still holding what they said at the old width.
+        drain_until_quiet(process, master_fd, output)
         narrow_map_plain = screen_text(bytes(output))
         for forbidden in (b"reached the provider", b"provider accepted", b"ON WIRE"):
             if forbidden in narrow_map_plain:
@@ -10063,7 +10075,7 @@ def keeper_lanes_ia_interaction(
                 )
 
         palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
-        lanes = resize_and_wait(
+        resize_and_wait(
             process,
             master_fd,
             output,
@@ -10072,7 +10084,13 @@ def keeper_lanes_ia_interaction(
             needle=b"Standalone LLM lanes",
             controls=(FULL_REDRAW,),
         )
-        lanes_plain = CSI_RE.sub(b"", lanes).decode("utf-8")
+        # The resize clears the screen and repaints the lane list -- ten rows
+        # -- and the selected lane's detail arrives in a later frame. So the
+        # frame that carries the list carries none of the detail below it,
+        # and the reading waits for the frames to stop before asking the
+        # screen.
+        drain_until_quiet(process, master_fd, output)
+        lanes_plain = screen_text(bytes(output)).decode("utf-8")
         if "MASC Lanes · Standalone" not in lanes_plain:
             raise AssertionError(
                 f"Lanes did not name the standalone scope: {lanes_plain!r}"

@@ -146,10 +146,6 @@ let record_vision_candidate_attempt ~runtime_id ~result ~reason =
     ()
 ;;
 
-let ok_json text =
-  record_vision_analyze_result ~result:"ok" ~reason:"ok";
-  Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])
-
 (* Default to Runtime_failure: an unclassified error is treated as an internal
    keeper-health fault, not a caller validation or workflow business rule. *)
 let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
@@ -289,8 +285,15 @@ let media_type_for_request ~bytes args =
   | Some (`String raw) -> validate_media_type raw
   | Some _ -> Error "media_type must be a string"
 
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
 type vision_outcome =
-  | Vo_ok of string
+  | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
@@ -301,6 +304,17 @@ type vision_outcome =
       }
   | Vo_empty
   | Vo_truncated
+
+let ok_json (reading : vision_reading) =
+  record_vision_analyze_result ~result:"ok" ~reason:"ok";
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "ok", `Bool true
+       ; "text", `String reading.text
+       ; "runtime_id", `String reading.runtime_id
+       ; "requested_model", `String reading.requested_model
+       ; "response_model", `String reading.response_model
+       ])
 
 let vision_text_of_json = function
   | `Assoc fields ->
@@ -319,7 +333,8 @@ let vision_text_of_response (response : Agent_core.Types.api_response) =
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
-let outcome_of_response (response : Agent_core.Types.api_response) =
+let outcome_of_response
+    ~runtime_id ~requested_model (response : Agent_core.Types.api_response) =
   (* A length stop is authoritative even when the prefix happens to form
      valid, nonempty JSON. Accepting that prefix would publish a partial
      extraction as success and prevent the next candidate from finishing it. *)
@@ -329,7 +344,8 @@ let outcome_of_response (response : Agent_core.Types.api_response) =
   | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->
     (match Va.classify ~truncated:false ~content:text with
-     | Ok t -> Vo_ok t
+     | Ok text ->
+       Vo_ok { text; runtime_id; requested_model; response_model = response.model }
      | Error Va.Empty_extraction -> Vo_empty
      | Error Va.Truncated_extraction -> Vo_truncated)
 
@@ -589,7 +605,9 @@ let run_candidates_outcome
                 ; detail = Provider_http_error.to_message err
                 })
        | Ok response ->
-            (match outcome_of_response response with
+            (match
+               outcome_of_response ~runtime_id ~requested_model:config.model_id response
+             with
              | Vo_truncated ->
                record_vision_candidate_attempt
                  ~runtime_id

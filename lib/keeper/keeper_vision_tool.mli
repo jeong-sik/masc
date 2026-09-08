@@ -96,8 +96,18 @@ val store_artifact
 (** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
     JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
     placeholder). *)
+(** Candidate identity and requested model come from the call configuration.
+    [response_model] is the provider-reported label, not an independently
+    verified model identity. None of these fields attest transcription accuracy. *)
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
 type vision_outcome =
-  | Vo_ok of string
+  | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
@@ -106,7 +116,9 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
-val outcome_of_response : Agent_core.Types.api_response -> vision_outcome
+val outcome_of_response :
+  runtime_id:string -> requested_model:string ->
+  Agent_core.Types.api_response -> vision_outcome
 (** Classify a provider response into a {!vision_outcome}. A reply the model
     truncated mid-JSON fails the structured parse before its text can be read;
     when the stop reason is a MaxTokens cut this is reported as [Vo_truncated]

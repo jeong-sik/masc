@@ -136,7 +136,7 @@ let eager_read ~media_type ~bytes : (string, string) result option =
          ~bytes
          ()
      with
-     | Keeper_vision_tool.Vo_ok text -> Some (Ok (truncate_read_text text))
+     | Keeper_vision_tool.Vo_ok reading -> Some (Ok (truncate_read_text reading.text))
      | outcome ->
        (match eager_read_eviction_reason_of_outcome outcome with
         | Some reason -> Some (Error reason)

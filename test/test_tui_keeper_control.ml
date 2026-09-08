@@ -60,7 +60,9 @@ let test_unobserved_offers_nothing () =
 
 let test_absent_offers_boot () =
   let r = reading ~liveness:Control.Absent "analyst" in
-  check_actions "boot" [ Control.Boot ] (Control.available r);
+  check_actions "boot, then delete"
+      [ Control.Boot; Control.Delete ]
+      (Control.available r);
   Alcotest.(check string) "an absent keeper reads absent, not unread" "absent"
     (Control.health_label r)
 
@@ -69,7 +71,9 @@ let test_absent_offers_boot () =
 let test_absent_and_paused_reads_paused () =
   let r = reading ~paused:true ~liveness:Control.Absent "analyst" in
   Alcotest.(check bool) "pause survives an absent roster" true r.Control.paused;
-  check_actions "boot" [ Control.Boot ] (Control.available r)
+  check_actions "boot, then delete"
+      [ Control.Boot; Control.Delete ]
+      (Control.available r)
 
 let test_live_running_offers_pause () =
   let r = reading ~liveness:(Control.Present (runtime "analyst")) "analyst" in
@@ -114,7 +118,9 @@ let test_registered_without_fiber_offers_boot () =
     runtime ~keepalive_running:false "analyst"
   in
   let r = reading ~liveness:(Control.Present live) "analyst" in
-  check_actions "boot, not pause" [ Control.Boot ] (Control.available r)
+  check_actions "boot, not pause; delete too"
+    [ Control.Boot; Control.Delete ]
+    (Control.available r)
 
 let test_only_shutdown_confirms () =
   List.iter
@@ -214,7 +220,8 @@ let step_testable =
     (fun fmt step ->
        match step with
        | Control.Lifecycle action -> Format.fprintf fmt "lifecycle:%s" action
-       | Control.Directive action -> Format.fprintf fmt "directive:%s" action)
+       | Control.Directive action -> Format.fprintf fmt "directive:%s" action
+       | Control.Purge -> Format.fprintf fmt "purge")
     ( = )
 
 let test_plans_name_their_endpoints () =
@@ -237,7 +244,55 @@ let test_plans_name_their_endpoints () =
   Alcotest.(check (list step_testable))
     "shutdown is a lifecycle post"
     [ Control.Lifecycle "shutdown" ]
-    (Control.plan Control.Shutdown)
+    (Control.plan Control.Shutdown);
+  (* Not a lifecycle step. The route is a dashboard action outside
+     /api/v1/keepers/ and takes the keeper in the body, so spelling it as one
+     would post to a path that does not exist. *)
+  Alcotest.(check (list step_testable))
+    "delete is the purge post"
+    [ Control.Purge ]
+    (Control.plan Control.Delete)
+
+(* Delete is the only action with no inverse: boot undoes a shutdown, and
+   nothing undoes a purge. *)
+let test_delete_is_confirmed_and_irreversible () =
+  Alcotest.(check bool) "delete arms before it submits" true
+    (Control.requires_confirmation Control.Delete);
+  Alcotest.(check (option (list step_testable)))
+    "and a conflict on it is a rejection, not a detour" None
+    (Control.recovers_from_conflict Control.Delete);
+  (* The keeper travels in the body under the name the route reads. *)
+  Alcotest.(check string) "the body names the keeper"
+    {|{"agent_name":"analyst"}|}
+    (Control.purge_body "analyst");
+  (* Not "d": masc_tui.ml binds that on this surface to repository changes. *)
+  Alcotest.(check string) "delete takes x" "x"
+    (Control.action_key Control.Delete);
+  Alcotest.(check bool) "and the arm has a list to name" true
+    (List.length Control.purge_artifacts > 0)
+
+(* A live fiber is the case a single keypress must not end. The purge route
+   would accept it and stop the keeper as part of the operation, so refusing
+   here is what keeps shutdown and delete two deliberate presses. *)
+let test_delete_is_not_offered_to_a_live_fiber () =
+  let live = reading ~liveness:(Control.Present (runtime "analyst")) "analyst" in
+  Alcotest.(check bool) "no delete while a fiber runs" false
+    (List.mem Control.Delete (Control.available live));
+  let paused =
+    reading ~paused:true ~liveness:(Control.Present (runtime "analyst")) "analyst"
+  in
+  Alcotest.(check bool) "not even for a paused one" false
+    (List.mem Control.Delete (Control.available paused));
+  (* An unread roster cannot say the fiber is gone. *)
+  Alcotest.(check bool) "and not without a roster" false
+    (List.mem Control.Delete (Control.available (reading "analyst")));
+  (* Absent is the one reading that licenses it, and boot stays the toggle. *)
+  let absent = reading ~liveness:Control.Absent "analyst" in
+  Alcotest.(check bool) "offered once the fiber is gone" true
+    (List.mem Control.Delete (Control.available absent));
+  Alcotest.(check (option action_testable))
+    "the toggle key still means boot" (Some Control.Boot)
+    (Control.primary absent)
 
 (* /boot answers 409 while the owner is operator-paused, and the durable pause
    only clears through the directive endpoint. Without the recovery steps, the
@@ -805,6 +860,10 @@ let () =
     ; ( "requests"
       , [ Alcotest.test_case "plans name their endpoints" `Quick
             test_plans_name_their_endpoints
+        ; Alcotest.test_case "delete is confirmed and irreversible" `Quick
+            test_delete_is_confirmed_and_irreversible
+        ; Alcotest.test_case "delete is not offered to a live fiber" `Quick
+            test_delete_is_not_offered_to_a_live_fiber
         ; Alcotest.test_case "boot recovers a paused owner" `Quick
             test_boot_recovers_a_paused_owner
         ; Alcotest.test_case "resume body carries the operation id" `Quick

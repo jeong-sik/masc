@@ -1242,13 +1242,16 @@ let init_skills_only =
 
 type init_tally = { written : int; skipped : int; failed : int }
 
-let seed_one ~target_root ~force tally rel =
+(* [rel] keys the embedded tree and [dest_rel] names where it lands. They are
+   the same string for every asset but the fresh-install roster, which is
+   authored under [keepers-default/] and seeds as [keepers/]. *)
+let seed_one ~target_root ~force tally (rel, dest_rel) =
   match Embedded_config.read rel with
   | None ->
     Printf.eprintf "init: missing embedded asset: %s\n" rel;
     { tally with failed = tally.failed + 1 }
   | Some content ->
-    let dest = Filename.concat target_root rel in
+    let dest = Filename.concat target_root dest_rel in
     Fs_compat.mkdir_p (Filename.dirname dest);
     if Fs_compat.file_exists dest && not force then begin
       Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
@@ -1279,7 +1282,14 @@ let init_cmd_exit base_path force skills_only =
       List.fold_left
         (seed_one ~target_root ~force)
         { written = 0; skipped = 0; failed = 0 }
-        (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list))
+        (List.filter_map
+           (fun rel ->
+             if Common.seeds_into_fresh_config_root rel
+             then Some (rel, rel)
+             else
+               Common.fresh_config_root_keeper_seed_target rel
+               |> Option.map (fun dest_rel -> rel, dest_rel))
+           Embedded_config.file_list))
   in
   let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
@@ -1290,10 +1300,11 @@ let init_cmd =
   let doc =
     "Seed default .masc/config/ from binary-embedded assets. Writes runtime \
      settings, prompts, tool definitions, connector declarations and first-party \
-     Skills in .masc/skills/, and leaves \
-     keepers/ empty for you to declare -- the same split the server makes when \
-     it creates a config root itself. Existing config files are kept unless --force; \
-     existing Skill packages are always preserved."
+     Skills in .masc/skills/, and puts one Keeper in keepers/ for you to edit \
+     -- it does not autoboot, so it waits until a model and a sandbox exist. \
+     The same split the server makes when it creates a config root itself. \
+     Existing config files are kept unless --force; existing Skill packages are \
+     always preserved."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
@@ -1976,6 +1987,7 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         Eio_context.set_clock (Eio.Stdenv.clock env);
         (* The same deadline the TUI's own create already runs under; this
            command does not invent a second one. *)
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
         match
           Masc_http_client.post_sync
             ~clock:(Eio.Stdenv.clock env)
@@ -1987,7 +1999,7 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         with
         | Error message -> Masc_cli_keeper_create.Unreachable message
         | Ok (status, response_body) ->
-          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body))
+          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body)))
   in
   let text, code = Masc_cli_keeper_create.render outcome in
   if code = 0 then print_endline text else prerr_endline text;
@@ -2232,18 +2244,15 @@ let sandbox_image_build_in_a_directory_exit ~cli ~tag =
         Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" cli n;
         Cmd.Exit.some_error)
 
-let sandbox_image_build_exit ~tag =
-  let argv =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @ Keeper_sandbox_image.build_argv ~tag
-  in
-  match argv with
+let sandbox_image_build_exit ~command ~tag =
+  match command with
   | [] ->
-    prerr_endline "sandbox-image: no docker command resolved";
+    prerr_endline "sandbox-image: no image build command resolved";
     Cmd.Exit.some_error
   | bin :: _ ->
-    (* docker exiting first would otherwise kill this process mid-write, and
-       the exit status we want to report is docker's own. *)
+    let argv = command @ Keeper_sandbox_image.build_argv ~tag in
+    (* The runtime exiting first would otherwise kill this process mid-write, and
+       the exit status we want to report is the runtime's own. *)
     let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
     let read_fd, write_fd = Unix.pipe () in
     Unix.set_close_on_exec write_fd;
@@ -2261,17 +2270,18 @@ let sandbox_image_build_exit ~tag =
     (match status with
      | Unix.WEXITED 0 ->
        Printf.printf
-         "built %s\n\
+         "built %s via %s\n\
           Point a Keeper at it with sandbox_image = %S in its TOML, or set \
           MASC_KEEPER_SANDBOX_DOCKER_IMAGE to make it that Keeper's default.\n"
          tag
+         (String.concat " " command)
          tag;
        Cmd.Exit.ok
      | Unix.WEXITED code ->
-       Printf.eprintf "sandbox-image: docker build exited %d\n" code;
+       Printf.eprintf "sandbox-image: %s build exited %d\n" bin code;
        Cmd.Exit.some_error
      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-       Printf.eprintf "sandbox-image: docker build stopped by signal %d\n" n;
+       Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" bin n;
        Cmd.Exit.some_error)
 
 (* Which store to build into. Docker stays the default because that is where
@@ -2281,10 +2291,14 @@ let sandbox_image_build_exit ~tag =
    only be made by naming that runtime here. *)
 let sandbox_image_build_for_runtime ~runtime ~tag =
   match runtime with
-  | None -> sandbox_image_build_exit ~tag
+  | None ->
+    sandbox_image_build_exit
+      ~command:(Keeper_sandbox_runtime.docker_command_argv ()) ~tag
   | Some backend ->
     (match Keeper_microvm_backend.recipe_delivery backend with
-     | Keeper_microvm_backend.On_stdin -> sandbox_image_build_exit ~tag
+     | Keeper_microvm_backend.On_stdin ->
+       sandbox_image_build_exit
+         ~command:[ Keeper_microvm_backend.cli_name backend ] ~tag
      | Keeper_microvm_backend.In_a_context_directory ->
        sandbox_image_build_in_a_directory_exit
          ~cli:(Keeper_microvm_backend.cli_name backend)
@@ -2325,7 +2339,9 @@ let sandbox_image_cmd =
         "This builds the other one: bash, ripgrep and git on a Debian base, \
          which is what a turn needs to read, search and edit a repository. The \
          recipe is embedded in this binary and goes straight to the runtime's \
-         build command, so no checkout and no registry is involved."
+         build command, so no source checkout or prepublished MASC image is \
+         needed. The initial Debian base image pull and package downloads \
+         require network access."
     ; `P
         "It carries gh and python3 because MASC itself asks the guest for \
          them: it mounts a GitHub CLI config there, and its own \

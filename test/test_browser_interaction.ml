@@ -16,6 +16,20 @@ let test_typed_actions () =
   check bool "live interactions admitted" true (Browser_lane.verb_allowed_on_live verb);
   check bool "interactions are writes" false (Browser_lane.verb_is_read verb);
   check string "closed wire verb" "page.interact" (Browser_lane.verb_to_string verb)
+let test_scene_reference () =
+  let target : Browser_lane.node_ref = {document_id="doc";node_id="node"} in
+  let reference = ["documentId",`String "doc";"nodeId",`String "node"] in
+  let request = parsed (fields "click" @ reference) in
+  check bool "observed identity is a typed target" true (request.action = Browser_lane.Click_node target);
+  let request = parsed (fields "fill" @ reference @ ["text",`String "별빛\n"]) in
+  check bool "reference fill retains literal text" true
+    (request.action = Browser_lane.Fill_node {target;text="별빛\n"});
+  List.iter (fun input -> check bool "mixed or incomplete references rejected" true
+    (Result.is_error (Interaction.parse (`Assoc input))))
+    [fields "click" @ reference @ ["selector",`String "button"];
+     fields "click" @ ["nodeId",`String "node"];
+     fields "click" @ ["documentId",`String "doc"];
+     fields "scroll" @ reference @ ["x",`Int 0;"y",`Int 10]]
 let test_invalid_actions () =
   List.iter (fun input -> check bool "invalid action rejected before dispatch" true
     (Result.is_error (Interaction.parse (`Assoc input))))
@@ -28,6 +42,21 @@ let test_invalid_actions () =
      fields "click" @ ["selector", `String "#query"; "script", `String "arbitrary()"];
      fields "click" @ ["selector", `String "#query"; "tabId", `Int 9];
      fields "evaluate"]
+let test_source_context () =
+  let module Source = Masc.Browser_source_context in
+  let fields = ["schema",`String "masc.source.v1";"file",`String "dashboard/src/demo.ts";
+    "line",`Int 12;"column",`Int 4;"kind",`String "template";"digest",`String (String.make 64 'a')] in
+  (match Source.of_json (`Assoc fields) with
+   | Source.Located location -> check int "original template line" 12 location.line
+   | _ -> fail "valid development source context refused");
+  check bool "external page is explicitly unmapped" true (Source.of_json `Null = Source.Unmapped);
+  List.iter (fun path -> match Source.of_json (`Assoc (("file",`String path)::List.remove_assoc "file" fields)) with
+    | Source.Invalid _ -> () | _ -> fail ("unsafe source path accepted: " ^ path))
+    ["../secret";"/etc/passwd";"dashboard/../../secret";"C:\\secret";"dashboard//x";"dashboard/./x"];
+  (match Source.of_json (`Assoc (("line",`Int 4)::fields)) with
+   | Source.Invalid _ -> () | _ -> fail "duplicate source field accepted")
 let () = run "browser interaction" ["typed boundary", [
+  test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
+  test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;
   test_case "malformed or mixed actions rejected" `Quick test_invalid_actions]]

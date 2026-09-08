@@ -148,6 +148,27 @@ let override_restore_failure_count () =
     ~labels:[ ("prompt", "override_restore") ]
     ()
 
+(* What the catalog says about [key]: the flag the TUI and dashboard read,
+   so a test pins the wire and not only the table behind it. *)
+let override_default_moved_in_catalog key =
+  match Prompt_registry.prompts_json () with
+  | `Assoc fields -> (
+      match List.assoc_opt "prompts" fields with
+      | Some (`List items) ->
+          List.find_map
+            (fun item ->
+              match get_string_field "key" item, get_bool_field "override_default_moved" item with
+              | Some item_key, Some moved when String.equal item_key key -> Some moved
+              | _ -> None)
+            items
+      | _ -> None)
+  | _ -> None
+
+let held_back_reason key =
+  Prompt_registry.held_back_overrides ()
+  |> List.find_map (fun ((entry : Prompt_override_persistence.entry), reason) ->
+         if String.equal entry.key key then Some reason else None)
+
 (* ── Fragment-group slots (#32780, #32814) ───────────────────────────
 
    A group file registers each [### marker] paragraph as <group>.<marker>
@@ -646,7 +667,7 @@ let () =
               check string "invalid override not applied"
                 (fixture "keeper")
                 (Prompt_registry.get_prompt "keeper"));
-          test_case "matching contract revision round-trips and applies" `Quick
+          test_case "a saved override round-trips and applies" `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               let override_text = "persisted system contract override" in
@@ -663,28 +684,52 @@ let () =
                 (Prompt_registry.get_prompt "keeper");
               check string "matching override source" "override"
                 (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
-          test_case "contract revision canonicalizes variable ordering" `Quick
+          test_case "an override is bound to the default it replaces" `Quick
             (fun () ->
-              let left =
-                Prompt_override_persistence.contract_revision ~body:"body"
-                  ~template_variables:[ "zeta"; "alpha" ]
-              in
-              let right =
-                Prompt_override_persistence.contract_revision ~body:"body"
-                  ~template_variables:[ "alpha"; "zeta" ]
-              in
-              check string "sorted variables have one revision" left right);
-          test_case "markdown body drift invalidates persisted override" `Quick
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (match
+                 Prompt_registry.set_override "test.templated"
+                   "bound facts {{facts_json}}"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              match Prompt_registry.override_entries () with
+              | [ entry ] ->
+                  check string "authored against the current default body"
+                    (Prompt_override_persistence.default_revision
+                       ~body:(fixture "test.templated"))
+                    entry.Prompt_override_persistence.authored_against;
+                  check (list string) "with the variables the prompt declared"
+                    [ "facts_json" ]
+                    entry.Prompt_override_persistence.template_variables;
+                  check (option bool) "and the catalog does not call it moved"
+                    (Some false)
+                    (override_default_moved_in_catalog "test.templated")
+              | entries ->
+                  fail
+                    (Printf.sprintf "expected one override, found %d"
+                       (List.length entries)));
+          (* The case this exists for: a release rewrote keeper.md under a
+             4.8 KB operator prompt and the server switched the prompt off,
+             held the text on disk, and served the new default. The operator
+             replaced that text on purpose; a new default is something to
+             show them, not a reason to stop applying what they wrote. *)
+          test_case
+            "a default body that moved under a saved override does not switch it off"
+            `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
+              let override_text = "persisted reply-guidelines override" in
               (match
-                 Prompt_registry.set_override "keeper.reply_guidelines"
-                   "persisted reply-guidelines override"
+                 Prompt_registry.set_override "keeper.reply_guidelines" override_text
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
               reload_registry prompts_dir;
+              check (option bool) "before the move the catalog is quiet"
+                (Some false)
+                (override_default_moved_in_catalog "keeper.reply_guidelines");
               let changed_body = "Reply guidelines contract changed" in
               write_file
                 (Filename.concat prompts_dir "keeper.reply_guidelines.md")
@@ -692,21 +737,34 @@ let () =
               reload_registry prompts_dir;
               let before = override_restore_failure_count () in
               Prompt_registry.restore_overrides dir;
-              check (float 0.0001) "body drift rejection counted"
-                (before +. 1.0)
+              check (float 0.0001) "no restore failure is counted" before
                 (override_restore_failure_count ());
-              check string "body drift falls back to changed file" changed_body
+              check string "the override is what a turn gets" override_text
                 (Prompt_registry.get_prompt "keeper.reply_guidelines");
-              check string "body drift source" "file"
-                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines"));
+              check string "and it says so" "override"
+                (Prompt_registry.prompt_source_to_string
+                 @@ Prompt_registry.prompt_source "keeper.reply_guidelines");
+              check int "nothing is held back" 0
+                (List.length (Prompt_registry.quarantined_entries ()));
+              check (option bool) "the catalog reports the default as moved"
+                (Some true)
+                (override_default_moved_in_catalog "keeper.reply_guidelines");
+              (* Saving the key again binds it to the default as it is now. *)
+              (match
+                 Prompt_registry.set_override_persisted ~base_path:dir
+                   "keeper.reply_guidelines" override_text
+               with
+              | Ok () -> ()
+              | Error _ -> fail "re-saving the same text did not persist");
+              check (option bool) "and the catalog is quiet again"
+                (Some false)
+                (override_default_moved_in_catalog "keeper.reply_guidelines"));
           test_case
-            "template-variable drift invalidates persisted override"
+            "a variable the prompt newly declares keeps the override in force, marked moved"
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
-              (match
-                 Prompt_registry.set_override "test.templated"
-                   "persisted facts {{facts_json}}"
-               with
+              let override_text = "persisted facts {{facts_json}}" in
+              (match Prompt_registry.set_override "test.templated" override_text with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
@@ -725,13 +783,59 @@ let () =
               reload_registry prompts_dir;
               let before = override_restore_failure_count () in
               Prompt_registry.restore_overrides dir;
-              check (float 0.0001) "variable drift rejection counted"
+              check (float 0.0001) "no restore failure is counted" before
+                (override_restore_failure_count ());
+              check string "the override still renders, so it applies" override_text
+                (Prompt_registry.get_prompt "test.templated");
+              check (option bool) "the catalog reports the contract as moved"
+                (Some true)
+                (override_default_moved_in_catalog "test.templated"));
+          (* The one thing that still holds an override back: it names a
+             variable the prompt no longer declares, so nothing downstream
+             would fill it and the literal placeholder would reach the
+             model. *)
+          test_case
+            "an override naming a variable the prompt dropped is held back with the reason"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              (match
+                 Prompt_registry.set_override "test.templated"
+                   "persisted facts {{facts_json}}"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              let renamed_body = "templated body {{facts_table}}" in
+              write_file
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [
+                     "---";
+                     "description: renamed variable contract";
+                     "category: test";
+                     "template_variables: [facts_table]";
+                     "---";
+                     renamed_body;
+                   ]);
+              reload_registry prompts_dir;
+              let before = override_restore_failure_count () in
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "the refusal is counted"
                 (before +. 1.0)
                 (override_restore_failure_count ());
-              check string "variable drift falls back to file" body
+              check string "a turn gets the file" renamed_body
                 (Prompt_registry.get_prompt "test.templated");
-              check string "variable drift source" "file"
-                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "test.templated"));
+              check string "and the source says so" "file"
+                (Prompt_registry.prompt_source_to_string
+                 @@ Prompt_registry.prompt_source "test.templated");
+              match held_back_reason "test.templated" with
+              | None -> fail "the refused override is not listed as held back"
+              | Some reason ->
+                  check bool "the reason names the stale variable" true
+                    (try
+                       ignore (Str.search_forward (Str.regexp_string "facts_json") reason 0);
+                       true
+                     with Not_found -> false));
           (* Refusing an override is not the same as discarding it. It used
              to be: the save path read only the live table, so the next write
              of any key rewrote the file without the refused entry, and an
@@ -741,20 +845,24 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               (match
-                 Prompt_registry.set_override "keeper.reply_guidelines"
-                   "the operator's own reply guidelines"
+                 Prompt_registry.set_override "test.templated"
+                   "the operator's own facts {{facts_json}}"
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
-              (* The default body moves under it, so the restore refuses. *)
+              (* The prompt drops the variable the override uses, so the
+                 restore refuses. *)
               write_file
-                (Filename.concat prompts_dir "keeper.reply_guidelines.md")
-                (markdown_fixture "keeper.reply_guidelines" "a different contract");
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [ "---"; "description: renamed variable contract"; "category: test";
+                     "template_variables: [facts_table]"; "---";
+                     "templated body {{facts_table}}" ]);
               reload_registry prompts_dir;
               Prompt_registry.restore_overrides dir;
               check string "the refused override is not in force" "file"
-                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines");
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "test.templated");
               check int "but it is still what the operator has saved" 1
                 (List.length (Prompt_registry.quarantined_entries ()));
               (* Now touch some entirely unrelated prompt. *)
@@ -763,7 +871,7 @@ let () =
                | Ok () -> ()
                | Error _ -> fail "the unrelated override did not save");
               check (list string) "the file on disk still holds both"
-                [ "keeper.reply_guidelines"; "test.plain" ]
+                [ "test.plain"; "test.templated" ]
                 (saved_keys_on_disk dir));
           (* Clearing is the operator saying so, and it reaches the copy they
              cannot see. Nothing else does. *)
@@ -771,21 +879,24 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               (match
-                 Prompt_registry.set_override "keeper.reply_guidelines" "held text"
+                 Prompt_registry.set_override "test.templated" "held {{facts_json}}"
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
               write_file
-                (Filename.concat prompts_dir "keeper.reply_guidelines.md")
-                (markdown_fixture "keeper.reply_guidelines" "moved again");
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [ "---"; "description: renamed variable contract"; "category: test";
+                     "template_variables: [facts_table]"; "---";
+                     "templated body {{facts_table}}" ]);
               reload_registry prompts_dir;
               Prompt_registry.restore_overrides dir;
               check int "held before the clear" 1
                 (List.length (Prompt_registry.quarantined_entries ()));
               (match
                  Prompt_registry.clear_prompt_override_persisted ~base_path:dir
-                   "keeper.reply_guidelines"
+                   "test.templated"
                with
                | Ok () -> ()
                | Error _ -> fail "the clear did not save");
@@ -800,18 +911,27 @@ let () =
               Unix.mkdir masc_dir 0o755;
               let malformed =
                 [
-                  ("wrong schema", {|{"schema_version":2,"overrides":[]}|});
+                  (* The version-1 envelope carried one digest as a gate;
+                     this build reads only the version that records what the
+                     override was written against. *)
+                  ("previous schema", {|{"schema_version":1,"overrides":[]}|});
                   ("top-level array", {|[]|});
                   ( "non-string value",
-                    {|{"schema_version":1,"overrides":[{"key":"keeper.reply_guidelines","value":42,"contract_revision":"r"}]}|}
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":42,"authored_against":"r","template_variables":[]}]}|}
+                  );
+                  ( "non-string template variable",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":"r","template_variables":[1]}]}|}
+                  );
+                  ( "version-1 field on a version-2 entry",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","contract_revision":"r"}]}|}
                   );
                   ( "duplicate entry field",
-                    {|{"schema_version":1,"overrides":[{"key":"keeper.reply_guidelines","key":"keeper","value":"x","contract_revision":"r"}]}|}
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","key":"keeper","value":"x","authored_against":"r","template_variables":[]}]}|}
                   );
                   ( "duplicate override key",
-                    {|{"schema_version":1,"overrides":[{"key":"keeper.reply_guidelines","value":"x","contract_revision":"r"},{"key":"keeper.reply_guidelines","value":"y","contract_revision":"r"}]}|}
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":"r","template_variables":[]},{"key":"keeper.reply_guidelines","value":"y","authored_against":"r","template_variables":[]}]}|}
                   );
-                  ("invalid JSON", {|{"schema_version":1|});
+                  ("invalid JSON", {|{"schema_version":2|});
                 ]
               in
               List.iter

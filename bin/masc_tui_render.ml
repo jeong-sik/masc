@@ -13718,7 +13718,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane)
+      | None, None when Option.is_some view.scene -> "s:text  n/p:control  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -13726,11 +13727,18 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
+        | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_scroll _) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
+        | Idle when Option.is_some view.scene ->
+            (match view.scene with
+             | Some scene -> Printf.sprintf "Scene %.1f ms • %d nodes%s" scene.elapsed_ms
+                 (List.length scene.content.nodes) (if scene.content.truncated then " • truncated" else ""), Theme.ok ()
+             | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
@@ -13762,6 +13770,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
+         | None when Option.is_some view.scene ->
+             (match List.nth_opt (scene_controls view) view.scene_cursor with
+              | Some node -> Printf.sprintf "  Control %d/%d: %s • n/p:select • Enter:click"
+                  (view.scene_cursor + 1) (List.length (scene_controls view)) (Terminal_text.single_line node.text)
+              | None -> "  No clickable controls in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
              | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live");
@@ -13784,9 +13797,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())
-        (match page with
-         | None -> "  No page content"
-         | Some page -> Printf.sprintf "  %s • %d chars%s%s"
+        (match view.scene, page with
+         | Some scene, _ -> "  " ^ Terminal_text.single_line scene.content.url ^ " • DOM order · viewport only · Ctrl-O:painted image"
+         | None, None -> "  No page content"
+         | None, Some page -> Printf.sprintf "  %s • %d chars%s%s"
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
@@ -16425,7 +16439,16 @@ let render_prompt_registry (state : state) =
             (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
                (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
           box_line_styled buf cols ~style:(Theme.recede ())
-            "  이 프롬프트의 원본이 바뀌어 핀이 어긋났습니다 \xc2\xb7 같은 키를 다시 저장하면 현재 원본에 다시 물립니다");
+            (Printf.sprintf
+               "  지금 계약으로는 렌더링할 수 없습니다: %s \xc2\xb7 그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다"
+               (Terminal_text.single_line entry.Tui_decode.hbo_reason)));
+       (* The override applies. This line says only that the shipped text it
+          replaced has changed since it was written, so the reader knows to
+          compare the two once rather than discovering a new default months
+          later. *)
+       if row.Tui_decode.pr_override_default_moved then
+         box_line_styled buf cols ~style:(Theme.warn ())
+           "  \xe2\x96\xb3 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요";
        let input_contract =
          if String.equal row.pr_category "librarian" then
            "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"

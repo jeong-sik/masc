@@ -15,14 +15,17 @@ open Time_compat
 module Action = Browser_action
 module Upload_lease = Browser_upload_lease
 
+type node_ref = { document_id : string; node_id : string }
 type interaction = Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
+  | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
 
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
   | Page_downloads of { tab_id : int }
   | Page_capture of { tab_id : int }
+  | Page_scene of { tab_id : int; max_chars : int }
   | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
@@ -40,6 +43,7 @@ let verb_to_string = function
   | Page_read _ -> "page.read"
   | Page_downloads _ -> "page.downloads"
   | Page_capture _ -> "page.capture"
+  | Page_scene _ -> "page.scene"
   | Page_interact _ -> "page.interact"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
@@ -53,9 +57,12 @@ let verb_to_string = function
 (* The wire carries a verb name plus args; the closed variant is the only
    thing that crosses a boundary. *)
 let interaction_args ~tab_id ~expected_url action =
+  let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let fields = match action with
     | Click selector -> ["action", `String "click"; "selector", `String selector]
     | Fill {selector; text} -> ["action", `String "fill"; "selector", `String selector; "text", `String text]
+    | Click_node target -> ("action",`String "click") :: node_fields target
+    | Fill_node {target;text} -> ("action",`String "fill") :: ("text",`String text) :: node_fields target
     | Scroll {x; y} -> ["action", `String "scroll"; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
     (Option.map (fun url -> "expectedUrl", `String url) expected_url |> Option.to_list))
@@ -74,6 +81,8 @@ let verb_json = function
       ]
   | Page_downloads {tab_id} ->
     `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
+  | Page_scene {tab_id;max_chars} ->
+    `Assoc ["verb",`String "page.scene";"args",`Assoc ["tabId",`Int tab_id;"maxChars",`Int max_chars]]
   | Page_capture { tab_id } ->
     `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
   | Page_interact { tab_id; expected_url; action } ->
@@ -111,14 +120,14 @@ let verb_json = function
      Readers and explicit-tab interactions are supported. Session ownership
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ | Page_downloads _
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
   | Session_status -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 let verb_allowed_on_live = function
   | Page_context _ | Page_downloads _ -> false
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_interact _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_interact _ -> true
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> false

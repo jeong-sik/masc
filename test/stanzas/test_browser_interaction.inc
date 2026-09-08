@@ -13,3 +13,14 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_interact_extension)))
+
+(rule
+ (alias runtest-test_browser_scene_resource)
+ (deps test_browser_scene_resource.cjs
+       ../connectors/browser/extension/background.js
+       ../lib/browser_scene_script.ml)
+ (action (run node %{dep:test_browser_scene_resource.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_scene_resource)))

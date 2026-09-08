@@ -67,3 +67,24 @@ let () =
   assert (browser_lane_on_screen state = None);
   assert state.composer_focused;
   print_endline "PASS reader hide/reopen, hidden reply, navigation, repeated open and draft ownership"
+
+let () =
+  let node : Masc.Browser_scene.node = {
+    node_id="n1";kind=Text;tag="p";text=String.make 152 'x' ^ "한글🙂";
+    rects=[{x=0.;y=0.;width=800.;height=20.}];color="rgb(0,0,0)";
+    font_size=16.;font_weight="400";white_space="normal";source_context=Masc.Browser_source_context.Unmapped } in
+  let content : Masc.Browser_scene.t = {
+    document_id="document";url="https://example.org";title="Scene";
+    width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false } in
+  let scene : Lane.scene = {source=Automation;client_id=None;tab_id=1;content;elapsed_ms=1.} in
+  let view = {(Lane.create ()) with source=Automation;selected_tab=Some 1;scene=Some scene} in
+  let lines = Masc_tui_types.browser_lane_page_lines ~cols:80 view in
+  List.iter (fun line ->
+    if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
+      failwith "scene line plus indentation exceeds the framed content width") lines;
+  if String.concat "" lines <> node.text then failwith "scene wrapping lost Unicode/ASCII text";
+  let pending = {view with load=Loading (42,Scene_read 1)} in
+  assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
+  assert ((Lane.accept_scene ~generation:42 (Ok {scene with tab_id=2}) pending).scene = None);
+  assert ((Lane.accept_scene ~generation:42 (Ok scene) pending).scene = Some scene);
+  print_endline "PASS scene wrapping and asynchronous source/tab ownership"

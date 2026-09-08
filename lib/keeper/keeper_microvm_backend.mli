@@ -125,7 +125,10 @@ type constraint_argv =
       (** Why this runtime cannot say it, in the operator's words. *)
 
 val run_constraint_argv : t -> guest_constraint -> constraint_argv
-(** How one runtime spells one guarantee on its [run], or why it cannot.
+(** How one runtime spells one guarantee on the detached Keeper [run], or why
+    it cannot. nerdctl 2.3.5 rejects [--rm] together with [-d], so its
+    [Remove_on_exit] is recorded as dropped; explicit teardown and the
+    abandoned-guest sweep own removal.
     Every pair is enumerated: a runtime added later has to answer each
     guarantee rather than inherit a default that would drop it. *)
 

@@ -108,7 +108,9 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-기본 Keeper 명단은 비어 있으며 `browser-lanes` skill 지침이 설치됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+기본 Keeper 명단에는 `imp` 하나가 들어 있고 `browser-lanes` skill 지침이 설치됩니다.
+`imp`는 autoboot이 꺼진 채로 설치되므로, 아래 모델과 실행 환경을 준비하기 전까지는
+서버가 이 Keeper를 띄우려 하지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
@@ -236,8 +238,11 @@ Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 insp
 공간은 호스트 filesystem을 따릅니다. 이 차이는 부팅 로그에 표시합니다.
 Apple에서 측정한 host descriptor 특성이 Linux에서도 같다고 보장하지 않습니다.
 `network_mode=none` 또는 `inherit`를 사용하며 Linux의 `policy`는 지원하지 않습니다.
-실제 Kata 환경 검증에는 `scripts/smoke-nerdctl-kata-volume.sh`를 사용합니다.
-이 검증 전에는 Linux microVM 지원 완료로 판단하지 않습니다.
+`scripts/smoke-nerdctl-kata-volume.sh`는 Kata의 볼륨·격리를 검사합니다.
+설치된 Keeper까지 검증하려면 `Kata volume smoke` workflow의 `release_run`에
+Linux x64 작업이 성공한 Release 실행 번호를 지정합니다. 이 경로는 해당 바이너리와
+shim을 설치하고 이미지 생성·Keeper 도구 실행·정본 checkpoint·게스트 재생성 후
+파일 보존을 확인합니다. 단순 볼륨 검사 통과만으로 설치된 Keeper 실행을 보장하지 않습니다.
 [Apple Container](https://github.com/apple/container#requirements)는 Apple Silicon과
 macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-containers/blob/main/docs/installation.md)는
 호스트 가상화 조건을 확인해야 합니다. Microsandbox의 현재 MASC 연결은 필수 격리
@@ -294,8 +299,9 @@ bash /tmp/masc-install.sh --version "$TAG" \
 ```
 
 0.34.0부터 `--force`는 바이너리를 갱신하며 기존 runtime 설정, 모델 선택,
-Keeper 파일을 보존합니다. 기본 seed는 매 설치마다 누락된 배포 자산과
-새 내장 skill을 보충하되 기존 설정과 skill 패키지는 보존합니다. 설정 초기화가 목적일
+Keeper 파일을 보존합니다. runtime과 model overlay가 이미 있는 작업 공간에서는
+새 내장 skill만 보충하고, 기존 설정과 사용자가 삭제한 선택 설정 파일을 보존합니다.
+새 설치 또는 필수 설정이 없는 작업 공간에서는 기본 설정을 seed합니다. 설정 초기화가 목적일
 때만 `--reset-config`를 추가합니다. 이 옵션은 seeded 설정과 선택한 팀 파일을
 덮어쓰므로 사용자 설정을 별도 보관한 다음 사용하세요.
 

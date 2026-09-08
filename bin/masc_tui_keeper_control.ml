@@ -151,16 +151,23 @@ type action =
   | Boot
   | Shutdown
   | Wakeup
+  | Delete
 
 (* One key each, and the toggle key submits whichever of pause/resume/boot the
    reading offers. Every letter here is unused by the Keepers surface's other
-   bindings (j/k move, Enter opens, l logs, c and m chat, r refresh, q quits). *)
+   bindings (j/k move, Enter opens, l logs, c and m chat, r refresh, q quits).
+
+   Delete takes "x" and not "d": masc_tui.ml already binds "d" on this surface
+   to the repository-changes view. "x" is bound elsewhere only under Config,
+   Overview task detail, Schedules, Planning, Verification and Harness, each
+   guarded on its own surface. *)
 let action_key = function
   | Pause -> "p"
   | Resume -> "p"
   | Boot -> "p"
   | Shutdown -> "s"
   | Wakeup -> "w"
+  | Delete -> "x"
 
 let action_label = function
   | Pause -> "pause"
@@ -168,6 +175,7 @@ let action_label = function
   | Boot -> "boot"
   | Shutdown -> "shutdown"
   | Wakeup -> "wake"
+  | Delete -> "delete"
 
 let action_gerund = function
   | Pause -> "pausing"
@@ -175,22 +183,46 @@ let action_gerund = function
   | Boot -> "booting"
   | Shutdown -> "shutting down"
   | Wakeup -> "waking"
+  | Delete -> "deleting"
 
 (* Shutdown ends the fiber and latches a durable operator pause, so bringing
    the keeper back is a three-request sequence rather than an undo. The web
    dashboard puts a confirmation in front of it for the same reason
    (dashboard/src/components/keeper-action-panel.ts). Pause, resume, boot and
    wake each have a single-request inverse and submit on the first press. *)
+(* Mirrors dashboard/src/api/keeper-lifecycle.ts KEEPER_PURGE_ARTIFACTS, which
+   mirrors the server's own plan. Written out rather than fetched: the
+   confirmation has to name what it removes before the request is sent, and
+   there is no route that answers "what would a purge take". *)
+let purge_artifacts =
+  [ "metrics store"
+  ; "decision log"
+  ; "feedback log"
+  ; "runtime directory"
+  ; "Memory OS snapshots and journal"
+  ; "TOML configuration"
+  ; "chat history"
+  ; "agent files and auth tokens"
+  ]
+
 let requires_confirmation = function
-  | Shutdown -> true
+  | Shutdown | Delete -> true
   | Pause | Resume | Boot | Wakeup -> false
 
+(* Delete is offered only where the roster said no fiber is running the keeper.
+   [Unobserved] offers nothing for the same reason every other action does not:
+   a roster that failed to load says nothing about whether a fiber is alive, and
+   the server's purge would have to stop one it was not asked to stop.
+
+   The purge route accepts a live keeper and shuts it down as part of the
+   operation. Not offering it here keeps the two steps the operator's to
+   sequence -- s then d -- so a single keypress never ends a running turn. *)
 let available reading =
   match reading.liveness with
   | Unobserved -> []
-  | Absent -> [ Boot ]
+  | Absent -> [ Boot; Delete ]
   | Present runtime ->
-      if not runtime.Decode.kr_keepalive_running then [ Boot ]
+      if not runtime.Decode.kr_keepalive_running then [ Boot; Delete ]
       else if reading.paused then [ Resume; Wakeup; Shutdown ]
       else [ Pause; Wakeup; Shutdown ]
 
@@ -202,6 +234,7 @@ let primary reading =
 type step =
   | Lifecycle of string
   | Directive of string
+  | Purge
 
 let plan = function
   | Pause -> [ Directive "pause" ]
@@ -209,10 +242,11 @@ let plan = function
   | Wakeup -> [ Directive "wakeup" ]
   | Boot -> [ Lifecycle "boot" ]
   | Shutdown -> [ Lifecycle "shutdown" ]
+  | Delete -> [ Purge ]
 
 let recovers_from_conflict = function
   | Boot -> Some [ Directive "resume"; Lifecycle "boot" ]
-  | Pause | Resume | Shutdown | Wakeup -> None
+  | Pause | Resume | Shutdown | Wakeup | Delete -> None
 
 type outcome =
   | Accepted of { already_live : bool }
@@ -257,6 +291,11 @@ let gate_transition ~inflight ~pending ~keeper action =
         Gate_arm { pending_keeper = keeper; pending_action = action }
 
 let lifecycle_body = "{}"
+
+(* The purge route takes the keeper in the body rather than the path, under the
+   name the dashboard sends. *)
+let purge_body keeper_name =
+  Yojson.Safe.to_string (`Assoc [ ("agent_name", `String keeper_name) ])
 
 let directive_body ~operator_operation_id action =
   let fields =

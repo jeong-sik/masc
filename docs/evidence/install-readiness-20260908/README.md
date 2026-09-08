@@ -57,3 +57,11 @@ the macOS system temporary directory was not visible to Docker. The old local ge
 image also lacked Python, so the binary's embedded recipe was built into a separate
 tag before acceptance. This is not a clean macOS VM measurement or a proof of real
 model quality, Linux first-turn operation, or long-running Keeper continuity.
+
+The same binary also passed [classic preset installation](classic-preset.json):
+four nonempty role instructions, Docker profile, inherited network and autoboot
+enabled. Preset files were downloaded from the binary's source commit and checked
+against staged checksums; the public 0.34.0 tag was not used before publication.
+With Keeper bootstrap disabled, the installed, unmodified runtime config reached
+`startup.state_ready=true` without provider credentials. This measures server
+readiness and preset seeding, not model turns by the four preset Keepers.

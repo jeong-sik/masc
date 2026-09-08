@@ -274,6 +274,14 @@ let execute_unlocked t = function
       let* _ = call t session `POST "/url" (Some (`Assoc ["url", `String url])) in
       page_summary t session)
   | Browser_lane.Page_act action -> fst (execute_action t action)
+  | Browser_lane.Page_scene {tab_id=id;max_chars} ->
+    let* session = session t in
+    with_tab t session (Some id) (fun () ->
+      let* data = script t session Browser_scene_script.read
+        [`Assoc ["mode",`String "read";"maxChars",`Int max_chars]] in
+      match data with
+      | `Assoc fields -> Ok (`Assoc (("tabId",`Int id) :: fields))
+      | _ -> Error (Protocol "malformed semantic scene"))
   | Browser_lane.Page_elements {tab_id=target_tab_id} ->
     let* session = session t in
     with_tab t session target_tab_id (fun () ->
@@ -309,7 +317,7 @@ let execute_unlocked t = function
   | Browser_lane.Page_interact { tab_id; expected_url; action } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
-      let* result = script t session Browser_interaction.script
+      let* result = script t session (Browser_scene_script.runtime ^ Browser_interaction.script)
         [Browser_lane.interaction_args ~tab_id ~expected_url action] in
       match result with
       | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))

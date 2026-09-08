@@ -6174,16 +6174,17 @@ let test_decode_prompts_reads_the_live_shape () =
 (* The field the wire has carried since the registry started quarantining
    overrides, and the snapshot dropped until 2026-09-07. A held-back key
    renders from its file, so the reader's only clue that an override exists
-   and is not running comes from here. *)
+   and is not running comes from here, and the reason is what tells them
+   which variable to take out. *)
 let held_back_payload =
   `Assoc
     [ ("prompts", `List [])
     ; ( "held_back"
       , `List
           [ `Assoc
-              [ ("key", `String "keeper")
+              [ ("key", `String "test.templated")
               ; ("bytes", `Int 1240)
-              ; ("contract_revision", `String "01e7760f")
+              ; ("reason", `String "Unknown template variables: facts_json")
               ]
           ] )
     ]
@@ -6195,10 +6196,33 @@ let test_decode_prompts_reads_held_back () =
     Alcotest.(check int) "one held back" 1
       (List.length snapshot.Tui_decode.ps_held_back);
     let entry = List.hd snapshot.Tui_decode.ps_held_back in
-    Alcotest.(check string) "key" "keeper" entry.Tui_decode.hbo_key;
+    Alcotest.(check string) "key" "test.templated" entry.Tui_decode.hbo_key;
     Alcotest.(check int) "saved bytes" 1240 entry.Tui_decode.hbo_bytes;
-    Alcotest.(check string) "the revision it was pinned to" "01e7760f"
-      entry.Tui_decode.hbo_contract_revision
+    Alcotest.(check string) "why it is not in force"
+      "Unknown template variables: facts_json" entry.Tui_decode.hbo_reason
+
+(* An override in force whose default moved is an ordinary override row with
+   one more fact on it. The row without the field is a row nothing moved
+   under. *)
+let test_decode_prompts_reads_a_moved_default () =
+  let row ~moved =
+    `Assoc
+      ([ ("key", `String "keeper")
+       ; ("effective", `String "the operator's prompt")
+       ; ("source", `String "override")
+       ]
+       @ match moved with None -> [] | Some moved -> [ ("override_default_moved", `Bool moved) ])
+  in
+  let decode rows =
+    match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List rows) ]) with
+    | Error detail -> Alcotest.fail detail
+    | Ok snapshot -> List.map (fun r -> r.Tui_decode.pr_override_default_moved) snapshot.Tui_decode.ps_rows
+  in
+  Alcotest.(check (list bool)) "true, false, and absent" [ true; false; false ]
+    (decode [ row ~moved:(Some true); row ~moved:(Some false); row ~moved:None ]);
+  match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List [ `Assoc [ ("key", `String "keeper"); ("source", `String "file"); ("override_default_moved", `String "yes") ] ]) ]) with
+  | Ok _ -> Alcotest.fail "a string where the wire promises a boolean decoded"
+  | Error _ -> ()
 
 (* A server with nothing quarantined omits the field, and so does one that
    predates it. Neither is an error, and both mean the same thing to a
@@ -8690,6 +8714,8 @@ let () =
           test_decode_prompts_reads_runtime_assets;
         Alcotest.test_case "reads the held-back overrides" `Quick
           test_decode_prompts_reads_held_back;
+        Alcotest.test_case "reads an override whose default moved" `Quick
+          test_decode_prompts_reads_a_moved_default;
         Alcotest.test_case "an absent held_back is empty, not an error" `Quick
           test_decode_prompts_absent_held_back_is_empty;
         Alcotest.test_case "hides assembly fragments by default" `Quick

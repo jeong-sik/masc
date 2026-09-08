@@ -33,27 +33,35 @@ class UpgradeConfigTest(unittest.TestCase):
             binary.write_text('''#!/usr/bin/env bash
 # Stands in for `masc init`, reading its flags the way the binary does:
 # --base-path <dir>, --force, and --skills-only (an upgrade seeds Skills
-# alone and leaves the config tree as it is).
+# alone and leaves the config tree as it is). The subcommand and the base
+# path are asserted rather than read by position: the upgrade path inserts
+# --skills-only ahead of --base-path, and a positional read turned the flag
+# itself into a path. optional.toml stands for a config file the operator
+# deleted -- an ordinary upgrade must not put it back.
 set -eu
-base=""; force=0; skills_only=0
+test "$1" = init
 shift
-while [ $# -gt 0 ]; do
+seed_base=""
+skills_only=0
+force_seed=0
+while [ "$#" -gt 0 ]; do
   case "$1" in
-    --base-path) base="$2"; shift 2 ;;
-    --force) force=1; shift ;;
+    --base-path) seed_base="$2"; shift 2 ;;
     --skills-only) skills_only=1; shift ;;
+    --force) force_seed=1; shift ;;
     *) echo "unexpected init argument: $1" >&2; exit 2 ;;
   esac
 done
-cfg="$base/.masc/config"
+test -n "$seed_base"
+cfg="$seed_base/.masc/config"
 if [ "$skills_only" -eq 0 ]; then
-  for name in runtime.toml agent-core-models-overlay.toml; do
-    if [ ! -e "$cfg/$name" ] || [ "$force" -eq 1 ]; then
+  for name in runtime.toml agent-core-models-overlay.toml optional.toml; do
+    if [ ! -e "$cfg/$name" ] || [ "$force_seed" -eq 1 ]; then
       echo seeded > "$cfg/$name"
     fi
   done
 fi
-skill_root="$base/.masc/skills"
+skill_root="$seed_base/.masc/skills"
 if [ ! -e "$skill_root/browser-lanes" ]; then
   mkdir -p "$skill_root/browser-lanes"
   echo builtin > "$skill_root/browser-lanes/SKILL.md"
@@ -101,6 +109,8 @@ curl() {
             self.assertEqual(keeper.read_text(), 'reset instructions\n' if reset else 'custom instructions\n')
             self.assertEqual((base / 'wizard-ran').exists(), reset)
             self.assertTrue(overlay.exists())
+            self.assertEqual((config / 'optional.toml').exists(), reset or missing_overlay,
+                             'ordinary upgrade must preserve removed optional config')
             self.assertEqual(skill.read_text(), 'operator skill\n')
             self.assertEqual((base / '.masc/skills/browser-lanes/SKILL.md').read_text(), 'builtin\n')
 

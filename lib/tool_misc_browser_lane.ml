@@ -164,6 +164,13 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
     else
     let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
     match get_string args "mode" "text" with
+    | "scene" ->
+      (match get_int_opt args "tabId" with
+       | Some tab_id when tab_id >= 0 ->
+           (match Browser_scene.read {request with tab_id=Some tab_id} ~max_chars with
+            | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+            | Error detail -> make_workflow_err ~tool_name ~start_time detail)
+       | _ -> make_workflow_err ~tool_name ~start_time "scene requires an observed tabId")
     | "downloads" ->
       if lane <> "automation" then make_workflow_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
@@ -186,7 +193,7 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
       let verb = match mode with
         | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
         | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
-        | _ -> Error "mode must be text, elements, screenshot, frames, dialog or downloads" in
+        | _ -> Error "mode must be text, elements, scene, screenshot, frames, dialog or downloads" in
       match verb with
       | Error detail -> make_workflow_err ~tool_name ~start_time detail
       | Ok verb ->

@@ -1826,6 +1826,7 @@ type async_msg =
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
+  | Browser_lane_scene_loaded of int * (Browser_lane_view.scene, string) result
   | Browser_lane_screenshot_ready of {
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
@@ -4044,11 +4045,23 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Viewport_refresh _ | Viewport_scroll _ -> true | _ -> false)
+  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
+        scene = None; scene_cursor = 0;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
+      (* Scene geometry belongs to its observation. Browser effects and fresh
+         reads withdraw it before dispatch; a screenshot may itself observe a
+         navigation, so dismissing its overlay must not resurrect old nodes.
+         Scene_click retains its exact reference in [operation], and the
+         matching completion can install the newly observed scene. *)
+      let view = match operation with
+        | Discover _ -> view
+        | Read | Open_session | Close_session | Goto _ | Screenshot _
+        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ ->
+            { view with scene = None; scene_cursor = 0 }
+      in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
@@ -4068,6 +4081,12 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
+        | Scene_read tab_id -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id))
+        | Scene_click {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Result.bind
+              (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
+              (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id)))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -9135,6 +9154,8 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
     | Keeper_control.Directive directive_action ->
         Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
           ~action:directive_action ~operator_operation_id
+      | Keeper_control.Purge ->
+          Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name
   in
   let rec walk ~recovery_available last_outcome steps =
     match steps with
@@ -9818,7 +9839,15 @@ let handle_keeper_action state ~base_path ~mailbox action =
             add_event state "system"
               (Printf.sprintf "Press %s again to %s %s"
                  (Keeper_control.action_key action)
-                 (Keeper_control.action_label action) keeper.k_name)
+                 (Keeper_control.action_label action) keeper.k_name);
+
+            (* Shutdown is undone by a boot. Delete is not undone at all, so
+               the arm names what goes -- the same list the dashboard shows
+               before its own purge. *)
+            if action = Keeper_control.Delete then
+              add_event state "system"
+                ("Delete removes: "
+                 ^ String.concat ", " Keeper_control.purge_artifacts)
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
@@ -11978,6 +12007,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
+  | Browser_lane_scene_loaded (generation, result) ->
+      state.browser_lane <- Option.map
+        (Browser_lane_view.accept_scene ~generation result) state.browser_lane
   | Browser_lane_screenshot_ready { generation; image_generation; result } ->
       (match state.browser_lane with
        | None -> ()
@@ -12011,7 +12043,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
                  | Ok () ->
                      state.browser_lane <- Some
-                       { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
+                       { view with reading = None; scene = None; scene_cursor = 0;
+                         selected_tab = None; scroll = 0; load = Idle };
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
             | Loading _ | Idle | No_browser | Failed _ -> ())
        | None -> ())
@@ -15946,7 +15979,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b") as key)
+               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -15975,7 +16008,25 @@ and is loaded on demand through keeper_skill.
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
-                 | "r" -> refresh_browser_lane state ~mailbox:async_messages
+                 | "s" when not (busy view) ->
+                     (match view.scene, view.selected_tab with
+                      | Some _, _ -> state.browser_lane <- Some {view with scene = None; scroll = 0}
+                      | None, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
+                      | None, None -> ())
+                 | "r" ->
+                     (match view.scene, view.selected_tab with
+                      | Some _, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
+                      | _ -> refresh_browser_lane state ~mailbox:async_messages)
+                 | "n" | "p" when Option.is_some view.scene && not (busy view) ->
+                     let count = List.length (scene_controls view) in
+                     if count > 0 then state.browser_lane <- Some {view with scene_cursor =
+                       (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "\r" | "\n" | "enter" when not (busy view) ->
+                     (match view.scene, List.nth_opt (scene_controls view) view.scene_cursor with
+                      | Some scene, Some node -> launch_browser_lane state ~mailbox:async_messages
+                          (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
+                            node_id=node.node_id;expected_url=scene.content.url})
+                      | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
@@ -19141,6 +19192,16 @@ and is loaded on demand through keeper_skill.
                        open_repository_change_diff state
                          ~mailbox:async_messages ~scope change)
                | _ -> ()))
+       (* Delete is the one keeper action with no inverse, so it is dispatched
+          here rather than through the toggle key: [Keeper_control.available]
+          offers it only where the roster shows no fiber, and
+          [gate_transition] holds the first press as an arm. *)
+       | Some "x"
+         when (match state.view with
+               | Keepers (Keeper_list | Keeper_detail) -> true
+               | _ -> false) ->
+           handle_keeper_action state ~base_path ~mailbox:async_messages
+             Keeper_control.Delete
        | Some "d"
          when (match state.view with
                | Keepers (Keeper_list | Keeper_detail) -> true

@@ -114,8 +114,9 @@ type constraint_argv =
    Apple's spellings were accepted by a live [container run] 1.3.0 on
    2026-08-28; the [msb] refusals were read from [msb run --help] on 0.6.16
    (2026-09-04) and confirmed by clap rejecting the flag before doing any
-   work; nerdctl's are Docker's own grammar, from that CLI's published
-   command reference.
+   work. nerdctl 2.3.5 accepts the isolation and scratch spellings below,
+   but rejects remove-on-exit with the detached run used for Keepers:
+   https://github.com/containerd/nerdctl/blob/v2.3.5/cmd/nerdctl/container/container_run.go#L354-L356
 
    The scratch mount, measured 2026-09-05 on container 1.3.1 with
    [--user 501:20 --read-only]: [--tmpfs /tmp] comes up as tmpfs rw, mode
@@ -152,7 +153,10 @@ let run_constraint_argv backend guest_constraint =
        write it has not been measured, and msb does not boot under masc today"
   | Nerdctl_kata, Drop_all_capabilities -> Expressed [ "--cap-drop"; "ALL" ]
   | Nerdctl_kata, Read_only_rootfs -> Expressed [ "--read-only" ]
-  | Nerdctl_kata, Remove_on_exit -> Expressed [ "--rm" ]
+  | Nerdctl_kata, Remove_on_exit ->
+    Not_expressible
+      "nerdctl 2.3.5 rejects --rm with detached -d Keeper runs; explicit \
+       teardown and the abandoned-guest sweep remove the container"
   | Nerdctl_kata, Scratch_tmpfs -> Expressed [ "--tmpfs"; scratch_guest_root ]
 ;;
 

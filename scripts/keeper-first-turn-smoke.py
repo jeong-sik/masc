@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Installed MASC -> fixture model -> real Docker tool -> durable checkpoint.
+"""Installed MASC -> fixture model -> actual Docker/Kata tool -> canonical checkpoint.
 
-Requires an already-built, locally available Docker image. Never builds code or
+Requires an already-built image in the selected runtime store. Never builds code or
 images. The model is scripted: this proves wiring and persistence, not quality.
 Evidence survives in --output-dir; temporary workspace and owned containers do not.
 """
@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import socket
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -207,7 +208,7 @@ def checkpoint_proof(base, fixture):
             data = json.loads(path.read_text())
         except (OSError, ValueError, UnicodeError):
             continue
-        if not isinstance(data, dict) or not data.get('session_id'):
+        if not isinstance(data, dict) or not isinstance(data.get('session_id'), str) or not data['session_id']:
             continue
         # Archived snapshots also carry messages; only the session-named
         # checkpoint is the authoritative input for the next resume.
@@ -228,26 +229,127 @@ def checkpoint_proof(base, fixture):
     return None
 
 
+def stop_server(server):
+    if server.poll() is None:
+        server.terminate()
+        try:
+            server.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+
+
+def kata_proof(args, fixture, base, output, runtime_env, server):
+    ids = command(['nerdctl', 'ps', '-aq', '--no-trunc', '--filter',
+                   'label=masc.mcp.keeper=' + args.keeper], runtime_env).split()
+    if len(ids) != 1:
+        raise SmokeError('expected one actual Kata Keeper container')
+    rows = json.loads(command(['nerdctl', 'inspect', '--mode', 'native', *ids], runtime_env))
+    (output / 'kata-native-inspect.json').write_text(json.dumps(rows, indent=2))
+    container = rows[0]
+    spec = container['Spec']
+    if container['Runtime']['Name'] != 'io.containerd.kata.v2':
+        raise SmokeError('Keeper container did not use the Kata runtime')
+    # nerdctl v2.3.5 labels.Networks is JSON-encoded []string.
+    if json.loads(container.get('Labels', {}).get('nerdctl/networks', 'null')) != ['none']:
+        raise SmokeError('original Kata guest network is not none')
+    if spec.get('hostname') != fixture.proof['hostname']:
+        raise SmokeError('ToolResult hostname differs from the actual Kata guest')
+    if spec.get('root', {}).get('readonly') is not True:
+        raise SmokeError('Kata guest rootfs is not read-only')
+    user = spec['process']['user']
+    if user['uid'] != os.getuid() or user['uid'] != fixture.proof['uid'] or spec['process'].get('capabilities', {}).get('effective'):
+        raise SmokeError('guest UID or capability boundary differs from the actual tool')
+    mounts = spec['mounts']
+    work_mount = next((mount for mount in mounts if mount['destination'] == '/masc-work'), None)
+    shim_mount = next((mount for mount in mounts if mount['destination'] == '/opt/masc-exec-shim'), None)
+    if not work_mount or not shim_mount:
+        raise SmokeError('Kata work volume or release shim mount is absent')
+    if 'ro' not in shim_mount.get('options', []) or 'rw' in shim_mount.get('options', []):
+        raise SmokeError('guest release shim mount is not read-only')
+    if Path(shim_mount['source']).resolve() != base / '.masc/microvm/shim':
+        raise SmokeError('guest did not mount this workspace release shim')
+    tool_results = [m for req in fixture.requests for m in req.get('messages', [])
+                    if m.get('role') == 'tool' and m.get('tool_call_id') == fixture.call_id]
+    evidence = [obj['shim_execution_evidence'] for obj in objects(tool_results)
+                if isinstance(obj.get('shim_execution_evidence'), dict)]
+    receipts = [entry for group in evidence if group.get('status') == 'recorded'
+                for entry in group.get('receipts', [])]
+    if not any(entry.get('status') == 'observed'
+               and entry.get('receipt', {}).get('boundary') == 'sandbox_applied'
+               and entry.get('outcome') == {'exit': 0, 'signal': None, 'timed_out': False, 'shim_error': False}
+               for entry in receipts):
+        raise SmokeError('actual Execute ToolResult has no successful shim execution receipt')
+    (output / 'shim-execution-receipts.json').write_text(json.dumps(receipts, indent=2))
+    proof_path = str(PurePosixPath(fixture.proof['cwd']) / fixture.filename)
+    if not PurePosixPath(proof_path).is_relative_to('/masc-work'):
+        raise SmokeError('Kata Execute wrote outside the managed work volume')
+    identity = f"{user['uid']}:{user['gid']}"
+    proof = json.loads(command(['nerdctl', 'exec', '--user', identity, ids[0],
+                               'cat', proof_path], runtime_env))
+    if proof != fixture.proof:
+        raise SmokeError('guest volume file differs from actual ToolResult')
+    (output / 'tool-proof.json').write_text(json.dumps(proof) + '\n')
+    expected_volume = 'masc-keeper-work-' + args.keeper
+    volumes = json.loads(command(['nerdctl', 'volume', 'inspect', expected_volume], runtime_env))
+    matching = [volume for volume in volumes
+                if volume.get('Name') == expected_volume
+                and Path(volume['Mountpoint']).resolve() == Path(work_mount['source']).resolve()]
+    if len(matching) != 1:
+        raise SmokeError('Kata work mount is not an identified managed named volume')
+    volume = matching[0]['Name']
+    (output / 'work-volume.json').write_text(json.dumps(matching[0], indent=2))
+    checkpoint, data = wait_until('canonical final Kata checkpoint',
+                                 lambda: checkpoint_proof(base, fixture), server)
+    # Stop the MASC owner before independently recreating a guest over its
+    # persisted volume. This is a persistence probe, not a second model turn.
+    stop_server(server)
+    remaining = command(['nerdctl', 'ps', '-aq', '--no-trunc', '--filter',
+                         'label=masc.mcp.keeper=' + args.keeper], runtime_env).split()
+    if remaining:
+        command(['nerdctl', 'rm', '-f', *remaining], runtime_env)
+    reread = json.loads(command(['nerdctl', 'run', '--rm', '--name', args.keeper + '-persistence',
+        '--label', 'masc.mcp.keeper=' + args.keeper, '--runtime', 'io.containerd.kata.v2',
+        '--pull', 'never', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--tmpfs', '/tmp',
+        '--user', identity, '-v', volume + ':/masc-work', args.image, 'cat', proof_path], runtime_env))
+    if reread != fixture.proof:
+        raise SmokeError('proof bytes did not survive Kata guest recreation')
+    (output / 'volume-recreated-proof.json').write_text(json.dumps(reread) + '\n')
+    return ids[0], checkpoint, data
+
+
 def run(args):
     binary = str(Path(args.binary).resolve(strict=True))
     output = Path(args.output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     marker = uuid.uuid4().hex
     keeper = 'first-turn-' + marker[:12]
+    args.keeper = keeper
+    runtime = 'docker' if args.backend == 'docker' else 'nerdctl'
+    profile = 'docker' if args.backend == 'docker' else 'microvm'
     fixture = ModelFixture(marker, output)
     model_server = fixture.serve()
     server = None
     docker_env = os.environ.copy()
     owned = []
+    owned_volumes = ['masc-keeper-work-' + keeper] if args.backend == 'nerdctl_kata' else []
     try:
-        command(['docker', 'image', 'inspect', args.image], docker_env)
-        # Docker Desktop/Colima choose their socket through the operator's
-        # context. Carry only that endpoint across HOME isolation, not config
-        # files or registry credentials.
-        docker_host = docker_env.get('DOCKER_HOST')
-        if not docker_host:
-            contexts = json.loads(command(['docker', 'context', 'inspect'], docker_env))
-            docker_host = contexts[0]['Endpoints']['docker']['Host']
+        docker_host = None
+        if args.backend == 'docker':
+            command(['docker', 'image', 'inspect', args.image], docker_env)
+            docker_host = docker_env.get('DOCKER_HOST')
+            if not docker_host:
+                contexts = json.loads(command(['docker', 'context', 'inspect'], docker_env))
+                docker_host = contexts[0]['Endpoints']['docker']['Host']
+        else:
+            if os.getuid() <= 0:
+                raise SmokeError('installed Kata acceptance must run as a nonroot host user')
+            if not args.guest_shim:
+                raise SmokeError('--backend nerdctl_kata requires --guest-shim from the installed release')
+            images = json.loads(command(['nerdctl', 'image', 'inspect', '--mode', 'native', args.image], docker_env))
+            if not images:
+                raise SmokeError('general image was not loaded into the configured nerdctl store')
+            (output / 'kata-image-native.json').write_text(json.dumps(images, indent=2))
         # Desktop/Colima share the user's home by default, while macOS's
         # /private/var temporary tree need not be visible to the Docker VM.
         with tempfile.TemporaryDirectory(prefix='masc-first-turn-', dir=Path.home()) as directory:
@@ -258,9 +360,23 @@ def run(args):
                    if k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')}
             env.pop('DOCKER_CONTEXT', None)
             env.pop('DOCKER_CONFIG', None)
-            env.update(DOCKER_HOST=docker_host, HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_BOOTSTRAP_ENABLED='true',
+            if docker_host:
+                env['DOCKER_HOST'] = docker_host
+            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_BOOTSTRAP_ENABLED='true',
                        MASC_KEEPER_SANDBOX_DOCKER_IMAGE=args.image)
             command([binary, 'init', '--base-path', str(base)], env)
+            if args.backend == 'nerdctl_kata':
+                source = Path(args.guest_shim).resolve(strict=True)
+                actual = hashlib.sha256(source.read_bytes()).hexdigest()
+                sidecar = source.with_name(source.name + '.sha256')
+                expected = sidecar.read_text().split() if sidecar.is_file() else []
+                if not expected or expected[0] != actual:
+                    raise SmokeError('installed release shim checksum sidecar missing or mismatched')
+                target = base / '.masc/microvm/shim'
+                target.mkdir(parents=True)
+                shutil.copy2(source, target / 'masc-exec-shim')
+                (target / 'masc-exec-shim').chmod(0o755)
+                (target / 'masc-exec-shim.sha256').write_text(actual + '  masc-exec-shim\n')
             config = base / '.masc/config'
             # Reuse the checked release startup contracts, including mandatory
             # exact-output lanes; only endpoint and transport streaming differ.
@@ -311,7 +427,8 @@ def run(args):
                     try:
                         creation = command([binary, 'keeper-create', '--base-path', str(base),
                             '--host', '127.0.0.1', '--port', str(port), '--agent', 'first-turn-admin',
-                            '--name', keeper, '--sandbox-profile', 'docker', '--network-mode', 'none',
+                            '--name', keeper, '--sandbox-profile', profile, '--network-mode', 'none',
+                            *(['--microvm-backend', 'nerdctl_kata'] if args.backend == 'nerdctl_kata' else []),
                             '--no-skills', '--no-autoboot', '--no-proactive', '--instructions',
                             'Execute the isolated first-turn proof and report its actual result.'], env)
                     except SmokeError as error:
@@ -319,7 +436,8 @@ def run(args):
                         # into a passing acceptance by silently bypassing it.
                         try:
                             direct = request(url + '/api/v1/keepers/' + keeper + '/up', token,
-                                {'name': keeper, 'sandbox_profile': 'docker', 'network_mode': 'none',
+                                {'name': keeper, 'sandbox_profile': profile, 'network_mode': 'none',
+                                 **({'microvm_backend': 'nerdctl_kata'} if args.backend == 'nerdctl_kata' else {}),
                                  'skills': {'names': []}, 'autoboot_enabled': False,
                                  'proactive_enabled': False, 'instructions': 'Isolated first-turn proof.'}, timeout=15)
                             (output / 'direct-up-diagnostic.json').write_bytes(direct)
@@ -341,63 +459,68 @@ def run(args):
                     if tool_mode.get('keeper') != keeper or tool_mode.get('mode') != 'yolo':
                         raise SmokeError('tool approval mode was not applied')
                     chat_request(url + '/api/v1/keepers/chat/stream', token,
-                        {'name': keeper, 'message': 'Run the isolated Docker proof once, then report completion.',
+                        {'name': keeper, 'message': 'Run the isolated ' + args.backend + ' proof once, then report completion.',
                          'request_id': 'kmsg-' + marker}, output / 'chat-stream.txt')
                     if fixture.error:
                         raise SmokeError(fixture.error)
                     if fixture.proof is None or len(fixture.requests) != (3 if fixture.search_requested else 2):
                         raise SmokeError('expected exactly tool-request then actual ToolResult/final response')
-                    ids = command(['docker', 'ps', '-aq', '--filter', 'label=masc.mcp.keeper=' + keeper], docker_env).split()
-                    if not ids:
-                        raise SmokeError('no actual Keeper Docker container found')
-                    inspected = json.loads(command(['docker', 'inspect', *ids], docker_env))
-                    owned = ids
-                    (output / 'docker-inspect.json').write_text(json.dumps(inspected, indent=2))
-                    container = next((item for item in inspected
-                                      if item['Config']['Hostname'] == fixture.proof['hostname']), None)
-                    if container is None or container['HostConfig']['NetworkMode'] != 'none':
-                        raise SmokeError('tool proof did not originate in isolated Keeper Docker container')
-                    guest_path = PurePosixPath(fixture.proof['cwd']) / fixture.filename
-                    host_file = None
-                    for mount in container['Mounts']:
-                        try:
-                            suffix = guest_path.relative_to(mount['Destination'])
-                        except ValueError:
-                            continue
-                        candidate = (Path(mount['Source']) / str(suffix)).resolve()
-                        if candidate.is_relative_to(base) and candidate.is_file():
-                            host_file = candidate
-                            break
-                    if host_file is None or json.loads(host_file.read_text()) != fixture.proof:
-                        raise SmokeError('host-mounted file does not match actual ToolResult')
-                    (output / 'tool-proof.json').write_text(host_file.read_text())
-                    checkpoint, data = wait_until('durable final checkpoint',
-                        lambda: checkpoint_proof(base, fixture), server)
+                    if args.backend == 'nerdctl_kata':
+                        container_id, checkpoint, data = kata_proof(
+                            args, fixture, base, output, docker_env, server)
+                    else:
+                        ids = command(['docker', 'ps', '-aq', '--filter', 'label=masc.mcp.keeper=' + keeper], docker_env).split()
+                        if not ids:
+                            raise SmokeError('no actual Keeper Docker container found')
+                        inspected = json.loads(command(['docker', 'inspect', *ids], docker_env))
+                        owned = ids
+                        (output / 'docker-inspect.json').write_text(json.dumps(inspected, indent=2))
+                        container = next((item for item in inspected
+                                          if item['Config']['Hostname'] == fixture.proof['hostname']), None)
+                        if container is None or container['HostConfig']['NetworkMode'] != 'none':
+                            raise SmokeError('tool proof did not originate in isolated Keeper Docker container')
+                        guest_path = PurePosixPath(fixture.proof['cwd']) / fixture.filename
+                        host_file = None
+                        for mount in container['Mounts']:
+                            try:
+                                suffix = guest_path.relative_to(mount['Destination'])
+                            except ValueError:
+                                continue
+                            candidate = (Path(mount['Source']) / str(suffix)).resolve()
+                            if candidate.is_relative_to(base) and candidate.is_file():
+                                host_file = candidate
+                                break
+                        if host_file is None or json.loads(host_file.read_text()) != fixture.proof:
+                            raise SmokeError('host-mounted file does not match actual ToolResult')
+                        (output / 'tool-proof.json').write_text(host_file.read_text())
+                        checkpoint, data = wait_until('durable final checkpoint',
+                            lambda: checkpoint_proof(base, fixture), server)
+                        container_id = container['Id']
                     (output / 'checkpoint.json').write_text(json.dumps(data, indent=2))
                     receipt = {'schema': 'masc.first_keeper_turn.v1', 'result': 'PASS',
                         'binary_sha256': hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
                         'binary_commit': command([binary, 'build-commit'], env).strip(),
                         'keeper': keeper, 'model': 'scripted loopback fixture', 'model_requests': len(fixture.requests),
-                        'image': args.image, 'container_id': container['Id'],
+                        'image': args.image, 'container_id': container_id, 'backend': args.backend,
                         'checkpoint_relative_path': str(checkpoint.relative_to(base)),
-                        'claims': ['actual Docker Execute', 'ToolResult returned to model',
-                                   'host file matched', 'canonical checkpoint contains final answer'],
+                        'claims': ['actual ' + args.backend + ' Execute', 'ToolResult returned to model',
+                                   ('host file matched' if args.backend == 'docker' else
+                                    'shim receipt and volume bytes survive guest recreation'),
+                                   'canonical checkpoint contains final answer'],
                         'not_measured': ['model quality', 'long-running Keeper continuity']}
                     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
                     print(json.dumps(receipt))
                 finally:
-                    if server.poll() is None:
-                        server.terminate()
-                        try:
-                            server.wait(timeout=15)
-                        except subprocess.TimeoutExpired:
-                            server.kill()
-                            server.wait()
-                    # Only this randomly named Keeper's containers are ours.
-                    ids = command(['docker', 'ps', '-aq', '--filter', 'label=masc.mcp.keeper=' + keeper], docker_env).split()
+                    stop_server(server)
+                    ids = command([runtime, 'ps', '-aq', '--filter', 'label=masc.mcp.keeper=' + keeper], docker_env).split()
                     owned = list(set(owned + ids))
                     if owned:
-                        command(['docker', 'rm', '-fv', *owned], docker_env)
+                        command([runtime, 'rm', '-fv' if runtime == 'docker' else '-f', *owned], docker_env)
+                    if owned_volumes:
+                        existing_volumes = command([runtime, 'volume', 'ls', '--format', '{{.Name}}'], docker_env).splitlines()
+                        for volume in owned_volumes:
+                            if volume in existing_volumes:
+                                command([runtime, 'volume', 'rm', volume], docker_env)
     finally:
         model_server.shutdown()
         model_server.server_close()
@@ -405,13 +528,15 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--backend', choices=('docker', 'nerdctl_kata'), default='docker')
+    parser.add_argument('--guest-shim', help='Installed release shim with adjacent .sha256 sidecar (Kata)')
     parser.add_argument('--binary', required=True)
     parser.add_argument('--image', required=True)
     parser.add_argument('--output-dir', required=True)
     args = parser.parse_args()
     try:
         run(args)
-    except (SmokeError, OSError, ValueError, subprocess.SubprocessError) as error:
+    except (SmokeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
         (Path(args.output_dir) / 'failure.txt').write_text(str(error) + '\n')
         raise SystemExit('first Keeper turn: FAIL: ' + str(error))

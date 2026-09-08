@@ -171,12 +171,46 @@ let test_seeds_rejects_dune_files () =
     (Common.seeds_into_fresh_config_root "prompts/dune")
 
 (* "keepers" is rejected as a whole segment, not as a prefix: a directory that
-   merely starts with those letters is ordinary distribution config. *)
+   merely starts with those letters is ordinary distribution config. The one
+   exception is [keepers-default], which is rejected here because it seeds under
+   another name rather than because it does not seed at all. *)
 let test_seeds_matches_whole_segment_only () =
   check bool "keepers-archive" true
     (Common.seeds_into_fresh_config_root "keepers-archive/x.toml");
   check bool "dune-project" true
     (Common.seeds_into_fresh_config_root "dune-project")
+
+(* Verbatim copy would land the roster at [keepers-default/], where nothing
+   reads it. Both seed paths ask the mapping below instead. *)
+let test_seeds_rejects_default_roster_verbatim () =
+  List.iter
+    (fun rel ->
+       check bool rel false (Common.seeds_into_fresh_config_root rel))
+    [ Common.default_keepers_dirname
+    ; Common.default_keepers_dirname ^ "/solo.toml"
+    ]
+
+let test_default_roster_seeds_into_keepers_dir () =
+  check
+    (option string)
+    "keepers-default/solo.toml"
+    (Some (Common.keepers_runtime_dirname ^ "/solo.toml"))
+    (Common.fresh_config_root_keeper_seed_target
+       (Common.default_keepers_dirname ^ "/solo.toml"))
+
+(* A README or a stray file in that directory is not a manifest, and the
+   bare directory name is not a file. Answering [Some] for either would write
+   a Keeper the roster never declared. *)
+let test_default_roster_target_rejects_non_manifests () =
+  List.iter
+    (fun rel ->
+       check (option string) rel None
+         (Common.fresh_config_root_keeper_seed_target rel))
+    [ Common.default_keepers_dirname
+    ; Common.default_keepers_dirname ^ "/README.md"
+    ; Common.keepers_runtime_dirname ^ "/executor.toml"
+    ; "runtime.toml"
+    ]
 
 let () =
   run "Common" [
@@ -186,6 +220,12 @@ let () =
       test_case "rejects keeper manifests" `Quick
         test_seeds_rejects_keeper_manifests;
       test_case "rejects dune files" `Quick test_seeds_rejects_dune_files;
+      test_case "rejects the default roster verbatim" `Quick
+        test_seeds_rejects_default_roster_verbatim;
+      test_case "default roster seeds into the keepers dir" `Quick
+        test_default_roster_seeds_into_keepers_dir;
+      test_case "default roster target rejects non-manifests" `Quick
+        test_default_roster_target_rejects_non_manifests;
       test_case "matches whole segment only" `Quick
         test_seeds_matches_whole_segment_only;
     ];

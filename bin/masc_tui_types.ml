@@ -2804,7 +2804,11 @@ module Browser_lane_view = struct
     source : source; client_id : string option; tab_id : int; title : string; url : string;
     data : string; elapsed_ms : float;
   }
+  type scene = { source : source; client_id : string option; tab_id : int;
+    content : Masc.Browser_scene.t; elapsed_ms : float }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
+    | Scene_read of int
+    | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_scroll of { tab_id : int; expected_url : string; y : int }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
@@ -2812,6 +2816,7 @@ module Browser_lane_view = struct
     clients : client list; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
+    scene : scene option; scene_cursor : int;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
@@ -2828,9 +2833,9 @@ module Browser_lane_view = struct
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None }
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0 }
   let switch_source source _t = { (create ()) with source }
-  let refresh t = { t with selected_tab = None; scroll = 0 }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0 }
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url
@@ -2847,7 +2852,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Viewport_refresh _ | Viewport_scroll _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2867,12 +2872,12 @@ module Browser_lane_view = struct
     | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scroll = 0; load = Idle; client_picker = None }
+      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = []; selected_tab = None; reading = None;
+         | Error detail -> { t with clients = []; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients; load = Idle } in
@@ -2887,7 +2892,7 @@ module Browser_lane_view = struct
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
                    | None, _ -> Idle
                  in
-                 { next with selected_tab = None; reading = None; scroll = 0;
+                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scroll = 0;
                    client_picker = Some 0; load }, false)
     | Loading _ | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
@@ -2989,6 +2994,35 @@ module Browser_lane_view = struct
       if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
       else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
 
+  let decode_scene json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* source = get parse_source "source" data in
+      let* client_id = parse_client_id source data in
+      let* tab_id = get integer "tabId" data in
+      let* elapsed_ms = get milliseconds "elapsed_ms" data in
+      let* content = Masc.Browser_scene.of_json data in
+      Ok {source;client_id;tab_id;content;elapsed_ms}
+
+  let accept_scene ~generation (result : (scene, string) result) t =
+    match t.load with
+    | Loading (current, (Scene_read tab_id | Scene_click {tab_id;_})) when current = generation ->
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id ->
+             {t with scene = Some scene; load = Idle; scene_cursor = 0; scroll = 0}
+         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
+         | Error detail -> {t with scene = None; load = Failed detail})
+    | _ -> t
+
+  let scene_controls t = match t.scene with
+    | None -> []
+    | Some scene -> List.filter (fun (node : Masc.Browser_scene.node) ->
+        match node.kind with Control {clickable=true; disabled=false; _} -> true | _ -> false)
+        scene.content.nodes
+
   let viewport_request ~tab_id ~expected_url ~y t =
     `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
        "action", `String "scroll"; "expectedUrl", `String expected_url;
@@ -3040,11 +3074,33 @@ module Browser_lane_view = struct
         let index = (current + direction + count) mod count in
         match List.nth_opt reading.tabs index with
         | None -> t
-        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; load = Idle }
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle }
 end
 
 let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
-  match view.reading with
+  let wrap text =
+    String.split_on_char '\n'
+      (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
+    |> List.concat_map (fun line -> if line = "" then [""] else
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+  match view.scene with
+  | Some scene -> List.concat_map (fun (node : Masc.Browser_scene.node) ->
+      let prefix = match node.kind with
+        | Text -> ""
+        | Raster -> "[image · Ctrl-O] "
+        | Control {disabled=true;_} -> "[disabled] "
+        | Control control ->
+            let rec index i = function
+              | [] -> None
+              | (candidate : Masc.Browser_scene.node) :: rest ->
+                  if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
+            let label = if control.editable then "input" else "button/link" in
+            (match index 0 (Browser_lane_view.scene_controls view) with
+             | None -> "[" ^ label ^ "] "
+             | Some i -> Printf.sprintf "[%s%d %s] "
+                 (if i = view.scene_cursor then ">" else "") (i + 1) label) in
+      wrap (prefix ^ node.text)) scene.content.nodes
+  | None -> match view.reading with
   | None -> []
   | Some reading ->
       match reading.page with
@@ -3054,7 +3110,7 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
             (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
           |> List.concat_map (fun line ->
               if line = "" then [""] else
-              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 4)) line)
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line)
 
 let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in

@@ -1,0 +1,46 @@
+{
+  "binary_commit": "585db68fd9253fd36a89066ddf1f92fddf361f92",
+  "binary_sha256": "0e6ad43e61ad7d1d1f924932e6cc63509e97b694f666d9860b52b97842974ac2",
+  "platform": "macos-arm64",
+  "preset": "classic",
+  "installation": "checksummed file:// binary mirror; HTTPS preset files pinned to the same commit",
+  "seeded_keepers": [
+    {
+      "file": "backend.toml",
+      "sandbox_profile": "docker",
+      "network_mode": "inherit",
+      "autoboot_enabled": true,
+      "instructions_nonempty": true
+    },
+    {
+      "file": "frontend.toml",
+      "sandbox_profile": "docker",
+      "network_mode": "inherit",
+      "autoboot_enabled": true,
+      "instructions_nonempty": true
+    },
+    {
+      "file": "qa.toml",
+      "sandbox_profile": "docker",
+      "network_mode": "inherit",
+      "autoboot_enabled": true,
+      "instructions_nonempty": true
+    },
+    {
+      "file": "tech_lead.toml",
+      "sandbox_profile": "docker",
+      "network_mode": "inherit",
+      "autoboot_enabled": true,
+      "instructions_nonempty": true
+    }
+  ],
+  "server_without_provider_credentials": {
+    "startup_state_ready": true,
+    "configuration_replaced_with_fixture": false,
+    "keeper_bootstrap_enabled": false
+  },
+  "not_measured": [
+    "published-tag preset download",
+    "preset Keeper model turns"
+  ]
+}

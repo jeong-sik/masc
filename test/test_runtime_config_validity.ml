@@ -4029,6 +4029,75 @@ let test_structured_judge_runtime_key_is_rejected () =
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
 
+let test_removed_preference_keeps_runtime_projection_readable () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Runtime_lane_preference.reset_for_testing ();
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_lane_preference.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let catalog = {|[[models]]
+id_prefix = "preference-fixture"
+provider_name = "fixture"
+base = "openai_chat"
+max_context_tokens = 8192
+max_output_tokens = 1024
+supports_tools = true
+|} in
+      let content candidates = Printf.sprintf {|[runtime]
+default = "fixture.alpha"
+[runtime.lanes.primary]
+candidates = %s
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9"
+[models.alpha]
+api-name = "preference-fixture"
+[models.beta]
+api-name = "preference-fixture"
+[fixture.alpha]
+[fixture.beta]
+|} candidates in
+      with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml (content {|["fixture.alpha", "fixture.beta"]|}) @@ fun path ->
+      (match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok Runtime.Initialized -> ()
+       | Ok (Runtime.Initialized_degraded _) -> fail "fixture runtime degraded"
+       | Error e -> fail (Runtime.strict_init_error_to_string e));
+      let project expected =
+        let json = Server_dashboard_runtime_resolved_json.build
+          ~generated_at_iso:"2026-09-08T00:00:00Z"
+          ~config:(Workspace.default_config base_path) in
+        let resolved = match Tui_decode.decode_runtime_resolved_snapshot json with
+          | Ok value -> value
+          | Error e -> failf "TUI rejected actual runtime producer: %s" e in
+        let lane = List.find
+          (fun (l : Tui_decode.runtime_resolved_lane) -> l.rrl_id = "primary")
+          resolved.rrs_lanes in
+        check (option string) "displayed preference is currently dispatchable"
+          expected lane.rrl_preferred_candidate;
+        lane in
+      Runtime_lane_preference.note_success ~lane_id:"primary" ~candidate:"fixture.beta";
+      ignore (project (Some "fixture.beta"));
+      (match Runtime.save_config_text ~runtime_config_path:path
+          (content {|["fixture.alpha"]|}) with
+       | Ok _ -> () | Error e -> fail e);
+      let remembered = Runtime_lane_preference.preferred_of_lane ~lane_id:"primary" in
+      check (option string) "test retains the old observed preference"
+        (Some "fixture.beta") (Option.map fst remembered);
+      let lane = project None in
+      check (option (float 0.)) "no orphan preference timestamp" None lane.rrl_preferred_at_ts;
+      check (list string) "dispatch candidate ordering matches the remaining candidate"
+        ["fixture.alpha"]
+        (Runtime_lane_preference.prefer_order ~lane_id:"primary" lane.rrl_runtime_ids))
+;;
+
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
   let catalog_row id = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
@@ -4908,6 +4977,8 @@ let () =
           test_case
             "save_config_text commits exact registry with runtime state"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
+          test_case "removed sticky candidate keeps the TUI projection readable"
+            `Quick test_removed_preference_keeps_runtime_projection_readable;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;

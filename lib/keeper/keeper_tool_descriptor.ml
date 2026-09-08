@@ -1884,19 +1884,40 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ()
 ;;
 
+(* What [keeper_spawn] answers on a start: the handle every later spawn
+   call names. Declared so a composition can hand it on. The builtin
+   run-and-read skill (start, wait, read as one plan) referenced [/handle],
+   and with the output opaque the plan was refused on every keeper turn
+   (live log 2026-09-08). Read, wait and stop stay opaque: their shape
+   depends on the outcome. *)
+let spawn_start_output_schema =
+  object_output_schema
+    ~properties:
+      [ "status", `Assoc [ "type", `String "string" ]
+      ; "handle", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "status"; "handle" ]
+;;
+
 let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
   let schema : Masc_domain.tool_schema = definition.schema in
-  cluster_descriptor_with_schema_source
-    ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:("masc.spawn." ^ definition.id)
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_keeper_spawn_dispatch
-    ~readonly:definition.read_only
-    ()
+  let descriptor =
+    cluster_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~input_schema:schema.input_schema
+      ~id:("masc.spawn." ^ definition.id)
+      ~name:schema.name
+      ~description:schema.description
+      ~handler:Tool_keeper_spawn_dispatch
+      ~readonly:definition.read_only
+      ()
+  in
+  match definition.action with
+  | Tool_schemas_spawn.Start ->
+    with_composable_output (Json_output { schema = spawn_start_output_schema }) descriptor
+  | Tool_schemas_spawn.Read | Tool_schemas_spawn.Wait | Tool_schemas_spawn.Stop -> descriptor
 ;;
 
 let keeper_code_query_descriptor () =

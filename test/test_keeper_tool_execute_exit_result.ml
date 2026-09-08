@@ -178,8 +178,9 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
           "escaped_shell was not one entry: %s"
           (Yojson.Safe.to_string other)
       | None ->
-        Alcotest.fail
-          "escaped_shell is absent from the payload the model reads")
+        Alcotest.failf
+          "escaped_shell is absent from the payload the model reads: %s"
+          (Yojson.Safe.to_string payload))
 ;;
 
 (* RFC spawn-a-process-that-outlives-the-call §1.0. The advice for [&] says
@@ -204,12 +205,16 @@ let test_a_backgrounded_child_still_holds_the_call () =
       let execution =
         run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ] ~cwd
       in
+      let payload = payload_of execution in
       let elapsed =
-        match payload_of execution with
+        match payload with
         | `Assoc fields ->
           (match List.assoc_opt "execution_time_ms" fields with
            | Some (`Int ms) -> ms
-           | _ -> Alcotest.fail "the payload has no execution_time_ms")
+           | _ ->
+             Alcotest.failf
+               "the payload has no execution_time_ms: %s"
+               (Yojson.Safe.to_string payload))
         | _ -> Alcotest.fail "payload was not an object"
       in
       if elapsed < 1000

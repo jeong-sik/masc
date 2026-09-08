@@ -3688,13 +3688,14 @@ let ensure_continuation_chat_projection
       ~keeper_name
       ~approval_id
       ~tool_name
+      ~phase
   =
   append_chat_projection
     ~base_path
     ~keeper_name
     { Keeper_chat_store.approval_id
     ; tool_name
-    ; phase = Keeper_chat_store.Approval_continuation_recorded
+    ; phase
     ; artifact_ref = None
     ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
     }
@@ -3712,41 +3713,64 @@ let continuation_chat_projection_present
     ~phase:Keeper_chat_store.Approval_continuation_recorded
 ;;
 
+let continuation_settled_chat_projection_present
+      ~base_path
+      ~keeper_name
+      ~approval_id
+  =
+  Keeper_chat_store.approval_continuation_settled
+    ~base_dir:base_path
+    ~keeper_name
+    ~approval_id
+;;
+
 type continuation_projection_result =
   | Continuation_projection_recorded
   | Continuation_projection_not_ready
 
-let ensure_settled_continuation_chat_projection
+(* The tool name a continuation receipt names, once the turn had the
+   resolution's outcome to show the model: a rejection needs no replay; an
+   approval needs its one-shot grant consumed and a durable replay outcome.
+   [Ok None] is "not yet": an unconsumed grant, or a consumed grant without
+   its outcome, means the effect has not been reported into a turn, so no
+   receipt of either phase may settle it. *)
+let settled_continuation_tool_name
+      ~base_path
+      ~(resolution : Keeper_event_queue.hitl_resolution)
+  =
+  match resolution.decision with
+  | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
+  | Keeper_event_queue.Hitl_approved ->
+    (match
+       approved_resolution_delivery ~base_path ~id:resolution.approval_id
+     with
+     | Ok
+         { request
+         ; state = Resolution_consumed
+         ; replay_outcome = Some _
+         } ->
+       Ok (Some (Some request.tool_name))
+     | Ok
+         { state = (Resolution_unconsumed | Resolution_consumed)
+         ; replay_outcome = None
+         ; _
+         }
+     | Ok
+         { state = Resolution_unconsumed
+         ; replay_outcome = Some _
+         ; _
+         } ->
+       Ok None
+     | Error error -> Error (grant_error_to_string error))
+;;
+
+let project_settled_continuation
       ~base_path
       ~keeper_name
       ~(resolution : Keeper_event_queue.hitl_resolution)
+      ~phase
   =
-  let approval_id = resolution.approval_id in
-  let ready_projection =
-    match resolution.decision with
-    | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
-    | Keeper_event_queue.Hitl_approved ->
-      (match approved_resolution_delivery ~base_path ~id:approval_id with
-       | Ok
-           { request
-           ; state = Resolution_consumed
-           ; replay_outcome = Some _
-           } ->
-         Ok (Some (Some request.tool_name))
-       | Ok
-           { state = (Resolution_unconsumed | Resolution_consumed)
-           ; replay_outcome = None
-           ; _
-           }
-       | Ok
-           { state = Resolution_unconsumed
-           ; replay_outcome = Some _
-           ; _
-           } ->
-         Ok None
-       | Error error -> Error (grant_error_to_string error))
-  in
-  match ready_projection with
+  match settled_continuation_tool_name ~base_path ~resolution with
   | Error _ as error -> error
   | Ok None -> Ok Continuation_projection_not_ready
   | Ok (Some tool_name) ->
@@ -3755,8 +3779,51 @@ let ensure_settled_continuation_chat_projection
       (ensure_continuation_chat_projection
          ~base_path
          ~keeper_name
-         ~approval_id
-         ~tool_name)
+         ~approval_id:resolution.approval_id
+         ~tool_name
+         ~phase)
+;;
+
+let ensure_settled_continuation_chat_projection
+      ~base_path
+      ~keeper_name
+      ~(resolution : Keeper_event_queue.hitl_resolution)
+  =
+  project_settled_continuation
+    ~base_path
+    ~keeper_name
+    ~resolution
+    ~phase:Keeper_chat_store.Approval_continuation_recorded
+;;
+
+(* #32956: the turn that received the replay failed after the provider
+   answered, so the model has already seen the evidence. The receipt settles
+   the continuation slot as failed; the intake then retires the queued wake
+   instead of carrying the same evidence into every later cycle. The route
+   is named in the log so a fleet grep can count how continuations fail. *)
+let ensure_failed_continuation_chat_projection
+      ~base_path
+      ~keeper_name
+      ~(resolution : Keeper_event_queue.hitl_resolution)
+      ~(route : Keeper_runtime_failure_route.route)
+  =
+  let projected =
+    project_settled_continuation
+      ~base_path
+      ~keeper_name
+      ~resolution
+      ~phase:Keeper_chat_store.Approval_continuation_failed
+  in
+  (match projected with
+   | Ok Continuation_projection_recorded ->
+     Log.Keeper.warn
+       "HITL_APPROVAL_CONTINUATION_FAILED: id=%s keeper=%s route=%s class=%s"
+       resolution.approval_id
+       keeper_name
+       (Keeper_runtime_failure_route.route_kind_label route)
+       (Keeper_runtime_failure_route.route_class_label route)
+   | Ok Continuation_projection_not_ready | Error _ -> ());
+  projected
 ;;
 
 let resolve_entry

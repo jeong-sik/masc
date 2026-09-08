@@ -2104,6 +2104,122 @@ let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
             ~approval_id))
 ;;
 
+(* #32956: a turn that received the replay and then failed after the
+   provider answered settles the continuation as failed. The same readiness
+   rule as the recorded receipt applies, the two share one slot, and the
+   settled predicate the intake reads is true for either. *)
+let test_failed_continuation_receipt_settles_once_after_the_grant_is_spent () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-failed-continuation" in
+  let input = `Assoc [ "target", `String "failed-continuation" ] in
+  let route =
+    Keeper_runtime_failure_route.Rotate_now
+      { rotate = Keeper_runtime_failure_route.No_progress_truncated }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id:approval_id
+            ~decision:Rule_types.Decision.Approve
+        with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         |> require_some "approved resolution was not delivered"
+       in
+       let ensure_failed () =
+         AQ.ensure_failed_continuation_chat_projection
+           ~base_path
+           ~keeper_name
+           ~resolution
+           ~route
+       in
+       (* The grant is unspent: the failed turn never showed the model its
+          outcome, so nothing may settle it. *)
+       (match ensure_failed () with
+        | Ok AQ.Continuation_projection_not_ready -> ()
+        | Ok AQ.Continuation_projection_recorded ->
+          Alcotest.fail "an unspent grant was settled by a failed turn"
+        | Error detail -> Alcotest.fail detail);
+       Alcotest.(check bool)
+         "nothing is settled before the grant is spent"
+         false
+         (AQ.continuation_settled_chat_projection_present
+            ~base_path
+            ~keeper_name
+            ~approval_id);
+       (match
+          Masc.Keeper_gate_replay.For_testing.settle_pre_effect_failure
+            ~base_path
+            ~approval_id
+            ~operation:"external-effect"
+            ~detail:"sandbox unavailable before effect"
+        with
+        | Ok _ -> ()
+        | Error detail -> Alcotest.fail detail);
+       (match ensure_failed () with
+        | Ok AQ.Continuation_projection_recorded -> ()
+        | Ok AQ.Continuation_projection_not_ready ->
+          Alcotest.fail "a spent grant with a durable outcome was not settled"
+        | Error detail -> Alcotest.fail detail);
+       Alcotest.(check bool)
+         "the failed receipt is visible in chat"
+         true
+         (Chat_store.approval_lifecycle_phase_present
+            ~base_dir:base_path
+            ~keeper_name
+            ~approval_id
+            ~phase:Chat_store.Approval_continuation_failed);
+       Alcotest.(check bool)
+         "the failed receipt is not a recorded receipt"
+         false
+         (AQ.continuation_chat_projection_present ~base_path ~keeper_name ~approval_id);
+       Alcotest.(check bool)
+         "the intake reads the failed receipt as settled"
+         true
+         (AQ.continuation_settled_chat_projection_present
+            ~base_path
+            ~keeper_name
+            ~approval_id);
+       (* Written once: a second settlement of the same phase is the same row. *)
+       (match ensure_failed () with
+        | Ok AQ.Continuation_projection_recorded -> ()
+        | Ok AQ.Continuation_projection_not_ready ->
+          Alcotest.fail "the settled grant read as not ready"
+        | Error detail -> Alcotest.fail detail);
+       let continuation_rows =
+         Chat_store.load_all ~base_dir:base_path ~keeper_name
+         |> List.filter (fun (message : Chat_store.chat_message) ->
+           match message.approval_lifecycle with
+           | Some lifecycle ->
+             Chat_store.approval_lifecycle_is_continuation lifecycle.Chat_store.phase
+           | None -> false)
+       in
+       Alcotest.(check int) "one continuation row" 1 (List.length continuation_rows);
+       (* One settlement per approval: the recorded receipt cannot follow
+          the failed one at the same slot. *)
+       (match
+          AQ.ensure_settled_continuation_chat_projection
+            ~base_path
+            ~keeper_name
+            ~resolution
+        with
+        | Error _ -> ()
+        | Ok AQ.Continuation_projection_recorded ->
+          Alcotest.fail "a recorded receipt overwrote the failed settlement"
+        | Ok AQ.Continuation_projection_not_ready ->
+          Alcotest.fail "the settled grant read as not ready");
+       drop_resolution ~base_path ~keeper_name resolution)
+;;
+
 let test_exact_binding_codec_validates_entry_identity () =
   let base_path = temp_dir () in
   Fun.protect
@@ -5509,6 +5625,10 @@ let () =
             "pre-effect replay failure retires grant and continues"
             `Quick
             test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation
+        ; Alcotest.test_case
+            "failed continuation receipt settles once after the grant is spent"
+            `Quick
+            test_failed_continuation_receipt_settles_once_after_the_grant_is_spent
         ; Alcotest.test_case
             "canonical replay repairs stale chat receipt once"
             `Quick

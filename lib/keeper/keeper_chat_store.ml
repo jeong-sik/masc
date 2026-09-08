@@ -142,6 +142,7 @@ type approval_lifecycle_phase =
   | Approval_replay_failed
   | Approval_replay_indeterminate
   | Approval_continuation_recorded
+  | Approval_continuation_failed
 
 type approval_lifecycle =
   { approval_id : string
@@ -184,6 +185,7 @@ let approval_lifecycle_phase_to_label = function
   | Approval_replay_failed -> "replay_failed"
   | Approval_replay_indeterminate -> "replay_indeterminate"
   | Approval_continuation_recorded -> "continuation_recorded"
+  | Approval_continuation_failed -> "continuation_failed"
 ;;
 
 let approval_lifecycle_phase_of_label = function
@@ -195,6 +197,7 @@ let approval_lifecycle_phase_of_label = function
   | "replay_failed" -> Some Approval_replay_failed
   | "replay_indeterminate" -> Some Approval_replay_indeterminate
   | "continuation_recorded" -> Some Approval_continuation_recorded
+  | "continuation_failed" -> Some Approval_continuation_failed
   | _ -> None
 ;;
 
@@ -665,7 +668,8 @@ let parse_approval_lifecycle ~path = function
                | Approval_requested
                | Approval_resolved_approved
                | Approval_resolved_rejected
-               | Approval_continuation_recorded -> false
+               | Approval_continuation_recorded
+               | Approval_continuation_failed -> false
                | Approval_replay_applied
                | Approval_replay_applied_with_warning
                | Approval_replay_failed
@@ -2634,7 +2638,25 @@ let approval_lifecycle_is_replay = function
   | Approval_replay_indeterminate -> true
   | Approval_resolved_approved
   | Approval_resolved_rejected
-  | Approval_continuation_recorded -> false
+  | Approval_continuation_recorded
+  | Approval_continuation_failed -> false
+;;
+
+(* The continuation settles once per approval, at the continuation slot:
+   recorded when the turn that received the replay completed or durably
+   checkpointed, failed when that turn failed after the provider answered.
+   Either one is the settlement the intake reads before re-delivering the
+   approval (#32956). *)
+let approval_lifecycle_is_continuation = function
+  | Approval_continuation_recorded
+  | Approval_continuation_failed -> true
+  | Approval_requested
+  | Approval_resolved_approved
+  | Approval_resolved_rejected
+  | Approval_replay_applied
+  | Approval_replay_applied_with_warning
+  | Approval_replay_failed
+  | Approval_replay_indeterminate -> false
 ;;
 
 let append_approval_lifecycle_at_slot_once
@@ -2710,7 +2732,8 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
     | Approval_replay_applied_with_warning
     | Approval_replay_failed
     | Approval_replay_indeterminate -> Approval_replay
-    | Approval_continuation_recorded -> Approval_continuation
+    | Approval_continuation_recorded
+    | Approval_continuation_failed -> Approval_continuation
   in
   match
     append_approval_lifecycle_at_slot_once
@@ -2809,6 +2832,16 @@ let approval_lifecycle_phase_present
     match message.approval_lifecycle with
     | Some lifecycle ->
       String.equal lifecycle.approval_id approval_id && lifecycle.phase = phase
+    | None -> false)
+;;
+
+let approval_continuation_settled ~base_dir ~keeper_name ~approval_id =
+  load_all ~base_dir ~keeper_name
+  |> List.exists (fun message ->
+    match message.approval_lifecycle with
+    | Some lifecycle ->
+      String.equal lifecycle.approval_id approval_id
+      && approval_lifecycle_is_continuation lifecycle.phase
     | None -> false)
 ;;
 

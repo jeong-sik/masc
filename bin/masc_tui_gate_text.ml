@@ -25,6 +25,10 @@ module Message_layout = Masc_tui_message_layout
    continuation row, and as the suffix of a folded run that also resumed. *)
 let continuation_wording = "턴 이어서 진행"
 
+(* The turn that received the replay failed after the model answered; the
+   approval is not delivered again (#32956). *)
+let failed_continuation_wording = "이어가던 턴 실패"
+
 (* What happened, then what it happened to.
 
    The subject used to lead, and the tool name used to lead the subject. Of
@@ -46,6 +50,7 @@ let news_of_phase : approval_lifecycle_phase -> string = function
   | Approval_replay_failed -> "적용 실패"
   | Approval_replay_indeterminate -> "적용 여부 불명 · 대상을 직접 확인하세요"
   | Approval_continuation_recorded -> continuation_wording
+  | Approval_continuation_failed -> failed_continuation_wording
 ;;
 
 let subject_of ~tool ~summary =
@@ -82,9 +87,10 @@ let lifecycle_line ~(phase : approval_lifecycle_phase) ~tool ~summary =
    severity instead would have kept showing the phase the correction exists to
    overturn.
 
-   [Approval_continuation_recorded] is the exception to all of it: it says the
-   turn resumed, which no outcome says, so it is not a stage and rides along
-   as a suffix instead of replacing the outcome. *)
+   The two continuation phases are the exception to all of it: they say what
+   the turn that resumed did, which no outcome says, so neither is a stage
+   and the one that is there rides along as a suffix instead of replacing
+   the outcome. *)
 type stage =
   | Waiting
   | Resolved
@@ -102,15 +108,17 @@ let stage_of_phase = function
     Some Replayed
   | Approval_resolved_approved | Approval_resolved_rejected -> Some Resolved
   | Approval_requested -> Some Waiting
-  | Approval_continuation_recorded -> None
+  | Approval_continuation_recorded | Approval_continuation_failed -> None
 ;;
 
-let is_continuation = function
-  | Approval_continuation_recorded -> true
+(* The suffix a continuation phase adds; the stages add none. *)
+let continuation_of_phase = function
+  | Approval_continuation_recorded -> Some continuation_wording
+  | Approval_continuation_failed -> Some failed_continuation_wording
   | Approval_requested | Approval_resolved_approved | Approval_resolved_rejected
   | Approval_replay_applied | Approval_replay_applied_with_warning
   | Approval_replay_failed | Approval_replay_indeterminate ->
-    false
+    None
 ;;
 
 let fold_line ~phases ~tool ~summary =
@@ -131,19 +139,28 @@ let fold_line ~phases ~tool ~summary =
           | None -> Some (stage, phase)))
       None phases
   in
-  let continued = List.exists is_continuation phases in
-  match outcome, continued with
-  (* Every phase is either a stage or the continuation, so a run with neither
+  (* The store settles the continuation once per approval, so at most one
+     of these is there; if the store ever held two, the later step stands,
+     on the same rule as the stages. *)
+  let continuation =
+    List.fold_left
+      (fun held phase ->
+        match continuation_of_phase phase with
+        | None -> held
+        | Some wording -> Some wording)
+      None phases
+  in
+  match outcome, continuation with
+  (* Every phase is either a stage or a continuation, so a run with neither
      is the empty run. *)
-  | None, false -> None
-  | None, true ->
-    Some (lifecycle_line ~phase:Approval_continuation_recorded ~tool ~summary)
-  | Some (_, phase), false -> Some (lifecycle_line ~phase ~tool ~summary)
-  | Some (_, phase), true ->
+  | None, None -> None
+  | None, Some wording -> Some (line ~news:[ wording ] ~tool ~summary)
+  | Some (_, phase), None -> Some (lifecycle_line ~phase ~tool ~summary)
+  | Some (_, phase), Some wording ->
     (* Both in front. Appended after the subject, the second one landed back
        in the column the pane cuts -- the position this module just moved the
        first one out of. *)
-    Some (line ~news:[ news_of_phase phase; continuation_wording ] ~tool ~summary)
+    Some (line ~news:[ news_of_phase phase; wording ] ~tool ~summary)
 ;;
 
 (* A Gate row's text carries the argument of the call it gated, and nothing

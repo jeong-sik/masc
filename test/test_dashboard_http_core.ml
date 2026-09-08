@@ -2150,16 +2150,16 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending = get_ok (Workspace_goals.request_current_proof config ~goal_id) in
+  let _, pending = get_ok (Lib.Workspace_goals.request_current_proof config ~goal_id) in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
     | _ -> fail "request did not persist pending proof"
   in
   ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
-  let committed = Workspace_goals.commit_verifier_decision
+  let committed = Lib.Workspace_goals.commit_verifier_decision
     ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
-    ~decision:Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
+    ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
   let proven = check_surfaces ~phase:"completed" ~proof_state:"proof_proven" in
   ignore (get_ok (Goal_store.upsert_goal config ~id:goal_id

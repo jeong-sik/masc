@@ -2,6 +2,36 @@
 module Tui_decode = Masc.Tui_decode
 module Metrics_tail = Masc_tui_metrics_tail
 
+(* A poll shares the current read; an explicit refresh owns a new one.
+   Only the owning response can settle that source and publish its result. *)
+module Snapshot_read : sig
+  type request
+  type t
+  type intent = Poll | Refresh
+
+  val idle : t
+  val start : intent:intent -> t -> t * request option
+  val settle : t -> request -> t option
+end = struct
+  type request = int
+  type t = { next : int; pending : request option }
+  type intent = Poll | Refresh
+
+  let idle = { next = 0; pending = None }
+
+  let start ~intent state =
+    match intent, state.pending with
+    | Poll, Some _ -> state, None
+    | (Poll | Refresh), _ ->
+      let request = state.next in
+      { next = request + 1; pending = Some request }, Some request
+
+  let settle state request =
+    match state.pending with
+    | Some pending when pending = request -> Some { state with pending = None }
+    | Some _ | None -> None
+end
+
 (** TUI shared types — split from masc_tui.ml (#3808) *)
 
 (** Agent type with status (from Tui_decode) *)
@@ -3158,6 +3188,8 @@ type runtime_config_reading = {
 
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
+type msx_menu_mode = Boot_game | Change_disk
+
 type msx_frame = {
   msx_number : int;
   msx_width : int;
@@ -3314,6 +3346,7 @@ type state = {
      the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
   mutable msx_menu_open: bool;
   mutable msx_notice: string option;
+  mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: string list;
   mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
@@ -3612,6 +3645,7 @@ type state = {
   (* Successful reads of each owning endpoint, independent of roster refresh.
      A failed refresh keeps both the receipt and the previous rows. *)
   mutable keeper_tool_approvals_observed: bool;
+  mutable keeper_tool_approvals_read: Snapshot_read.t;
   (* Which keepers are mid-turn right now, from GET /api/v1/keepers/turns.
      Rides the same tick as the approvals above, for the same reason: the
      "answering now" badge is drawn from every surface, so it cannot wait
@@ -3632,6 +3666,7 @@ type state = {
   mutable gate_rules_unavailable: string option;
   mutable gate_error: string option;
   mutable gate_snapshot_observed: bool;
+  mutable gate_snapshot_read: Snapshot_read.t;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -3744,6 +3779,7 @@ type state = {
      ok/unknown split so a failed store read never draws as "no schedules". *)
   mutable schedules: schedule_snapshot option;
   mutable schedules_error: string option;
+  mutable schedules_read: Snapshot_read.t;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
@@ -3791,6 +3827,7 @@ type state = {
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
@@ -4897,6 +4934,7 @@ let create_state
   msx_last_poll_ns = 0L;
   msx_menu_open = false;
   msx_notice = None;
+  msx_menu_mode = Boot_game;
   msx_carts = [];
   msx_menu_index = 0;
   palette_open = false;
@@ -5031,6 +5069,7 @@ let create_state
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_tool_approvals_observed = false;
+  keeper_tool_approvals_read = Snapshot_read.idle;
   keeper_turns = [];
   keeper_turns_error = None;
   gate_pending = [];
@@ -5040,6 +5079,7 @@ let create_state
   gate_rules_unavailable = None;
   gate_error = None;
   gate_snapshot_observed = false;
+  gate_snapshot_read = Snapshot_read.idle;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;
@@ -5089,6 +5129,7 @@ let create_state
   goal_action_error = None;
   schedules = None;
   schedules_error = None;
+  schedules_read = Snapshot_read.idle;
   schedule_cursor = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;
@@ -5120,6 +5161,7 @@ let create_state
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;
+  lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
   keeper_secrets = [];

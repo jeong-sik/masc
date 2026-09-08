@@ -256,3 +256,20 @@ let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
     let result = if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path in
     of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
 ;;
+
+let handle_change_disk ~tool_name ~start_time ~base_path args =
+  let request = match args with
+    | `Assoc ["disk", `String disk] when disk <> "" -> Ok disk
+    | _ -> Error "disk must name one .dsk image" in
+  match request with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok disk -> (
+    match resolve_cart ~base_path disk with
+    | Error message -> reject ~tool_name ~start_time message
+    | Ok path when not (is_dsk_path path) -> reject ~tool_name ~start_time "disk must be a .dsk image"
+    | Ok path ->
+      let backup_slot = "before-disk-change" in
+      let backup_path = Filename.concat (Filename.concat (msx_dir ~base_path) "saves") (backup_slot ^ ".json") in
+      of_lane ~tool_name ~start_time ~extra:["backup_slot", `String backup_slot]
+        (Msx_lane.change_disk ~path ~backup_path))
+;;

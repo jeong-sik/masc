@@ -38,7 +38,8 @@ let test_legacy_tilde_keys () =
 let test_msx_checkpoint_keys () =
   List.iter (fun (parameters, final, expected) ->
     check_name "checkpoint key reaches binding" expected parameters final)
-    [ "17", '~', "f6"; "18", '~', "f7"
+    [ "17", '~', "f6"; "18", '~', "f7"; "19", '~', "f8"
+    ; "57371;1", 'u', "f8"
     ; "17;1", '~', "f6"; "18;1", '~', "f7"
     ; "57369;1", 'u', "f6"; "57370;1", 'u', "f7"
     ; "17;2", '~', "shift-f6"; "57370;5", 'u', "ctrl-f7"
@@ -48,7 +49,7 @@ let test_msx_checkpoint_keys () =
   List.iter (fun (parameters, final) ->
     check (option string) "checkpoint release cannot invoke binding" None
       (named ~parameters ~final))
-    [ "17;1:3", '~'; "18;1:3", '~'
+    [ "17;1:3", '~'; "18;1:3", '~'; "19;1:3", '~'; "57371;1:3", 'u'
     ; "57369;1:3", 'u'; "57370;5:3", 'u' ]
 ;;
 

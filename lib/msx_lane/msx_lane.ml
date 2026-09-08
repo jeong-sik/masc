@@ -401,23 +401,26 @@ let atomic_write path contents =
     (fun () -> output_string oc contents; close_out oc; Sys.rename tmp path)
 ;;
 
+let checkpoint_json (st : machine) =
+  let named = function None -> `Null | Some name -> `String name in
+  `Assoc
+    [ "version", `Int 1
+    ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
+    ; "cartridge", named st.cart
+    ; "disk", named st.disk
+    ; "disk_id", named st.disk_id
+    ; "media", media_json st.media
+    ; "ledger", `List (List.map entry_json (List.rev st.entries))
+    ]
+;;
+
 let save ~path =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
     | Some st ->
-      let named = function None -> `Null | Some name -> `String name in
-      let json = `Assoc
-        [ "version", `Int 1
-        ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
-        ; "cartridge", named st.cart
-        ; "disk", named st.disk
-        ; "disk_id", named st.disk_id
-        ; "media", media_json st.media
-        ; "ledger", `List (List.map entry_json (List.rev st.entries))
-        ] in
       try
-        atomic_write path (Yojson.Safe.to_string json);
+        atomic_write path (Yojson.Safe.to_string (checkpoint_json st));
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
 ;;
@@ -490,4 +493,28 @@ let restore ~path ~ledger_dir =
         state := Some st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
+;;
+
+let change_disk ~path ~backup_path =
+  try
+    let original = read_file path in
+    let target_id = media_id original in
+    with_machine (fun st ->
+      match st.disk_id, Msx.disk_image st.m with
+      | Some current_id, Some current_bytes -> (
+        let media = (current_id, current_bytes) :: List.remove_assoc current_id st.media in
+        let target_bytes = match List.assoc_opt target_id media with
+          | Some retained -> retained | None -> original in
+        match Msx.restore ~state:(Msx.serialize st.m) with
+        | Error message -> Error (Unreadable ("cannot checkpoint current machine: " ^ message))
+        | Ok m -> (
+          match Msx.change_disk m target_bytes with
+          | Error message -> Error (Invalid_request message)
+          | Ok () ->
+            atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
+            let next = {st with m; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
+            state := Some next;
+            Ok (observe next)))
+      | _ -> Error (Invalid_request "load a disk game before changing disks"))
+  with Sys_error message -> Error (Unreadable message)
 ;;

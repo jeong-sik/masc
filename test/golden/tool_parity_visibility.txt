@@ -113,6 +113,7 @@ masc_library_list	deferrable	keeper_projection
 masc_library_read	always_loaded	none
 masc_library_search	always_loaded	none
 masc_messages	always_loaded	none
+masc_msx_change_disk	deferrable	none
 masc_msx_eject	deferrable	none
 masc_msx_load	deferrable	none
 masc_msx_press	deferrable	none

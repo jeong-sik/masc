@@ -53,6 +53,7 @@ let tilde_name = function
   | "6" -> Some "pagedown"
   | "17" -> Some "f6"
   | "18" -> Some "f7"
+  | "19" -> Some "f8"
   | _ -> None
 
 (* Unicode code points the Kitty protocol reports as themselves. Only the ones
@@ -69,6 +70,7 @@ let codepoint_name code =
     | 127 -> Some "backspace"
     | 57369 -> Some "f6"
     | 57370 -> Some "f7"
+    | 57371 -> Some "f8"
     | _ -> None
 
 (* With disambiguation enabled, iTerm reports Ctrl+letter as CSI-u instead of

@@ -3,6 +3,14 @@ type placement = {
   rows : int;
 }
 
+let fit_rows ~cell_pixels ~image_pixels ~columns ~rows =
+  match cell_pixels, image_pixels with
+  | Some (cw, ch), Some (iw, ih) when cw > 0 && ch > 0 && iw > 0 && ih > 0 ->
+      let allowed = float_of_int (max 1 columns) *. float_of_int cw
+        *. float_of_int ih /. float_of_int iw /. float_of_int ch in
+      max 1 (int_of_float (min (float_of_int (max 1 rows)) allowed))
+  | _ -> max 1 rows
+
 type query_reply =
   | Supported
   | Refused of string

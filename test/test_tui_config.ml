@@ -264,7 +264,14 @@ let write_cases =
    the pick, and the next start reads it back. A [tui] table is not something
    the runtime schema models, so this also answers whether writing one leaves
    a runtime.toml the server still loads -- the write validates the whole file
-   and refuses it otherwise. *)
+   and refuses it otherwise.
+
+   [models.sample] is a model no capability catalog knows, which is the ordinary
+   shape for an operator running their own openai-compatible server. Such a model
+   carries its own [capabilities] table: with none, nothing knows what a request
+   to it may express, and the runtime refuses the file rather than dispatch
+   blind. The table's presence is what makes it declared -- every field inside
+   has a default -- so this one names only what 1024 tokens of context implies. *)
 let storable_runtime =
   "[providers.local]\n\
    protocol = \"openai-compatible-http\"\n\
@@ -273,6 +280,9 @@ let storable_runtime =
    [models.sample]\n\
    api-name = \"sample\"\n\
    max-context = 1024\n\
+   \n\
+   [models.sample.capabilities]\n\
+   max-output-tokens = 1024\n\
    \n\
    [local.sample]\n\
    max-request-body-bytes = 65536\n\

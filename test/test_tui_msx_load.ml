@@ -20,7 +20,13 @@ let a_frame ?(cartridge = Some "xspelunker") () : Masc_tui_types.msx_frame =
 let a_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
-let captured render =
+(* The annotation is the point. Without it [render] is inferred from a use
+   that drops its result as a statement, so an incomplete application -- a
+   render missing one of its labelled arguments -- type-checks, returns the
+   function that still wants it, and is discarded. The buffer then stays empty
+   and every assertion about the output reads it as absent output. That is what
+   happened when render gained ~connection in #34262. *)
+let captured (render : (string -> unit) -> unit) =
   let buf = Buffer.create 4096 in
   render (fun text -> Buffer.add_string buf text);
   Buffer.contents buf
@@ -34,13 +40,16 @@ let contains hay needle =
 (* --- The spectator ---------------------------------------------------- *)
 
 let test_empty_frame () =
-  let out = captured (fun write -> Masc_tui_msx.render ~write None) in
+  let out = captured (fun write ->
+        Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected None) in
   check bool "an empty frame says no machine is loaded" true
     (contains out "no machine loaded");
   check bool "and writes something" true (String.length out > 0)
 
 let test_real_frame () =
-  let out = captured (fun write -> Masc_tui_msx.render ~write (Some (a_frame ()))) in
+  let out = captured (fun write ->
+        Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
+          (Some (a_frame ()))) in
   check bool "a real frame names the mode" true (contains out "GRAPHIC2");
   check bool "and the cartridge" true (contains out "xspelunker");
   check bool "and the frame number" true (contains out "345");

@@ -188,9 +188,38 @@ let test_clients_decode () =
     "tabs", `List []; "page", `Null]] in
   expect "live responses require explicit client ID" (Result.is_error (decode missing_id))
 
+let test_visual_scroll_ownership () =
+  let view = loaded () in
+  let expected_url = "https://example.org/" in
+  let pending = { view with load = Loading (41, Viewport_scroll {tab_id=2; expected_url; y=120}) } in
+  let shot = success (decode_screenshot (screenshot_response ())) in
+  let body = viewport_request ~tab_id:2 ~expected_url ~y:120 view in
+  let fields = match body with `Assoc fields -> fields | _ -> failwith "not an object" in
+  expect "scroll targets observed client, tab and URL"
+    (List.assoc "clientId" fields = `String firefox.client_id
+     && List.assoc "tabId" fields = `Int 2
+     && List.assoc "expectedUrl" fields = `String expected_url);
+  let ready, image = accept_screenshot ~generation:41 (Ok shot) pending in
+  expect "successful scroll releases busy state and admits new frame" (ready.load = Idle && image = Some shot);
+  let late, image = accept_screenshot ~generation:40 (Ok shot) pending in
+  expect "late scroll frame cannot replace current request" (late = pending && image = None);
+  let changed = { shot with url = "https://example.org/another-page" } in
+  let refused, image = accept_screenshot ~generation:41 (Ok changed) pending in
+  expect "navigation during scroll cannot masquerade as observed page"
+    (not (busy refused) && image = None && read_status refused = Read_failed);
+  let refreshing = { pending with load = Loading (41, Viewport_refresh {tab_id=2; expected_url}) } in
+  let refused, image = accept_screenshot ~generation:41 (Ok changed) refreshing in
+  expect "refresh never silently repins a different URL" (not (busy refused) && image = None);
+  let refused, image = accept_screenshot ~generation:41 (Error "scroll outcome unknown") pending in
+  expect "failed effect is surfaced without retry" (not (busy refused) && image = None);
+  let switched = switch_source Automation pending in
+  let same, image = accept_screenshot ~generation:41 (Ok shot) switched in
+  expect "closed or switched visual mode rejects an old frame" (same = switched && image = None)
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["client connection ownership", test_client_connection_ownership;
+    ["visual scroll ownership", test_visual_scroll_ownership;
+     "client connection ownership", test_client_connection_ownership;
      "client inventory contract", test_clients_decode;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
      "read and tab selection", test_read_and_selection;

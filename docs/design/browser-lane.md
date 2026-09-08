@@ -98,3 +98,28 @@ BrowserTabs resolution failures include the current typed `clients` inventory an
 a retry instruction in both structured error data and the model-facing message.
 An ambiguous or stale selection dispatches no browser command; the Keeper must
 choose a returned `clientId` and retry explicitly.
+
+
+## Terminal visual viewport
+
+After choosing and reading a Browser Lane tab, `Ctrl-O` opens Zen/Firefox's
+rendered PNG in the terminal. The browser owns DOM, CSS layout, fonts and page
+painting; MASC transports the resulting viewport via the terminal image protocol.
+This is not a second CSS engine or DOM-to-terminal layout conversion.
+
+While the viewport is open, wheel up/down or `j`/`k`/arrow keys scroll the actual
+selected page by 120 CSS pixels, then capture it again. `r` captures that same
+page again; `Esc` returns to the text reader. All other keys and pastes are
+consumed by the viewport and cannot edit a hidden draft. Inputs during an
+in-flight operation are not queued. Errors are shown without replaying actions.
+
+The source, live client, tab and observed URL remain pinned. Both scroll and
+refresh reject a returned frame from another URL. Leaving the viewport cancels
+presentation of a late frame; it cannot reverse a browser action already sent.
+Terminal resize redraws the cached PNG and fits its aspect ratio when terminal
+cell dimensions are known. It does not resize the browser's CSS viewport.
+
+This increment is event-driven visual reading and scrolling. It does not yet
+forward pointer clicks or text entry, stream video, or claim an interactive FPS.
+Rendering uses the existing [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
+or iTerm2 image path; unsupported terminals retain the explicit image diagnostic.

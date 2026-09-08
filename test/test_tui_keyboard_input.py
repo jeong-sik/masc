@@ -13313,7 +13313,107 @@ def run_browser_client_picker_regression(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
+def run_browser_viewport_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    captures, actions = [], []
+    png = [""]
+    changed = [False]
+    blocked, release = threading.Event(), threading.Event()
+    target = {"lane": "live", "clientId": client, "tabId": 2}
+    url = "https://example.org/"
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        return 200, {"ok": True, "data": {"source": "live", "clientId": client,
+            "elapsed_ms": 12.5, "tabs": [{"id": 2, "title": "owned", "url": url, "active": True}],
+            "page": {"tabId": 2, "title": "owned", "url": url,
+                "text": "owned browser body", "chars": 18, "truncated": False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        captures.append(request)
+        assert request == target, "viewport capture lost its explicit target"
+        return 200, {"ok": True, "data": {"source": "live", "clientId": client,
+            "tabId": 2, "title": "owned", "url": url + "changed" if changed[0] else url,
+            "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+
+    def scroll(body):
+        request = json.loads(body)
+        actions.append(request)
+        assert request == dict(target, expectedUrl=url, action="scroll", x=0, y=120)
+        if len(actions) == 2:
+            blocked.set()
+            if not release.wait(timeout=10):
+                return 504, {"ok": False, "error": "fixture timeout"}
+        return 200, {"ok": True, "data": {"scrollY": len(actions) * 120}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
+        "data": {"clients": [{"clientId": client, "browser": "zen"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(scroll)
+
+    def interact(process, master, slave, output, _base):
+        def image_input(data: bytes) -> bytes:
+            # draw_image writes its own image layer and footer, without the
+            # Frame_presenter FRAME_END emitted by ordinary text frames.
+            read_available(master, output)
+            start = len(output)
+            os.write(master, data)
+            wait_for_output(process, master, output, b"a=T", start=start, timeout=3)
+            image_end = end_of_needle(output, b"a=T", start)
+            footer = b"Esc: back"
+            wait_for_output(process, master, output, footer, start=image_end, timeout=3)
+            return bytes(output[start:end_of_needle(output, footer, image_end)])
+
+        palette_go(process, master, output, b"go Browser Lane", b"owned browser body")
+        image_input(b"\x0f")
+        image_input(b"j")
+        assert len(actions) == 1 and len(captures) == 2
+        # Global shortcuts and pasted text belong to the visible viewport.
+        os.write(master, b"a\x1b[200~hidden-draft\x1b[201~")
+        wait_for_terminal_input_consumed(slave)
+        image_input(b"r")
+        assert len(actions) == 1 and len(captures) == 3
+        resize_and_wait(process, master, output, rows=35, columns=110, needle=b"Esc: back")
+        assert len(captures) == 3, "resize must redraw cached bytes without browser effects"
+        os.write(master, b"\x1b[<65;10;10M")
+        assert wait_for_fixture_event(process, master, output, blocked, timeout=3)
+        os.write(master, b"jr")
+        wait_for_terminal_input_consumed(slave)
+        send_and_wait(process, master, output, b"\x1b", b"Scrolling selected browser viewport")
+        read_available(master, output)
+        start = len(output)
+        release.set()
+        wait_for_output(process, master, output, b"Read 12.5 ms", start=start, timeout=3)
+        assert b"a=T" not in output[start:], "late frame reopened a closed viewport"
+        assert len(actions) == 2 and len(captures) == 4, "busy input was queued or replayed"
+        image_input(b"\x0f")
+        changed[0] = True
+        restored = send_and_wait(process, master, output, b"r", b"expected URL mismatch")
+        assert FULL_REDRAW in restored, "async image dismissal reused the cleared text frame"
+        visible = screen_text(restored[restored.rfind(FULL_REDRAW):])
+        for row in (b"MASC Browser Lane", b"owned browser body", b"b:choose browser"):
+            assert row in visible, f"async image dismissal did not restore {row!r}"
+        assert b"Esc: back" not in visible, "viewport footer remained after async dismissal"
+        assert len(captures) == 6
+        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        os.write(master, b"q")
+
+    try:
+        run_terminal_scenario(executable, description="Browser visual viewport input and late frame ownership",
+            interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
+            preload_input=GRAPHICS_SUPPORTED_REPLY)
+    finally:
+        release.set()
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
+    run_browser_viewport_regression(executable)
     fixtures = overview_event_http_fixtures()
     client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []
@@ -13371,7 +13471,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         capture()
         if requests != [{"lane": "live", "clientId": client_id, "tabId": 2}]:
             raise AssertionError(f"screenshot did not bind the selected live tab: {requests!r}")
-        send_and_wait(process, master_fd, output, b"j", b"second page body")
+        send_and_wait(process, master_fd, output, b"\x1b", b"second page body")
         send_and_wait(process, master_fd, output, b"a", b"second page body")
         send_and_wait(process, master_fd, output, b"g", b"Ctrl-U:clear")
         draft = b"https://example.org/?q=draft"
@@ -13398,7 +13498,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
             raise AssertionError("cancelled screenshot interrupted the URL draft")
         # A cancelled preview still settles its operation, so another capture works.
         capture()
-        restored = send_and_wait(process, master_fd, output, b" ", draft + b"x")
+        restored = send_and_wait(process, master_fd, output, b"\x1b", draft + b"x")
         if draft + b"x " in CSI_RE.sub(b"", restored).split(b"\xe2\x96\x8f")[0]:
             raise AssertionError("image dismissal typed into the retained URL draft")
         send_and_wait(process, master_fd, output, b"\x1b", b"g:URL")

@@ -1,0 +1,503 @@
+{
+  "scope": "one fresh local fixture cycle on the new pinned runtime; metadata only",
+  "requested_repetitions": 1,
+  "source": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+  "keeper": "zen-advanced-8a5f2bea",
+  "runtime_instance_id": "01a07ec0-b09e-7000-bc34-f1d32f363465",
+  "at_unix": 1788833822.938553,
+  "cases": [
+    {
+      "case": "1",
+      "phases": [
+        {
+          "phase": "initial",
+          "counts": {
+            "all_calls": 40,
+            "successful_calls": 39,
+            "failed_calls": 1,
+            "success_by_tool": {
+              "BrowserSession": 1,
+              "BrowserGoto": 1,
+              "BrowserTabs": 1,
+              "BrowserRead": 17,
+              "BrowserInteract": 4,
+              "BrowserAct": 13,
+              "Write": 1,
+              "keeper_analyze_image": 1
+            },
+            "success_by_read_mode": {
+              "text": 9,
+              "elements": 2,
+              "frames": 2,
+              "dialog": 3,
+              "screenshot": 1
+            },
+            "success_by_act": {
+              "fill": 1,
+              "select": 1,
+              "press": 1,
+              "click": 5,
+              "scroll": 1,
+              "accept_dialog": 2,
+              "dismiss_dialog": 1,
+              "upload": 1
+            },
+            "success_by_interact": {
+              "fill": 1,
+              "click": 1,
+              "scroll": 2
+            }
+          }
+        },
+        {
+          "phase": "close",
+          "counts": {
+            "all_calls": 1,
+            "successful_calls": 1,
+            "failed_calls": 0,
+            "success_by_tool": {
+              "BrowserSession": 1
+            },
+            "success_by_read_mode": {},
+            "success_by_act": {},
+            "success_by_interact": {}
+          },
+          "receipt": {
+            "operation_state": "Succeeded",
+            "driver_ready": true,
+            "at_unix": 1788833645.8337522
+          }
+        }
+      ],
+      "counts": {
+        "all_calls": 40,
+        "successful_calls": 39,
+        "failed_calls": 1,
+        "success_by_tool": {
+          "BrowserSession": 1,
+          "BrowserGoto": 1,
+          "BrowserTabs": 1,
+          "BrowserRead": 17,
+          "BrowserInteract": 4,
+          "BrowserAct": 13,
+          "Write": 1,
+          "keeper_analyze_image": 1
+        },
+        "success_by_read_mode": {
+          "text": 9,
+          "elements": 2,
+          "frames": 2,
+          "dialog": 3,
+          "screenshot": 1
+        },
+        "success_by_act": {
+          "fill": 1,
+          "select": 1,
+          "press": 1,
+          "click": 5,
+          "scroll": 1,
+          "accept_dialog": 2,
+          "dismiss_dialog": 1,
+          "upload": 1
+        },
+        "success_by_interact": {
+          "fill": 1,
+          "click": 1,
+          "scroll": 2
+        }
+      },
+      "initial_was_clean": false,
+      "strict_audit_passed": false,
+      "browser_workflow_covered_after_recovery": true,
+      "actual_written_bytes_transferred": true,
+      "write_to_upload_matches": [
+        {
+          "write_call_id": "call_rigce7m2",
+          "write_at_unix": 1788833537.467545,
+          "upload_at_unix": 1788833542.3636851,
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "requested_51_bytes_match": false
+        }
+      ],
+      "requested_effects_and_coverage_verified": false,
+      "failed_calls": [
+        {
+          "call_id": "call_anjnksh0",
+          "tool": "keeper_analyze_image",
+          "action": null,
+          "mode": null,
+          "at_unix": 1788833550.160099,
+          "input_sha256": "75bcf6e218c7e67af25f3a4015b6905bcd8c5b00711dbf15cdfe3fc832323614",
+          "result_sha256": "210702577cd7c1fc19cd57f5c3b2dc427c627eda8a18e90bbd2181dc3fb01320",
+          "structured_error_code": "invalid_structured_response",
+          "wire_failure_class": "runtime_failure",
+          "diagnosis": "vision response was not valid structured JSON; a later image-analysis call is separately recorded"
+        }
+      ],
+      "fixture_flags": {
+        "top_input": true,
+        "top_click": true,
+        "nested_input": true,
+        "nested_select": true,
+        "nested_enter": true,
+        "nested_click": true,
+        "prompt_result": true,
+        "confirm_result": true,
+        "alert_returned": true,
+        "top_scroll": true,
+        "nested_scroll": true,
+        "exact_uploaded_bytes": false
+      },
+      "coverage": {
+        "BrowserSession": true,
+        "BrowserGoto": true,
+        "BrowserTabs": true,
+        "BrowserRead": true,
+        "BrowserInteract": true,
+        "BrowserAct": true,
+        "Write": true,
+        "keeper_analyze_image": true,
+        "read_text": true,
+        "read_elements": true,
+        "read_frames": true,
+        "read_dialog": true,
+        "read_screenshot": true,
+        "selector_actions_previously_observed": true,
+        "successful_selector_actions_previously_observed": true,
+        "frame_paths_previously_observed": true,
+        "outer_frames": true,
+        "actual_upload_click": true,
+        "nested_read_text": true,
+        "nested_read_elements": true,
+        "nested_fill": true,
+        "nested_select": true,
+        "nested_press": true,
+        "nested_click": true,
+        "nested_scroll": true,
+        "interact_fill_expected_url": true,
+        "interact_click_expected_url": true,
+        "interact_scroll_expected_url": true,
+        "accept_prompt": true,
+        "dismiss_confirm": true,
+        "accept_alert": true,
+        "write_exact_synthetic": false,
+        "write_owned_synthetic": true,
+        "all_writes_synthetic": false,
+        "all_writes_owned_payloads": true,
+        "fresh_session_open": true,
+        "no_early_session_close": true,
+        "upload_owned_file": true,
+        "stored_png_analyzed": true,
+        "upload_post_after_click_before_inspection": true
+      },
+      "synthetic_file": {
+        "name": "advanced-upload-1.txt",
+        "bytes": 51,
+        "sha256": "d95f0978e89dbaf395e4b5f3dd75cb35cecf1e7b0cab65eca7bf2ac579cfa73b"
+      },
+      "actual_uploads": [
+        {
+          "at_unix": 1788833542.3636851,
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "exact_bytes_match": false,
+          "filename_match": true
+        }
+      ],
+      "staged_owned_files": [
+        {
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "exact_bytes_match": false,
+          "directory_mode": "0o700",
+          "file_mode": "0o600"
+        }
+      ],
+      "lease_release_verified": true,
+      "approval_waits": [
+        {
+          "tool_call_id": "call_rigce7m2",
+          "at_unix": 1788833515.578918,
+          "execution_started": true,
+          "execution_success": true
+        }
+      ],
+      "approval_answers": [
+        {
+          "at_unix": 1788833516.011637,
+          "tool_call_id": "call_rigce7m2",
+          "tool": "Write",
+          "filename": "advanced-upload-1.txt",
+          "bytes": 50,
+          "sha256": "5d7c041d6b6a393f469dbd900835669a8cca6a3bc31c4caa4977f6d4719668d0",
+          "expected_bytes_match": false,
+          "decision": "approve",
+          "response": {
+            "settled": true,
+            "remembered": false,
+            "decision": "approve"
+          }
+        }
+      ],
+      "models": [
+        "glm-5.3-flash"
+      ],
+      "runtime_ids": [
+        "ollama_cloud.ollama-cloud-glm-5-3-flash"
+      ],
+      "vision_model": null,
+      "vision_artifacts": [
+        {
+          "handle": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6",
+          "bytes": 53761,
+          "sha256": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6",
+          "analyzed": true
+        }
+      ],
+      "http_capture": {
+        "bytes": 53761,
+        "sha256": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6"
+      },
+      "capture_scope": "direct Browser Lane HTTP PNG, not TUI or desktop compositor",
+      "close": {
+        "operation_state": "Succeeded",
+        "driver_ready": true,
+        "at_unix": 1788833645.8337522
+      },
+      "original_audit_sha256": null,
+      "raw_trace_sha256": {
+        "turn-1788833129136-2bef-000000.jsonl": "bb85cd59c5950ec24950ed6a62de94d9ba4770a6e36864b6e302af48cb1507ae",
+        "turn-1788833445592-2bef-000001.jsonl": "5230ccf09bb71b43bb3cc83bcfbcea905c1241b5d46c985109beade87120a554",
+        "turn-1788833635777-2bef-000002.jsonl": "0234c1e042b8ed1076153a28ffc0e67f02dde657090afac4a1c54f70c809aca4"
+      }
+    }
+  ],
+  "hash_format": "SHA256 of canonical UTF-8 JSON (sorted keys, compact separators) for tool input/result",
+  "prior_session_setup_failure": {
+    "source": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+    "runtime_instance_id": "01a07ec0-b09e-7000-bc34-f1d32f363465",
+    "keeper": "zen-advanced-8a5f2bea",
+    "result": "browser_session_setup_failed",
+    "model_operation_state": "Succeeded",
+    "browser_workflow_verified": false,
+    "downloads_test_performed": false,
+    "requested51_file_written": false,
+    "sandbox_teardown_exercised": false,
+    "calls": [
+      {
+        "call_id": "call_vxi6uxj5",
+        "tool": "BrowserSession",
+        "action": "open",
+        "success": false,
+        "input_sha256": "c21c6cc014b5b64b573f134addb2eb35012bcb6c45c8d50630bf92a21e73c3af",
+        "result_sha256": "551717b1b21e797a4d0e982c97f35c74983dcff519de83ecca47a23a28e21d84",
+        "failure": "BiDi ws-direct expected101 got404"
+      },
+      {
+        "call_id": "call_cp1x79rd",
+        "tool": "BrowserTabs",
+        "action": null,
+        "success": false,
+        "input_sha256": "5ab6af0c4b37ab56cd4c725a9a6f540b73858447080baf9e909d60aa0f659100",
+        "result_sha256": "aa95564e3fd084fde077421896fceafbaf3732e76d9d931bd0be2c6d2c6c0c14",
+        "failure": "session_closed"
+      },
+      {
+        "call_id": "call_gtufn9rr",
+        "tool": "BrowserSession",
+        "action": "open",
+        "success": false,
+        "input_sha256": "c21c6cc014b5b64b573f134addb2eb35012bcb6c45c8d50630bf92a21e73c3af",
+        "result_sha256": "551717b1b21e797a4d0e982c97f35c74983dcff519de83ecca47a23a28e21d84",
+        "failure": "BiDi ws-direct expected101 got404"
+      },
+      {
+        "call_id": "call_4h3pmil4",
+        "tool": "keeper_lane_status",
+        "action": null,
+        "success": true,
+        "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "result_sha256": "b158238d40261a5e1fc414017ecdd4c80fb6644e0cc4bf98ee89f77cb153df08",
+        "failure": null
+      }
+    ],
+    "raw_trace_sha256": {
+      "turn-1788833129136-2bef-000000.jsonl": "bb85cd59c5950ec24950ed6a62de94d9ba4770a6e36864b6e302af48cb1507ae"
+    },
+    "driver_after_setup_failure": {
+      "at_unix": 1788833285.727079,
+      "driver_ready": true,
+      "explicit_close_not_sent": "open failed and runtime compensated the new session; no usable browser tab existed"
+    }
+  },
+  "driver_launch_recovery": {
+    "at_unix": 1788833445.456727,
+    "old_driver_pid": 11246,
+    "new_driver_pid": 21100,
+    "driver_port": 59920,
+    "websocket_port": 0,
+    "driver_ready": true,
+    "server_pid_unchanged": 11247,
+    "server_source_unchanged": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+    "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+    "scope": "only idle owned geckodriver restarted; existing9222listener/otherbrowsers untouched",
+    "official_reference": "https://firefox-source-docs.mozilla.org/testing/geckodriver/Flags.html"
+  },
+  "prior_session_setup_failure_counts": {
+    "all_calls": 4,
+    "successful_calls": 1,
+    "failed_calls": 3,
+    "success_by_tool": {
+      "keeper_lane_status": 1
+    },
+    "success_by_read_mode": {},
+    "success_by_act": {},
+    "success_by_interact": {}
+  },
+  "combined_attempt_calls": {
+    "all_calls": 40,
+    "successful_calls": 39,
+    "failed_calls": 1,
+    "success_by_tool": {
+      "BrowserSession": 1,
+      "BrowserGoto": 1,
+      "BrowserTabs": 1,
+      "BrowserRead": 17,
+      "BrowserInteract": 4,
+      "BrowserAct": 13,
+      "Write": 1,
+      "keeper_analyze_image": 1
+    },
+    "success_by_read_mode": {
+      "text": 9,
+      "elements": 2,
+      "frames": 2,
+      "dialog": 3,
+      "screenshot": 1
+    },
+    "success_by_act": {
+      "fill": 1,
+      "select": 1,
+      "press": 1,
+      "click": 5,
+      "scroll": 1,
+      "accept_dialog": 2,
+      "dismiss_dialog": 1,
+      "upload": 1
+    },
+    "success_by_interact": {
+      "fill": 1,
+      "click": 1,
+      "scroll": 2
+    }
+  },
+  "unique_attempt_call_ids": 40,
+  "close_calls": {
+    "all_calls": 1,
+    "successful_calls": 1,
+    "failed_calls": 0,
+    "success_by_tool": {
+      "BrowserSession": 1
+    },
+    "success_by_read_mode": {},
+    "success_by_act": {},
+    "success_by_interact": {}
+  },
+  "combined_all_executed_calls": {
+    "all_calls": 45,
+    "successful_calls": 41,
+    "failed_calls": 4,
+    "success_by_tool": {
+      "keeper_lane_status": 1,
+      "BrowserSession": 2,
+      "BrowserGoto": 1,
+      "BrowserTabs": 1,
+      "BrowserRead": 17,
+      "BrowserInteract": 4,
+      "BrowserAct": 13,
+      "Write": 1,
+      "keeper_analyze_image": 1
+    },
+    "success_by_read_mode": {
+      "text": 9,
+      "elements": 2,
+      "frames": 2,
+      "dialog": 3,
+      "screenshot": 1
+    },
+    "success_by_act": {
+      "fill": 1,
+      "select": 1,
+      "press": 1,
+      "click": 5,
+      "scroll": 1,
+      "accept_dialog": 2,
+      "dismiss_dialog": 1,
+      "upload": 1
+    },
+    "success_by_interact": {
+      "fill": 1,
+      "click": 1,
+      "scroll": 2
+    }
+  },
+  "unique_all_executed_call_ids": 45,
+  "prepared_binary_identity": {
+    "at_unix": 1788833118.744102,
+    "source": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+    "server_sha256": "4e59e4bcb7cf86f1b8be51f4c8f870d6a0d6058950079b15ad161e614081dea6",
+    "shim_sha256": "7f00f70cfbb8596db63adae279216b4991fd9f8459894d1723a6c61c7f73ce39",
+    "shim_sidecar_matches": true,
+    "request_bytes": 51,
+    "previous_evidence_overwritten": false,
+    "shutdown_fix_ancestor": "2382cb2a647dac2e5b00a841b7aeb7ce43b3b3e1",
+    "shutdown_fix_in_measured_source": true
+  },
+  "shim_dependency_recovery": null,
+  "keeper_cleanup": {
+    "at_unix": 1788833720.833606,
+    "source": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+    "runtime_instance_id": "01a07ec0-b09e-7000-bc34-f1d32f363465",
+    "operation_id": "shutdown-99306a68-46cc-4082-ac93-3cb0405cd9e1",
+    "phase": "finalized",
+    "join_terminal": {
+      "kind": "stopped"
+    },
+    "cleanup_error": null,
+    "registry_unregistered": true,
+    "accumulator_dropped": true,
+    "paused": true,
+    "total_turns": 3,
+    "autoboot_enabled": false,
+    "proactive_enabled": false,
+    "keepalive_running": false,
+    "shutdown_admission_fence": false,
+    "driver_ready": true,
+    "pending_approval_ids": [],
+    "owned_vm_before_down": [
+      {
+        "id": "masc-keeper-vm-zen-advanced-8a5f2bea-inherit-22d2341c",
+        "state": "running",
+        "keeper_label": "zen-advanced-8a5f2bea",
+        "owner_pid_label": "11247",
+        "base_path_hash_label": "22d2341c7340d577ea4097b25400cb8c"
+      }
+    ],
+    "owned_vm_after_down": [],
+    "post_down_inventory_available": true,
+    "owned_container_absence_verified": true,
+    "automatic_teardown_exercised": true,
+    "manual_vm_stop_or_delete": false,
+    "manual_metadata_or_file_deletion": false,
+    "shared_server_driver_stopped": false
+  },
+  "verification_run_finished": true,
+  "requested_content_note": "Requested content is51 bytes including final LF; exact matching and actual transfer fidelity are separate fields. Upstream raw provider response parsing was not measured.",
+  "shutdown_fix_in_measured_source": true,
+  "cleanup_verified": true,
+  "completed_requested_repetitions": false,
+  "browser_workflows_exercised": true,
+  "result": "browser_workflows_covered_with_input_failures"
+}

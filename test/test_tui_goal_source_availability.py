@@ -46,12 +46,12 @@ def run(executable):
             screen = h.screen_text(frame)
             if scenario == 'empty-ready':
                 assert cause.encode() not in screen, screen
-                assert b'no goals in this filter' in screen, screen
+                assert b'(no goals)' in screen, screen
             else:
                 assert cause.encode() in screen, screen
                 assert b'approval queue store is unreadable' not in screen, screen
                 if scenario == 'source-unavailable':
-                    assert b'no goals in this filter' not in screen, screen
+                    assert b'(no goals)' not in screen, screen
             print('GOAL_SOURCE_PTY_EVIDENCE ' + json.dumps({
                 'scenario': scenario, 'http_reads': list(reads), 'rows': 40, 'columns': columns,
                 'binary_sha256': hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
@@ -62,8 +62,8 @@ def run(executable):
         h.palette_go(process, master, output, b'go Planning', cause.encode())
         capture('source-unavailable', cause.encode(), 140)
         current[:] = h.planning_snapshot([])
-        h.send_and_wait(process, master, output, b'r', b'no goals in this filter')
-        capture('empty-ready', b'no goals in this filter', 141)
+        h.send_and_wait(process, master, output, b'r', b'(no goals)')
+        capture('empty-ready', b'(no goals)', 141)
         current[:] = h.planning_snapshot([h.planning_goal('source-goal', 'source-goal-loaded')])
         h.send_and_wait(process, master, output, b'r', b'source-goal-loaded')
         h.send_and_wait(process, master, output, b'\x1b[C', cause.encode())

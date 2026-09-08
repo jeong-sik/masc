@@ -53,13 +53,17 @@ type proof_reconciliation =
 (** Commit one verdict from the application-owned Goal verifier. The fixed
     [verifier_exact] authority is constructed inside this boundary; callers
     cannot supply or impersonate it. The ledger commit precedes any phase
-    write, and a stale/non-pending verdict is refused. *)
+    write, and a stale/non-pending verdict is refused. An exact replay after
+    the target phase committed returns success without rewriting state or
+    repeating phase events and announcements. *)
 val commit_verifier_decision
   :  tool_name:string
   -> start_time:float
   -> Workspace_utils_backend_setup.config
   -> goal_id:string
   -> verification_run_id:string
+  -> request_id:string
+  -> criterion:Goal_store.criterion
   -> decision:verifier_decision
   -> evidence:string
   -> Tool_result.result
@@ -71,3 +75,13 @@ val reconcile_committed_proof :
 (** Converges the Goal phase after a crash between the durable proof verdict
     write and the phase/event write. The existing verdict is reused without a
     model call or ledger rewrite. *)
+
+val request_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
+  (Goal_store.goal * Goal_verification.record, string) result
+(** Bind a proof request and Verifying phase to the same current criterion. *)
+
+val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
+  (bool, string) result
+(** Recover a missing/stale request only while the current Goal remains Verifying.
+    [Ok false] means a concurrent phase change needs no recovery; no request is
+    created and no other Goal in the scan is blocked. *)

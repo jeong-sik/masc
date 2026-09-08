@@ -4368,6 +4368,7 @@ let planning_proof_mark = function
   | Tui_decode.Proof_pending -> (Theme.warn ()) ^ "\xe2\x80\xa6" ^ Ansi.reset
   | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ "\xe2\x9c\x93" ^ Ansi.reset
   | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ "\xe2\x9c\x97" ^ Ansi.reset
+  | Tui_decode.Proof_stale _ -> (Theme.warn ()) ^ "~" ^ Ansi.reset
   | Tui_decode.Proof_unreadable _ -> (Theme.warn ()) ^ "!" ^ Ansi.reset
 ;;
 
@@ -4381,6 +4382,8 @@ let planning_proof_detail (goal : planning_goal) =
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
   | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
+  | Tui_decode.Proof_stale _ ->
+      Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->

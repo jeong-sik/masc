@@ -12404,7 +12404,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                what is on screen is untouched. *)
             state.msg_older_error <- Some detail)
 let drain_async_messages state ~base_path ~http_refresh_inflight
-    ~http_scoped_refresh_inflight ~scoped_refresh_followup mailbox =
+    ~http_scoped_refresh_inflight ~scoped_refresh_followup
+    ~frame_presenter ~render_schedule mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
@@ -12414,8 +12415,15 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
           Log.Transport.info
             "async result waited %.0f ms in the mailbox before the loop applied it"
             (Masc_tui_http.ms_of_ns waited_ns);
+        let image_was_open = state.image_open in
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
+        (* The image renderer cleared the text screen outside the presenter.
+           If an async failure dismisses it, cached unchanged rows must also
+           be restored, just as they are after a keyboard dismissal. *)
+        if image_was_open && not state.image_open then (
+          Frame_presenter.invalidate frame_presenter;
+          Render_schedule.request render_schedule Render_schedule.Force);
         loop true
   in
   loop false
@@ -14248,7 +14256,8 @@ and is loaded on demand through keeper_skill.
       end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          ~http_scoped_refresh_inflight ~scoped_refresh_followup async_messages
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup
+          ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       (* Check for input *)
       let input_timeout =
@@ -19981,7 +19990,8 @@ and is loaded on demand through keeper_skill.
       Eio.Fiber.yield ();
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          ~http_scoped_refresh_inflight ~scoped_refresh_followup async_messages
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup
+          ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
 
       (* Periodic refresh *)

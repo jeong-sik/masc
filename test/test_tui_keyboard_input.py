@@ -13358,16 +13358,28 @@ def run_browser_viewport_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(scroll)
 
     def interact(process, master, slave, output, _base):
+        def image_input(data: bytes) -> bytes:
+            # draw_image writes its own image layer and footer, without the
+            # Frame_presenter FRAME_END emitted by ordinary text frames.
+            read_available(master, output)
+            start = len(output)
+            os.write(master, data)
+            wait_for_output(process, master, output, b"a=T", start=start, timeout=3)
+            image_end = end_of_needle(output, b"a=T", start)
+            footer = b"Esc: back"
+            wait_for_output(process, master, output, footer, start=image_end, timeout=3)
+            return bytes(output[start:end_of_needle(output, footer, image_end)])
+
         palette_go(process, master, output, b"go Browser Lane", b"owned browser body")
-        send_and_wait(process, master, output, b"\x0f", b"a=T")
-        send_and_wait(process, master, output, b"j", b"a=T")
+        image_input(b"\x0f")
+        image_input(b"j")
         assert len(actions) == 1 and len(captures) == 2
         # Global shortcuts and pasted text belong to the visible viewport.
         os.write(master, b"a\x1b[200~hidden-draft\x1b[201~")
         wait_for_terminal_input_consumed(slave)
-        send_and_wait(process, master, output, b"r", b"a=T")
+        image_input(b"r")
         assert len(actions) == 1 and len(captures) == 3
-        resize_and_wait(process, master, output, rows=35, columns=110, needle=b"a=T")
+        resize_and_wait(process, master, output, rows=35, columns=110, needle=b"Esc: back")
         assert len(captures) == 3, "resize must redraw cached bytes without browser effects"
         os.write(master, b"\x1b[<65;10;10M")
         assert wait_for_fixture_event(process, master, output, blocked, timeout=3)
@@ -13380,9 +13392,14 @@ def run_browser_viewport_regression(executable: str) -> None:
         wait_for_output(process, master, output, b"Read 12.5 ms", start=start, timeout=3)
         assert b"a=T" not in output[start:], "late frame reopened a closed viewport"
         assert len(actions) == 2 and len(captures) == 4, "busy input was queued or replayed"
-        send_and_wait(process, master, output, b"\x0f", b"a=T")
+        image_input(b"\x0f")
         changed[0] = True
-        send_and_wait(process, master, output, b"r", b"expected URL mismatch")
+        restored = send_and_wait(process, master, output, b"r", b"expected URL mismatch")
+        assert FULL_REDRAW in restored, "async image dismissal reused the cleared text frame"
+        visible = screen_text(restored[restored.rfind(FULL_REDRAW):])
+        for row in (b"MASC Browser Lane", b"owned browser body", b"b:choose browser"):
+            assert row in visible, f"async image dismissal did not restore {row!r}"
+        assert b"Esc: back" not in visible, "viewport footer remained after async dismissal"
         assert len(captures) == 6
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")

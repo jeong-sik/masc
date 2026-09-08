@@ -5650,12 +5650,23 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             input_text=expected_text,
             cursor_column=13,
         )
+        # The narrowest terminal the chat pane draws in. #33096 gated the pane
+        # on Masc_tui_message_layout.chat_min_terminal_cols; below it the pane
+        # draws "Keeper chat needs a larger terminal" and has no composer at
+        # all, so this step waited on a composer that was never going to
+        # arrive and stalled the whole lane (#34125).
+        #
+        # 41, not the 38 that commit's subject named: the constant is derived
+        # (4 + 2 + turn_rail_cells + chat_role_label_column + 20) and the
+        # derivation has grown by three since. Pinned at the floor rather than
+        # comfortably above it -- at 60 this would still pass while the floor
+        # moved underneath, which is how it got to 41 unnoticed.
         narrow_frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=30,
-            columns=16,
+            columns=41,
             needle=composer_showing(b"A"),
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
@@ -5663,7 +5674,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         assert_message_input_frame(
             narrow_frame,
             row=28,
-            columns=16,
+            columns=41,
             input_text=expected_text,
             cursor_column=13,
         )

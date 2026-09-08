@@ -58,7 +58,7 @@ Download the installer attached to [GitHub Releases](https://github.com/jeong-si
 It verifies and installs the assets for the selected release.
 
 ```bash
-TAG=v0.35.0
+TAG=v0.34.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh

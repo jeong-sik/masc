@@ -303,7 +303,13 @@ let run_fatal_helper ~settlement root leaf =
           && Printexc.raw_backtrace_length observed >= length
           && original_frames_preserved 0
        then 0
-       else 4)
+       else (
+         Printf.eprintf
+           "fatal %s lost original backtrace frames\nExpected origin:\n%sObserved:\n%s%!"
+           (if settlement then "settlement" else "callback")
+           (Printexc.raw_backtrace_to_string expected)
+           (Printexc.raw_backtrace_to_string observed);
+         4))
   | _ -> 5
 ;;
 

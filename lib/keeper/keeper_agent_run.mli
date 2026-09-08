@@ -64,6 +64,14 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val native_tool_boundary :
+    keeper_name:string ->
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
+    tool_calls:Keeper_agent_result.tool_call_detail list ->
+    assistant_turn_texts:string list ->
+    autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) option ->
+    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val tool_boundary_before_repetition :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     Keeper_tools_agent_core.terminal_effect_state ->
@@ -122,25 +130,19 @@ module For_testing : sig
     :  autonomous_yield_request
     -> Runtime_agent.cooperative_yield_reason
 
-  (** The three detectors below run on Direct turns and nowhere else.
+  (** Native AGENT_CORE evaluates these detectors on both Direct and
+      Autonomous tool boundaries. Without [repetition_execution], tool
+      observations are reconstructed from the visible checkpoint transcript;
+      with it, observations belong to the explicit admitted execution scope.
+      Assistant text observations are local to the current dispatch.
 
-      [direct_repetition_boundary] is installed only when
-      [repetition_execution] is [Some], and one call site supplies it:
-      keeper_turn.ml passes it with [turn_kind:Turn_record.Direct]. The
-      autonomous path (keeper_unified_turn_execution.ml, [Turn_record.Autonomous])
-      passes none, so a keeper driving itself is not measured by any of them.
-
-      That is not an omitted argument. {!Keeper_repetition_scope.Execution}
-      has one constructor, [direct_operation], keyed by a
-      [Keeper_chat_operation.Operation_id.t] -- an autonomous turn has no such
-      id, and no scope was designed for it.
-
-      Measured 2026-09-07 in trace-1788623557478-00000: an autonomous keeper
-      ran 1,484 turns and called Execute 186 times consecutively with
-      byte-identical input, every call returning exit 0. [threshold] for
-      [repeated_tool_call_input] is 5. Whether the autonomous path should
-      carry these is #34083, because installing them there changes what an
-      autonomous keeper does. *)
+      The official-client tool hook differs: it is installed only with an
+      explicit [repetition_execution], currently supplied by Direct turns.
+      Autonomous official-client turns do not supply that scope. The scope ID
+      codec supports autonomous admission UUIDs, but admission and resumption
+      are not wired into that lane. #34083 therefore needs lane-specific
+      evidence; the lack of an explicit scope does not imply the native
+      autonomous detector is absent. *)
   val repeated_exact_tool_call
     :  threshold:int
     -> tool_call_detail list

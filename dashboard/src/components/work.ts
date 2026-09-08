@@ -1,3 +1,4 @@
+import { GoalProofStatus } from './goals/goal-proof'
 // MASC Dashboard — Work Tab (keeper-v2 goal/task layout)
 // Surface: Goal list (priority-sorted), Task terminology, inline expandable gate detail,
 // claimable backlog, the 5 KPI strip, and WorkAside operator triage panel.
@@ -306,6 +307,7 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
   return {
     id: node.id,
     title: node.title,
+    verification: node.verification,
     metric: node.metric,
     target_value: node.target_value,
     due_date: node.due_date,
@@ -734,6 +736,7 @@ function GoalCard({
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
         <span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>
+        <${GoalProofStatus} proof=${goalNode?.verification ?? goal.verification} />
         ${goal.metric ? html`
           <span
             class="wk-metric mono"

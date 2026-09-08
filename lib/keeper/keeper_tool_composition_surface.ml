@@ -1167,6 +1167,37 @@ let instruction_skill ?resource_location ~reference ~description ~body () =
   { reference; description; body; resource_location }
 ;;
 
+let instruction_skills_of_catalog skill_catalog =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.surface with
+           | Some reference, Keeper_skill_catalog.Instruction ->
+             let resource_location =
+               match skill.provenance with
+               | Some
+                   { source_root = Some source_root
+                   ; resource_read_max_bytes = Some resource_read_max_bytes
+                   ; directory
+                   ; _
+                   } ->
+                 Some
+                   { source_root; directory; resource_read_max_bytes }
+               | Some { source_root = None; _ }
+               | Some { resource_read_max_bytes = None; _ }
+               | None ->
+                 None
+             in
+             Some
+               (instruction_skill
+                  ?resource_location
+                  ~reference
+                  ~description:skill.description
+                  ~body:skill.body
+                  ())
+           | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
+             None)
+;;
+
 let instruction_skill_schema_tool
       ~(instruction_skills : instruction_skill list)
   =
@@ -1256,11 +1287,17 @@ let load_instruction_resource location relative_path =
 let make_instruction_skill_tool
       ~(config : Workspace.config)
       ?record_activation
+      ?on_result
       ~instruction_skills
       ()
   =
   let name = Catalog.skill_tool_name in
   let description = instruction_skill_description instruction_skills in
+  let observe handler execution_env input =
+    let result = handler execution_env input in
+    Option.iter (fun callback -> callback ~input result) on_result;
+    result
+  in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
@@ -1268,7 +1305,7 @@ let make_instruction_skill_tool
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
-    (fun execution_env input ->
+    (observe (fun execution_env input ->
       let start_time = Time_compat.now () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
@@ -1487,7 +1524,7 @@ let make_instruction_skill_tool
                         "identity %s"
                         (Skill_reference.identity_to_yojson identity
                          |> Yojson.Safe.to_string))
-                   (carried_references_text instruction_skills))))))
+                   (carried_references_text instruction_skills)))))))
 ;;
 
 module For_testing = struct

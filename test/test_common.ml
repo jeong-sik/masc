@@ -163,7 +163,7 @@ let test_seeds_rejects_keeper_manifests () =
   List.iter
     (fun rel ->
        check bool rel false (Common.seeds_into_fresh_config_root rel))
-    [ "keepers"; "keepers/fixture-coordinator.toml"; "keepers/nested/deep.toml" ]
+    [ "keepers"; "keepers/reviewer.toml"; "keepers/nested/deep.toml" ]
 
 let test_seeds_rejects_dune_files () =
   check bool "top-level dune" false (Common.seeds_into_fresh_config_root "dune");

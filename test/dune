@@ -7,6 +7,12 @@
 ; Test Environment Configuration
 
 (test
+ (name test_msx_vision)
+ (modules test_msx_vision)
+ (libraries alcotest unix base64 yojson fs_compat masc masc_test_deps
+   masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
+
+(test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc_test_deps eio))
@@ -3735,6 +3741,13 @@
  (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_exit_signals)
+ (modules test_tui_exit_signals)
+ ; unix so one case delivers a real SIGTERM to the test process and reads it
+ ; back the way the loop does.
+ (libraries alcotest masc_tui_exit_signals unix))
+
+(test
  (name test_tui_retained_view)
  (modules test_tui_retained_view)
  (libraries
@@ -5252,6 +5265,11 @@
 (include stanzas/test_tempo_coverage.inc)
 (include stanzas/test_keeper_periodic_wake.inc)
 
+(test
+ (name test_standalone_skill_tools)
+ (modules test_standalone_skill_tools)
+ (libraries masc_test_deps masc.skill_reference masc.skill_snapshot
+  masc.skill_snapshot_service))
 (rule
  (alias runtest-test_tui_tools_poll_continuity)
  (deps test_tui_tools_poll_continuity.py test_tui_keyboard_input.py)

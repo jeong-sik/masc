@@ -912,7 +912,22 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   (match native ~requested:(fun () -> Error "queue fixture unreadable")
       (live_call () :: run_2_starts_from) with
    | Error (Agent_core.Error.Internal _) -> ()
-   | _ -> fail "unreadable durable queue was hidden by repetition")
+   | _ -> fail "unreadable durable queue was hidden by repetition");
+  (* The official-client hook is installed on the same terms (#34083): with
+     no Direct execution scope it reads the same transcript-seeded accumulator
+     and reports the same streak as a host stop. *)
+  let official calls =
+    Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+      ~repetition_execution:None
+      ~tool_calls:calls
+  in
+  (match official (live_call () :: run_2_starts_from) with
+   | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
+       { tool_name = "keeper_tasks_list"; repeated_count = 3 })) -> ()
+   | _ -> fail "official-client boundary without a scope lost transcript-seeded repetition");
+  (match official [ live_call (); List.hd run_2_starts_from ] with
+   | Ok None -> ()
+   | _ -> fail "official-client boundary without a scope stopped an ordinary retry")
 
 let test_repeated_assistant_text_boundary () =
   let detect =

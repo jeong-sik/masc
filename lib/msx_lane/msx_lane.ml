@@ -376,13 +376,8 @@ type frame = {
   disk : string option;
 }
 
-let frame () =
-  locked (fun () ->
-    match !state with
-    | None -> None
-    | Some st ->
+let frame_of (st : machine) =
       let width, height = Msx.frame_dims st.m in
-      Some
         { number = st.frame
         ; width
         ; height
@@ -390,7 +385,13 @@ let frame () =
         ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
         ; cartridge = st.cart
         ; disk = st.disk
-        })
+        }
+;;
+
+let frame () = locked (fun () -> Option.map frame_of !state)
+;;
+
+let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
 ;;
 
 let atomic_write path contents =

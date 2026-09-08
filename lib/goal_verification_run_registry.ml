@@ -130,6 +130,7 @@ module Payload = struct
       | "committed" -> Ok []
       | "deferred" -> Ok [ "detail" ]
       | "raised" -> Ok [ "detail" ]
+      | "review_cancelled" -> Ok [ "detail" ]
       | label -> Error (Printf.sprintf "unknown Goal review outcome %S" label)
     in
     let* detail_fields = detail_fields in

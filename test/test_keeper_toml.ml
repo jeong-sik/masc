@@ -1056,6 +1056,59 @@ let rec ocaml_source_files path =
   else []
 ;;
 
+(* Every string literal in an OCaml source, lowercased and joined, and
+   nothing else.
+
+   What this guard is for is written in its own failure message: a fixture
+   needs a name, and an ordinary word eventually picks a live Keeper's. A
+   name a fixture uses is a literal. Reading the whole file caught the
+   comments too, and a comment naming the Keeper a measurement was taken on
+   -- lib/types/prompt_block_id.mli counts turns on one, and four more cite
+   an incident by the Keeper it happened to -- is provenance for the
+   sentence around it, not a fixture that will couple a test to live state.
+   Seven of the thirteen it reported were that.
+
+   Quoted-string literals ({|...|}) count, and their bodies are taken
+   verbatim. Comments are not tracked: a quoted name inside one reads like a
+   fixture from here and there are none in the tree. *)
+let string_literals_of_ocaml source =
+  let n = String.length source in
+  let buf = Buffer.create 256 in
+  let rec scan i =
+    if i >= n
+    then ()
+    else if source.[i] = '"'
+    then quoted (i + 1)
+    else if i + 1 < n && source.[i] = '{' && source.[i + 1] = '|'
+    then braced (i + 2)
+    else scan (i + 1)
+  and quoted i =
+    if i >= n
+    then ()
+    else if source.[i] = '\\' && i + 1 < n
+    then quoted (i + 2)
+    else if source.[i] = '"'
+    then (
+      Buffer.add_char buf '\n';
+      scan (i + 1))
+    else (
+      Buffer.add_char buf (Char.lowercase_ascii source.[i]);
+      quoted (i + 1))
+  and braced i =
+    if i >= n
+    then ()
+    else if i + 1 < n && source.[i] = '|' && source.[i + 1] = '}'
+    then (
+      Buffer.add_char buf '\n';
+      scan (i + 2))
+    else (
+      Buffer.add_char buf (Char.lowercase_ascii source.[i]);
+      braced (i + 1))
+  in
+  scan 0;
+  Buffer.contents buf
+;;
+
 let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
   let repo = repo_root () in
   let identities = concrete_keeper_inventory repo in
@@ -1071,7 +1124,7 @@ let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
   let violations =
     source_files
     |> List.concat_map (fun path ->
-         let source = read_text_file path |> String.lowercase_ascii in
+         let source = string_literals_of_ocaml (read_text_file path) in
          identities
          |> List.filter (fun identity ->
               String_util.contains_substring source (String.lowercase_ascii identity))

@@ -78,10 +78,10 @@ let test_addressing_analysis () =
     true
     (match addr1 with Composer.Broadcast_all -> true | _ -> false);
 
-  let addr2 = Composer.analyze_addressing "Hello @fixture_worker and @lane-smith please review" in
+  let addr2 = Composer.analyze_addressing "Hello @tester and @lane-smith please review" in
   (match addr2 with
    | Composer.Mentions targets ->
-       Alcotest.(check bool) "contains fixture_worker" true (List.mem "fixture_worker" targets);
+       Alcotest.(check bool) "contains tester" true (List.mem "tester" targets);
        Alcotest.(check bool) "contains lane-smith" true (List.mem "lane-smith" targets)
    | _ -> Alcotest.fail "expected Mentions");
 
@@ -102,7 +102,7 @@ let test_format_addressing_hint () =
     true
     (String.contains h1 '@');
 
-  let h2 = Composer.format_addressing_hint ~max_cells:80 (Composer.Mentions [ "fixture_worker" ]) in
+  let h2 = Composer.format_addressing_hint ~max_cells:80 (Composer.Mentions [ "tester" ]) in
   Alcotest.(check bool) "mentions contains target"
     true
     (String.contains h2 '@');

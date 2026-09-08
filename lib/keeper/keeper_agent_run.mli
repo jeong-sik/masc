@@ -76,8 +76,8 @@ module For_testing : sig
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     Keeper_tools_agent_core.terminal_effect_state ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
-  val direct_repetition_boundary :
-    execution:Keeper_repetition_scope.Execution.t ->
+  val official_client_tool_boundary :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
@@ -131,18 +131,19 @@ module For_testing : sig
     -> Runtime_agent.cooperative_yield_reason
 
   (** Native AGENT_CORE evaluates these detectors on both Direct and
-      Autonomous tool boundaries. Without [repetition_execution], tool
-      observations are reconstructed from the visible checkpoint transcript;
-      with it, observations belong to the explicit admitted execution scope.
-      Assistant text observations are local to the current dispatch.
+      Autonomous tool boundaries, and the official-client tool hook is
+      installed on the same terms: both read the turn accumulator. Without
+      [repetition_execution] that accumulator is seeded from the visible
+      checkpoint transcript; with it, observations belong to the explicit
+      admitted execution scope. Assistant text observations are local to the
+      current dispatch, and only the native boundary reads them.
 
-      The official-client tool hook differs: it is installed only with an
-      explicit [repetition_execution], currently supplied by Direct turns.
-      Autonomous official-client turns do not supply that scope. The scope ID
-      codec supports autonomous admission UUIDs, but admission and resumption
-      are not wired into that lane. #34083 therefore needs lane-specific
-      evidence; the lack of an explicit scope does not imply the native
-      autonomous detector is absent. *)
+      Direct turns supply an admitted scope; Autonomous turns do not. The
+      scope ID codec supports autonomous admission UUIDs, but journal
+      admission and resumption are not wired into that lane. An autonomous
+      official-client turn therefore counts repeats across the provider
+      attempts of one dispatch plus whatever the transcript seeds, and an
+      admitted scope adds only its latched observation failure (#34083). *)
   val repeated_exact_tool_call
     :  threshold:int
     -> tool_call_detail list

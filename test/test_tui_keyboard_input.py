@@ -1631,7 +1631,13 @@ def run_terminal_scenario(
                     [
                         "/bin/sh",
                         "-c",
-                        "trap '' INT; kill -STOP $$; \"$@\"; tui_status=$?; "
+                        # TERM beside INT: the SIGTERM scenario signals the
+                        # process group, because this shell is the pid the
+                        # harness holds and the TUI is its child. The TUI
+                        # installs its own handlers for both, so ignoring
+                        # them here only keeps the shell alive to stop
+                        # itself after the TUI exits.
+                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
                         'kill -STOP $$; exit "$tui_status"',
                         "masc-tui-test-launcher",
                         executable,
@@ -2656,6 +2662,22 @@ def interrupt_with_ctrl_c(
         b"\x03",
         b"Ctrl-C: press again to quit",
     )
+
+
+def terminate_with_sigterm(
+    process: subprocess.Popen[bytes],
+    _master_fd: int,
+    _slave_fd: int,
+    _output: bytearray,
+    _base_path: str,
+) -> None:
+    # What `kill` and a service manager send. The handler only records the
+    # signal; the loop has to read the record on its next pass and leave the
+    # way q does, so the terminal restore and Goodbye the harness checks after
+    # this come from that one exit path. A loop that never read it would sit
+    # here until the harness's post-exit wait gives up. The launcher shell in
+    # the same group ignores TERM (see run_terminal_scenario).
+    os.killpg(process.pid, signal.SIGTERM)
 
 
 def quit_from_compact_message(
@@ -7026,8 +7048,11 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
+            # The skill row names an outcome now, not a chain of receipts.
+            # "DELIVERED · USED" was the evidence path; the label says what
+            # came of it, and the mark above already carries the state.
             re.compile(
-                rb"DELIVERED[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?USED"
+                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
@@ -9079,10 +9104,6 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
-                "payload_availability": {
-                    "input": {"state": "available"},
-                    "output": {"state": "available"},
-                },
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -9156,10 +9177,6 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
-                "payload_availability": {
-                    "input": {"state": "available"},
-                    "output": {"state": "available"},
-                },
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},
@@ -10874,7 +10891,18 @@ def config_navigation_interaction() -> Interaction:
         )
         # Source-only input must not open an editor or a hidden-source search.
         # If / stole focus, v would become search text instead of returning.
-        send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
+        # Nothing should happen, which is the whole point -- so there is no
+        # new frame to wait for. A frame carries the rows that changed, and
+        # inert keys change none; waiting for the title to arrive again
+        # starves on a screen that is already correct. Read the screen.
+        os.write(master_fd, b"e/")
+        time.sleep(0.4)
+        read_available(master_fd, output)
+        if b"runtime.toml status" not in screen_text(bytes(output)):
+            raise AssertionError(
+                "e or / moved the Config status screen: "
+                f"{screen_text(bytes(output))!r}"
+            )
         reloaded_source = send_and_wait(process, master_fd, output, b"v", b"first-value = ")
         if b"first-value = 9" not in CSI_RE.sub(b"", reloaded_source):
             raise AssertionError("Config reload changed revision without its new source")
@@ -13289,6 +13317,13 @@ def run_keyboard_regression(executable: str) -> None:
         description="Ctrl-C",
         interact=interrupt_with_ctrl_c,
         confirm_exit=b"\x03",
+    )
+    # No confirming key: the signal is the whole exit.
+    run_terminal_scenario(
+        executable,
+        description="SIGTERM",
+        interact=terminate_with_sigterm,
+        confirm_exit=b"",
     )
 
 

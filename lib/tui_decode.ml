@@ -425,6 +425,7 @@ type goal_proof =
   | Proof_pending
   | Proof_proven of string option
   | Proof_refuted of string option
+  | Proof_stale of string option
   | Proof_unreadable of string option
 
 type planning_goal = {
@@ -1662,6 +1663,8 @@ let decode_goal_proof json =
      | None ->
        let completion = member "completion" json in
        (match string_at completion "state" with
+        | Some "stale_criterion" ->
+          Proof_stale (verdict_text (member "historical_completion" completion))
         | Some "proof_proven" -> Proof_proven (verdict_text completion)
         | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
         | Some "proof_pending" -> Proof_pending

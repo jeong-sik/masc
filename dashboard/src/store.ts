@@ -1,3 +1,4 @@
+import { decodeGoalProof } from './api/goal-proof'
 // MASC Dashboard — Centralized reactive state via @preact/signals
 // SSE events and API responses update these signals;
 // subscribing components re-render automatically.
@@ -848,6 +849,7 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       const updatedAt = asString(row.updated_at)
       if (!id || !title || !phase || !createdAt || !updatedAt) return null
       return {
+        verification: decodeGoalProof(row.verification),
         id,
         title,
         metric: asString(row.metric) ?? null,

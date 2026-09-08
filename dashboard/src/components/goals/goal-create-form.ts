@@ -1,6 +1,6 @@
 // Goal creation form — right-hand side panel in the Work surface.
 // Design reference: prototype NewGoalComposer (work.jsx ~line 437).
-// Fields: title (required), priority (1-5).
+// A new Goal declares its measured quantity and target alongside its title.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -12,6 +12,7 @@ import {
   goalCreating,
   goalCreateError,
   createGoal,
+  currentGoalCreateDraft,
   resetGoalCreateForm,
   goalCreateErrorMessage,
   GOAL_PRIORITY_MIN,
@@ -22,52 +23,57 @@ import {
 // ── Local form state signals ─────────────────────────────────────────────────
 
 const titleSignal = signal('')
+const metricSignal = signal('')
+const targetSignal = signal('')
 const prioritySignal = signal(GOAL_PRIORITY_DEFAULT)
 
 export function resetGoalCreateFormLocal(): void {
   titleSignal.value = ''
+  metricSignal.value = ''
+  targetSignal.value = ''
   prioritySignal.value = GOAL_PRIORITY_DEFAULT
   resetGoalCreateForm()
-}
-
-function resetLocalForm(): void {
-  resetGoalCreateFormLocal()
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function GoalCreateForm() {
-  if (!showGoalCreate.value) return null
-
   // Escape key dismisses
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && showGoalCreate.value) {
         e.stopPropagation()
         showGoalCreate.value = false
-        resetLocalForm()
+        resetGoalCreateFormLocal()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('keydown', onKey) }
   }, [])
 
+  if (!showGoalCreate.value) return null
+
   const handleSubmit = () => {
+    const owner = currentGoalCreateDraft()
     void createGoal({
       title: titleSignal.value,
+      metric: metricSignal.value,
+      targetValue: targetSignal.value,
       priority: prioritySignal.value,
     }).then(ok => {
-      if (ok) resetLocalForm()
+      if (ok && owner === currentGoalCreateDraft()) resetGoalCreateFormLocal()
     })
   }
 
   const handleClose = () => {
     showGoalCreate.value = false
-    resetLocalForm()
+    resetGoalCreateFormLocal()
   }
 
   const isTitleEmpty = !titleSignal.value.trim()
-  const isSubmitDisabled = goalCreating.value || isTitleEmpty
+  const isMetricEmpty = !metricSignal.value.trim()
+  const isTargetEmpty = !targetSignal.value.trim()
+  const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
 
   return html`
     <aside
@@ -78,7 +84,7 @@ export function GoalCreateForm() {
     >
       <div class="wk-goal-create-hd">
         <div>
-          <div class="wk-goal-create-eyebrow">goal store · create</div>
+          <div class="wk-goal-create-eyebrow">성공 기준이 있는 목표</div>
           <h3 id="goal-create-title">새 목표</h3>
         </div>
         <button
@@ -104,12 +110,50 @@ export function GoalCreateForm() {
             value=${titleSignal.value}
             placeholder="예) scheduler p99 SLO 400ms 회복"
             autoFocus=${true}
+            required=${true}
+            disabled=${goalCreating.value}
             onInput=${(e: Event) => { titleSignal.value = (e.target as HTMLInputElement).value }}
           />
           ${isTitleEmpty && goalCreateError.value?.kind === 'title_empty' ? html`
             <p class="wk-goal-create-err" role="alert" data-testid="goal-create-title-error">
               ${goalCreateErrorMessage(goalCreateError.value)}
             </p>
+          ` : null}
+        </div>
+
+        <div class="wk-goal-create-sec">
+          <label for="goal-create-metric" class="wk-goal-create-label">
+            측정 지표<span class="wk-goal-create-req">*</span>
+          </label>
+          <${TextInput}
+            id="goal-create-metric"
+            testId="goal-create-metric"
+            required=${true}
+            disabled=${goalCreating.value}
+            value=${metricSignal.value}
+            placeholder="예) 24시간 운전 중 scheduler 지연 p99"
+            onInput=${(e: Event) => { metricSignal.value = (e.target as HTMLInputElement).value }}
+          />
+          ${goalCreateError.value?.kind === 'metric_empty' ? html`
+            <p class="wk-goal-create-err" role="alert">${goalCreateErrorMessage(goalCreateError.value)}</p>
+          ` : null}
+        </div>
+
+        <div class="wk-goal-create-sec">
+          <label for="goal-create-target" class="wk-goal-create-label">
+            목표 값<span class="wk-goal-create-req">*</span>
+          </label>
+          <${TextInput}
+            id="goal-create-target"
+            testId="goal-create-target"
+            required=${true}
+            disabled=${goalCreating.value}
+            value=${targetSignal.value}
+            placeholder="예) 400ms 이하"
+            onInput=${(e: Event) => { targetSignal.value = (e.target as HTMLInputElement).value }}
+          />
+          ${goalCreateError.value?.kind === 'target_empty' ? html`
+            <p class="wk-goal-create-err" role="alert">${goalCreateErrorMessage(goalCreateError.value)}</p>
           ` : null}
         </div>
 
@@ -123,6 +167,7 @@ export function GoalCreateForm() {
           <input
             id="goal-create-priority"
             type="range"
+            disabled=${goalCreating.value}
             class="wk-goal-create-range"
             data-testid="goal-create-priority"
             min=${GOAL_PRIORITY_MIN}

@@ -57,5 +57,6 @@ let dispatch_authorized ~source ~on_output_chunk ~dispatch =
   | Keeper_gate.Exact_always_rule _
   | Keeper_gate.Keeper_always_allow
   | Keeper_gate.Workspace_always_allow
-  | Keeper_gate.Readonly_sandbox -> dispatch ()
+  | Keeper_gate.Readonly_sandbox
+  | Keeper_gate.Local_output -> dispatch ()
 ;;

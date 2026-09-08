@@ -7188,6 +7188,12 @@ let probe tool_name args =
 
 let composable_output_probes =
   [ probe "Execute" (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+    (* #34263 gave the start answer a named handle so a composition can hand
+       it on. The declaration landed without a probe, and this list is the
+       only thing that runs the producer against the schema it now claims. *)
+  ; probe
+      "keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
   ; probe "keeper_time_now" (`Assoc [])
   ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"

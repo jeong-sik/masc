@@ -363,6 +363,18 @@ let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
       match member "message" json with `String m -> Error m | _ -> Error "load refused"))
 ;;
 
+let post_msx_change_disk ~host ~port ~disk =
+  let body = Yojson.Safe.to_string (`Assoc ["disk", `String disk]) in
+  match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
+  | Error e -> Error e
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (match member "message" json with
+      | `String message -> Error message | _ -> Error "disk change refused")
+;;
+
 let post_msx_checkpoint ~host ~port ~restore ~slot =
   let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
   let body = Yojson.Safe.to_string (`Assoc ["slot", `String slot]) in

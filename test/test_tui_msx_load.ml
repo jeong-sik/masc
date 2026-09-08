@@ -141,6 +141,23 @@ let test_menu_empty_inventory () =
      | Masc_tui_msx.Stay -> true
      | _ -> false)
 
+let test_change_disk_menu () =
+  let state = a_state () in
+  state.msx_frame <- Some { (a_frame ()) with msx_cartridge = None; msx_disk = Some "A.dsk" };
+  state.msx_carts <- ["cart.rom"; "A.dsk"; "B.DSK"];
+  let out = captured (fun write -> Masc_tui_msx.open_menu ~write ~mode:Masc_tui_types.Change_disk state) in
+  check bool "menu identifies disk replacement" true (contains out "change disk");
+  check bool "cartridges excluded from replacement menu" false (contains out "cart.rom");
+  check bool "uppercase disk extension accepted" true (contains out "B.DSK");
+  let write _ = () in
+  ignore (Masc_tui_msx.menu_consume ~write state "down" : Masc_tui_msx.menu_action);
+  check bool "Kitty enter selects a swap, not reboot load" true
+    (match Masc_tui_msx.menu_consume ~write state "enter" with Swap_disk "A.dsk" -> true | _ -> false);
+  check bool "escape cancels replacement" true
+    (Masc_tui_msx.menu_consume ~write state "esc" = Masc_tui_msx.Closed);
+  ignore (captured (fun write -> Masc_tui_msx.open_menu ~write state));
+  check bool "ordinary opening resets picker to game loading" true (state.msx_menu_mode = Masc_tui_types.Boot_game)
+
 let () =
   run "MSX screen"
     [ ( "spectator"
@@ -149,7 +166,8 @@ let () =
         ; test_case "close on esc" `Quick test_spectator_close
         ] )
     ; ( "load menu"
-      , [ test_case "lists the inventory" `Quick test_menu_lists_inventory
+      , [ test_case "disk replacement menu" `Quick test_change_disk_menu
+        ; test_case "lists the inventory" `Quick test_menu_lists_inventory
         ; test_case "watch row when loaded" `Quick test_menu_watch_row_when_loaded
         ; test_case "navigation and select" `Quick test_menu_navigation_and_select
         ; test_case "esc closes" `Quick test_menu_esc_closes

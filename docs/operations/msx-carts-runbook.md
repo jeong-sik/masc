@@ -111,3 +111,21 @@ the current machine intact. Saving again replaces that named checkpoint.
 These are emulator checkpoints, separate from a game's own disk-save menu.
 The presence of a checkpoint does not establish that every game command or
 ending is supported. Keep a checkpoint before experimenting with later stages.
+
+## Multi-disk games
+
+When the game requests another disk, press **F8** in the TUI, select the
+requested `.dsk`, then press Return in the game if requested. Keepers use
+`masc_msx_change_disk {"disk":"game-b.dsk"}`. This preserves CPU, RAM and
+frame count; it does not reload or reboot the game.
+
+The outgoing machine is checkpointed as `before-disk-change` before replacement.
+Modified media remain in the session, indexed by the original image content:
+A → B → A reinserts the modified A, rather than rereading its original bytes.
+Named checkpoints retain all those disk versions, so restoring the campaign
+restores its off-drive media too. Original files in the inventory are unchanged.
+
+The operator-provided Sangokushi II A image reached the new-game and scenario
+menus with the corrected core, then requested B media. The B image and actual
+campaign/ending verification are still outstanding; do not substitute another
+game image or treat the disk prompt as a completed playthrough.

@@ -73,8 +73,12 @@ let title_of ~(connection : Masc_tui_types.connection_status)
         " MSX — no frame: the server is %s, so nothing could be asked for."
         (Masc_tui_types.connection_status_label status))
   | Some f ->
-      let cart = match f.msx_cartridge with Some c -> " · " ^ c | None -> "" in
-      Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode cart
+      let media =
+        match (f.msx_cartridge, f.msx_disk) with
+        | Some c, _ | None, Some c -> " · " ^ c
+        | None, None -> ""
+      in
+      Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode media
         f.msx_number
 
 (* How much of the terminal the picture takes: 1.0 fills the screen, and
@@ -232,6 +236,7 @@ let entry_label (state : Masc_tui_types.state) = function
       let cart =
         match state.msx_frame with
         | Some { msx_cartridge = Some c; _ } -> c
+        | Some { msx_disk = Some d; _ } -> d
         | _ -> "current machine"
       in
       "> watch " ^ cart
@@ -258,7 +263,7 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
    | [] ->
        Buffer.add_string buf
          (fit_line cols
-            " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM images");
+            " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images");
        Buffer.add_string buf "\027[0K\r\n"
    | _ ->
        List.iteri

@@ -2536,6 +2536,10 @@ type runtime_param_edit =
   ; rpe_draft : string
   ; rpe_replace_on_type : bool
   ; rpe_mode : runtime_param_edit_mode
+  ; rpe_choices : string list
+    (* Carried on the edit so the key handler can ask what this param accepts
+       without holding the row it came from. Empty means the reader types the
+       value. *)
   }
 
 let runtime_param_type_name value_type =
@@ -2563,6 +2567,7 @@ let runtime_param_edit_of_row ~advanced (row : Tui_decode.runtime_param_row) =
       (if advanced then row.rpr_current_json else runtime_param_friendly_text row)
   ; rpe_replace_on_type = true
   ; rpe_mode = (if advanced then Advanced_json else Friendly_value)
+  ; rpe_choices = row.rpr_choices
   }
 
 let runtime_param_edit_append edit text =
@@ -2591,6 +2596,31 @@ let runtime_param_edit_toggle_bool edit =
   in
   { edit with rpe_draft = next; rpe_replace_on_type = false }
 
+(* Walk a closed set. [step] is +1 or -1; a draft that is not one of the
+   choices — a value typed by hand, or the parameterized form of a partly
+   closed domain — starts the walk at the first choice rather than being
+   silently kept, because the reader pressed a key asking for a different
+   value. *)
+let runtime_param_edit_cycle_choice edit ~step =
+  match edit.rpe_choices with
+  | [] -> edit
+  | choices ->
+    let count = List.length choices in
+    let current = String.trim edit.rpe_draft in
+    let index =
+      let rec find i = function
+        | [] -> None
+        | c :: rest -> if String.equal c current then Some i else find (i + 1) rest
+      in
+      find 0 choices
+    in
+    let next =
+      match index with
+      | None -> 0
+      | Some i -> ((i + step) mod count + count) mod count
+    in
+    { edit with rpe_draft = List.nth choices next; rpe_replace_on_type = false }
+
 let runtime_param_edit_value edit =
   let parse_json () =
     try Ok (Yojson.Safe.from_string edit.rpe_draft) with
@@ -2614,6 +2644,12 @@ let runtime_param_edit_value edit =
         | Some value when Float.is_finite value -> Ok (`Float value)
         | Some _ | None -> Error "Enter a number")
      | "string" -> Ok (`String edit.rpe_draft)
+     | "enum" ->
+       (* A named value is sent as-is: the registry owns the grammar, so a
+          form this picker does not list (a parameterized one, typed by hand)
+          must still reach it and be judged there rather than here. *)
+       let value = String.trim edit.rpe_draft in
+       if String.equal value "" then Error "Choose a value" else Ok (`String value)
      | _ -> parse_json ())
 
 type memory_sort_order =
@@ -2981,11 +3017,33 @@ module Browser_lane_view = struct
          | Error detail -> {t with scene = None; load = Failed detail})
     | _ -> t
 
-  let scene_controls t = match t.scene with
+  let scene_targets t = match t.scene with
     | None -> []
-    | Some scene -> List.filter (fun (node : Masc.Browser_scene.node) ->
-        match node.kind with Control {clickable=true; disabled=false; _} -> true | _ -> false)
-        scene.content.nodes
+    | Some scene ->
+        let _, nodes = List.fold_left (fun (seen, nodes) (node : Masc.Browser_scene.node) ->
+          if List.mem node.node_id seen then seen, nodes
+          else node.node_id :: seen, node :: nodes) ([], []) scene.content.nodes in
+        List.rev nodes
+
+  let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
+
+  let scene_context t =
+    match t.scene, selected_scene_target t with
+    | Some scene, Some node ->
+        let source = match node.source_context with
+          | Masc.Browser_source_context.Unmapped -> `Null
+          | Invalid detail -> `Assoc ["error", `String detail]
+          | Located source -> `Assoc ["file",`String source.file;"line",`Int source.line;
+              "column",`Int source.column;"precision",`String (match source.kind with Template -> "template" | Element -> "element");
+              "sha256",`String source.digest] in
+        Some (Yojson.Safe.pretty_to_string (`Assoc [
+          "context",`String "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.";
+          "lane",`String (source_name scene.source);
+          "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
+          "tabId",`Int scene.tab_id;"url",`String scene.content.url;
+          "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "tag",`String node.tag;"text",`String node.text;"source",source]))
+    | _ -> None
 
   let viewport_request ~tab_id ~expected_url ~y t =
     `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
@@ -3049,20 +3107,18 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
   match view.scene with
   | Some scene -> List.concat_map (fun (node : Masc.Browser_scene.node) ->
-      let prefix = match node.kind with
-        | Text -> ""
-        | Raster -> "[image · Ctrl-O] "
-        | Control {disabled=true;_} -> "[disabled] "
-        | Control control ->
-            let rec index i = function
-              | [] -> None
-              | (candidate : Masc.Browser_scene.node) :: rest ->
-                  if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
-            let label = if control.editable then "input" else "button/link" in
-            (match index 0 (Browser_lane_view.scene_controls view) with
-             | None -> "[" ^ label ^ "] "
-             | Some i -> Printf.sprintf "[%s%d %s] "
-                 (if i = view.scene_cursor then ">" else "") (i + 1) label) in
+      let rec index i = function
+        | [] -> None
+        | (candidate : Masc.Browser_scene.node) :: rest ->
+            if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
+      let label = match node.kind with
+        | Text -> node.tag | Raster -> "image · Ctrl-O"
+        | Control {disabled=true;_} -> "disabled"
+        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
+      let prefix = match index 0 (Browser_lane_view.scene_targets view) with
+        | None -> ""
+        | Some i -> Printf.sprintf "[%s%d %s] "
+            (if i = view.scene_cursor then ">" else "") (i + 1) label in
       wrap (prefix ^ node.text)) scene.content.nodes
   | None -> match view.reading with
   | None -> []
@@ -3101,6 +3157,7 @@ type msx_frame = {
   msx_rgb : string;
   msx_mode : string;
   msx_cartridge : string option;
+  msx_disk : string option;
 }
 
 type state = {
@@ -4227,6 +4284,7 @@ let settle_voice_transcript (state : state) ~keeper =
 
 type text_input_target =
   | Text_browser_url
+  | Text_ask_answer
   | Text_preset_name
   | Text_runtime_param
   | Text_palette
@@ -4251,6 +4309,9 @@ let text_input_target (state : state) ~compact_viewport =
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  else if state.view = Approvals && not compact_viewport
+          && not state.context_inspector_open && Option.is_some state.ask_text_entry
+  then Some Text_ask_answer
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
   else if state.view = Connectors && not compact_viewport

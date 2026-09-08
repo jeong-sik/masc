@@ -1,0 +1,26 @@
+{
+  "source_commit": "215517f229fd74c5300ee7fc4aae91f29da1db4c",
+  "platform": "macos-arm64",
+  "binary_sha256": "79ca5b6fccaed95e022eccd215b9e554f26af5650aed5ef1fd883147e1b0a3f0",
+  "result": "PASS",
+  "keeper_manifests": 0,
+  "builtin_skill_packages": [
+    "browser-lanes"
+  ],
+  "config_category_file_counts": {
+    "tools": 161,
+    "identity": 89,
+    "keepers": 0,
+    "mcp": 2,
+    "prompts": 24,
+    "themes": 53
+  },
+  "keeper_prompt_sha256": "f3d293149440bcec3405d0a1a86dc7eb4559a04d74024d100959725a934a4ac9",
+  "browser_skill_sha256": "8c7d6a7d7e5b3f4e9c23de5737f7cecb08fa963a6162d1cbdf47a333bde07902",
+  "checks": [
+    "fresh binary seed equals frozen shared Keeper prompt",
+    "fresh browser-lanes Skill includes frozen scene instructions",
+    "no default Keeper manifests"
+  ],
+  "init_summary": "init: 331 written, 0 skipped, 0 failed, 1 builtin Skill package(s) installed (root=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-freeze-seed-dbfinge4/workspace/.masc/config)"
+}

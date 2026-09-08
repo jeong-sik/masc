@@ -21,6 +21,7 @@ let frame () =
   ; msx_rgb = String.make (w * h * 3) '\128'
   ; msx_mode = "screen2"
   ; msx_cartridge = Some "test.rom"
+  ; msx_disk = None
   }
 ;;
 

@@ -219,10 +219,89 @@ let test_ingress_accounts_for_accepted_work_at_owner_release () =
     check bool "accepted work executed or received terminal failure" true
       (!executed || released))
 
+(* -- the policy the step loop judges by -------------------------- *)
+
+(* The client is what makes a policy change take effect without a restart: the
+   state machine is pure and would go on deciding with whatever [config] it was
+   built with. So the property under test is not "the state machine reads
+   config" — [test_discord_gateway_state] covers that — but "the step the run
+   loop takes carries the policy as it is right now".
+
+   Deleting the [with_trigger_policy] call inside
+   [Client.For_testing.step_with_current_policy] must turn these red. *)
+
+let config_with policy : State.config =
+  { token = "bot-token"; intents = []; bot_user_id = None; trigger_policy = policy }
+;;
+
+let policy_after ~built_with ~now_returning =
+  let state = State.create ~config:(config_with built_with) in
+  let stepped, (_ : State.gateway_effect list) =
+    Client.For_testing.step_with_current_policy state
+      ~trigger_policy:(fun () -> now_returning)
+      ~now_mono:0.0
+      State.Connect_requested
+  in
+  (State.config stepped).trigger_policy
+;;
+
+let policy_name = State.trigger_policy_to_string
+
+let test_step_takes_the_current_policy () =
+  check string "a policy changed after connect governs the next step"
+    (policy_name State.All)
+    (policy_name (policy_after ~built_with:State.Mention_only ~now_returning:State.All))
+;;
+
+let test_step_keeps_an_unchanged_policy () =
+  check string "an unchanged policy survives the step"
+    (policy_name State.Mention_only)
+    (policy_name
+       (policy_after ~built_with:State.Mention_only ~now_returning:State.Mention_only))
+;;
+
+(* The reader is called per step, not once: a client that cached the first
+   answer would pass the two checks above and still need a reconnect. *)
+let test_step_rereads_the_policy_each_time () =
+  let answers = ref [ State.Mention_only; State.All; State.Mention_or_thread ] in
+  let next () =
+    match !answers with
+    | [] -> fail "policy reader called more often than the test has answers"
+    | a :: rest -> answers := rest; a
+  in
+  let state = ref (State.create ~config:(config_with State.Mention_only)) in
+  let seen =
+    List.map
+      (fun () ->
+        let s', (_ : State.gateway_effect list) =
+          Client.For_testing.step_with_current_policy !state
+            ~trigger_policy:next ~now_mono:0.0 State.Connect_requested
+        in
+        state := s';
+        policy_name (State.config s').trigger_policy)
+      [ (); (); () ]
+  in
+  check (list string) "each step took the reading current at that step"
+    [ policy_name State.Mention_only
+    ; policy_name State.All
+    ; policy_name State.Mention_or_thread
+    ]
+    seen
+;;
+
 let () =
   run "discord_gateway_client"
     [
-      ( "reader_policy"
+      ( "trigger_policy_injection"
+      , [
+          test_case "the step takes the policy current at that moment" `Quick
+            test_step_takes_the_current_policy
+        ; test_case "an unchanged policy survives the step" `Quick
+            test_step_keeps_an_unchanged_policy
+        ; test_case "the policy is re-read on every step" `Quick
+            test_step_rereads_the_policy_each_time
+        ] )
+    ; ( "reader_policy"
       , [
           test_case "stops after WSS close input" `Quick
             test_reader_stops_after_close_input

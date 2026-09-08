@@ -878,13 +878,29 @@ let assemble_hooks
                 in
                 let turn_blocks =
                   let blocks = List.rev !recorded_blocks in
-                  if post_tool_round
-                  then
-                    List.filter
-                      (fun (block, _) ->
-                         Prompt_block_id.injected_on_post_tool_round block)
-                      blocks
-                  else blocks
+                  let blocks =
+                    if post_tool_round
+                    then
+                      List.filter
+                        (fun (block, _) ->
+                           Prompt_block_id.injected_on_post_tool_round block)
+                        blocks
+                    else blocks
+                  in
+                  (* The assembly is a cached prefix, so a block that changes
+                     every turn re-bills every block behind it. Order by how
+                     often each one actually changes rather than by the order
+                     the producers happened to run in: over 386 sangsu turns
+                     the 51,518 B memory block changed 65 times while the 81 B
+                     clock line ahead of it changed 306, and that turn paid
+                     314,080 cache-creation tokens against 50,788 reads.
+                     [stable_sort] keeps producer order inside one rank. *)
+                  List.stable_sort
+                    (fun (left, _) (right, _) ->
+                       Int.compare
+                         (Prompt_block_id.cache_rank left)
+                         (Prompt_block_id.cache_rank right))
+                    blocks
                 in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context

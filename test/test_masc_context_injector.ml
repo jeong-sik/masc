@@ -1,4 +1,12 @@
-(** Tests for MCI. *)
+(** Tests for {!Masc.Masc_context_injector}, the AGENT_CORE context injector the
+    keeper turn path builds in [keeper_run_context.ml] and reads back through
+    [render_temporal_summary] in [keeper_run_prompt.ml] and
+    [keeper_run_tools_hooks.ml].
+
+    This suite was declared as an [(executable)] rather than a [(test)] in
+    test/dune, so [dune runtest] never ran it and the edited-tests selector had
+    no suite to name. It compiled under @check and nothing else, for as long as
+    it existed. *)
 
 open Alcotest
 module MCI = Masc.Masc_context_injector

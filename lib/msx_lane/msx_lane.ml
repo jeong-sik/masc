@@ -13,6 +13,7 @@ type observation = {
   tiles : string list;
   sprites : sprite list;
   cartridge : string option;
+  disk : string option;
 }
 
 type entry = { at_frame : int; who : string; key_name : string; down : bool }
@@ -78,6 +79,7 @@ type machine = {
   m : Msx.t;
   mutable frame : int;
   cart : string option;
+  disk : string option;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
 }
@@ -149,6 +151,7 @@ let observe st =
   ; tiles = tiles_of st.m mode
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
+  ; disk = st.disk
   }
 ;;
 
@@ -204,13 +207,25 @@ let load_cart = function
     else Error (Unreadable (Printf.sprintf "cartridge not found: %s" path))
 ;;
 
-let load ~ledger_dir ~roms_dir ~cart_path =
+let load_disk = function
+  | None -> Ok None
+  | Some path ->
+    if Sys.file_exists path then Ok (Some (path, read_file path))
+    else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
+;;
+
+let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
   locked (fun () ->
-    match load_roms roms_dir, load_cart cart_path with
-    | Error e, _ | _, Error e -> Error e
-    | Ok roms, Ok cart ->
+    match load_roms roms_dir, load_cart cart_path, load_disk disk_path with
+    | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error e
+    | Ok roms, Ok cart, Ok disk ->
       let m = Msx.create ~machine:{ Msx.ram_kb = 512; vram_kb = 128; roms } in
-      Option.iter (fun (_, bytes) -> Msx.load_cartridge m bytes) cart;
+      (* A disk wins over a cartridge: the image boots through the interface
+         ROM [Msx.load_disk] rides in the one cartridge slot, so a plugged
+         cart would be shadowed anyway. *)
+      (match disk with
+       | Some (_, bytes) -> Msx.load_disk m bytes
+       | None -> Option.iter (fun (_, bytes) -> Msx.load_cartridge m bytes) cart);
       Msx.step m ~frames:boot_frames;
       mkdir_p ledger_dir;
       let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
@@ -219,7 +234,10 @@ let load ~ledger_dir ~roms_dir ~cart_path =
       let st =
         { m
         ; frame = boot_frames
-        ; cart = Option.map (fun (path, _) -> Filename.basename path) cart
+        ; cart =
+            (if Option.is_some disk then None
+             else Option.map (fun (path, _) -> Filename.basename path) cart)
+        ; disk = Option.map (fun (path, _) -> Filename.basename path) disk
         ; ledger_path
         ; entries = []
         }
@@ -324,6 +342,7 @@ type frame = {
   rgb : string;
   mode : string;
   cartridge : string option;
+  disk : string option;
 }
 
 let frame () =
@@ -339,5 +358,6 @@ let frame () =
         ; rgb = Msx.frame_rgb st.m
         ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
         ; cartridge = st.cart
+        ; disk = st.disk
         })
 ;;

@@ -45,6 +45,7 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
         ; ("mode", `String o.Msx_lane.mode)
         ; ( "cartridge"
           , match o.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
+        ; ("disk", match o.Msx_lane.disk with Some d -> `String d | None -> `Null )
         ])
 ;;
 
@@ -108,17 +109,19 @@ let handle_press request reqd =
    is called with no cart, so the menu and a keeper see one inventory. *)
 let carts_json ~base_path : Yojson.Safe.t =
   let carts = Tool_misc_msx_lane.carts_available ~base_path in
-  let loaded, cartridge =
+  let loaded, cartridge, disk =
     match Msx_lane.frame () with
-    | None -> (false, `Null)
-    | Some f -> (
-      true,
-      match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null)
+    | None -> (false, `Null, `Null)
+    | Some f ->
+      ( true
+      , (match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null)
+      , (match f.Msx_lane.disk with Some d -> `String d | None -> `Null) )
   in
   `Assoc
     [ ("carts", `List (List.map (fun c -> `String c) carts))
     ; ("loaded", `Bool loaded)
     ; ("cartridge", cartridge)
+    ; ("disk", disk)
     ]
 ;;
 
@@ -165,6 +168,7 @@ let frame_json () : Yojson.Safe.t =
       ; ("mode", `String f.Msx_lane.mode)
       ; ( "cartridge"
         , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
+      ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
       ; ("rgb_base64", `String (Base64.encode_string f.Msx_lane.rgb))
       ]
 ;;

@@ -45,6 +45,20 @@ let all_known =
   ]
 ;;
 
+(* See the mli. Ordered by how often each block's content actually changed,
+   not by what it holds: the 51 KB memory block moved 65 times in 386 turns
+   while the 81 B clock line moved 306, and the clock was in front of it. *)
+let cache_rank = function
+  | Keeper_instructions -> 0
+  | Skill_compositions -> 1
+  | Memory_os_recall -> 2
+  | Dynamic_context -> 3
+  | Temporal_summary -> 4
+  (* An operator speaking mid-turn is the newest thing in the assembly and the
+     only block that rides a post-tool round; it stays last on both counts. *)
+  | Operator_note -> 5
+;;
+
 (* See the mli. [Keeper_instructions] never enters the extra-context
    assembly (it is the rendered system prompt, recorded separately for the
    TurnRecord); it answers [true] because it is not a recurring world-state

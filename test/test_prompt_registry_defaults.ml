@@ -725,11 +725,14 @@ let () =
                with
               | Ok () -> ()
               | Error message -> fail message);
-              persist_overrides_or_fail dir;
-              reload_registry prompts_dir;
+              (* Asked while the override is in force: after [reload_registry]
+                 the table is empty until the restore, and an empty table
+                 answers false whatever the digest says. *)
               check (option bool) "before the move the catalog is quiet"
                 (Some false)
                 (override_default_moved_in_catalog "keeper.reply_guidelines");
+              persist_overrides_or_fail dir;
+              reload_registry prompts_dir;
               let changed_body = "Reply guidelines contract changed" in
               write_file
                 (Filename.concat prompts_dir "keeper.reply_guidelines.md")
@@ -911,10 +914,7 @@ let () =
               Unix.mkdir masc_dir 0o755;
               let malformed =
                 [
-                  (* The version-1 envelope carried one digest as a gate;
-                     this build reads only the version that records what the
-                     override was written against. *)
-                  ("previous schema", {|{"schema_version":1,"overrides":[]}|});
+                  ("other schema version", {|{"schema_version":1,"overrides":[]}|});
                   ("top-level array", {|[]|});
                   ( "non-string value",
                     {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":42,"authored_against":"r","template_variables":[]}]}|}
@@ -922,8 +922,8 @@ let () =
                   ( "non-string template variable",
                     {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":"r","template_variables":[1]}]}|}
                   );
-                  ( "version-1 field on a version-2 entry",
-                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","contract_revision":"r"}]}|}
+                  ( "unknown entry field",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","pinned_to":"r"}]}|}
                   );
                   ( "duplicate entry field",
                     {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","key":"keeper","value":"x","authored_against":"r","template_variables":[]}]}|}

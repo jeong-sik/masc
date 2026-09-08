@@ -49,6 +49,14 @@ val clear_startup_error : unit -> unit
     configuration as an ordinary disconnected connector. *)
 
 val set_trigger_policy : Slack_gateway_state.trigger_policy -> unit
+(** Store the trigger policy the connector surface should report. Set at
+    gateway startup and again whenever an operator changes the
+    [slack.trigger_policy] param. A display mirror: the socket client reads the
+    param per step, so this is what the screen says, not what is judged by. *)
+
+val get_trigger_policy : unit -> Slack_gateway_state.trigger_policy option
+(** What that surface currently reports, or [None] before any gateway startup
+    has installed one. *)
 
 (** Typed failure modes for Slack REST actions. Closed sum. *)
 type send_error =

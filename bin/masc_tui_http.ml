@@ -280,6 +280,7 @@ let frame_of_json json : Masc_tui_types.msx_frame option =
         ; msx_height = member "height" json |> to_int
         ; msx_mode = member "mode" json |> to_string
         ; msx_cartridge = member "cartridge" json |> to_string_option
+        ; msx_disk = member "disk" json |> to_string_option
         ; msx_rgb = member "rgb_base64" json |> to_string |> Base64.decode_exn
         }
     with _ -> None)

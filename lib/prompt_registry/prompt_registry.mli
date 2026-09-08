@@ -201,7 +201,7 @@ val restore_persisted_entry :
 (** The same commit for an entry the operator saved earlier (a preset).  The
     entry keeps the binding it was written with; it is admitted under the
     same rule as the boot-time restore, and refused as a validation error
-    only when it no longer renders under the prompt's current contract. *)
+    only when it does not render under the prompt's current contract. *)
 
 val clear_prompt_override_persisted :
   base_path:string -> string -> (unit, string) result

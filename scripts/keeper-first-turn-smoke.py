@@ -17,9 +17,11 @@ import subprocess
 import tempfile
 import threading
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import uuid
+from typing import NamedTuple
 
 
 class SmokeError(RuntimeError):
@@ -239,6 +241,48 @@ def stop_server(server):
             server.wait()
 
 
+def strict_proof_path(value: str) -> PurePosixPath:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise SmokeError('proof path must be a nonempty path string')
+    path = PurePosixPath(value)
+    if not path.is_absolute() or any(part in ('.', '..') for part in value.split('/')):
+        raise SmokeError('proof path must be absolute without traversal segments')
+    return path
+
+
+class KataPathProjection(NamedTuple):
+    host_root: PurePosixPath
+    guest_root: PurePosixPath
+
+    def guest_cwd(self, model_cwd: str) -> PurePosixPath:
+        try:
+            relative = strict_proof_path(model_cwd).relative_to(self.host_root)
+        except ValueError as error:
+            raise SmokeError('model proof cwd is outside this Keeper playground') from error
+        return self.guest_root / relative
+
+    def match_proof(self, raw: dict, model: dict) -> dict:
+        if not isinstance(raw, dict) or not isinstance(model, dict):
+            raise SmokeError('Kata proofs must be JSON objects')
+        cwd = strict_proof_path(raw.get('cwd'))
+        if cwd != self.guest_cwd(model.get('cwd')):
+            raise SmokeError('guest proof cwd differs from the projected model cwd')
+        projected = dict(raw, cwd=str(self.host_root / cwd.relative_to(self.guest_root)))
+        if projected != model:
+            raise SmokeError('guest volume file differs from actual ToolResult')
+        return projected
+
+
+def kata_path_projection(base: Path, keeper: str, mount_destination: str) -> KataPathProjection:
+    # Keeper_remote_path.host_root / keeper_remote_root map only this Keeper's
+    # playground namespace. Do not resolve guest paths through the host FS.
+    if not keeper or '/' in keeper or keeper in ('.', '..'):
+        raise SmokeError('invalid proof Keeper name')
+    return KataPathProjection(
+        strict_proof_path(str(base)) / '.masc' / 'playground' / keeper,
+        strict_proof_path(mount_destination) / keeper)
+
+
 def kata_proof(args, fixture, base, output, runtime_env, server):
     ids = command(['nerdctl', 'ps', '-aq', '--no-trunc', '--filter',
                    'label=masc.mcp.keeper=' + args.keeper], runtime_env).split()
@@ -281,15 +325,15 @@ def kata_proof(args, fixture, base, output, runtime_env, server):
                for entry in receipts):
         raise SmokeError('actual Execute ToolResult has no successful shim execution receipt')
     (output / 'shim-execution-receipts.json').write_text(json.dumps(receipts, indent=2))
-    proof_path = str(PurePosixPath(fixture.proof['cwd']) / fixture.filename)
-    if not PurePosixPath(proof_path).is_relative_to('/masc-work'):
-        raise SmokeError('Kata Execute wrote outside the managed work volume')
+    projection = kata_path_projection(base, args.keeper, work_mount['destination'])
+    proof_path = str(projection.guest_cwd(fixture.proof['cwd']) / fixture.filename)
     identity = f"{user['uid']}:{user['gid']}"
-    proof = json.loads(command(['nerdctl', 'exec', '--user', identity, ids[0],
-                               'cat', proof_path], runtime_env))
-    if proof != fixture.proof:
-        raise SmokeError('guest volume file differs from actual ToolResult')
-    (output / 'tool-proof.json').write_text(json.dumps(proof) + '\n')
+    raw_proof = command(['nerdctl', 'exec', '--user', identity, ids[0],
+                         'cat', proof_path], runtime_env)
+    (output / 'tool-proof.json').write_text(raw_proof)
+    (output / 'tool-proof-model-projected.json').write_text(json.dumps(fixture.proof) + '\n')
+    proof = json.loads(raw_proof)
+    projection.match_proof(proof, fixture.proof)
     expected_volume = 'masc-keeper-work-' + args.keeper
     volumes = json.loads(command(['nerdctl', 'volume', 'inspect', expected_volume], runtime_env))
     matching = [volume for volume in volumes
@@ -308,13 +352,13 @@ def kata_proof(args, fixture, base, output, runtime_env, server):
                          'label=masc.mcp.keeper=' + args.keeper], runtime_env).split()
     if remaining:
         command(['nerdctl', 'rm', '-f', *remaining], runtime_env)
-    reread = json.loads(command(['nerdctl', 'run', '--rm', '--name', args.keeper + '-persistence',
+    reread = command(['nerdctl', 'run', '--rm', '--name', args.keeper + '-persistence',
         '--label', 'masc.mcp.keeper=' + args.keeper, '--runtime', 'io.containerd.kata.v2',
         '--pull', 'never', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--tmpfs', '/tmp',
-        '--user', identity, '-v', volume + ':/masc-work', args.image, 'cat', proof_path], runtime_env))
-    if reread != fixture.proof:
+        '--user', identity, '-v', volume + ':/masc-work', args.image, 'cat', proof_path], runtime_env)
+    if reread != raw_proof:
         raise SmokeError('proof bytes did not survive Kata guest recreation')
-    (output / 'volume-recreated-proof.json').write_text(json.dumps(reread) + '\n')
+    (output / 'volume-recreated-proof.json').write_text(reread)
     return ids[0], checkpoint, data
 
 
@@ -399,8 +443,12 @@ def run(args):
                 (config / name).write_text(content)
             keepers = config / 'keepers'
             keepers.mkdir(exist_ok=True)
-            if list(keepers.glob('*.toml')):
-                raise SmokeError('fresh init unexpectedly seeded a Keeper')
+            if sorted(path.name for path in keepers.iterdir()) != ['imp.toml']:
+                raise SmokeError('fresh init must seed exactly the first Keeper manifest imp.toml')
+            with (keepers / 'imp.toml').open('rb') as source:
+                manifest = tomllib.load(source)
+            if manifest.get('keeper', {}).get('autoboot_enabled') is not False:
+                raise SmokeError('first Keeper must wait for manual start (autoboot_enabled = false)')
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
@@ -508,6 +556,11 @@ def run(args):
                                     'shim receipt and volume bytes survive guest recreation'),
                                    'canonical checkpoint contains final answer'],
                         'not_measured': ['model quality', 'long-running Keeper continuity']}
+                    if args.backend == 'nerdctl_kata':
+                        receipt['proof_artifacts'] = {
+                            'raw_guest': 'tool-proof.json',
+                            'model_projected': 'tool-proof-model-projected.json',
+                            'raw_guest_after_recreation': 'volume-recreated-proof.json'}
                     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
                     print(json.dumps(receipt))
                 finally:

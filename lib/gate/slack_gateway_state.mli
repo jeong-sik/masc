@@ -176,6 +176,12 @@ val create : config:config -> t
 val state : t -> connection_state
 val config : t -> config
 
+val with_trigger_policy : t -> trigger_policy -> t
+(** Replace the trigger policy carried in [config], leaving every other field
+    of the state alone. The I/O layer applies this immediately before each
+    {!step} so a policy an operator changes takes effect on the next inbound
+    message without a restart. *)
+
 val step : t -> now_mono:float -> input -> t * gateway_effect list
 (** Pure transition. Given the current state and an input, returns the new state
     and the effects the I/O layer must run, in order.

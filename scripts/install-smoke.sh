@@ -135,18 +135,27 @@ for f in runtime.toml agent-core-models-overlay.toml; do
   [ -f "$base/.masc/config/$f" ] || {
     echo "install-smoke: installer seeded no $f" >&2; exit 1; }
 done
-# The roster is the operator's. A seed that hands over keepers would autoboot
-# them into a sandbox this host does not have.
-if [ -n "$(ls -A "$base/.masc/config/keepers" 2>/dev/null)" ]; then
-  echo "install-smoke: installer seeded keeper manifests into an untouched workspace" >&2
-  ls -A "$base/.masc/config/keepers" >&2
-  exit 1
-fi
+# A fresh workspace ships one Keeper, but must not start it before the
+# operator configures a model and sandbox. Parse the installed manifest so
+# an absent, misplaced, or non-boolean opt-out cannot pass this check.
+python3 - "$base/.masc/config/keepers" <<'PY_ROSTER'
+from pathlib import Path
+import sys
+import tomllib
+
+roster = Path(sys.argv[1])
+if sorted(path.name for path in roster.iterdir()) != ["imp.toml"]:
+    raise SystemExit("install-smoke: expected exactly the first Keeper manifest imp.toml")
+with (roster / "imp.toml").open("rb") as source:
+    manifest = tomllib.load(source)
+if manifest.get("keeper", {}).get("autoboot_enabled") is not False:
+    raise SystemExit("install-smoke: first Keeper must wait for manual start (autoboot_enabled = false)")
+PY_ROSTER
 for f in SKILL.md references/connection.md references/advanced.md references/verification.md; do
   [ -f "$base/.masc/skills/browser-lanes/$f" ] || {
     echo "install-smoke: missing builtin browser Skill file $f" >&2; exit 1; }
 done
-echo "install-smoke: installer seeded config and builtin Skills, and left the keeper roster empty"
+echo "install-smoke: installer seeded config and builtin Skills, and one Keeper waiting for manual start"
 
 # Built-in skill packages come from the verified binary, not a source checkout.
 for file in SKILL.md references/advanced.md references/connection.md references/verification.md; do
@@ -155,6 +164,42 @@ for file in SKILL.md references/advanced.md references/connection.md references/
   }
 done
 echo "install-smoke: installer seeded the complete browser-lanes Skill package"
+
+# Reinstall the actual compiled artifact through the upgrade branch. This
+# proves init --skills-only against real embedded assets, not a fixture CLI.
+# Same-version --force is deliberate: this checks preservation, not migration
+# from an older release's configuration schema.
+runtime_config="$base/.masc/config/runtime.toml"
+operator_file="$base/.masc/config/operator-install-smoke.txt"
+optional_config="$base/.masc/config/themes/tomorrow-night.toml"
+[ -f "$optional_config" ] || { echo "install-smoke: optional theme was not seeded" >&2; exit 1; }
+printf '\n# install-smoke operator setting must survive reinstall\n' >> "$runtime_config"
+printf 'operator-owned install-smoke bytes\n' > "$operator_file"
+cp "$runtime_config" "$work/runtime-before-upgrade.toml"
+cp "$operator_file" "$work/operator-before-upgrade.txt"
+cp -R "$base/.masc/skills/browser-lanes" "$work/browser-skill-before-upgrade"
+rm "$optional_config"
+commit_before="$("$prefix/masc" build-commit)"
+# shellcheck disable=SC2086  # SHIM_FLAG is one optional word, or empty
+MASC_RELEASE_BASE_URL="file://$work/release" \
+  bash "$INSTALL_SH" --version "$VERSION" --prefix "$prefix" \
+    --base-path "$base" --force --no-wizard $SHIM_FLAG
+[ "$("$prefix/masc" build-commit)" = "$commit_before" ] || {
+  echo "install-smoke: reinstall changed the packaged build commit" >&2; exit 1;
+}
+python3 - "$base" "$work" <<'PYUPGRADE'
+import pathlib
+import sys
+base, work = map(pathlib.Path, sys.argv[1:])
+config = base / '.masc/config'
+assert (config / 'runtime.toml').read_bytes() == (work / 'runtime-before-upgrade.toml').read_bytes(), 'operator runtime bytes changed'
+assert (config / 'operator-install-smoke.txt').read_bytes() == (work / 'operator-before-upgrade.txt').read_bytes(), 'operator file changed'
+assert not (config / 'themes/tomorrow-night.toml').exists(), 'upgrade restored deliberately removed optional config'
+def files(root):
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+assert files(base / '.masc/skills/browser-lanes') == files(work / 'browser-skill-before-upgrade'), 'installed builtin Skill package changed'
+PYUPGRADE
+echo "install-smoke: actual-artifact force reinstall preserved config, removed optional theme, and builtin Skills"
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"

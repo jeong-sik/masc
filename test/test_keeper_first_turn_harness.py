@@ -42,5 +42,50 @@ class CanonicalAcceptance(unittest.TestCase):
             self.assertIsNone(SMOKE.checkpoint_proof(base, SMOKE.ModelFixture('marker', base)))
 
 
+class KataProjectionAcceptance(unittest.TestCase):
+    def setUp(self):
+        self.projection = SMOKE.kata_path_projection(Path('/workspace'), 'keeper', '/masc-work')
+        self.raw = {'marker': 'unique', 'cwd': '/masc-work/keeper', 'hostname': 'guest', 'uid': 1001}
+        self.model = dict(self.raw, cwd='/workspace/.masc/playground/keeper')
+
+    def test_only_cwd_is_projected_and_raw_proof_is_preserved(self):
+        original = dict(self.raw)
+        self.assertEqual(self.projection.match_proof(self.raw, self.model), self.model)
+        self.assertEqual(self.raw, original)
+        self.assertEqual(str(self.projection.guest_cwd(self.model['cwd'])), '/masc-work/keeper')
+        nested = dict(self.raw, cwd='/masc-work/keeper/repo/subdir')
+        projected = dict(self.model, cwd='/workspace/.masc/playground/keeper/repo/subdir')
+        self.assertEqual(self.projection.match_proof(nested, projected), projected)
+
+    def test_unmapped_or_traversing_model_paths_are_rejected(self):
+        for cwd in ('/masc-work/keeper', '/workspace/.masc/playground/other',
+                    '/workspace/.masc/playground/keeper-extra', 'repo',
+                    '/workspace/.masc/playground/keeper/../other',
+                    '/workspace/.masc/playground/keeper/repo/../repo'):
+            with self.subTest(cwd=cwd), self.assertRaises(SMOKE.SmokeError):
+                self.projection.guest_cwd(cwd)
+
+    def test_raw_guest_path_must_match_exact_projection(self):
+        for cwd in ('/masc-work/other', '/masc-work/keeper/subdir',
+                    '/masc-work/keeper/../keeper', '/workspace/.masc/playground/keeper'):
+            with self.subTest(cwd=cwd), self.assertRaises(SMOKE.SmokeError):
+                self.projection.match_proof(dict(self.raw, cwd=cwd), self.model)
+
+    def test_empty_proofs_and_invalid_cwd_are_rejected(self):
+        for proof in ({}, None, [], dict(self.raw, cwd=None), dict(self.raw, cwd=''),
+                      dict(self.raw, cwd=42)):
+            with self.subTest(proof=proof), self.assertRaises(SMOKE.SmokeError):
+                self.projection.match_proof(proof, self.model)
+        for proof in ({}, None, [], dict(self.model, cwd=None), dict(self.model, cwd='')):
+            with self.subTest(proof=proof), self.assertRaises(SMOKE.SmokeError):
+                self.projection.match_proof(self.raw, proof)
+
+    def test_other_fields_are_not_rewritten_or_ignored(self):
+        for changed in (dict(self.raw, marker='wrong'), dict(self.raw, uid=0),
+                        dict(self.raw, hostname='other'), dict(self.raw, extra=True)):
+            with self.subTest(proof=changed), self.assertRaises(SMOKE.SmokeError):
+                self.projection.match_proof(changed, self.model)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -47,7 +47,7 @@ let _rp_int ~key ~default ~min_v ~max_v ~description () =
     ~validate:(_rp_validate_int ~min:min_v ~max:max_v key)
     ~serialize:(fun v -> `Int v)
     ~meta:{ Runtime_params.description; value_type = "int";
-            min_value = Some (`Int min_v); max_value = Some (`Int max_v) }
+            min_value = Some (`Int min_v); max_value = Some (`Int max_v); choices = [] }
     ~deserialize:_rp_deser_int ()
 
 let _rp_float ~key ~default ~min_v ~max_v ~description () =
@@ -56,7 +56,7 @@ let _rp_float ~key ~default ~min_v ~max_v ~description () =
     ~validate:(_rp_validate_float ~min:min_v ~max:max_v key)
     ~serialize:(fun v -> `Float v)
     ~meta:{ Runtime_params.description; value_type = "float";
-            min_value = Some (`Float min_v); max_value = Some (`Float max_v) }
+            min_value = Some (`Float min_v); max_value = Some (`Float max_v); choices = [] }
     ~deserialize:_rp_deser_float ()
 
 let _rp_bool ~key ~default ~description () =
@@ -65,5 +65,5 @@ let _rp_bool ~key ~default ~description () =
     ~validate:(fun _ -> Ok ())
     ~serialize:(fun v -> `Bool v)
     ~meta:{ Runtime_params.description; value_type = "bool";
-            min_value = None; max_value = None }
+            min_value = None; max_value = None; choices = [] }
     ~deserialize:_rp_deser_bool ()

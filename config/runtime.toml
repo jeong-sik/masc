@@ -1190,6 +1190,11 @@ candidates = [
 #   all                — 모든 메시지에 응답
 #   user_only:<snowflake> — 특정 사용자만
 # Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
+#
+# 이 값은 서버가 부팅할 때 한 번 읽는다. TUI 의 Config → params 화면에서
+# discord.trigger_policy 를 고르면 그 선택이 이 파일과 환경변수보다 앞서고,
+# 재시작 없이 다음 메시지부터 적용된다. 그 선택을 지우면 다시 여기로 돌아온다.
+# 우선순위: params 화면 선택 > MASC_DISCORD_TRIGGER_POLICY > 이 값 > mention_or_thread
 [discord]
 trigger_policy = "mention_or_thread"
 

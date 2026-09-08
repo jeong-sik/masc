@@ -167,11 +167,21 @@ val unregister_thread : thread_id:string -> unit
 
 (** {2 Trigger policy}
 
-    Set once at gateway startup, read by [connectors_json] for dashboard
-    display. Same mutable-ref pattern as [record_ready]. *)
+    Set at gateway startup and again whenever an operator changes the
+    [discord.trigger_policy] param, read by [connectors_json] for dashboard
+    display. Same mutable-ref pattern as [record_ready].
+
+    This is a display mirror, not the value anything is judged by: the gateway
+    client reads the param per step. Left un-updated it would keep reporting
+    the boot-time policy and contradict the change on the operator's own
+    screen. *)
 
 val set_trigger_policy : Discord_gateway_state.trigger_policy -> unit
-(** Store the resolved trigger policy. Called once at gateway startup. *)
+(** Store the trigger policy the connector surface should report. *)
+
+val get_trigger_policy : unit -> Discord_gateway_state.trigger_policy option
+(** What that surface currently reports, or [None] before any gateway startup
+    has installed one. *)
 
 (** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)

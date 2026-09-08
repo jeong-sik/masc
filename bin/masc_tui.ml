@@ -4044,7 +4044,7 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ -> true | _ -> false)
+  | Some view when (match operation with Read | Screenshot _ | Viewport_refresh _ | Viewport_scroll _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         load = Failed "Choose a connected browser before reading its tabs" }
@@ -4068,10 +4068,17 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
-        | Screenshot tab_id -> Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
+          }
+        | Viewport_scroll {tab_id; expected_url; y} -> Browser_lane_screenshot_ready {
+            generation; image_generation;
+            result = call (fun () ->
+              Result.bind
+                (Masc_tui_http.scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y)
+                (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
@@ -6470,6 +6477,7 @@ let paste_clipboard_image state =
    again would put another reply on the key stream. [None] until asked. *)
 let terminal_draws_images = ref None
 let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
+let image_cell_pixels = ref None
 
 (* Said the same at both doors a picture comes through: the capability was
    asked once and the answer cannot change, so neither does the sentence that
@@ -6684,7 +6692,8 @@ let clamp_planning_cursor state =
    about why -- the picture that never arrives looks exactly like the picture
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
-let draw_image state ?(caption = []) ~refuse ~title data =
+let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
+  state.browser_viewport <- None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
   | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
@@ -6715,7 +6724,10 @@ let draw_image state ?(caption = []) ~refuse ~title data =
         | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
             (* Kitty derives the width from the row count, so the image keeps
                its shape instead of being stretched into the box. *)
-            Masc_tui_graphics.place ~data ~rows:box.Masc_tui_graphics.rows
+            let rows = Masc_tui_graphics.fit_rows ~cell_pixels:!image_cell_pixels
+              ~image_pixels:(Masc.Keeper_image_dimensions.image_dimensions data)
+              ~columns:box.columns ~rows:box.rows in
+            Masc_tui_graphics.place ~data ~rows
       in
       let header =
         String.concat ""
@@ -6730,7 +6742,7 @@ let draw_image state ?(caption = []) ~refuse ~title data =
         ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
-            (Message_layout.fit_width "  any key: back" (max 1 (columns - 1))));
+            (Message_layout.fit_width footer (max 1 (columns - 1))));
       state.image_open <- true
 
 let ensure_img_cache_dir () =
@@ -7059,11 +7071,26 @@ let open_named_image state ~mailbox =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  state.browser_viewport <- None;
   match state.image_open with
   | false -> ()
   | true ->
       state.image_open <- false;
       write_to_terminal Masc_tui_graphics.delete_all
+
+let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
+  let failed = ref false in
+  let refuse detail =
+    failed := true;
+    close_image state;
+    state.browser_lane <- Option.map
+      (fun (view : Browser_lane_view.t) -> { view with load = Failed detail }) state.browser_lane
+  in
+  draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
+    ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
+        (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
+    ~footer:"  wheel / ↑↓ / j k: scroll page   r: refresh   Esc: back" bytes;
+  if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
 
@@ -11970,11 +11997,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (match !terminal_draws_images with
                   | Some false -> refuse terminal_draws_no_images
                   | Some true | None ->
-                      draw_image state ~refuse ~title:("Browser screenshot · " ^ shot.title)
-                        ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
-                            (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms;
-                          shot.url] bytes)
-             | _ -> ())
+                      draw_browser_viewport state shot bytes)
+             | _ ->
+                 if Option.is_some state.browser_viewport then close_image state)
   | Browser_lane_action_done (generation, result) ->
       (match state.browser_lane with
        | Some view ->
@@ -13119,6 +13144,7 @@ let main
   (* And what a cell measures, for the same reason: the spectator sizes an
      image placement against the screen and cannot ask the terminal itself. *)
   Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
+  image_cell_pixels := terminal_probe.cell_pixels;
   terminal_draws_images :=
     Some
       (match proto with
@@ -14272,14 +14298,18 @@ and is loaded on demand through keeper_skill.
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
-           discard_frame_for_new_size frame_presenter render_schedule
+           discard_frame_for_new_size frame_presenter render_schedule;
+           (match state.browser_viewport with
+            | Some (shot, bytes) -> draw_browser_viewport state shot bytes
+            | None -> ())
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
       if Option.is_some input then begin
         Atomic.set interrupt_armed false;
-        state.image_request_generation <- state.image_request_generation + 1
+        if Option.is_none state.browser_viewport then
+          state.image_request_generation <- state.image_request_generation + 1
       end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
@@ -14289,6 +14319,27 @@ and is loaded on demand through keeper_skill.
          program's frame. The next key is the one that takes the picture away
          and is not also a keystroke for the surface underneath -- an operator
          pressing j to dismiss a screenshot did not mean to move a cursor. *)
+      let viewport_owned_input = state.image_open && Option.is_some state.browser_viewport
+        && Option.is_some input in
+      (match state.browser_viewport, input with
+       | Some (shot, _), Some event ->
+           let close () =
+             state.image_request_generation <- state.image_request_generation + 1;
+             close_image state;
+             invalidate_frame_for_resize frame_presenter render_schedule
+           in
+           (* Viewport keys and wheel notches move by 120 CSS pixels. Inputs during an in-flight request are consumed,
+              never queued or replayed after a possible browser side effect. *)
+           let scroll y = launch_browser_lane state ~mailbox:async_messages
+             (Browser_lane_view.Viewport_scroll {tab_id=shot.tab_id; expected_url=shot.url; y}) in
+           (match event with
+            | Key ("esc" | "q") -> close ()
+            | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
+            | Key ("j" | "down") | Mouse_wheel (Masc.Tui_decode.Wheel_down, _, _) -> scroll 120
+            | Key ("k" | "up") | Mouse_wheel (Masc.Tui_decode.Wheel_up, _, _) -> scroll (-120)
+            | _ -> ())
+       | _ -> ());
+      let input = if viewport_owned_input then None else input in
       let dismissed_image =
         state.image_open && Option.is_some input
       in

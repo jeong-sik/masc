@@ -26,6 +26,11 @@ type placement = {
           width. *)
 }
 
+val fit_rows : cell_pixels:(int * int) option -> image_pixels:(int * int) option
+  -> columns:int -> rows:int -> int
+(** Aspect-preserving rows that fit both terminal dimensions. Without measured
+    pixel geometry, retain the requested rows rather than inventing cell shape. *)
+
 val query : string
 (** Ask the terminal whether it speaks the protocol. Sends a one-pixel image
     it is asked to receive but not draw, under a distinctive id. A terminal

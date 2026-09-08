@@ -2568,10 +2568,18 @@ let fetch_browser_lane_screenshot ~host ~port ~view ~tab_id =
   | Error (`Msg detail) -> Error ("invalid screenshot base64: " ^ detail)
   | Ok bytes -> Ok (screenshot, bytes)
 
+let scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y =
+  let body = Masc_tui_types.Browser_lane_view.viewport_request ~tab_id ~expected_url ~y view
+    |> Yojson.Safe.to_string in
+  let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
+    ~path:"/api/v1/dashboard/browser-lane/interact" ~body in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail
+
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Screenshot _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Screenshot _ | Viewport_refresh _ | Viewport_scroll _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

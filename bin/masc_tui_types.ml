@@ -2769,6 +2769,8 @@ module Browser_lane_view = struct
     data : string; elapsed_ms : float;
   }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
+    | Viewport_refresh of { tab_id : int; expected_url : string }
+    | Viewport_scroll of { tab_id : int; expected_url : string; y : int }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type t = {
     clients : client list; selected_client : client option; client_picker : int option;
@@ -2809,7 +2811,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Viewport_refresh _ | Viewport_scroll _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2951,18 +2953,28 @@ module Browser_lane_view = struct
       if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
       else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
 
+  let viewport_request ~tab_id ~expected_url ~y t =
+    `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
+       "action", `String "scroll"; "expectedUrl", `String expected_url;
+       "x", `Int 0; "y", `Int y]
+      @ (match client_id t with None -> [] | Some id -> ["clientId", `String id]))
+
   (* Settle the browser operation even when a later key cancelled opening the
      image. The caller separately checks image intent before drawing. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     match t.load with
-    | Loading (current, Screenshot requested_tab) when current = generation ->
+    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_scroll {tab_id=requested_tab;_}))
+      when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
                               && screenshot.client_id = client_id t
                               && screenshot.tab_id = requested_tab
-                              && t.selected_tab = Some requested_tab ->
+                              && t.selected_tab = Some requested_tab
+                              && (match t.load with
+                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_scroll {expected_url;_})) -> screenshot.url = expected_url
+                                  | _ -> true) ->
              { t with load = Idle }, Some screenshot
-         | Ok _ -> { t with load = Failed "screenshot source, client or tab mismatch" }, None
+         | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
          | Error detail -> { t with load = Failed detail }, None)
     | Loading _ | Idle | No_browser | Failed _ -> t, None
 
@@ -3161,6 +3173,7 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   (* Any new input cancels an outstanding asynchronous image preview. *)
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
@@ -4738,6 +4751,7 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  browser_viewport = None;
   image_request_generation = 0;
   msx_open = false;
   msx_frame = None;

@@ -27,7 +27,7 @@ template_variables: []
 
 브라우저 작업은 `browser-lanes` 스킬이 있으면 먼저 읽으세요. 실제로 관측한 연결·탭·요소 식별자를 사용하고, 조작 후 다시 읽거나 캡처해 확인하세요. 일부만 읽은 페이지를 전부 확인했다고 말하지 마세요.
 
-GitHub 작업 전에는 현재 레인의 `gh auth status`를 확인하세요. 연결된 인증으로 `gh`를 사용하고 다른 Keeper의 자격증명을 가져오지 마세요. 이슈를 만들 때 저장소에 `.github/issue-taxonomy.json`이 있으면 그 분류와 작성 규칙을 따르세요. 이슈 본문에는 해당 분류 어휘를 사용한 fenced `masc-triage` 코드 블록을 정확히 하나 넣으세요.
+GitHub 작업 전에는 현재 레인의 `gh auth status`를 확인하세요. GitHub identity가 연결된 Keeper에는 런타임이 `GH_CONFIG_DIR`로 인증 설정을 넘기므로, `HOME`을 바꾸거나 `.config/gh`를 만들어 설정을 복사하지 말고 `gh`를 그대로 쓰세요. 다른 Keeper의 자격증명을 가져오지 마세요. 이슈를 만들 때 저장소에 `.github/issue-taxonomy.json`이 있으면 그 분류와 작성 규칙을 따르세요. 이슈 본문에는 해당 분류 어휘를 사용한 fenced `masc-triage` 코드 블록을 정확히 하나 넣으세요.
 
 ## 대기와 소통
 

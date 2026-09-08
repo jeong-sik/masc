@@ -91,6 +91,11 @@ masc --base-path "$HOME/masc-workspace"
 
 ```bash
 masc start --base-path "$HOME/masc-workspace"
+```
+
+서버는 foreground로 실행됩니다. 별도 터미널에서 상태를 확인합니다.
+
+```bash
 curl http://127.0.0.1:8935/health
 curl 'http://127.0.0.1:8935/health?full=1'
 ```
@@ -131,7 +136,8 @@ bash /tmp/masc-install.sh --version "$TAG" \
 ```
 
 0.34.0부터 `--force`는 바이너리를 갱신하며 기존 runtime 설정, 모델 선택,
-Keeper 파일을 보존합니다. 누락된 기본 설정은 보충합니다. 설정 초기화가 목적일
+Keeper 파일을 보존합니다. runtime 설정이나 model overlay가 누락된 경우
+기존 파일을 보존하며 기본 seed를 실행합니다. 설정 초기화가 목적일
 때만 `--reset-config`를 추가합니다. 이 옵션은 seeded 설정과 선택한 팀 파일을
 덮어쓰므로 사용자 설정을 별도 보관한 다음 사용하세요.
 

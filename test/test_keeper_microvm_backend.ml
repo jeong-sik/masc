@@ -518,6 +518,7 @@ let test_only_a_labelled_listing_is_offered () =
        "container lists with labels"
        [ "container"; "list"; "-a"; "--format"; "json" ]
        argv
+   | Microvm.Nerdctl_labelled_json_lines _ -> fail "Apple received nerdctl grammar"
    | Microvm.Listing_not_established reason ->
      fail ("container's own listing was refused: " ^ reason));
   List.iter
@@ -529,12 +530,16 @@ let test_only_a_labelled_listing_is_offered () =
           (Backend.to_string backend ^ " says why it cannot be scoped")
           true
           (String.length reason > 0)
-      | Microvm.Labelled_json_array argv ->
+      | Microvm.Labelled_json_array argv | Microvm.Nerdctl_labelled_json_lines argv ->
         Alcotest.failf
           "%s offered a listing this build cannot scope: %s"
           (Backend.to_string backend)
           (String.concat " " argv))
-    [ Backend.Microsandbox; Backend.Nerdctl_kata ]
+    [ Backend.Microsandbox ];
+  (match Microvm.container_listing_for Backend.Nerdctl_kata with
+   | Microvm.Nerdctl_labelled_json_lines argv ->
+     check Alcotest.bool "nerdctl obtains full ids" true (List.mem "--no-trunc" argv)
+   | _ -> fail "nerdctl labelled inventory missing")
 ;;
 
 let test_the_log_tail_flag_is_per_runtime () =

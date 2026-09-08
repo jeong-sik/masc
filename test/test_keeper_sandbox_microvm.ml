@@ -1053,9 +1053,9 @@ let test_leaves_foreign_base_guest_untouched () =
    found". *)
 let test_sweep_skips_listing_when_cli_is_unavailable () =
   let spawn_count = ref 0 in
-  let run_argv ~timeout_sec:_ _argv =
+  let run_argv ~timeout_sec:_ argv =
     incr spawn_count;
-    Unix.WEXITED 0, "[]"
+    Unix.WEXITED 0, (match argv with "nerdctl" :: _ -> "" | _ -> "[]")
   in
   let asked = ref [] in
   let unavailable =
@@ -1082,27 +1082,15 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
       ~is_pid_alive
       ~run_argv
   in
-  (* Only Apple's runtime has an established labelled listing today, so it is
-     the only row and the only spawn. *)
-  Alcotest.(check int) "available listing count" 1 !spawn_count;
-  match available with
-  | [] -> Alcotest.fail "available CLI did not run the sweep"
-  | [ (backend, outcome) ] ->
-    Alcotest.(check string)
-      "the row names the runtime it swept"
-      "apple_container"
-      (Backend.to_string backend);
+  (* Apple and Kata have independently parsed labelled inventories. *)
+  Alcotest.(check int) "available listing count" 2 !spawn_count;
+  Alcotest.(check (list string)) "available backend inventory rows"
+    [ "apple_container"; "nerdctl_kata" ]
+    (List.map (fun (backend, _) -> Backend.to_string backend) available);
+  List.iter (fun (_, outcome) ->
     Alcotest.(check (list string)) "available removed" [] outcome.M.removed;
-    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)
-  | rows ->
-    Alcotest.failf
-      "expected one swept runtime, got %d"
-      (List.length rows)
+    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)) available
 
-(* Exercise the production boot entrypoint against the sweep's paused CLI
-   inventory. A fake CLI permits the boot's stop/delete/probe calls, then
-   refuses its image. This tests the actual lifecycle without guest
-   credentials, a shim binary, or a container daemon. *)
 
 let test_startup_sweep_serializes_inventory_with_boot () =
   let module Turn = Masc.Keeper_turn_sandbox_runtime in

@@ -49,14 +49,24 @@ let test_missing () =
   check_status "task-missing" `Not_found
 
 let test_authoritative_storage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "dashboard-task-detail-" "" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
+      check bool "fixture uses authoritative filesystem backend" true
+        (match config.backend with
+         | Workspace_utils_backend_setup.FileSystem _ -> true
+         | Workspace_utils_backend_setup.Memory _ -> false);
       let check_read id expected =
         let status, body = Detail.read ~config ~task_id:(Some id) |> Detail.response in
-        check bool "authoritative storage status" true (status = expected);
+        let status_name = function
+          | `OK -> "200" | `Bad_request -> "400"
+          | `Not_found -> "404" | `Service_unavailable -> "503" in
+        check string ("authoritative storage status for " ^ id)
+          (status_name expected) (status_name status);
         if status = `Service_unavailable then
           check string "storage diagnostics stay private" "task detail unavailable"
             Yojson.Safe.Util.(body |> member "error" |> to_string)

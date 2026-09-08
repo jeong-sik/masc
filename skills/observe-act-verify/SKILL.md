@@ -19,6 +19,12 @@ Choose an action that answers a concrete question or advances the user's task. S
 
 Differentiate an action that takes effect immediately from one that opens another prompt. Stop a learned sequence at any new decision or unrecognized screen. Text entry is an ordered sequence of key edges; a list of simultaneously held keys is not a string. Use a composition's explicit ordering edges for a known sequence when available, keeping decisions between observations model-directed.
 
+## Resume after an observation boundary
+
+A turn can end after a successful capture but before its image is interpreted. Preserve the returned artifact handle, surface identity and the next unfinished step. On resume, read that exact artifact to finish interpreting the captured state instead of restarting the capture step by habit. Copy the handle from the successful receipt; do not reconstruct it from memory or a checkpoint name. If the artifact is unavailable, obtain a new capture and use its returned handle.
+
+Interpreting a retained artifact is not permission to act on stale state. Before input, establish whether the same session is still yours and whether it has advanced since that capture, using available current revision or caller-tagged action evidence. If the state has advanced or its continuity is unknown, capture and interpret the current state before acting. A new capture does not establish driving ownership. An unchanged turn-based prompt may be waiting for input; repeated observation is useful only when there is a concrete reason to expect new information. A runtime repetition notice describes prior calls, not a promise that future observations cannot change.
+
 ## Retain what was learned
 
 Record a reusable transition with:

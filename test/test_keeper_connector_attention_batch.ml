@@ -736,14 +736,60 @@ let test_batch_turn_failure_leaves_every_member_queued () =
       (connector_event_ids_of_queue queued))
 ;;
 
-(* RFC-0377: the completion counterpart to the failure test above — batch
-   admitted, then the turn completes. This is genuinely new coverage: no
-   prior test in this suite exercised the completion-ack path at all.
-   Drives the same real [batch_disposition_of_cycle_outcome] function,
-   then applies its [Batch_ack_completed] action to every
-   [consumed_selections] member the way [remove_completed_selections]
-   does (List.for_all over terminalize_completed_selection), proving a
-   turn completion acks the WHOLE admitted batch, not only the primary. *)
+let test_checkpoint_retention_preserves_unsettled_sources () =
+  with_ctx "connector-retention-settlement" (fun ~base_path ~keeper_name ~meta:_ ~ctx:_ ->
+    let module Persistence = Keeper_event_queue_persistence in
+    let require label = function
+      | Ok value -> value
+      | Error detail -> failf "%s: %s" label detail
+    in
+    let first = connector_attention_stimulus
+      ~base_path ~keeper_name ~channel_id:"chan-retained"
+      ~message_id:"first" ~arrived_at:1.0 ~content:"Still needs a reply" in
+    let second = connector_attention_stimulus
+      ~base_path ~keeper_name ~channel_id:"chan-retained"
+      ~message_id:"second" ~arrived_at:2.0 ~content:"Independent pending reply" in
+    let board = board_distractor_stimulus ~post_id:"board-retained" ~arrived_at:3.0 in
+    List.iter (enqueue_exn ~base_path keeper_name) [first; second; board];
+    let pending () =
+      Persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "reload exact durable sources"
+    in
+    let original = pending () in
+    let identities selections = List.map
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id)
+      selections in
+    (* The first yield and a run longer than the former count boundary must
+       preserve the same requests. These are fixture observations, not gates. *)
+    for cycle = 1 to 12 do
+      Keeper_heartbeat_loop.For_testing.retain_connector_attention_sources
+        ~base_path ~keeper_name (pending ());
+      let retained = pending () in
+      check (list string) "yield retains every exact input identity"
+        (identities original) (identities retained);
+      List.iter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        let expected = match selection.source.payload with
+          | Q.Connector_attention _ -> cycle
+          | _ -> 0 in
+        check int "retention count survives a cold durable reload"
+          expected selection.checkpoint_retentions)
+        retained
+    done;
+    let retained = pending () in
+    let selected = List.find
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id = first.post_id)
+      retained in
+    let (_ : Keeper_registry_event_queue.source_ack_result) =
+      Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:1000.0 ~selection:selected
+      |> require "explicit completion settles the exact source" in
+    check (list string) "completion leaves other outstanding inputs intact"
+      [second.post_id; board.post_id] (identities (pending ())))
+;;
+
+(* A completed, addressed turn settles the entire admitted batch through the
+   existing exact-source terminalization path. *)
 let test_batch_completion_acks_every_member () =
   with_ctx "connector-batch-completion" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
@@ -877,7 +923,9 @@ let () =
   run
     "keeper_connector_attention_batch"
     [ ( "all-ready Event Queue intake"
-      , [ test_case "exact mixed bindings reach dispatch and settlement" `Quick
+      , [ test_case "checkpoint yields preserve requests until exact settlement" `Quick
+            test_checkpoint_retention_preserves_unsettled_sources
+        ; test_case "exact mixed bindings reach dispatch and settlement" `Quick
             test_exact_mixed_bindings_reach_dispatch_and_settlement
         ; test_case
             "admits all ready Board, Schedule, and Bootstrap sources in one turn"

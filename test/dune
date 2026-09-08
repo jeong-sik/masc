@@ -1977,7 +1977,9 @@
 (test
  (name test_schedule_consumer_dispatch)
  (modules test_schedule_consumer_dispatch)
- (libraries masc_test_deps masc_schedule masc_server))
+ ; masc.config: the fixture declares each keeper's sandbox profile through
+ ; Keeper_sandbox_config.keeper_toml_path rather than rebuilding that path.
+ (libraries masc_test_deps masc_schedule masc_server masc.config))
 
 (test
  (name test_server_dashboard_http_schedule_actions)

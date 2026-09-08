@@ -4981,7 +4981,7 @@
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries masc masc_tui_types masc_tui_message_layout))
+ (libraries yojson masc masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)

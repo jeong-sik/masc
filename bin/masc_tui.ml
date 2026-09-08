@@ -1856,7 +1856,7 @@ type async_msg =
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
-      (Tui_decode.keeper_tool_approval list, string) result
+      Snapshot_read.request * (Tui_decode.keeper_tool_approval list, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;
@@ -1875,7 +1875,7 @@ type async_msg =
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
-  | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
+  | Gate_snapshot_loaded of Snapshot_read.request * (Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
           survive nobody watching, and both lane modes. *)
   | Gate_approval_resolved of
@@ -1926,7 +1926,7 @@ type async_msg =
     }
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
-  | Schedules_loaded of (schedule_snapshot, string) result
+  | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
      not say whose it was would be filed under whoever is open when it lands. *)
@@ -2455,7 +2455,12 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
 (* Fetch the held tool calls for the Approvals surface. Its own fiber for the
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
-let launch_keeper_tool_approvals_load state ~mailbox =
+let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let read, request = Snapshot_read.start ~intent state.keeper_tool_approvals_read in
+  state.keeper_tool_approvals_read <- read;
+  match request with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2464,7 +2469,7 @@ let launch_keeper_tool_approvals_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_tool_approvals_loaded result)
+    enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2473,7 +2478,7 @@ let launch_keeper_tool_approvals_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+        (Keeper_tool_approvals_loaded (request, Error "Eio switch is unavailable"))
 
 (* What voice actually resolved to, plus the microphone the recorder would
    open.
@@ -2549,7 +2554,12 @@ let launch_keeper_turns_load state ~mailbox =
       enqueue_async mailbox
         (Keeper_turns_loaded (Error "Eio switch is unavailable"))
 
-let launch_gate_snapshot_load state ~mailbox =
+let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let read, request = Snapshot_read.start ~intent state.gate_snapshot_read in
+  state.gate_snapshot_read <- read;
+  match request with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2558,7 +2568,7 @@ let launch_gate_snapshot_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Gate_snapshot_loaded result)
+    enqueue_async mailbox (Gate_snapshot_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2567,7 +2577,7 @@ let launch_gate_snapshot_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
+        (Gate_snapshot_loaded (request, Error "Eio switch is unavailable"))
 
 (* [reason] mirrors [Masc_tui_http.post_dashboard_gate_resolve]: required
    labeled option, because a trailing [?reason] here is unerasable
@@ -2933,7 +2943,12 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
              (Keeper_schedules_loaded
                 (keeper_name, Error "Eio switch is unavailable")))
 
-let launch_schedules_load state ~mailbox =
+let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let read, request = Snapshot_read.start ~intent state.schedules_read in
+  state.schedules_read <- read;
+  match request with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2942,7 +2957,7 @@ let launch_schedules_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Schedules_loaded result)
+    enqueue_async mailbox (Schedules_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2950,7 +2965,7 @@ let launch_schedules_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None ->
-      enqueue_async mailbox (Schedules_loaded (Error "Eio switch is unavailable"))
+      enqueue_async mailbox (Schedules_loaded (request, Error "Eio switch is unavailable"))
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
@@ -5225,9 +5240,9 @@ let goto_surface state ~mailbox (destination : surface) =
    | Clients -> launch_clients_load state ~mailbox
    | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
    | Approvals ->
-       launch_keeper_tool_approvals_load state ~mailbox;
-       launch_gate_snapshot_load state ~mailbox
-   | Schedules -> launch_schedules_load state ~mailbox
+       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
+   | Schedules -> launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
    | Verification -> launch_verification_load state ~mailbox
    | Planning -> launch_verification_load state ~mailbox
    | Harness -> launch_harness_load state ~mailbox
@@ -5283,8 +5298,8 @@ let goto_surface state ~mailbox (destination : surface) =
    | Code -> launch_code_entries_load state ~mailbox
    | Metrics ->
        launch_memory_health_load state ~mailbox;
-       launch_keeper_tool_approvals_load state ~mailbox;
-       launch_gate_snapshot_load state ~mailbox;
+       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
        launch_keeper_tool_modes_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
@@ -11384,7 +11399,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            add_event state "error" (keeper_name ^ ": github login: " ^ detail));
       launch_github_identity_view state ~mailbox keeper_name)
   | System_logs_loaded result -> apply_system_logs_load state result
-  | Schedules_loaded result -> (
+  | Schedules_loaded (request, result) -> (
+      match Snapshot_read.settle state.schedules_read request with
+      | None -> ()
+      | Some read ->
+      state.schedules_read <- read;
       match result with
       | Ok snapshot ->
           state.schedules <- Some snapshot;
@@ -11451,7 +11470,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "system" ("Schedule: " ^ message);
           (* The row shown still carries the old status until this lands; a
              cancelled row that reads "scheduled" invites a second cancel. *)
-          launch_schedules_load state ~mailbox
+          launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
       | Error err ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- Some err)
@@ -11602,6 +11621,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               call_label
         | Error detail -> "could not answer the held call: " ^ detail
       in
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       append_chat_history state request
         (match result with
          | Ok { Masc_tui_http.settled = true; _ }
@@ -11609,8 +11629,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Message_status
          | _ -> Message_error)
         text
-  | Keeper_tool_approvals_loaded result ->
-      (match result with
+  | Keeper_tool_approvals_loaded (request, result) ->
+      (match Snapshot_read.settle state.keeper_tool_approvals_read request with
+       | None -> ()
+       | Some read ->
+       state.keeper_tool_approvals_read <- read;
+       match result with
        | Ok held ->
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
@@ -11667,8 +11691,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               about the turns themselves, and blanking every badge on one
               lost poll would flicker. The error shows on the keeper list. *)
            state.keeper_turns_error <- Some detail)
-  | Gate_snapshot_loaded result ->
-      (match result with
+  | Gate_snapshot_loaded (request, result) ->
+      (match Snapshot_read.settle state.gate_snapshot_read request with
+       | None -> ()
+       | Some read ->
+       state.gate_snapshot_read <- read;
+       match result with
        | Ok snapshot ->
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
            state.gate_modes <- snapshot.Tui_decode.gs_modes;
@@ -11706,7 +11734,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
-           launch_gate_snapshot_load state ~mailbox
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
@@ -11720,7 +11748,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () ->
            add_event state "system"
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
-           launch_gate_snapshot_load state ~mailbox
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
@@ -11730,7 +11758,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () ->
            add_event state "system"
              (Printf.sprintf "%s Gate set to %s" (gate_lane_label lane) mode);
-           launch_gate_snapshot_load state ~mailbox
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
@@ -11828,7 +11856,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                "too late for %s's call %s; it was no longer waiting"
                keeper_name
                (Keeper_chat.compact_request_id tool_call_id)
-         | Error detail -> "could not answer the held call: " ^ detail)
+         | Error detail -> "could not answer the held call: " ^ detail);
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_chat_interrupt_done (request, result) ->
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
@@ -14379,7 +14408,7 @@ and is loaded on demand through keeper_skill.
                   report_action state "system" (action ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
-                  launch_schedules_load state ~mailbox:async_messages))
+                  launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages))
           | _ ->
             report_action state "error"
               (action ^ ": the editor form must be a JSON object")))
@@ -17625,6 +17654,18 @@ and is loaded on demand through keeper_skill.
            load_local_workspace_if_safe state base_path;
            let host = server_peer_host in
            let port = state.port in
+           (* Each source owns its read even while the whole-surface refresh
+              is busy. Cadence reads share these requests rather than
+              superseding them before their responses can arrive. *)
+           (match state.connection_status with
+            | Booting -> ()
+            | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
+              launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
+                state ~mailbox:async_messages;
+              launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
+                state ~mailbox:async_messages;
+              launch_schedules_load ~intent:Snapshot_read.Refresh
+                state ~mailbox:async_messages);
            start_http_refresh state ~host ~port ~intent:Revalidate
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight

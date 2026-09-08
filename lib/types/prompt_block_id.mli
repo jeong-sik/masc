@@ -39,6 +39,26 @@ val of_string : string -> (t, string) result
 val all_known : t list
 (** Every current producer-backed constructor, for exhaustive codec tests. *)
 
+val cache_rank : t -> int
+(** Where this block sits in the assembled extra system context: lower first.
+
+    The assembly is a prefix the provider caches. A block that changes on
+    almost every turn invalidates everything after it, so the order that costs
+    least puts the blocks that rarely change in front of the blocks that
+    always do — regardless of their size.
+
+    Measured over 386 consecutive sangsu turns (2026-09-08), distinct contents
+    per block: [skill_compositions] 1, [keeper_instructions] 5,
+    [memory_os_recall] 65, [dynamic_context] 295, [temporal_summary] 306.
+    Size runs the other way: [memory_os_recall] was 51,518 B of the 88,177 B
+    assembled, sitting behind an 81 B clock line that changed nearly every
+    turn. That turn reported 314,080 cache-creation tokens against 50,788
+    cache reads.
+
+    Equal ranks keep their assembly order, so this decides only what the
+    measurement decided. A new constructor must choose a rank here; the
+    exhaustive match is what makes that a decision rather than an accident. *)
+
 val injected_on_post_tool_round : t -> bool
 (** Whether the per-turn context assembly re-injects this block on a
     provider round that follows tool results.

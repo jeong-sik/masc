@@ -76,7 +76,7 @@ let test_keeper_capture () =
       let dir = Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name in
       let png = match Multimodal.Vision_artifact_store.load ~dir
         (Multimodal.Vision_artifact_store.of_string handle) with
-        | Ok bytes -> bytes | Error e -> fail e in
+        | Ok bytes -> bytes | Error e -> fail (Multimodal.Vision_artifact_store.load_error_to_string e) in
       let obs, frame = before in
       check int "captured same frame" obs.frame (json |> member "frame" |> to_int);
       decode_with_python ~png ~rgb:frame.rgb ~width:frame.width ~height:frame.height;

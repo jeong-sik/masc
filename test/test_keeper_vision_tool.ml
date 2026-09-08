@@ -1301,7 +1301,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
            (Store.of_string handle)
        with
        | Ok stored -> assert (String.equal stored bytes)
-       | Error msg -> failwith msg);
+       | Error msg -> failwith (Store.load_error_to_string msg));
       assert_metric_increment
         "vision_ingest stored_unread"
         before
@@ -1338,7 +1338,7 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
         let handle = artifact_handle_of_placeholder placeholder |> Store.of_string in
         (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
          | Ok stored -> assert (stored = bytes)
-         | Error error -> failwith error)
+         | Error error -> failwith (Store.load_error_to_string error))
       | _ -> failwith "fallback image must carry its durable artifact"
     in
     (match projected.blocks with
@@ -1386,7 +1386,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
        let handle = artifact_handle_of_placeholder reading |> Store.of_string in
        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
         | Ok original -> assert (original = bytes)
-        | Error detail -> failwith detail)
+        | Error detail -> failwith (Store.load_error_to_string detail))
      | _ -> failwith "semantic fallback lost its reading or artifact");
     let history = project ~mode:Vi.Store_only [ image ] in
     assert (!calls = 1);
@@ -1970,7 +1970,31 @@ let test_browser_screenshot_rejects_invalid_client () =
     | _ -> failwith "malformed routing identity must fail before pixel persistence")
     [`String "not-a-client"; `Int 73]
 
+let test_artifact_failures_are_classified () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-artifact-errors" in
+    let dir = Vt.vision_store_dir ~keeper_name:meta.name in
+    let corrupt = store_image meta "original image" in
+    Out_channel.with_open_bin (Filename.concat dir corrupt)
+      (fun oc -> output_string oc "tampered image");
+    let unreadable = String.make 64 'b' in
+    Unix.mkdir (Filename.concat dir unreadable) 0o700;
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      failwith "artifact errors must not invoke a vision provider" in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      List.iter (fun (artifact, expected_code, expected_class) ->
+        let raw = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+          ~net:(Eio.Stdenv.net env) ~meta ~args:(artifact_args artifact) () in
+        let json = json_of_output raw in
+        assert (assoc_string "error" json = expected_code);
+        assert (assoc_string "failure_class" json = expected_class))
+        [ "bad-reference", "invalid_artifact", "policy_rejection"
+        ; String.make 64 'a', "artifact_not_found", "workflow_rejection"
+        ; corrupt, "artifact_load_failed", "runtime_failure"
+        ; unreadable, "artifact_load_failed", "runtime_failure" ])))
+
 let () =
+  test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
   test_browser_screenshot_requires_keeper_owner ();
   test_browser_screenshot_reaches_vision_reader ();

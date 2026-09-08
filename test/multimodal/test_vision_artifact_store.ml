@@ -20,20 +20,12 @@ let ok = function
   | Ok v -> v
   | Error e -> failwith e
 
-(* substring check (no extra deps) — pins error identity, not just Error/Ok. *)
-let mentions ~needle s =
-  let nl = String.length needle and sl = String.length s in
-  let rec go i =
-    i + nl <= sl && (String.equal (String.sub s i nl) needle || go (i + 1))
-  in
-  go 0
-
 (* store -> load round-trips arbitrary binary bytes losslessly. *)
 let test_round_trip () =
   let dir = temp_dir () in
   let bytes = "\x89PNG\r\n\x1a\n\x00\xffbinary\x00\x00bytes\xfe" in
   let h = ok (S.store ~dir bytes) in
-  assert (String.equal (ok (S.load ~dir h)) bytes)
+  assert (String.equal (ok (Result.map_error S.load_error_to_string (S.load ~dir h))) bytes)
 
 (* content-addressed: identical bytes -> identical handle. *)
 let test_content_addressed () =
@@ -57,14 +49,15 @@ let test_persisted_handle_reload () =
   let h = ok (S.store ~dir bytes) in
   let persisted = S.to_string h in
   let rewrapped = S.of_string persisted in
-  assert (String.equal (ok (S.load ~dir rewrapped)) bytes)
+  assert (String.equal (ok (Result.map_error S.load_error_to_string (S.load ~dir rewrapped))) bytes)
 
 (* an unknown handle is a typed Error, not a crash or empty success. *)
 let test_missing_is_error () =
   let dir = temp_dir () in
   let bogus = S.of_string (String.make 64 'a') in
   match S.load ~dir bogus with
-  | Error _ -> ()
+  | Error (S.Missing_artifact _) -> ()
+  | Error _ -> assert false
   | Ok _ -> assert false
 
 (* a tampered file (bytes no longer hash to the handle) is rejected on read. *)
@@ -76,12 +69,13 @@ let test_corruption_detected () =
   output_string oc "tampered-content";
   close_out oc;
   match S.load ~dir h with
-  | Error _ -> ()
+  | Error (S.Hash_mismatch _) -> ()
+  | Error _ -> assert false
   | Ok _ -> assert false
 
 (* a malformed handle (path-traversal, non-hex, wrong length, uppercase) is
    rejected by the SHAPE guard before any filesystem access — fail closed, no
-   read outside [dir]. Asserting the error is specifically "malformed handle"
+   read outside [dir]. Asserting the error is specifically [Malformed_handle]
    (not just any Error) pins the guard: with [is_canonical] removed, a traversal
    handle falls through to a not-found / hash-mismatch error instead, and this
    test goes red. The dir is seeded so a non-guarded load would actually reach
@@ -92,7 +86,8 @@ let test_malformed_handle_rejected () =
   List.iter
     (fun bad ->
       match S.load ~dir (S.of_string bad) with
-      | Error msg -> assert (mentions ~needle:"malformed handle" msg)
+      | Error (S.Malformed_handle _) -> ()
+      | Error _ -> assert false
       | Ok _ -> assert false)
     [ "../../etc/passwd";
       "/etc/passwd";
@@ -105,12 +100,22 @@ let test_malformed_handle_rejected () =
       (* one long *)
       String.make 64 'A' (* uppercase: not canonical *) ]
 
+let test_unreadable_is_not_missing () =
+  let dir = temp_dir () in
+  ignore (ok (S.store ~dir "seed"));
+  let handle = String.make 64 'b' in
+  Unix.mkdir (Filename.concat dir handle) 0o700;
+  match S.load ~dir (S.of_string handle) with
+  | Error (S.Read_failed _) -> ()
+  | Error _ | Ok _ -> assert false
+
 let () =
   test_round_trip ();
   test_content_addressed ();
   test_distinct ();
   test_persisted_handle_reload ();
   test_missing_is_error ();
+  test_unreadable_is_not_missing ();
   test_corruption_detected ();
   test_malformed_handle_rejected ();
   print_endline "test_vision_artifact_store: all assertions passed"

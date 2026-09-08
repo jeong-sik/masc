@@ -710,13 +710,17 @@ let handle_with_outcome
      | Some sw, Some net, Some clock ->
        let dir = vision_store_dir ~keeper_name:meta.name in
          (match load_artifact ~dir (Store.of_string handle_str) with
-        | Error msg ->
-          Keeper_tool_execution.failure
-            ~class_:Tool_result.Runtime_failure
-            (err_json
-               ~failure_class:Tool_result.Runtime_failure
-               ~detail:msg
-               "artifact_load_failed")
+        | Error error ->
+          let failure_class, code, recovery = match error with
+            | Store.Malformed_handle _ -> Tool_result.Policy_rejection,
+                "invalid_artifact", "Copy the exact artifact returned by the image-producing tool."
+            | Store.Missing_artifact _ -> Tool_result.Workflow_rejection,
+                "artifact_not_found", "Observe again and use the artifact returned for this Keeper."
+            | Store.Hash_mismatch _ | Store.Read_failed _ -> Tool_result.Runtime_failure,
+                "artifact_load_failed", "The stored image could not be read with verified integrity." in
+          Keeper_tool_execution.failure ~class_:failure_class
+            (err_json ~failure_class
+               ~detail:(Store.load_error_to_string error ^ " " ^ recovery) code)
         | Ok bytes ->
           (match validate_image_size bytes with
              | Error msg ->

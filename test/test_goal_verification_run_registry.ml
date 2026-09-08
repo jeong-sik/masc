@@ -3,6 +3,11 @@ open Masc
 
 module R = Goal_verification_run_registry
 
+let criterion = Goal_store.Criterion
+  { revision = "criterion-original"; title = "Verify three services";
+    metric = Some "verified services"; target_value = Some "3" }
+
+
 let with_path f =
   let path = Filename.temp_file "goal_verification_runs_" ".jsonl" in
   Fun.protect
@@ -34,13 +39,13 @@ let test_completed_run_replays_with_tool_evidence () =
     registry
     ~run_id
     ~goal_id:"goal-a"
-    ~review_kind:R.Proof
+    ~request_id:"proof-request-original" ~criterion ~review_kind:R.Proof
     ~authority_actor:"verifier_exact"
     ~started_at:10.0;
   R.mark_completed
     registry
     ~run_id
-    ~outcome:R.Committed
+    ~outcome:R.Committed ~evaluated_verdict:(Some (R.Approved { reason = "three services verified" }))
     ~tools:[ sample_tool () ]
     ~evaluator_runtime:"runtime-a"
     ~elapsed_s:2.5
@@ -69,8 +74,8 @@ let test_cancelled_review_preserves_its_observations_after_restart () =
   let run_id = "goal-run-cancelled" in
   let detail = "review fiber cancelled after reading the measurement" in
   R.register_running registry ~run_id ~goal_id:"goal-cancelled"
-    ~review_kind:R.Proof ~authority_actor:"verifier_exact" ~started_at:10.0;
-  R.mark_completed registry ~run_id ~outcome:(R.Review_cancelled { detail })
+    ~request_id:"proof-request-original" ~criterion ~review_kind:R.Proof ~authority_actor:"verifier_exact" ~started_at:10.0;
+  R.mark_completed registry ~run_id ~outcome:(R.Review_cancelled { detail }) ~evaluated_verdict:None
     ~tools:[ sample_tool () ] ~evaluator_runtime:"runtime-a" ~elapsed_s:2.5 ();
   let before = match R.get registry ~run_id with
     | Some run -> R.run_to_yojson run |> Yojson.Safe.to_string
@@ -87,6 +92,34 @@ let test_cancelled_review_preserves_its_observations_after_restart () =
   | _ -> fail "persisted cancellation disappeared or changed after restart"
 ;;
 
+let test_superseded_review_retains_its_bound_criterion_and_verdict () =
+  with_path @@ fun path ->
+  let registry = R.create ~path () in
+  let run_id = "superseded-review" in
+  let evaluated_verdict = Some (R.Approved { reason = "three services reached target three" }) in
+  R.register_running registry ~run_id ~goal_id:"goal-revised"
+    ~request_id:"request-before-edit" ~criterion
+    ~review_kind:R.Proof ~authority_actor:"verifier_exact" ~started_at:10.;
+  R.mark_completed registry ~run_id ~outcome:R.Reviewed ~evaluated_verdict
+    ~tools:[ sample_tool () ] ~evaluator_runtime:"runtime-a" ~elapsed_s:2. () ;
+  (* The evaluated verdict must already survive a restart before commit runs. *)
+  (match R.get (R.replay path) ~run_id with
+   | Some { status = R.Completed { outcome = R.Reviewed; evaluated_verdict = Some (R.Approved _); _ }; _ } -> ()
+   | _ -> fail "evaluated verdict was not durable before commit");
+  R.mark_completed registry ~run_id
+    ~outcome:(R.Superseded { detail = "a new proof request replaced the reviewed criterion" })
+    ~evaluated_verdict ~tools:[ sample_tool () ] ~evaluator_runtime:"runtime-a" ~elapsed_s:3. () ;
+  match R.get (R.replay path) ~run_id with
+  | Some { request_id; criterion = retained_criterion;
+      status = R.Completed { outcome = R.Superseded _;
+        evaluated_verdict = Some (R.Approved { reason }); tools = [ tool ]; _ }; _ } ->
+    check string "original request retained" "request-before-edit" request_id;
+    check bool "frozen criterion retained" true (Goal_store.criterion_equal criterion retained_criterion);
+    check string "evaluated approval retained" "three services reached target three" reason;
+    check string "lookup evidence retained" "proof bytes" tool.output_excerpt
+  | _ -> fail "superseded review lost its historical evidence"
+;;
+
 let test_running_attempt_is_not_claimed_after_restart () =
   with_path
   @@ fun path ->
@@ -95,7 +128,7 @@ let test_running_attempt_is_not_claimed_after_restart () =
     registry
     ~run_id:"goal-run-interrupted"
     ~goal_id:"goal-interrupted"
-    ~review_kind:R.Proof
+    ~request_id:"proof-request-original" ~criterion ~review_kind:R.Proof
     ~authority_actor:"verifier_exact"
     ~started_at:20.0;
   check int "replayed running attempts are dropped" 0
@@ -111,13 +144,13 @@ let test_reviewed_observation_survives_replay () =
     registry
     ~run_id
     ~goal_id:"goal-reviewed"
-    ~review_kind:R.Proof
+    ~request_id:"proof-request-original" ~criterion ~review_kind:R.Proof
     ~authority_actor:"verifier_exact"
     ~started_at:20.0;
   R.mark_completed
     registry
     ~run_id
-    ~outcome:R.Reviewed
+    ~outcome:R.Reviewed ~evaluated_verdict:(Some (R.Approved { reason = "three services verified" }))
     ~tools:[ sample_tool () ]
     ~evaluator_runtime:"runtime-a"
     ~elapsed_s:2.5
@@ -145,6 +178,10 @@ let () =
             "cancelled review preserves observations after restart"
             `Quick
             test_cancelled_review_preserves_its_observations_after_restart
+        ; test_case
+            "superseded review retains criterion and evaluated verdict"
+            `Quick
+            test_superseded_review_retains_its_bound_criterion_and_verdict
         ; test_case
             "running attempt is not claimed after restart"
             `Quick

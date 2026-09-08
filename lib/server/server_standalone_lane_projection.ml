@@ -259,6 +259,8 @@ let retained_run_detail_json run =
                ~subject_key:"goal_id"
                ~subject_id:run.goal_id
                [ "review_kind", `String "proof"
+               ; "request_id", `String run.request_id
+               ; "criterion", Goal_store.criterion_to_yojson run.criterion
                ; "authority_actor", `String run.authority_actor
                ] ) ]
        @ output)
@@ -469,12 +471,16 @@ let observed_verification_run (run : Verification_run_registry.run) =
     status
 ;;
 
-let terminal_of_goal_verification_outcome = function
+let terminal_of_goal_verification_outcome ~evaluated_verdict = function
   | Goal_verification_run_registry.Raised _
   | Goal_verification_run_registry.Deferred _ -> Failed
   | Goal_verification_run_registry.Reviewed
   | Goal_verification_run_registry.Committed -> Succeeded
   | Goal_verification_run_registry.Review_cancelled _ -> Cancelled
+  | Goal_verification_run_registry.Superseded _ ->
+    (* The lane measures whether a judgement was produced, independently of
+       whether its original request was still current when it returned. *)
+    (match evaluated_verdict with Some _ -> Succeeded | None -> Failed)
 ;;
 
 let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
@@ -482,9 +488,9 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
     match run.status with
     | Goal_verification_run_registry.Running -> Running
     | Goal_verification_run_registry.Completed
-        { outcome; evaluator_runtime; elapsed_s; _ } ->
+        { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; _ } ->
       Terminal
-        { kind = terminal_of_goal_verification_outcome outcome
+        { kind = terminal_of_goal_verification_outcome ~evaluated_verdict outcome
         ; elapsed_s
         ; elapsed_measured = true
         ; selected_slot = evaluator_runtime

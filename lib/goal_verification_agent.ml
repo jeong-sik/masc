@@ -216,13 +216,12 @@ let process_pending_work_inner
       ~observe_evaluator_runtime
       ~persist_reviewed
       ~verification_run_id
+      ~bound_review
       config
       (work : pending_work)
   : process_outcome
   =
-  match bind_review config ~goal_id:work.goal_id with
-  | Error detail -> defer ~goal_id:work.goal_id ~reason:detail
-  | Ok (goal, (request_id, criterion)) ->
+  let goal, (request_id, criterion) = bound_review in
     let outcome =
        (match goal_proof_lookup config with
         | Error detail ->
@@ -284,7 +283,10 @@ let process_pending_work_inner
                  | Task.Anti_rationalization.Reject reason ->
                    Workspace_goals.Proof_refuted { reason }
                in
-               persist_reviewed ();
+               let evaluated_verdict = match review_verdict with
+                 | Task.Anti_rationalization.Approve reason -> Goal_verification_run_registry.Approved { reason }
+                 | Task.Anti_rationalization.Reject reason -> Goal_verification_run_registry.Rejected { reason } in
+               persist_reviewed evaluated_verdict;
                match
                  commit_gate_verdict
                    config
@@ -317,15 +319,21 @@ let process_pending_work_inner
 let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
   : process_outcome
   =
+  match bind_review config ~goal_id:work.goal_id with
+  | Error detail -> defer ~goal_id:work.goal_id ~reason:detail
+  | Ok ((_goal, (request_id, criterion)) as bound_review) ->
   let registry = Goal_verification_run_registry.global () in
   let run_id = Random_id.uuid_v7 () in
   let started_at = Time_compat.now () in
   let tools = ref [] in
   let evaluator_runtime = ref None in
+  let evaluated_verdict = ref None in
   Goal_verification_run_registry.register_running
     registry
     ~run_id
     ~goal_id:work.goal_id
+    ~request_id
+    ~criterion
     ~review_kind:Goal_verification_run_registry.Proof
     ~authority_actor:Runtime.verifier_exact_lane_id
     ~started_at;
@@ -343,17 +351,21 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
       registry
       ~run_id
       ~outcome
+      ~evaluated_verdict:!evaluated_verdict
       ~tools:(List.rev !tools)
       ?evaluator_runtime:!evaluator_runtime
       ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
       ()
   in
-  let persist_reviewed () = persist Goal_verification_run_registry.Reviewed in
+  let persist_reviewed verdict =
+    evaluated_verdict := Some verdict;
+    persist Goal_verification_run_registry.Reviewed
+  in
   let complete outcome =
     let registry_outcome =
       match outcome with
       | Committed -> Goal_verification_run_registry.Committed
-      | Superseded -> Goal_verification_run_registry.Deferred
+      | Superseded -> Goal_verification_run_registry.Superseded
           { detail = "review superseded by a newer pending proof request" }
       | Deferred reason -> Goal_verification_run_registry.Deferred { detail = reason }
     in
@@ -367,6 +379,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
         ~observe_evaluator_runtime
         ~persist_reviewed
         ~verification_run_id:run_id
+        ~bound_review
         config
         work
     in
@@ -388,6 +401,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
       ~outcome:
         (Goal_verification_run_registry.Raised
            { detail = Printexc.to_string exn })
+      ~evaluated_verdict:!evaluated_verdict
       ~tools:(List.rev !tools)
       ?evaluator_runtime:!evaluator_runtime
       ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))

@@ -7645,6 +7645,7 @@ type lane_run_status =
   | Lane_run_approved
   | Lane_run_reviewed
   | Lane_run_committed
+  | Lane_run_superseded
   | Lane_run_rejected
   | Lane_run_deferred
   | Lane_run_review_cancelled
@@ -7665,6 +7666,7 @@ let lane_run_status_of_string = function
   | "approved" -> Lane_run_approved
   | "reviewed" -> Lane_run_reviewed
   | "committed" -> Lane_run_committed
+  | "superseded" -> Lane_run_superseded
   | "rejected" -> Lane_run_rejected
   | "deferred" -> Lane_run_deferred
   | "review_cancelled" -> Lane_run_review_cancelled
@@ -7685,6 +7687,7 @@ let lane_run_status_label = function
   | Lane_run_approved -> "approved"
   | Lane_run_reviewed -> "reviewed"
   | Lane_run_committed -> "committed"
+  | Lane_run_superseded -> "superseded"
   | Lane_run_rejected -> "rejected"
   | Lane_run_deferred -> "deferred"
   | Lane_run_review_cancelled -> "review_cancelled"
@@ -7718,6 +7721,7 @@ type lane_run_decision =
   | Lane_run_decision_rejected
   | Lane_run_decision_reviewed
   | Lane_run_decision_committed
+  | Lane_run_decision_superseded
   | Lane_run_decision_pending
   | Lane_run_decision_not_reached
   | Lane_run_not_a_decision
@@ -7732,6 +7736,7 @@ let lane_run_decision ~run_kind ~status =
      | Lane_run_rejected -> Lane_run_decision_rejected
      | Lane_run_reviewed -> Lane_run_decision_reviewed
      | Lane_run_committed -> Lane_run_decision_committed
+     | Lane_run_superseded -> Lane_run_decision_superseded
      | Lane_run_running -> Lane_run_decision_pending
      | Lane_run_deferred
      | Lane_run_review_cancelled
@@ -7861,6 +7866,7 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       | Lane_run_approved
       | Lane_run_reviewed
       | Lane_run_committed
+      | Lane_run_superseded
       | Lane_run_rejected
       | Lane_run_deferred
       | Lane_run_review_cancelled

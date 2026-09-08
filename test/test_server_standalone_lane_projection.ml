@@ -420,12 +420,17 @@ let task_verification_run ~verification_id ~started_at : Verification.run =
 let goal_verification_run ~run_id ~started_at : Goal_verification.run =
   { run_id
   ; goal_id = "goal-4"
+  ; request_id = "proof-request-4"
+  ; criterion = Masc.Goal_store.Criterion
+      { revision = "criterion-4"; title = "Four verified services";
+        metric = Some "verified services"; target_value = Some "4" }
   ; review_kind = Goal_verification.Proof
   ; authority_actor = Runtime.verifier_exact_lane_id
   ; started_at
   ; status =
       Goal_verification.Completed
         { outcome = Goal_verification.Committed
+        ; evaluated_verdict = Some (Goal_verification.Approved { reason = "four verified" })
         ; evaluator_runtime = Some "verifier-secondary"
         ; elapsed_s = 2.
         ; tools = []

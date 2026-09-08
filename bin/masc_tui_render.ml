@@ -6680,6 +6680,7 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_committed -> Theme.ok ()
   | Tui_decode.Lane_run_cancelled
   | Tui_decode.Lane_run_rejected
+  | Tui_decode.Lane_run_superseded
   | Tui_decode.Lane_run_deferred
   | Tui_decode.Lane_run_review_cancelled -> Theme.warn ()
   | Tui_decode.Lane_run_failed
@@ -6876,6 +6877,7 @@ let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   | Tui_decode.Lane_run_decision_rejected -> Theme.warn (), "REJECTED"
   | Tui_decode.Lane_run_decision_reviewed -> Theme.ok (), "REVIEWED"
   | Tui_decode.Lane_run_decision_committed -> Theme.ok (), "COMMITTED"
+  | Tui_decode.Lane_run_decision_superseded -> Theme.info (), "SUPERSEDED"
   | Tui_decode.Lane_run_decision_pending -> Theme.info (), "NO DECISION YET"
   | Tui_decode.Lane_run_decision_not_reached -> Theme.warn (), "NO DECISION"
   | Tui_decode.Lane_run_not_a_decision -> Theme.info (), "NOT A VERDICT"

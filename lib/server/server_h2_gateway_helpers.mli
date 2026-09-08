@@ -12,6 +12,14 @@ val h2_respond_json_value :
   ?compress:bool ->
   H2.Reqd.t -> Yojson.Safe.t -> unit
 
+(** Encode immutable JSON on the shared CPU executor, then write on the
+    caller fiber. Only the negotiated encoding is prepared. *)
+val h2_respond_json_value_on_cpu :
+  ?status:H2.Status.t ->
+  ?extra_headers:(string * string) list ->
+  ?compress:bool ->
+  H2.Reqd.t -> Yojson.Safe.t -> unit
+
 val h2_respond_text :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->

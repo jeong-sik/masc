@@ -2625,7 +2625,7 @@ let add_routes ~sw ~clock router =
           just the auth + transport wrapper. *)
        with_public_read (fun state req reqd ->
          let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->

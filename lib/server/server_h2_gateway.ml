@@ -1113,7 +1113,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let json =
               dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            h2_respond_json_value_on_cpu h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals" ->
           with_h2_public_read h2_reqd (fun state ->

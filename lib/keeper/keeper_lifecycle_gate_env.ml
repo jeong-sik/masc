@@ -14,10 +14,11 @@ open Keeper_meta_contract
 
 (* Global kill-switches from the feature-flag registry. All default true. *)
 let global () : Keeper_lifecycle_gate.flags =
+  let autonomous = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED" in
   { reactive = Feature_flag_registry.get_bool "MASC_KEEPER_REACTIVE_ENABLED"
-  ; proactive = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
-  ; autonomous = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
-  ; bootstrap = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
+  ; proactive = autonomous
+  ; autonomous
+  ; bootstrap = autonomous
   }
 
 (* One declarative mode owns both spontaneous initiative and automatic owner

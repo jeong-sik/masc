@@ -2,17 +2,40 @@
 
 `masc-browser-host` is an OCaml/Eio executable. Firefox starts it through
 `runtime.connectNative("masc_browser_host")`. It reads the lane token from a
-file, long-polls `/browser-lane/poll`, forwards `tabs.list` and `page.read` as
-native frames, and posts correlated replies to `/browser-lane/result`.
+file, long-polls `/browser-lane/poll`, and forwards `browser.info`, `tabs.list`,
+`page.read`, `page.elements`, `page.capture`, and `page.interact` as native
+frames. It posts correlated replies to `/browser-lane/result`. These cover
+browser metadata, tab listing, page text/elements, screenshots, and page interactions.
 
-Install a CI-built executable without building locally:
+After installing MASC, register its native host separately. Use the same
+published tag as the installed binary (the example requires `v0.34.0` to have
+been published). No source checkout or local build is required:
 
 ```sh
-connectors/browser/install-host.sh \
-  --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace \
+TAG=v0.34.0
+BASE_PATH="$HOME/masc-workspace"
+curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/connectors/browser/install-host.sh" \
+  -o /tmp/masc-install-host.sh
+less /tmp/masc-install-host.sh
+bash /tmp/masc-install-host.sh \
+  --binary "$HOME/.local/bin/masc-browser-host" \
+  --base-path "$BASE_PATH" \
   --server http://127.0.0.1:8935
+
+EXTENSION_DIR="$BASE_PATH/.masc/browser-lane/extension"
+mkdir -p "$EXTENSION_DIR"
+for file in manifest.json background.js; do
+  curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/connectors/browser/extension/$file" \
+    -o "$EXTENSION_DIR/$file"
+done
 ```
+
+Adjust `--binary` for a custom installation prefix. Start the MASC server with
+the same base path. In Firefox, open `about:debugging#/runtime/this-firefox`,
+choose **Load Temporary Add-on**, and select `manifest.json` in the extension
+directory above. Firefox removes temporary add-ons on restart; load it again
+for a later browser session. Keep both extension files together and update
+them from the same tag when upgrading the native host.
 
 The installer copies the executable into
 `<base-path>/.masc/browser-lane/host/` and registers the launcher there.
@@ -59,7 +82,8 @@ it `HTTP failed`.
 The native protocol uses a 4-byte little-endian length followed by UTF-8 JSON.
 Mozilla specifies native byte order and a 1 MiB host-to-browser limit; the
 supported macOS/Linux release architectures are little-endian. This host
-also caps incoming frames at 1 MiB as an application memory bound, below
+caps browser-to-host replies at 8 MiB to admit a 5 MiB PNG after base64/JSON
+encoding, below
 Mozilla's 4 GiB incoming protocol limit. Oversized or truncated frames fail
 explicitly. stdout is reserved for frames; diagnostics go to stderr without
 tokens or page content. An independent stdin fiber detects browser closure

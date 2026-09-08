@@ -57,6 +57,8 @@ run_self_test_when_changed() {
 }
 
 blocking_lints() {
+  run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
+  run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   run_lint "Logging consistency" bash scripts/ci/check-logging-consistency.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs

@@ -1,0 +1,130 @@
+name: Kata volume smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/kata-volume-smoke.yml'
+      - 'scripts/smoke-nerdctl-kata-volume.sh'
+      - 'lib/keeper/keeper_sandbox_microvm.ml'
+      - 'lib/keeper/keeper_sandbox_microvm.mli'
+
+permissions:
+  contents: read
+
+jobs:
+  kata-volume:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Verified release API asset names/digests, 2026-09-08:
+      # https://github.com/containerd/nerdctl/releases/tag/v2.3.5
+      # Full includes containerd 2.3.3, BuildKit 0.31.2, runc and CNI.
+      NERDCTL_VERSION: '2.3.5'
+      NERDCTL_SHA256: b697295c623639734aaab737523c808fd3cc8d3046039fd94fff1744e4c317aa
+      # Go runtime archive carries monolithic guest images + QEMU defaults:
+      # https://github.com/kata-containers/kata-containers/releases/tag/4.1.0
+      # https://github.com/kata-containers/kata-containers/blob/4.1.0/tools/packaging/kata-deploy/local-build/kata-release-tarball-inputs.sh
+      KATA_VERSION: '4.1.0'
+      KATA_SHA256: 8b32080424c884238ee8d52060fdfd060fbe2b5fdfa4eb9ff2772b382b432b55
+      # Registry-confirmed Debian bookworm-slim OCI index; sufficient for the
+      # volume script's shell/coreutils checks. This is not a MASC image proof.
+      PROOF_IMAGE: docker.io/library/debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Require real KVM
+        run: |
+          mkdir -p kata-evidence
+          uname -a | tee kata-evidence/host.txt
+          test "$(uname -m)" = x86_64
+          # Missing nested virtualization is an acceptance failure, not a skip.
+          # https://github.com/kata-containers/kata-containers/blob/4.1.0/docs/install/README.md
+          if [ ! -c /dev/kvm ]; then
+            echo '::error::This runner exposes no /dev/kvm. Real Kata proof requires a KVM-capable ephemeral Linux runner.'
+            exit 1
+          fi
+          sudo python3 - <<'PY'
+          import fcntl, os
+          fd = os.open('/dev/kvm', os.O_RDWR | os.O_CLOEXEC)
+          try:
+              assert fcntl.ioctl(fd, 0xAE00, 0) == 12, 'KVM_GET_API_VERSION failed'
+          finally:
+              os.close(fd)
+          PY
+
+      - name: Download and verify runtime distributions
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends zstd
+          cd "$RUNNER_TEMP"
+          nerdctl_asset="nerdctl-full-${NERDCTL_VERSION}-linux-amd64.tar.gz"
+          kata_asset="kata-go-static-${KATA_VERSION}-amd64.tar.zst"
+          curl --fail --location --retry 3 \
+            "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/${nerdctl_asset}" -o "$nerdctl_asset"
+          curl --fail --location --retry 3 \
+            "https://github.com/kata-containers/kata-containers/releases/download/${KATA_VERSION}/${kata_asset}" -o "$kata_asset"
+          printf '%s  %s\n' "$NERDCTL_SHA256" "$nerdctl_asset" "$KATA_SHA256" "$kata_asset" | sha256sum --check
+          sudo tar -C /usr/local -xzf "$nerdctl_asset"
+          sudo tar -C / --zstd -xf "$kata_asset"
+          test -x /opt/kata/bin/containerd-shim-kata-v2
+          test -f /opt/kata/share/defaults/kata-containers/configuration-qemu.toml
+          /usr/local/bin/nerdctl --version | tee "$GITHUB_WORKSPACE/kata-evidence/nerdctl-version.txt"
+          /opt/kata/bin/kata-runtime --version | tee "$GITHUB_WORKSPACE/kata-evidence/kata-version.txt"
+
+      - name: Start isolated containerd with the Kata shim
+        run: |
+          # This ephemeral job has its own containerd root/state/socket. Existing
+          # runner Docker services are not used by the proof.
+          # Official nerdctl/ctr Kata setup (ConfigPath in CRI does not apply):
+          # https://github.com/kata-containers/kata-containers/blob/4.1.0/docs/how-to/containerd-kata.md
+          sudo tee /usr/local/bin/containerd-shim-kata-v2 >/dev/null <<'SH'
+          #!/bin/sh
+          export KATA_CONF_FILE=/opt/kata/share/defaults/kata-containers/configuration-qemu.toml
+          exec /opt/kata/bin/containerd-shim-kata-v2 "$@"
+          SH
+          sudo chmod 755 /usr/local/bin/containerd-shim-kata-v2
+          cat > "$RUNNER_TEMP/kata-containerd.toml" <<'TOML'
+          version = 3
+          root = "/var/lib/masc-kata-proof/containerd"
+          state = "/run/masc-kata-proof/containerd"
+          [grpc]
+            address = "/run/masc-kata-proof/containerd.sock"
+          TOML
+          sudo systemd-run --unit masc-kata-proof-containerd \
+            --property=Type=notify --property=Delegate=yes \
+            --setenv=PATH=/usr/local/bin:/opt/kata/bin:/usr/bin:/bin \
+            /usr/local/bin/containerd --config "$RUNNER_TEMP/kata-containerd.toml"
+          # nerdctl-full supplies CNI and BuildKit. Only image pull is needed in
+          # this storage proof, so no BuildKit daemon/image build is started.
+          # https://github.com/containerd/nerdctl/blob/v2.3.5/docs/config.md
+          sudo mkdir -p /etc/nerdctl
+          sudo tee /etc/nerdctl/nerdctl.toml >/dev/null <<'TOML'
+          address = "unix:///run/masc-kata-proof/containerd.sock"
+          namespace = "masc-kata-proof"
+          data_root = "/var/lib/masc-kata-proof/nerdctl"
+          cni_path = "/usr/local/libexec/cni"
+          TOML
+          sudo /usr/local/bin/nerdctl info | tee kata-evidence/nerdctl-info.txt
+
+      - name: Run actual Kata persistence and isolation proof
+        run: |
+          set -o pipefail
+          sudo /usr/local/bin/nerdctl pull "$PROOF_IMAGE" 2>&1 | tee kata-evidence/image-pull.log
+          sudo /usr/local/bin/nerdctl images --format json | tee kata-evidence/image-inventory.jsonl
+          sudo env PATH=/usr/local/bin:/usr/bin:/bin \
+            bash scripts/smoke-nerdctl-kata-volume.sh "$PROOF_IMAGE" \
+            2>&1 | tee kata-evidence/volume-smoke.log
+
+      - name: Collect daemon evidence
+        if: always()
+        run: |
+          mkdir -p kata-evidence
+          sudo journalctl --unit masc-kata-proof-containerd --no-pager > kata-evidence/containerd.log
+          git rev-parse HEAD > kata-evidence/source-commit.txt
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: kata-volume-proof-${{ github.sha }}
+          path: kata-evidence/

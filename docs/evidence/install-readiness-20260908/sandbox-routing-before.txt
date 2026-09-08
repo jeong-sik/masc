@@ -1,0 +1,35 @@
+...FF
+======================================================================
+FAIL: test_kata_uses_nerdctl_even_with_docker_override (__main__.SandboxImageCliTest.test_kata_uses_nerdctl_even_with_docker_override)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/test/test_sandbox_image_cli.py", line 66, in test_kata_uses_nerdctl_even_with_docker_override
+    self.exercise('nerdctl_kata', 'nerdctl', custom_docker=True)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<checkout>/test/test_sandbox_image_cli.py", line 46, in exercise
+    self.assertEqual(data['command'], expected_command)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'configured-docker' != 'nerdctl'
+- configured-docker
++ nerdctl
+
+
+======================================================================
+FAIL: test_runtime_build_failure_is_not_success (__main__.SandboxImageCliTest.test_runtime_build_failure_is_not_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/test/test_sandbox_image_cli.py", line 72, in test_runtime_build_failure_is_not_success
+    self.exercise('nerdctl_kata', 'nerdctl', failure=True)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<checkout>/test/test_sandbox_image_cli.py", line 46, in exercise
+    self.assertEqual(data['command'], expected_command)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'docker' != 'nerdctl'
+- docker
++ nerdctl
+
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.875s
+
+FAILED (failures=2)

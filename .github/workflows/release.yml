@@ -21,22 +21,21 @@ jobs:
         include:
           - os: macos-14  # Apple Silicon
             arch: macos-arm64
-            may-fail: true   # upstream opam macOS arm64 binary missing (#7475)
             shim-arch: ''    # the exec shim is a Linux guest binary; none here
-          - os: ubuntu-latest
+          - os: macos-15-intel
+            arch: macos-x64
+            shim-arch: ''
+          - os: ubuntu-24.04
             arch: linux-x64
-            may-fail: false
             shim-arch: amd64
           # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
           # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
           # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
           - os: ubuntu-24.04-arm
             arch: linux-arm64
-            may-fail: false
             shim-arch: arm64
 
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.may-fail }}
     # The Linux jobs also build the exec shim in a container (an opam install
     # on the first run), on top of the server build.
     timeout-minutes: 60
@@ -52,6 +51,11 @@ jobs:
           else
             scripts/check-version-truth.sh
           fi
+
+      - name: Installer behavior (terminal wizard and upgrades)
+        run: |
+          python3 test/test_installer_wizard.py
+          python3 test/test_installer_upgrade.py
 
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -128,6 +132,36 @@ jobs:
             bin/masc_tui.exe \
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
+
+      - name: Keeper creation CLI exits after HTTP response
+        run: python3 test/test_keeper_create_cli_exit.py _build/default/bin/main_eio.exe
+
+      - name: Sandbox image CLI runtime routing
+        run: python3 test/test_sandbox_image_cli.py _build/default/bin/main_eio.exe
+
+      # Exercise the image distributed as a recipe by the actual release CLI.
+      # This is guest tool readiness, not an authenticated Keeper/model turn.
+      - name: General sandbox image and guest tool smoke
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist sandbox-smoke-workspace
+          image="masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}"
+          _build/default/bin/main_eio.exe sandbox-image --tag "$image" \
+            > "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --user "$(id -u):$(id -g)" --tmpfs /tmp \
+            -v "$PWD/sandbox-smoke-workspace:/workspace" -w /workspace "$image" \
+            bash -lc '
+              set -eu
+              for tool in bash curl find gh git less ps python3 rg; do command -v "$tool"; done
+              git init --quiet
+              printf "release sandbox proof\n" > proof.txt
+              rg --fixed-strings "release sandbox proof" proof.txt
+              python3 -c "from pathlib import Path; assert Path(\"proof.txt\").read_text() == \"release sandbox proof\\n\""
+              printf "general-sandbox-tools: PASS\n"
+            ' >> "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
+          cat "dist/general-sandbox-${{ matrix.arch }}.log"
+          rm -r sandbox-smoke-workspace
 
       # Prove the self-contained claim: neither shipped binary may keep a
       # dynamic libsqlite3 dependency, or a bare Linux install breaks again.
@@ -244,7 +278,32 @@ jobs:
       - name: Installer smoke (offline)
         run: |
           chmod +x scripts/install-smoke.sh
-          scripts/install-smoke.sh dist ${{ matrix.arch }}
+          install_args=(dist "${{ matrix.arch }}")
+          if [ "${{ runner.os }}" = Linux ]; then
+            install_args+=("masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}")
+          fi
+          scripts/install-smoke.sh "${install_args[@]}"
+
+      # A build runner has development libraries that a fresh user host lacks.
+      - name: Fresh Ubuntu installation (no OCaml or checkout dependencies)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -euc '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends ca-certificates curl python3 libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+              bash scripts/install-smoke.sh dist "${{ matrix.arch }}"
+            '
+
+      - name: Upload failed installation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: install-failure-${{ matrix.arch }}
+          if-no-files-found: ignore
+          path: |
+            dist/general-sandbox-*.log
+            dist/first-keeper-turn-*/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -270,10 +329,11 @@ jobs:
 
       - name: Verify advertised release assets
         run: |
-          for arch in macos-arm64 linux-x64 linux-arm64; do
+          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
               "masc-tui-$arch" \
+              "masc-browser-host-$arch" \
               "masc-deployment-preflight-helper-$arch" \
               "masc-check-runtime-deployment-preflight-$arch" \
               "masc-dashboard-$arch.tar.gz" \

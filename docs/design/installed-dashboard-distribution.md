@@ -30,12 +30,16 @@ masc -> .masc-releases/<receipt-sha256>/masc
 
 The release directory is verified before publication and previous releases remain
 in place. An atomic rename changes the `masc` pointer. A private
-`.masc-install-transaction` retains the previous regular file or symlink until
-seeding, wizard, and binary smoke checks complete. Failure rolls the pointer back.
+`.masc-install-transaction` retains the previous server and companion regular files
+or symlinks until
+seeding, wizard, and binary smoke checks complete. Failure restores all journaled executable destinations.
 A process crash can leave the transaction for explicit `commit` or `rollback` with
 the verified helper; a new install refuses to overwrite that unfinished transaction.
-Companion binaries and user config seeding retain their existing installer behavior;
-the transaction covers the server binary/dashboard pair.
+Verified companion downloads are staged before publication and passed to the helper
+with `--companion NAME PATH`. Existing companion destinations are journaled before
+any executable is replaced. Workspace guest shims and explicit configuration resets
+are outside this prefix transaction. `--force` preserves configuration;
+`--reset-config` explicitly requests seeded configuration replacement.
 
 ## Runtime authority
 

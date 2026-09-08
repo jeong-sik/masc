@@ -21,6 +21,12 @@ type response = {
     fully read into memory; size capped at 8 MB
     (see {!post_sync} / {!get_response_sync} for the cap details). *)
 
+val with_scoped_pool :
+  sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> (unit -> 'a) -> 'a
+(** Run short-lived client work with its own pool. Closes pooled Piaf clients
+    before returning, restores the previous domain-local pool, and removes
+    its metrics entry. Await child requests before the callback returns. *)
+
 val default_request_timeout_sec : float
 (** Shared outbound HTTP request deadline used by connector delivery clients.
     This bounds the full request/response exchange, unlike the pool's separate

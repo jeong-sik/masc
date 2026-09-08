@@ -38,6 +38,9 @@ val valid_strings : string list
 (** The accepted spellings, for a schema mirror and for a refusal that can
     name what it would have taken. *)
 
+val kata_containerd_shim : string
+(** Containerd runtime identity used for Kata boot and inventory scoping. *)
+
 val run_runtime_args : t -> string list
 (** Extra argv the boot needs to get a microVM rather than whatever the CLI
     would default to. Apple's [container] and [msb] are microVM runtimes by

@@ -41,7 +41,7 @@ class Distribution(unittest.TestCase):
         (self.assets / ".build-stamp").write_text("2026-09-07T00:00:00Z\n")
         os.utime(self.assets / ".build-stamp", (1788739200, 1788739200))
         system = os.uname()
-        self.arch = {("Darwin", "arm64"): "macos-arm64", ("Linux", "x86_64"): "linux-x64", ("Linux", "aarch64"): "linux-arm64"}[(system.sysname, system.machine)]
+        self.arch = {("Darwin", "arm64"): "macos-arm64", ("Darwin", "x86_64"): "macos-x64", ("Linux", "x86_64"): "linux-x64", ("Linux", "aarch64"): "linux-arm64"}[(system.sysname, system.machine)]
         self.asset = "masc-" + self.arch
         self.archive = self.root / "bundle.tar.gz"
         bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive)
@@ -121,6 +121,24 @@ class Distribution(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rollback cannot be confirmed"):
             bundle.rollback(self.prefix)
 
+    def test_companion_publication_failure_restores_all_previous_executables(self):
+        previous = self.old()
+        tui = self.prefix / "masc-tui"
+        tui.write_text("old tui")
+        original = os.replace
+        def reject_browser(source, target):
+            if Path(source).name == "next" and Path(target).name == "masc-browser-host":
+                raise OSError("injected companion publication failure")
+            return original(source, target)
+        with patch.object(bundle.os, "replace", side_effect=reject_browser):
+            with self.assertRaisesRegex(OSError, "companion publication"):
+                bundle.install(self.binary, self.archive, self.prefix, self.asset,
+                               [("masc-tui", self.binary), ("masc-browser-host", self.binary)])
+        self.assertEqual(tui.read_text(), "old tui")
+        self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+        self.assertFalse((self.prefix / "masc-browser-host").exists())
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
     def test_wrong_binary_does_not_replace_old_install(self):
         previous = self.old()
         self.binary.write_text(self.binary.read_text() + "# changed bytes\n")
@@ -149,7 +167,7 @@ class Distribution(unittest.TestCase):
     def mirror(self):
         mirror = self.root / "release" / "v9.9.9"
         mirror.mkdir(parents=True)
-        for name in [self.asset, "masc-tui-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
+        for name in [self.asset, "masc-tui-" + self.arch, "masc-browser-host-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
                      "masc-check-runtime-deployment-preflight-" + self.arch]:
             shutil.copy2(self.binary, mirror / name)
         shutil.copy2(self.archive, mirror / ("masc-dashboard-" + self.arch + ".tar.gz"))
@@ -179,12 +197,16 @@ class Distribution(unittest.TestCase):
 
     def test_real_installer_later_smoke_failure_restores_previous_binary(self):
         previous = self.old()
+        tui = self.prefix / "masc-tui"
+        tui.write_text("old tui")
         self.binary.write_text(self.binary.read_text().replace("--version) echo 9.9.9", "--version) exit 9"))
         bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive)
         mirror = self.mirror()
         result = self.run_installer(mirror, ["--force"])
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+        self.assertEqual(tui.read_text(), "old tui")
+        self.assertFalse((self.prefix / "masc-browser-host").exists())
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
     def test_wrong_source_commit_is_rejected_even_when_binary_hash_matches(self):
@@ -206,11 +228,15 @@ class Distribution(unittest.TestCase):
 
     def test_real_installer_missing_archive_keeps_old_binary(self):
         previous = self.old()
+        tui = self.prefix / "masc-tui"
+        tui.write_text("old tui")
         mirror = self.mirror()
         (mirror / ("masc-dashboard-" + self.arch + ".tar.gz")).unlink()
         result = self.run_installer(mirror, ["--force"])
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+        self.assertEqual(tui.read_text(), "old tui")
+        self.assertFalse((self.prefix / "masc-browser-host").exists())
 
 
 if __name__ == "__main__":

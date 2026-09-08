@@ -12,7 +12,8 @@
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
 #   --base-path DIR    .masc seed target (default: $PWD)
 #   --no-seed          Skip writing default config files
-#   --force            Overwrite existing binary / config
+#   --force            Refresh existing binaries; preserve workspace config
+#   --reset-config     Overwrite seeded config and selected team preset files
 #   --dry-run          Print what would happen, do not write
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
@@ -20,7 +21,8 @@
 #   --no-guest-shim    Do not place the guest exec shim (masc-exec-shim) and its
 #                      sha256 sidecar under <base-path>/.masc/microvm/shim; a
 #                      host that boots no microvm keeper needs neither
-#   --provider ID      Pre-select a provider for the wizard (e.g. deepseek)
+#   --provider ID      Select a provider, including on an existing workspace
+#                      (e.g. deepseek; incompatible with --no-wizard)
 #   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
 #   --sandbox PROFILE  Set the seeded team keepers' sandbox_profile
 #                        (docker|microvm|remote_ssh; use with --team)
@@ -59,6 +61,7 @@ MASC_PORT="${MASC_PORT:-8935}"
 BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0
+RESET_CONFIG=0
 DRY_RUN=0
 GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
@@ -106,6 +109,7 @@ PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
 PARTIAL_FILES=()
+COMPANION_ARGS=()
 BUNDLE_HELPER=""
 BUNDLE_TRANSACTION_ACTIVE=0
 DASHBOARD_ASSETS_DIR=""
@@ -492,11 +496,14 @@ prompt_provider() {
       elif [ -n "${PROVIDER_KEYS[$i]}" ]; then
         printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
       fi
-      printf >&2 '\n'
+      printf >&2 ' [%s; id: %s]\n' "${PROVIDER_AVAIL[$i]}" "${PROVIDER_IDS[$i]}"
     done
     printf >&2 '> '
     local choice
-    read -r choice || true
+    if ! read -r choice; then
+      warn "input closed; provider selection cancelled"
+      return 1
+    fi
     if [ -z "$choice" ]; then
       echo "$DEFAULT_PROVIDER_INDEX"
       return
@@ -505,13 +512,14 @@ prompt_provider() {
       warn "please enter a number"
       continue
     fi
-    idx=$((choice - 1))
-    if [ "$idx" -lt 0 ] || [ "$idx" -ge "${#PROVIDER_IDS[@]}" ]; then
-      warn "invalid choice"
-      continue
-    fi
-    echo "$idx"
-    return
+    # Match displayed choices, without evaluating unbounded input as arithmetic.
+    for idx in "${!PROVIDER_IDS[@]}"; do
+      if [ "$choice" = "$((idx + 1))" ]; then
+        echo "$idx"
+        return
+      fi
+    done
+    warn "invalid choice"
   done
 }
 
@@ -564,7 +572,10 @@ update_runtime_default() {
 provider_ping_possible() {
   local idx="$1" key="$2" key_var
   key_var=$(provider_key_var "$idx")
-  [ -z "$key_var" ] || [ -n "$key" ]
+  if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
+    return 0
+  fi
+  [ -n "${PROVIDER_PING_PATHS[$idx]}" ] && { [ -z "$key_var" ] || [ -n "$key" ]; }
 }
 
 ping_provider() {
@@ -574,20 +585,22 @@ ping_provider() {
   local key_var
   key_var=$(provider_key_var "$idx")
 
-  # A subscription has no endpoint to reach; the meaningful check is whether its
-  # CLI is on PATH. Being signed in is a deeper, per-CLI probe left to a later
-  # step (RFC-0408) -- here we only confirm the command exists.
+  # CLI presence alone does not prove that the subscription is signed in.
   if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
     local cli_command="${PROVIDER_COMMANDS[$idx]}"
-    if [ -z "$cli_command" ]; then
-      warn "subscription $(provider_name "$idx") has no CLI command in runtime.toml; skipping check"
-      return 0
+    if [ -z "$cli_command" ] || ! command -v "$cli_command" >/dev/null 2>&1; then
+      warn "$(provider_name "$idx") CLI is not installed; install and sign in before using it"
+      return 1
     fi
-    if command -v "$cli_command" >/dev/null 2>&1; then
-      return 0
-    fi
-    warn "$cli_command not found on PATH; sign in to $(provider_name "$idx") before using it"
-    return 1
+    local probe_status=0
+    "$DEST" runtime-probe --base-path "$BASE_PATH" \
+      "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" >/dev/null 2>&1 || probe_status=$?
+    case "$probe_status" in
+      0) return 0 ;;
+      3) return 3 ;; # runtime-probe explicitly reports unsupported
+      *) warn "$(provider_name "$idx") sign-in check did not pass; authenticate with its CLI"
+         return 1 ;;
+    esac
   fi
 
   if [ -z "$ping_path" ]; then
@@ -642,7 +655,7 @@ run_wizard() {
     # A terminal is here to choose, so move the menu default onto a source that
     # is actually ready and let the operator confirm or change it.
     prefer_available_default
-    provider_idx=$(prompt_provider)
+    provider_idx=$(prompt_provider) || die "provider selection cancelled"
   else
     # No terminal and no --provider. Make the choice only when it is not a
     # choice at all -- exactly one ready source; otherwise leave it to the
@@ -704,17 +717,21 @@ run_wizard() {
       return 0
     fi
     if ! provider_ping_possible "$provider_idx" "$key"; then
-      log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
-    elif ping_provider "$provider_idx" "$key"; then
-      log "provider connectivity: ok"
+      log "missing credential or healthcheck.path for $(provider_name "$provider_idx"); skipping the connectivity check"
     else
-      warn "provider connectivity check did not pass; masc will retry at first turn"
+      local ping_status=0
+      ping_provider "$provider_idx" "$key" || ping_status=$?
+      case "$ping_status" in
+        0) log "provider connectivity: ok" ;;
+        3) log "login probe unavailable for $(provider_name "$provider_idx"); verify sign-in with its CLI" ;;
+        *) warn "provider connectivity check did not pass; masc will retry at first turn" ;;
+      esac
     fi
     return 0
   fi
 
   if ! provider_ping_possible "$provider_idx" "$key"; then
-    log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
+    log "missing credential or healthcheck.path for $(provider_name "$provider_idx"); skipping the connectivity check"
     return 0
   fi
 
@@ -725,19 +742,23 @@ run_wizard() {
   case "$answer" in
     [Nn]*) ;;
     *)
-      if ping_provider "$provider_idx" "$key"; then
-        log "provider ping: ok"
-      else
-        echo >&2
-        printf '? Connectivity check failed. [retry/skip/abort] ' >&2
-        local action
-        read -r action || true
-        case "$action" in
-          retry|Retry|r) run_wizard "$base_path" ;;
-          skip|Skip|s) ;;
-          *) die "aborted by user" ;;
-        esac
-      fi
+      local ping_status=0
+      ping_provider "$provider_idx" "$key" || ping_status=$?
+      case "$ping_status" in
+        0) log "provider ping: ok" ;;
+        3) log "login probe unavailable for $(provider_name "$provider_idx"); verify sign-in with its CLI" ;;
+        *)
+          echo >&2
+          printf '? Connectivity check failed. [retry/skip/abort] ' >&2
+          local action
+          read -r action || true
+          case "$action" in
+            retry|Retry|r) run_wizard "$base_path" ;;
+            skip|Skip|s) ;;
+            *) die "aborted by user" ;;
+          esac
+          ;;
+      esac
       ;;
   esac
 }
@@ -751,7 +772,7 @@ maybe_run_wizard() {
   fi
 
   if [ ! -e "$runtime_file" ]; then
-    if [ "$WIZARD" = "1" ]; then
+    if [ "$WIZARD" = "1" ] || [ -n "$WIZARD_PROVIDER" ]; then
       die "runtime.toml not found; cannot run wizard (did you mean to seed config?)"
     fi
     log "runtime.toml not found; skipping first-time setup wizard"
@@ -760,9 +781,9 @@ maybe_run_wizard() {
   fi
 
   # "First-time" means the config root was not already here. A workspace that was
-  # already configured keeps the [runtime].default it has; --wizard or --force
+  # already configured keeps the [runtime].default it has; --wizard or --reset-config
   # asks for the choice again.
-  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$FORCE" -eq 0 ] && [ "$WIZARD" != "1" ]; then
+  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$RESET_CONFIG" -eq 0 ] && [ "$WIZARD" != "1" ] && [ -z "$WIZARD_PROVIDER" ]; then
     log "config root was already here; skipping first-time setup wizard"
     log "run with --wizard to choose a provider again"
     return 0
@@ -775,7 +796,8 @@ maybe_run_wizard() {
   run_wizard "$base_path"
 }
 
-is_tty() { [ -t 0 ] && [ -t 1 ]; }
+# Prompts use stderr; stdout is captured by $(prompt_provider).
+is_tty() { [ -t 0 ] && [ -t 2 ]; }
 
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
@@ -799,6 +821,7 @@ while [ $# -gt 0 ]; do
     --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; shift 2 ;;
     --no-seed) SEED_CONFIG=0; shift ;;
     --force)   FORCE=1; shift ;;
+    --reset-config) RESET_CONFIG=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
@@ -830,6 +853,13 @@ case "$WIZARD_SANDBOX" in
   local) die "--sandbox local is not a loadable profile; use docker, microvm, or remote_ssh (or omit to keep the preset's own)" ;;
   *) die "--sandbox must be docker, microvm, or remote_ssh" ;;
 esac
+
+if [ "$WIZARD" = "0" ] && [ -n "$WIZARD_PROVIDER" ]; then
+  die "--provider requires the setup wizard; omit --no-wizard (or MASC_WIZARD=0)"
+fi
+if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
+  die "--sandbox requires --team; existing keepers use their own sandbox_profile"
+fi
 
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
 
@@ -892,7 +922,7 @@ detect_asset() {
   case "$os/$arch" in
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
-    Darwin/x86_64) die "macOS x86_64 release asset not built. Build from source per README." ;;
+    Darwin/x86_64) echo "masc-macos-x64" ;;
     Linux/aarch64) echo "masc-linux-arm64" ;;
     *) die "unsupported platform: $os/$arch" ;;
   esac
@@ -901,6 +931,7 @@ detect_asset() {
 ASSET=$(detect_asset)
 PLATFORM_SUFFIX="${ASSET#masc-}"
 TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
+BROWSER_HOST_ASSET="masc-browser-host-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
 DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
@@ -980,6 +1011,7 @@ fetch_release_checksums() {
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
 TUI_DEST="$PREFIX/masc-tui"
+BROWSER_HOST_DEST="$PREFIX/masc-browser-host"
 PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
@@ -1071,12 +1103,12 @@ install_release_companion() {
     || die "download failed (asset missing for $VERSION?): $asset"
   verify_checksum "$tmp" "$asset"
   chmod +x "$tmp"
-  mv "$tmp" "$dest"
-  log "installed: $dest"
+  COMPANION_ARGS+=(--companion "${dest##*/}" "$tmp")
+  log "staged: $dest"
 }
 
-# Install and verify the companions before replacing the main binary.
-# A failed companion download must leave the currently installed runtime intact.
+# Stage and verify every companion before publishing any executable.
+# The bundle helper journals companions with the main binary for rollback.
 #
 # A missing asset stops the install rather than skipping the companion. That is
 # the same rule the two preflight companions already follow, and it is why the
@@ -1084,6 +1116,7 @@ install_release_companion() {
 # installer that quietly delivers less than it was built to deliver is worse
 # than one that stops and says which asset was absent.
 install_release_companion "$TUI_ASSET" "$TUI_DEST"
+install_release_companion "$BROWSER_HOST_ASSET" "$BROWSER_HOST_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 
@@ -1096,7 +1129,7 @@ install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 guest_shim_asset() {
   case "$PLATFORM_SUFFIX" in
     macos-arm64|linux-arm64) echo "masc-exec-shim-linux-arm64" ;;
-    linux-x64) echo "masc-exec-shim-linux-amd64" ;;
+    macos-x64|linux-x64) echo "masc-exec-shim-linux-amd64" ;;
     *) die "no guest exec shim asset for platform $PLATFORM_SUFFIX" ;;
   esac
 }
@@ -1178,19 +1211,24 @@ else
   fetch_bundle_asset "$DASHBOARD_ASSET" "$bundle_archive"
   DASHBOARD_ASSETS_DIR="$(python3 "$BUNDLE_HELPER" install \
     --binary "$binary_input" --archive "$bundle_archive" \
-    --prefix "$PREFIX" --binary-asset "$ASSET")" \
+    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"})" \
     || die "binary/dashboard installation rejected"
   BUNDLE_TRANSACTION_ACTIVE=1
   log "installed verified binary/dashboard: $DEST"
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
+# Record existing workspaces even when an overlay is missing or seeding is disabled.
+[ ! -d "$BASE_PATH/.masc/config" ] || CONFIG_PREEXISTING=1
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
-  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  # An upgrade keeps the operator's config as it is, files it removed
+  # included, and only installs builtin Skill packages that are missing;
+  # --reset-config is the one way to seed the whole config tree again.
+  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
     CONFIG_PREEXISTING=1
     log "preserving existing config at $CONFIG_DIR; installing missing builtin Skills"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -1213,7 +1251,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
     init_args=(init --base-path "$BASE_PATH")
-    [ "$FORCE" -eq 1 ] && init_args+=(--force)
+    [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
     if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
       die "config seed failed ($DEST ${init_args[*]}): $init_summary"
     fi
@@ -1277,7 +1315,7 @@ seed_team() {
   while IFS= read -r rel || [ -n "$rel" ]; do
     case "$rel" in ''|'#'*) continue ;; esac
     dest="$cfg/$rel"
-    if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
+    if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"
       continue
     fi
@@ -1372,7 +1410,13 @@ cat <<EOF
 
 ${c_grn}masc ${VERSION} installed.${c_off}
 
-Next:
+Installed:
+  server + TUI + dashboard + browser host + deployment preflight tools
+  workspace: $BASE_PATH
+  provider credentials, Keeper creation and execution backend setup are separate
+  browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
+
+Next (choose the TUI or server-only command):
   ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
   ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
   ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
@@ -1382,27 +1426,28 @@ Next:
 
   ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
   ${c_dim}# the server here when nothing is answering the port${c_off}
-  $start_env $DEST --base-path "$BASE_PATH"
+  $start_env "$DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
-  $start_env $DEST start --base-path "$BASE_PATH"
+  $start_env "$DEST" start --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# to change provider or model later, edit:${c_off}
   #   $BASE_PATH/.masc/config/runtime.toml
 
-  ${c_dim}# sanity check${c_off}
+  ${c_dim}# sanity check in a second terminal while the server is running${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
   ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
   ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
-  $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
+  "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# a Keeper runs each turn inside an image. Build the general one -- bash,${c_off}
-  ${c_dim}# ripgrep and git -- or every turn stops at docker_preflight_failed:${c_off}
-  $DEST sandbox-image
+  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
+  "$DEST" sandbox-image
+  ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
+  # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

@@ -203,18 +203,37 @@ def transaction_dir(prefix):
     return journal
 
 
+def restore_entry(entry, destination):
+    previous = entry / "previous"
+    if previous.is_symlink() or previous.exists():
+        os.replace(previous, destination)
+    elif (entry / "new-install").is_file():
+        destination.unlink(missing_ok=True)
+    else:
+        fail("incomplete install transaction; preserving it for inspection")
+
+
+def save_previous(destination, entry):
+    if destination.is_symlink():
+        (entry / "previous").symlink_to(os.readlink(destination))
+    elif destination.exists():
+        if not destination.is_file():
+            fail("installed executable path is not a file")
+        os.link(destination, entry / "previous")
+    else:
+        (entry / "new-install").touch()
+
+
 def rollback(prefix):
     journal = transaction_dir(prefix)
     if not journal.exists():
         fail("install transaction missing; rollback cannot be confirmed")
-    previous = journal / "previous"
-    destination = prefix / "masc"
-    if previous.is_symlink() or previous.exists():
-        os.replace(previous, destination)
-    elif (journal / "new-install").is_file():
-        destination.unlink(missing_ok=True)
-    else:
-        fail("incomplete install transaction; preserving it for inspection")
+    companions = journal / "companions"
+    if companions.exists():
+        for entry in companions.iterdir():
+            if (entry / "ready").exists():
+                restore_entry(entry, prefix / entry.name)
+    restore_entry(journal, prefix / "masc")
     fsync_dir(prefix)
     shutil.rmtree(journal)
 
@@ -230,7 +249,15 @@ def commit(prefix):
     shutil.rmtree(journal)
 
 
-def install(binary, archive, prefix, asset):
+def install(binary, archive, prefix, asset, companions=()):
+    names = set()
+    for name, source in companions:
+        if name not in {"masc-tui", "masc-browser-host", "masc-deployment-preflight-helper",
+                        "masc-check-runtime-deployment-preflight"} or name in names:
+            fail("unsupported or duplicate companion name")
+        names.add(name)
+        if not Path(source).is_file():
+            fail("companion source is not a file")
     prefix.mkdir(parents=True, exist_ok=True)
     prefix = prefix.resolve(strict=True)
     releases = prefix / ".masc-releases"
@@ -276,17 +303,26 @@ def install(binary, archive, prefix, asset):
         journal.mkdir(mode=0o700)
         try:
             destination = prefix / "masc"
-            if destination.is_symlink():
-                (journal / "previous").symlink_to(os.readlink(destination))
-            elif destination.exists():
-                if not destination.is_file():
-                    fail("installed mascot path is not a file")
-                os.link(destination, journal / "previous")
-            else:
-                (journal / "new-install").touch()
+            save_previous(destination, journal)
+            if companions:
+                companion_journal = journal / "companions"
+                companion_journal.mkdir()
+                for name, source in companions:
+                    entry = companion_journal / name
+                    entry.mkdir()
+                    shutil.copy2(source, entry / "next")
+                    (entry / "next").chmod(0o755)
+                    with (entry / "next").open("rb") as stream:
+                        os.fsync(stream.fileno())
+                    save_previous(prefix / name, entry)
+                    (entry / "ready").touch()
+                    fsync_dir(entry)
+                fsync_dir(companion_journal)
             fsync_dir(journal)
             next_link = journal / "next"
             next_link.symlink_to(installed / "masc")
+            for name, _ in companions:
+                os.replace(journal / "companions" / name / "next", prefix / name)
             os.replace(next_link, destination)
             fsync_dir(prefix)
         except BaseException:
@@ -307,13 +343,14 @@ def main():
     for name in ("binary", "archive", "prefix"):
         inst.add_argument("--" + name, type=Path, required=True)
     inst.add_argument("--binary-asset", required=True)
+    inst.add_argument("--companion", nargs=2, action="append", default=[], metavar=("NAME", "PATH"))
     for name in ("commit", "rollback"):
         commands.add_parser(name).add_argument("--prefix", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "package":
         package(args.binary, args.assets, args.source_commit, args.binary_asset, args.archive)
     elif args.command == "install":
-        install(args.binary, args.archive, args.prefix, args.binary_asset)
+        install(args.binary, args.archive, args.prefix, args.binary_asset, args.companion)
     elif args.command == "commit":
         commit(args.prefix.resolve())
     else:

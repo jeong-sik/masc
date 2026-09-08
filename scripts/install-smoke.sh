@@ -15,7 +15,7 @@
 # reached a fresh host and died on "no runtime config path". The seed now comes
 # out of the binary, so the smoke drives it and asserts what landed.
 #
-# Usage: install-smoke.sh <binaries_dir> <arch>
+# Usage: install-smoke.sh <binaries_dir> <arch> [keeper_image]
 #   binaries_dir holds the release-named files:
 #     masc-<arch>, masc-tui-<arch>,
 #     masc-deployment-preflight-helper-<arch>,
@@ -26,6 +26,8 @@ set -euo pipefail
 
 BIN_DIR="${1:?usage: install-smoke.sh <binaries_dir> <arch>}"
 ARCH="${2:?usage: install-smoke.sh <binaries_dir> <arch>}"
+KEEPER_IMAGE="${3:-}"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
@@ -36,6 +38,7 @@ INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 ASSETS=(
   "masc-$ARCH"
   "masc-tui-$ARCH"
+  "masc-browser-host-$ARCH"
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
   "masc-dashboard-$ARCH.tar.gz"
@@ -52,7 +55,7 @@ done
 # which is the flag a host without microvm keepers uses.
 case "$ARCH" in
   macos-arm64|linux-arm64) SHIM_ASSET="masc-exec-shim-linux-arm64" ;;
-  linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
+  macos-x64|linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
   *) SHIM_ASSET="" ;;
 esac
 SHIM_FLAG="--no-guest-shim"
@@ -86,7 +89,7 @@ prefix="$work/bin"
 base="$work/base"
 mkdir -p "$stage" "$prefix" "$base"
 
-# Stage the file:// release: the four assets plus a SHA256SUMS with exactly
+# Stage the file:// release: the release assets plus a SHA256SUMS with exactly
 # the format install.sh's verify_checksum parses ("<hash>  <name>").
 for a in "${ASSETS[@]}"; do
   cp "$BIN_DIR/$a" "$stage/$a"
@@ -103,10 +106,13 @@ MASC_RELEASE_BASE_URL="file://$work/release" \
     --base-path "$base" \
     --no-wizard $SHIM_FLAG
 
-for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
-echo "install-smoke: installer placed all four binaries"
+echo "install-smoke: installer placed all five executables"
+"$prefix/masc-tui" --help > "$work/tui-help.txt"
+"$prefix/masc-browser-host" --help > "$work/browser-host-help.txt"
+
 
 shim_dest="$base/.masc/microvm/shim/masc-exec-shim"
 if [ -z "$SHIM_FLAG" ]; then
@@ -142,6 +148,14 @@ for f in SKILL.md references/connection.md references/advanced.md references/ver
 done
 echo "install-smoke: installer seeded config and builtin Skills, and left the keeper roster empty"
 
+# Built-in skill packages come from the verified binary, not a source checkout.
+for file in SKILL.md references/advanced.md references/connection.md references/verification.md; do
+  [ -f "$base/.masc/skills/browser-lanes/$file" ] || {
+    echo "install-smoke: browser-lanes package missing $file" >&2; exit 1;
+  }
+done
+echo "install-smoke: installer seeded the complete browser-lanes Skill package"
+
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"
 mkdir -p "$work/outside-checkout"
@@ -166,4 +180,9 @@ esac
 
 python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
   --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"
+if [ -n "$KEEPER_IMAGE" ]; then
+  python3 "$REPO_ROOT/scripts/keeper-first-turn-smoke.py" \
+    --binary "$prefix/masc" --image "$KEEPER_IMAGE" \
+    --output-dir "$BIN_DIR/first-keeper-turn-$ARCH"
+fi
 echo "install-smoke: PASS"

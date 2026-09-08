@@ -56,7 +56,8 @@ let command_argv_for backend = [ Backend.cli_name backend ]
 let unsupported_docker_flags = [ "--security-opt"; "--pids-limit" ]
 
 (** Guest mount point of the per-keeper work volume. The keeper's working
-    tree lives here, on ext4, and this path is the remote lane's
+    tree lives here (an ext4 disk on Apple, a managed directory on nerdctl),
+    and this path is the remote lane's
     [remote_root] for the guest: the same role [\[exec.ssh.endpoints\]
     .remote_root] plays for an OpenSSH endpoint.
 
@@ -464,10 +465,12 @@ let image_listing_shape_for backend =
 
 (* [container image inspect] answers JSON with no flag; [msb image inspect]
    answers a human table unless [--format json] is asked for, and then answers
-   a bare object rather than an array. [nerdctl image inspect] documents
-   [--mode=(dockercompat|native)] with no stated default, so the mode is named
-   rather than assumed -- dockercompat, which is Docker's array-of-one shape
-   this module already reads. *)
+   a bare object rather than an array. Nerdctl 2.3.5 dockercompat rejects
+   digest-only image references after normalizing an empty tag to latest.
+   Native mode avoids that conversion and returns containerd image records.
+   Its successful empty array and unfiltered digest aliases require the typed
+   content check below, not merely an array-shape check.
+   Source: nerdctl v2.3.5 pkg/cmd/image/inspect.go, native/image.go. *)
 let image_inspect_argv_for backend ~image =
   match (backend : Backend.t) with
   | Backend.Apple_container -> command_argv_for backend @ [ "image"; "inspect"; image ]
@@ -475,13 +478,80 @@ let image_inspect_argv_for backend ~image =
     command_argv_for backend @ [ "image"; "inspect"; "--format"; "json"; image ]
   | Backend.Nerdctl_kata ->
     command_argv_for backend
-    @ [ "image"; "inspect"; "--mode"; "dockercompat"; image ]
+    @ [ "image"; "inspect"; "--mode"; "native"; image ]
 ;;
 
 let image_inspect_shape_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata -> Json_array
   | Backend.Microsandbox -> Json_object
+;;
+
+type nerdctl_native_image =
+  { image_name : string
+  ; target_digest : string
+  }
+
+let parse_nerdctl_native_images raw =
+  let ( let* ) = Result.bind in
+  let field key = function
+    | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name key) fields with
+       | [ (_, value) ] -> Ok value
+       | _ -> Error ("native image requires exactly one " ^ key ^ " field"))
+    | _ -> Error ("native image " ^ key ^ " parent must be an object")
+  in
+  let nonempty = function
+    | `String value when String.trim value <> "" -> Ok value
+    | _ -> Error "native image name and target digest must be nonempty strings"
+  in
+  let row value =
+    let* image = field "Image" value in
+    let* name = field "Name" image in
+    let* image_name = nonempty name in
+    let* target = field "Target" image in
+    let* digest = field "digest" target in
+    let* target_digest = nonempty digest in
+    Ok { image_name; target_digest }
+  in
+  match Yojson.Safe.from_string raw with
+  | `List rows ->
+    List.fold_right
+      (fun value acc ->
+         let* image = row value in
+         let* rest = acc in
+         Ok (image :: rest))
+      rows (Ok [])
+  | _ -> Error "native image inspection must be an array"
+  | exception Yojson.Json_error detail -> Error ("invalid native image JSON: " ^ detail)
+;;
+
+let classify_image_probe_for backend ~image ~inspect ~listing =
+  match backend, inspect with
+  | Backend.Nerdctl_kata, (Unix.WEXITED 0 as status, stdout, stderr) ->
+    let invalid reason = probe_failure ~phase:Image_inspect ~status ~stdout ~stderr ~reason in
+    (match parse_nerdctl_native_images stdout with
+     | Error reason -> invalid reason
+     | Ok [] -> Image_missing
+     | Ok rows ->
+       (* OCI reference syntax uses @ to separate a name from immutable content.
+          Native inspect may return other repository aliases for that digest;
+          digest equality, not a guessed repository/tag normalization, binds it. *)
+       (match String.split_on_char '@' image with
+        | [ _name ] -> Image_present
+        | [ name; digest ] when name <> "" && digest <> "" ->
+          (match List.find_opt (fun row -> not (String.equal row.target_digest digest)) rows with
+           | None -> Image_present
+           | Some row ->
+             invalid (Printf.sprintf
+               "native image %s target digest %s differs from requested reference %s"
+               row.image_name row.target_digest digest))
+        | _ -> invalid "invalid digest-qualified image reference"))
+  | _ ->
+    classify_image_probe
+      ~inspect_shape:(image_inspect_shape_for backend)
+      ~listing_shape:(image_listing_shape_for backend)
+      ~inspect ~listing
 ;;
 
 let image_probe_for backend ~image ~timeout_sec =
@@ -499,11 +569,7 @@ let image_probe_for backend ~image ~timeout_sec =
            (image_listing_argv_for backend))
     | _ -> None
   in
-  classify_image_probe
-    ~inspect_shape:(image_inspect_shape_for backend)
-    ~listing_shape:(image_listing_shape_for backend)
-    ~inspect
-    ~listing
+  classify_image_probe_for backend ~image ~inspect ~listing
 ;;
 
 (* Build the image this binary carries the recipe for, into the store the
@@ -1244,38 +1310,93 @@ let ensure_msb_work_volume ~volume_name ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
-(** The work volume, for whichever runtime this keeper declared.
+(* Nerdctl's volume store locks create and returns an existing named volume
+   unchanged. Listing is unsuitable as proof of absence: upstream skips
+   unreadable volume metadata while returning a successful list. Create then
+   inspect avoids that ambiguity and never removes or replaces existing data.
+   See containerd/nerdctl pkg/mountutil/volumestore/volumestore.go. *)
+let ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec =
+  let cli = command_argv_for Backend.Nerdctl_kata in
+  let run suffix = Process_eio.run_argv_with_status_split ~timeout_sec (cli @ suffix) in
+  let failure stage (status, stdout, stderr) =
+    Error
+      (Printf.sprintf "microvm_work_volume_%s_failed: %s (%s; %s)"
+         stage volume_name
+         (match status with
+          | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+          | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+         (output_for_log ~stdout ~stderr))
+  in
+  match run [ "volume"; "create"; volume_name ] with
+  | Unix.WEXITED 0, _, _ ->
+    (match run [ "volume"; "inspect"; volume_name ] with
+     | Unix.WEXITED 0, stdout, _ ->
+       let confirmed =
+         match Yojson.Safe.from_string stdout with
+         | exception Yojson.Json_error _ -> false
+         | `List [ `Assoc fields ] ->
+           let values key =
+             List.filter_map
+               (fun (name, value) -> if String.equal name key then Some value else None)
+               fields
+           in
+           (match values "Name", values "Mountpoint" with
+            | [ `String name ], [ `String mountpoint ] ->
+              String.equal name volume_name
+              && not (String.equal mountpoint "")
+              && not (Filename.is_relative mountpoint)
+            | _ -> false)
+         | _ -> false
+       in
+       if confirmed then (
+         Log.Keeper.warn
+           "microvm work volume=%s backend=nerdctl_kata storage=managed_directory requested_size=%s capacity_enforced=false; host filesystem capacity applies"
+           volume_name size;
+         Ok `Ensured)
+       else
+         Error
+           (Printf.sprintf
+              "microvm_work_volume_probe_failed: nerdctl inspect did not confirm exactly one named volume with an absolute mountpoint: %s"
+              volume_name)
+     | outcome -> failure "probe" outcome)
+  | outcome -> failure "create" outcome
+;;
 
-    Apple and msb are established; nerdctl still refuses. Apple takes a sized
-    disk volume; msb takes a directory-backed named volume with no size (see
-    {!msb_volume_create_argv} for why the kind is forced), so RFC-0400's size
-    ceiling reaches Apple and is dropped for msb, the way it is for nerdctl.
-    Existence: Apple probes inspect-then-listing; msb settles from the listing
-    alone because its [volume inspect] has no machine form.
-
-    For [nerdctl] there is nothing to establish -- its [volume create]
-    documents [--label] and no size flag (nerdctl command reference), so the
-    sized per-keeper volume RFC-0400 asks for has no nerdctl spelling. *)
+(** Apple takes a sized guest disk; msb and nerdctl use persistent managed
+    directories. The latter do not claim Apple's capacity or flat host-FD
+    behavior. All backends keep the working tree off the host playground. *)
 let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   match (backend : Backend.t) with
   | Backend.Apple_container -> ensure_apple_work_volume ~volume_name ~size ~timeout_sec
   | Backend.Microsandbox -> ensure_msb_work_volume ~volume_name ~timeout_sec
-  | Backend.Nerdctl_kata ->
-    Error
-      "microvm_work_volume_unsupported: nerdctl volume create documents \
-       --label only and no size flag, so the sized per-keeper work volume \
-       RFC-0400 puts the keeper's tree on has no nerdctl spelling."
+  | Backend.Nerdctl_kata -> ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec
 ;;
 
 (** The keeper's root on the work volume, created inside the guest.
 
-    The host cannot create it: it lives inside the volume's ext4 image. The
+    The host does not access it directly; all backends provision through guest exec. The
     volume root is initially owned by root, and Apple Container's user
     namespace refuses even guest root changing a mode afterwards, so the
     directory is made as root with the mode it will keep. [-m] applies only
     to a newly created directory; an existing keeper-owned root is untouched.
     Idempotent. *)
 let work_root_dir_mode = "0777"
+
+(* nerdctl creates the volume data directory with mode 0700 (v2.3.5:
+   pkg/mountutil/volumestore/volumestore.go and pkg/store/filestore.go).
+   The keeper's writable child is unreachable without search permission on
+   that root. Change only search bits, inside the mounted guest; do not grant
+   write/list access or alter existing child permissions. *)
+let work_volume_search_argv_for backend ~container_name =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Microsandbox -> None
+  | Backend.Nerdctl_kata ->
+    Some
+      (exec_argv_for backend ~container_name ~uid:0 ~gid:0
+         ~container_cwd:work_volume_guest_root ~stdin:false
+         ~command_argv:[ "chmod"; "a+x"; work_volume_guest_root ])
+;;
 
 let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
   exec_argv_for
@@ -1594,17 +1715,14 @@ let live_containers_of_json ~base_path ~keeper_name = function
     not in the answer, and msb keeps labels in [inspect] under
     [active_config.labels] -- one call per guest rather than one listing.
 
-    [nerdctl] has no [list] subcommand (it is [ps]), and its command
-    reference does document [--format=json]. What the reference does not
-    document for those rows is a [.Labels] field, so the nested labels object
-    this scoping reads has no established nerdctl shape; nerdctl is not
-    installed on this host, so it could not be measured either.
-
-    Naming the gap rather than running the Apple argv is the point: read as
-    "no guests", an unscopable listing is exactly the answer that leaves a
-    guest running with nothing able to reap it. *)
+    Nerdctl's ListItem exposes LabelsMap to Go templates even though its
+    ordinary JSON representation excludes that field. Request an explicit
+    flat record, including the runtime identity; do not pretend its status
+    prose is Apple's structured running state.
+    Source: nerdctl v2.3.5 pkg/cmd/container/list.go:107-125,182-193. *)
 type container_listing =
   | Labelled_json_array of string list
+  | Nerdctl_labelled_json_lines of string list
   | Listing_not_established of string
 
 let container_listing_for backend =
@@ -1620,11 +1738,138 @@ let container_listing_for backend =
        cannot be read back from the listing; msb keeps labels in `inspect` \
        under active_config.labels, one call per guest"
   | Backend.Nerdctl_kata ->
-    Listing_not_established
-      "nerdctl has no `list` subcommand (it is `ps`), and while its reference \
-       documents `--format=json` it documents no .Labels field on those rows, \
-       so the nested labels object this scoping reads has no established \
-       nerdctl shape"
+    Nerdctl_labelled_json_lines
+      (command_argv_for backend @ [ "ps"; "-a"; "--no-trunc"; "--format";
+        {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ])
+;;
+
+type nerdctl_inventory_entry =
+  { nerdctl_id : string
+  ; nerdctl_name : string
+  ; nerdctl_image : string
+  ; nerdctl_status : string
+  ; nerdctl_created_at : string
+  ; nerdctl_runtime : string
+  ; nerdctl_labels : (string * string) list
+  }
+
+let nerdctl_inventory_of_json_lines raw =
+  let ( let* ) = Result.bind in
+  let object_fields = function
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names = List.length (List.sort_uniq String.compare names)
+      then Ok fields else Error "nerdctl inventory contains duplicate fields"
+    | _ -> Error "nerdctl inventory row must be an object"
+  in
+  let required_string fields name =
+    match List.assoc_opt name fields with
+    | Some (`String value) -> Ok value
+    | _ -> Error ("nerdctl inventory requires string field " ^ name)
+  in
+  let decode line =
+    let* json =
+      try Ok (Yojson.Safe.from_string line)
+      with Yojson.Json_error detail -> Error ("invalid nerdctl inventory JSON: " ^ detail)
+    in
+    let* fields = object_fields json in
+    let* nerdctl_id = required_string fields "id" in
+    (* --no-trunc returns the complete containerd id: accepting an empty or
+       option-shaped id could make a removal target somebody else's guest. *)
+    let* () =
+      if String.length nerdctl_id = 64
+         && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) nerdctl_id
+      then Ok () else Error "nerdctl inventory requires a full hexadecimal container id"
+    in
+    let* nerdctl_name = required_string fields "name" in
+    let* nerdctl_image = required_string fields "image" in
+    let* nerdctl_status = required_string fields "status" in
+    let* nerdctl_created_at = required_string fields "created_at" in
+    let* nerdctl_runtime = required_string fields "runtime" in
+    let* labels =
+      match List.assoc_opt "labels" fields with
+      | Some `Null -> Ok [] (* Go marshals a nil map as null; it owns no labels. *)
+      | Some value -> object_fields value
+      | None -> Error "nerdctl inventory requires labels"
+    in
+    let* nerdctl_labels =
+      List.fold_right (fun (key, value) acc ->
+        let* rest = acc in
+        match value with
+        | `String value -> Ok ((key, value) :: rest)
+        | _ -> Error "nerdctl inventory label values must be strings") labels (Ok [])
+    in
+    Ok { nerdctl_id; nerdctl_name; nerdctl_image; nerdctl_status;
+         nerdctl_created_at; nerdctl_runtime; nerdctl_labels }
+  in
+  let* rows =
+    String.split_on_char '\n' raw
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+    |> fun lines -> List.fold_right (fun line acc ->
+         let* row = decode line in
+         let* rest = acc in
+         Ok (row :: rest)) lines (Ok [])
+  in
+  let ids = List.map (fun row -> row.nerdctl_id) rows in
+  if List.length ids = List.length (List.sort_uniq String.compare ids)
+  then Ok rows else Error "nerdctl inventory contains duplicate container ids"
+;;
+
+let nerdctl_label row name = List.assoc_opt name row.nerdctl_labels
+
+let nerdctl_belongs_to_base ~base_path row =
+  let exact name expected = nerdctl_label row name = Some expected in
+  String.equal row.nerdctl_runtime Backend.kata_containerd_shim
+  && exact Keeper_sandbox_runtime.sandbox_component_label_key
+       Keeper_sandbox_runtime.sandbox_component_label_value
+  && exact Keeper_sandbox_runtime.sandbox_base_path_hash_label_key
+       (Keeper_sandbox_runtime.base_path_hash base_path)
+  && exact Keeper_sandbox_runtime.sandbox_kind_label_key keeper_vm_container_kind
+;;
+
+let nerdctl_owner_pid row =
+  match Option.bind
+          (nerdctl_label row Keeper_sandbox_runtime.sandbox_owner_pid_label_key)
+          int_of_string_opt with
+  | Some pid when pid > 0 -> Some pid
+  | Some _ | None -> None
+;;
+
+let nerdctl_live_containers_of_json_lines ~base_path ~keeper_name raw =
+  let expected_keeper = Keeper_sandbox_runtime.sanitize_label_value keeper_name in
+  Result.map (fun rows ->
+    List.filter_map (fun row ->
+      if not (nerdctl_belongs_to_base ~base_path row)
+         || nerdctl_label row Keeper_sandbox_runtime.sandbox_keeper_label_key <> Some expected_keeper
+      then None
+      else
+        let label = nerdctl_label row in
+        let float_label key = Option.bind (label key) float_of_string_opt in
+        Some ({ id = row.nerdctl_id; name = row.nerdctl_name; image = row.nerdctl_image;
+                status = row.nerdctl_status; running = None;
+                created_at = Some row.nerdctl_created_at;
+                keeper_name = label Keeper_sandbox_runtime.sandbox_keeper_label_key;
+                container_kind = label Keeper_sandbox_runtime.sandbox_kind_label_key;
+                network_label = label Keeper_sandbox_runtime.sandbox_network_label_key;
+                owner_pid = nerdctl_owner_pid row;
+                started_at = float_label Keeper_sandbox_runtime.sandbox_started_at_label_key;
+                ttl_sec = float_label Keeper_sandbox_runtime.sandbox_ttl_sec_label_key;
+                cpus = None; memory_bytes = None; hostname = None;
+                ipv4_address = None; ipv6_address = None; gateway = None }
+              : Keeper_sandbox_runtime.live_container)) rows)
+    (nerdctl_inventory_of_json_lines raw)
+;;
+
+let nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive raw =
+  Result.map (fun rows ->
+    List.filter_map (fun row ->
+      let keeper_name = nerdctl_label row Keeper_sandbox_runtime.sandbox_keeper_label_key in
+      match nerdctl_belongs_to_base ~base_path row, keeper_name, nerdctl_owner_pid row with
+      | true, Some name, Some pid when String.trim name <> "" && not (is_pid_alive pid) ->
+        Some { container_id = row.nerdctl_id; keeper_name; owner_pid = Some pid }
+      | _ -> None) rows)
+    (nerdctl_inventory_of_json_lines raw)
 ;;
 
 let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
@@ -1635,13 +1880,32 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
          "microvm_container_listing_unsupported: %s: %s"
          (Backend.to_string backend)
          reason)
-  | Labelled_json_array argv ->
+  | (Labelled_json_array argv | Nerdctl_labelled_json_lines argv) as listing ->
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, stdout, _ ->
-       (match Yojson.Safe.from_string stdout with
-        | json -> live_containers_of_json ~base_path ~keeper_name json
-        | exception Yojson.Json_error detail ->
-          Error ("microvm container list returned invalid JSON: " ^ detail))
+       (match listing with
+        | Nerdctl_labelled_json_lines _ ->
+          let ( let* ) = Result.bind in
+          let* containers = nerdctl_live_containers_of_json_lines ~base_path ~keeper_name stdout in
+          (* ps Status is display prose. Ask the existing typed bool inspect
+             for each scoped guest so status does not misreport unknown as idle. *)
+          List.fold_right (fun (container : Keeper_sandbox_runtime.live_container) acc ->
+            let* rest = acc in
+            match Process_eio.run_argv_with_status_split ~timeout_sec
+                    (inspect_argv_for backend ~container_name:container.id) with
+            | Unix.WEXITED 0, state, _ ->
+              let* running = running_of_nerdctl_state_json state in
+              Ok ({ container with running = Some running } :: rest)
+            | status, out, err ->
+              Error (Printf.sprintf "nerdctl inventory state for %s failed (%s): %s"
+                       container.id (Keeper_sandbox_exec_failure.status_label status)
+                       (output_for_log ~stdout:out ~stderr:err))) containers (Ok [])
+        | Labelled_json_array _ ->
+          (match Yojson.Safe.from_string stdout with
+           | json -> live_containers_of_json ~base_path ~keeper_name json
+           | exception Yojson.Json_error detail ->
+             Error ("microvm container list returned invalid JSON: " ^ detail))
+        | Listing_not_established reason -> Error reason)
      | status, stdout, stderr ->
        Error
          (Printf.sprintf
@@ -1703,9 +1967,17 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
   match run_argv ~timeout_sec listing with
   | Unix.WEXITED 0, out ->
     let candidates =
-      match Yojson.Safe.from_string out with
-      | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
-      | exception Yojson.Json_error _ -> []
+      match backend with
+      | Backend.Nerdctl_kata ->
+        (match nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive out with
+         | Ok candidates -> candidates
+         | Error detail ->
+           Log.Keeper.warn "nerdctl abandoned guest inventory rejected: %s" detail;
+           [])
+      | Backend.Apple_container | Backend.Microsandbox ->
+        (match Yojson.Safe.from_string out with
+         | json -> sweep_candidates_of_json ~base_path ~is_pid_alive json
+         | exception Yojson.Json_error _ -> [])
     in
     List.fold_left
       (fun acc candidate ->
@@ -1719,7 +1991,10 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
           { acc with failed = (candidate.container_id, detail) :: acc.failed })
       { removed = []; failed = [] }
       candidates
-  | _, _ -> { removed = []; failed = [] }
+  | status, detail ->
+    Log.Keeper.warn "microvm abandoned guest inventory failed backend=%s status=%s: %s"
+      (Backend.to_string backend) (Keeper_sandbox_exec_failure.status_label status) detail;
+    { removed = []; failed = [] }
 ;;
 
 (** Remove every abandoned guest, per runtime.
@@ -1742,7 +2017,7 @@ let sweep_abandoned_guests
       else (
         match container_listing_for backend with
         | Listing_not_established _ -> None
-        | Labelled_json_array listing ->
+        | Labelled_json_array listing | Nerdctl_labelled_json_lines listing ->
           Some
             ( backend
             , sweep_one_backend

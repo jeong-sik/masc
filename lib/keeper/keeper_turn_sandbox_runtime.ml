@@ -853,8 +853,9 @@ let stop_and_delete_microvm_container ?timeout_sec ~backend container_name =
          (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
 ;;
 
-(** The work volume (RFC-0400): the keeper's working tree, on ext4, where a
-    host descriptor is never pinned by a guest touching a file. Created if
+(** The work volume (RFC-0400): Apple's working tree is on a guest ext4 disk;
+    Linux nerdctl uses a persistent runtime-managed directory, without Apple's
+    capacity or flat host-descriptor guarantee. Created if
     it is not there yet; refusing rather than booting without it follows
     [image_present] in the same lane -- a guest with no work volume has no
     tree, and the remote lane has nowhere to run. *)
@@ -968,7 +969,21 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
     while {!Keeper_sandbox_microvm.work_volume_guest_root} itself may be a
     rootfs directory. *)
 let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_name =
-  match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+  let prepare_volume =
+    match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+    | Error _ as err -> err
+    | Ok () ->
+      (match Keeper_sandbox_microvm.work_volume_search_argv_for backend ~container_name with
+       | None -> Ok ()
+       | Some argv ->
+         match run_argv_with_status ?timeout_sec argv with
+         | Unix.WEXITED 0, _ -> Ok ()
+         | _, out ->
+           Error
+             ("microvm_work_volume_search_failed: "
+              ^ Keeper_sandbox_runtime.docker_failure_output_for_log out))
+  in
+  match prepare_volume with
   | Error _ as err -> err
   | Ok () ->
   let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in

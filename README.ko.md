@@ -43,7 +43,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 |---|---|---|
 | **TUI** | Keeper를 지켜보고 지시하고, Gate에 답하고, 도구 호출과 코드, diff, blame, 메모리를 볼 때 | 터미널에서 `masc`. 이름으로 부르면 `masc-tui` |
 | **MCP** | 내가 쓰는 에이전트를 작업 공간에 넣을 때. 작업을 잡고, 보드에 쓰고, 증거를 남깁니다 | MCP 클라이언트로 `http://127.0.0.1:8935/mcp`에 bearer와 함께 |
-| **대시보드** | 같은 상태를 브라우저에서 볼 때 | 같은 서버의 `/dashboard/`. 빌드된 번들이 있을 때만 뜹니다. 소스 체크아웃에는 있고, 공개 바이너리에는 없습니다 |
+| **대시보드** | 같은 상태를 브라우저에서 볼 때 | 같은 서버의 `/dashboard/`. 0.34.0 설치 스크립트는 바이너리와 일치하는 번들을 설치합니다 |
 
 셋 다 같은 `.masc/`를 읽고 씁니다. 운영자용 새 기능은 TUI에 먼저 들어갑니다.
 대시보드는 빌드되고 사실을 보여 주는 상태로 유지하지만, 제품이 자라는 곳은
@@ -65,8 +65,7 @@ less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
 ```
 
-설치 스크립트는 릴리스에 `SHA256SUMS`가 있으면 검증하고, `masc`와 `masc-tui`를
-나란히 놓은 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
+설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
 마법사는 이 컴퓨터에 뭐가 있는지 보고하고, 딱 하나만 씁니다. `runtime.toml`의
 `[runtime].default`입니다. API 키는 묻지도 저장하지도 않습니다. 서버는 자기가
 시작된 환경에서 키를 읽습니다.
@@ -82,16 +81,31 @@ bash /tmp/masc-install.sh --version "$TAG"
   있는 것. 마법사는 보고만 하고 고르지 않습니다. 샌드박스는 Keeper마다
   정하거나, 자기 선택을 들고 있는 `--team <preset>`이 정합니다.
 
-지원 플랫폼은 그 릴리스에 붙은 자산이 전부입니다.
+다음 릴리스 **0.34.0**은 Intel Mac, `masc-browser-host`, 대시보드 번들을
+포함하고 `--force` 업그레이드에서 기존 설정을 보존합니다. 게시 전까지 위
+예제는 공개된 0.33.0에 고정합니다. 플랫폼별 준비물, 설치 파일, 첫 실행,
+선택 기능과 업그레이드는 [설치 가이드](docs/INSTALL.md)에 정리했습니다.
 
 ### 소스에서
+
+Git, opam, C 개발 도구, Node.js 22와 Corepack을 먼저 설치합니다. Native
+라이브러리와 재현 가능한 빌드 절차는 [Release workflow](.github/workflows/release.yml)를
+참고합니다. 체크아웃에서 대시보드를 쓰려면 아래 frontend 빌드도 필요합니다.
+코딩 에이전트는 [저장소 실행 프로토콜](docs/constitution.xml)에 따라 CI에서 빌드합니다.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-scripts/opam-pin-external-deps.sh --install
+opam init --bare
+opam switch create . ocaml-base-compiler.5.5.1
+eval "$(opam env)"
+scripts/opam-pin-external-deps.sh
 opam install . --deps-only
-dune build bin/main_eio.exe bin/masc_tui.exe
+opam exec -- dune build bin/main_eio.exe bin/masc_tui.exe
+corepack enable
+corepack prepare pnpm@10.31.0 --activate
+(cd dashboard && pnpm install --frozen-lockfile)
+scripts/build-dashboard-if-needed.sh --force
 ```
 
 컴파일러와 Dune 버전은 `dune-project`에 고정돼 있습니다. 첫 빌드는 몇 분
@@ -210,14 +224,16 @@ bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-Claude Desktop은 `mcp-remote`를 거칩니다.
+Claude Desktop은 [`mcp-remote`](https://github.com/punkpeye/mcp-remote#custom-headers)를
+거칩니다. `npx`용 Node.js/npm이 필요하며, 아래 header가 토큰을 HTTP 인증에 연결합니다.
 
 ```json
 {
   "mcpServers": {
     "masc": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp"],
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp",
+        "--header", "Authorization: Bearer ${MASC_TOKEN}"],
       "env": { "MASC_TOKEN": "여기에-토큰" }
     }
   }
@@ -286,13 +302,13 @@ sandbox_image = "node:22-bookworm"
 network_mode = "none"
 mention_targets = ["operator"]
 
-[keeper.tools]
-native = "read"   # "none" | "read" | "full"
-
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
 """
+
+[keeper.tools]
+native = "read"   # "none" | "read" | "full"
 ```
 
 모르는 키는 거부합니다. 모델은 여기가 아니라 `runtime.toml`에서 배정합니다.
@@ -380,13 +396,13 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 
 ## 대시보드
 
-같은 프로세스가 빌드된 번들을 찾을 수 있을 때 `/dashboard/`에
-TypeScript/Preact SPA를 띄웁니다. `MASC_ASSETS_DIR` 아래, 그다음 소스
-체크아웃 배치대로 실행 파일 옆에서 `assets/dashboard/`를 찾습니다. 공개
-바이너리에는 번들이 없습니다. v0.33.0을 설치해 띄우면 `/dashboard/`는
-`503 Dashboard unavailable`을 답하고 `/health?full=1`의
-`dashboard_surface.status`는 `"missing"`입니다. 번들은
-`.github/workflows/dashboard-artifact.yml`이 하듯 `dashboard/`에서 빌드합니다.
+서버가 `/dashboard/`에 TypeScript/Preact SPA를 제공합니다. 0.34.0 설치
+스크립트는 실행 파일 prefix 아래에 같은 소스 커밋의 대시보드 번들을 설치하고
+커밋과 파일 체크섬을 검증합니다. 사용하려고 Node.js나 소스를 설치하거나
+프론트엔드를 빌드할 필요가 없습니다. 이미 실행 중인 서버는 재시작할 때 새
+번들을 사용합니다. [배포 구조](docs/design/installed-dashboard-distribution.md)와
+[설치 가이드](docs/INSTALL.md)를 참고하세요. 이전 태그는 해당 태그의 설치
+스크립트를 사용합니다.
 
 대시보드는 TUI가 읽는 상태를 그대로 읽고, TUI에 없는 화면 둘(실험적인 IDE
 셸, Lab 진단)을 아직 갖고 있습니다. 2026-09-07까지 두 주 동안 대시보드에
@@ -412,8 +428,7 @@ TypeScript/Preact SPA를 띄웁니다. `MASC_ASSETS_DIR` 아래, 그다음 소�
 - microVM Keeper는 `apple_container`에서만 부팅이 확인됐습니다. `auto_judge`는
   자기 레인에 모델이 있어야 하는데, 프로바이더 키 하나로 설치한 환경에는 대개
   없습니다. 그 호출은 사람을 기다립니다.
-- TUI 화면과 키는 `main`에서 바뀝니다. 공개 릴리스는 그보다 뒤에 있고,
-  대시보드 번들도 들어 있지 않습니다.
+- TUI 화면과 키는 `main`에서 바뀝니다. 설치한 태그의 문서를 사용하세요.
 
 ## 저장소 구조
 

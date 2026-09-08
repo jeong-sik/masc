@@ -126,7 +126,7 @@ type json_shape =
   | Json_array
       (** One array of records: [container image list --format json],
           [container image inspect], [msb image list --format json],
-          [nerdctl image inspect --mode dockercompat]. *)
+          [nerdctl image inspect --mode native]. *)
   | Json_object
       (** One bare object: [msb image inspect --format json], which answers a
           record rather than the array of one Docker's grammar returns. *)
@@ -167,6 +167,17 @@ val classify_image_probe :
     only when a subsequent image listing also succeeds in [listing_shape],
     proving that the runtime and its image store were readable. Every
     unavailable or malformed observation fails closed. *)
+
+val classify_image_probe_for :
+  Keeper_microvm_backend.t ->
+  image:string ->
+  inspect:Unix.process_status * string * string ->
+  listing:(Unix.process_status * string * string) option ->
+  image_probe_outcome
+(** Backend-aware image admission. Nerdctl native records must contain a
+    nonempty Image.Name and Target.digest. An immutable requested digest must
+    match the returned target; alternate names for the same content are valid.
+    Empty native inspection is not evidence that an image is present. *)
 
 val image_probe_for :
   Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
@@ -271,9 +282,11 @@ val logs_tail_argv_for :
 
 (** {2 The work volume and the shim (RFC-0400)}
 
-    The keeper's working tree lives on a per-keeper ext4 volume mounted at
-    {!work_volume_guest_root}; that path is the remote lane's [remote_root]
-    for the guest. A tree on the virtiofs share pins one host file
+    The keeper's working tree lives on a per-keeper persistent volume mounted
+    at {!work_volume_guest_root}; that path is the remote lane's [remote_root].
+    Apple uses an ext4 disk; nerdctl uses a managed host directory with no
+    enforced capacity. The following FD measurements apply only to Apple.
+    A tree on Apple's virtiofs share pins one host file
     descriptor -- one host vnode -- per inode the guest touches against a
     [kern.maxvnodes] of 263,168; measured writing 20,000 files on container
     1.3.1: ext4 volume 26 -> 26 host descriptors, virtiofs 26 -> 20,027.
@@ -353,18 +366,29 @@ val classify_volume_probe
   -> listing:(Unix.process_status * string * string) option
   -> volume_probe_outcome
 
+(** Apple provisions a capacity-limited guest disk. Nerdctl provisions a
+    persistent managed directory and logs that [size] is not enforced.
+    [`Ensured] means idempotent create followed by strict inspect confirmation;
+    it does not claim to distinguish a new volume from an existing one. *)
 val ensure_work_volume_for
   :  Keeper_microvm_backend.t
   -> volume_name:string
   -> size:string
   -> timeout_sec:float
-  -> ([ `Created | `Already_present ], string) result
+  -> ([ `Created | `Already_present | `Ensured ], string) result
+
+val work_volume_search_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list option
+(** For nerdctl, add search permission on the root-owned work volume before
+    using its keeper directory. Run only after confirming the guest mount.
+    Other backends need no permission change. *)
 
 val keeper_work_root_mkdir_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> keeper_name:string -> string list
 (** Create {!keeper_work_root} inside the guest, in one exec. The host
-    cannot: the directory lives inside the volume's ext4 image. The volume
-    root is initially root-owned and the user namespace refuses a later
+    does not access the working tree directly. Apple uses an ext4 disk and
+    nerdctl a runtime-managed directory. The volume
+    root is initially root-owned and Apple's user namespace refuses a later
     chmod, so creation runs as root with an explicit writable mode that
     applies only to a new directory. Idempotent. *)
 
@@ -432,6 +456,9 @@ type container_listing =
   | Labelled_json_array of string list
       (** The argv whose output nests [configuration.labels], which is where
           the base path hash, the keeper name and the owner pid live. *)
+  | Nerdctl_labelled_json_lines of string list
+      (** Explicit Go-template fields including LabelsMap and Runtime.
+          This is nerdctl's own flat record, not an Apple-shaped projection. *)
   | Listing_not_established of string
       (** Why this runtime's listing cannot be scoped to a base path and
           keeper. Named rather than answered with the Apple argv: read as "no
@@ -440,10 +467,9 @@ type container_listing =
 
 val container_listing_for : Keeper_microvm_backend.t -> container_listing
 (** [Labelled_json_array] for [container list -a --format json].
-    [Listing_not_established] for [msb], whose listing rows carry no labels
-    (they live in [msb inspect] under [active_config.labels]), and for
-    [nerdctl], which has no [list] subcommand and no literal [--format
-    json]. *)
+    [Nerdctl_labelled_json_lines] for nerdctl ps with explicit LabelsMap.
+    [Listing_not_established] for msb, whose listing rows carry no labels
+    (they live in msb inspect under active_config.labels). *)
 
 val list_live_containers_for :
   Keeper_microvm_backend.t ->
@@ -472,6 +498,19 @@ val sweep_candidates_of_json :
 (** Guests in a [Labelled_json_array] listing that belong to this base path
     and whose owning server is gone. A guest whose scope or owner label is
     missing or unparseable is not a candidate. *)
+
+val nerdctl_live_containers_of_json_lines :
+  base_path:string -> keeper_name:string -> string ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Strictly decode nerdctl's explicit template and scope by Kata runtime,
+    component, base-path hash, keeper name and microVM kind. Running remains
+    unknown because ps Status is display text, not a state protocol. *)
+
+val nerdctl_sweep_candidates_of_json_lines :
+  base_path:string -> is_pid_alive:(int -> bool) -> string ->
+  (sweep_candidate list, string) result
+(** Only positively identified Kata guests with positive, parsed dead owner
+    PIDs are candidates. Malformed inventory rejects the whole snapshot. *)
 
 val sweep_abandoned_guests :
   base_path:string ->

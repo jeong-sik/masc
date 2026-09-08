@@ -350,8 +350,8 @@ let test_the_command_separator_is_per_runtime () =
        ~command_argv:[ "sh" ]);
   check
     (Alcotest.list Alcotest.string)
-    "msb needs the separator and spells stdin --stream"
-    [ "msb"; "exec"; "--stream"; "--user"; "1:2"; "-w"; "/w"; "g"; "--"; "sh" ]
+    "msb uses --stream and separator without a numeric --user"
+    [ "msb"; "exec"; "--stream"; "-w"; "/w"; "g"; "--"; "sh" ]
     (Microvm.exec_argv_for
        Backend.Microsandbox
        ~container_name:"g"
@@ -518,6 +518,7 @@ let test_only_a_labelled_listing_is_offered () =
        "container lists with labels"
        [ "container"; "list"; "-a"; "--format"; "json" ]
        argv
+   | Microvm.Nerdctl_labelled_json_lines _ -> fail "Apple received nerdctl grammar"
    | Microvm.Listing_not_established reason ->
      fail ("container's own listing was refused: " ^ reason));
   List.iter
@@ -529,12 +530,16 @@ let test_only_a_labelled_listing_is_offered () =
           (Backend.to_string backend ^ " says why it cannot be scoped")
           true
           (String.length reason > 0)
-      | Microvm.Labelled_json_array argv ->
+      | Microvm.Labelled_json_array argv | Microvm.Nerdctl_labelled_json_lines argv ->
         Alcotest.failf
           "%s offered a listing this build cannot scope: %s"
           (Backend.to_string backend)
           (String.concat " " argv))
-    [ Backend.Microsandbox; Backend.Nerdctl_kata ]
+    [ Backend.Microsandbox ];
+  (match Microvm.container_listing_for Backend.Nerdctl_kata with
+   | Microvm.Nerdctl_labelled_json_lines argv ->
+     check Alcotest.bool "nerdctl obtains full ids" true (List.mem "--no-trunc" argv)
+   | _ -> fail "nerdctl labelled inventory missing")
 ;;
 
 let test_the_log_tail_flag_is_per_runtime () =
@@ -603,8 +608,8 @@ let test_the_image_inspect_argv_and_shape_agree () =
     (Microvm.image_inspect_argv_for Backend.Microsandbox ~image);
   check
     (Alcotest.list Alcotest.string)
-    "nerdctl names the mode rather than assuming a default"
-    [ "nerdctl"; "image"; "inspect"; "--mode"; "dockercompat"; image ]
+    "nerdctl requests native image identity"
+    [ "nerdctl"; "image"; "inspect"; "--mode"; "native"; image ]
     (Microvm.image_inspect_argv_for Backend.Nerdctl_kata ~image);
   let shape_label backend =
     match Microvm.image_inspect_shape_for backend with
@@ -618,34 +623,6 @@ let test_the_image_inspect_argv_and_shape_agree () =
     (shape_label Backend.Microsandbox);
   check Alcotest.string "nerdctl answers Docker's array" "array"
     (shape_label Backend.Nerdctl_kata)
-;;
-
-(* Neither of the other two can be handed Apple's volume grammar, and a
-   create over a volume that already holds a keeper's tree is what the
-   existence check exists to prevent. Only the refusing arms are exercised
-   here: Apple's runs a process. *)
-let test_the_work_volume_refuses_where_its_grammar_is_unknown () =
-  List.iter
-    (fun backend ->
-      match
-        Microvm.ensure_work_volume_for
-          backend
-          ~volume_name:"masc-keeper-work-probe"
-          ~size:"4g"
-          ~timeout_sec:1.0
-      with
-      | Error detail ->
-        check
-          Alcotest.bool
-          (Backend.to_string backend ^ " names the code")
-          true
-          (String.length detail > 0
-           && String.starts_with ~prefix:"microvm_work_volume_unsupported:" detail)
-      | Ok _ ->
-        Alcotest.failf
-          "%s provisioned a work volume with a grammar this build has not read"
-          (Backend.to_string backend))
-    [ Backend.Microsandbox; Backend.Nerdctl_kata ]
 ;;
 
 (* ── the parse ──────────────────────────────────────────────────────── *)
@@ -849,8 +826,6 @@ let () =
     ; ( "reaping"
       , [ Alcotest.test_case "only a labelled listing is offered" `Quick
             test_only_a_labelled_listing_is_offered
-        ; Alcotest.test_case "the work volume refuses an unknown grammar" `Quick
-            test_the_work_volume_refuses_where_its_grammar_is_unknown
         ] )
     ; ( "state"
       , [ Alcotest.test_case "each parser reads its own runtime's shape" `Quick

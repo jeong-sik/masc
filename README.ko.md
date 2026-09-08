@@ -29,7 +29,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 > 합니다. 운영 서비스가 아니고 보안 경계도 아닙니다. Gate와 샌드박스는 특정
 > 작업을 막지만, 사람이 보지 않는 사이 에이전트가 하는 위험한 일을 전부 막지는
 > 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 최신 릴리스는
-> [v0.33.0](https://github.com/jeong-sik/masc/releases)(2026-09-06)입니다.
+> [v0.34.0](https://github.com/jeong-sik/masc/releases)(2026-09-08)입니다.
 
 ![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -58,7 +58,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 검증하는 자산이 한 릴리스에서 나오게 하기 위해서입니다.
 
 ```bash
-TAG=v0.33.0
+TAG=v0.34.0
 curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh

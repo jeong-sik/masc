@@ -33,3 +33,20 @@ MASC now applies this preparation after checking the actual guest mount.
 This proves the runtime's storage and isolation behavior. It does not establish
 installed Keeper admission, MASC tool dispatch, ARM64 Kata operation, policy
 networking, resource capacity enforcement or long-running continuity.
+
+## Installed Keeper boundary
+
+[Run 34190392725](https://github.com/jeong-sik/masc/actions/runs/34190392725)
+installed Linux x64 binary `340bb704d2268f04e2b7d7f41079beec94800b8f`
+from successful Release job 34188869079, including its guest shim. Building the
+embedded general image, importing it into the isolated Kata runtime and matching
+the image config digest succeeded. The first actual Keeper Execute failed at boot:
+
+```text
+microvm_start_failed: flags -d and --rm cannot be specified together
+```
+
+The standalone volume proof did not use that production detached flag combination.
+The correction records automatic removal as a dropped lifecycle constraint and
+retains explicit teardown, scoped abandoned-guest cleanup and isolation flags.
+A new installed-binary run is required before claiming Kata Keeper acceptance.

@@ -279,6 +279,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
 type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
+  | No_periodic_or_scheduled_stimulus
   | Reactive_disabled
 
 type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
@@ -1587,7 +1588,10 @@ let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
 
+type cycle_wake = Periodic_tick | Attention_wake
+
 let keeper_cycle_decision
+      ?(wake = Periodic_tick)
       ?(event_queue_triggers = [])
       ~(meta : keeper_meta)
       (observation : world_observation)
@@ -1702,6 +1706,12 @@ let keeper_cycle_decision
         ; verdict = Skip { reasons = Scheduled_autonomous_disabled, [] }
         ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
         }
+      else if wake = Attention_wake && not scheduled_due_from_queue
+              && observation.scheduled_automation.due_ready_count = 0 then
+        { should_run = false
+        ; channel = Scheduled_autonomous
+        ; verdict = Skip { reasons = No_periodic_or_scheduled_stimulus, [] }
+        ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous }
       else (
         (* A scheduled heartbeat is itself the wake signal. Backlog, schedule,
            idle time, and previous-turn age remain observations for the model;

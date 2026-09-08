@@ -71,6 +71,12 @@ product_package_version="$(extract_single '^> Current package version: v\([^ ]*\
 product_changelog_entry="$(extract_single '^> Latest changelog entry: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
 product_published_release="$(extract_single '^> Latest published GitHub release: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
 spec_baseline="$(extract_single '^> Snapshot baseline: `dune-project` version `\([^`]*\)`$' docs/spec/SPEC-INDEX.md)"
+# The copy-paste install block. Nothing checked it, so it kept the previous
+# release across two of them: v0.33.0 stood while v0.34.0 was Latest, and a
+# reader following the README installed the version before the one the same
+# page announced two paragraphs earlier.
+readme_tag="$(extract_single '^TAG=v\([^ ]*\)$' README.md)"
+readme_ko_tag="$(extract_single '^TAG=v\([^ ]*\)$' README.ko.md)"
 changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
 
 [[ -n "$product_package_version" ]] || fail "missing current package version in docs/PRODUCT-OPERATING-PLAN.md"
@@ -87,6 +93,16 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
   fail "PRODUCT-OPERATING-PLAN latest published release ($product_published_release) != ROADMAP latest published release ($roadmap_published_release)"
 [[ "$spec_baseline" == "$package_version" ]] || \
   fail "SPEC-INDEX snapshot baseline ($spec_baseline) != current package version ($package_version)"
+
+[[ -n "$readme_tag" ]] || fail "missing TAG= install pin in README.md"
+[[ -n "$readme_ko_tag" ]] || fail "missing TAG= install pin in README.ko.md"
+# Against the published release, not the package version: the install block
+# fetches a tag from GitHub, and a package version bumped ahead of its tag
+# names a tag that is not there yet.
+[[ "$readme_tag" == "$roadmap_published_release" ]] || \
+  fail "README install TAG ($readme_tag) != latest published release ($roadmap_published_release)"
+[[ "$readme_ko_tag" == "$readme_tag" ]] || \
+  fail "README.ko install TAG ($readme_ko_tag) != README install TAG ($readme_tag)"
 
 # PR checks compare checked-in documents only. Repository-global tags can
 # change after this commit without changing its documentation. The release

@@ -27,7 +27,7 @@ If an external operation's outcome is uncertain, inspect its target first. Read 
 
 For browser work, read the `browser-lanes` skill when available. Use observed connection, tab, and element identifiers, then read or capture the page after acting. Do not claim to have checked content that was truncated or unread.
 
-Before GitHub work, check `gh auth status` in the current lane. Use the connected identity with `gh`; do not borrow another Keeper's credentials. If the repository has `.github/issue-taxonomy.json`, follow its categories and issue-writing rules. Include exactly one fenced `masc-triage` code block in the issue body, using that taxonomy’s vocabulary.
+Before GitHub work, check `gh auth status` in the current lane. When a GitHub identity is connected, the runtime passes its auth config through `GH_CONFIG_DIR`; run `gh` as is instead of changing `HOME` or copying the config into a new `.config/gh`. Do not borrow another Keeper's credentials. If the repository has `.github/issue-taxonomy.json`, follow its categories and issue-writing rules. Include exactly one fenced `masc-triage` code block in the issue body, using that taxonomy’s vocabulary.
 
 ## Waiting and communication
 

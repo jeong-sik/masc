@@ -17,3 +17,5 @@ Four-platform job outcomes are recorded in the parent acceptance matrix.
 Receipt artifact paths are preserved relative to the `kata/` directory. The full canonical checkpoint remains in the linked CI artifact.
 
 [Fresh init inventory](seed-inventory.json) records the compiled seed: 331 config files, 24 prompts, 161 tool definitions, 89 identity declarations, 53 themes and two MCP declarations, plus runtime/model overlay. It creates zero Keepers and one browser-lanes Skill package. The shared Keeper prompt and Skill bytes match the frozen source. Identity declarations do not authenticate those services.
+
+[All four Release build jobs](release-jobs.json) completed successfully; tag publication was skipped. [Canonical checkpoint reference](checkpoint-reference.json) records its downloaded SHA and exact session identity.

@@ -8,8 +8,8 @@ work belongs to a subsequent release; acceptance corrections remain possible.
 [Freeze PR #34303](https://github.com/jeong-sik/masc/pull/34303) tracks integration.
 The four-platform [Release run 34192837971](https://github.com/jeong-sik/masc/actions/runs/34192837971)
 and [browser/Keeper regression run 34192899797](https://github.com/jeong-sik/masc/actions/runs/34192899797)
-cover this source. The browser/Keeper regression run passed. Linux x64, Linux
-ARM64 and macOS ARM installation jobs passed; macOS Intel remains in progress.
+cover this source. The browser/Keeper regression run passed. All four native installation/reinstall jobs passed: Linux x64, Linux ARM64,
+macOS ARM and macOS Intel.
 [Installed Kata run 34194081312](https://github.com/jeong-sik/masc/actions/runs/34194081312)
 also passed. [Frozen candidate evidence](frozen-215517f229/README.md) binds
 the actual binary, guest storage and TUI behavior to this source. Public tag

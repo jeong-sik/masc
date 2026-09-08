@@ -4,6 +4,9 @@ external spawnp :
 
 external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
 
+external group_has_no_live_members : int -> bool
+  = "masc_process_group_has_no_live_members"
+
 type state = Unstarted | Owned | Reaped of Unix.process_status | Lost
 
 type t = { mutable state : state; mutable pid : int; lock : Stdlib.Mutex.t }
@@ -42,7 +45,8 @@ let finish t pid =
   (* See [observe]: running and exited children both retain our wait authority. *)
   ignore (observe t pid : bool);
   (try Unix.kill (-pid) Sys.sigkill with
-   | Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+   | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+   | Unix.Unix_error (Unix.EPERM, _, _) when group_has_no_live_members pid -> ());
   match wait pid with
   | status -> t.state <- Reaped status; status
   | exception (Unix.Unix_error (Unix.ECHILD, _, _) as exn) ->

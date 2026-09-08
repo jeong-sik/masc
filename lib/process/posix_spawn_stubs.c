@@ -20,6 +20,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#endif
 
 #include <caml/alloc.h>
 #include <caml/fail.h>
@@ -243,4 +247,39 @@ CAMLprim value masc_process_exited_without_reaping(value v_pid)
   } while (rc < 0 && errno == EINTR);
   if (rc < 0) uerror("waitid", Nothing);
   CAMLreturn(Val_bool(info.si_pid != 0));
+}
+
+/* Darwin kill(-pgid, sig) returns EPERM for a zombie-only group. Keep the
+   unreaped leader anchor: do not reap first or swallow permission errors for
+   live members. A failed or incomplete process-table query is not evidence.
+   Called only after EPERM, under the same owner lock as waitpid. */
+CAMLprim value masc_process_group_has_no_live_members(value v_pgid)
+{
+  CAMLparam1(v_pgid);
+  int no_live = 0;
+#ifdef __APPLE__
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, Int_val(v_pgid) };
+  size_t bytes = 0;
+  if (Int_val(v_pgid) > 1 && sysctl(mib, 4, NULL, &bytes, NULL, 0) == 0) {
+    /* Supply a non-NULL buffer even for an empty result so the second call
+       reads the process table instead of becoming another size query. */
+    size_t capacity = bytes ? bytes : sizeof(struct kinfo_proc);
+    struct kinfo_proc *members = malloc(capacity);
+    if (members != NULL) {
+      bytes = capacity;
+      if (sysctl(mib, 4, members, &bytes, NULL, 0) == 0
+          && bytes <= capacity && bytes % sizeof(*members) == 0) {
+        no_live = 1;
+        for (size_t i = 0; i < bytes / sizeof(*members); i++) {
+          if (members[i].kp_proc.p_stat != SZOMB) {
+            no_live = 0;
+            break;
+          }
+        }
+      }
+      free(members);
+    }
+  }
+#endif
+  CAMLreturn(Val_bool(no_live));
 }

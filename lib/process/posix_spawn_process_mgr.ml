@@ -11,6 +11,9 @@ external posix_spawn
 
 external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
 
+external group_has_no_live_members : int -> bool
+  = "masc_process_group_has_no_live_members"
+
 type group_phase = Running | Terminating of Monotonic_deadline.t | Killed
 
 type group_owner = {
@@ -36,6 +39,7 @@ let locked t f =
 let kill_group t signal =
   try Unix.kill (-t.pid) signal with
   | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+  | Unix.Unix_error (Unix.EPERM, _, _) when group_has_no_live_members t.pid -> ()
 ;;
 
 let signal t signal =

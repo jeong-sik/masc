@@ -9,6 +9,8 @@ open Alcotest
 let managers env =
   [ "eio_posix", Eio.Stdenv.process_mgr env
   ; "posix_spawn", Posix_spawn_process_mgr.mgr
+  ; "foreground", Posix_spawn_process_mgr.foreground_mgr
+      ~clock:(Eio.Stdenv.clock env) ~grace_seconds:2.
   ]
 ;;
 
@@ -262,7 +264,7 @@ let test_group_normal_exit_reaps_in_long_lived_switch () =
     let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
     Eio.Switch.run (fun sw ->
       for _ = 1 to 12 do
-        let proc = Eio.Process.spawn ~sw mgr [ "/bin/true" ] in
+        let proc = Eio.Process.spawn ~sw mgr [ "/bin/sh"; "-c"; "exit 0" ] in
         ignore (Eio.Process.await proc);
         (match Unix.waitpid [ Unix.WNOHANG ] (Eio.Process.pid proc) with
          | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()

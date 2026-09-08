@@ -8063,10 +8063,17 @@ def viewport_gap_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The too-small guard is strict on terminal rows (the composer reads
-    # terminal_rows > minimum_fixed_chrome_rows, and the guard still draws
-    # "resize to at least 14 rows" when opened at exactly 14), so the
-    # narrow-gap walk opens at the smallest size that renders: 15 rows.
+    # This fixture has no agenda strip. Fourteen physical rows leave only
+    # thirteen below navigation; the hint must name the usable physical size.
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"resize to at least 15 rows",
+    )
+    # Following the displayed size must restore the surface, not the warning.
     resize_and_wait(
         process,
         master_fd,

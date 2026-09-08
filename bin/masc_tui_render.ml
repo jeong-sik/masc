@@ -106,9 +106,11 @@ let chat_row_action_at ~row =
 let acting_pane_drawn_cols () = !acting_pane_reserved_cols
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 
+let navigation_rows = 1
+
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  (max 1 (rows - 1), max 1 (cols - !acting_pane_reserved_cols))
+  (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
 
 let frame_lines buf =
   let str = Buffer.contents buf in
@@ -19192,12 +19194,24 @@ let render_agenda (state : state) =
   finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
 ;;
 
-let render_terminal_too_small ~rows ~cols =
+let render_terminal_too_small state ~rows ~cols =
+  (* The hint names physical terminal rows, whereas the guard receives the
+     body after navigation, agenda, and composer allocation. At the minimum
+     body size the composer can be absent; evaluate its policy at the proposed
+     surface size rather than copying the current tiny viewport's overhead. *)
+  let surface_rows =
+    Render_schedule.Viewport.minimum_fixed_chrome_rows
+    + Masc_tui_types.agenda_chrome_rows state
+  in
+  let minimum_terminal_rows =
+    navigation_rows + surface_rows
+    + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
+  in
   let buf = Buffer.create 64 in
   Buffer.add_string buf
     (fit_width
        (Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
-          Render_schedule.Viewport.minimum_fixed_chrome_rows)
+          minimum_terminal_rows)
        cols);
   Buffer.add_char buf '\n';
   finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
@@ -19219,7 +19233,7 @@ let render (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then
-    let frame, clamped = render_terminal_too_small ~rows ~cols in
+    let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None)
   else if state.palette_open then
     let frame, clamped = render_palette state in

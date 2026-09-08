@@ -141,7 +141,13 @@ module Impl = struct
 
     let spawn_unix make_group ~sw ?cwd ~env ~fds ~executable args =
       let group = make_group () in
-      let cwd = Option.map Eio.Path.native_exn cwd in
+      let cwd = Option.map
+          (fun path ->
+             (* Preserve the filesystem refusal before libc can collapse a
+                missing cwd into the executable's ENOENT. Close the probe
+                immediately; a caller's switch may outlive many commands. *)
+             Eio.Path.with_open_dir path (fun _ -> Eio.Path.native_exn path))
+          cwd in
       Switch.check sw;
       (* [reap] below waits on [Eio_unix.Process.sigchld], and only a backend
          that installs a SIGCHLD handler ever broadcasts it. eio_posix does;

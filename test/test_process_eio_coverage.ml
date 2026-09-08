@@ -176,18 +176,16 @@ let test_or_refusal_carries_the_spawn_errno () =
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
-(* Eio path, same file: PATH resolution finds it, the forked child's execve
-   fails, and eio hands the parent that failure as text over its error pipe
-   (fork_action.c, low_level.ml). The text arrives as a value, unparsed. *)
-let test_or_refusal_carries_the_child_setup_text_eio () =
+(* Native foreground execution owns a posix_spawn group. A failed exec
+   therefore reports libc's errno, rather than a fork error-pipe string. *)
+let test_or_refusal_carries_the_native_spawn_errno () =
   with_runtime_reset @@ fun () ->
   with_noexec_file @@ fun path ->
   match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
-  | Error (Process_eio.Child_setup_failed { executable; detail }) ->
-    check string "the refusal names the file" path executable;
-    check bool "eio's text is carried" true (String.length detail > 0)
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.EACCES }) ->
+    check string "the refusal names the file" path executable
   | Error refusal ->
-    failf "expected Child_setup_failed, got %s" (Process_eio.spawn_refusal_to_string refusal)
+    failf "expected Spawn_failed EACCES, got %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
@@ -1279,7 +1277,7 @@ let () =
             test_or_refusal_carries_the_spawn_errno;
           test_case "argv-with-status-split-or-refusal-carries-child-setup-text-eio"
             `Quick
-            test_or_refusal_carries_the_child_setup_text_eio;
+            test_or_refusal_carries_the_native_spawn_errno;
           test_case "argv-with-status-split-or-refusal-refuses-empty-argv-both-paths"
             `Quick
             test_or_refusal_refuses_empty_argv_on_both_paths;

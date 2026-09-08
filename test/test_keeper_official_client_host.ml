@@ -351,6 +351,54 @@ let test_scoped_boundary_spans_official_attempts () =
     [ "Codex"; "Claude Code"; "Antigravity" ]
 ;;
 
+(* #28971: a keeper repeated a successful tool call with identical arguments 31
+   times in one turn while every success changed the tool's own state, so the
+   output never repeated either. The exact axis is blind to that shape by
+   construction — its fingerprint includes the output — and the incident was
+   filed before the input axis existed. This pin reproduces the shape through
+   the official client wiring (identical input, moving output, as when a tool
+   appends to a file) and holds two lines: below the input threshold the turn
+   keeps going, at the threshold it aborts with the measured streak. *)
+let test_moving_output_input_loop_aborts_at_input_threshold () =
+  List.iter (fun runtime_label ->
+    with_active_raw_trace (fun ~path:_ ~active ->
+      let module Scope = Masc.Keeper_repetition_scope in
+      let execution, _source, target = prepare_direct_execution () in
+      let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+      let annotate_input = hash "annotate --file log.txt --line done" in
+      let calls = ref [] in
+      let appended = ref 0 in
+      let observation () =
+        incr appended;
+        { scoped_observation with
+          input_fingerprint = Some annotate_input
+        ; output_fingerprint =
+            Some (hash (Printf.sprintf "appended line %d" !appended)) }
+      in
+      let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
+        ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
+          let observation = observation () in
+          Scope.Execution.observe execution ~target observation;
+          calls := observation :: !calls)
+        ~on_tool_boundary:(fun () ->
+          Masc.Keeper_agent_run.For_testing.direct_repetition_boundary
+            ~execution ~tool_calls:!calls)
+        (fun _input ->
+          Ok { Agent_core.Types.content =
+                 Printf.sprintf "appended line %d" (!appended + 1)
+             ; _meta = None })
+      in
+      let fourth = tool.call ~call_id:"input-loop-call-4" (`Assoc []) in
+      check bool "moving output keeps the turn below the input threshold"
+        true (Option.is_none fourth.abort_turn);
+      let fifth = tool.call ~call_id:"input-loop-call-5" (`Assoc []) in
+      (match fifth.abort_turn with
+       | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 5 }) -> ()
+       | _ -> fail (runtime_label ^ " missed the identical-input loop"));
+      check (option string) "input-loop stop is not failure" None !terminal_error))
+    [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
 let test_scoped_boundary_error_stops_immediately () =
   List.iter (fun runtime_label ->
     with_active_raw_trace (fun ~path:_ ~active ->
@@ -1815,6 +1863,10 @@ let () =
             test_repeated_exact_dynamic_tool_call_aborts_the_turn
         ; test_case "scope repetition survives official provider replacement" `Quick
             test_scoped_boundary_spans_official_attempts
+        ; test_case
+            "identical-input loop with moving output aborts at the input threshold"
+            `Quick
+            test_moving_output_input_loop_aborts_at_input_threshold
         ; test_case "scope observation failure stops official tool call" `Quick
             test_scoped_boundary_error_stops_immediately
         ; test_case "scope stop preserves exact terminal priority" `Quick

@@ -103,12 +103,19 @@ keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
 설치기 없이 자산만 바꿔 넣을 때는 sidecar 도 같이 바꾼다. 안 바꾸면 다음 부팅이
 옛 해시와 새 바이너리를 보고 거절한다.
 
+서버가 shim 을 찾는 자리는 `<base path>/.masc/microvm/shim` 이다
+(`Config_dir_resolver.microvm_shim_dir`). 아래 명령은 그 경로를 `MASC_BASE_PATH`
+에서 만든다 — 서버를 띄울 때 쓰는 값과 같아야 하고, 다르면 shim 을 깔아도 서버가
+못 찾는다.
+
 ```bash
+shim_dir="${MASC_BASE_PATH:?set it to the same base path the server runs with}/.masc/microvm/shim"
+
 # 서버와 같은 태그의 자산을 받는다
 gh release download vX.Y.Z -R jeong-sik/masc -p masc-exec-shim-linux-arm64 -p SHA256SUMS -D /tmp/shim
-mkdir -p ~/me/.masc/microvm/shim
-install -m 755 /tmp/shim/masc-exec-shim-linux-arm64 ~/me/.masc/microvm/shim/masc-exec-shim
-grep ' masc-exec-shim-linux-arm64$' /tmp/shim/SHA256SUMS > ~/me/.masc/microvm/shim/masc-exec-shim.sha256
+mkdir -p "$shim_dir"
+install -m 755 /tmp/shim/masc-exec-shim-linux-arm64 "$shim_dir/masc-exec-shim"
+grep ' masc-exec-shim-linux-arm64$' /tmp/shim/SHA256SUMS > "$shim_dir/masc-exec-shim.sha256"
 ```
 
 서버와 shim 은 한 major 차이를 서로 참으므로(위 계약 표 아래 문단) 순서는 상관없다.
@@ -120,10 +127,11 @@ shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌�
 # Docker 가 있으면
 scripts/remote-ssh/build-shim.sh --arch arm64
 # 결과 dist/remote-ssh/masc-exec-shim-linux-arm64 를 설치
-mkdir -p ~/me/.masc/microvm/shim
-cp dist/remote-ssh/masc-exec-shim-linux-arm64 ~/me/.masc/microvm/shim/masc-exec-shim
-chmod +x ~/me/.masc/microvm/shim/masc-exec-shim
-rm -f ~/me/.masc/microvm/shim/masc-exec-shim.sha256
+shim_dir="${MASC_BASE_PATH:?set it to the same base path the server runs with}/.masc/microvm/shim"
+mkdir -p "$shim_dir"
+cp dist/remote-ssh/masc-exec-shim-linux-arm64 "$shim_dir/masc-exec-shim"
+chmod +x "$shim_dir/masc-exec-shim"
+rm -f "$shim_dir/masc-exec-shim.sha256"
 ```
 
 Docker 없이 Apple container 로 빌드할 때: 빌드 컨테이너에 `--dns` 를
@@ -157,7 +165,7 @@ container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
 
 # 3b. 게스트가 이미 없으면 호스트 디렉터리와 볼륨을 같이 붙인 일회용 컨테이너로
 container run --rm --user 0:0 \
-  -v ~/me/.masc/playground/microvm/<keeper>:/src:ro -v masc-keeper-work-<keeper>:/masc-work \
+  -v "$MASC_BASE_PATH/.masc/playground/microvm/<keeper>":/src:ro -v masc-keeper-work-<keeper>:/masc-work \
   masc-keeper-sandbox:local sh -c "mkdir -p -m 0777 /masc-work/<keeper> \
     && cp -a /src/. /masc-work/<keeper>/ && chown -R $U:20 /masc-work/<keeper>"
 

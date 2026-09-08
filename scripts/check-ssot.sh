@@ -161,7 +161,11 @@ check_rule "R6-home-masc-root" 0 \
   '' \
   bin lib scripts
 
-check_rule "R6-home-masc-root-docs" 67 \
+# 67 -> 58: the two runbooks that told an operator to type one machine's home
+# directory now derive the path from MASC_BASE_PATH. What is left is RFC prose
+# recording where a measurement was taken, which is the kind of sentence the
+# evidence exclusion above exists for.
+check_rule "R6-home-masc-root-docs" 58 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '^docs/evidence/' \

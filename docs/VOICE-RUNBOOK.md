@@ -249,7 +249,7 @@ Any device that can make two HTTP calls can speak to a keeper. No MASC change
 is needed; this was verified end to end on 2026-09-04.
 
 ```sh
-TOKEN=$(cat ~/me/.masc/auth/admin.token)
+TOKEN=$(cat "${MASC_BASE_PATH:?set it to the base path the server runs with}/.masc/auth/admin.token")
 
 # 1. audio in, text out
 curl -X POST "$MASC/api/v1/voice/transcribe" \

@@ -20,6 +20,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#endif
 
 #include <caml/alloc.h>
 #include <caml/fail.h>
@@ -243,4 +247,38 @@ CAMLprim value masc_process_exited_without_reaping(value v_pid)
   } while (rc < 0 && errno == EINTR);
   if (rc < 0) uerror("waitid", Nothing);
   CAMLreturn(Val_bool(info.si_pid != 0));
+}
+
+/* Darwin killpg skips zombies, then reports EPERM when it found no live
+   signalable member (XNU kern_sig.c: killpg1). Distinguish that case from
+   real permission denial without releasing the owner's waitable PID anchor.
+   An incomplete/unavailable snapshot is not evidence of an empty live group. */
+CAMLprim value masc_process_group_only_owned_zombies(value v_pid)
+{
+  CAMLparam1(v_pid);
+  int only_owned_zombies = 0;
+#if defined(__APPLE__)
+  pid_t pid = (pid_t)Int_val(v_pid);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pid };
+  size_t size = 0;
+  if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
+    struct kinfo_proc *members = malloc(size);
+    if (members != NULL) {
+      size_t capacity = size;
+      if (sysctl(mib, 4, members, &size, NULL, 0) == 0 &&
+          size <= capacity && size % sizeof(*members) == 0) {
+        int found_leader = 0;
+        int all_zombies = 1;
+        for (size_t i = 0; i < size / sizeof(*members); i++) {
+          if (members[i].kp_proc.p_stat != SZOMB) all_zombies = 0;
+          if (members[i].kp_proc.p_pid == pid &&
+              members[i].kp_eproc.e_ppid == getpid()) found_leader = 1;
+        }
+        only_owned_zombies = found_leader && all_zombies;
+      }
+      free(members);
+    }
+  }
+#endif
+  CAMLreturn(Val_bool(only_owned_zombies));
 }

@@ -345,6 +345,30 @@ let test_fallback_timeout_cleans_descendant_with_closed_stdio () =
   check bool "explicit timeout preserved" true
     (Process_eio.exit_reason_of_status status = Process_eio.Timed_out)
 
+(* A leader which exited without descendants is still waitable when cleanup
+   signals its group. Darwin reports EPERM for this zombie-only group. *)
+let test_fallback_owner_preserves_completed_exit_status () =
+  let owner = Unix_foreground_process.create () in
+  let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+    Fun.protect ~finally:(fun () -> Unix_foreground_process.close owner) (fun () ->
+      Unix_foreground_process.spawn owner "/bin/sh" [ "/bin/sh"; "-c"; "exit 7" ]
+        (Unix.environment ()) dev_null dev_null dev_null;
+      let deadline = Monotonic_deadline.after ~seconds:5. in
+      let rec await_exit () =
+        match Unix_foreground_process.poll owner with
+        | Some status -> status
+        | None ->
+          if Monotonic_deadline.passed deadline then fail "child did not exit";
+          ignore (Unix.select [] [] [] 0.01);
+          await_exit ()
+      in
+      check bool "normal nonzero status is preserved" true
+        (await_exit () = Unix.WEXITED 7);
+      check bool "repeated poll retains status" true
+        (Unix_foreground_process.poll owner = Some (Unix.WEXITED 7));
+      Unix_foreground_process.close owner))
+
 exception Fallback_owner_fixture_failure
 
 let test_fallback_owner_exception_cleanup () =
@@ -1290,6 +1314,8 @@ let () =
             test_fallback_normal_exit_cleans_descendant_and_preserves_sibling;
           test_case "fallback-timeout-cleans-closed-stdio-descendant" `Quick
             test_fallback_timeout_cleans_descendant_with_closed_stdio;
+          test_case "fallback-owner-preserves-completed-exit-status" `Quick
+            test_fallback_owner_preserves_completed_exit_status;
           test_case "fallback-owner-exception-cleanup" `Quick
             test_fallback_owner_exception_cleanup;
           test_case "argv-with-status-fallback-observes-timeout" `Quick

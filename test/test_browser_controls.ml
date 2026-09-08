@@ -253,6 +253,7 @@ let test_download_result_reaches_provider () =
       let stored = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.base_path) ~sha256:reference.sha256 with
         | Ok (Some bytes) -> bytes | Ok None -> fail "manifest missing"
         | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+      check bool "binary download manifest is valid UTF-8 JSON" true (String.is_valid_utf_8 stored);
       match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string stored) with
       | Tool_output.Decoded_artifact_manifest {structured_content;artifact_refs;_} ->
         check bool "download identity and reader survive" true (structured_content = payload);

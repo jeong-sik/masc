@@ -187,6 +187,7 @@ let target_text = function
   | Pane.Target_keeper name -> "keeper:" ^ name
   | Pane.Target_more -> "more"
   | Pane.Target_file index -> "file:" ^ string_of_int index
+  | Pane.Target_calls name -> "calls:" ^ name
 
 let rows = 14
 let cols = Pane.pane_cols
@@ -298,6 +299,8 @@ let test_a_gone_keepers_focus_header_says_unfinished () =
   let header = last_index_of_in dead_texts "goner" in
   check bool "the focus header says unfinished" true
     (contains "unfinished" (List.nth dead_texts header));
+  check bool "and says what unfinished means" true
+    (contains "unfinished: process gone" (List.nth dead_texts header));
   check bool "the focus header does not say in turn" false
     (contains "in turn" (List.nth dead_texts header));
   check bool "an open turn does not borrow the session number" false
@@ -314,6 +317,7 @@ let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let header = List.nth texts (last_index_of_in texts "sangsu") in
   check bool "idle health preserves the unresolved feed record" true
     (contains "open/gap" header);
+  check bool "and says what open/gap means" true (contains "open/gap: no settle yet" header);
   check bool "receipt clock remains visible" true (contains "evt 10.0s" header);
   check bool "no row asserts a current turn" false
     (List.exists (fun row -> contains "in turn" row || contains "running" row) texts)
@@ -330,7 +334,7 @@ let test_event_age_uses_local_receipt_not_producer_time () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let row = find_row_in texts "sangsu" in
   check bool "local receipt is ten seconds old" true (contains "evt 10.0s" row);
-  check bool "no observed calls is explicit" true (contains "0 seen" row);
+  check bool "no observed calls is explicit" true (contains "none seen" row);
   check bool "producer's fifteen-minute age is not substituted" false
     (contains "15m" row)
 
@@ -367,7 +371,7 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let prior = find_row_in texts "evt 20.0s" in
   check bool "earlier missing settlement remains open/gap" true (contains "open/gap" prior);
-  check bool "earlier record uses an observed count" true (contains "0 seen" prior);
+  check bool "earlier record uses an observed count" true (contains "none seen" prior);
   check bool "no settled marker is invented" false
     (contains (Acting.glyph_text Acting.Turn_settled) prior)
 
@@ -415,8 +419,10 @@ let test_header_states_tabs_fleet_and_feed () =
   check bool "states the live feed" true (contains "live" (nth 0));
   check bool "the transport is explicit" true (contains "feed live" (nth 0));
   check bool "cumulative frame counts are omitted" false (contains "events" (nth 0));
-  check bool "event age clock is defined" true (contains "evt=since receipt" (nth 1));
-  check bool "tool count authority is defined" true (contains "seen/total=tool calls" (nth 1))
+  check bool "the first legend row says which clock the pane follows" true
+    (contains Pane.clock_legend (nth 1));
+  check bool "the second legend row says what the counts count" true
+    (contains Pane.count_legend (nth 2))
 
 let test_fleet_orders_waiting_then_working_then_settled_then_quiet () =
   let polisher = index_of "polisher" and sangsu = index_of "sangsu"
@@ -431,7 +437,8 @@ let test_fleet_rows_read_the_state () =
   check bool "working names the call out" true (contains "Execute" (find_row "sangsu"));
   check bool "working counts its calls" true (contains "2 seen" (find_row "sangsu"));
   check bool "settled counts its calls" true (contains "3 total" (find_row "rondo"));
-  check bool "settled totals tokens compactly" true (contains "74.2k tok" (find_row "rondo"));
+  check bool "settled shows both token parts" true
+    (contains "73.9k+358 tok" (find_row "rondo"));
   check bool "quiet says so" true (contains "no events" (find_row "quiet-one"))
 
 let test_focus_block_names_the_latest_observed_record () =
@@ -455,9 +462,9 @@ let test_focus_falls_back_to_who_acted_last () =
     (List.exists (fun row -> contains "sangsu" row) texts)
 
 let test_narrow_budget_folds_the_fleet () =
-  let drawn = Pane.lines ~rows:4 ~cols ~scroll:0 fixture in
+  let drawn = Pane.lines ~rows:5 ~cols ~scroll:0 fixture in
   let texts = List.map text drawn.Pane.rows in
-  check int "four rows" 4 (List.length drawn.Pane.rows);
+  check int "five rows" 5 (List.length drawn.Pane.rows);
   check bool "header stays" true (contains "[Recent]" (List.nth texts 0));
   check bool "the fold counts what it hid" true
     (List.exists (fun row -> contains "3 more" row) texts);
@@ -480,7 +487,7 @@ let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
     |> fst |> span_values
   in
   let full = Pane.lines ~rows:14 ~cols ~scroll:0 input in
-  let folded = Pane.lines ~rows:8 ~cols ~scroll:0 input in
+  let folded = Pane.lines ~rows:9 ~cols ~scroll:0 input in
   let scrolled = Pane.lines ~rows:6 ~cols ~scroll:1 input in
   check (list (pair string string)) "folded keeper keeps text, tones and click target"
     (keeper_row full) (keeper_row folded);
@@ -488,28 +495,33 @@ let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
     (keeper_row full) (keeper_row scrolled);
   let folded_text = List.map text folded.Pane.rows in
   check bool "overview fold counts both hidden keepers" true
-    (contains "2 more" (List.nth folded_text 4));
-  check string "fold remains actionable" "more" (target_text (List.nth folded.targets 4));
+    (contains "2 more" (List.nth folded_text 5));
+  check string "fold remains actionable" "more" (target_text (List.nth folded.targets 5));
   check bool "overview focus still belongs to selected Unicode keeper" true
-    (contains name (List.nth folded_text 6));
+    (contains name (List.nth folded_text 7));
   check bool "overview focus shows current receipt age" true
-    (contains "evt 10.0s" (List.nth folded_text 6));
-  let later = Pane.lines ~rows:8 ~cols ~scroll:0 { input with Pane.now = now +. 20. } in
+    (contains "evt 10.0s" (List.nth folded_text 7));
+  let later = Pane.lines ~rows:9 ~cols ~scroll:0 { input with Pane.now = now +. 20. } in
   check bool "a later frame advances receipt age in the reused row" true
-    (contains "evt 30.0s" (text (List.nth later.Pane.rows 3)))
+    (contains "evt 30.0s" (text (List.nth later.Pane.rows 4)))
 
 (* ── targets ────────────────────────────────────────────────────────── *)
 
 let test_targets_name_the_keeper_under_each_fleet_row () =
   let targets = List.map target_text drawn.Pane.targets in
   check string "the header switches the tab" "next-tab" (List.nth targets 0);
-  check string "the legend acts on nothing" "none" (List.nth targets 1);
-  check string "first fleet row is the waiting keeper" "keeper:polisher" (List.nth targets 2);
-  check string "then the working one" "keeper:sangsu" (List.nth targets 3);
-  check string "then the settled one" "keeper:rondo" (List.nth targets 4);
-  check string "then the quiet one" "keeper:quiet-one" (List.nth targets 5);
-  check string "the rule acts on nothing" "none" (List.nth targets 6);
-  check string "focus rows act on nothing" "none" (List.nth targets (last_index_of "sangsu"));
+  check string "the clock legend acts on nothing" "none" (List.nth targets 1);
+  check string "the count legend acts on nothing" "none" (List.nth targets 2);
+  check string "first fleet row is the waiting keeper" "keeper:polisher" (List.nth targets 3);
+  check string "then the working one" "keeper:sangsu" (List.nth targets 4);
+  check string "then the settled one" "keeper:rondo" (List.nth targets 5);
+  check string "then the quiet one" "keeper:quiet-one" (List.nth targets 6);
+  check string "the rule acts on nothing" "none" (List.nth targets 7);
+  let header = last_index_of "sangsu" in
+  check string "the focus header acts on nothing" "none" (List.nth targets header);
+  check string "a call row opens the keeper's calls" "calls:sangsu"
+    (List.nth targets (header + 1));
+  check string "so does the call still out" "calls:sangsu" (List.nth targets (header + 2));
   check string "padding acts on nothing" "none" (List.nth targets (rows - 1))
 
 (* ── scroll ─────────────────────────────────────────────────────────── *)
@@ -521,10 +533,11 @@ let test_a_pane_that_fits_does_not_scroll () =
   check (list string) "a scroll on a pane that fits draws the same rows" texts
     (List.map text scrolled.Pane.rows)
 
-let short_rows = 6
+let short_rows = 7
+let header_rows = 3
 
 let test_scrolling_walks_the_full_list_under_the_header () =
-  let below = short_rows - 2 in
+  let below = short_rows - header_rows in
   let scrolled = Pane.lines ~rows:short_rows ~cols ~scroll:1 fixture in
   let texts = List.map text scrolled.Pane.rows in
   check int "the largest scroll shows the last row under the top indicator"
@@ -532,15 +545,15 @@ let test_scrolling_walks_the_full_list_under_the_header () =
   check int "exactly the rows asked for" short_rows (List.length texts);
   check bool "header stays" true (contains "[Recent]" (List.nth texts 0));
   check bool "the top indicator counts what is above" true
-    (contains "\xe2\x86\x91 1 more" (List.nth texts 2));
+    (contains "\xe2\x86\x91 1 more" (List.nth texts header_rows));
   check bool "the first visible row is the second fleet row" true
-    (contains "sangsu" (List.nth texts 3));
+    (contains "sangsu" (List.nth texts (header_rows + 1)));
   check bool "the bottom indicator counts what is below" true
     (contains "\xe2\x86\x93 5 more" (List.nth texts (short_rows - 1)));
   check string "a visible fleet row still names its keeper" "keeper:sangsu"
-    (target_text (List.nth scrolled.Pane.targets 3));
+    (target_text (List.nth scrolled.Pane.targets (header_rows + 1)));
   check string "indicators act on nothing" "none"
-    (target_text (List.nth scrolled.Pane.targets 2));
+    (target_text (List.nth scrolled.Pane.targets header_rows));
   List.iteri
     (fun i line -> check int (Printf.sprintf "scrolled row %d width" i) cols (width line))
     scrolled.Pane.rows
@@ -549,7 +562,7 @@ let test_scroll_clamps_at_the_last_row () =
   let at_max = Pane.lines ~rows:short_rows ~cols ~scroll:5 fixture in
   let texts = List.map text at_max.Pane.rows in
   check bool "the top indicator counts everything above" true
-    (contains "\xe2\x86\x91 5 more" (List.nth texts 2));
+    (contains "\xe2\x86\x91 5 more" (List.nth texts header_rows));
   check bool "the last row of the list is on screen" true
     (contains "Execute" (List.nth texts (short_rows - 1)));
   check bool "no bottom indicator when nothing is below" false
@@ -576,15 +589,15 @@ let test_legend_preserves_reachable_targets_in_small_windows () =
           check int "small window keeps target budget" rows (List.length value.Pane.targets);
           List.iter (fun line -> check int "small row width" cols (width line)) value.Pane.rows;
           check bool "legend stays visible while scrolling" true
-            (contains "evt=since receipt" (text (List.nth value.Pane.rows 1))))
+            (contains Pane.clock_legend (text (List.nth value.Pane.rows 1))))
         windows)
-    [ 3; 4; 5; 6 ];
+    [ 4; 5; 6; 7 ];
   List.iter
     (fun rows ->
       let value = Pane.lines ~rows ~cols ~scroll:99 fixture in
       check int "header-only height remains bounded" rows (List.length value.Pane.rows);
       check int "no body means no scroll destination" 0 value.Pane.scroll_max)
-    [ 0; 1; 2 ]
+    [ 0; 1; 2; 3 ]
 
 let test_event_and_count_labels_fit_the_existing_width () =
   let input =
@@ -601,7 +614,7 @@ let test_event_and_count_labels_fit_the_existing_width () =
   check bool "tool name is whole" true (contains "network_read" row);
   check bool "observed count is whole" true (contains "1 seen" row);
   check bool "receipt age is whole" true (contains "evt 12.4s" row);
-  check int "pane width remains unchanged" 56 Pane.pane_cols;
+  check int "pane width is two cells wider for the token parts" 58 Pane.pane_cols;
   check bool "settled total and receipt age both fit" true
     (contains "3 total" (find_row "rondo") && contains "evt 1m35s" (find_row "rondo"))
 
@@ -772,7 +785,7 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   check bool "new approval is visible and takes ordering priority" true
     (contains "approval" (row_for "sangsu" approved_view));
   check string "click target follows newly prioritized keeper" "keeper:sangsu"
-    (target_text (List.nth approved_view.Pane.targets 2));
+    (target_text (List.nth approved_view.Pane.targets 3));
   check int "viewport budget remains live" 6 (List.length approved_view.Pane.rows)
 
 (* Hidden content must remain reachable without paying its Unicode layout
@@ -842,11 +855,74 @@ let test_hidden_rows_do_not_allocate_text_layout () =
     ["fleet", 5, fleet; "focus", 6, focus; "changes", 4, changes]
 
 let test_tokens_and_ages_are_compact () =
-  check string "both sides summed" "74.2k tok" (Pane.tokens_text (Some 73_877, Some 358));
+  check string "both sides as parts" "73.9k+358 tok" (Pane.tokens_text (Some 73_877, Some 358));
+  check string "both sides summed" "74.2k tok" (Pane.tokens_sum_text (Some 73_877, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
   check string "unknown is empty" "" (Pane.tokens_text (None, None));
   check string "age in the feed's shape" "10.0s" (Pane.age_text ~now 990.);
   check string "a clock behind now is zero" "0ms" (Pane.age_text ~now 2_000.)
+
+
+(* Each legend row is drawn whole: a legend cut at the edge would define a
+   word with half a sentence. *)
+let test_legend_rows_fit_whole () =
+  check bool "clock legend is whole" true (contains Pane.clock_legend (nth 1));
+  check bool "count legend is whole" true (contains Pane.count_legend (nth 2))
+
+(* A three-digit settle with two large parts overflows the reading; the row
+   keeps its age and shows the sum instead of clipping the age mid-number. *)
+let test_fleet_row_shows_the_token_sum_when_the_parts_overflow () =
+  let event =
+    match settled ~at:990. "sangsu" with
+    | Observer.Keeper_turn_complete value ->
+      Observer.Keeper_turn_complete
+        { value with
+          tc_tool_calls = Some 123
+        ; tc_input_tokens = Some 999_900
+        ; tc_output_tokens = Some 999_900
+        }
+    | _ -> fail "settled fixture must carry a turn completion"
+  in
+  let input =
+    { fixture with
+      Pane.keepers = [ keeper "sangsu" ]; approvals = []
+    ; chunks = chunks [ "sangsu" ] @@ entries [ 990., event ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let row = find_row_in texts "sangsu" in
+  check bool "the count is whole" true (contains "123 total" row);
+  check bool "the sum stands in for the parts" true (contains "2.0M tok" row);
+  check bool "the parts are not drawn" false (contains "+" row);
+  check bool "the age is whole" true (contains "evt 10.0s" row)
+
+(* sangsu's turn 41 settled twenty seconds ago and turn 6 has opened since:
+   the earlier turn draws under the header with both token parts and its
+   cost, and gives up the age of its settle's receipt to fit them. *)
+let earlier_turn_input =
+  { fixture with
+    Pane.keepers = [ keeper "sangsu" ]; approvals = []
+  ; chunks = chunks [ "sangsu" ] @@ entries
+      [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
+          ~correlation:"trace-sangsu" lane
+      ; 980., settled ~at:980. "sangsu"
+      ]
+  }
+
+let test_earlier_turn_row_gives_up_its_age_before_its_parts () =
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 earlier_turn_input).Pane.rows in
+  let row = find_row_in texts "turn 41" in
+  check bool "both token parts" true (contains "73.9k+358 tok" row);
+  check bool "the cost" true (contains "$0.0258" row);
+  check bool "the receipt age is what it gave up" false (contains "evt" row);
+  check bool "the count" true (contains "3 total" row)
+
+let test_an_earlier_turn_row_opens_the_keepers_calls () =
+  let value = Pane.lines ~rows ~cols ~scroll:0 earlier_turn_input in
+  let texts = List.map text value.Pane.rows in
+  let index = index_of_in texts "turn 41" in
+  check string "the turn row opens the calls surface" "calls:sangsu"
+    (target_text (List.nth value.Pane.targets index))
 
 let () =
   run "tui acting pane"
@@ -904,6 +980,8 @@ let () =
     ; ( "targets"
       , [ test_case "targets name the keeper under each fleet row" `Quick
             test_targets_name_the_keeper_under_each_fleet_row
+        ; test_case "an earlier turn row opens the keeper's calls" `Quick
+            test_an_earlier_turn_row_opens_the_keepers_calls
         ] )
     ; ( "scroll"
       , [ test_case "a pane that fits does not scroll" `Quick
@@ -931,5 +1009,10 @@ let () =
         ; test_case "reused chunks keep presentation inputs live" `Quick
             test_reused_chunks_keep_presentation_inputs_live
         ; test_case "tokens and ages are compact" `Quick test_tokens_and_ages_are_compact
+        ; test_case "legend rows fit whole" `Quick test_legend_rows_fit_whole
+        ; test_case "fleet row shows the token sum when the parts overflow" `Quick
+            test_fleet_row_shows_the_token_sum_when_the_parts_overflow
+        ; test_case "earlier turn row gives up its age before its parts" `Quick
+            test_earlier_turn_row_gives_up_its_age_before_its_parts
         ] )
     ]

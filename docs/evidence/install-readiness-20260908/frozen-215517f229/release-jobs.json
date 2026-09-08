@@ -28,13 +28,22 @@
       "status": "completed"
     },
     {
-      "completed_at": null,
-      "conclusion": null,
+      "completed_at": "2026-09-08T06:47:15Z",
+      "conclusion": "success",
       "html_url": "https://github.com/jeong-sik/masc/actions/runs/34192837971/job/101954247128",
       "id": 101954247128,
       "name": "build (macos-15-intel, macos-x64)",
       "started_at": "2026-09-08T06:00:38Z",
-      "status": "in_progress"
+      "status": "completed"
+    },
+    {
+      "completed_at": "2026-09-08T06:47:15Z",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34192837971/job/101964406096",
+      "id": 101964406096,
+      "name": "release",
+      "started_at": "2026-09-08T06:47:16Z",
+      "status": "completed"
     }
   ],
   "release_run": 34192837971,

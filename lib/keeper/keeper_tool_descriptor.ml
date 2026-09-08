@@ -613,13 +613,14 @@ let execute_output_schema =
           ; "output_artifact", normalized_artifact_ref_schema
           ; "stdout_artifact", normalized_artifact_ref_schema
           ; "stderr_artifact", normalized_artifact_ref_schema
-          ; ( "output_completeness"
-            , `Assoc
-                [ "type", `String "string"
-                ; "enum", `List [ `String "complete"; `String "capture_only" ]
-                ; "description", `String
-                    "complete means both streams reached EOF and were preserved; capture_only means the producer supplied retained output without that proof."
-                ] )
+            (* "complete" means both streams reached EOF and were preserved;
+               "capture_only" means the producer supplied retained output
+               without that proof. The values are not declared as an [enum]:
+               the composable schema contract admits only [type] on a string
+               (validate_schema_contract), the plan runtime checks nothing an
+               enum would add, and the keyword kept every declared schema from
+               satisfying the contract test since #33925. *)
+          ; "output_completeness", `Assoc [ "type", `String "string" ]
           ; "typed", `Assoc [ "type", `String "boolean" ]
           ; "execution_time_ms", `Assoc [ "type", `String "integer" ]
           ] )

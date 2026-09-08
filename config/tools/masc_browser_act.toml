@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Automation Firefox only. Use BrowserRead lane=automation mode=elements for selectors and tabId. Actions can change external state; read the page after success or failure before retrying."""
+Configured Firefox/Zen automation only. Use BrowserRead lane=automation mode=elements for selectors and tabId. Reuse the observed decoded selector string exactly, preserving CSS combinators and escapes. After no match, read elements again in the same tab and frame before correcting the input. Actions can change external state; read the page after success or failure before retrying."""
 additional_properties = false
 
 [[params]]
@@ -26,7 +26,7 @@ description = "Required except for open_tab. Use the observed tab id."
 [[params]]
 name = "selector"
 type = "string"
-description = "CSS selector for click/fill/press/select; must match exactly one element."
+description = "Observed CSS selector for click/fill/press/select/upload; must match exactly one element. Preserve the decoded string, including > and existing CSS escapes; do not insert literal JSON escape notation."
 
 [[params]]
 name = "text"
@@ -63,7 +63,7 @@ description = "Vertical pixel delta for scroll; required with x."
 name = "framePath"
 type = "array"
 items = { type = "string" }
-description = "Outer-to-inner iframe/frame CSS selectors from BrowserRead mode=frames. Omit for top-level. Only element and scroll actions accept a nonempty path."
+description = "Outer-to-inner iframe/frame CSS selectors from BrowserRead mode=frames. Reuse each decoded selector exactly, preserving CSS escapes. Omit for top-level. Only element and scroll actions accept a nonempty path."
 
 [[params]]
 name = "paths"

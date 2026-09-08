@@ -103,6 +103,24 @@ val mark_proof_pending :
     [Proof_refuted] is superseded by the new request; a committed
     [Proof_proven] verdict is never overwritten. *)
 
+type reopen_outcome =
+  | Proof_unchanged of record option
+  | Proof_reset of record
+
+val reset_reopened_proof :
+  Workspace_utils.config -> goal_id:string -> actor:string ->
+  (Goal_store.goal * reopen_outcome, string) result
+(** After the phase entered Executing, archive the prior verdict in
+    [goal_events.jsonl] before resetting the active proof to idle. The current
+    phase is re-read under the verification lock; pending proofs and goals
+    that already advanced to another phase are retained. Repeating Reopen on
+    Executing repairs a failed reset without discarding a newer request.
+    Only primary stores authorize this reset. An unreadable source or failed
+    archive leaves the proof unchanged. The returned Goal is the phase snapshot
+    used for the decision. Archive append followed by a failed ledger write may
+    leave duplicate historical entries after retry; it is not an exactly-once
+    cross-file transaction. *)
+
 val record_proof_verdict :
   Workspace_utils.config ->
   goal_id:string ->

@@ -1631,7 +1631,13 @@ def run_terminal_scenario(
                     [
                         "/bin/sh",
                         "-c",
-                        "trap '' INT; kill -STOP $$; \"$@\"; tui_status=$?; "
+                        # TERM beside INT: the SIGTERM scenario signals the
+                        # process group, because this shell is the pid the
+                        # harness holds and the TUI is its child. The TUI
+                        # installs its own handlers for both, so ignoring
+                        # them here only keeps the shell alive to stop
+                        # itself after the TUI exits.
+                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
                         'kill -STOP $$; exit "$tui_status"',
                         "masc-tui-test-launcher",
                         executable,
@@ -2656,6 +2662,22 @@ def interrupt_with_ctrl_c(
         b"\x03",
         b"Ctrl-C: press again to quit",
     )
+
+
+def terminate_with_sigterm(
+    process: subprocess.Popen[bytes],
+    _master_fd: int,
+    _slave_fd: int,
+    _output: bytearray,
+    _base_path: str,
+) -> None:
+    # What `kill` and a service manager send. The handler only records the
+    # signal; the loop has to read the record on its next pass and leave the
+    # way q does, so the terminal restore and Goodbye the harness checks after
+    # this come from that one exit path. A loop that never read it would sit
+    # here until the harness's post-exit wait gives up. The launcher shell in
+    # the same group ignores TERM (see run_terminal_scenario).
+    os.killpg(process.pid, signal.SIGTERM)
 
 
 def quit_from_compact_message(
@@ -6685,7 +6707,9 @@ def context_inspector_fixtures() -> HttpFixtures:
             "runtime_profile": "anthropic.claude-opus-5",
             "captured_at": 1787600000.0,
             "wire": {
-                "phase": "Pre_dispatch_serialization",
+                # A nullary variant is a one-element list in
+                # ppx_deriving_yojson's encoding, not a bare string.
+                "phase": ["Pre_dispatch_serialization"],
                 "capture_id": "capture-context",
                 "provider": "anthropic",
                 "model": "claude-opus-5",
@@ -6731,7 +6755,7 @@ def context_inspector_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         resize_and_wait(
-            process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview"
+            process, master_fd, output, rows=50, columns=140, needle=b"MASC Overview"
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -6769,20 +6793,6 @@ def context_inspector_interaction() -> Interaction:
                     f"Context composition omitted {needle!r}: {composition!r}"
                 )
 
-        # The item list and its detail are a split layout, and the split
-        # needs Masc_tui_roster_pane.threshold_cols (110). The runner opens
-        # at 100, where this view draws as one column with no "SELECTED
-        # INPUT" heading at all, so the wait starved on a pane that was
-        # rendering correctly for the width it had.
-        resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=120,
-            needle=b"Tool schemas",
-            controls=(FULL_REDRAW,),
-        )
         exact_input = send_and_wait(
             process, master_fd, output, b"2", b"SELECTED INPUT"
         )
@@ -6844,7 +6854,10 @@ def context_inspector_interaction() -> Interaction:
             columns=109,
             needle=b"SELECTED BLOCK",
         )
-        narrow_map_plain = CSI_RE.sub(b"", narrow_map)
+        # The whole screen, not the frame the resize returned. A frame holds
+        # the rows that changed, and the evidence rows below the selection do
+        # not change when the width does.
+        narrow_map_plain = screen_text(bytes(output))
         for forbidden in (b"reached the provider", b"provider accepted", b"ON WIRE"):
             if forbidden in narrow_map_plain:
                 raise AssertionError(
@@ -6903,9 +6916,15 @@ def context_inspector_interaction() -> Interaction:
             b"\x1b",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
-        help_frame = send_and_wait(process, master_fd, output, b"?", b"Slash commands")
-        if b"/context" not in CSI_RE.sub(b"", help_frame):
-            raise AssertionError(f"Help did not disclose /context: {help_frame!r}")
+        # The overlay is headed "MASC Cheat Sheet" now; "Slash commands" was a
+        # section title it no longer carries.
+        send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        # The /context disclosure this step used to assert is not here any
+        # more: the cheat sheet lists keys, and the slash commands announce
+        # themselves in the composer's hint line as the word is typed
+        # (Masc_tui_command.hint_spans, drawn at masc_tui_render.ml). That
+        # surface has no coverage yet and wants its own scenario rather than
+        # a tail on this one.
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
@@ -7029,8 +7048,11 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
+            # The skill row names an outcome now, not a chain of receipts.
+            # "DELIVERED · USED" was the evidence path; the label says what
+            # came of it, and the mark above already carries the state.
             re.compile(
-                rb"DELIVERED[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?USED"
+                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
@@ -9082,10 +9104,6 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
-                "payload_availability": {
-                    "input": {"state": "available"},
-                    "output": {"state": "available"},
-                },
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -9159,10 +9177,6 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
-                "payload_availability": {
-                    "input": {"state": "available"},
-                    "output": {"state": "available"},
-                },
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},
@@ -13292,6 +13306,13 @@ def run_keyboard_regression(executable: str) -> None:
         description="Ctrl-C",
         interact=interrupt_with_ctrl_c,
         confirm_exit=b"\x03",
+    )
+    # No confirming key: the signal is the whole exit.
+    run_terminal_scenario(
+        executable,
+        description="SIGTERM",
+        interact=terminate_with_sigterm,
+        confirm_exit=b"",
     )
 
 

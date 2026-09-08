@@ -736,6 +736,33 @@ let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~act
             (Some record)))
 ;;
 
+let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~already goal =
+  let goal_id = goal.Goal_store.id in
+  match Goal_verification.reset_reopened_proof ctx.config ~goal_id ~actor:ctx.agent_name with
+  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+  | Ok (goal, outcome) ->
+    let verification, proof_reset =
+      match outcome with
+      | Goal_verification.Proof_unchanged record -> record, false
+      | Goal_verification.Proof_reset record -> Some record, true
+    in
+    if goal.phase <> Goal_phase.Executing || (already && not proof_reset) then
+      already_goal_response ~tool_name ~start_time ~goal_id
+        ~action:Goal_phase.Reopen ~phase:goal.phase goal verification
+    else (
+      emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
+        ~payload:(`Assoc
+          [ "phase", Goal_phase.to_yojson goal.phase; "actor", `String ctx.agent_name ]);
+      ok_result ~tool_name ~start_time
+        ([ "goal_id", `String goal_id
+         ; "action", `String (Goal_phase.action_to_string Goal_phase.Reopen)
+         ; "goal", Goal_store.goal_to_yojson goal
+         ]
+         @ match verification with
+           | None -> []
+           | Some record -> [ "verification", Goal_verification.record_to_yojson record ]))
+;;
+
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match
@@ -769,8 +796,9 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
               | Goal_phase.Dropped ->
                 already_goal_response
                   ~tool_name ~start_time ~goal_id ~action ~phase goal None)
-           | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
+             finish_goal_reopen ~tool_name ~start_time ctx ~already:true goal
+           | Goal_phase.Public_action.Drop ->
              already_goal_response
                ~tool_name ~start_time ~goal_id ~action ~phase goal None)
         | Ok (Goal_phase.Move_to phase) ->
@@ -819,8 +847,12 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                            ; ( "verification"
                              , Goal_verification.record_to_yojson record )
                            ]))
-           | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
+                (match update_goal_phase ctx goal ~phase ?note () with
+                 | Error error -> phase_write_error_result ~tool_name ~start_time error
+                 | Ok updated_goal ->
+                   finish_goal_reopen ~tool_name ~start_time ctx ~already:false updated_goal)
+           | Goal_phase.Public_action.Drop ->
                 (match update_goal_phase ctx goal ~phase ?note () with
                  | Error error ->
                    phase_write_error_result ~tool_name ~start_time error

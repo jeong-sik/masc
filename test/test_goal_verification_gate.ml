@@ -496,6 +496,162 @@ let goal_events_text config =
 
 (* (a) The completion request enters the gate; the durable proof request is
    visible in the response and in the ledger. *)
+let test_reopen_without_any_verification_history () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Reopen before any completion request" in
+  let path = Goal_verification.verifications_path config in
+  check bool "creation does not need a proof ledger" false (Sys.file_exists path);
+  let repeated = must_succeed "already executing without proof" (transition ctx goal_id "reopen") in
+  check bool "fresh goal reopen is a no-op" true (json_bool repeated [ "noop" ]);
+  ignore (must_succeed "drop" (transition ctx goal_id "drop"));
+  let reopened = must_succeed "reopen without proof" (transition ctx goal_id "reopen") in
+  check string "reopened goal executes" "executing" (json_state reopened [ "goal"; "phase" ]);
+  check bool "reopen invents no verification history" false (Sys.file_exists path)
+;;
+
+let test_reopened_goal_enters_a_new_verification_cycle () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Reopen a proven goal" in
+  ignore (must_succeed "first request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "first proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "original proof"));
+  let previous = ledger_record config goal_id in
+  ignore (must_succeed "reopen" (transition ctx goal_id "reopen"));
+  check string "reopen returns to execution" "executing" (stored_phase config goal_id);
+  check bool "the previous proof is no longer the active proof" true
+    ((ledger_record config goal_id).completion = Goal_verification.Completion_idle);
+  let history = goal_events_text config in
+  let archived =
+    String.split_on_char '\n' history
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      json_state event [ "event_type" ] = "goal_proof_reopened")
+  in
+  (match archived, previous.completion with
+   | [ event ], Goal_verification.Proof_proven verdict ->
+     check string "original evidence remains in history" verdict.evidence
+       (json_state event [ "payload"; "previous_verdict"; "evidence" ]);
+     check string "original verifier attempt remains in history" verdict.verification_run_id
+       (json_state event [ "payload"; "previous_verdict"; "verification_run_id" ]);
+     check string "original proof time remains in history" verdict.recorded_at
+       (json_state event [ "payload"; "previous_verdict"; "recorded_at" ])
+   | _ -> fail "reopen must preserve the original verdict once");
+  let repeated = must_succeed "repeat reopened execution" (transition ctx goal_id "reopen") in
+  check bool "repeated reopen is a no-op" true (json_bool repeated [ "noop" ]);
+  check string "repeated reopen emits no duplicate history" history (goal_events_text config);
+  ignore (must_succeed "new completion request" (transition ctx goal_id "request_complete"));
+  check string "new request reaches verifying" "verifying" (stored_phase config goal_id);
+  (match Goal_verification_agent.For_testing.collect_pending config with
+   | Ok work -> check bool "the verifier can collect the new proof request" true
+       (List.exists (fun (work : Goal_verification_agent.For_testing.pending_work) -> work.goal_id = goal_id) work)
+   | Error detail -> fail detail);
+  let pending = ledger_record config goal_id in
+  (match Goal_verification.reset_reopened_proof config ~goal_id ~actor:"delayed-reopen" with
+   | Ok (current_goal, Goal_verification.Proof_unchanged _) ->
+     check string "delayed reset returns the current phase" "verifying"
+       (Goal_phase.to_string current_goal.phase)
+   | _ -> fail "a delayed reset must retain a newly pending review");
+  check bool "new pending proof remains byte-for-byte unchanged" true
+    (pending = ledger_record config goal_id);
+  ignore (must_succeed "second proof"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:0. config ~goal_id ~verification_run_id:"second-verifier-run"
+       ~decision:Workspace_goals.Proof_proven ~evidence:"new execution proof"));
+  check string "new execution can complete" "completed" (stored_phase config goal_id);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven verdict ->
+    check string "new proof owns the active verdict" "second-verifier-run" verdict.verification_run_id
+  | _ -> fail "second execution did not retain its own proof"
+;;
+
+let test_reopen_archive_failure_is_recoverable_without_losing_proof () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Retry a reopened proof archive" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "preserve this proof"));
+  let original = ledger_record config goal_id in
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  let history = Fs_compat.load_file path in
+  Fs_compat.invalidate_cached_writer path;
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  let refused = must_fail "archive failure" (transition ctx goal_id "reopen") in
+  check string "archive failure is explicit" "internal_error" (json_state refused [ "error_code" ]);
+  check string "phase change remains committed" "executing" (stored_phase config goal_id);
+  check bool "archive failure retains the original active proof" true
+    (original = ledger_record config goal_id);
+  Unix.rmdir path;
+  Fs_compat.save_file path history;
+  ignore (must_succeed "reopen retries its unfinished reset" (transition ctx goal_id "reopen"));
+  ignore (must_succeed "new request after repair" (transition ctx goal_id "request_complete"));
+  check string "repaired reopen does not remain blocked by old proof" "verifying"
+    (stored_phase config goal_id)
+;;
+
+let test_reopen_reset_refuses_an_unreadable_goal_source () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Unreadable goal during reopen" in
+  let path = Goal_store.goals_path config in
+  let executing_snapshot = Fs_compat.load_file path in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "still authoritative"));
+  let original = ledger_record config goal_id in
+  let ledger_path = Goal_verification.verifications_path config in
+  let ledger_bytes = Fs_compat.load_file ledger_path in
+  let history = goal_events_text config in
+  Fs_compat.save_file path "not JSON";
+  Fs_compat.save_file (path ^ ".last-good") executing_snapshot;
+  (match Goal_verification.reset_reopened_proof config ~goal_id ~actor:"reopener" with
+   | Error detail -> check bool "read failure retains its explanation" true (String.trim detail <> "")
+   | Ok _ -> fail "a recovery snapshot cannot authorize proof reset");
+  check bool "read failure never becomes an idle proof" true
+    (original = ledger_record config goal_id);
+  check string "ledger bytes are preserved" ledger_bytes (Fs_compat.load_file ledger_path);
+  check string "invalid primary is not rewritten" "not JSON" (Fs_compat.load_file path);
+  check string "no fabricated reopen archive" history (goal_events_text config)
+;;
+
+let test_reopen_reset_refuses_a_recovered_verification_ledger () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Unreadable proof during reopen" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "preserve primary authority"));
+  (* Model the persisted phase write before a failed reset, so a recovered
+     proven ledger would otherwise be overwritten with idle. *)
+  (match Goal_store.update_goal_if_phase config ~goal_id
+     ~expected_phase:Goal_phase.Completed
+     (fun goal -> { goal with phase = Goal_phase.Executing }) with
+   | Ok (Goal_store.Goal_updated _) -> ()
+   | _ -> fail "could not enter the reopen recovery boundary");
+  let path = Goal_verification.verifications_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  let history = goal_events_text config in
+  Fs_compat.save_file path "not JSON";
+  (match Goal_verification.reset_reopened_proof config ~goal_id ~actor:"reopener" with
+   | Error _ -> ()
+   | Ok _ -> fail "a recovered ledger cannot authorize proof reset");
+  check string "invalid ledger primary is preserved" "not JSON" (Fs_compat.load_file path);
+  check string "readable ledger mirror is preserved" mirror
+    (Fs_compat.load_file (path ^ ".last-good"));
+  check string "unreadable ledger produces no archive" history (goal_events_text config);
+  Sys.remove path;
+  (match Goal_verification.reset_reopened_proof config ~goal_id ~actor:"reopener" with
+   | Error _ -> ()
+   | Ok _ -> fail "a missing primary with a surviving mirror is not a new empty ledger");
+  check bool "missing primary is not recreated from mirror" false (Sys.file_exists path);
+  check string "mirror remains unchanged when primary is missing" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
 let test_request_complete_enters_verifying_with_proof_pending () =
   with_workspace
   @@ fun config ->
@@ -843,7 +999,17 @@ let () =
             test_goal_list_renders_a_ledger_error_state
         ] )
     ; ( "stage 2 gate"
-      , [ test_case "request_complete enters verifying with proof pending" `Quick
+      , [ test_case "reopen works before any completion request" `Quick
+            test_reopen_without_any_verification_history
+        ; test_case "reopen starts a new verification cycle and preserves history" `Quick
+            test_reopened_goal_enters_a_new_verification_cycle
+        ; test_case "failed reopen archive can be retried without losing proof" `Quick
+            test_reopen_archive_failure_is_recoverable_without_losing_proof
+        ; test_case "unreadable goal cannot reset a proof" `Quick
+            test_reopen_reset_refuses_an_unreadable_goal_source
+        ; test_case "recovered ledger cannot authorize proof reset" `Quick
+            test_reopen_reset_refuses_a_recovered_verification_ledger
+        ; test_case "request_complete enters verifying with proof pending" `Quick
             test_request_complete_enters_verifying_with_proof_pending
         ; test_case "proof proven completes with authority and evidence" `Quick
             test_proof_proven_completes_with_authority_and_evidence

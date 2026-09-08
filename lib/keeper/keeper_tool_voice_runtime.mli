@@ -41,6 +41,10 @@ val speak_message_of_args : Yojson.Safe.t -> (string, string) result
     summary for it. *)
 
 val speak_call_summary : message:string -> string option
+
+val voice_not_configured_message : string
+(** What a speak answers when no voice config exists at all: the refusal the
+    handler returns before the Gate, as a missing dependency. *)
 (** The one line a speak approval is about: the first non-blank line of the
     message, whole. This is the speak tool's declared call summary; the
     handler states it when it asks the Gate, and the replay engine states it

@@ -80,7 +80,12 @@ let speak_call_summary ~message = String_util.first_nonblank_line message
    third: there is no endpoint to speak through, so a review approves nothing
    and, once approved, the bridge fails the call as a runtime fault the model
    is told to report as one. The model is told instead that voice is not set
-   up here, before anyone is asked to approve it. *)
+   up here, before anyone is asked to approve it.
+
+   The config is read first, once, for every route. An exemption answers
+   whether the Gate reviews a speak, not whether voice exists: an exempt
+   keeper with no config used to reach the bridge and get the same runtime
+   fault, one site of the two. *)
 type speak_route =
   | Exempt_from_gate
   | Reviewed_by_gate
@@ -91,7 +96,7 @@ let voice_not_configured_message =
   "voice is not configured in this workspace: no [voice] section in \
    runtime.toml and no voice_config.json, so there is no TTS endpoint to speak \
    through. Say it in text instead. An operator can enable voice by adding a \
-   [voice] section with a tts endpoint."
+   [voice] section whose tts.endpoints lists one."
 
 let handle_speak_with_outcome
       ~(config : Workspace.config)
@@ -205,19 +210,19 @@ let handle_speak_with_outcome
                ])
       in
       let route =
-        match meta.always_allow with
-        | Some true -> Exempt_from_gate
-        | Some false | None ->
-          (match meta.voice_always_allow with
+        match Voice_config.load_detailed () with
+        | Error Voice_config.Not_configured -> Refused_voice_not_configured
+        | Error (Voice_config.Invalid reason) -> Refused_by_voice_config reason
+        | Ok vcfg ->
+          (match meta.always_allow with
            | Some true -> Exempt_from_gate
            | Some false | None ->
-             (match Voice_config.load_detailed () with
-              | Ok vcfg ->
+             (match meta.voice_always_allow with
+              | Some true -> Exempt_from_gate
+              | Some false | None ->
                 if Voice_config.voice_gate_always_allow_for_agent vcfg meta.name
                 then Exempt_from_gate
-                else Reviewed_by_gate
-              | Error Voice_config.Not_configured -> Refused_voice_not_configured
-              | Error (Voice_config.Invalid reason) -> Refused_by_voice_config reason))
+                else Reviewed_by_gate))
       in
       (match route with
        | Exempt_from_gate -> run_speak ()

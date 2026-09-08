@@ -330,13 +330,6 @@ let make_keeper_meta name =
    runtime fault (tool matrix case 048, nightly 2026-09-08). No voice config
    is therefore refused before the Gate, as a missing dependency, with the
    model told to say it in text. *)
-let contains_substring ~needle haystack =
-  let n = String.length needle
-  and h = String.length haystack in
-  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
-  n = 0 || at 0
-;;
-
 let test_keeper_voice_speak_refuses_before_the_gate_when_unconfigured () =
   Eio_main.run
   @@ fun env ->
@@ -374,9 +367,52 @@ let test_keeper_voice_speak_refuses_before_the_gate_when_unconfigured () =
           ^ Tool_result.tool_failure_class_to_string other)
      | Tool_result.Completed () | Tool_result.Deferred () ->
        fail "an unconfigured voice did not refuse");
-    let message = Yojson.Safe.Util.(member "message" json |> to_string) in
-    check bool "the model is told voice is not configured" true
-      (contains_substring ~needle:"voice is not configured" message))
+    check string "the model is told voice is not configured"
+      Masc.Keeper_tool_voice_runtime.voice_not_configured_message
+      Yojson.Safe.Util.(member "message" json |> to_string))
+;;
+
+(* An exemption decides whether the Gate reviews a speak, not whether voice
+   exists. An exempt keeper with no config used to reach the bridge and get
+   the runtime fault the refusal above replaces; it is refused the same way. *)
+let test_keeper_voice_speak_exempt_keeper_is_refused_when_unconfigured () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta =
+      { (make_keeper_meta "voice-exempt-keeper") with
+        Masc.Keeper_meta_contract.always_allow = Some true
+      }
+    in
+    let reviewed = ref false in
+    let review_then_continue ~operation:_ ~input:_ ~call_summary:_ ~continue =
+      reviewed := true;
+      continue ()
+    in
+    let outcome =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool_with_outcome
+        ~config
+        ~meta
+        ~authorize_external_effect:review_then_continue
+        ~name:"keeper_voice_speak"
+        ~args:(`Assoc [ "message", `String "hello from an exempt keeper" ])
+        ()
+    in
+    check bool "the Gate was not asked" false !reviewed;
+    match outcome.Masc.Keeper_tool_execution.disposition with
+    | Tool_result.Failed Tool_result.Dependency_unavailable -> ()
+    | Tool_result.Failed other ->
+      fail
+        ("an exempt keeper without voice refused as "
+         ^ Tool_result.tool_failure_class_to_string other)
+    | Tool_result.Completed () | Tool_result.Deferred () ->
+      fail "an exempt keeper without voice did not refuse")
 ;;
 
 (* The legacy memory bank is gone (RFC keeper-memory-consolidation Stage 4):
@@ -1208,9 +1244,13 @@ let () =
         ] )
     ; ( "keeper_voice_speak"
       , [ test_case
-            "keeper_voice_speak surfaces TTS failure"
+            "keeper_voice_speak with no voice configured is refused before the Gate"
             `Quick
             test_keeper_voice_speak_refuses_before_the_gate_when_unconfigured
+        ; test_case
+            "an exempt keeper with no voice configured is refused before the Gate"
+            `Quick
+            test_keeper_voice_speak_exempt_keeper_is_refused_when_unconfigured
         ; test_case
             "keeper_voice_speak under an invalid config is refused without a Gate review"
             `Quick

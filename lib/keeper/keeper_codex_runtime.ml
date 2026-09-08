@@ -455,6 +455,21 @@ let recovery_failure_of_client_error = function
    check first if writes start failing. If Codex closes it, [Native_read]
    leaves a keeper with no write path at all, and the posture is what has to
    change; a note about which tool to reach for would then be wrong. *)
+(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
+   count already includes the cached prefix and the output count already
+   includes reasoning, so both copy across and the cache fields fill the
+   canonical record's cache slots. *)
+let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
+  : Agent_core.Types.api_usage
+  =
+  { input_tokens = usage.input_tokens
+  ; output_tokens = usage.output_tokens
+  ; cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_read_input_tokens = usage.cached_input_tokens
+  ; cost_usd = None
+  }
+;;
+
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
     [ "Your built-in file edits run under a read-only sandbox in this session, \
@@ -866,9 +881,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
-              (* This adapter does not sum per-frame usage before a host
-                 stop yet; the Codex app-server stream's counts are read only from
-                 its terminal frame. *)
+              (* A host stop ends the turn from inside a tool call, before
+                 the app-server's thread/tokenUsage/updated for this turn has
+                 arrived, so there is no count to report here. *)
             ~usage:None
             stop
         in
@@ -990,7 +1005,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
          ; model = turn.model
          ; stop_reason = EndTurn
          ; content = [ Text turn.text ]
-         ; usage = None
+         ; usage = Option.map api_usage_of_token_usage turn.usage
          ; telemetry =
              Some
                { Agent_core.Types.default_inference_telemetry with
@@ -1039,7 +1054,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            ~capture
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
-           ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
+           ~usage_scope:
+             (match turn.usage with
+              | Some _ -> Runtime_usage_scope.Per_request
+              | None -> Runtime_usage_scope.Usage_scope_unavailable)
            ()
        in
        Ok

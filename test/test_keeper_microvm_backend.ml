@@ -272,12 +272,12 @@ let test_a_lifecycle_drop_is_recorded_on_the_guest () =
    just the individual flag translation. *)
 let test_kata_detached_boot_records_explicit_cleanup () =
   let argv = booted "kata detached lifecycle" Backend.Nerdctl_kata in
-  check bool "Keeper stays detached" true (List.mem "-d" argv);
-  check bool "detached run does not request automatic removal" false
+  check Alcotest.bool "Keeper stays detached" true (List.mem "-d" argv);
+  check Alcotest.bool "detached run does not request automatic removal" false
     (List.mem "--rm" argv);
-  check bool "automatic removal drop is observable" true
+  check Alcotest.bool "automatic removal drop is observable" true
     (List.mem "masc.mcp.microvm_dropped=remove_on_exit" argv);
-  check (list string) "explicit teardown still removes the Kata guest"
+  check (Alcotest.list Alcotest.string) "explicit teardown still removes the Kata guest"
     [ "nerdctl"; "rm"; "--force"; "g" ]
     (Microvm.delete_force_argv_for Backend.Nerdctl_kata ~container_name:"g")
 ;;

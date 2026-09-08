@@ -13,6 +13,16 @@
 
 module Frame = Masc_tui_image_mosaic
 
+(* Which image protocol this terminal speaks, as the boot probe found it. The
+   value is owned by the executable -- the probe runs there and every other
+   image surface reads it from the same place -- and set here once so the
+   spectator does not need it threaded through [render], [open_screen] and
+   [consume] as a parameter each. Unsupported until told otherwise, so a
+   terminal that never answered draws the mosaic. *)
+let graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
+
+let set_graphics_protocol p = graphics_protocol := p
+
 let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
 let title_of (frame : Masc_tui_types.msx_frame option) =
@@ -34,6 +44,42 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   Buffer.add_string buf "\027[0K\r\n";
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
+   | Some f
+     when String.length f.msx_rgb = f.msx_width * f.msx_height * 3
+          && (match !graphics_protocol with
+              | Masc_tui_graphics.Kitty_protocol -> true
+              | Masc_tui_graphics.ITerm2_protocol
+              | Masc_tui_graphics.Unsupported_protocol -> false) ->
+       (* A terminal that draws images gets the frame's own pixels. The mosaic
+          below is a good picture of a frame and still throws most of it away:
+          a character cell can carry two colours, so at 150 columns the whole
+          256x192 screen arrives as about 8,500 of its 49,152 pixels, and no
+          finer block character raises that -- more subdivisions per cell do
+          not add colours to the cell. Handing the pixels over is the only
+          step that does.
+
+          Raw RGB rather than PNG: the frame is already three bytes per pixel
+          in exactly the layout [place_rgb] wants, and masc has no PNG
+          encoder. The length test above is [=] rather than [>=] because
+          [place_rgb] refuses a frame that disagrees with its dimensions, and
+          a refusal here would clear the screen and draw nothing.
+
+          iTerm2 is left on the mosaic: its protocol carries a file, not a
+          pixel buffer, so it needs the encoder this path avoids. *)
+       let box =
+         { Masc_tui_graphics.columns = max 1 cols; rows = max 1 screen_rows }
+       in
+       let escape =
+         Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
+           ~pixel_height:f.msx_height box
+       in
+       if String.equal escape "" then for _ = 1 to screen_rows do blank_row () done
+       else begin
+         Buffer.add_string buf escape;
+         (* The image is drawn at the cursor and the terminal does not move it,
+            so the footer needs the rows stepped over by hand. *)
+         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+       end
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to

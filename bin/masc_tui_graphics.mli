@@ -48,6 +48,26 @@ val payload_media_type : string
     identifies bytes whether they are this, before placing -- after placing
     there is nobody to ask. *)
 
+val place_rgb
+  :  data:string
+  -> pixel_width:int
+  -> pixel_height:int
+  -> placement
+  -> string
+(** Bytes that put a raw RGB frame -- three bytes per pixel, row-major, no
+    container -- on the terminal at the cursor, scaled into the cell box.
+
+    For a caller holding a frame rather than a file: no encoder stands between
+    the pixels and the wire. [pixel_width] and [pixel_height] are what the
+    format cannot carry itself and the terminal needs to read the payload.
+
+    [""] when [data] is empty or its length is not
+    [pixel_width * pixel_height * 3] -- a frame that disagrees with its own
+    dimensions is refused here rather than drawn as whatever the terminal
+    makes of it.
+
+    Chunked and silent for the same reasons as {!place}. *)
+
 val place : data:string -> placement -> string
 (** Bytes that put [data] -- the contents of a PNG file -- on the terminal at
     the cursor.

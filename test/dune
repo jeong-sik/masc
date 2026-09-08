@@ -4964,6 +4964,11 @@
  (libraries alcotest unix masc_tui_types masc_tui_msx))
 
 (test
+ (name test_tui_msx_graphics)
+ (modules test_tui_msx_graphics)
+ (libraries alcotest unix masc_tui_types masc_tui_graphics masc_tui_msx))
+
+(test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
  (libraries masc_tui_runtime_config_view))

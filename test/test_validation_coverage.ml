@@ -248,7 +248,7 @@ let test_agent_id_with_dots_accepted () =
 
 let test_agent_id_single_dot () =
   match Validation.Id_shape.validate "." with
-  | Ok _ -> fail "an identifier that is only dots should be rejected"
+  | Ok _ -> fail "an identifier starting with a dot should be rejected"
   | Error _ -> ()
 
 let test_agent_id_double_dot () =

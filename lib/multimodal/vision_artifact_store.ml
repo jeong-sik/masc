@@ -68,6 +68,7 @@ let load ~dir (h : handle) : (string, load_error) result =
     try
       (* Use typed OS failures to distinguish an absent reference from a denied
          or broken store. The actual read retains Fs_compat's path checks. *)
+      (* See Missing_artifact below: stat probes existence; metadata is unused. *)
       ignore (Unix.stat path);
       let bytes = Fs_compat.load_file path in
       if String.equal (hash bytes) h then Ok bytes
@@ -81,6 +82,7 @@ let load ~dir (h : handle) : (string, load_error) result =
            filesystem adapter may report Sys_error rather than Unix_error.
            Recheck with typed OS errors; never classify from message text. *)
         (try
+           (* See the ENOENT branch below: only continued existence is needed. *)
            ignore (Unix.stat path);
            Error (Read_failed detail)
          with

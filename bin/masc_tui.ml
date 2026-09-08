@@ -15986,7 +15986,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -16025,12 +16025,17 @@ and is loaded on demand through keeper_skill.
                       | Some _, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
-                     let count = List.length (scene_controls view) in
+                     let count = List.length (scene_targets view) in
                      if count > 0 then state.browser_lane <- Some {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "y" when not (busy view) ->
+                     (match scene_context view with
+                      | Some context -> copy_reference_to_terminal render_schedule context;
+                          add_event state "system" "Browser element context sent to terminal clipboard"
+                      | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match view.scene, List.nth_opt (scene_controls view) view.scene_cursor with
-                      | Some scene, Some node -> launch_browser_lane state ~mailbox:async_messages
+                     (match view.scene, selected_scene_target view with
+                      | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url})
                       | _ -> ())

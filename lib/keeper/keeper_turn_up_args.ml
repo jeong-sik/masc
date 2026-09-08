@@ -18,6 +18,7 @@ type parsed_args = {
   max_context_override_present : bool;
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
+  microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
   network_mode_opt : string option;
@@ -223,6 +224,7 @@ let known_turn_up_args =
   ; "max_context_override"
   ; "proactive_enabled"
   ; "sandbox_profile"
+  ; "microvm_backend"
   ; "remote_endpoint"
   ; "network_mode"
   ; "egress_allow"
@@ -263,6 +265,18 @@ let validate_no_unknown_keys args =
    suite has no daemon and passes its own. *)
 let docker_preflight_default ?image ~timeout_sec () =
   Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
+;;
+
+let parse_microvm_backend_patch args =
+  match Json_util.assoc_member_opt "microvm_backend" args with
+  | None -> Ok None
+  | Some `Null -> Ok (Some None)
+  | Some (`String raw) ->
+    (match Keeper_microvm_backend.of_string raw with
+     | Some backend -> Ok (Some (Some backend))
+     | None -> Error ("microvm_backend_unknown: expected "
+                     ^ String.concat ", " Keeper_microvm_backend.valid_strings))
+  | Some _ -> Error "microvm_backend must be a string or null"
 ;;
 
 let parse
@@ -309,6 +323,24 @@ let parse
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
+    match parse_microvm_backend_patch args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok microvm_backend_patch ->
+    let profile_defaults =
+      match microvm_backend_patch with
+      | None -> profile_defaults
+      | Some microvm_backend -> { profile_defaults with microvm_backend }
+    in
+    let effective_profile =
+      match sandbox_profile_opt with
+      | Some raw -> sandbox_profile_of_string raw
+      | None -> profile_defaults.sandbox_profile
+    in
+    match profile_defaults.microvm_backend, effective_profile with
+    | Some _, (None | Some (Docker | Remote_ssh)) ->
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection
+        "microvm_backend_requires_microvm: microvm_backend is only valid with sandbox_profile = microvm; pass null to clear it when changing profiles")
+    | None, _ | Some _, Some Micro_vm ->
     (* An explicit profile must be valid, and one of the call, the keeper TOML,
        or the manifest has to state it. There is no fallback: the arm that used
        to take [None, None, None] resolved to [Local], and the only thing
@@ -465,6 +497,7 @@ let parse
       max_context_override_present;
       proactive_enabled_opt;
       sandbox_profile_opt;
+      microvm_backend_patch;
       remote_endpoint_opt;
       remote_endpoint_present;
       network_mode_opt;

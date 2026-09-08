@@ -1712,6 +1712,15 @@ let keeper_create_network_mode =
   in
   Arg.(value & opt (some string) None & info [ "network-mode" ] ~docv:"MODE" ~doc)
 
+let keeper_create_microvm_backend =
+  let doc =
+    Printf.sprintf
+      "MicroVM runtime (%s), valid only with --sandbox-profile microvm. \
+       Linux requires an explicit backend; the server validates the selection."
+      (String.concat ", " Keeper_microvm_backend.valid_strings)
+  in
+  Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
+
 let keeper_create_remote_endpoint =
   let doc =
     "Endpoint registry name under [exec.ssh.endpoints.<name>] in runtime.toml. \
@@ -1833,6 +1842,7 @@ let keeper_create_flags_term =
         instructions
         sandbox_profile
         network_mode
+        microvm_backend
         remote_endpoint
         mention_targets
         skill_names
@@ -1861,6 +1871,7 @@ let keeper_create_flags_term =
         ; instructions
         ; sandbox_profile
         ; network_mode
+        ; microvm_backend
         ; remote_endpoint
         ; mention_targets
         ; skills
@@ -1876,6 +1887,7 @@ let keeper_create_flags_term =
     $ keeper_create_instructions
     $ keeper_create_sandbox_profile
     $ keeper_create_network_mode
+    $ keeper_create_microvm_backend
     $ keeper_create_remote_endpoint
     $ keeper_create_mention_target
     $ keeper_create_skill
@@ -1893,6 +1905,7 @@ let keeper_create_flags_are_absent (flags : Masc_cli_keeper_create.flags) =
   && String.equal (String.trim flags.instructions) ""
   && String.equal (String.trim flags.sandbox_profile) ""
   && Option.is_none flags.network_mode
+  && Option.is_none flags.microvm_backend
   && Option.is_none flags.remote_endpoint
   && List.is_empty flags.mention_targets
   && Option.is_none flags.skills

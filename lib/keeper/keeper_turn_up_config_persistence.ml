@@ -349,6 +349,13 @@ let full_fields
     ]
   in
   let fields =
+    match meta.microvm_backend with
+    | None -> fields
+    | Some backend ->
+      ("microvm_backend", Keeper_toml_loader.Toml_string
+         (Keeper_microvm_backend.to_string backend)) :: fields
+  in
+  let fields =
     match meta.max_context_override with
     | Some value ->
       ("max_context_override", Keeper_toml_loader.Toml_int value) :: fields
@@ -409,6 +416,14 @@ let explicit_edits
   |> append_optional "proactive_enabled" set_bool parsed.proactive_enabled_opt
   |> append_optional "autoboot_enabled" set_bool parsed.autoboot_enabled_opt
   |> fun fields ->
+  let fields =
+    match parsed.microvm_backend_patch with
+    | None -> fields
+    | Some backend ->
+      ("microvm_backend", match backend with
+       | None -> Keeper_toml_loader.Remove
+       | Some backend -> set_string (Keeper_microvm_backend.to_string backend)) :: fields
+  in
   (if not parsed.remote_endpoint_present
    then fields
    else

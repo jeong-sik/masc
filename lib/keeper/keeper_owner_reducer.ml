@@ -43,6 +43,7 @@ type profile_update =
   { instructions : string
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
+  ; microvm_backend : Keeper_microvm_backend.t option
   ; network_mode : Keeper_types_profile.network_mode
   ; mention_targets : string list
   ; proactive_enabled : bool
@@ -441,6 +442,7 @@ let apply_existing (state : state) meta command =
            instructions = update.instructions
          ; sandbox_profile = update.sandbox_profile
          ; sandbox_image = update.sandbox_image
+         ; microvm_backend = update.microvm_backend
          ; network_mode = update.network_mode
          ; mention_targets = update.mention_targets
          ; proactive = { enabled = update.proactive_enabled }

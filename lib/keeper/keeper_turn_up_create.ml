@@ -154,12 +154,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         sandbox_profile;
         sandbox_image = p.profile_defaults.sandbox_image;
         network_mode;
-        (* keeper_up does not take a backend: the runtime a keeper runs on is
-           declared in its TOML and reapplied by
-           [effective_meta_of_profile_defaults], the same way the profile and
-           the network mode are. Accepting one here would let a caller name an
-           isolation the keeper's own file does not. *)
-        microvm_backend = None;
+        microvm_backend = p.profile_defaults.microvm_backend;
         mention_targets;
         proactive = {
           enabled = proactive_enabled;

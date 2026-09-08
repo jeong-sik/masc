@@ -311,6 +311,7 @@ let profile_update_command (meta : keeper_meta) =
     { instructions = meta.instructions
     ; sandbox_profile = meta.sandbox_profile
     ; sandbox_image = meta.sandbox_image
+    ; microvm_backend = meta.microvm_backend
     ; network_mode = meta.network_mode
     ; mention_targets = meta.mention_targets
     ; proactive_enabled = meta.proactive.enabled
@@ -468,6 +469,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
        | Some _ as img -> img
        | None -> old.sandbox_image);
     network_mode;
+    microvm_backend = p.profile_defaults.microvm_backend;
     autoboot_enabled;
     paused = old.paused;
     latched_reason = source_meta.latched_reason;

@@ -146,7 +146,6 @@ let middle_dot = " \xc2\xb7 "
 let open_record_glyph = "~"
 let settled_glyph = Acting.glyph_text Acting.Turn_settled
 let attention_glyph = Acting.glyph_text Acting.Attention
-let quiet_glyph = Acting.glyph_text Acting.Quiet
 let rule_glyph = "\xe2\x94\x80"
 let ellipsis = "\xe2\x80\xa6"
 let up_arrow = "\xe2\x86\x91"
@@ -171,9 +170,10 @@ let compact_count n =
     Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
   else string_of_int n
 
-(* Input and output as two parts. The input part is what a turn re-sends on
-   every call, so it is what makes a twelve-call turn read in the millions;
-   a reader who sees [3.4M+12k] can tell that from a long answer. *)
+(* Input and output as two parts, for the focus block. The input part is what
+   a turn re-sends on every call, so it is what makes a twelve-call turn read
+   in the millions; a reader who sees a large input beside a small output can
+   tell that from one long answer. *)
 (* Labelled, not joined by "+". The two figures are input and output, and a
    plus sign between them reads as arithmetic -- the more so because
    [tokens_sum_text] right below produces exactly that sum in the same shape.
@@ -188,6 +188,14 @@ let tokens_sum_text = function
   | None, None -> ""
   | Some i, Some o -> compact_count (i + o) ^ " tok"
   | Some n, None | None, Some n -> compact_count n ^ " tok"
+
+(* The same sum without its unit, for the fleet row's column: the heading
+   above it already says what the figure counts, and repeating "tok" on every
+   row cost four of the nine cells the column has. *)
+let tokens_sum_figure = function
+  | None, None -> ""
+  | Some i, Some o -> compact_count (i + o)
+  | Some n, None | None, Some n -> compact_count n
 
 let plural n word = Printf.sprintf "%d %s%s" n word (if n = 1 then "" else "s")
 let calls_text n = plural n "call"
@@ -220,6 +228,18 @@ let chunk_calls_text (chunk : Acting.chunk) =
     match List.length (Acting.chunk_tools chunk) with
     | 0 -> "no calls yet"
     | seen -> Printf.sprintf "%d+ calls" seen
+
+(* The same count as a figure alone, for the fleet row's four-cell column.
+   The word "calls" moves to the column header, which says it once for every
+   row instead of once per row. "?" is a settle that named no count, and "-"
+   is a record with no call yet: they are different facts and neither is 0. *)
+let calls_figure (chunk : Acting.chunk) =
+  if chunk.Acting.ck_settled then
+    match chunk.Acting.ck_calls with Some count -> string_of_int count | None -> "?"
+  else
+    match List.length (Acting.chunk_tools chunk) with
+    | 0 -> "-"
+    | seen -> string_of_int seen ^ "+"
 
 type record_state = Record_open | Record_unfinished | Record_settled
 
@@ -265,29 +285,82 @@ let record_glyph = function
   | Record_unfinished -> unfinished_glyph
   | Record_settled -> settled_glyph
 
+(* Fixed columns, so the eye can run down one and compare rows instead of
+   reading each as a sentence. Every row spends the same cells on the same
+   fact whether or not it has that fact, and a column with nothing to say is
+   left blank rather than letting the next one slide left. Joined by "·" in
+   whatever order a row happened to have them, the same cell held a tool name
+   on one line and a call count on the next.
+
+   The four add up to [reading_cells] exactly. Widest members measured:
+   "unsettled" 9 and "no events" 9 in a 10-cell state column, whose last cell
+   is the gap to the next -- without it "unsettled" and a tool name ran
+   together; "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
+   "999.9k" 6 under a 9-cell "tok/turn". Widening one has to narrow another,
+   and [test_widest_settled_reading_fits_whole] fails when the sum drifts. *)
+let state_cells = 10
+let tool_cells = 12
+let calls_cells = 5
+let tokens_cells = 9
+
+(* Figures read down a column when their last digits line up, so counts and
+   tokens are right-aligned; names read from their first letter. *)
+let pad_right width text =
+  let text = Layout.take_cells text width in
+  text ^ String.make (max 0 (width - Layout.display_width text)) ' '
+
+let pad_left width text =
+  let text = Layout.take_cells text width in
+  String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
+
+(* The word in the state column. The record vocabulary, unchanged: "unsettled"
+   is a record that has not closed, which is not the same claim as a keeper
+   that is running, and this row has no evidence for the second. *)
+let state_column_word = function
+  | Record_open -> ("unsettled", Dim)
+  | Record_unfinished -> ("gone", Warn)
+  | Record_settled -> ("settled", Dim)
+
 (* The glyph is the record's state; the words are the newest tool and the
    count, or the count and the tokens once settled. No clock here: the age
    of the newest event is one fact, and it sits on the focus header. *)
 let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
+  let blank width = { text = String.make width ' '; tone = Plain } in
   match approval, chunk with
   | Some tool, _ ->
-      [ { text = attention_glyph ^ " "; tone = Warn }
-      ; { text = join [ "approval"; tool ]; tone = Warn }
-      ]
+    (* An approval outranks whatever the record says, and it can arrive before
+       any chunk does -- reading the chunk first drew a keeper waiting on an
+       operator as one with nothing to report. *)
+    [ { text = pad_right state_cells "approval"; tone = Warn }
+    ; { text = pad_right tool_cells tool; tone = Warn }
+    ; blank (calls_cells + tokens_cells)
+    ]
+  | None, None ->
+    (* No record at all. The state column carries the reason and the rest of
+       the row stays blank, so an empty tool column reads as "nothing named"
+       rather than as a row that failed to draw. *)
+    [ { text = pad_right state_cells "no events"; tone = Dim }
+    ; blank (tool_cells + calls_cells + tokens_cells)
+    ]
   | None, Some chunk ->
-      let state = record_state ~health chunk in
-      let detail =
-        match state, latest_tool chunk with
-        | Record_settled, _ ->
-            join [ chunk_calls_text chunk; tokens_text chunk.Acting.ck_tokens ]
-        | (Record_open | Record_unfinished), Some tool -> join [ tool; chunk_calls_text chunk ]
-        | (Record_open | Record_unfinished), None -> chunk_calls_text chunk
-      in
-      let _, tone = record_word state in
-      [ { text = record_glyph state ^ " "; tone }
-      ; { text = detail; tone = (if state = Record_unfinished then Warn else Plain) }
-      ]
-  | None, None -> [ { text = quiet_glyph ^ " no events"; tone = Dim } ]
+    let state = record_state ~health chunk in
+    let word, word_tone = state_column_word state in
+    (* Which columns a row fills is the record's shape, not a choice. A turn
+       still open names the tool it is in and has no token count; a settled one
+       carries the counts and names no tool, because a finished turn is not in
+       one. Each fact keeps its own column either way. *)
+    let tool, tokens =
+      match state with
+      | Record_settled -> ("", tokens_sum_figure chunk.Acting.ck_tokens)
+      | Record_open | Record_unfinished ->
+        ((match latest_tool chunk with Some tool -> tool | None -> ""), "")
+    in
+    let detail_tone = if state = Record_unfinished then Warn else Plain in
+    [ { text = pad_right state_cells word; tone = word_tone }
+    ; { text = pad_right tool_cells tool; tone = detail_tone }
+    ; { text = pad_left calls_cells (calls_figure chunk); tone = detail_tone }
+    ; { text = pad_left tokens_cells tokens; tone = detail_tone }
+    ]
 
 (* ── Lines ─────────────────────────────────────────────────────────────── *)
 
@@ -852,7 +925,17 @@ let materialize_row ~cols input = function
 (* One legend row: the two record glyphs a fleet row can start with, what
    a count with a plus means, and what the token figure adds up. It fits
    the 55 text cells the pane has beside its border. *)
-let legend = "~ unsettled · ! gone · 4+=seen so far · tok per turn"
+(* Column headings, in the row the legend used to hold. With the parts in
+   fixed columns the names can sit over them, which says what each one is
+   once for the whole list instead of a glyph key the reader has to carry
+   down every row. Built from the same widths, so a change to one moves both
+   the heading and the column under it. *)
+let legend =
+  String.make (mark_cells + name_cells + gap_cells) ' '
+  ^ pad_right state_cells "state"
+  ^ pad_right tool_cells "tool"
+  ^ pad_left calls_cells "calls"
+  ^ pad_left tokens_cells "tok/turn"
 
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in

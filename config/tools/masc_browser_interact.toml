@@ -1,6 +1,6 @@
 name = "masc_browser_interact"
 description = """
-Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Requires a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Returns the current URL and scroll position; read/capture again to verify the resulting page. No arbitrary JavaScript."""
+Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Use documentId and nodeId from BrowserRead mode=scene, or a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Returns the current URL and scroll position; read/capture again to verify the resulting page. No arbitrary JavaScript."""
 additional_properties = false
 
 [[params]]
@@ -29,7 +29,7 @@ enum = ["click", "fill", "scroll"]
 [[params]]
 name = "selector"
 type = "string"
-description = "Required for click/fill. Must identify exactly one visible element in the top document."
+description = "Required for click/fill unless documentId/nodeId are provided. Must identify exactly one visible element in the top document."
 
 [[params]]
 name = "text"
@@ -50,3 +50,13 @@ description = "Required for scroll: vertical CSS-pixel delta."
 name = "clientId"
 type = "string"
 description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."
+
+[[params]]
+name = "documentId"
+type = "string"
+description = "Document identity from BrowserRead mode=scene. Supply with nodeId instead of selector; rejects navigation/reload."
+
+[[params]]
+name = "nodeId"
+type = "string"
+description = "Observed element identity from scene. Survives reordering; detached/replaced nodes fail rather than targeting a replacement."

@@ -419,7 +419,7 @@ run_mode() {
     else
       (
         ((.workspace collaboration.bound_workspace_ids // null) | type == "array")
-        and ((.runtime.proactive_enabled // null) | type == "boolean")
+        and (.activation_mode as $mode | ["manual", "on_demand", "autonomous"] | index($mode) != null)
       ) | tostring
     end
   ')"
@@ -431,7 +431,7 @@ run_mode() {
       "false"
     else
       [(.keepers // [])[] |
-        if (.keepalive_running == false and .proactive_enabled == true) then
+        if (.keepalive_running == false and .activation_mode == "autonomous") then
           (.diagnostic | type == "object")
           and (.diagnostic.quiet_reason != "disabled")
           and (.diagnostic.continuity_state != "desired_offline")

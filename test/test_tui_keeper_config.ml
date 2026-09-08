@@ -11,14 +11,13 @@ let observed =
           "assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}
         }
       },
-      "autoboot_enabled": true,
+      "activation_mode": "autonomous",
       "max_context_override": null,
       "sandbox_profile": "docker",
       "network_mode": "none",
       "sandbox_roots": ["repo-a", ".masc/playground/alpha/"],
       "prompt": {"instructions": "be exact"},
       "execution": {"selected_runtime_id": "codex_subscription.gpt-5.6-sol"},
-      "proactive": {"enabled": true},
       "skills": {"names": null},
       "workspace": {"mention_targets": ["@alpha"]},
       "sources": {
@@ -39,12 +38,11 @@ let test_editor_starts_from_observed_values () =
   Alcotest.(check (list string)) "editable keys"
     [ "runtime_id"
     ; "mention_targets"
-    ; "autoboot_enabled"
+    ; "activation_mode"
     ; "max_context_override"
     ; "sandbox_profile"
     ; "network_mode"
     ; "instructions"
-    ; "proactive_enabled"
     ; "skills"
     ]
     (assoc_keys projected);
@@ -61,7 +59,7 @@ let test_patch_contains_only_changed_fields () =
         `Assoc
           (List.map
              (fun (key, value) ->
-               if String.equal key "proactive_enabled" then key, `Bool false
+               if String.equal key "activation_mode" then key, `String "manual"
                else key, value)
              fields)
     | _ -> assert false
@@ -70,7 +68,7 @@ let test_patch_contains_only_changed_fields () =
   | Error detail -> Alcotest.fail detail
   | Ok patch ->
       Alcotest.(check string) "one changed field"
-        {|{"expected_config_revision":{"manifest":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runtime_assignment":{"state":"runtime_config_present","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}}},"proactive_enabled":false}|}
+        {|{"expected_config_revision":{"manifest":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runtime_assignment":{"state":"runtime_config_present","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}}},"activation_mode":"manual"}|}
         (Yojson.Safe.to_string patch)
 
 let test_deleted_field_means_unchanged () =
@@ -282,10 +280,10 @@ let test_fetched_text_is_sanitized_but_the_frame_is_not () =
     (contains rendered "before<esc>[31mafter");
   Alcotest.(check bool) "frame kept its own marker" true (contains rendered editable_glyph)
 
-let test_wrong_typed_scalar_is_sanitized_at_the_row_boundary () =
+let test_invalid_mode_text_is_sanitized_at_the_row_boundary () =
   let hostile =
     Yojson.Safe.from_string
-      {|{"autoboot_enabled": "before\u001b]8;;https://example.invalid\u0007after"}|}
+      {|{"activation_mode": "before\u001b]8;;https://example.invalid\u0007after"}|}
   in
   let rendered =
     view_lines
@@ -294,7 +292,7 @@ let test_wrong_typed_scalar_is_sanitized_at_the_row_boundary () =
     |> String.concat "\n"
   in
   Alcotest.(check bool)
-    "wrong-typed fallback was sanitized"
+    "invalid mode text was sanitized"
     true
     (contains rendered "before<esc>]8;;https://example.invalid")
 
@@ -400,7 +398,7 @@ let test_config_revision_projection_rejects_malformed_runtime () =
     (contains row "manifest=missing")
 
 let changed_proactive =
-  `Assoc [ "proactive_enabled", `Bool false ]
+  `Assoc [ "activation_mode", `String "on_demand" ]
 
 let check_revision_rejected label revision =
   let before = with_config_revision revision in
@@ -595,7 +593,7 @@ let () =
         ; Alcotest.test_case "fetched text sanitized, frame not" `Quick
             test_fetched_text_is_sanitized_but_the_frame_is_not
         ; Alcotest.test_case "wrong-typed scalar is sanitized" `Quick
-            test_wrong_typed_scalar_is_sanitized_at_the_row_boundary
+            test_invalid_mode_text_is_sanitized_at_the_row_boundary
         ; Alcotest.test_case "composite revision assigned" `Quick
             test_config_revision_projection_assigned
         ; Alcotest.test_case "composite revision assignment missing" `Quick

@@ -447,8 +447,8 @@ def run(args):
                 raise SmokeError('fresh init must seed exactly the first Keeper manifest imp.toml')
             with (keepers / 'imp.toml').open('rb') as source:
                 manifest = tomllib.load(source)
-            if manifest.get('keeper', {}).get('autoboot_enabled') is not False:
-                raise SmokeError('first Keeper must wait for manual start (autoboot_enabled = false)')
+            if manifest.get('keeper', {}).get('activation_mode') != 'manual':
+                raise SmokeError('first Keeper must wait for manual start (activation_mode = "manual")')
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
@@ -477,7 +477,7 @@ def run(args):
                             '--host', '127.0.0.1', '--port', str(port), '--agent', 'first-turn-admin',
                             '--name', keeper, '--sandbox-profile', profile, '--network-mode', 'none',
                             *(['--microvm-backend', 'nerdctl_kata'] if args.backend == 'nerdctl_kata' else []),
-                            '--no-skills', '--no-autoboot', '--no-proactive', '--instructions',
+                            '--no-skills', '--activation-mode', 'manual', '--instructions',
                             'Execute the isolated first-turn proof and report its actual result.'], env)
                     except SmokeError as error:
                         # Diagnostic only: do not turn a broken installed CLI
@@ -486,8 +486,7 @@ def run(args):
                             direct = request(url + '/api/v1/keepers/' + keeper + '/up', token,
                                 {'name': keeper, 'sandbox_profile': profile, 'network_mode': 'none',
                                  **({'microvm_backend': 'nerdctl_kata'} if args.backend == 'nerdctl_kata' else {}),
-                                 'skills': {'names': []}, 'autoboot_enabled': False,
-                                 'proactive_enabled': False, 'instructions': 'Isolated first-turn proof.'}, timeout=15)
+                                 'skills': {'names': []}, 'activation_mode': 'manual', 'instructions': 'Isolated first-turn proof.'}, timeout=15)
                             (output / 'direct-up-diagnostic.json').write_bytes(direct)
                         except (urllib.error.URLError, TimeoutError) as diagnostic_error:
                             detail = (diagnostic_error.read().decode() if isinstance(diagnostic_error, urllib.error.HTTPError)

@@ -14609,6 +14609,7 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
         run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
         run_browser_client_picker_regression(os.path.abspath(sys.argv[1]))
+        run_browser_scene_regression(os.path.abspath(sys.argv[1]))
         print("tui Browser screenshot regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "config":

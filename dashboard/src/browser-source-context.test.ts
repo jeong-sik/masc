@@ -67,7 +67,7 @@ describe('development browser source context', () => {
     host.querySelector('button')!.click()
     expect(clicked).toBe(1)
     expect([...host.querySelectorAll('span')].map(el => el.textContent)).toEqual(['1','2'])
-    render(h('div'),host)
+    render(h('div',null),host)
     expect(reference).toBeNull()
   })
   it('adds JSX source after spread props and only to native elements', () => {

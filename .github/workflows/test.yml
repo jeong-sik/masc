@@ -170,6 +170,15 @@ jobs:
           install-flags: --with-test
           os-packages: jq ripgrep
 
+      # test_run_local_script builds the PATH a dashboard build would run
+      # under, from the directories holding node, pnpm, python3, git, mkdir
+      # and bash. Every one but pnpm is on the runner, so the suite failed
+      # with "required test command is missing: pnpm" before reaching a
+      # single scenario -- in the only lane that runs it. The version is the
+      # one pr-check.yml and release.yml build the SPA with.
+      - name: Make pnpm available to the suites that read a dashboard PATH
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
       - name: Test
         env:
           # Public runners give four CPUs; use all four for the build

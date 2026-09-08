@@ -12830,9 +12830,11 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
      it and leave the terminal in raw mode. *)
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
-  (* SIGINT is the only one of these a person sends by hand mid-sentence, so
-     it asks the loop rather than ending the process. The rest still mean the
-     session is over. *)
+  (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
+     session is over. Neither ends the process from the handler: the loop
+     leaves through [Break], so the switch release that stops a server this
+     TUI started runs whichever signal ended the session. See
+     [Masc_tui_exit_signals]. *)
   Sys.set_signal Sys.sigint (Sys.Signal_handle request_interrupt);
   Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
   Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
@@ -13004,7 +13006,18 @@ let main
   in
 
   let request_full_repaint _ = Atomic.set resize_requested true in
-  let terminate _ = exit 0 in
+  (* SIGTERM, SIGHUP and SIGQUIT used to call [exit] from the handler, and a
+     second Ctrl-C did the same from the loop. [exit] runs the [at_exit]
+     terminal restore and nothing else: the switch release in
+     [run_with_eio_context] never ran, so a server this TUI had started
+     stayed up -- and whether it did depended on which key ended the session.
+     Every end now goes the way q goes: the handler records, the loop reads
+     the record once per pass and raises [Break], the switch releases, and
+     the process returns from [main]. A handler cannot raise [Break] itself:
+     it runs at the next poll point, inside whatever the loop was doing, an
+     Eio wait included. *)
+  let exit_signals = Masc_tui_exit_signals.create () in
+  let terminate _ = Masc_tui_exit_signals.request_terminate exit_signals in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
      Ctrl-X on the same hand, and the footer never listed it, so the first
@@ -13014,9 +13027,9 @@ let main
      it, and suspend is wired to a handler that gives the terminal back. So
      the signal stays a signal and the loop decides what it means — the first
      one says what a second one will do, and any other key withdraws it. *)
-  let interrupt_requested = Atomic.make false in
-  let interrupt_armed = Atomic.make false in
-  let request_interrupt _ = Atomic.set interrupt_requested true in
+  let request_interrupt _ =
+    Masc_tui_exit_signals.request_interrupt exit_signals
+  in
   let rec suspend _ =
     restore_terminal ();
     Sys.set_signal Sys.sigtstp Sys.Signal_default;
@@ -14449,17 +14462,18 @@ and is loaded on demand through keeper_skill.
          one only says so. The notice is an event rather than a footer line
          because it has to survive the frame the operator is looking at, and
          because the answer to "why did nothing happen" belongs in the log
-         they can scroll back to. *)
-      if Atomic.exchange interrupt_requested false then begin
-        state.quit_armed <- false;
-        if Atomic.get interrupt_armed then exit 0
-        else begin
-          Atomic.set interrupt_armed true;
-          add_event state "system"
-            "Ctrl-C: press again to quit, or any other key to stay";
-          Render_schedule.request render_schedule Render_schedule.Background
-        end
-      end;
+         they can scroll back to. A terminate signal ends the session
+         outright. Both leave through [Break], the exit q takes, so the
+         switch release that stops a server this TUI started runs for every
+         way out. *)
+      (match Masc_tui_exit_signals.poll exit_signals with
+       | Masc_tui_exit_signals.Quit -> raise Break
+       | Masc_tui_exit_signals.Interrupt_armed ->
+           state.quit_armed <- false;
+           add_event state "system"
+             "Ctrl-C: press again to quit, or any other key to stay";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Masc_tui_exit_signals.Continue -> ());
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -14522,7 +14536,7 @@ and is loaded on demand through keeper_skill.
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
       if Option.is_some input then begin
-        Atomic.set interrupt_armed false;
+        Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
       end;

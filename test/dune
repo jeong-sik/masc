@@ -3735,6 +3735,13 @@
  (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_exit_signals)
+ (modules test_tui_exit_signals)
+ ; unix so one case delivers a real SIGTERM to the test process and reads it
+ ; back the way the loop does.
+ (libraries alcotest masc_tui_exit_signals unix))
+
+(test
  (name test_tui_retained_view)
  (modules test_tui_retained_view)
  (libraries

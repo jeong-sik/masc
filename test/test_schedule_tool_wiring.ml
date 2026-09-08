@@ -11,7 +11,23 @@ let rec rm_rf path =
       Sys.remove path
 ;;
 
+(* A snapshot alone does not make a keeper readable. [read_effective_meta]
+   merges the snapshot with the keeper's declared profile, and since #32078 a
+   keeper with no declared sandbox_profile has no effective meta at all --
+   [effective_meta_of_profile_defaults] returns an error rather than assuming
+   one. The wake-target check reads through that path, so a registration
+   without the TOML registers a keeper the scheduler cannot see. *)
 let register_wake_target config keeper_name =
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path:config.Workspace.base_path
+      ~agent_name:keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Out_channel.with_open_text profile_path (fun channel ->
+    Printf.fprintf
+      channel
+      "[keeper]\ninstructions = \"schedule wiring test target\"\nsandbox_profile = \"docker\"\n");
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -118,10 +134,9 @@ let create_args
      ; "requested_by_id", `String "operator"
      ; "scheduled_by_id", `String "scheduler-agent"
      ]
-     @
-     if allow_unregistered_keeper
-     then [ "allow_unregistered_keeper", `Bool true ]
-     else []
+     @ (if allow_unregistered_keeper
+        then [ "allow_unregistered_keeper", `Bool true ]
+        else [])
      @
      match schedule_id with
      | None -> []
@@ -723,7 +738,9 @@ let test_payload_contracts_are_schema_only () =
   List.iter
     (fun contract ->
        let open Yojson.Safe.Util in
-       check int "contract field count" 4
+       (* kind, creation_contract, dispatch_contract. [dispatch_tool] was the
+          fourth until #31712 removed it as a key nothing read. *)
+       check int "contract field count" 3
          (contract |> to_assoc |> List.length);
        check string "creation contract" "per_kind_validator_required"
          (contract |> member "creation_contract" |> to_string);

@@ -1,8 +1,9 @@
 name = "masc_msx_press"
 description = """
-Hold one or more keys on the shared MSX machine for hold_frames, then run \
-the rest of frames released, and return the observation (see \
-masc_msx_screen). Keys: up down left right space esc return trigger_a \
+Hold keys on the shared MSX machine, then run on with them released.
+
+Holds for hold_frames, runs the rest of frames released, and returns the \
+observation (see masc_msx_screen). Keys: up down left right space esc return trigger_a \
 trigger_b f1-f5 or one character. Games read input edges, so a short hold \
 (5 frames) is a press. Every edge is recorded in the ledger with your name \
 and the frame number. Frames are 1/60 s; at most 300 per call."""

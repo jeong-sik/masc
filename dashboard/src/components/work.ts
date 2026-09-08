@@ -26,6 +26,7 @@ import { openTaskDetail } from './goals/task-detail-state'
 import { goalPhaseLabel } from './goals/goal-helpers'
 import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
+import { GoalAssignPicker } from './goals/goal-assign-picker'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
 import { VerifyQueue } from './verification/verify-queue'
@@ -1692,6 +1693,10 @@ function WorkSurfaceV2() {
                     </span>
                     <span class="wk-spacer"></span>
                     <span class="wk-bl-prio mono">P${t.priority ?? 0}</span>
+                    ${/* Goal presence is goal_id, not goalTitle: a title lookup
+                          that misses also leaves goalTitle undefined, and
+                          masc_task_set_goal refuses an already-assigned task. */
+                      t.goal_id ? null : html`<${GoalAssignPicker} taskId=${t.id} />`}
                     <button type="button" class="wk-task-claim" onClick=${() => claimTask(t.id)}>＋ claim</button>
                   </div>
                 `}

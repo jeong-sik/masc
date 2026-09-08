@@ -161,6 +161,23 @@ let test_cwd_missing_on_host_is_allowed_when_requires_existing_dir_false () =
         msg)
 ;;
 
+(* The token a downstream classifier reads, taken from the module that
+   defines it rather than spelled here. Its sibling variant renders
+   "cwd_not_directory:", and #33579 wrote this one as
+   "path_outside_whitelist" on the assumption that the pair matches. It does
+   not -- the prefix is "path blocked:" -- so both checks below have asked
+   for a string no producer emits since the day they were added.
+
+   Matched case-insensitively: [message_prefix] is documented as a prefix of
+   the lowercase form of [to_message], and [to_message] opens with a capital. *)
+let outside_whitelist_prefix =
+  Keeper_path_check_error.message_prefix
+    (* Built the way exec_policy.ml builds it at the site under test; the
+       prefix does not read the payload, the message around it does. *)
+    (Keeper_path_check_error.Path_outside_whitelist
+       { path = ""; for_keeper_command = true })
+;;
+
 let test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false () =
   with_temp_tree (fun workdir ->
     let ir = shell_ir ~cwd:"/etc" ~workdir [] in
@@ -174,7 +191,7 @@ let test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false (
       Alcotest.(check bool)
         "outside workdir surfaces path_outside_whitelist"
         true
-        (String_util.contains_substring msg "path_outside_whitelist")
+        (String_util.contains_substring_ci msg outside_whitelist_prefix)
     | Ok () ->
       Alcotest.fail
         "cwd outside workdir must be rejected even when requires_existing_dir is false")
@@ -280,7 +297,7 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
       Alcotest.(check bool)
         "micro_vm target rejects outside workdir"
         true
-        (String_util.contains_substring msg "path_outside_whitelist")
+        (String_util.contains_substring_ci msg outside_whitelist_prefix)
     | Ok () -> Alcotest.fail "micro_vm target must reject path outside workdir")
 ;;
 

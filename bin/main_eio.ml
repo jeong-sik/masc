@@ -1242,13 +1242,16 @@ let init_skills_only =
 
 type init_tally = { written : int; skipped : int; failed : int }
 
-let seed_one ~target_root ~force tally rel =
+(* [rel] keys the embedded tree and [dest_rel] names where it lands. They are
+   the same string for every asset but the fresh-install roster, which is
+   authored under [keepers-default/] and seeds as [keepers/]. *)
+let seed_one ~target_root ~force tally (rel, dest_rel) =
   match Embedded_config.read rel with
   | None ->
     Printf.eprintf "init: missing embedded asset: %s\n" rel;
     { tally with failed = tally.failed + 1 }
   | Some content ->
-    let dest = Filename.concat target_root rel in
+    let dest = Filename.concat target_root dest_rel in
     Fs_compat.mkdir_p (Filename.dirname dest);
     if Fs_compat.file_exists dest && not force then begin
       Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
@@ -1279,7 +1282,14 @@ let init_cmd_exit base_path force skills_only =
       List.fold_left
         (seed_one ~target_root ~force)
         { written = 0; skipped = 0; failed = 0 }
-        (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list))
+        (List.filter_map
+           (fun rel ->
+             if Common.seeds_into_fresh_config_root rel
+             then Some (rel, rel)
+             else
+               Common.fresh_config_root_keeper_seed_target rel
+               |> Option.map (fun dest_rel -> rel, dest_rel))
+           Embedded_config.file_list))
   in
   let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
@@ -1290,10 +1300,11 @@ let init_cmd =
   let doc =
     "Seed default .masc/config/ from binary-embedded assets. Writes runtime \
      settings, prompts, tool definitions, connector declarations and first-party \
-     Skills in .masc/skills/, and leaves \
-     keepers/ empty for you to declare -- the same split the server makes when \
-     it creates a config root itself. Existing config files are kept unless --force; \
-     existing Skill packages are always preserved."
+     Skills in .masc/skills/, and puts one Keeper in keepers/ for you to edit \
+     -- it does not autoboot, so it waits until a model and a sandbox exist. \
+     The same split the server makes when it creates a config root itself. \
+     Existing config files are kept unless --force; existing Skill packages are \
+     always preserved."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)

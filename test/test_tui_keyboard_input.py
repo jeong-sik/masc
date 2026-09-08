@@ -10972,12 +10972,15 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
-    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
+    if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
+            or "▸ y" not in choices_plain
+            or re.search(r"│\s+x\s+│", choices_plain) is None):
         raise AssertionError(
             f"the candidate list missed the second name: {choices!r}"
         )
-    # Enter alone runs the highlighted candidate (def y): the answer names
+    # Enter alone runs the highlighted candidate (y): the answer names
     # the location and the cursor jumps to it.
     picked = send_and_wait(
         process, master_fd, output, b"\r", b"y: lib/a.ml:1"

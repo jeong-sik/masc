@@ -10891,7 +10891,18 @@ def config_navigation_interaction() -> Interaction:
         )
         # Source-only input must not open an editor or a hidden-source search.
         # If / stole focus, v would become search text instead of returning.
-        send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
+        # Nothing should happen, which is the whole point -- so there is no
+        # new frame to wait for. A frame carries the rows that changed, and
+        # inert keys change none; waiting for the title to arrive again
+        # starves on a screen that is already correct. Read the screen.
+        os.write(master_fd, b"e/")
+        time.sleep(0.4)
+        read_available(master_fd, output)
+        if b"runtime.toml status" not in screen_text(bytes(output)):
+            raise AssertionError(
+                "e or / moved the Config status screen: "
+                f"{screen_text(bytes(output))!r}"
+            )
         reloaded_source = send_and_wait(process, master_fd, output, b"v", b"first-value = ")
         if b"first-value = 9" not in CSI_RE.sub(b"", reloaded_source):
             raise AssertionError("Config reload changed revision without its new source")

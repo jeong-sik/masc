@@ -141,7 +141,8 @@ let secret_files_for_source ~source ~observed ~prepare =
   | Keeper_gate.Exact_always_rule _
   | Keeper_gate.Keeper_always_allow
   | Keeper_gate.Workspace_always_allow
-  | Keeper_gate.Readonly_sandbox -> prepare ()
+  | Keeper_gate.Readonly_sandbox
+  | Keeper_gate.Local_output -> prepare ()
 ;;
 
 module For_testing = struct

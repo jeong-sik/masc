@@ -55,8 +55,8 @@ type feed =
 (** One keeper as the fleet block draws it. [mark] is the one-cell health
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
     colour the caller reads out of the same health. [health] is that same
-    reading. A gone process marks an unclosed feed record [unfinished]; every
-    other unclosed record is [open/gap], without asserting a current turn. *)
+    reading. A gone process marks an unsettled feed record with [!]; every
+    other unsettled record wears [~], without asserting a current turn. *)
 type keeper = {
   name : string;
   mark : string;
@@ -113,9 +113,18 @@ type changes =
       malformed : int;
     }
 
+(** How much of the fleet the Recent tab draws. Beside the Keepers roster
+    every fleet row would be a roster row said twice, so there only the
+    selected keeper's record draws; beside any other surface the whole
+    fleet does. *)
+type scope =
+  | Whole_fleet
+  | Selected_only
+
 type input = {
   now : float;
   tab : tab;
+  scope : scope;
   feed : feed;
   keepers : keeper list;
   selected : string option;
@@ -164,16 +173,16 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     are joined: a line that would overflow is cut at the right edge, a short
     one is padded, and rows the content does not need are blank. The header
     row carries the two tabs and the feed's transport state on both tabs.
-    The Recent tab reserves two legend rows under the header (one when only
-    two rows exist): {!clock_legend} says which clock the pane's ages follow
-    and which the roster's LAST column follows, {!count_legend} what [seen],
-    [total] and [tok] count. Changes keeps its single header row.
+    The Recent tab reserves a second header row for {!legend}. Changes keeps
+    its single header row.
 
-    A row states less before it clips a figure: a fleet row that cannot fit
-    both token parts shows their sum, and an earlier-turn row gives up its
-    receipt age, then its cost, then the token parts, in that order.
+    A row states less before it clips a figure: an earlier-turn row gives up
+    its cost, then the token parts; the focus header gives up the long form
+    of its state word.
 
-    Recent tab, two layouts. At [scroll = 0] the overview: the fleet takes at
+    Recent tab under [Selected_only]: the selected keeper's focus block
+    alone, windowed like the Changes tab. Under [Whole_fleet], two layouts.
+    At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes
     the rest. Any other [scroll] (clamped to [scroll_max]) is the full list --
@@ -187,19 +196,16 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     file, windowed the same way. *)
 
 val keeper_state_text :
-  ?compact:bool ->
-  now:float ->
   health:Masc.Tui_decode.keeper_health_reading option ->
   approval:string option ->
   Masc_tui_acting.chunk option ->
   span list
-(** The fleet row's recent observation: approval first, then the newest
-    record's tool and observed count ([seen], or [none seen]) or settled
-    count ([total]). Unknown settled totals stay unknown. [evt] is elapsed
-    since the newest locally received event, not turn duration. Unclosed
-    records are [open/gap] or [unfinished] when the process is gone; neither
-    asserts current work. [compact] draws the token sum instead of its
-    parts. *)
+(** The fleet row's recent observation: approval first, then the record's
+    glyph ([~] unsettled, [!] unsettled with the process gone, the settled
+    mark otherwise) and its words: the newest tool and the observed count
+    ([4+ calls], [no calls yet]) before a settle, the settle's count
+    ([12 calls]) and the tokens after. Unknown settled counts stay unknown.
+    No clock: the age of the newest event is on the focus header. *)
 
 val tokens_text : int option * int option -> string
 (** Input and output tokens as two parts when both are known
@@ -210,9 +216,8 @@ val tokens_sum_text : int option * int option -> string
 (** The same tokens summed ([74.2k tok]), for a row that cannot afford the
     parts. *)
 
-val clock_legend : string
-val count_legend : string
-(** The two legend rows, as drawn. *)
+val legend : string
+(** The legend row, as drawn. *)
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)

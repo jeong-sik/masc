@@ -7,15 +7,15 @@ module Reading = Masc.Tui_decode
    The pane is a column of fleet rows. A row is a border cell, the health
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
    the configured names whole that the roster's window keeps whole. The
-   reading's budget holds the event clock and its count authority:
-   [~ network_read · 3 seen · evt 12.4s] and, with both token parts, a
-   two-digit settled row [■ 12 total · 3.4M+12k tok · evt 24.8s] at 37
-   cells. *)
+   reading's budget holds the record glyph, the newest tool or the count,
+   and both token parts: [~ network_read · 3+ calls] and
+   [■ 123 calls · 999.9k+999.9k tok] at 31 cells. The age of the newest
+   event is one fact and sits on the focus header, not here. *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
 let gap_cells = 1
-let reading_cells = 38
+let reading_cells = 36
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
 (* What the roster pane leaves a surface is the least a surface lays out
@@ -100,9 +100,14 @@ type changes =
       malformed : int;
     }
 
+type scope =
+  | Whole_fleet
+  | Selected_only
+
 type input = {
   now : float;
   tab : tab;
+  scope : scope;
   feed : feed;
   keepers : keeper list;
   selected : string option;
@@ -151,9 +156,10 @@ let down_arrow = "\xe2\x86\x93"
 let edited_glyph = "~"
 let written_glyph = "+"
 let failed_glyph = "!"
+let unfinished_glyph = "!"
 
 let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
-let event_age_text ~now at = "evt " ^ age_text ~now at
+let last_event_text ~now at = "last event " ^ age_text ~now at
 
 let compact_count n =
   let thousand = 1_000 and million = 1_000_000 in
@@ -193,17 +199,19 @@ let latest_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
-(* A settle reports the whole turn's count. An open record only knows the
-   calls this feed observed, which may start mid-turn or have lost rows. *)
+(* One word for the count. A settle reports the whole turn: [12 calls]. An
+   unsettled record only knows what this feed observed, which may have
+   started mid-turn or lost rows, so it says at least that many: [4+ calls],
+   and [no calls yet] when it saw none. *)
 let chunk_calls_text (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then
     match chunk.Acting.ck_calls with
-    | Some count -> Printf.sprintf "%d total" count
-    | None -> "total ?"
+    | Some count -> calls_text count
+    | None -> "calls ?"
   else
     match List.length (Acting.chunk_tools chunk) with
-    | 0 -> "none seen"
-    | seen -> Printf.sprintf "%d seen" seen
+    | 0 -> "no calls yet"
+    | seen -> Printf.sprintf "%d+ calls" seen
 
 type record_state = Record_open | Record_unfinished | Record_settled
 
@@ -231,20 +239,28 @@ let record_state ~health (chunk : Acting.chunk) =
     | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_stale
            | Reading.Health_degraded) | None -> Record_open
 
-(* The focus header has the room the fleet row lacks, so it says what the
-   state word means: an unsettled record is a turn no settle has closed, and
-   [unfinished] adds that the process is gone, so none will. The fleet row
-   keeps the bare word in [keeper_state_text]. *)
-let record_explanation = function
-  | Record_open -> ("open/gap: no settle yet", Dim)
-  | Record_unfinished -> ("unfinished: process gone", Warn)
+(* The record's state in words, for the focus header and the earlier-turn
+   rows; a fleet row carries only the glyph. An unsettled record is a turn
+   no settle has closed; it does not say the keeper is at work. When the
+   process is gone none will come, and the long form says so. *)
+let record_word = function
+  | Record_open -> ("unsettled", Dim)
+  | Record_unfinished -> ("unsettled", Warn)
   | Record_settled -> ("settled", Dim)
 
-let unfinished_glyph = "!"
+let record_word_long = function
+  | Record_unfinished -> ("unsettled, process gone", Warn)
+  | (Record_open | Record_settled) as state -> record_word state
 
-let keeper_state_text ?(compact = false) ~now ~health ~approval
-    (chunk : Acting.chunk option) =
-  let tokens = if compact then tokens_sum_text else tokens_text in
+let record_glyph = function
+  | Record_open -> open_record_glyph
+  | Record_unfinished -> unfinished_glyph
+  | Record_settled -> settled_glyph
+
+(* The glyph is the record's state; the words are the newest tool and the
+   count, or the count and the tokens once settled. No clock here: the age
+   of the newest event is one fact, and it sits on the focus header. *)
+let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
   match approval, chunk with
   | Some tool, _ ->
       [ { text = attention_glyph ^ " "; tone = Warn }
@@ -252,19 +268,16 @@ let keeper_state_text ?(compact = false) ~now ~health ~approval
       ]
   | None, Some chunk ->
       let state = record_state ~health chunk in
-      let glyph, detail, tone =
-        match state with
-        | Record_open ->
-          (open_record_glyph,
-           join [ Option.value ~default:"open/gap" (latest_tool chunk); chunk_calls_text chunk ], Dim)
-        | Record_unfinished ->
-          (unfinished_glyph, join [ "unfinished"; chunk_calls_text chunk ], Warn)
-        | Record_settled ->
-          (settled_glyph, join [ chunk_calls_text chunk; tokens chunk.Acting.ck_tokens ], Dim)
+      let detail =
+        match state, latest_tool chunk with
+        | Record_settled, _ ->
+            join [ chunk_calls_text chunk; tokens_text chunk.Acting.ck_tokens ]
+        | (Record_open | Record_unfinished), Some tool -> join [ tool; chunk_calls_text chunk ]
+        | (Record_open | Record_unfinished), None -> chunk_calls_text chunk
       in
-      [ { text = glyph ^ " "; tone }
+      let _, tone = record_word state in
+      [ { text = record_glyph state ^ " "; tone }
       ; { text = detail; tone = (if state = Record_unfinished then Warn else Plain) }
-      ; { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim }
       ]
   | None, None -> [ { text = quiet_glyph ^ " no events"; tone = Dim } ]
 
@@ -319,7 +332,13 @@ let tab_pill ~active tab =
   else { text = tab_label tab; tone = Dim }
 
 let header_line ~cols input =
-  let keepers = List.length input.keepers in
+  (* Beside the roster the count is the roster's own title; the header then
+     says only what the roster cannot, the feed's state. *)
+  let count =
+    match input.scope with
+    | Whole_fleet -> plural (List.length input.keepers) "keeper" ^ middle_dot
+    | Selected_only -> ""
+  in
   let feed =
     match input.feed with
     | Feed_off -> { text = "no feed"; tone = Dim }
@@ -332,9 +351,7 @@ let header_line ~cols input =
        [ tab_pill ~active:(input.tab = Tab_fleet) Tab_fleet
        ; { text = " "; tone = Plain }
        ; tab_pill ~active:(input.tab = Tab_changes) Tab_changes
-       ; { text = Printf.sprintf "%s%s%s" middle_dot (plural keepers "keeper") middle_dot
-         ; tone = Dim
-         }
+       ; { text = middle_dot ^ count; tone = Dim }
        ; feed
        ])
 
@@ -376,10 +393,6 @@ let fleet_row ~cols input keeper chunk =
     | Some name -> String.equal name keeper.name
     | None -> false
   in
-  let reading ~compact =
-    keeper_state_text ~compact ~now:input.now ~health:keeper.health ~approval chunk
-  in
-  let room = cols - border_cells - mark_cells - name_cells - gap_cells in
   ( fit_line ~cols
       (with_border
          ([ { text = Layout.fit_width keeper.mark mark_cells; tone = keeper.mark_tone }
@@ -388,7 +401,7 @@ let fleet_row ~cols input keeper chunk =
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
           ]
-          @ first_fitting ~room [ reading ~compact:false; reading ~compact:true ]))
+          @ keeper_state_text ~health:keeper.health ~approval chunk))
   , Target_keeper keeper.name )
 
 let more_line ~cols n =
@@ -461,58 +474,56 @@ let turn_name (chunk : Acting.chunk) =
   | Some _ when chunk.Acting.ck_settled -> Some (Acting.turn_text chunk.Acting.ck_turn)
   | _ -> None
 
-let turn_summary_line ~cols ~now ~health (chunk : Acting.chunk) =
+let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
+  let state = record_state ~health chunk in
   let named =
     match turn_name chunk with
     | Some text -> [ { text; tone = Plain } ]
     | None -> []
   in
   let prefix =
-    match record_state ~health chunk with
+    match state with
     | Record_settled -> { text = settled_glyph ^ " "; tone = Dim }
-    | Record_open -> { text = open_record_glyph ^ " open/gap"; tone = Dim }
-    | Record_unfinished -> { text = unfinished_glyph ^ " unfinished"; tone = Warn }
+    | Record_open | Record_unfinished ->
+        let word, tone = record_word state in
+        { text = record_glyph state ^ " " ^ word; tone }
   in
-  let line ~tokens ~cost ~age =
+  let line ~tokens ~cost =
     with_border
       ( [ prefix ]
       @ named
-      @ [ { text = middle_dot ^ join [ chunk_calls_text chunk; tokens; cost ]; tone = Dim } ]
-      @
-      if age then [ { text = middle_dot ^ event_age_text ~now chunk.Acting.ck_at; tone = Dim } ]
-      else [] )
+      @ [ { text = middle_dot ^ join [ chunk_calls_text chunk; tokens; cost ]; tone = Dim } ] )
   in
   let parts = tokens_text chunk.Acting.ck_tokens
   and sum = tokens_sum_text chunk.Acting.ck_tokens
   and cost = cost_text chunk.Acting.ck_cost_usd in
-  (* What an earlier turn gives up first is the age of its settle's receipt:
-     the header carries the record that is current, and the turns below it
-     are ordered newest first. The cost goes next and the token parts last,
-     since the parts are what the row is read for. *)
+  (* No receipt age: when this settle arrived is not what the row is read
+     for, and the header carries the one clock. The cost goes before the
+     token parts, since the parts are what the row is read for. *)
   fit_line ~cols
     (first_fitting ~room:cols
-       [ line ~tokens:parts ~cost ~age:true
-       ; line ~tokens:parts ~cost ~age:false
-       ; line ~tokens:parts ~cost:"" ~age:false
-       ; line ~tokens:sum ~cost:"" ~age:false
-       ])
+       [ line ~tokens:parts ~cost; line ~tokens:parts ~cost:""; line ~tokens:sum ~cost:"" ])
 
 let focus_header_line ~cols ~now ~health name current =
   match current with
   | Some (current : Acting.chunk) ->
-      let state_word, state_tone = record_explanation (record_state ~health current) in
+      let state = record_state ~health current in
       let named =
         match turn_name current with
         | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
         | None -> []
       in
+      let line (state_word, state_tone) =
+        with_border
+          ( { text = name; tone = Accent }
+          :: named
+          @ [ { text = middle_dot ^ state_word; tone = state_tone }
+            ; { text = middle_dot ^ last_event_text ~now current.Acting.ck_at; tone = Dim }
+            ] )
+      in
+      (* The long form of the state word goes before the clock does. *)
       fit_line ~cols
-        (with_border
-           ( { text = name; tone = Accent }
-           :: named
-           @ [ { text = middle_dot ^ state_word; tone = state_tone }
-             ; { text = middle_dot ^ event_age_text ~now current.Acting.ck_at; tone = Dim }
-             ] ))
+        (first_fitting ~room:cols [ line (record_word_long state); line (record_word state) ])
   | None ->
       fit_line ~cols
         (with_border
@@ -652,14 +663,20 @@ let fleet_lines ~below ~scroll input =
   let fleet_rows =
     List.map (fun keeper -> Fleet_row (keeper, Hashtbl.find_opt newest keeper.name)) ordered
   in
-  let body =
-    fleet_rows
-    @ (match focus_rows with
-       | [] -> []
-       | _ :: _ -> Rule :: focus_rows)
-  in
-  window ~below ~scroll body ~overview:(fun () ->
-    overview_rows ~below fleet_rows focus focus_rows)
+  match input.scope with
+  | Selected_only ->
+      (* Beside the roster every fleet row is a roster row said twice; the
+         selected keeper's record is the only news. *)
+      window ~below ~scroll focus_rows ~overview:(fun () -> folded_rows ~below focus_rows)
+  | Whole_fleet ->
+      let body =
+        fleet_rows
+        @ (match focus_rows with
+           | [] -> []
+           | _ :: _ -> Rule :: focus_rows)
+      in
+      window ~below ~scroll body ~overview:(fun () ->
+        overview_rows ~below fleet_rows focus focus_rows)
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 
@@ -766,7 +783,7 @@ let materialize_row ~cols input = function
   | Tool_row (chunk, tool, state) ->
       tool_line ~cols ~state chunk tool, Target_calls chunk.Acting.ck_keeper
   | Earlier_turn (chunk, health) ->
-      turn_summary_line ~cols ~now:input.now ~health chunk, Target_calls chunk.Acting.ck_keeper
+      turn_summary_line ~cols ~health chunk, Target_calls chunk.Acting.ck_keeper
   | Rule -> rule_line ~cols, Target_none
   | More n -> more_line ~cols n
   | Indicator (direction, n) ->
@@ -775,24 +792,20 @@ let materialize_row ~cols input = function
   | File_row (index, file) -> file_line ~cols ~now:input.now index file
   | Formatted_status (line, target) -> line, target
 
-(* Two clocks share the screen and the legend says which is which: the
-   pane's ages count from when this pane received the keeper's newest event,
-   the roster's LAST column from the server's last turn. The second row
-   names the two call counts and what the token figure adds up. Each fits
-   the 57 text cells the pane has beside its border. *)
-let clock_legend = "evt=age of newest event here · roster LAST=last turn"
-let count_legend = "seen=feed saw · total=settle said · tok=in+out per turn"
+(* One legend row: the two record glyphs a fleet row can start with, what
+   a count with a plus means, and what the token figure adds up. It fits
+   the 55 text cells the pane has beside its border. *)
+let legend = "~ unsettled · ! gone · 4+=seen so far · tok=in+out/turn"
 
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
   if rows = 0 then { rows = []; targets = []; scroll_max = 0 }
   else
     let header = (header_line ~cols input, Target_next_tab) in
-    let legend text = (fit_line ~cols (with_border [ { text; tone = Dim } ]), Target_none) in
     let headers =
       match input.tab with
-      | Tab_fleet when rows >= 3 -> [ header; legend clock_legend; legend count_legend ]
-      | Tab_fleet when rows = 2 -> [ header; legend clock_legend ]
+      | Tab_fleet when rows >= 2 ->
+        [ header; (fit_line ~cols (with_border [ { text = legend; tone = Dim } ]), Target_none) ]
       | Tab_fleet | Tab_changes -> [ header ]
     in
     let below = rows - List.length headers in

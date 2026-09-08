@@ -1456,6 +1456,15 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   in
   { Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
+  ; scope =
+      (match state.view with
+       | Keepers Keeper_list -> Pane.Selected_only
+       | Keepers
+           (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+       | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
+       | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+       | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+           Pane.Whole_fleet)
   ; feed
   ; keepers
   ; selected =

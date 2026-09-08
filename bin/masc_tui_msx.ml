@@ -97,9 +97,12 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
            ~pixel_height:f.msx_height ~rows:picture_rows
        in
        if String.equal escape "" then for _ = 1 to screen_rows do blank_row () done
-       else
-         Buffer.add_string buf
-           (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+       else begin
+         Buffer.add_string buf escape;
+         (* The image is drawn at the cursor and the terminal does not move it,
+            so the footer needs the rows stepped over by hand. *)
+         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+       end
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to

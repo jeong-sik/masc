@@ -233,6 +233,34 @@ let scalar_cell_width scalar =
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
   else max 0 (Uucp.Break.tty_width_hint scalar)
 
+(* A terminal that draws grapheme clusters gives an emoji sequence two cells
+   whatever its scalars add up to, and the sum missed in both directions: a
+   symbol made emoji by VS16 summed to one cell, a thumb with a skin tone to
+   four, a family joined by ZWJ to six. These are the scalars that mark such
+   a cluster: the emoji presentation selector (VS16), the zero width joiner
+   (ZWJ), the skin tone modifiers, and the tags that spell a subregion flag.
+   The text presentation selector (VS15) asks the other way, for one cell.
+   Regional indicator pairs are not here: two of them already sum to the two
+   cells a flag takes. *)
+let vs16 = Uchar.of_int 0xFE0F
+let vs15 = Uchar.of_int 0xFE0E
+let zwj = Uchar.of_int 0x200D
+let skin_tone_first = 0x1F3FB
+let skin_tone_last = 0x1F3FF
+let tag_first = 0xE0020
+let tag_last = 0xE007F
+let emoji_cluster_cells = 2
+let text_presentation_cells = 1
+
+let widens_emoji_cluster scalar =
+  let code = Uchar.to_int scalar in
+  Uchar.equal scalar vs16
+  || Uchar.equal scalar zwj
+  || (code >= skin_tone_first && code <= skin_tone_last)
+  || (code >= tag_first && code <= tag_last)
+
+let narrows_emoji_cluster scalar = Uchar.equal scalar vs15
+
 type display_piece = {
   start_offset : int;
   end_offset : int;
@@ -297,9 +325,19 @@ let grapheme_pieces text start_offset end_offset reversed =
     let widest = ref 0 in
     let hangul_l = ref false in
     let hangul_vt = ref false in
+    let emoji_wide = ref false in
+    let emoji_text = ref false in
     let close_cluster () =
       if !cluster_end > !cluster_start then begin
-        let cells = if !hangul_l && !hangul_vt then !widest else !width in
+        (* A cluster carrying both selectors is malformed; the wide reading
+           wins because a cell left blank is harmless and a cell overflowed
+           breaks the border. *)
+        let cells =
+          if !emoji_wide then emoji_cluster_cells
+          else if !emoji_text then text_presentation_cells
+          else if !hangul_l && !hangul_vt then !widest
+          else !width
+        in
         pieces :=
           { start_offset = !cluster_start;
             end_offset = !cluster_end;
@@ -311,7 +349,9 @@ let grapheme_pieces text start_offset end_offset reversed =
         width := 0;
         widest := 0;
         hangul_l := false;
-        hangul_vt := false
+        hangul_vt := false;
+        emoji_wide := false;
+        emoji_text := false
       end
     in
     let take_scalar scalar =
@@ -321,7 +361,9 @@ let grapheme_pieces text start_offset end_offset reversed =
       widest := max !widest scalar_width;
       let hangul_type = Uucp.Hangul.syllable_type scalar in
       hangul_l := !hangul_l || hangul_type = `L;
-      hangul_vt := !hangul_vt || hangul_type = `V || hangul_type = `T
+      hangul_vt := !hangul_vt || hangul_type = `V || hangul_type = `T;
+      emoji_wide := !emoji_wide || widens_emoji_cluster scalar;
+      emoji_text := !emoji_text || narrows_emoji_cluster scalar
     in
     let rec drain event =
       match Uuseg.add segmenter event with

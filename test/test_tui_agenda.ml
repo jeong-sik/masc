@@ -260,10 +260,18 @@ let test_the_frame_and_the_bound_read_the_same_number () =
          ~module_path:"bin/masc_tui_ansi.ml"
          ~binding_name:"get_terminal_size"
          ~callee:"Masc_tui_render_schedule.Terminal_size_cache.get")
-  ; check int "a polled resize invalidates the presented frame" 1
+  (* The loop stopped calling the presenter directly. Both doors a resize can
+     arrive through -- SIGWINCH and the loop's own ioctl snapshot -- end in
+     [discard_frame_for_new_size], and the code says why: "so the two cannot
+     come to disagree about what a resize costs". Counting there counts the
+     rule; counting in [run_loop] counted one spelling of it, and an
+     extraction that changed nothing about the behaviour read as the rule
+     being gone. The loop's side of it is the [refresh_terminal_size] count
+     above. *)
+  ; check int "a resize invalidates the presented frame, in one place" 1
       (calls
          ~module_path:"bin/masc_tui.ml"
-         ~binding_name:"run_loop"
+         ~binding_name:"discard_frame_for_new_size"
          ~callee:"Frame_presenter.invalidate")
   ; check int "Tools End uses the exact projected maximum" 1
       (calls

@@ -70,17 +70,21 @@ let reconcile config ~delivered ~retained =
   Alcotest.(check int) "delivered" delivered report.Wake.delivered;
   Alcotest.(check int) "retained" retained report.Wake.retained
 
+let check_rejections config ~verification_ids ~authority =
+  let actual_ids = List.map (fun stimulus ->
+    match stimulus.Keeper_event_queue.payload with
+    | Keeper_event_queue.Completion_authority_rejected rejection ->
+      Alcotest.(check string) "task identity" task_id rejection.car_task_id;
+      Alcotest.(check string) "exact reason" reason rejection.car_reason;
+      Alcotest.(check bool) "typed authority" true
+        (authority = rejection.car_authority);
+      rejection.car_verification_id
+    | _ -> Alcotest.fail "expected only typed rejection stimuli") (queue config) in
+  Alcotest.(check (list string)) "exact verification identities without duplicates"
+    (List.sort String.compare verification_ids) (List.sort String.compare actual_ids)
+
 let check_rejection config ~verification_id ~authority =
-  match queue config with
-  | [ { payload = Keeper_event_queue.Completion_authority_rejected rejection; _ } ] ->
-    Alcotest.(check string) "task identity" task_id rejection.car_task_id;
-    Alcotest.(check string) "verification identity" verification_id
-      rejection.car_verification_id;
-    Alcotest.(check string) "exact reason" reason rejection.car_reason;
-    Alcotest.(check bool) "typed authority" true
-      (authority = rejection.car_authority)
-  | events -> Alcotest.failf "expected one typed rejection, got %d events"
-                (List.length events)
+  check_rejections config ~verification_ids:[verification_id] ~authority
 
 let test_commit_gap authority () =
   with_workspace (fun config ->
@@ -228,21 +232,38 @@ let test_daemon_delivery ~start_before_commit () =
           ~on_runtime_attempt_error:_ () ->
         incr reviewer_calls;
         Alcotest.fail "delivery recovery must not invoke a model");
-    if start_before_commit then
+    (* Poll only the durable result, never manually reconcile. The bound belongs
+       to this test's failure detection, not the product's recovery policy. *)
+    let await_delivery expected_count =
+      Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+        let rec await () =
+          if pending config = [] && List.length (queue config) = expected_count then ()
+          else (Eio.Time.sleep clock 0.01; await ())
+        in
+        await ())
+    in
+    let boot_id = "vrf-native-daemon-boot-sentinel" in
+    if start_before_commit then (
+      prepare_submission config boot_id;
+      commit config ~authority:system ~verification_id:boot_id
+        (D.Verdict_rejected { reason });
       Masc.Completion_authority_agent.start ~sw ~clock ~config;
+      await_delivery 1;
+      check_rejection config ~verification_id:boot_id ~authority:system;
+      (* The daemon scans boot review scopes before delivering this sentinel.
+         Its queue row and acknowledged outbox prove that startup recovery has
+         finished before the second commit. Only a fresh hook wake can now
+         deliver the second rejection. Leave the first row intact and verify
+         both exact identities, so no test-side queue mutation drives delivery. *)
+      check_pending config 0);
     prepare_submission config verification_id;
     commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
     if not start_before_commit then
       Masc.Completion_authority_agent.start ~sw ~clock ~config;
-    (* Poll only the durable result, never manually reconcile. The bound belongs
-       to this test's failure detection, not the product's recovery policy. *)
-    Eio.Time.with_timeout_exn clock 5.0 (fun () ->
-      let rec await_delivery () =
-        if pending config = [] && List.length (queue config) = 1 then ()
-        else (Eio.Time.sleep clock 0.01; await_delivery ())
-      in
-      await_delivery ());
-    check_rejection config ~verification_id ~authority:system;
+    let verification_ids =
+      if start_before_commit then [boot_id; verification_id] else [verification_id] in
+    await_delivery (List.length verification_ids);
+    check_rejections config ~verification_ids ~authority:system;
     check_pending config 0;
     Alcotest.(check int) "repair delivery uses no model" 0 !reviewer_calls)
 

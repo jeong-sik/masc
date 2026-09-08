@@ -1,5 +1,4 @@
 open Alcotest
-open Masc
 module Detail = Server_dashboard_task_detail
 
 let task id description =
@@ -52,7 +51,7 @@ let test_missing () =
 let test_authoritative_storage () =
   let base_path = Filename.temp_dir "dashboard-task-detail-" "" in
   Fun.protect
-    ~finally:(fun () -> Masc.Fs_compat.remove_tree base_path)
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let check_read id expected =
@@ -68,18 +67,18 @@ let test_authoritative_storage () =
       check_read " \t" `Bad_request;
       check_read "task-selected" `Service_unavailable;
       ignore (Masc.Workspace.init config ~agent_name:(Some "task-detail-test"));
-      let backlog = match Masc.Workspace_backlog.read_backlog_r config with
+      let backlog = match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog
         | Error detail -> fail detail in
-      Masc.Workspace_backlog.write_backlog config
+      Workspace_backlog.write_backlog config
         { backlog with tasks = [task "task-selected" "current body"] };
       check_read "task-selected" `OK;
       let corrupt path body =
         Out_channel.with_open_bin path (fun oc -> output_string oc body) in
-      let links_path = Masc.Workspace_goal_index.goal_task_links_path config in
+      let links_path = Workspace_goal_index.goal_task_links_path config in
       corrupt links_path "{broken";
       check_read "task-selected" `Service_unavailable;
-      Masc.Workspace_goal_index.write_goal_task_links config
+      Workspace_goal_index.write_goal_task_links config
         ["goal-1", ["task-selected"]];
       check_read "task-selected" `OK;
       (* A valid recovery registry must not hide failure of the current one. *)
@@ -87,7 +86,7 @@ let test_authoritative_storage () =
       check_read "task-selected" `Service_unavailable;
       (* A missing task needs no goal registry read. *)
       check_read "task-missing" `Not_found;
-      corrupt (Masc.Workspace_backlog.backlog_path config) "{broken";
+      corrupt (Workspace_backlog.backlog_path config) "{broken";
       (* The writer retained a valid recovery snapshot, but it is not current. *)
       check_read "task-selected" `Service_unavailable;
       check_read "task-missing" `Service_unavailable)

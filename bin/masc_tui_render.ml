@@ -13718,7 +13718,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane)
+      | None, None when Option.is_some view.scene -> "s:text  n/p:control  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -13726,11 +13727,18 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
+        | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_scroll _) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
+        | Idle when Option.is_some view.scene ->
+            (match view.scene with
+             | Some scene -> Printf.sprintf "Scene %.1f ms • %d nodes%s" scene.elapsed_ms
+                 (List.length scene.content.nodes) (if scene.content.truncated then " • truncated" else ""), Theme.ok ()
+             | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
@@ -13762,6 +13770,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
+         | None when Option.is_some view.scene ->
+             (match List.nth_opt (scene_controls view) view.scene_cursor with
+              | Some node -> Printf.sprintf "  Control %d/%d: %s • n/p:select • Enter:click"
+                  (view.scene_cursor + 1) (List.length (scene_controls view)) (Terminal_text.single_line node.text)
+              | None -> "  No clickable controls in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
              | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live");
@@ -13784,9 +13797,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())
-        (match page with
-         | None -> "  No page content"
-         | Some page -> Printf.sprintf "  %s • %d chars%s%s"
+        (match view.scene, page with
+         | Some scene, _ -> "  " ^ Terminal_text.single_line scene.content.url ^ " • DOM order · viewport only · Ctrl-O:painted image"
+         | None, None -> "  No page content"
+         | None, Some page -> Printf.sprintf "  %s • %d chars%s%s"
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));

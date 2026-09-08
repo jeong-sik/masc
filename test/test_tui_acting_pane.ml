@@ -896,10 +896,13 @@ let test_fleet_row_shows_the_token_sum_when_the_parts_overflow () =
   check bool "the parts are not drawn" false (contains "+" row);
   check bool "the age is whole" true (contains "evt 10.0s" row)
 
-(* sangsu's turn 3141 settled twenty seconds ago and turn 6 has opened
-   since: the earlier turn draws under the header. With the fixture's
-   tokens and cost the full row is 60 cells against a 58-cell pane, so the
-   age of the settle's receipt is what it gives up. *)
+(* sangsu's session turn 5 opened, settled as the keeper's turn 3141 twenty
+   seconds ago, and session turn 6 has opened since: the earlier turn draws
+   under the header. The order is the feed's own; a settle folded before its
+   turn's start would take the later start into itself, since a settled
+   chunk with no session number accepts any session-numbered member. With
+   the fixture's tokens and cost the full row is 60 cells against a 58-cell
+   pane, so the age of the settle's receipt is what it gives up. *)
 let settled_earlier ?(calls = 3) ?(input = 73_877) ?(output = 358) ?(cost = 0.0258) () =
   match settled ~at:980. "sangsu" with
   | Observer.Keeper_turn_complete value ->
@@ -920,6 +923,8 @@ let earlier_turn_input ?calls ?input ?output ?cost () =
       [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
           ~correlation:"trace-sangsu" lane
       ; 980., settled_earlier ?calls ?input ?output ?cost ()
+      ; 970., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:970.
+          ~correlation:"trace-sangsu" lane
       ]
   }
 

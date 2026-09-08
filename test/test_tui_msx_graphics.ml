@@ -22,14 +22,16 @@ let frame () =
   ; msx_mode = "screen2"
   ; msx_cartridge = Some "test.rom"
   ; msx_disk = None
+  ; msx_players = []
   }
 ;;
 
-let drawn () =
+let drawn ?notice () =
   let buf = Buffer.create 65536 in
   Msx.render
     ~write:(Buffer.add_string buf)
     ~connection:Masc_tui_types.Connected
+    ?notice
     (Some (frame ()));
   Buffer.contents buf
 ;;
@@ -110,6 +112,20 @@ let test_every_other_terminal_still_gets_the_mosaic () =
     [ "iterm2", Graphics.ITerm2_protocol
     ; "a terminal that does not draw images", Graphics.Unsupported_protocol
     ]
+;;
+
+let test_checkpoint_bindings_and_result_are_visible () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    let out = drawn () in
+    check bool "footer names quick save" true (mentions ~needle:"F6: save quick" out);
+    check bool "footer names quick restore" true (mentions ~needle:"F7: restore quick" out);
+    List.iter (fun notice ->
+      let out = drawn ~notice () in
+      check bool "checkpoint outcome remains visible beside the frame" true
+        (mentions ~needle:notice out);
+      check bool "notice keeps save control visible" true (mentions ~needle:"F6: save quick" out);
+      check bool "notice keeps restore control visible" true (mentions ~needle:"F7: restore quick" out))
+      [ "Saved quick checkpoint"; "Restored quick checkpoint"; "Restore failed: no checkpoint" ])
 ;;
 
 (* Restore the cell size for the same reason [with_protocol] restores the
@@ -194,6 +210,8 @@ let () =
             test_a_graphics_terminal_gets_the_pixels
         ; test_case "every other terminal still gets the mosaic" `Quick
             test_every_other_terminal_still_gets_the_mosaic
+        ; test_case "checkpoint bindings and outcome" `Quick
+            test_checkpoint_bindings_and_result_are_visible
         ] )
     ; ( "fit"
       , [ test_case "the image is kept inside the screen" `Quick

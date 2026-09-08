@@ -258,6 +258,36 @@ let test_disk_boot_smoke () =
   | _ -> Printf.printf "not run: MSX_ROMS and MSX_DISK are unset on this host\n%!"
 ;;
 
+let test_checkpoint_roundtrip () =
+  with_workspace @@ fun base_path ->
+  let call name args = dispatch ~base_path name args in
+  let load = call "masc_msx_load" ["roms_dir", `String ""] in
+  check bool "initial machine loaded" true (is_completed load);
+  let press = call "masc_msx_press" ["keys", `List [`String "space"]; "frames", `Int 7] in
+  check bool "input recorded" true (is_completed press);
+  let before = frame_of press and ledger_before = Msx_lane.ledger () in
+  let save = call "masc_msx_save" ["slot", `String "campaign"] in
+  check bool "checkpoint saved" true (is_completed save);
+  check int "saving does not advance" before (frame_of save);
+  let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
+  let path = Filename.concat (Filename.concat dir "saves") "campaign.json" in
+  check bool "checkpoint is durable bytes" true (String.length (In_channel.with_open_bin path In_channel.input_all) > 0);
+  ignore (call "masc_msx_step" ["frames", `Int 13] : Tool_result.result);
+  ignore (call "masc_msx_eject" [] : Tool_result.result);
+  let restore = call "masc_msx_restore" ["slot", `String "campaign"] in
+  check bool "checkpoint restored after eject" true (is_completed restore);
+  check int "restored original frame" before (frame_of restore);
+  check bool "input history restored" true (Msx_lane.ledger () = ledger_before);
+  List.iter (fun slot ->
+    check bool "unsafe slot refused" true (rejected (call "masc_msx_save" ["slot", `String slot]));
+    check int "bad slot preserves machine" before (frame_of (call "masc_msx_screen" []))
+  ) [""; ".."; "../escape"; "with/slash"; "with space"];
+  Out_channel.with_open_bin path (fun oc -> output_string oc "{broken");
+  check bool "corrupt checkpoint refused" true (rejected (call "masc_msx_restore" ["slot", `String "campaign"]));
+  check int "corrupt checkpoint preserves machine" before (frame_of (call "masc_msx_screen" []));
+  check bool "corrupt checkpoint preserves ledger" true (Msx_lane.ledger () = ledger_before)
+;;
+
 let test_key_vocabulary () =
   let named =
     [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
@@ -293,6 +323,8 @@ let test_registration () =
       | [] -> fail ("missing descriptor for " ^ name)
       | _ -> fail ("duplicate descriptor for " ^ name))
     [ (Tool_schemas_misc.Misc_msx_load, "masc_msx_load", false)
+    ; (Tool_schemas_misc.Misc_msx_save, "masc_msx_save", false)
+    ; (Tool_schemas_misc.Misc_msx_restore, "masc_msx_restore", false)
     ; (Tool_schemas_misc.Misc_msx_eject, "masc_msx_eject", false)
     ; (Tool_schemas_misc.Misc_msx_screen, "masc_msx_screen", true)
     ; (Tool_schemas_misc.Misc_msx_press, "masc_msx_press", false)
@@ -389,6 +421,7 @@ let () =
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "disk image loads into the drive" `Quick test_disk_load
+        ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary

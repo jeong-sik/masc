@@ -177,12 +177,21 @@ let detail_lines row =
   ]
 
 let pad s n =
-  let len = String.length s in
-  if len >= n then s else s ^ String.make (n - len) ' '
+  (* Cells, not bytes. Model and provider names come from runtime.toml, so
+     a name outside ASCII is a configuration away, and a byte count would
+     pad it short -- every column after it shifts on that row alone. *)
+  let cells = Masc_tui_message_layout.display_width s in
+  if cells >= n then s else s ^ String.make (n - cells) ' '
 
 (* Clip on the model column only. A clipped "1638" for 16384 is a different
    number and reads as fact; a clipped name still points at the right row. *)
-let clip s n = if String.length s <= n then s else String.sub s 0 (max 0 (n - 1)) ^ "~"
+let clip s n =
+  if Masc_tui_message_layout.display_width s <= n then s
+  else
+    (* [String.sub] here cut at a byte, which splits a multi-byte scalar and
+       puts its pieces on screen. [fit_width] cuts at a cell and fills the
+       column, with the same trailing [~]. *)
+    Masc_tui_message_layout.fit_width s n
 
 let effort_width = 8
 let temperature_width = 11
@@ -191,7 +200,10 @@ let gutter = 2
 
 let render ~width rows =
   let provider_width =
-    List.fold_left (fun acc r -> max acc (String.length r.provider)) (String.length "provider") rows
+    List.fold_left
+      (fun acc r -> max acc (Masc_tui_message_layout.display_width r.provider))
+      (Masc_tui_message_layout.display_width "provider")
+      rows
   in
   let fixed =
     provider_width + gutter + effort_width + gutter + temperature_width

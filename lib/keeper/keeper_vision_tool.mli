@@ -93,9 +93,6 @@ val store_artifact
 (** Store image bytes in the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 
-(** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
-    JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
-    placeholder). *)
 (** Candidate identity and requested model come from the call configuration.
     [response_model] is the provider-reported label, not an independently
     verified model identity. It may be empty when the response supplies no model
@@ -107,6 +104,9 @@ type vision_reading =
   ; response_model : string
   }
 
+(** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
+    JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
+    placeholder). *)
 type vision_outcome =
   | Vo_ok of vision_reading
   | Vo_invalid_request of string

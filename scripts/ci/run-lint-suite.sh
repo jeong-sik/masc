@@ -87,6 +87,13 @@ blocking_lints() {
   run_lint "Dashboard tests type-checked" \
     bash scripts/lint/dashboard-tests-are-type-checked.sh
 
+  # An (executable) named test_* is linked by @check and run by nothing.
+  run_self_test_when_changed "Test suites declared as tests self-test" \
+    scripts/lint/test-suites-are-declared-as-tests.sh \
+    bash scripts/lint/test-suites-are-declared-as-tests.sh --self-test
+  run_lint "Test suites declared as tests" \
+    bash scripts/lint/test-suites-are-declared-as-tests.sh
+
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
   # "run" reports a failure the change did not cause, which is how a report

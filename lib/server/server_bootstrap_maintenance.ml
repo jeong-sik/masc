@@ -171,12 +171,17 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
    zero already reached a turn, and that turn chose to keep it (Connector
    attention takes no evidence-free Ignored label, #32114). Asking whether the
    queue is non-empty made a deliberate retention read the same as work the
-   owner has never been handed, so the minute sweep re-woke the owner for the
-   same entry without end: sangsu held a Discord attention entry at 336
-   retentions across 5.7 hours -- one wake every 61 s against a 600 s
-   cadence -- and ran 454 turns in eight hours, the most of seventeen Keepers.
-   New work does not depend on this sweep; [wakeup_keeper ~stimulus] flips the
-   hint as it enqueues. #32277 closed the same churn for board rows. *)
+   owner has never been handed, so the same entry could be re-woken with no
+   terminal condition: one Discord attention entry on sangsu reached 336
+   retentions across 5.7 hours. New work does not depend on this sweep;
+   [wakeup_keeper ~stimulus] flips the hint as it enqueues.
+
+   The scope is a redundant wake, not a Keeper's turn rate. Over one 38-minute
+   window this predicate removes 13 of 212 wake hints, and across seventeen
+   Keepers the sweep wake count does not predict the turn count (r = -0.16;
+   msb-probe took zero wakes and still ran 127 turns in eight hours, while
+   code-reviewer took a wake on 38 of 39 ticks and ran 121). Whatever paces the
+   fleet below its configured cadence is elsewhere and still unidentified. *)
 let owner_has_undelivered_durable_demand state =
   List.exists
     (fun (selection : Keeper_event_queue_state.pending_selection) ->

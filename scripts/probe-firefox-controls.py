@@ -101,7 +101,7 @@ try:
  with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
  log=open(out/'geckodriver.log','w')
  driver=subprocess.Popen([str(args.geckodriver.resolve()),'--host','127.0.0.1','--port',str(port),
-  '--binary',str(args.firefox.resolve())],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+  '--websocket-port','0','--binary',str(args.firefox.resolve())],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
  execution['driver_pgid']=driver.pid
  for _ in range(100):
   try:

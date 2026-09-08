@@ -633,7 +633,7 @@ describe('Work', () => {
         resetGoalCreateFormLocal()
       })
 
-      it('calls masc_goal_upsert with title and priority when form is submitted', async () => {
+      it('calls masc_goal_upsert with the entered success criterion and priority', async () => {
         callMcpToolMock.mockResolvedValue('ok')
 
         goals.value = []
@@ -648,6 +648,8 @@ describe('Work', () => {
         // Fill in the title
         const titleInput = screen.getByTestId('goal-create-title-input')
         fireEvent.input(titleInput, { target: { value: 'SLO 400ms 회복' } })
+        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'scheduler p99 over 24 hours' } })
+        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '400 ms or less' } })
 
         // Submit
         fireEvent.click(screen.getByTestId('goal-create-submit'))
@@ -657,6 +659,8 @@ describe('Work', () => {
 
         expect(callMcpToolMock).toHaveBeenCalledWith('masc_goal_upsert', expect.objectContaining({
           title: 'SLO 400ms 회복',
+          metric: 'scheduler p99 over 24 hours',
+          target_value: '400 ms or less',
           priority: expect.any(Number),
         }))
         // masc_goal_upsert rejects lifecycle fields; the form must not send them.

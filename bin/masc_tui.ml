@@ -13116,6 +13116,9 @@ let main
   (* The spectator draws its own screen and cannot reach this ref, so it is
      handed the same answer rather than probing again. *)
   Masc_tui_msx.set_graphics_protocol proto;
+  (* And what a cell measures, for the same reason: the spectator sizes an
+     image placement against the screen and cannot ask the terminal itself. *)
+  Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
   terminal_draws_images :=
     Some
       (match proto with

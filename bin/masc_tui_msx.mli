@@ -15,6 +15,12 @@ val set_graphics_protocol : Masc_tui_graphics.graphics_protocol -> unit
     the spectator and the image overlay cannot disagree about what the
     terminal can do. *)
 
+val set_cell_pixels : (int * int) option -> unit
+(** Tell the spectator what one character cell measures, so an image placement
+    can be sized to stay inside the screen. [None] leaves it sizing in cells
+    alone. Set once at startup from the terminal probe, for the same reason
+    {!set_graphics_protocol} is: this screen cannot reach the reader's state. *)
+
 val render : write:(string -> unit) -> Masc_tui_types.msx_frame option -> unit
 (** Draw the frame as a truecolor mosaic, or a "no machine" line when it is
     [None] or too short. Writes the whole terminal. *)

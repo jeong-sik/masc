@@ -26,12 +26,53 @@ let check_rgb label expected color =
   check (triple int int int) label expected actual
 ;;
 
+let cell_size_query = "\x1b[16t"
+
 let test_query_can_skip_only_palette () =
-  check string "graphics remains under NO_COLOR" Masc_tui_graphics.query
+  check string "graphics remains under NO_COLOR"
+    (cell_size_query ^ Masc_tui_graphics.query)
     (Masc_tui_terminal_probe.query ~palette:false);
   check string "one combined query"
-    (Masc_tui_terminal_palette.query ^ Masc_tui_graphics.query)
+    (cell_size_query ^ Masc_tui_terminal_palette.query ^ Masc_tui_graphics.query)
     (Masc_tui_terminal_probe.query ~palette:true)
+;;
+
+(* CSI 16 t is answered with CSI 6 ; height ; width t (xterm ctlseqs). The
+   width comes second, and reading the pair the other way round would size
+   every placement against a cell the wrong shape. *)
+let test_a_cell_size_reply_is_read_width_last () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:false
+      ("\x1b[6;34;15t" ^ graphics_ok)
+  in
+  check (option (pair int int)) "width 15, height 34" (Some (15, 34))
+    result.cell_pixels;
+  check string "and none of it was typed" "" result.replay
+;;
+
+(* PageDown is ESC [ 6 ~ and shares the first two bytes with the reply. It is
+   held only until the final byte says which one arrived. *)
+let test_page_down_is_not_eaten_by_the_cell_size_wait () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:false
+      ("\x1b[6~" ^ graphics_ok)
+  in
+  check (option (pair int int)) "no size was claimed" None result.cell_pixels;
+  check string "the key reached the reader whole" "\x1b[6~" result.replay
+;;
+
+(* A reply whose numbers are missing, unparseable or zero is not a cell size,
+   and a zero would divide by nothing downstream. *)
+let test_a_malformed_cell_size_is_not_a_size () =
+  List.iter
+    (fun body ->
+      let result =
+        Masc_tui_terminal_probe.decode ~palette_requested:false (body ^ graphics_ok)
+      in
+      check (option (pair int int))
+        (Printf.sprintf "%S is not a size" body)
+        None result.cell_pixels)
+    [ "\x1b[6;34t"; "\x1b[6;0;15t"; "\x1b[6;34;0t"; "\x1b[6;x;15t"; "\x1b[8;34;15t" ]
 ;;
 
 let test_palette_requires_both_slots () =
@@ -326,6 +367,14 @@ let () =
       , [ test_case "NO_COLOR skips only palette" `Quick
             test_query_can_skip_only_palette
         ; test_case "the byte cap is fixed" `Quick test_byte_cap_is_fixed
+        ] )
+    ; ( "cell size"
+      , [ test_case "a reply is read width last" `Quick
+            test_a_cell_size_reply_is_read_width_last
+        ; test_case "PageDown is not eaten" `Quick
+            test_page_down_is_not_eaten_by_the_cell_size_wait
+        ; test_case "a malformed reply is not a size" `Quick
+            test_a_malformed_cell_size_is_not_a_size
         ] )
     ; ( "palette"
       , [ test_case "both slots are required" `Quick

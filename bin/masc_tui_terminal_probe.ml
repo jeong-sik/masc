@@ -2,13 +2,22 @@ type result =
   { palette : Masc_tui_terminal_palette.t option
   ; theme_mode : Masc_tui_terminal_palette.theme_mode option
   ; graphics : Masc_tui_graphics.query_reply option
+  ; cell_pixels : (int * int) option
   ; replay : string
   }
 
 let max_bytes = 64 * 1024
 
+(* CSI 16 t asks for the character cell size; the answer is CSI 6 ; h ; w t
+   (xterm ctlseqs, XTWINOPS). It goes first because {!complete} is satisfied
+   by the graphics reply alone -- a terminal answering both in order has
+   already given the cell size by the time startup stops reading. A terminal
+   that does not answer leaves it [None] and the caller keeps its layout. *)
+let cell_size_query = "\x1b[16t"
+
 let query ~palette =
-  (if palette then Masc_tui_terminal_palette.query else "")
+  cell_size_query
+  ^ (if palette then Masc_tui_terminal_palette.query else "")
   ^ Masc_tui_graphics.query
 ;;
 
@@ -29,6 +38,11 @@ type mode =
         (** [ESC \[ ?] and onward. Only reached when the bracketed-paste
             matcher has already ruled the sequence out, so the paste path
             keeps the first claim on every byte it wants. *)
+  | Csi_window
+        (** [ESC \[ 6] and onward: the head of the cell-size reply, and also
+            of PageDown. Which one it is shows at the final byte, so the
+            sequence is held until then and replayed whole when it turns out
+            to be the key. *)
   | Apc_prefix
   | Apc of bool
   | Apc_passthrough of bool
@@ -52,6 +66,10 @@ type decoder =
             switches theme. Nothing waits on it: a terminal that answers
             neither leaves it [None]. *)
   ; mutable graphics : Masc_tui_graphics.query_reply option
+  ; mutable cell_pixels : (int * int) option
+        (** Width and height of one character cell, as the terminal
+            reported them. Nothing waits on it: a terminal that does not
+            answer CSI 16 t leaves it [None]. *)
   }
 
 let create ~palette_requested =
@@ -66,6 +84,7 @@ let create ~palette_requested =
       Array.make Masc_tui_terminal_palette.ansi_slot_count None
   ; theme_mode = None
   ; graphics = None
+  ; cell_pixels = None
   }
 ;;
 
@@ -114,6 +133,42 @@ let private_parameter_marker = '?'
    anything else ending here is a sequence this did not ask for. *)
 let is_csi_final byte = byte >= '\x40' && byte <= '\x7e'
 let theme_mode_final = 'n'
+
+let window_report_final = 't'
+let cell_size_report_code = "6"
+
+(* [6;h;w] from a CSI whose final byte is [t]. Anything else -- another report
+   code, a missing field, a non-number -- is not this reply. *)
+let parse_cell_size body =
+  match String.split_on_char ';' body with
+  | [ code; height; width ] when String.equal code cell_size_report_code ->
+    (match (int_of_string_opt width, int_of_string_opt height) with
+     | Some width, Some height when width > 0 && height > 0 -> Some (width, height)
+     | _ -> None)
+  | _ -> None
+;;
+
+let finish_csi_window decoder =
+  let sequence = Buffer.contents decoder.pending in
+  let length = String.length sequence in
+  let size =
+    if length > csi_introducer_length
+       && Char.equal sequence.[length - 1] window_report_final
+    then
+      parse_cell_size
+        (String.sub sequence csi_introducer_length
+           (length - csi_introducer_length - 1))
+    else None
+  in
+  (match size with
+   | Some size -> if Option.is_none decoder.cell_pixels then decoder.cell_pixels <- Some size
+   | None ->
+     (* PageDown, or a report this did not ask for. It was held while it might
+        have been the reply, so it goes on whole rather than being dropped. *)
+     flush_pending decoder);
+  Buffer.clear decoder.pending;
+  decoder.mode <- Normal
+;;
 
 let finish_csi_private decoder =
   let sequence = Buffer.contents decoder.pending in
@@ -215,6 +270,17 @@ let rec feed decoder byte =
     end
     else if
       matched = csi_introducer_length
+      && Char.equal byte cell_size_report_code.[0]
+      && Option.is_none decoder.cell_pixels
+    then begin
+      (* [ESC \[ 6] heads the cell-size reply and also PageDown. Held until
+         the final byte tells them apart; once the size is known this stops
+         claiming the sequence, so the key is never delayed again. *)
+      Buffer.add_char decoder.pending byte;
+      decoder.mode <- Csi_window
+    end
+    else if
+      matched = csi_introducer_length
       && Char.equal byte private_parameter_marker
       && decoder.palette_requested
     then begin
@@ -229,6 +295,13 @@ let rec feed decoder byte =
       flush_pending decoder;
       decoder.mode <- Normal;
       feed decoder byte
+    end
+  | Csi_window ->
+    Buffer.add_char decoder.pending byte;
+    if is_csi_final byte then finish_csi_window decoder
+    else if Buffer.length decoder.pending > response_max_bytes then begin
+      flush_pending decoder;
+      decoder.mode <- Normal
     end
   | Csi_private ->
     Buffer.add_char decoder.pending byte;
@@ -313,6 +386,7 @@ let snapshot decoder =
   { palette = palette decoder
   ; theme_mode = decoder.theme_mode
   ; graphics = decoder.graphics
+  ; cell_pixels = decoder.cell_pixels
   ; replay = unread_replay decoder
   }
 ;;
@@ -354,8 +428,8 @@ let rec next decoder ~next_raw =
            the end of it. [Csi_private] holds with them: the reply's final
            byte may be in the next read. *)
         | Normal | Paste_prefix _ | Paste _ | Osc_candidate _
-        | Osc_passthrough _ | Csi_private | Apc_prefix | Apc _
-        | Apc_passthrough _ ->
+        | Osc_passthrough _ | Csi_private | Csi_window | Apc_prefix
+        | Apc _ | Apc_passthrough _ ->
           None)
      | Some byte ->
        feed decoder byte;
@@ -370,8 +444,8 @@ let finish decoder =
    (* These are holding bytes that turned out not to be the sequence they
       might have been, and the reader typed them. [Csi_private] among them:
       an unfinished reply is the reader's input, not ours to swallow. *)
-   | Escape | Paste_prefix _ | Osc_candidate _ | Csi_private | Apc_prefix
-   | Apc _ ->
+   | Escape | Paste_prefix _ | Osc_candidate _ | Csi_private | Csi_window
+   | Apc_prefix | Apc _ ->
      flush_pending decoder);
   decoder.mode <- Normal;
   snapshot decoder

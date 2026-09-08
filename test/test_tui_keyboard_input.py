@@ -3621,7 +3621,10 @@ def open_loaded_planning(
         timeout=3.0,
     )
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Approvals")
+    # No Approvals waypoint here. Masc_tui_types.is_surface_active keeps that
+    # surface off the ring while there is nothing pending, and these fixtures
+    # seed nothing, so the walk burned every key on a screen that does not
+    # exist. The walk to Board passes wherever Approvals would have been.
     tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (0)"))
     tab_until(process, master_fd, output, b"plan-alpha-29424")
 
@@ -3730,10 +3733,17 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
-    send_and_wait(process, master_fd, output, b"f", b"show:active")
-    empty = send_and_wait(
-        process, master_fd, output, b"f", b"no goals in this filter"
-    )
+    # One press, not two. The pane opens on Planning_filter_active, so the
+    # first press lands on completed, which these fixtures leave empty --
+    # the note this step is about is already on that screen. The old pair
+    # was written for a default of Planning_filter_all: it waited for
+    # "show:active", the filter the pane had just left, and then for a note
+    # that a second press had already carried past.
+    empty = send_and_wait(process, master_fd, output, b"f", b"show:completed")
+    if b"no goals in this filter" not in CSI_RE.sub(b"", empty):
+        raise AssertionError(
+            f"the empty filter drew no note: {empty!r}"
+        )
     if frame_row_of(empty, b"no goals in this filter") >= terminal_rows - 2:
         raise AssertionError(f"Planning empty note overflowed: {empty!r}")
     os.write(master_fd, b"q")

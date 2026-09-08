@@ -39,3 +39,9 @@ Use an available checkpoint before an uncertain irreversible decision and at mea
 On an unexpected result, retain the last good checkpoint and the failing input/observation. Try a different action only with a new hypothesis or evidence. A transport timeout does not prove the action failed: observe the destination before repeating a write. If another participant could have acted, the resulting screen alone does not attribute the change to your timed-out call; use an available caller-tagged receipt or action history, otherwise leave attribution unresolved. Empty polling and repeated blind input are not progress.
 
 For a game, distinguish a menu, a completed turn, defeat, an observer-only ending and the player's requested victory. Report the outcome that was actually observed.
+
+## Isolate a failed action
+
+Preserve the failing state before recovery when a snapshot tool is available. Keep it separate from the last known good state. In an isolated session, replay the accepted actions from that same good state, then compare a second run that omits only the suspected action. Preserve both input lists, source identity and resulting observations. Rejected calls are not accepted actions; verify replay tools actually consumed the expected events and reached the intended final state before comparing outcomes.
+
+A different result supports the suspected action's involvement in that sequence. It does not establish a universal cause or prove the entire workflow is fixed. Record both the demonstrated boundary and remaining uncertainty. Do not use values observed after corruption as progress evidence until a coherent state is independently confirmed.

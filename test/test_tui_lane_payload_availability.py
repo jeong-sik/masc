@@ -58,7 +58,9 @@ def run(executable: str, scenario: str) -> None:
 
     def interact(process, master, _slave, output, _base):
         h.palette_go(process, master, output, b"go lanes", b"Board Attention")
-        h.send_and_wait(process, master, output, b"\r", run_id.encode())
+        # Summary IDs are abbreviated to fit their column; the exact detail
+        # request and the full detail frame below establish run identity.
+        h.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained \xc2\xb7 end")
         h.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7 PROMPT PAYLOAD")
         h.read_available(master, output)
         before = len(output)

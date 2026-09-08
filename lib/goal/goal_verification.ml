@@ -442,6 +442,68 @@ let get_record config ~goal_id : (record option, string) result =
 let ledger_error_to_yojson detail =
   `Assoc [ "state", `String "ledger_error"; "detail", `String detail ]
 
+type reopen_outcome =
+  | Proof_unchanged of record option
+  | Proof_reset of record
+
+let archive_reopened_proof config ~goal_id ~actor ~at verdict =
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  try
+    Fs_compat.append_jsonl path
+      (`Assoc
+        [ "ts", `String at
+        ; "goal_id", `String goal_id
+        ; "event_type", `String "goal_proof_reopened"
+        ; "payload", `Assoc
+            [ "phase", Goal_phase.to_yojson Goal_phase.Executing
+            ; "actor", `String actor
+            ; "previous_verdict", verdict_to_yojson verdict
+            ]
+        ]);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+    Error (Printf.sprintf "could not preserve reopened Goal proof: %s" (Printexc.to_string exn))
+;;
+
+let reset_reopened_proof config ~goal_id ~actor =
+  Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
+    let path = verifications_path config in
+    let* state =
+      if Workspace_utils.path_exists config path then
+        let* json = Workspace_utils.read_json_result config path in
+        state_of_yojson json
+      else if Workspace_utils.path_exists config (verifications_recovery_path config) then
+        Error "goal_verification: primary ledger is missing while its recovery mirror exists"
+      else Ok (default_state ())
+    in
+    let* goal = Goal_store.get_goal_result config ~goal_id in
+    let* goal = Option.to_result ~none:"goal not found during proof reset" goal in
+    let current = find_record state.records goal_id in
+    (* Creating a pending proof takes this same ledger lock. A request
+       that already published its pending proof is preserved even if its
+       subsequent phase write has not finished. This read takes no goals
+       lock, so the reset adds no reverse lock order. *)
+    match goal.Goal_store.phase, current with
+    | Goal_phase.Executing,
+      Some ({ completion = Proof_proven verdict | Proof_refuted verdict; _ } as record) ->
+      let now = Masc_domain.now_iso () in
+      let* () = archive_reopened_proof config ~goal_id ~actor ~at:now verdict in
+      let updated = { record with completion = Completion_idle; updated_at = now } in
+      let next =
+        { version = state.version + 1
+        ; updated_at = now
+        ; records = replace_record state.records updated
+        }
+      in
+      let* () = write_state_result config next in
+      Ok (goal, Proof_reset updated)
+    | Goal_phase.Executing, (None | Some { completion = Completion_idle | Proof_pending _; _ })
+    | (Goal_phase.Verifying | Goal_phase.Completed | Goal_phase.Dropped), _ ->
+      Ok (goal, Proof_unchanged current))
+;;
+
 (* {1 Durable proof request (RFC-0387 §4.1)}
 
    [mark_proof_pending] runs before the phase enters [Verifying], so the

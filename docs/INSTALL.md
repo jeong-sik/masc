@@ -293,8 +293,14 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 
 공개된 0.34.0 바이너리는 Keeper 를 만들지 않고 내장 스킬 `browser-lanes`만
 준비합니다. 그 뒤의 `main` 소스 빌드와 다음 릴리스는 **자동 시작하지 않는
-Keeper `imp` 1명**을 함께 준비합니다. 모델과 샌드박스를 설정한 뒤 Keeper를
-시작하세요.
+Keeper `imp` 1명**과 내장 스킬 `browser-lanes`, `browser-design`,
+`frontend-implement`, `frontend-verify`, `evidence-review`를 함께 준비합니다.
+모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
+
+Task·Goal 검증 에이전트도 workspace에 게시된 instruction Skill을
+`keeper_skill`로 읽을 수 있습니다. 기본 `evidence-review`는 계약·실행 로그·리비전을
+대조하는 절차를 안내합니다. Skill은 조회 방법을 제공하며 새 도구나 실행 권한을
+부여하지 않습니다. 설치된 Skill이 없으면 기존 증거 조회로 검증을 이어갑니다.
 
 프롬프트는 다음 세 곳만 구분하면 됩니다.
 

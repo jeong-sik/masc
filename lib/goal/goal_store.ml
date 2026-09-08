@@ -326,6 +326,12 @@ let update_state config f =
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
 
+let get_goal_result config ~goal_id =
+  let path = goals_path config in
+  let* json = Workspace_utils.read_json_result config path in
+  let* state = state_of_yojson json in
+  Ok (find_goal state.goals goal_id)
+
 type conditional_update =
   | Goal_updated of goal
   | Goal_phase_mismatch of Goal_phase.t

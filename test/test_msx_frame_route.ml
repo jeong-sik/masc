@@ -20,7 +20,7 @@ let with_tick_machine f =
       Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
       Unix.rmdir dir)
     (fun () ->
-      (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None with
+      (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
        | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
       f ())
 
@@ -77,7 +77,7 @@ let () =
             check bool "no pixels when unloaded" true (member "rgb_base64" j = None))
         ; test_case "a loaded machine yields a decodable frame" `Quick (fun () ->
             let dir = Filename.temp_dir "msx-frame-route-" "" in
-            (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None with
+            (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
              | Ok _ -> ()
              | Error e -> fail (Lane.error_to_string e));
             let j = Route.frame_json () in
@@ -99,7 +99,7 @@ let () =
     ; ( "press_json"
       , [ test_case "press result carries ok and the new frame" `Quick (fun () ->
             let dir = Filename.temp_dir "msx-press-route-" "" in
-            (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None with
+            (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
              | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
             (match Lane.press ~who:"operator" ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
                      ~hold_frames:2 ~step_frames:6 with

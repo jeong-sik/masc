@@ -3101,6 +3101,7 @@ type msx_frame = {
   msx_rgb : string;
   msx_mode : string;
   msx_cartridge : string option;
+  msx_disk : string option;
 }
 
 type state = {

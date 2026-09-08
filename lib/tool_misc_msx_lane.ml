@@ -1,8 +1,10 @@
 (** MSX lane tools (RFC-0439 §3.5; increment §6.1, turn-based only).
 
-    [masc_msx_load] plugs a cartridge into the workspace machine,
-    [masc_msx_screen] reads it, [masc_msx_press] and [masc_msx_step] move
-    its time, [masc_msx_eject] ends it. The machine is {!Msx_lane}'s: one per
+    [masc_msx_load] plugs a game into the workspace machine — a cartridge ROM
+    or a raw .dsk floppy image (same [cart] argument; a name ending in .dsk
+    goes to the drive, anything else to the slot) — [masc_msx_screen] reads
+    the machine, [masc_msx_press] and [masc_msx_step] move its time,
+    [masc_msx_eject] ends it. The machine is {!Msx_lane}'s: one per
     workspace, in this process, shared by every caller. The observation is
     text first — mode, name table, sprite table — because a keeper without a
     vision runtime cannot read pixels (RFC-0414). *)
@@ -28,6 +30,7 @@ let observation_fields (o : Msx_lane.observation) =
   ; ("pc", `String (Printf.sprintf "%04x" o.pc))
   ; ("halted", `Bool o.halted)
   ; ("cartridge", match o.cartridge with Some c -> `String c | None -> `Null)
+  ; ("disk", match o.disk with Some d -> `String d | None -> `Null)
   ; ("screen_text", `String o.screen_text)
   ; ("tiles", `List (List.map (fun row -> `String row) o.tiles))
   ; ("sprites", `List (List.map sprite o.sprites))
@@ -84,13 +87,17 @@ let resolve_roms_dir ~base_path args =
   | dir -> dir
 ;;
 
-(* A cart is a path that exists, or a name (with or without .rom) in carts/. *)
+(* A cart is a path that exists, or a name (with or without .rom/.dsk) in
+   carts/. A .dsk image resolves the same way and loads into the drive — the
+   inventory holds game media, whatever the medium is. *)
 let resolve_cart ~base_path name =
   let trimmed = String.trim name in
   if Sys.file_exists trimmed && not (Sys.is_directory trimmed) then Ok trimmed
   else begin
     let dir = carts_dir ~base_path in
-    let candidates = [ trimmed; trimmed ^ ".rom"; trimmed ^ ".ROM" ] in
+    let candidates =
+      [ trimmed; trimmed ^ ".rom"; trimmed ^ ".ROM"; trimmed ^ ".dsk"; trimmed ^ ".DSK" ]
+    in
     match
       List.find_opt
         (fun c -> Sys.file_exists (Filename.concat dir c))
@@ -102,7 +109,8 @@ let resolve_cart ~base_path name =
         (match carts_available ~base_path with
          | [] ->
            Printf.sprintf
-             "unknown cartridge %S and the inventory %s is empty: put ROM images there or pass a path"
+             "unknown cartridge %S and the inventory %s is empty: put ROM or .dsk images \
+              there or pass a path"
              trimmed dir
          | names ->
            Printf.sprintf "unknown cartridge %S; available: %s" trimmed
@@ -110,18 +118,30 @@ let resolve_cart ~base_path name =
   end
 ;;
 
+(* Case-insensitive .dsk — the extension picks the drive over the slot. *)
+let is_dsk_path path =
+  let lower = String.lowercase_ascii path in
+  String.length lower >= 4
+  && String.sub lower (String.length lower - 4) 4 = ".dsk"
+;;
+
 let handle_load ~tool_name ~start_time ~base_path args =
   let roms_dir = resolve_roms_dir ~base_path args in
-  let cart =
+  let media =
     match get_string_opt args "cart" with
     | Some n when String.trim n <> "" -> Some (resolve_cart ~base_path n)
     | Some _ | None -> None
   in
-  match cart with
+  match media with
   | Some (Error message) -> reject ~tool_name ~start_time message
+  | Some (Ok path) when is_dsk_path path ->
+    of_lane ~tool_name ~start_time
+      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+         ~cart_path:None ~disk_path:(Some path))
   | Some (Ok path) ->
     of_lane ~tool_name ~start_time
-      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir ~cart_path:(Some path))
+      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+         ~cart_path:(Some path) ~disk_path:None)
   | None ->
     (* BIOS only, and the inventory so the next call can name a game. *)
     of_lane ~tool_name ~start_time
@@ -130,7 +150,8 @@ let handle_load ~tool_name ~start_time ~base_path args =
           , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
         ; ("bios", `Bool (roms_dir <> ""))
         ]
-      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir ~cart_path:None)
+      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+         ~cart_path:None ~disk_path:None)
 ;;
 
 let handle_eject ~tool_name ~start_time _args =

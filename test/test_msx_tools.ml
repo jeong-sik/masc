@@ -178,6 +178,47 @@ let test_inventory () =
      has "hero.rom" && has "big")
 ;;
 
+(* A .dsk image resolves in the same inventory and lands in the drive: the
+   observation names it under "disk" with no cartridge (the interface ROM the
+   core rides in the slot takes it), and a ROM-less load still completes —
+   the image is synthetic, no BIOS is around to boot it. *)
+let test_disk_load () =
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  List.iter (fun d -> if not (Sys.file_exists d) then Sys.mkdir d 0o755)
+    [ Filename.concat base_path ".masc"; Filename.dirname carts; carts ];
+  Out_channel.with_open_bin (Filename.concat carts "war.dsk") (fun oc ->
+    output_string oc (String.make (720 * 1024) '\xf9'));
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "war") ] in
+  check bool "a name ending in .dsk resolves and loads" true (is_completed r);
+  check (option string) "the disk is named under disk" (Some "war.dsk")
+    (match member "disk" (Tool_result.data r) with Some (`String s) -> Some s | _ -> None);
+  check (option string) "no cartridge is claimed while a disk runs" None
+    (match member "cartridge" (Tool_result.data r) with Some (`String s) -> Some s | _ -> None);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "war.dsk") ] in
+  check bool "the full file name resolves too" true (is_completed r)
+;;
+
+(* With a BIOS and a real .dsk on this host, the boot chain runs: the machine
+   keeps stepping and the clock advances frame by frame. CI has no ROM images
+   (they are not in the repository), so without MSX_ROMS and MSX_DISK this
+   case records that it did not run instead of pretending to. *)
+let test_disk_boot_smoke () =
+  match Sys.getenv_opt "MSX_ROMS", Sys.getenv_opt "MSX_DISK" with
+  | Some roms, Some disk when roms <> "" && disk <> "" ->
+    with_workspace @@ fun base_path ->
+    let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String roms); ("cart", `String disk) ] in
+    check bool "load with a BIOS and a disk completes" true (is_completed r);
+    let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 300) ] in
+    check bool "the machine steps past the boot" true (is_completed r);
+    check int "the clock is boot plus the step" (Msx_lane.boot_frames + 300) (frame_of r);
+    (* HALT is a normal VSync wait mid-boot, not a fault — the smoke's claim
+       is that the chain keeps observing a named mode. *)
+    check bool "a display mode is named" true
+      (match member "mode" (Tool_result.data r) with Some (`String m) -> String.length m > 0 | _ -> false)
+  | _ -> Printf.printf "not run: MSX_ROMS and MSX_DISK are unset on this host\n%!"
+;;
+
 let test_key_vocabulary () =
   let named =
     [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
@@ -308,6 +349,8 @@ let () =
         ; test_case "press writes the ledger" `Quick test_press_ledger
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "cartridge inventory" `Quick test_inventory
+        ; test_case "disk image loads into the drive" `Quick test_disk_load
+        ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "registration" `Quick test_registration
         ; test_case "xspelunker: two presses reach the level card" `Quick

@@ -8,13 +8,15 @@
 
 open Alcotest
 
-let a_frame ?(cartridge = Some "xspelunker") () : Masc_tui_types.msx_frame =
+let a_frame ?(cartridge = Some "xspelunker") ?(disk = None) () :
+    Masc_tui_types.msx_frame =
   { msx_number = 345
   ; msx_width = 256
   ; msx_height = 192
   ; msx_rgb = String.make (256 * 192 * 3) '\128'
   ; msx_mode = "GRAPHIC2"
   ; msx_cartridge = cartridge
+  ; msx_disk = disk
   }
 
 let a_state () =

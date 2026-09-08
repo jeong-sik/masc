@@ -11,10 +11,11 @@ The bundle includes:
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
   - dashboard read-path captures for briefing + project snapshot
-  - Keeper V01-V15 compile/regression conformance logs + correlated bundle
+  - verified Keeper V01-V15 compile/regression conformance receipt
   - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
-Raw files are written next to OUTPUT_MARKDOWN.
+Only the Markdown report is written next to release artifacts.
+Raw captures and lifecycle logs stay in private temporary storage and are removed on exit.
 EOF
 }
 
@@ -87,7 +88,6 @@ install_version_stdout="$scratch_dir/install-version.stdout"
 install_version_stderr="$scratch_dir/install-version.stderr"
 lifecycle_dir="$scratch_dir/keeper-full-lifecycle"
 lifecycle_bundle_json="$lifecycle_dir/bundle.json"
-lifecycle_bundle_md="$lifecycle_dir/bundle.md"
 
 stop_server() {
   if [[ -n "${SERVER_PID:-}" ]]; then
@@ -394,8 +394,7 @@ python3 - \
   "$project_snapshot_json" \
   "$initialize_json" \
   "$server_log" \
-  "$lifecycle_bundle_json" \
-  "$lifecycle_bundle_md" <<'PY'
+  "$lifecycle_bundle_json" <<'PY'
 import json
 import pathlib
 import sys
@@ -417,7 +416,6 @@ from datetime import datetime, timezone
     initialize_json,
     server_log,
     lifecycle_bundle_json,
-    lifecycle_bundle_md,
 ) = sys.argv[1:]
 
 def load(path):
@@ -490,23 +488,11 @@ md = f"""# Release Evidence Bundle
 - Source SHA: `{lifecycle.get("source_sha", "<missing>")}`
 - Correlation bundle: `{lifecycle.get("bundle_id", "<missing>")}`
 - Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
-- Human-readable matrix: `{pathlib.Path(lifecycle_bundle_md).resolve().relative_to(pathlib.Path(outfile).resolve().parent)}`
+- Verification: source SHA, scenario results, log digests, and correlation bundle were verified before this receipt was rendered.
 
 ## Raw Captures
 
-- `install-version.stdout`
-- `install-version.stderr`
-- `health.json`
-- `initialize.headers`
-- `initialize.json`
-- `tools-list.json`
-- `masc-status.json`
-- `dashboard-briefing.json`
-- `project-snapshot.json`
-- `server.log`
-- `keeper-full-lifecycle/bundle.json`
-- `keeper-full-lifecycle/bundle.md`
-- `keeper-full-lifecycle/v01-*.log` through `v15-*.log`
+Raw HTTP captures, authentication material, server logs, and lifecycle bundle files remain in private temporary storage and are removed on exit. They are not release attachments. The verified lifecycle receipt above is retained in this report.
 
 ## Re-run
 

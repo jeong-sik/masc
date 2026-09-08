@@ -13313,6 +13313,75 @@ def run_browser_client_picker_regression(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
+def run_browser_scene_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    target = {"lane": "live", "clientId": client, "tabId": 2}
+    url = "https://example.org/scene"
+    scenes, actions = [], []
+
+    def node(identity, kind, text):
+        result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
+            "text": text, "rects": [{"x": 0, "y": 0, "width": 100, "height": 20}],
+            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal"}
+        if kind == "control":
+            result.update(clickable=True, editable=False, disabled=False)
+        return result
+
+    def read(_body):
+        return 200, {"ok": True, "data": {"source": "live", "clientId": client,
+            "elapsed_ms": 12.5, "tabs": [{"id": 2, "title": "scene", "url": url, "active": True}],
+            "page": {"tabId": 2, "title": "scene", "url": url,
+                "text": "scene reader ready", "chars": 18, "truncated": False}}}
+
+    def scene(body):
+        request = json.loads(body)
+        scenes.append(request)
+        assert request == target, "scene read lost client/tab ownership"
+        changed = bool(actions)
+        return 200, {"ok": True, "data": {"source": "live", "clientId": client,
+            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1",
+            "documentId": "document-after" if changed else "document-before",
+            "url": url, "title": "scene", "truncated": False,
+            "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0},
+            "nodes": [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
+                node("first-control", "control", "First action"),
+                node("second-control", "control", "Second action"),
+                node("image", "raster", "Scene illustration")]}}
+
+    def click(body):
+        request = json.loads(body)
+        assert request == dict(target, action="click", documentId="document-before",
+            nodeId="second-control", expectedUrl=url), "click lost the selected observed reference"
+        actions.append(request)
+        return 200, {"ok": True, "data": {"clicked": True}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
+        "data": {"clients": [{"clientId": client, "browser": "zen"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/scene"] = RequestHttpResponse(scene)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(click)
+
+    def interact(process, master, _slave, output, _base):
+        palette_go(process, master, output, b"go Browser Lane", b"scene reader ready")
+        frame = send_and_wait(process, master, output, b"s", b"SCENE BEFORE CLICK")
+        visible = screen_text(frame)
+        for text in (b"[>1 button/link] First action", b"[2 button/link] Second action",
+                     "[image · Ctrl-O] Scene illustration".encode()):
+            assert text in visible, f"scene projection missing {text!r}"
+        send_and_wait(process, master, output, b"n", b"[>2 button/link] Second action")
+        send_and_wait(process, master, output, b"p", b"[>1 button/link] First action")
+        send_and_wait(process, master, output, b"n", b"[>2 button/link] Second action")
+        assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
+        send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
+        assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
+        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        os.write(master, b"q")
+
+    run_terminal_scenario(executable, description="Browser scene text, selection and observed click refresh",
+        interact=interact, http_fixtures=fixtures)
+
+
 def run_browser_viewport_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
@@ -14513,6 +14582,10 @@ def run_fusion_history_regression(executable: str) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[2] == "browser-scene":
+        run_browser_scene_regression(os.path.abspath(sys.argv[1]))
+        print("tui Browser scene regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "fusion-history":
         run_fusion_history_regression(os.path.abspath(sys.argv[1]))
         print("tui historical Fusion inspection: PASS")

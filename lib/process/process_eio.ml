@@ -754,46 +754,29 @@ let rec discard_to_eof r chunk =
   | 0 -> ()
   | _ -> discard_to_eof r chunk
 
-(* The cancellation path's stand-in for awaiting the exit status.
-
-   [Eio.Process.await] is not usable here: the daemon that resolves it lives in
-   the switch being cancelled and is already gone, so the await would never
-   return. Reaping the child directly is not usable either: the switch release
-   hook that follows signals and waitpids the pid it was given, and a pid this
-   side has already reaped is somebody else's by then.
-
-   What this side still holds is the read end of every pipe it gave the child.
-   A write end closes when its holder exits, so EOF on all of them is the
-   child -- and anything it handed the pipe to -- being gone, observed without
-   touching the exit status. That is the wait, bounded by the same grace the
-   ordinary reap gives. A child that was given no pipe (both streams
-   redirected to files) has nothing to observe and gets no wait, as before.
-
-   A source that reached EOF before the cancellation is already closed, which
-   Eio reports as [Invalid_argument]; that is the answer this is waiting for,
-   not a failure. *)
+(* Cancellation has stopped the owning switch's reap daemon. Neither EOF
+   nor absence of capture pipes proves the child exited: it may close its
+   streams before finishing a TERM handler. Keep the existing TERM grace
+   independently of pipe lifetime, without awaiting the cancelled daemon or
+   reaping the PID owned by the switch release hook. Only this cancellation
+   path pays the full grace; an observed successful exit never enters it. *)
 let wait_for_child_to_let_go ~clock sources =
-  match sources with
-  | [] -> ()
-  | sources ->
-    let chunk = Cstruct.create drain_chunk_size in
-    (match
-       Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
-         List.iter
-           (fun (label, r) ->
-              try discard_to_eof r chunk with
-              | Eio.Io _ | Invalid_argument _ ->
-                Log.Misc.debug
-                  "[Process_eio] %s was already gone while waiting out the cancellation grace"
-                  label)
-           sources;
-         Ok ())
-     with
-     | Ok () -> ()
-     | Error `Timeout ->
-       Log.Misc.debug
-         "[Process_eio] child kept its pipes open for %.1fs after SIGTERM; SIGKILL follows"
-         child_exit_grace_seconds)
+  let chunk = Cstruct.create drain_chunk_size in
+  match
+    Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
+      List.iter
+        (fun (label, r) ->
+           try discard_to_eof r chunk with
+           | Eio.Io _ | Invalid_argument _ ->
+             Log.Misc.debug
+               "[Process_eio] %s unavailable during cancellation grace"
+               label)
+        sources;
+      (* EOF releases a stream, not ownership of the child. *)
+      Eio.Fiber.await_cancel ())
+  with
+  | Error `Timeout -> ()
+  | Ok () -> assert false
 
 (* Runs in the [Fun.protect] finalizer of every spawn helper, so it sees three
    states: the child exited and [status] is set; the body raised and the child
@@ -802,15 +785,14 @@ let wait_for_child_to_let_go ~clock sources =
    [sinks] are this side's write ends (stdin) and close first, so a child
    blocked on its input sees EOF before it is asked to stop. [sources] are the
    read ends; on the cancellation path they are what the grace is waited out
-   on, so they close last there. *)
+   on while preserving the full grace, so they close last there. *)
 let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
   (* Two ways to get here with no status. This fiber was cancelled while [sw]
      lives on: the timeout race in [with_explicit_timeout_exn], where the
      daemon that resolves [await] is a fiber of [sw] and still running, so
      the child is reaped the ordinary way. Or [sw] itself is off: a stop
      request, where that daemon is gone, awaiting it would deadlock the switch
-     before its release hook can reap the child, and the child releasing its
-     pipes is the only exit observation left. Reading this fiber's own
+     before its release hook can reap the child, and pipe closure cannot establish that the child exited. Reading this fiber's own
      cancellation as the switch's sent every exec timeout down the second
      path, and a 0.2s budget returned when the child's orphaned grandchild
      closed the pipe two seconds later (#33182). Record the switch's state

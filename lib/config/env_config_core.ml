@@ -541,7 +541,9 @@ let data_dir_env_key = "MASC_DATA_DIR"
 (** SSOT for auth env-var names (issue 8352). *)
 let admin_token_env_key = "MASC_ADMIN_TOKEN"
 
-(** Admin token for privileged endpoints. None = admin auth disabled. *)
+(** Optional startup input for the stored Admin credential. When absent,
+    startup attempts to mint a token; this does not disable HTTP auth.
+    Requests resolve their bearer against the credential store. *)
 let admin_token_opt () =
   raw_value_opt admin_token_env_key |> trim_opt
 

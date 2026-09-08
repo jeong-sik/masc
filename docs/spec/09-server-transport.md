@@ -456,7 +456,21 @@ let make_routes ~port ~host:_ ~sw ~clock =
 
 ### 7.5 Admin 인증
 
-`MASC_ADMIN_TOKEN` 환경변수로 admin-only API를 보호한다. 토큰 비교는 검증된 Eqaf의 timing-resistant equality에 위임한다.
+Admin 전용 HTTP 경로는 `with_token_permission_auth ~permission:CanAdmin`으로
+보호한다. Workspace auth가 enabled이고 `require_token=true`여야 하며,
+요청의 bearer를 저장된 credential로 해석한 뒤 그 role의 권한을 검사한다.
+요청마다 환경변수 값과 직접 비교하는 방식이 아니다
+(`Server_auth.authorize_token_bound_permission_request`).
+
+`MASC_ADMIN_TOKEN`은 서버 시작 시 credential 동기화 입력이다. 값이 있으면
+초기 admin 신원에 그 토큰을 Admin credential로 저장하고, 없으면 Admin
+토큰 발급을 시도한다. 미설정은 인증 비활성화를 뜻하지 않는다. 동기화·발급
+실패는 시작 로그에 남는다 (`Server_runtime_startup_credentials.sync_admin_token_env`).
+
+운영자 bearer 발급과 클라이언트 연결은
+[Local Dashboard Auth Runbook](../LOCAL-DASHBOARD-AUTH-RUNBOOK.md)을 따른다.
+`login --client-env VAR`는 발급된 토큰을 클라이언트가 읽을 환경변수 이름을
+선택하며, 서버의 요청 인증 방식을 변경하지 않는다.
 
 ### 7.6 CORS
 
@@ -729,7 +743,7 @@ sequenceDiagram
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
 | `MASC_HTTP_AUTH_STRICT` | non-loopback시 자동 | MCP 경로 토큰 인증 강제 |
-| `MASC_ADMIN_TOKEN` | (미설정) | Admin API 토큰 |
+| `MASC_ADMIN_TOKEN` | 미설정 시 시작 단계에서 발급 시도 | 초기 Admin credential 동기화 입력 (§7.5); 요청은 저장된 bearer 신원·권한으로 검증 |
 
 ### 15.4 SSE 설정
 
@@ -779,13 +793,13 @@ sequenceDiagram
 
 **INV-SERVER-008**: Non-loopback bind 시 `MASC_HTTP_AUTH_STRICT`가 자동 활성화되어, 토큰 없는 MCP 접근을 차단한다.
 
-**INV-SERVER-009**: 토큰 저장은 SHA256 해시만. Raw token은 `create_token` 반환 시 한 번만 노출되고 서버에 저장되지 않는다.
+**INV-SERVER-009**: Credential 검증 레코드는 토큰의 SHA256 해시를 저장한다. `login`과 file-backed credential 경로는 클라이언트가 읽을 raw token을 별도 private 파일에도 저장하므로, 그 파일과 bearer가 포함된 URL·출력은 비밀로 취급한다.
 
 **INV-SERVER-010**: WebSocket/gRPC는 `Sse.subscribe_external`로 broadcast를 수신한다. SSE 레지스트리와 독립적인 세션 관리를 유지하면서 이벤트 통합은 external subscriber hook으로 달성한다.
 
 **INV-SERVER-011**: SIGTERM/SIGINT 수신 시 5초 내 graceful shutdown. 타임아웃 초과 시 `exit 1`. Shutdown notification이 모든 SSE 클라이언트에 broadcast된 후 종료한다.
 
-**INV-SERVER-012**: Admin API는 `MASC_ADMIN_TOKEN`과의 비교를 `with_admin_auth`에서 Eqaf의 timing-resistant equality에 위임한다.
+**INV-SERVER-012**: Admin 전용 HTTP 경로는 workspace auth enabled·`require_token=true`와 유효한 저장된 bearer credential의 `CanAdmin` 권한을 요구한다. `MASC_ADMIN_TOKEN` 미설정은 이 검증을 해제하지 않는다.
 
 ---
 

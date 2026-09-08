@@ -894,7 +894,7 @@ let prepare_microvm_shim_dir (t : t) =
   | exception Unix.Unix_error (code, _, _) ->
     Error
       (Printf.sprintf
-         "microvm_shim_missing: %s (%s); rerun the installer for the same MASC release and base path with --guest-shim to install the architecture-matched Linux guest shim and SHA256 sidecar"
+         "microvm_shim_missing: %s (%s); rerun the installer for the same MASC release and base path without --no-guest-shim to install the architecture-matched Linux guest shim and SHA256 sidecar"
          binary
          (Unix.error_message code))
   | () ->

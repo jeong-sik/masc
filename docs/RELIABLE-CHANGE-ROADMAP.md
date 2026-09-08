@@ -53,7 +53,8 @@ Goal 완료 요청은 원시 증거를 보존한 뒤 verifier에 제출한다. �
 
 ## G1 — 요청부터 검증 결과까지 측정이 끊기지 않는다
 
-Runtime Goal ID: `goal-reliable-change-g1-20260909`.
+Runtime Goal ID: `goal-reliable-change-g1-20260909`. 첫 구현 Task: `task-1478` (등록 시 todo).
+[등록 당시 readback](evidence/reliable-change-roadmap/activation.json)은 실행 결과가 아니다.
 정의 정본: [G1 acceptance contract](roadmaps/reliable-change-g1.json).
 
 범위는 기존 coding harness와 run/turn/request/cost ledger의 연결이다. 새로운 실행 엔진을 만들지 않는다.

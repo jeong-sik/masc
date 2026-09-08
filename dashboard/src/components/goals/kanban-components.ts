@@ -1,6 +1,7 @@
 // Kanban board components: KanbanCard, TaskBacklog
 
 import { html } from 'htm/preact'
+import { useTaskSearchText, TaskSearchFeedback } from '../common/task-search-text'
 import { signal } from '@preact/signals'
 import { useRef, useEffect, useState } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
@@ -359,10 +360,13 @@ export function TaskBacklog() {
   const totalTasks = todo.length + inProgress.length + awaitingVerification.length + done.length
   const query = taskSearchQuery.value
   const hasSearch = query.trim().length > 0
-  const filteredTodo = filterTasksByQuery(todo, query)
-  const filteredInProgress = filterTasksByQuery(inProgress, query)
-  const filteredAwaitingVerification = filterTasksByQuery(awaitingVerification, query)
-  const filteredDone = filterTasksByQuery(done, query)
+  const taskSearch = useTaskSearchText([...todo, ...inProgress, ...awaitingVerification, ...done], query)
+  const descriptions = new Map(taskSearch.kind === 'ready' ? taskSearch.tasks.map(task => [task.id, task]) : [])
+  const searchable = (rows: Task[]) => rows.map(task => descriptions.get(task.id) ?? task)
+  const filteredTodo = filterTasksByQuery(searchable(todo), query)
+  const filteredInProgress = filterTasksByQuery(searchable(inProgress), query)
+  const filteredAwaitingVerification = filterTasksByQuery(searchable(awaitingVerification), query)
+  const filteredDone = filterTasksByQuery(searchable(done), query)
   const filteredTotal =
     filteredTodo.length +
     filteredInProgress.length +
@@ -443,11 +447,12 @@ export function TaskBacklog() {
               searchDoneVisibleCount.value = DONE_PAGE_SIZE
             }}
           >검색 초기화</button>
-          <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${filteredTotal}/${totalTasks}</span>
+          ${taskSearch.kind === 'ready' ? html`<span class="font-mono text-3xs text-[var(--color-fg-muted)]">${filteredTotal}/${totalTasks}</span>` : null}
         ` : null}
       </div>
+      <${TaskSearchFeedback} state=${taskSearch} />
       <${BacklogPressure} todoTasks=${todo} />
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3 items-start">
+      <div style=${taskSearch.kind === 'ready' ? undefined : { display: 'none' }} class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3 items-start">
         <${TaskColumn}
           title="할 일"
           count=${sortedTodo.length}

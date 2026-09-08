@@ -42,12 +42,18 @@ let configure_prompt_registry () =
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts")
 ;;
 
+(* A producer here is a workspace agent, not a Keeper: it declares no sandbox
+   profile, and since #32078 the Keeper resolver raises rather than assuming
+   one. [Verification_authority_tools.create] takes its [Workspace_producer]
+   arm for such a producer and roots it at [bundle_root] under the shared
+   playground prefix, which is also the prefix the Goal proof surface walks.
+   Writing where the surface reads is the point of this helper; a path
+   invented here would let the test pass while the product looked elsewhere. *)
 let ensure_producer_playground (config : Workspace.config) producer =
   let path =
-    Keeper_sandbox_config.host_root_abs_of_agent
-      ~base_path:
-        (Workspace_verification_store.project_root_of_base_path config.base_path)
-      ~agent_name:producer
+    Filename.concat
+      (Workspace_verification_store.project_root_of_base_path config.base_path)
+      (Playground_paths.bundle_root producer)
   in
   let rec mkdir_p dir =
     if not (Sys.file_exists dir)

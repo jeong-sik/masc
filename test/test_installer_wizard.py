@@ -1,5 +1,6 @@
 """Exercise the installer's real shell wizard through a terminal and pipes."""
 import errno
+import http.server
 import os
 from pathlib import Path
 import pty
@@ -27,6 +28,7 @@ load_provider_catalog() { :; }
 compute_provider_availability() { :; }
 report_sandbox_backends() { :; }
 update_runtime_default() { printf 'selected=%s\\n' "$2"; }
+prompt_runtime_source() { echo configured; }
 DRY_RUN=1
 BASE_PATH=/fixture
 '''
@@ -78,6 +80,40 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
+    def test_local_authentication_challenge_is_not_reported_as_stopped(self):
+        class AuthRequired(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        with http.server.HTTPServer(('127.0.0.1', 0), AuthRequired) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                body = ('\nPROVIDER_KINDS=(provider)\n'
+                        f'PROVIDER_ENDPOINTS=(http://127.0.0.1:{server.server_port})\n'
+                        'PROVIDER_PING_PATHS=(/models)\nprovider_availability_label 0\n')
+                result, _ = run_shell(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), 'authentication required')
+            finally:
+                server.shutdown()
+                thread.join()
+
+    def test_runtime_connection_choices_are_visible_without_installed_clients(self):
+        definition = 'prompt_runtime_source() {' + SCRIPT.split('prompt_runtime_source() {', 1)[1].split('\nruntime_setup_input()', 1)[0]
+        for choice, expected in [(b'2\n', 'llama_cpp'), (b'3\n', 'vllm'),
+                                 (b'4\n', 'claude_code'), (b'5\n', 'codex'),
+                                 (b'6\n', 'antigravity'), (b'7\n', 'later')]:
+            with self.subTest(expected=expected):
+                result, terminal = run_shell('\n' + definition + '\nprompt_runtime_source\n', choice)
+                self.assertEqual(result.returncode, 0, terminal)
+                self.assertEqual(result.stdout.strip(), expected)
+                for label in ('llama.cpp', 'vLLM', 'Claude Code', 'Codex', 'Antigravity'):
+                    self.assertIn(label, terminal)
+
     def test_new_workspace_prompts_and_defaults_to_home(self):
         with tempfile.TemporaryDirectory() as directory:
             result, terminal = run_shell(

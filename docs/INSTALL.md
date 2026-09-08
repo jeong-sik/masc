@@ -71,7 +71,7 @@ uname -m
 ## 설치
 
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -138,12 +138,32 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-공개된 **0.34.0 바이너리**는 기본 Keeper를 만들지 않고 `browser-lanes` skill을 설치합니다.
-동결 이후의 `main` 소스 빌드는 autoboot이 꺼진 `imp` 하나를 seed합니다.
-릴리스 설치기는 설정을 바이너리에서 가져오므로, 설치기만 갱신해도 0.34.0의 명단은
-바뀌지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+**0.35.0 바이너리**는 autoboot이 꺼진 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+`imp`의 기본 sandbox는 Docker이며 모델과 실행 환경을 준비한 뒤 수동으로 시작합니다.
+설치기는 설정을 바이너리에서 가져옵니다. 이전 0.34.0 바이너리의 기본 명단은 비어 있습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
+
+## 모델 연결 선택
+
+터미널 마법사는 기존 API/Ollama 설정 외에도 **llama.cpp, vLLM, Claude Code,
+Codex, Antigravity**를 선택지로 표시합니다. 설치돼 있지 않아도 선택지가 사라지지 않습니다.
+로컬 서버는 다른 컴퓨터의 endpoint를 지정할 수도 있습니다.
+
+선택한 연결만 추가하며 모델 ID와 context 크기는 실제 서버·CLI 설정에 맞게 입력합니다.
+도구 호출과 streaming은 확인한 기능만 활성화합니다. 모델명만 보고 이미지·reasoning·
+도구 지원을 추측하지 않습니다. HTTP 모델은 해당 provider에만 적용되는 capability
+overlay를 함께 만듭니다. API 키는 값이 아니라 환경변수 이름을 지정합니다.
+
+설정은 임시 workspace에서 같은 바이너리의 runtime 검증을 통과한 뒤 반영합니다.
+검증에 실패하거나 원본이 동시에 변경되면 기존 설정을 보존합니다. 이미 같은 setup
+연결이 있으면 새로 중복 생성하지 말고 기존 공급자 선택이나 TOML 편집을 사용하세요.
+
+**설정 검증, CLI 설치, HTTP 접속, 인증, 모델의 실제 응답은 서로 다른 상태**입니다.
+이 마법사는 모델 서버·모델 가중치·공급자 CLI를 자동 설치하거나 계정을 인증하지 않습니다.
+Antigravity에는 CLI가 생성한 OAuth 파일 경로와 요청 timeout도 명시해야 합니다.
+`Configure later`로 모델 연결을 미룰 수 있으며, 기본 Keeper는 자동 시작되지 않습니다.
+기존 workspace에서 다시 설정하려면 `--wizard`를 사용하세요.
 
 ## 처음 실행하고 할 수 있는 일
 
@@ -299,7 +319,7 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 이 파일 하나가 전체 요청을 대신하지 않습니다. 개발 계약인 `constitution.xml`은
 Keeper runtime 시스템 프롬프트가 아닙니다.
 
-공개 0.34.0의 기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
+0.35.0의 기본 설치는 **비활성 Keeper `imp` 1명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
 `browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
 지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
 0.34.0의 Gecko scene 기능은 새 native host와 브라우저 확장 0.3.0을 함께 사용합니다.

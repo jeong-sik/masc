@@ -175,9 +175,8 @@ def configure(binary, base_path, spec):
                                      '--base-path', stage, runtime_id], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode:
-                # Diagnostics can quote operator config/credential paths. Keep
-                # them off shared logs; callers receive a fixed failure only.
-                raise SetupError('runtime validation failed; original configuration preserved (requires a binary with deployment-overlay CLI support)')
+                diagnostic = result.stderr.decode(errors='replace').strip() or 'validator produced no stderr'
+                raise SetupError('runtime validation failed; original configuration preserved:\n' + diagnostic)
             contents[0] = (stage_config / paths[0].name).read_bytes()
         if [snapshot(path) for path in paths] != originals:
             raise SetupError('configuration changed during validation; rerun setup against the new snapshot')

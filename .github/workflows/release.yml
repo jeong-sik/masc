@@ -135,6 +135,9 @@ jobs:
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
 
+      - name: Runtime setup validates each supported connection
+        run: python3 test/test_install_runtime_setup.py --binary _build/default/bin/main_eio.exe
+
       - name: Keeper creation CLI exits after HTTP response
         run: python3 test/test_keeper_create_cli_exit.py _build/default/bin/main_eio.exe
 
@@ -337,6 +340,7 @@ jobs:
         run: |
           mkdir -p release-assets
           cp scripts/install.sh release-assets/install.sh
+          cp scripts/install-runtime-setup.py release-assets/install-runtime-setup.py
           for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \

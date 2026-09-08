@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.35.0] - 2026-09-08
+
+### Installation and setup
+
+- Include the corrected macOS dependency bootstrap, Python executable selection, and loader diagnostics in the same source release as the binaries.
+- Ask for a workspace on terminal installs; preserve explicit paths and existing workspaces. Add program-only uninstall, explicit workspace data removal, and dry-run.
+- Ship a disabled starter Keeper (`imp`) for manual activation after model and sandbox setup.
+- Add explicit llama.cpp, vLLM, Claude Code, Codex, and Antigravity setup choices using operator-supplied model metadata; validate staged configuration before publishing it.
+- Validate runtime default changes with the same workspace capability catalog and overlay used by server startup.
+- Run documentation and installer checks without waiting for OCaml preparation; new global tags no longer invalidate checks on unchanged branches.
+
+### Keeper and operator interfaces
+
+- Add TUI Keeper deletion, connector trigger-policy selection, preset inspection, and clearer fleet state.
+- Add browser development source-context selection and Dashboard goal selection.
+- Surface scheduled wake outcomes, preserve operator prompt overrides, and repair prompt assembly and duplicate owner wake handling.
+- Improve JSONL recovery and subprocess cancellation/foreground process-group cleanup; prevent host environment expansion into sandbox command arguments.
+- Extend MSX disk image loading and playback presentation.
+
 ## [0.34.0] - 2026-09-08
 
 ### Installation and distribution

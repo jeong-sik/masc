@@ -101,6 +101,7 @@ jobs:
           python3 test/test_installer_wizard.py -v
           python3 test/test_installer_upgrade.py -v
           python3 test/test_installer_uninstall.py -v
+          python3 test/test_install_runtime_setup.py -v
 
       - name: Blocking lints
         run: |

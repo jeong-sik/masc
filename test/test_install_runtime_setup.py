@@ -77,11 +77,11 @@ class RuntimeSetup(unittest.TestCase):
                 SETUP.render(changed)
             self.assertNotIn('secret-value', str(caught.exception))
 
-    def test_failed_validator_preserves_both_files_without_exposing_stderr(self):
-        self.validator("print('credential-secret-value', file=sys.stderr)\nsys.exit(1)\n")
+    def test_failed_validator_preserves_both_files_and_reports_the_reason(self):
+        self.validator("print('model alias is absent from the capability catalog', file=sys.stderr)\nsys.exit(1)\n")
         with self.assertRaises(SETUP.SetupError) as caught:
             SETUP.configure(self.binary, self.base, spec())
-        self.assertNotIn('credential-secret-value', str(caught.exception))
+        self.assertIn('model alias is absent from the capability catalog', str(caught.exception))
         self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
 
     def test_success_validates_stage_and_preserves_existing_bytes(self):

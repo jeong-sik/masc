@@ -58,7 +58,7 @@ Download the installer attached to [GitHub Releases](https://github.com/jeong-si
 It verifies and installs the assets for the selected release.
 
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -74,7 +74,7 @@ The wizard reports two axes:
 
 - **Model source.** A cloud provider (Anthropic, OpenAI, GLM, DeepSeek, ...)
   keyed by its environment variable; a local server (Ollama, llama-server, MLX)
-  probed at its health path and shown `reachable` or `not running`; or a
+  probed at its health path and shown `reachable`, `authentication required`, or `unreachable`; or a
   subscription CLI (Claude Code, Codex, Antigravity) shown `installed` when it
   is on `PATH` and `signed in` when its own login check passes.
   `--provider <id>` picks one without prompting.
@@ -494,7 +494,7 @@ source of truth for binaries. APIs and configuration may change before 1.0.
 Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 - `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
-  line is `0.34.0`.
+  line is `0.35.0`.
 - `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
   without caveats.
 - `v2.*` tags are history; they do not define the active line.

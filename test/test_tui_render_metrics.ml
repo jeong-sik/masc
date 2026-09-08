@@ -317,9 +317,45 @@ let test_section_tools_populated () =
   let state = make_state () in
   let gp = make_gate_pending ~id:"gp1" ~keeper:"alpha" in
   state.gate_pending <- [ gp ];
+  state.gate_snapshot_observed <- true;
   let lines = Render_metrics.render_section_tools ~cols:90 state in
   check bool "tools populated produces lines" true (List.length lines > 0);
   List.iter (fun l -> check bool "tool line bounded" true (Layout.display_width l <= 90)) lines
+;;
+
+let test_approval_source_observations () =
+  let state = make_state () in
+  (* A different successful refresh cannot establish approval source data. *)
+  state.last_refresh <- 100.;
+  let kpis = Render_metrics.calculate_kpis state in
+  check (option int) "unread Gate is not zero" None kpis.gate_pending_count;
+  check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
+  let governance () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
+  let output = governance () in
+  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not observed");
+  check bool "unread queues cannot claim empty" false (contains output "no active pending");
+  state.gate_snapshot_observed <- true;
+  state.keeper_tool_approvals_observed <- true;
+  let kpis = Render_metrics.calculate_kpis state in
+  check (option int) "observed empty Gate is zero" (Some 0) kpis.gate_pending_count;
+  check (option int) "observed empty held calls are zero" (Some 0) kpis.held_approvals_count;
+  check bool "both observed queues may claim empty" true (contains (governance ()) "no active pending");
+  state.gate_pending <- [ make_gate_pending ~id:"gp1" ~keeper:"alpha" ];
+  state.gate_error <- Some "gate-refresh-offline";
+  let kpis = Render_metrics.calculate_kpis state in
+  check (option int) "stale Gate count is not current" None kpis.gate_pending_count;
+  check (option int) "available held count survives" (Some 0) kpis.held_approvals_count;
+  let output = governance () in
+  check bool "stale source error is visible" true (contains output "gate-refresh-offline");
+  check bool "stale tool is not charted" false (contains output "bash");
+  check bool "partial empty cannot claim all empty" false (contains output "no active pending");
+  state.gate_error <- None;
+  state.gate_rules_unavailable <- Some "rules-store-offline";
+  check (option int) "rules failure does not hide ready queue" (Some 1)
+    (Render_metrics.calculate_kpis state).gate_pending_count;
+  let output = governance () in
+  check bool "partial store error is visible" true (contains output "Standing Rules: unavailable: rules-store-offline");
+  check bool "available tool is charted" true (contains output "bash")
 ;;
 
 let test_render_metrics_body_budget () =
@@ -398,6 +434,7 @@ let () =
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated
+        ; test_case "approval source observations" `Quick test_approval_source_observations
         ] )
     ; ( "responsiveness"
       , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )

@@ -6162,14 +6162,35 @@ def autonomous_turn_history_interaction() -> Interaction:
             start=pane_start,
             timeout=5.0,
         )
+        # Two calls, each with its own detail rows, do not fit the runner's
+        # default 30 rows: the block reaches the first call's identity line
+        # and the second is below the fold, so this read used to miss it and
+        # report a name that was on screen a few rows further down.
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=60,
+            columns=100,
+            needle=b"masc_task_history",
+            controls=(FULL_REDRAW,),
+        )
         pane = bytes(output[pane_start:])
         plain_pane = CSI_RE.sub(b"", pane)
         for needle, what in (
-            (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
+            # Not "content withheld" any more. That wording read as someone
+            # holding the text back and sent readers looking for a way to see
+            # it; there is none, and the count is the whole fact. The renderer
+            # says so in its own words at masc_tui_keeper_chat_history.ml.
+            ("2 reasoning steps \u00b7 text not recorded".encode(),
+             "the unrecorded reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
             ("\u00b7 THINKING".encode(), "the thinking lane"),
-            ("TOOLS\u2502".encode(), "the nested tool block"),
+            # The label is padded to its column now, so "TOOLS" no longer sits
+            # against the rule. The block marker in front of it is what tells
+            # this row from the word appearing anywhere else.
+            ("\u25a0 TOOLS".encode(), "the tool block header"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(

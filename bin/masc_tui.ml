@@ -1965,6 +1965,10 @@ type async_msg =
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
   | Preset_detail_loaded of
       string Masc_tui_fetched.request * (Tui_decode.preset_detail, string) result
+  (* The chat answer to [/preset show]. The pane's own detail rides on
+     [Preset_detail_loaded] with a cursor key; this one has a sink because a
+     typed command answers where it was typed. *)
+  | Preset_contents_shown of preset_sink * (Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
@@ -7626,6 +7630,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~wrap:(fun result -> Preset_saved (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore_missing_name ->
       notice ~role:Message_error "/preset restore needs a name on the same line"
+  | Masc_tui_command.Preset_show_missing_name ->
+      notice ~role:Message_error "/preset show needs a name on the same line"
+  | Masc_tui_command.Preset_show name ->
+      (* [/preset] alone lists names and counts; a count cannot be read, so
+         this asks the server what that one preset actually holds. *)
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
+        ~wrap:(fun result -> Preset_contents_shown (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore name ->
       Buffer.clear state.msg_input;
       notice ~role:Message_local
@@ -10040,7 +10053,9 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
        | Masc_tui_command.Preset_save_missing_name
        | Masc_tui_command.Preset_restore _
-       | Masc_tui_command.Preset_restore_missing_name ->
+       | Masc_tui_command.Preset_restore_missing_name
+       | Masc_tui_command.Preset_show _
+       | Masc_tui_command.Preset_show_missing_name ->
            set_msg_scroll state 0;
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
@@ -10806,6 +10821,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               is a fresh question. *)
            state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
            ensure_preset_detail state ~mailbox
+       | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+  | Preset_contents_shown (sink, result) ->
+      (match sink, result with
+       | Preset_to_chat target, Ok detail ->
+           chat_notice state ~keeper_name:target ~role:Message_local
+             (String.concat "\n" (Masc_tui_preset_text.contents_lines detail))
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~role:Message_error detail
+       (* The pane reads its own detail through [Preset_detail_loaded], keyed
+          by the cursor, so a pane sink here would be a second answer to a
+          question nobody asked. *)
+       | Preset_to_pane, Ok _ -> ()
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
   | Preset_detail_loaded (request, result) ->
       (* Dropping an answer the cursor has moved past is [complete]'s job

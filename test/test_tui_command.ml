@@ -65,6 +65,8 @@ let describe = function
   | Command.Preset_save_missing_name -> "preset-save-missing-name"
   | Command.Preset_restore name -> "preset-restore:" ^ name
   | Command.Preset_restore_missing_name -> "preset-restore-missing-name"
+  | Command.Preset_show name -> "preset-show:" ^ name
+  | Command.Preset_show_missing_name -> "preset-show-missing-name"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_ref_command_parses_url_and_bare_id () =
@@ -223,6 +225,8 @@ let test_preset_commands_parse_verb_name_and_description () =
     ; "preset-save-missing-name"
     ; "preset-restore:morning"
     ; "preset-restore-missing-name"
+    ; "preset-show:morning"
+    ; "preset-show-missing-name"
     ; "unknown:preset drop"
     ]
     (List.map
@@ -235,6 +239,8 @@ let test_preset_commands_parse_verb_name_and_description () =
        ; "/preset save"
        ; "/preset restore morning"
        ; "/preset restore"
+       ; "/preset show morning"
+       ; "/preset show"
        ; "/preset drop morning"
        ])
 
@@ -702,6 +708,8 @@ let test_autocomplete_sub_arguments () =
     (Command.autocomplete "/tools c");
   check (option string) "/preset s -> save" (Some "/preset save")
     (Command.autocomplete "/preset s");
+  check (option string) "/preset sh -> show" (Some "/preset show")
+    (Command.autocomplete "/preset sh");
   let keeper_names = [ "sol-xhigh"; "roger"; "librarian" ] in
   check (option string) "/keeper s -> sol-xhigh" (Some "/keeper sol-xhigh")
     (Command.autocomplete ~keeper_names "/keeper s");

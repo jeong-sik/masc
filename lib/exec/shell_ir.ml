@@ -70,6 +70,22 @@ let rec with_sandbox (target : Sandbox_target.t) (ir : t) : t =
       }
 ;;
 
+let rec arg_has_variable = function
+  | Lit _ -> false
+  | Var _ -> true
+  | Concat parts -> List.exists arg_has_variable parts
+;;
+
+let rec has_variable_expansion = function
+  | Simple simple ->
+    List.exists arg_has_variable simple.args
+    || List.exists (fun (_, arg) -> arg_has_variable arg) simple.env
+  | Pipeline stages -> List.exists has_variable_expansion stages
+  | Sequence { head; tail } ->
+    has_variable_expansion head
+    || List.exists (fun (_, stage) -> has_variable_expansion stage) tail
+;;
+
 let rec pp_arg fmt = function
   | Lit (s, _) -> Format.fprintf fmt "%S" s
   | Var (name, _) -> Format.fprintf fmt "$%s" name

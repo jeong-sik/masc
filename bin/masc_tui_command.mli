@@ -118,6 +118,9 @@ type t =
   | Preset_restore of string
       (** [/preset restore <name>] — autosave the live state, then apply. *)
   | Preset_restore_missing_name  (** [/preset restore] with no name. *)
+  | Preset_show of string
+      (** [/preset show <name>] — what that preset holds, by kind. *)
+  | Preset_show_missing_name  (** [/preset show] with no name. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
 type command_help = {

@@ -4768,7 +4768,7 @@ let test_config_post_restarts_from_atomic_toml () =
            (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
       check bool "running projection converged" true
         (match Masc.Keeper_registry.get ~base_path:config.base_path name with
-         | Some entry -> Keeper_activation_mode.spontaneous entry.meta.activation_mode
+         | Some entry -> Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode
          | None -> false))
 
 let test_config_post_materializes_missing_toml () =

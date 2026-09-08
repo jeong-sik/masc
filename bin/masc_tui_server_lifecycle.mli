@@ -11,6 +11,24 @@
     {!owned_server} — a handle for a server this TUI started — is stoppable,
     so "kill what I did not start" is unrepresentable rather than guarded. *)
 
+(** {1 When a server is due}
+
+    A refresh completes with a reading of the port. Nothing answering is the
+    case a first install produces, and it is the case the TUI reacts to. *)
+
+type contact =
+  | Nothing_answered  (** Every request this refresh made failed. *)
+  | Server_reached  (** At least one answered. *)
+  | Undecided
+      (** Connecting, booting or reconnecting: no reading yet. *)
+
+val start_due : contact:contact -> already_attempted:bool -> bool
+(** Whether to start a server now. True only when nothing answered and this
+    session has not already spawned one: a refresh fails for reasons a new
+    server would not fix, and a second [masc] on the same port would only
+    fail to bind. The caller derives [contact] from its connection status, so
+    this rule tests without a TTY or a render state. *)
+
 type discovery =
   | Sibling of string
       (** The [masc] file next to the running TUI binary (how install.sh

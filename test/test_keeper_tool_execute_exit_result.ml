@@ -56,7 +56,16 @@ let cleanup_dir path =
   in
   rm path
 
-let make_local_meta ~name : Keeper_meta_contract.keeper_meta =
+(* Remote_ssh stood here after Local was removed, and a Remote_ssh keeper with
+   no declared remote_endpoint is refused before its command runs:
+
+     {"error":"remote_ssh_endpoint_missing: keeper background-holds has no
+       remote_endpoint", "requested_sandbox":"remote_ssh"}
+
+   These cases need a command to actually run, so the profile comes from the
+   shared fixture helper -- the one place that answers what a test runs
+   under, and which the runner can point elsewhere with MASC_TEST_SANDBOX. *)
+let make_meta ~name : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ ("name", `String name)
@@ -65,7 +74,7 @@ let make_local_meta ~name : Keeper_meta_contract.keeper_meta =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
+    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
   | Error e -> Alcotest.fail e
 
 let rec mkdir_p path =
@@ -121,7 +130,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
        | Error error ->
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"costume-advice" in
+      let meta = make_meta ~name:"costume-advice" in
       let cwd = playground_dir ~base ~name:"costume-advice" in
       (* [;] used to be the construct this test reached for; RFC-0391 put it
          in Shell_ir.connector, so a substitution stands in. What is being
@@ -200,7 +209,7 @@ let test_a_backgrounded_child_still_holds_the_call () =
        | Error error ->
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"background-holds" in
+      let meta = make_meta ~name:"background-holds" in
       let cwd = playground_dir ~base ~name:"background-holds" in
       let execution =
         run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ] ~cwd

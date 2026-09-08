@@ -46,6 +46,9 @@ let body ~width proof last_review_note =
   | Tui_decode.Proof_pending ->
       { tone = Waiting; text = "waiting for the completion judge" }
       :: note ~width last_review_note
+  | Tui_decode.Proof_stale evidence ->
+      verdict ~width Note "criterion changed; previous proof is historical" evidence
+      @ note ~width last_review_note
   | Tui_decode.Proof_unreadable detail ->
       verdict ~width Unreadable "verification ledger unreadable" detail
       @ note ~width last_review_note

@@ -135,6 +135,20 @@ type absent_owner_acknowledgement =
   ; backlog_version : int
   }
 
+type owner_absence =
+  { finalization : finalization_evidence
+  ; observed_at : string
+  }
+(** Boot recovery's own observation of a finalized [Operator_stop_retain_meta]
+    operation whose Keeper owner and metadata are both gone. The owner registry
+    answers [Owner_not_found] on every boot for such a record, so retrying the
+    admission release cannot succeed; the retain contract did not hold, so the
+    record is not settled and reclaimed like a removal either. [finalization]
+    is the original evidence unchanged and [observed_at] is when recovery found
+    the absence; it equals the operation's [updated_at]. Recovery writes this
+    once and does not walk the operation again. The operator acknowledgement
+    ({!Operator_absence_acknowledged}) may still follow it. *)
+
 type supersession =
   | Operator_blocked_purge_released of { actor : string }
       (** The operator released a [Blocked] dashboard purge whose worker died
@@ -182,6 +196,7 @@ type phase =
   | Cleanup_ready of cleanup_evidence
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
+  | Owner_absent of owner_absence
   | Operator_absence_acknowledged of absent_owner_acknowledgement
   | Blocked of failure
   | Superseded of supersession
@@ -221,6 +236,7 @@ type invariant_error =
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
   | Invalid_absence_acknowledgement of string
+  | Invalid_owner_absence of string
 
 val schema_version : int
 val requires_admission_fence : t -> bool

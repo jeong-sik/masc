@@ -8,6 +8,7 @@ let clamp_priority p =
 
 type goal = {
   id : string;
+  criterion_revision : string;
   title : string;
   metric : string option;
   target_value : string option;
@@ -19,6 +20,52 @@ type goal = {
   created_at : string;
   updated_at : string;
 }
+
+type criterion = Criterion of {
+  revision : string;
+  title : string;
+  metric : string option;
+  target_value : string option;
+}
+
+let criterion_of_goal (goal : goal) =
+  Criterion { revision = goal.criterion_revision; title = goal.title;
+              metric = goal.metric; target_value = goal.target_value }
+
+let criterion_equal (Criterion left) (Criterion right) =
+  String.equal left.revision right.revision
+  && String.equal left.title right.title
+  && Option.equal String.equal left.metric right.metric
+  && Option.equal String.equal left.target_value right.target_value
+
+let criterion_to_yojson (Criterion c) =
+  `Assoc [ "revision", `String c.revision; "title", `String c.title;
+           "metric", Json_util.string_opt_to_json c.metric;
+           "target_value", Json_util.string_opt_to_json c.target_value ]
+
+let criterion_of_yojson = function
+  | `Assoc fields as json ->
+      let expected = [ "revision"; "title"; "metric"; "target_value" ] in
+      if List.length fields <> List.length expected
+         || List.sort String.compare (List.map fst fields)
+            <> List.sort String.compare expected then
+        Error "criterion: expected exactly revision, title, metric and target_value"
+      else
+        let optional_string name =
+          match Json_util.assoc_member_opt name json with
+          | Some `Null -> Ok None
+          | Some (`String value) -> Ok (Some value)
+          | _ -> Error ("criterion: invalid " ^ name)
+        in
+        (match Json_util.assoc_member_opt "revision" json,
+               Json_util.assoc_member_opt "title" json with
+         | Some (`String revision), Some (`String title)
+           when String.trim revision <> "" ->
+             let* metric = optional_string "metric" in
+             let* target_value = optional_string "target_value" in
+             Ok (Criterion { revision; title; metric; target_value })
+         | _ -> Error "criterion: revision and title must be strings; revision must not be blank")
+  | _ -> Error "criterion: expected object"
 
 type state = {
   version : int;
@@ -38,6 +85,7 @@ and goal_to_yojson (goal : goal) =
   `Assoc
     [
       ("id", `String goal.id);
+      ("criterion_revision", `String goal.criterion_revision);
       ("title", `String goal.title);
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
@@ -74,6 +122,7 @@ and goal_of_yojson = function
   | `Assoc fields as json ->
       let accepted_fields =
         [ "id"
+        ; "criterion_revision"
         ; "title"
         ; "metric"
         ; "target_value"
@@ -101,6 +150,11 @@ and goal_of_yojson = function
                "goal_of_yojson: unknown Goal field %S is not accepted"
                field)
       | None, Some (`String id), Some (`String title) ->
+          let* criterion_revision =
+            match List.filter (fun (key, _) -> String.equal key "criterion_revision") fields with
+            | [ _, `String revision ] when String.trim revision <> "" -> Ok revision
+            | _ -> Error "goal_of_yojson: criterion_revision must be a non-blank string"
+          in
           let phase =
             (* Phase is required: a row without [phase] is a decode error, not
                a silent Active default. The silent default caused main red
@@ -135,6 +189,7 @@ and goal_of_yojson = function
              Ok
                {
                     id;
+                    criterion_revision;
                     title;
                     metric = Json_util.get_string json "metric";
                     target_value = Json_util.get_string json "target_value";
@@ -178,12 +233,8 @@ let ensure_dirs config =
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
 
-(* A store that exists but does not decode must not license a write.  The
-   read-modify-write paths below take the file lock, read, then overwrite BOTH
-   goals.json and its .last-good mirror — so a lenient empty fallback on the read
-   turns one undecodable row into permanent loss of every goal.  [load_state]
-   separates "no store yet" (legitimately empty) from "store present, undecodable"
-   so writers can refuse while readers keep the lenient behaviour. *)
+(* Recovery snapshots support historical reads. Every read-modify-write uses
+   [load_primary_state] under the Goal lock; a mirror never authorizes mutation. *)
 type load_outcome =
   | Loaded of state
   | Undecodable of string
@@ -313,10 +364,22 @@ let find_goal goals id =
 let replace_goal goals updated =
   List.map (fun goal -> if String.equal goal.id updated.id then updated else goal) goals
 
+let load_primary_state config =
+  ensure_dirs config;
+  let path = goals_path config in
+  if Workspace_utils.path_exists config path then
+    match Workspace_utils.read_json_result config path with
+    | Error detail -> Undecodable detail
+    | Ok json -> (match state_of_yojson json with
+        | Ok state -> Loaded state | Error detail -> Undecodable detail)
+  else if Workspace_utils.path_exists config (goals_recovery_path config) then
+    Undecodable "primary Goal store is missing while its recovery mirror exists"
+  else Loaded (default_state ())
+
 let update_state config f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      match load_state config with
+      match load_primary_state config with
       | Undecodable detail -> Error (undecodable_store_error config detail)
       | Loaded state ->
         let next_state = f state in
@@ -327,10 +390,28 @@ let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
 
 let get_goal_result config ~goal_id =
-  let path = goals_path config in
-  let* json = Workspace_utils.read_json_result config path in
+  let* json = Workspace_utils.read_json_result config (goals_path config) in
   let* state = state_of_yojson json in
   Ok (find_goal state.goals goal_id)
+
+let transact_goal config ~goal_id f =
+  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+      let* json = Workspace_utils.read_json_result config (goals_path config) in
+      let* state = state_of_yojson json in
+      match find_goal state.goals goal_id with
+      | None -> Error "goal not found"
+      | Some current ->
+          let* updated, result = f current in
+          if not (String.equal updated.id current.id) then
+            Error "goal transaction cannot replace goal identity"
+          else if updated = current then Ok (current, result)
+          else
+            let now = Masc_domain.now_iso () in
+            let updated = { updated with updated_at = now } in
+            let next = { version = state.version + 1; updated_at = now;
+                         goals = replace_goal state.goals updated } in
+            let* () = write_state_result config next in
+            Ok (updated, result))
 
 type conditional_update =
   | Goal_updated of goal
@@ -339,7 +420,7 @@ type conditional_update =
 let update_goal_if_phase config ~goal_id ~expected_phase f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      match load_state config with
+      match load_primary_state config with
       | Undecodable detail -> Error (undecodable_store_error config detail)
       | Loaded state ->
         (match find_goal state.goals goal_id with
@@ -373,7 +454,7 @@ let delete_goal_error_to_string = function
 let delete_goal config ~goal_id =
   let deleted =
     Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      match load_state config with
+      match load_primary_state config with
       | Undecodable detail ->
         Error (Persistence_failed (undecodable_store_error config detail))
       | Loaded state ->
@@ -480,6 +561,21 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         updated_at = now;
                       }
                   in
+                  let criterion_changed =
+                    not (String.equal existing.title next_goal.title)
+                    || not (Option.equal String.equal existing.metric next_goal.metric)
+                    || not (Option.equal String.equal existing.target_value next_goal.target_value)
+                  in
+                  let next_goal =
+                    if not criterion_changed then next_goal
+                    else
+                      let phase = match next_goal.phase with
+                        | Goal_phase.Verifying | Goal_phase.Completed -> Goal_phase.Executing
+                        | Goal_phase.Executing | Goal_phase.Dropped as phase -> phase
+                      in
+                      { next_goal with criterion_revision = Random_id.hex ~bytes:16;
+                        phase; last_review_note = None; last_review_at = None }
+                  in
                   {
                     version = state.version + 1;
                     updated_at = now;
@@ -509,6 +605,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                   let new_goal =
                       {
                         id = resolved_id;
+                        criterion_revision = Random_id.hex ~bytes:16;
                         title = Option.value title ~default:"Untitled goal";
                         metric;
                         target_value;

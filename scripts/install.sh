@@ -1642,7 +1642,7 @@ Next (choose the TUI or server-only command):
   curl http://127.0.0.1:${MASC_PORT}/health
 
   ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
-  ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
+  ${c_dim}# a fresh root seeds one Keeper, imp, with autoboot off: start it from the Keepers view once a model and a sandbox exist (or reinstall with --team)${c_off}
   "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# or create one non-interactively once the server is up:${c_off}

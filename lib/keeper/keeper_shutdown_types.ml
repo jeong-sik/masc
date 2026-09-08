@@ -152,6 +152,18 @@ type absent_owner_acknowledgement =
   ; backlog_version : int
   }
 
+(* Boot recovery's own observation of a finalized retained-metadata stop
+   whose Keeper owner and metadata are both gone. The owner registry answers
+   [Owner_not_found] on every boot for such a record, so retrying the
+   admission release cannot succeed; the retain contract did not hold, so
+   the record is not settled and reclaimed like a removal either. The
+   finalization is kept exactly as written and [observed_at] is when
+   recovery found the absence. The operator acknowledgement may follow. *)
+type owner_absence =
+  { finalization : finalization_evidence
+  ; observed_at : string
+  }
+
 type supersession =
   | Operator_blocked_purge_released of { actor : string }
   | Operator_metadata_update of { actor : string }
@@ -168,6 +180,7 @@ type phase =
   | Cleanup_ready of cleanup_evidence
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
+  | Owner_absent of owner_absence
   | Operator_absence_acknowledged of absent_owner_acknowledgement
   | Blocked of failure
   | Superseded of supersession
@@ -207,6 +220,7 @@ type invariant_error =
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
   | Invalid_absence_acknowledgement of string
+  | Invalid_owner_absence of string
 
 let schema_version = 8
 
@@ -216,6 +230,7 @@ let requires_admission_fence operation =
   | Finalized
       { completion = (Completion_not_requested | Completion_delivered _); _ }
   | Superseded _
+  | Owner_absent _
   | Operator_absence_acknowledged _ -> false
   | Prepared
   | Joining_lanes
@@ -299,6 +314,7 @@ let invariant_error_to_string = function
       (cleanup_reason_label cleanup_reason)
       (completion_receipt_kind completion)
   | Invalid_absence_acknowledgement detail -> detail
+  | Invalid_owner_absence detail -> detail
   | Superseded_cleanup_reason_mismatch cleanup_reason ->
     Printf.sprintf
       "shutdown supersession requires operator_stop_retain_meta, actual=%s"
@@ -330,6 +346,11 @@ let rec validate operation =
          || ack.prior_updated_at = "" || ack.acknowledged_at <> operation.updated_at
       then Error (Invalid_absence_acknowledgement "invalid retained absence acknowledgement")
       else validate { operation with phase = Finalized ack.finalization }
+    | Owner_absent absence ->
+      if operation.cleanup_intent.reason <> Operator_stop_retain_meta
+         || absence.observed_at <> operation.updated_at
+      then Error (Invalid_owner_absence "invalid recorded owner absence")
+      else validate { operation with phase = Finalized absence.finalization }
     | Finalized evidence ->
       let expected_meta_removed =
         match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
@@ -551,6 +572,7 @@ let phase_to_string = function
   | Cleanup_ready _ -> "cleanup_ready"
   | Reconciliation_required _ -> "reconciliation_required"
   | Finalized _ -> "finalized"
+  | Owner_absent _ -> "owner_absent"
   | Operator_absence_acknowledged _ -> "operator_absence_acknowledged"
   | Blocked _ -> "blocked"
   | Superseded _ -> "superseded"

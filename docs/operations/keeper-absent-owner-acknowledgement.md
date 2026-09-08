@@ -1,11 +1,19 @@
 # Retained shutdown acknowledgement for an absent owner
 
 A finalized `operator_stop_retain_meta` record can outlive its Keeper owner,
-metadata, and declaration. Normal recovery continues to reject that disagreement:
-absence is not evidence that the original retained-metadata cleanup succeeded.
+metadata, and declaration. Absence is not evidence that the original
+retained-metadata cleanup succeeded, so recovery does not settle or reclaim
+such a record. It also does not retry it: the owner registry answers
+`Owner_not_found` on every boot, and nothing changes that. Boot recovery
+records the observation once on the record as `owner_absent`, keeping the
+original finalization and the observation time, logs one warning, and leaves
+the record alone on later boots. A retain-meta record whose metadata still
+exists is different: its owner should have been installed, and recovery keeps
+failing there.
 
 `Keeper_shutdown_reconciliation.acknowledge_absent_owner` records an explicit
-operator observation as `operator_absence_acknowledged`. It keeps the complete
+operator observation as `operator_absence_acknowledged`, starting from either
+the `finalized` record or the `owner_absent` record. It keeps the complete
 original finalization, original revision and update time, and a SHA-256 digest of
 the original canonical operation JSON. It also records the actor, reason,
 observation time, and authoritative backlog version. It never fabricates metadata
@@ -45,7 +53,8 @@ caller-supplied digest precondition. The retained original digest is audit evide
 
 The first acknowledgement requires all of the following:
 
-- The exact record is finalized with retained metadata, no in-flight turn, no
+- The exact record is finalized with retained metadata, or is recovery's
+  `owner_absent` observation of such a finalization, with no in-flight turn, no
   requested completion, and stopped-lane join evidence without a cleanup error.
   Every originally recorded task has original settlement evidence.
 - The owner inventory is installed and reports that this owner is absent; the
@@ -72,7 +81,9 @@ no removable individual owner entry: an absent entry under the creation guards
 also excludes the sole chat-operation writer. SQLite inspection runs in a system
 thread while the lifecycle guards remain held.
 
-The acknowledgement CAS increments the operation revision once. A retry naming
+The acknowledgement CAS increments the operation revision once. The retained
+digest names the record the acknowledgement replaced, `finalized` or
+`owner_absent`; both carry the same original finalization. A retry naming
 the old or acknowledged revision returns the same immutable record. It checks
 corrupt and unfinished siblings again, and releases only an intake reservation
 still belonging to the acknowledged operation. It does not inspect, overwrite,

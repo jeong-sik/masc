@@ -76,7 +76,7 @@ def wait_for(label, observe, process, timeout):
     raise AcceptanceError(f"{label} did not finish within probe timeout {timeout}s")
 
 
-def assess(goal, run, expected_state, evidence_path, *, evidence_readable, proof_root):
+def assess(goal, run, expected_state, evidence_path, *, evidence_readable, proof_root, expected_content=None):
     """Require the committed Goal and that exact run's successful tool records."""
     root = Path(proof_root).resolve()
     expected_path = (root / evidence_path).resolve()
@@ -91,6 +91,20 @@ def assess(goal, run, expected_state, evidence_path, *, evidence_readable, proof
         target = (root / cwd / file_path).resolve()
         return target.is_relative_to(root) and target == expected_path
 
+    def complete_fixture(tool):
+        if tool.get("disposition") != "completed" or tool.get("output_truncated") is not False:
+            return False
+        try:
+            payload = json.loads(tool.get("output_excerpt", ""))
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(payload, dict) or not isinstance(payload.get("path"), str):
+            return False
+        return (expected_content is not None and payload.get("ok") is True
+                and payload.get("truncated") is False
+                and Path(payload["path"]).resolve() == expected_path
+                and payload.get("content") == expected_content)
+
     completion = goal.get("verification", {}).get("completion", {})
     tools = run.get("tools", [])
     successful = [tool for tool in tools if tool.get("disposition") == "completed"]
@@ -99,7 +113,7 @@ def assess(goal, run, expected_state, evidence_path, *, evidence_readable, proof
               and tool.get("input", {}).get("identity", {}).get("name") == "evidence-review"
               and "file" not in tool.get("input", {})]
     reads = [tool for tool in tools if reads_fixture(tool)]
-    completed_reads = [tool for tool in reads if tool.get("disposition") == "completed"]
+    completed_reads = [tool for tool in reads if complete_fixture(tool)]
     qualifying_reads = completed_reads if evidence_readable else reads
     expected_verdict = "APPROVE" if expected_state == "proof_proven" else "REJECT"
     checks = {
@@ -132,6 +146,10 @@ def run(args):
         "runtime_config_sha256": hashlib.sha256(config_source.read_bytes()).hexdigest(),
         "model_mode": "configured provider; runner supplies no scripted model responses",
         "scope": "Goal proof through shared Task/Goal reviewer; three synthetic fixtures",
+        "limitations": [
+            "Tool completion order does not establish separate model turns or Skill-guided selection.",
+            "Tools lack attempt identity; inspect server.log for failover before claiming one-model evidence.",
+        ],
         "cases": {}, "passed": False,
     }
     try:
@@ -200,6 +218,7 @@ def run(args):
                         goal_id = "goal-probe-" + name
                         if evidence is not None:
                             save(fixtures / (name + ".json"), evidence)
+                        expected_content = (fixtures / (name + ".json")).read_text() if evidence is not None else None
                         save(output / (name + "-fixture.json"), {"evidence": evidence, "expected_revision": revision})
                         created = client.call_tool("masc_goal_upsert", {
                             "id": goal_id, "title": "Verifier Skill probe: " + name,
@@ -232,7 +251,8 @@ def run(args):
                         recorded = wait_for(name + " observation commit", committed, process, args.timeout)
                         receipt["cases"][name] = assess(
                             goal, recorded, expected, f"probe/{name}.json",
-                            evidence_readable=evidence is not None, proof_root=fixtures.parent)
+                            evidence_readable=evidence is not None, proof_root=fixtures.parent,
+                            expected_content=expected_content)
                         save(output / "receipt.json", receipt)
                         print(name + ": " + json.dumps(receipt["cases"][name]["checks"]), flush=True)
                     receipt["passed"] = all(case["passed"] for case in receipt["cases"].values())

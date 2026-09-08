@@ -128,7 +128,10 @@ let acknowledge_absent_owner_observing ~on_guards_acquired ~config ~keeper_name 
                 match operation.cleanup_intent.reason, operation.turn_disposition,
                       operation.phase, operation.join_evidence with
                 | Operator_stop_retain_meta, No_inflight_turn,
-                  Finalized ({ completion = Completion_not_requested; _ } as evidence),
+                  ( Finalized ({ completion = Completion_not_requested; _ } as evidence)
+                  | Owner_absent
+                      { finalization = ({ completion = Completion_not_requested; _ } as evidence)
+                      ; _ } ),
                   Some { terminal = Terminal_stopped; cleanup_error = None; _ } -> Ok evidence
                 | _ -> Error Ineligible_operation in
               let unsettled = List.filter (fun id ->

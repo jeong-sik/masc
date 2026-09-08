@@ -32,7 +32,12 @@ let with_workspace f =
 let refresh workspace =
   match Service.refresh ~workspace ~user_home:None
           ~read_config:(fun () -> Service.Config_text config_text) with
-  | Service.Published snapshot | Service.Unchanged snapshot -> snapshot
+  | Service.Published snapshot | Service.Unchanged snapshot ->
+      check int
+        ("fixture catalog has no rejected documents: "
+         ^ Yojson.Safe.to_string (Snapshot.to_public_yojson snapshot))
+        0 (List.length (Snapshot.rejections snapshot));
+      snapshot
   | Service.Workspace_retired -> fail "fixture workspace retired"
 
 let invoke tool id input =
@@ -50,7 +55,9 @@ let content = function
 let reference snapshot =
   match Snapshot.effective_entries snapshot with
   | [ entry ] -> Snapshot.entry_reference entry
-  | _ -> fail "expected one instruction Skill"
+  | _ ->
+      failf "expected one instruction Skill; catalog: %s"
+        (Yojson.Safe.to_string (Snapshot.to_public_yojson snapshot))
 
 let with_file reference file =
   match Skill_reference.to_yojson reference with
@@ -58,9 +65,9 @@ let with_file reference file =
   | _ -> fail "reference must be an object"
 
 let test_read_freeze_and_observe () = with_workspace (fun root workspace ->
-  let path = Filename.concat root "skills/guide/SKILL.md" in
+  let path = Filename.concat root "skills/evidence-guide/SKILL.md" in
   write path (document "Read references/proof.md before evaluating the logs.");
-  write (Filename.concat root "skills/guide/references/proof.md") "Compare the execution SHA with the requested SHA.";
+  write (Filename.concat root "skills/evidence-guide/references/proof.md") "Compare the execution SHA with the requested SHA.";
   let snapshot = refresh workspace in
   let reference = reference snapshot in
   let observed = ref [] in
@@ -87,7 +94,7 @@ let test_read_freeze_and_observe () = with_workspace (fun root workspace ->
   | Ok _ -> fail "new run accepted an obsolete exact revision")
 
 let test_resource_boundary () = with_workspace (fun root workspace ->
-  write (Filename.concat root "skills/guide/SKILL.md") (document "Inspect evidence.");
+  write (Filename.concat root "skills/evidence-guide/SKILL.md") (document "Inspect evidence.");
   write (Filename.concat root "skills/OUTSIDE.md") "NOT_A_BUNDLED_REFERENCE";
   let snapshot = refresh workspace in
   let tools = Surface.of_snapshot ~config:(Masc.Workspace.default_config root) snapshot in
@@ -106,9 +113,9 @@ let test_workspace_isolation () = with_workspace (fun root workspace ->
     Fs_compat.mkdir_p (Filename.concat other_root ".masc");
     let other_workspace = get (Service.workspace_of_base_path ~base_path:other_root) in
     Eio.Switch.on_release sw (fun () -> Service.retire ~workspace:other_workspace);
-    write (Filename.concat root "skills/guide/SKILL.md")
+    write (Filename.concat root "skills/evidence-guide/SKILL.md")
       (document "Evidence procedure for workspace A.");
-    write (Filename.concat other_root "skills/guide/SKILL.md")
+    write (Filename.concat other_root "skills/evidence-guide/SKILL.md")
       (document "Evidence procedure for workspace B.");
     let snapshot = refresh workspace in
     let other_snapshot = refresh other_workspace in
@@ -129,7 +136,7 @@ let test_workspace_isolation () = with_workspace (fun root workspace ->
     | Ok _ -> fail "first workspace accepted a reference from the second workspace"))
 
 let test_composition_not_available () = with_workspace (fun root workspace ->
-  write (Filename.concat root "skills/guide/SKILL.md")
+  write (Filename.concat root "skills/evidence-guide/SKILL.md")
     (document
        "```toml composition\n[[compositions]]\nname = \"evidence-guide\"\ndescription = \"Inspect execution evidence\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = \"clock\"\ntool = \"keeper_time_now\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```");
   let snapshot = refresh workspace in

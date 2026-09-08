@@ -329,12 +329,20 @@ let request_complete config goal_id =
 (* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
    reached only through the verifier's proof. *)
 let prove_complete config goal_id =
+  let request_id, criterion =
+    match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }) ->
+      pending.request_id, pending.criterion
+    | _ -> fail "proof requires a durable pending request"
+  in
   Some
     (Workspace_goals.commit_verifier_decision
        ~tool_name:"goal_verifier_commit"
        ~start_time:0.
        config
        ~goal_id
+       ~request_id
+       ~criterion
        ~verification_run_id:"goal-verifier-test-run"
        ~decision:Workspace_goals.Proof_proven
        ~evidence:"observed by the test verifier")

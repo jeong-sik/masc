@@ -3,8 +3,9 @@
 Candidate source: `f92979e06b146ff0c206f2594fe3cc2519d88416`.
 [Release build](https://github.com/jeong-sik/masc/actions/runs/34191784974) and
 [Keeper regression suites](https://github.com/jeong-sik/masc/actions/runs/34191815788)
-are the verification runs for this candidate. A scheduled check is not a passing
-result; final outcomes must be read from the corresponding jobs.
+are the verification runs for this candidate. The four targeted Keeper suites
+passed: microVM backend, Kata inventory, turn-up arguments and recovery transmission.
+Platform and installed Kata outcomes are separate acceptance results.
 
 | Platform | Required installation evidence |
 | --- | --- |

@@ -22,10 +22,17 @@ let test_the_split_over_the_real_catalogue () =
     Descriptor.public_names ()
     |> List.partition (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
   in
-  check (slist string String.compare) "only the tools that change something"
+  check (slist string String.compare) "public tools requiring this chat approval hook"
     [ "Edit"; "Write" ] asked;
-  check (slist string String.compare) "everything else runs unasked"
-    [ "Execute"; "Grep"; "Read"; "WebFetch"; "WebSearch" ] ran
+  (* This is the chat hook's split, not a proof that every Run is a read or
+     already authorized by its executor. BrowserTabs/Read declare readonly;
+     the other Browser descriptors declare ordered mutations without
+     leaves_masc. Their handlers still validate lane, client and action
+     context. Execute delegates its permission decision to the execution Gate. *)
+  check (slist string String.compare) "public tools with no additional chat approval"
+    [ "Execute"; "Grep"; "Read"; "WebFetch"; "WebSearch"
+    ; "BrowserTabs"; "BrowserRead"; "BrowserSession"; "BrowserGoto"
+    ; "BrowserAct"; "BrowserInteract" ] ran
 
 let test_reading_is_never_asked_about () =
   (* Reading to answer a question is the bulk of what a keeper does. *)

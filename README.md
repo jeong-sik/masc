@@ -72,12 +72,15 @@ stores one; the server reads keys from the environment it is started in.
 
 The wizard reports two axes:
 
-- **Model source.** A cloud provider (Anthropic, OpenAI, GLM, DeepSeek, ...)
-  keyed by its environment variable; a local server (Ollama, llama-server, MLX)
-  probed at its health path and shown `reachable` or `not running`; or a
-  subscription CLI (Claude Code, Codex, Antigravity) shown `installed` when it
-  is on `PATH` and `signed in` when its own login check passes.
-  `--provider <id>` picks one without prompting.
+- **Model source.** The seeded `runtime.toml` carries five providers: Ollama
+  Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, and a local Ollama. A
+  cloud provider is keyed by its environment variable; the local server is
+  probed at its health path and shown `reachable` or `not running`. Templates
+  for llama-server, vLLM, MLX, and the subscription CLIs (Claude Code, Codex,
+  Antigravity) sit commented out in the same file; uncomment one and the
+  wizard lists it, showing a CLI as `installed` when it is on `PATH` and
+  `signed in` when its own login check passes. Anthropic and OpenAI have no
+  seeded block yet. `--provider <id>` picks one without prompting.
 - **Execution sandbox.** Which of `docker`, `microvm`, and `remote_ssh` this
   host can offer. The wizard reports and does not choose. The sandbox is set
   per Keeper, or by a `--team <preset>` that carries its own choice.
@@ -140,7 +143,7 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc` | On an interactive terminal: opens the TUI, starting the server first when nothing answers the port. Anywhere else (a pipe, a unit file, a container, CI): runs the server |
 | `masc start --base-path <dir>` | Runs the server regardless of the terminal |
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
-| `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary and leaves `keepers/` empty |
+| `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `autoboot_enabled = false` |
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. It
 falls back to `MASC_BASE_PATH`, then the current directory. Runtime state
@@ -306,8 +309,11 @@ More client formats and a direct `initialize` probe are in
 A Keeper is one TOML file under `<base-path>/.masc/config/keepers/`. The
 server boots it, wakes it on board mentions, timers, and unassigned tasks,
 runs each turn in a sandbox, and writes the turn's records under `.masc/`
-before the Keeper goes idle. Nothing exists until you declare one: the
-installer, `masc init`, and the server all leave `keepers/` empty.
+before the Keeper goes idle. A fresh root starts with one Keeper, `imp`: the
+installer, `masc init`, and the server all seed it from the binary's
+`keepers-default/`. It ships with `autoboot_enabled = false`, so nothing runs
+until a model and a sandbox exist and you start it or turn autoboot on. The
+published v0.34.0 binary predates this seed and leaves `keepers/` empty.
 
 ```toml
 [keeper]
@@ -383,7 +389,7 @@ runtime. Measured 2026-09-04 on macOS 26.6.1:
 |---|---|---|
 | `apple_container` | `container` | Runs. The assumed backend on macOS, and the only one that carries `network_mode = "policy"` |
 | `microsandbox` | `msb` | Wired, does not boot: the sweep cannot tell its guests apart, and the Keeper stops at `microvm_container_listing_failed` |
-| `nerdctl_kata` | `nerdctl` | Untested; an absent CLI is refused by name |
+| `nerdctl_kata` | `nerdctl` | Verified once on Linux x64 by the `Kata volume smoke` workflow (run 34194081312, 2026-09-08): a Keeper executes in a Kata guest and its work volume survives guest recreation. Not part of the release gate and not measured on macOS. An absent CLI is refused by name |
 
 A backend whose CLI is missing is refused at boot rather than replaced with a
 shared kernel. On a host other than macOS the backend has to be named.

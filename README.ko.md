@@ -71,11 +71,15 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 마법사가 보고하는 축은 둘입니다.
 
-- **모델 출처.** 클라우드 프로바이더(Anthropic, OpenAI, GLM, DeepSeek 등)는
-  환경 변수 이름으로, 로컬 서버(Ollama, llama-server, MLX)는 헬스체크 경로를
-  찔러 `reachable`/`not running`으로, 구독형 CLI(Claude Code, Codex,
-  Antigravity)는 `PATH`에 있으면 `installed`, 자체 로그인 확인을 통과하면
-  `signed in`으로 보여 줍니다. `--provider <id>`를 주면 묻지 않고 고릅니다.
+- **모델 출처.** 시드된 `runtime.toml`에는 프로바이더 다섯이 들어 있습니다.
+  Ollama Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, 로컬 Ollama.
+  클라우드 프로바이더는 환경 변수 이름으로, 로컬 서버는 헬스체크 경로를 찔러
+  `reachable`/`not running`으로 보여 줍니다. llama-server, vLLM, MLX 와 구독형
+  CLI(Claude Code, Codex, Antigravity)는 같은 파일에 주석 처리된 템플릿으로
+  있어서, 주석을 풀면 마법사 목록에 오르고 CLI 는 `PATH`에 있으면
+  `installed`, 자체 로그인 확인을 통과하면 `signed in`으로 보입니다. Anthropic
+  과 OpenAI 는 아직 시드 블록이 없습니다. `--provider <id>`를 주면 묻지 않고
+  고릅니다.
 - **실행 샌드박스.** `docker`, `microvm`, `remote_ssh` 중 이 컴퓨터가 줄 수
   있는 것. 마법사는 보고만 하고 고르지 않습니다. 샌드박스는 Keeper마다
   정하거나, 자기 선택을 들고 있는 `--team <preset>`이 정합니다.
@@ -134,7 +138,7 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 | `masc` | 터미널에서는 TUI를 엽니다. 포트에 아무도 없으면 서버부터 띄웁니다. 터미널이 아닌 곳(파이프, 유닛 파일, 컨테이너, CI)에서는 서버가 뜹니다 |
 | `masc start --base-path <dir>` | 터미널이든 아니든 서버를 띄웁니다 |
 | `masc-tui --base-path <dir>` | TUI를 이름으로 엽니다 |
-| `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. `keepers/`는 비워 둡니다 |
+| `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. Keeper `imp` 하나가 `autoboot_enabled = false`로 들어갑니다 |
 
 `--base-path`는 `.masc`를 담은 디렉터리이지 `.masc` 자체가 아닙니다. 없으면
 `MASC_BASE_PATH`, 그다음 현재 디렉터리를 씁니다. 실행 상태는
@@ -291,9 +295,12 @@ Goal은 주인이 따로 없는, 같이 갖는 목표입니다. `masc_goal_upser
 
 Keeper는 `<base-path>/.masc/config/keepers/` 아래 TOML 파일 하나입니다.
 서버가 띄우고, 보드 멘션·타이머·미배정 작업에 깨우고, 턴마다 샌드박스에서
-돌리고, Keeper가 쉬기 전에 그 턴의 기록을 `.masc/` 아래에 씁니다. 선언하기
-전에는 아무것도 없습니다. 설치 스크립트도 `masc init`도 서버도 `keepers/`를
-비워 둡니다.
+돌리고, Keeper가 쉬기 전에 그 턴의 기록을 `.masc/` 아래에 씁니다. 새 루트에는
+Keeper `imp` 하나가 들어 있습니다. 설치 스크립트도 `masc init`도 서버도
+바이너리의 `keepers-default/`에서 그 하나를 시드합니다. `autoboot_enabled =
+false`로 들어오므로 모델과 샌드박스를 갖추고 직접 시작하거나 autoboot 을 켜기
+전에는 아무것도 돌지 않습니다. 공개된 v0.34.0 바이너리는 이 시드보다 앞서
+만들어져 `keepers/`를 비워 둡니다.
 
 ```toml
 [keeper]
@@ -366,7 +373,7 @@ Discord, iMessage, Slack은 서버 안에서 돌고, 토큰이 서버 환경에 
 |---|---|---|
 | `apple_container` | `container` | 돕니다. macOS의 기본값이고, `network_mode = "policy"`를 실을 수 있는 유일한 백엔드 |
 | `microsandbox` | `msb` | 배선은 됐고 부팅은 안 됩니다. 게스트를 구분하지 못해 Keeper가 `microvm_container_listing_failed`에서 멈춥니다 |
-| `nerdctl_kata` | `nerdctl` | 시험 안 했습니다. CLI가 없으면 이름을 대고 거부합니다 |
+| `nerdctl_kata` | `nerdctl` | Linux x64 에서 `Kata volume smoke` 워크플로로 한 번 확인했습니다(run 34194081312, 2026-09-08). Keeper 가 Kata 게스트 안에서 실행되고 작업 볼륨이 게스트 재생성 뒤에도 남습니다. 릴리즈 게이트에는 없고 macOS 에서는 재지 않았습니다. CLI가 없으면 이름을 대고 거부합니다 |
 
 CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에서 거부합니다. macOS가
 아닌 호스트에서는 백엔드를 직접 적어야 합니다.

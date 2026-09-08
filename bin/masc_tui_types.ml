@@ -3768,6 +3768,10 @@ type state = {
   mutable lanes_standalone_cursor: int;
   mutable lane_runs: Tui_decode.lane_run_summary list option;
   mutable lane_runs_error: string option;
+  mutable lane_runs_next: (float * string) option;
+  mutable lane_runs_total: int option;
+  mutable lane_runs_loading: bool;
+  mutable lane_runs_generation: int;
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
@@ -5087,6 +5091,10 @@ let create_state
   lanes_standalone_cursor = 0;
   lane_runs = None;
   lane_runs_error = None;
+  lane_runs_next = None;
+  lane_runs_total = None;
+  lane_runs_loading = false;
+  lane_runs_generation = 0;
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;

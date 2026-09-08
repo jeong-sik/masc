@@ -2065,6 +2065,7 @@ type lane_run_summary =
 type lane_run_page =
   { lrpg_runs : lane_run_summary list
   ; lrpg_next : (float * string) option
+  ; lrpg_total : int option
   }
 
 type lane_run_detail =

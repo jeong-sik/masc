@@ -230,35 +230,39 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
       (* A disk wins over a cartridge: the image boots through the warm-up
          replay, which wants the cartridge slot empty -- a C-BIOS boot that
          finds the interface ROM re-enters the sector boot every cycle. *)
-      let pre_frames =
+      let boot_result =
         match disk with
         | Some (_, bytes) ->
           Msx.load_disk ~interface_rom:false m bytes;
           Msx.step m ~frames:disk_boot_frames;
-          (match Msx.boot_disk m with Ok () -> () | Error _ -> ());
-          disk_boot_frames + boot_frames
+          (match Msx.boot_disk m with
+           | Ok () -> Ok (disk_boot_frames + boot_frames)
+           | Error message -> Error (Invalid_request ("disk boot failed: " ^ message)))
         | None ->
           Option.iter (fun (_, bytes) -> Msx.load_cartridge m bytes) cart;
-          boot_frames
+          Ok boot_frames
       in
-      Msx.step m ~frames:boot_frames;
-      mkdir_p ledger_dir;
-      let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-      (* A new machine starts a new ledger: truncate. *)
-      Out_channel.with_open_bin ledger_path (fun _ -> ());
-      let st =
-        { m
-        ; frame = pre_frames
-        ; cart =
-            (if Option.is_some disk then None
-             else Option.map (fun (path, _) -> Filename.basename path) cart)
-        ; disk = Option.map (fun (path, _) -> Filename.basename path) disk
-        ; ledger_path
-        ; entries = []
-        }
-      in
-      state := Some st;
-      Ok (observe st))
+      match boot_result with
+      | Error e -> Error e
+      | Ok pre_frames ->
+        Msx.step m ~frames:boot_frames;
+        mkdir_p ledger_dir;
+        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+        (* A new machine starts a new ledger: truncate. *)
+        Out_channel.with_open_bin ledger_path (fun _ -> ());
+        let st =
+          { m
+          ; frame = pre_frames
+          ; cart =
+              (if Option.is_some disk then None
+               else Option.map (fun (path, _) -> Filename.basename path) cart)
+          ; disk = Option.map (fun (path, _) -> Filename.basename path) disk
+          ; ledger_path
+          ; entries = []
+          }
+        in
+        state := Some st;
+        Ok (observe st))
 ;;
 
 let eject () =

@@ -6725,13 +6725,23 @@ let render_lane_run_list (state : state) ~lane_id =
     | Some runs -> runs
   in
   let shown = List.length runs in
+  let coverage =
+    let count = match state.lane_runs_total with
+      | Some total -> Printf.sprintf "%d loaded / %d retained" shown total
+      | None -> Printf.sprintf "%d loaded" shown in
+    let continuation =
+      if state.lane_runs_loading then " · loading"
+      else match state.lane_runs_next with
+        | Some _ -> " · ] older"
+        | None -> if Option.is_some state.lane_runs then " · end" else "" in
+    count ^ continuation in
   let header =
-    Printf.sprintf "%s · %s (%d runs)  %s"
+    Printf.sprintf "%s · %s (%s)  %s"
       (screen_title " MASC Lanes")
       (fit_width
          (Terminal_text.single_line (standalone_lane_label state lane_id))
          20)
-      shown (connection_badge state)
+      coverage (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -12252,6 +12262,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
                      (index + 1)
                      (Terminal_text.single_line failure.fpf_model)
                      (Terminal_text.single_line failure.fpf_reason_code) )
+               ; Ansi.dim, "    Token usage: not recorded"
                ]
                @ fusion_wrapped_block ~width ~indent:"    "
                    failure.fpf_reason_detail)
@@ -12266,17 +12277,15 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
               ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
               ; style = Some (Chart.Status Masc_tui_theme.Ok)
               }
-        | Fusion_panel_failed failure ->
-            Some
-              { Chart.name = Terminal_text.single_line failure.fpf_model
-              ; count = 0
-              ; style = Some (Chart.Status Masc_tui_theme.Bad)
-              })
+        | Fusion_panel_failed _ -> None)
       evidence.fe_panel
   in
   let panel_chart_lines =
     if List.length panel_token_items >= 2 then
-      (Ansi.dim, "  Model token distribution:")
+      ( Ansi.dim
+      , if failed = 0 then "  Model token distribution:"
+        else Printf.sprintf "  Model token distribution (measured %d/%d panels):"
+            answered (answered + failed) )
       :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
       @ [ Ansi.dim, "" ]
     else []
@@ -12401,9 +12410,16 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
   @ [ Ansi.dim, ""
     ; Ansi.bold, "  2  PANEL RESPONSES"
     ; ( Ansi.dim
-      , Printf.sprintf
-          "  %d answered / %d failed  \xc2\xb7  %d input / %d output tokens"
-          answered failed input_tokens output_tokens )
+      , let usage =
+          if answered = 0 then "panel token usage: not recorded"
+          else if failed = 0 then
+            Printf.sprintf "%d input / %d output tokens" input_tokens output_tokens
+          else
+            Printf.sprintf "measured %d/%d panels: %d input / %d output tokens"
+              answered (answered + failed) input_tokens output_tokens
+        in
+        Printf.sprintf "  %d answered / %d failed  \xc2\xb7  %s"
+          answered failed usage )
   ]
   @ [ Ansi.dim, "" ]
   @ panel_chart_lines

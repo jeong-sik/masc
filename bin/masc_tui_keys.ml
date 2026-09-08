@@ -652,6 +652,7 @@ let footer_hints_lanes_run_list =
   hints_of_bindings
     ([ b Navigate "j/k" "move" ~help:"move the run cursor"
      ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
+     ; b Act "]" "older" ~help:"load the next retained-run page from the server"
      ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
      ]
      @ listing_meta)

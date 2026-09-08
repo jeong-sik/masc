@@ -84,7 +84,9 @@ val load :
     [Msx.boot_disk] re-enters the image's boot sector with the loader
     running — the path a game's loader reaches its title screen on (the
     cart-INIT path the core also wires reboots mid-boot). A disk therefore
-    wins over [cart_path] — the slot is one, and the replay wants it empty. *)
+    wins over [cart_path] — the slot is one, and the replay wants it empty.
+    A rejected disk boot preserves the previous machine and ledger. Successful
+    loading alone is not evidence that a game reaches an interactive screen. *)
 
 val eject : unit -> (unit, error) result
 val screen : unit -> (observation, error) result

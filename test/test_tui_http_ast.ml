@@ -1705,24 +1705,38 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"
        ~callee:"discard_frame_for_new_size");
-  (* The contract is that the cost is paid in one place, not that main walks
-     through it a fixed number of times. #30255 gave the loop a second reason
-     to distrust the presenter's cached screen -- an image overlay covered
-     the frame and was dismissed -- and a count read that as a regression.
-
-     [Frame_presenter.invalidate] appears once in the whole file, inside
-     [discard_frame_for_new_size], so a caller that invalidated on its own
-     would raise this to 2 and fail here. That is how the loop's own ioctl
-     door was found: it had copied both lines rather than calling them. *)
-  check bool "main reaches the presenter only through that cost" true
+  (* Resize, async image dismissal, and terminal damage are distinct reasons
+     to distrust the cached text frame. Each owns one explicit invalidation;
+     ordinary refreshes must not gain another full-screen repaint site. *)
+  check bool "main reaches the resize invalidation boundary" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"invalidate_frame_for_resize"
      + Ast_grep.count_calls_in_value_binding ~module_path:main_path
          ~binding_name:"main" ~callee:"discard_frame_for_new_size"
      >= 1);
-  check int "nothing invalidates the presenter outside that boundary" 1
+  let invalidation_sites =
+    [ "discard_frame_for_new_size"; "drain_async_messages"; "main" ]
+  in
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " owns one presentation invalidation") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+           ~binding_name ~callee:"Frame_presenter.invalidate"))
+    invalidation_sites;
+  check int "no invalidation outside the explicit recovery boundaries"
+    (List.fold_left
+       (fun count binding_name ->
+         count + Ast_grep.count_calls_in_value_binding ~module_path:main_path
+           ~binding_name ~callee:"Frame_presenter.invalidate")
+       0 invalidation_sites)
     (Ast_grep.count_calls ~module_path:main_path
        ~callee:"Frame_presenter.invalidate");
+  check int "async image dismissal requests a forced restoration" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"drain_async_messages"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
   let terminal_repair_path = "bin/masc_tui_terminal_write_repair.ml" in
   check int "console repair boundary delegates to the repair state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
@@ -1983,19 +1997,29 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
    chat surface -- so their wiring is pinned here. Without the startup line the
    first symptom is a recovered dispatch that can never settle. *)
 let test_missing_operator_token_is_reported () =
-  check int "startup binds the bearer to the workspace it opened" 1
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui.ml"
-       ~callee:"Masc_tui_http.install_operator_token");
-  (* Not a call count on [operator_token_present]: every surface that reports a
-     refusal now reads it, so counting occurrences says nothing about startup.
-     What must not disappear is that startup says out loud what came of binding
-     a bearer -- a silent mint reads to the operator as a broken credential
-     when the server's index has not caught up yet. *)
-  check int "startup reports what came of binding a bearer" 1
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui.ml"
-       ~callee:"Masc_tui_credential.outcome_notice");
+  (* Startup binds once; a workspace which becomes available later is bound
+     again by the guarded server-contact retry. Scope each assertion to its
+     owner so one path cannot accidentally stand in for the other. *)
+  let module_path = "bin/masc_tui.ml" in
+  let credential_boundaries = [ "main"; "react_to_server_contact" ] in
+  List.iter
+    (fun callee ->
+      List.iter
+        (fun binding_name ->
+          check int (binding_name ^ " owns one " ^ callee) 1
+            (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name
+               ~callee))
+        credential_boundaries;
+      check int ("no " ^ callee ^ " outside credential boundaries")
+        (List.fold_left
+           (fun count binding_name ->
+             count + Ast_grep.count_calls_in_value_binding ~module_path
+               ~binding_name ~callee)
+           0 credential_boundaries)
+        (Ast_grep.count_calls ~module_path ~callee))
+    [ "Masc_tui_http.install_operator_token"
+    ; "Masc_tui_credential.outcome_notice"
+    ];
   (* The mint's window is a policy, and the three the type offers mean different
      things. [Long_lived] leaves an admin secret on disk that nothing retires;
      [With_expiry] takes the workspace's operator-session day, which is the very

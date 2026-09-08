@@ -297,8 +297,7 @@ Keeper는 `<base-path>/.masc/config/keepers/` 아래 TOML 파일 하나입니다
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 sandbox_image = "node:22-bookworm"
 network_mode = "none"

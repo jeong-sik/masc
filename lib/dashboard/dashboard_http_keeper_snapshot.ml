@@ -242,11 +242,6 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           ("verify", `Bool false);
         ]
       in
-      let proactive =
-        `Assoc [
-          ("enabled", `Bool m.proactive.enabled);
-        ]
-      in
       let approval_mode =
         Keeper_tool_approval_mode.resolve
           (Keeper_tool_approval_mode.shared ())
@@ -349,7 +344,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
        `Assoc [
          ("name", `String m.name);
          ("config_revision", keeper_config_revision_json config_revision);
-         ("autoboot_enabled", `Bool m.autoboot_enabled);
+         ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          ( "sandbox_profile"
          , `String
@@ -380,7 +375,6 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
            `Null );
          ("prompt", prompt);
          ("execution", execution);
-         ("proactive", proactive);
          ("tools", tools);
          ("skills", skills);
          ("auto_execution_session", auto_execution_session_surface_json ());

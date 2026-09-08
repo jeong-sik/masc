@@ -311,8 +311,7 @@ installer, `masc init`, and the server all leave `keepers/` empty.
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 sandbox_image = "node:22-bookworm"
 network_mode = "none"

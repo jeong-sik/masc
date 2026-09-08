@@ -370,7 +370,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             ("tool_audit_source", member_assoc "tool_audit_source" keeper);
             ("tool_audit_at", member_assoc "tool_audit_at" keeper);
             ("last_heartbeat_at", Json_util.string_opt_to_json last_heartbeat_at);
-            ("proactive_enabled", member_assoc "proactive_enabled" keeper);
+            ("activation_mode", member_assoc "activation_mode" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ( "model",
               Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" keeper)) );

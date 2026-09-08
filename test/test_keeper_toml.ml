@@ -601,7 +601,7 @@ let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
               true
               (String_util.contains_substring detail expected_kind)))
     [ "name", "true", "string"
-    ; "autoboot_enabled", "\"yes\"", "boolean"
+    ; "activation_mode", "true", "string"
     ; "max_context_override", "\"128001\"", "integer"
     ; "mention_targets", "true", "string array"
     ]
@@ -632,7 +632,7 @@ let test_profile_parses_tools_native () =
 
 
 let test_profile_absent_tools_native_is_none () =
-  let input = "[keeper]\nproactive_enabled = true\n" in
+  let input = "[keeper]\nactivation_mode = \"autonomous\"\n" in
   match TL.parse_toml input with
   | Error error -> fail error
   | Ok doc ->
@@ -710,12 +710,33 @@ let test_skill_names_preserve_absent_empty_and_exact_values () =
   check (option (list string)) "explicit empty overrides inherited names" (Some []) merged.skill_names
 ;;
 
+let test_activation_modes () =
+  List.iter (fun (wire, restores, spontaneous) ->
+    let doc = match TL.parse_toml (Printf.sprintf "[keeper]\nactivation_mode = %S\n" wire) with
+      | Ok doc -> doc | Error error -> fail error in
+    let defaults = match KTP.profile_defaults_of_toml doc with
+      | Ok defaults -> defaults | Error error -> fail error in
+    match defaults.activation_mode with
+    | None -> fail "declared mode disappeared"
+    | Some mode ->
+      check string "round trip" wire (Masc.Keeper_activation_mode.to_string mode);
+      check bool "owner restoration" restores (Masc.Keeper_activation_mode.restore_owner mode);
+      check bool "spontaneous initiative" spontaneous (Masc.Keeper_activation_mode.spontaneous mode))
+    ["manual", false, false; "on_demand", true, false; "autonomous", true, true];
+  List.iter (fun body ->
+    let doc = match TL.parse_toml ("[keeper]\n" ^ body ^ "\n") with
+      | Ok doc -> doc | Error error -> fail error in
+    match KTP.profile_defaults_of_toml doc with
+    | Error _ -> () | Ok _ -> fail "unknown mode or removed boolean was accepted")
+    ["activation_mode = \"automatic\""; "activation_mode = true"
+    ; "autoboot_enabled = true"; "proactive_enabled = false"]
+;;
+
 let test_profile_full () =
   let input = {|
 [keeper]
 mention_targets = ["sherlock", "log-analyzer"]
-proactive_enabled = true
-autoboot_enabled = false
+activation_mode = "manual"
 max_context_override = 128001
 |} in
   match TL.parse_toml input with
@@ -725,8 +746,8 @@ max_context_override = 128001
     | Error e -> fail e
     | Ok d ->
       check int "mention_targets" 2 (List.length d.mention_targets);
-      check (option bool) "proactive" (Some true) d.proactive_enabled;
-      check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
+      check (option string) "activation mode" (Some "manual")
+        (Option.map Masc.Keeper_activation_mode.to_string d.activation_mode);
       check (option int) "max_context_override" (Some 128_001)
         d.max_context_override
 
@@ -734,7 +755,7 @@ let test_profile_rejects_wrong_known_field_shape () =
   let input =
     {|
 [keeper]
-autoboot_enabled = [true, false]
+activation_mode = [true, false]
 |}
   in
   match TL.parse_toml input with
@@ -744,9 +765,9 @@ autoboot_enabled = [true, false]
      | Ok _ -> fail "known scalar field must not silently use its default"
      | Error message ->
        check bool "names field" true
-         (String_util.contains_substring message "keeper.autoboot_enabled");
+         (String_util.contains_substring message "keeper.activation_mode");
        check bool "names expected type" true
-         (String_util.contains_substring message "boolean"))
+         (String_util.contains_substring message "string"))
 
 let test_profile_rejects_invalid_max_context_override () =
   let input =
@@ -874,7 +895,7 @@ let test_discover_retains_invalid_files () =
   in
   write_file "good.toml" {|
 [keeper]
-autoboot_enabled = false
+activation_mode = "manual"
 |};
   write_file "bad.toml" "[broken";
   let result = KTP.discover_keepers_toml tmp_dir in
@@ -1010,7 +1031,7 @@ let test_default_roster_does_not_autoboot () =
              (option bool)
              (file ^ " autoboot_enabled")
              (Some false)
-             defaults.KTP.autoboot_enabled))
+             (Option.map Masc.Keeper_activation_mode.restore_owner defaults.KTP.activation_mode)))
     files
 
 let concrete_keeper_inventory_path repo =
@@ -1100,7 +1121,7 @@ let test_typed_keeper_toml_edits_preserve_unrelated_fields () =
 # operator comment
 [keeper]
 name = "probe"
-"proactive_enabled"	= true
+"activation_mode"	= "autonomous"
 max_context_override	= 200000
 
 [keeper.agent_core_env]
@@ -1109,7 +1130,7 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
   (match
      TL.edit_keeper_toml_fields_strict_staged
        ~path
-       [ "proactive_enabled", TL.Set (TL.Toml_bool false)
+       [ "activation_mode", TL.Set (TL.Toml_string "manual")
        ; "sandbox_image", TL.Set (TL.Toml_string "keeper:test")
        ; "mention_targets", TL.Set (TL.Toml_string_array [ "/tmp/a"; "/tmp/b" ])
        ; "max_context_override", TL.Remove
@@ -1127,8 +1148,8 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
   match TL.parse_toml content with
   | Error error -> fail error
   | Ok doc ->
-    check (option bool) "bool updated" (Some false)
-      (TL.toml_bool_opt doc "keeper.proactive_enabled");
+    check (option string) "activation mode updated" (Some "manual")
+      (TL.toml_string_opt doc "keeper.activation_mode");
     check (option string) "sandbox image inserted" (Some "keeper:test")
       (TL.toml_string_opt doc "keeper.sandbox_image");
     check (list string) "list inserted" [ "/tmp/a"; "/tmp/b" ]
@@ -1375,7 +1396,7 @@ let test_profile_defaults_materializable_for_name_uses_base_path () =
       write_file (Filename.concat config_dir "runtime.toml") "";
       write_file
         (Filename.concat keepers_dir "runtime.toml")
-        "[keeper]\nautoboot_enabled = true\ninstructions = \"runtime keeper\"\n";
+        "[keeper]\nactivation_mode = \"autonomous\"\ninstructions = \"runtime keeper\"\n";
       check bool
         "explicit autoboot keeper is materializable"
         true
@@ -1390,7 +1411,7 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
   let input = {|
 [keeper]
 mention_targets = ["a", "b"]
-autoboot_enabled = false
+activation_mode = "manual"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1687,18 +1708,18 @@ let test_projection_profile_snapshot_freshness () =
   let a = Filename.concat keepers_dir "snapshot-a.toml" in
   let b = Filename.concat keepers_dir "snapshot-b.toml" in
   let declaration enabled = Printf.sprintf
-      "[keeper]\ninstructions = \"Answer the question.\"\nautoboot_enabled = %b\n" enabled in
+      "[keeper]\ninstructions = \"Answer the question.\"\nactivation_mode = %S\n" (if enabled then "autonomous" else "manual") in
   write_file a (declaration true);
   let before = KTP.read_keeper_profile_snapshot ~base_path in
   write_file a (declaration false);
   write_file b (declaration true);
   check (option bool) "same projection keeps its captured declaration" (Some true)
-    (snapshot_defaults_exn before "snapshot-a").autoboot_enabled;
+    (Option.map Masc.Keeper_activation_mode.restore_owner (snapshot_defaults_exn before "snapshot-a").activation_mode);
   check (list string) "same projection does not discover later additions" ["snapshot-a"]
     (KTP.snapshot_configured_keeper_names before);
   let after = KTP.read_keeper_profile_snapshot ~base_path in
   check (option bool) "next projection observes edit immediately" (Some false)
-    (snapshot_defaults_exn after "snapshot-a").autoboot_enabled;
+    (Option.map Masc.Keeper_activation_mode.restore_owner (snapshot_defaults_exn after "snapshot-a").activation_mode);
   check (list string) "next projection observes added file" ["snapshot-a"; "snapshot-b"]
     (KTP.snapshot_configured_keeper_names after);
   Sys.remove a;
@@ -1706,12 +1727,12 @@ let test_projection_profile_snapshot_freshness () =
   check (list string) "next projection observes deletion" ["snapshot-b"]
     (KTP.snapshot_configured_keeper_names removed);
   check (option bool) "deleted declaration gets ordinary missing defaults" None
-    (snapshot_defaults_exn removed "snapshot-a").autoboot_enabled
+    (Option.map Masc.Keeper_activation_mode.restore_owner (snapshot_defaults_exn removed "snapshot-a").activation_mode)
 
 let test_projection_profile_snapshot_error_parity () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
   write_file (Filename.concat keepers_dir "malformed.toml") "[keeper]\ngoal = [\n";
-  write_file (Filename.concat keepers_dir "uninstructed.toml") "[keeper]\nautoboot_enabled = true\n";
+  write_file (Filename.concat keepers_dir "uninstructed.toml") "[keeper]\nactivation_mode = \"autonomous\"\n";
   let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   List.iter (fun name ->
     match KTP.snapshot_profile_defaults snapshot name,
@@ -1725,7 +1746,7 @@ let test_projection_profile_snapshot_error_parity () =
 let test_projection_profile_snapshot_filename_identity () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
   write_file (Filename.concat keepers_dir "file-key.toml")
-    "[keeper]\nname = \"declared-key\"\ninstructions = \"Answer the question.\"\nautoboot_enabled = false\n";
+    "[keeper]\nname = \"declared-key\"\ninstructions = \"Answer the question.\"\nactivation_mode = \"manual\"\n";
   let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   check (list string) "discovery uses declared name" ["declared-key"]
     (KTP.snapshot_configured_keeper_names snapshot);
@@ -1739,7 +1760,7 @@ let test_projection_profile_snapshot_filename_identity () =
 let test_projection_profile_snapshot_fleet_wiring () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
   let path = Filename.concat keepers_dir "snapshot-fleet.toml" in
-  write_file path "[keeper]\ninstructions = \"Answer the question.\"\nautoboot_enabled = true\n";
+  write_file path "[keeper]\ninstructions = \"Answer the question.\"\nactivation_mode = \"autonomous\"\n";
   let config = Masc.Workspace.default_config base_path in
   let profile_snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   Sys.remove path;
@@ -1835,6 +1856,7 @@ let () =
             test_profile_rejects_invalid_tools_native;
           test_case "rejects unknown [keeper.tools] sibling" `Quick
             test_profile_rejects_unknown_tools_sibling_key;
+          test_case "activation modes" `Quick test_activation_modes;
           test_case "full" `Quick test_profile_full;
           test_case "rejects wrong known-field shape" `Quick
             test_profile_rejects_wrong_known_field_shape;

@@ -1,6 +1,5 @@
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 network_mode = "inherit"
 mention_targets = ["maker", "제작"]

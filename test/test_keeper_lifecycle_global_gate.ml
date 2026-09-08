@@ -9,11 +9,11 @@
     runtime.toml value takes) and pin:
 
     1. MASC_KEEPER_AUTONOMOUS_ENABLED=false suppresses the scheduled-autonomous
-       turn even though meta.proactive.enabled is true.
+       turn even though (Masc.Keeper_activation_mode.spontaneous meta.activation_mode) is true.
     2. MASC_KEEPER_REACTIVE_ENABLED=false suppresses a reactive (mention) turn
        (Skip Reactive_disabled).
     3. MASC_KEEPER_AUTONOMOUS_ENABLED=false blocks autonomous activation
-       readiness even though meta.autoboot_enabled is true.
+       readiness even though (Masc.Keeper_activation_mode.restore_owner meta.activation_mode) is true.
     4. With no override (default all-true) the same keeper runs / is ready —
        so the gate is the cause of the suppression. *)
 
@@ -83,8 +83,7 @@ let ready_meta () =
   let meta = make_meta "gate" in
   let now = Time_compat.now () in
   { meta with
-    autoboot_enabled = true
-  ; proactive = { enabled = true }
+    activation_mode = Masc.Keeper_activation_mode.Autonomous
   ; runtime =
       { meta.runtime with
         proactive_rt =
@@ -174,12 +173,26 @@ let test_default_proactive_runs () =
   let d = decide ~meta:(ready_meta ()) schedule_attention_obs in
   check bool "default: scheduled automation attention runs" true d.should_run
 
+let test_requested_schedules_preserve_activation_modes () =
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
+  List.iter (fun mode ->
+    let meta = { (ready_meta ()) with activation_mode = mode } in
+    check bool "no spontaneous turn" false (decide ~meta base_obs).should_run;
+    check bool "due schedule still runs" true (decide ~meta schedule_attention_obs).should_run;
+    check bool "pause still blocks due schedule" false
+      (decide ~meta:{ meta with paused = true } schedule_attention_obs).should_run;
+    let queued = WO.keeper_cycle_decision ~meta
+      ~event_queue_triggers:[WO.Scheduled_automation_stimulus] base_obs in
+    check bool "queued schedule still runs" true queued.should_run)
+    [Masc.Keeper_activation_mode.Manual; On_demand; Autonomous]
+;;
+
 let test_global_proactive_off_suppresses () =
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
   let meta = ready_meta () in
   check bool "precondition: per-keeper proactive still enabled" true
-    meta.proactive.enabled;
-  let d = decide ~meta schedule_attention_obs in
+    (Masc.Keeper_activation_mode.spontaneous meta.activation_mode);
+  let d = decide ~meta base_obs in
   check bool "global proactive off suppresses the turn" false d.should_run;
   check bool "suppressed on scheduled-autonomous channel" true
     (match d.channel with WO.Scheduled_autonomous -> true | WO.Reactive -> false);
@@ -227,7 +240,7 @@ let test_global_autonomous_off_blocks_readiness () =
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
   let meta = ready_meta () in
   check bool "precondition: per-keeper autoboot still enabled" true
-    meta.autoboot_enabled;
+    (Masc.Keeper_activation_mode.restore_owner meta.activation_mode);
   let r = Readiness.of_meta meta in
   check bool "global autonomous off blocks activation" false
     r.autonomous_activation.ok;
@@ -298,22 +311,14 @@ let test_durable_demand_does_not_require_proactive () =
   without_overrides @@ fun () ->
   let ready = ready_meta () in
   let proactive_disabled =
-    { ready with proactive = { enabled = false } }
+    { ready with activation_mode = Masc.Keeper_activation_mode.On_demand }
   in
-  check bool "ordinary autonomous execution remains disabled" true
-    (match
-       Readiness.classify_owner_execution
-         ~shutdown_operation_id:None
-         ~runtime:(owner_runtime ~phase:State_machine.Running ~live_fiber:true)
-         (Ok proactive_disabled)
-     with
-     | Readiness.Retained_disabled Readiness.Retained_proactive_disabled -> true
-     | Readiness.Executable
-     | Readiness.Recoverable
-     | Readiness.Retained_disabled _
-     | Readiness.Paused_dead _
-     | Readiness.Shutdown_fenced _
-     | Readiness.Unknown _ -> false);
+  check bool "on-demand owner remains executable" true
+    (match Readiness.classify_owner_execution
+       ~shutdown_operation_id:None
+       ~runtime:(owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+       (Ok proactive_disabled) with
+     | Readiness.Executable -> true | _ -> false);
   check bool "persisted reactive demand can wake the live owner" true
     (match
        Readiness.classify_durable_demand_execution
@@ -341,25 +346,16 @@ let test_durable_demand_does_not_require_proactive () =
      | Readiness.Shutdown_fenced _
      | Readiness.Unknown _ -> false);
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
-  check bool "persisted demand still respects the autoboot kill-switch" true
-    (match
-       Readiness.classify_durable_demand_execution
-         ~shutdown_operation_id:None
-         ~runtime:Readiness.Owner_unregistered
-         (Ok proactive_disabled)
-     with
-     | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
-     | Readiness.Executable
-     | Readiness.Recoverable
-     | Readiness.Retained_disabled _
-     | Readiness.Paused_dead _
-     | Readiness.Shutdown_fenced _
-     | Readiness.Unknown _ -> false)
+  check bool "requested work recovers despite spontaneous global switch" true
+    (match Readiness.classify_durable_demand_execution
+       ~shutdown_operation_id:None ~runtime:Readiness.Owner_unregistered
+       (Ok proactive_disabled) with
+     | Readiness.Recoverable -> true | _ -> false)
 ;;
 
 let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
   without_overrides @@ fun () ->
-  let autoboot_disabled = { (ready_meta ()) with autoboot_enabled = false } in
+  let autoboot_disabled = { (ready_meta ()) with activation_mode = Masc.Keeper_activation_mode.Manual } in
   let classify ?(shutdown_operation_id = None) runtime =
     Readiness.classify_durable_demand_execution
       ~shutdown_operation_id
@@ -376,24 +372,14 @@ let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
      | Readiness.Paused_dead _
      | Readiness.Shutdown_fenced _
      | Readiness.Unknown _ -> false);
-  let remains_autoboot_disabled runtime =
-    match classify runtime with
-    | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
-    | Readiness.Executable
-    | Readiness.Recoverable
-    | Readiness.Retained_disabled _
-    | Readiness.Paused_dead _
-    | Readiness.Shutdown_fenced _
-    | Readiness.Unknown _ -> false
-  in
-  check bool "absent owner is not autobooted" true
-    (remains_autoboot_disabled Readiness.Owner_unregistered);
-  check bool "dead fiber is not treated as executable" true
-    (remains_autoboot_disabled
-       (owner_runtime ~phase:State_machine.Running ~live_fiber:false));
-  check bool "terminal owner is not treated as executable" true
-    (remains_autoboot_disabled
-       (owner_runtime ~phase:State_machine.Stopped ~live_fiber:true));
+  check bool "explicit request can recover an absent manual owner" true
+    (match classify Readiness.Owner_unregistered with Readiness.Recoverable -> true | _ -> false);
+  check bool "explicit request can recover a dead manual owner" true
+    (match classify (owner_runtime ~phase:State_machine.Running ~live_fiber:false) with
+     | Readiness.Recoverable -> true | _ -> false);
+  check bool "terminal owner remains ineligible" true
+    (match classify (owner_runtime ~phase:State_machine.Stopped ~live_fiber:true) with
+     | Readiness.Paused_dead _ -> true | _ -> false);
   let operation_id = Shutdown_types.Operation_id.generate () in
   check bool "shutdown fence still dominates the live-owner exception" true
     (match
@@ -409,17 +395,9 @@ let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
      | Readiness.Paused_dead _
      | Readiness.Unknown _ -> false);
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
-  check bool "global autonomous kill-switch still dominates" true
-    (match
-       classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
-     with
-     | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
-     | Readiness.Executable
-     | Readiness.Recoverable
-     | Readiness.Retained_disabled _
-     | Readiness.Paused_dead _
-     | Readiness.Shutdown_fenced _
-     | Readiness.Unknown _ -> false)
+  check bool "global initiative switch does not block explicit work" true
+    (match classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true) with
+     | Readiness.Executable -> true | _ -> false)
 ;;
 
 let test_owner_execution_shutdown_fence_blocks_boot () =
@@ -529,7 +507,8 @@ let () = init_runtime_default_for_tests ()
 let () =
   run "keeper_lifecycle_global_gate"
     [ ( "proactive"
-      , [ test_case "default runs" `Quick test_default_proactive_runs
+      , [ test_case "requested schedules preserve modes" `Quick test_requested_schedules_preserve_activation_modes
+        ; test_case "default runs" `Quick test_default_proactive_runs
         ; test_case "global off suppresses" `Quick
             test_global_proactive_off_suppresses
         ] )

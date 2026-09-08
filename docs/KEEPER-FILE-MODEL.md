@@ -29,8 +29,7 @@ canonical Keeper name; `[keeper].name` is optional.
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["operator"]
 ```
@@ -38,9 +37,8 @@ mention_targets = ["operator"]
 Current `[keeper]` fields:
 
 - `name`
-- `autoboot_enabled`
+- `activation_mode`
 - `mention_targets`
-- `proactive_enabled`
 - `sandbox_profile`
 - `sandbox_image`
 - `network_mode`
@@ -110,7 +108,7 @@ masc_keeper_up(
   name: "reviewer",
   instructions: "Review the current change and report concrete evidence.",
   sandbox_profile: "docker",
-  autoboot_enabled: true
+  activation_mode: "autonomous"
 )
 ```
 

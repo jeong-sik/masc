@@ -1,3 +1,4 @@
+import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
 import type {
   BoardMonitoring,
@@ -141,7 +142,7 @@ export interface DashboardFleetSafetyHealth {
 
 export interface DashboardPausedKeeperDetail {
   name: string
-  autoboot_enabled: boolean | null
+  activation_mode: KeeperActivationMode | null
   pause_kind: string | null
   paused_elapsed_sec: number | null
   missing_pause_root_cause: boolean | null

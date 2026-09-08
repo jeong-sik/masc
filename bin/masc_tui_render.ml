@@ -5802,22 +5802,11 @@ let keeper_message_identity ~max_cells state keeper_name =
              ^ fit_runtime_id (max_cells - prefix_width) runtime_id
              ^ Ansi.reset)
 
-(* Two dispositions an operator needs before stopping anything: whether the
-   keeper comes back by itself, and whether it takes turns without being
-   asked. Both are on the roster row. *)
+(* One activation mode and the sandbox declaration from the roster row. *)
 let keeper_flag_cell (runtime : keeper_runtime option) =
   match runtime with
-  | None -> Ansi.dim ^ "- - -" ^ Ansi.reset
+  | None -> Ansi.dim ^ "- -" ^ Ansi.reset
   | Some row ->
-      let flag enabled letter =
-        if enabled then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ letter ^ Ansi.reset
-        else Ansi.dim ^ "-" ^ Ansi.reset
-      in
-      (* The sandbox is a name rather than a yes/no, so it gets a letter of its
-         own instead of the on/off colour the other two use: "D" reads as the
-         profile it stands for, and anything this roster has not been taught
-         shows its own first letter rather than being folded into "L". A word
-         the reader does not recognise is better than a wrong one. *)
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
@@ -5827,9 +5816,10 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
         | _ -> Ansi.dim ^ "?" ^ Ansi.reset
       in
-      flag row.kr_autoboot_enabled "A"
-      ^ " "
-      ^ flag row.kr_proactive_enabled "P"
+      (match row.kr_activation_mode with
+       | Activation_manual -> "M"
+       | Activation_on_demand -> "D"
+       | Activation_autonomous -> "A")
       ^ " "
       ^ sandbox
 
@@ -5843,7 +5833,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; " "
     ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
     ; (if columns.kcol_show_flags then
-         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "A P S"
+         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "Mode S"
        else "")
     ; Printf.sprintf " %*s" Render_schedule.keeper_last_turn_width "LAST"
     ; (if columns.kcol_show_runtime then
@@ -6254,7 +6244,7 @@ let render_keeper_list (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     "  Health = heartbeat/readiness   Lifecycle = keeper process   Last = time since last turn";
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  A = autoboot   P = autonomous turns   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
+    "  Mode: M manual / D on demand / A autonomous   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);

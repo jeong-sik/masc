@@ -165,8 +165,7 @@ let persist_keeper_meta ?proactive_enabled config keeper_name =
     | None -> meta
     | Some enabled ->
       { meta with
-        autoboot_enabled = true
-      ; proactive = { enabled }
+        activation_mode = (if enabled then Masc.Keeper_activation_mode.Autonomous else On_demand)
       }
   in
   declare_keeper_profile config keeper_name;
@@ -183,8 +182,7 @@ let register_keeper ?proactive_enabled config keeper_name =
     | None -> meta
     | Some enabled ->
       { meta with
-        autoboot_enabled = true
-      ; proactive = { enabled }
+        activation_mode = (if enabled then Masc.Keeper_activation_mode.Autonomous else On_demand)
       }
   in
   declare_keeper_profile config keeper_name;
@@ -209,8 +207,7 @@ let register_offline_keeper ?proactive_enabled config keeper_name =
     | None -> meta
     | Some enabled ->
       { meta with
-        autoboot_enabled = true
-      ; proactive = { enabled }
+        activation_mode = (if enabled then Masc.Keeper_activation_mode.Autonomous else On_demand)
       }
   in
   declare_keeper_profile config keeper_name;

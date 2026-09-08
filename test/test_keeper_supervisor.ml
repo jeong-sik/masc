@@ -194,7 +194,7 @@ let write_keeper_toml_with_instructions config_dir ~name ~instructions =
 [keeper]
 name = "%s"
 sandbox_profile = "docker"
-proactive_enabled = false
+activation_mode = "on_demand"
 instructions = "%s"
 |}
        name instructions);
@@ -209,7 +209,7 @@ let write_empty_keeper_toml config_dir ~name =
 name = "%s"
 instructions = "test keeper"
 sandbox_profile = "docker"
-proactive_enabled = false
+activation_mode = "on_demand"
 |}
        name);
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
@@ -1062,7 +1062,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
        in
        let name = "supervised-operation-ready" in
-       let meta = make_meta name in
+       let meta = { (make_meta name) with activation_mode = Masc.Keeper_activation_mode.Manual } in
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
@@ -1147,6 +1147,10 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          ~proactive_warmup_sec:0
          ctx
          meta;
+       check bool "manual mode does not spontaneously launch" false (Atomic.get runner_ready);
+       KSS.supervise_keepalive
+         ~intent:Masc.Keeper_activation_readiness.Requested_work
+         ~publish_lifecycle ~launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta;
        let executor_started_in_time =
          wait_until
            ~clock
@@ -1319,7 +1323,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
         {
           base with
           paused = true;
-          autoboot_enabled = true;
+          activation_mode = Masc.Keeper_activation_mode.Autonomous;
         }
       in
       (match Keeper_meta_store.replace_snapshot config meta with
@@ -1845,7 +1849,7 @@ let test_supervised_stop_drains_librarian_before_terminal () =
    deterministically by pre-claiming the lane; the registry FSM still accepts
    [Fiber_started], so this exercises the fork-rejection path (not the launch
    gate). *)
-let test_launch_fork_rejection_does_not_announce_running () =
+let assert_launch_bootstrap_policy ~mode ~expected_bootstrap () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1861,11 +1865,14 @@ let test_launch_fork_rejection_does_not_announce_running () =
         Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
       in
       let name = "launch-fork-reject" in
-      let meta = make_meta name in
+      let meta = { (make_meta name) with activation_mode = mode } in
       (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
+      Masc.Keeper_registry_event_queue.enqueue ~base_path:config.base_path name
+        { post_id = "requested-bootstrap"; urgency = Masc.Keeper_event_queue.Normal
+        ; arrived_at = Unix.gettimeofday (); payload = Masc.Keeper_event_queue.Bootstrap };
       (match
          Lane.reject_before_start reg.lane ~reason:(Failure "pre-claimed for test")
        with
@@ -1898,6 +1905,16 @@ let test_launch_fork_rejection_does_not_announce_running () =
            with
            | Ok () -> fail "expected lane fork rejection to propagate as Error"
            | Error _ -> ());
+      let pending = match Masc.Keeper_registry_event_queue.pending_selections_result
+        ~base_path:config.base_path name with
+        | Ok pending -> pending | Error detail -> fail detail in
+      let post_ids = List.map
+        (fun (selection : Masc.Keeper_event_queue_state.pending_selection) -> selection.source.post_id)
+        pending in
+      check bool "explicit queued request survives launch" true
+        (List.mem "requested-bootstrap" post_ids);
+      check bool "synthetic bootstrap follows initiative policy" expected_bootstrap
+        (List.mem "bootstrap" post_ids);
       check bool
         "fork-rejected launch resolves done through the crash path"
         true
@@ -1908,6 +1925,17 @@ let test_launch_fork_rejection_does_not_announce_running () =
         (match Reg.get_phase ~base_path:config.base_path name with
          | Some KSM.Crashed -> true
          | Some _ | None -> false))
+
+let test_launch_fork_rejection_does_not_announce_running () =
+  assert_launch_bootstrap_policy ~mode:Masc.Keeper_activation_mode.Autonomous ~expected_bootstrap:true ()
+
+let test_on_demand_and_manual_launch_do_not_inject_bootstrap () =
+  List.iter (fun mode -> assert_launch_bootstrap_policy ~mode ~expected_bootstrap:false ())
+    [Masc.Keeper_activation_mode.On_demand; Manual];
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.set "MASC_KEEPER_AUTONOMOUS_ENABLED" "false";
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests (fun () ->
+    assert_launch_bootstrap_policy ~mode:Masc.Keeper_activation_mode.Autonomous ~expected_bootstrap:false ())
 
 let test_fork_rejection_preserves_replacement_lane () =
   Eio_main.run @@ fun env ->
@@ -2833,6 +2861,8 @@ let () =
         test_supervised_stop_joins_board_attention_worker;
       test_case "supervised stop drains Librarian before terminal" `Quick
         test_supervised_stop_drains_librarian_before_terminal;
+      test_case "owner launch respects spontaneous bootstrap policy" `Quick
+        test_on_demand_and_manual_launch_do_not_inject_bootstrap;
       test_case "lane fork reject does not announce Running" `Quick
         test_launch_fork_rejection_does_not_announce_running;
       test_case "fork reject preserves newer same-name lane" `Quick

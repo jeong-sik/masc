@@ -19,12 +19,11 @@ type editable_field =
 let editable_fields =
   [ Direct ("runtime_id", [ "execution"; "selected_runtime_id" ])
   ; Direct ("mention_targets", [ "workspace"; "mention_targets" ])
-  ; Direct ("autoboot_enabled", [ "autoboot_enabled" ])
+  ; Direct ("activation_mode", [ "activation_mode" ])
   ; Direct ("max_context_override", [ "max_context_override" ])
   ; Direct ("sandbox_profile", [ "sandbox_profile" ])
   ; Direct ("network_mode", [ "network_mode" ])
   ; Direct ("instructions", [ "prompt"; "instructions" ])
-  ; Direct ("proactive_enabled", [ "proactive"; "enabled" ])
   ; Skill_selection
   ]
 
@@ -470,9 +469,7 @@ let view_lines ~sanitize json =
   ; section "effective settings" (Printf.sprintf "e opens %d fields" editable_count)
   ; editable_value_row "Runtime"
       (fun () -> string_value (at [ "execution"; "selected_runtime_id" ]))
-  ; editable_value_row "Autoboot" (fun () -> bool_value (at [ "autoboot_enabled" ]))
-  ; editable_value_row "Autonomous turns"
-      (fun () -> bool_value (at [ "proactive"; "enabled" ]))
+  ; editable_value_row "Activation" (fun () -> string_value (at [ "activation_mode" ]))
   ; editable_value_row "Context override"
       (fun () -> int_override_value (at [ "max_context_override" ]))
   ; editable_value_row "Sandbox / network"

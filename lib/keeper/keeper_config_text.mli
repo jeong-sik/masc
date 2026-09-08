@@ -23,7 +23,6 @@ val invalid_name_error : string -> string
 
 (* ── Configuration constants ────────────────────────────────── *)
 
-val default_proactive_enabled : bool
 val prompt_render_max_bytes : int
 
 (* ── UTF-8 string processing ────────────────────────────────── *)

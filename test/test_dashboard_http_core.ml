@@ -2943,13 +2943,13 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   mkdir_p keepers_dir;
   write_file
     (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nautoboot_enabled = false\ninstructions = \"Keeper base\"\n";
+    "[keeper]\nactivation_mode = \"manual\"\ninstructions = \"Keeper base\"\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
   write_file
     (Filename.concat keepers_dir "beta.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
   Config_dir_resolver.reset ();
   Fun.protect
@@ -2982,7 +2982,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         (json |> member "counts" |> member "persisted_keepers" |> to_int);
       write_file
         (Filename.concat keepers_dir "base.toml")
-        "[keeper]\nautoboot_enabled = true\n";
+        "[keeper]\nactivation_mode = \"autonomous\"\n";
       Config_dir_resolver.reset ();
       let configured_names_after_autoboot_change =
         Masc.Keeper_meta_store.configured_keeper_names config
@@ -4185,8 +4185,7 @@ let prepare_config_sync_keeper ~sw config name =
     | Error error -> fail ("meta fixture: " ^ error)
     | Ok meta ->
       { meta with
-        Masc.Keeper_meta_contract.autoboot_enabled = true
-      ; proactive = { enabled = false }
+        Masc.Keeper_meta_contract.activation_mode = Masc.Keeper_activation_mode.On_demand
         (* keeper_turn_up_config_persistence.persist requires instructions
            from somewhere -- explicit instructions_arg, an existing
            keeper.toml -- before it will materialize a keeper.
@@ -4216,7 +4215,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nautoboot_enabled = false\nproactive_enabled = false\n"
+       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -4415,7 +4414,7 @@ let test_config_post_requires_expected_revision () =
   let raw, _ =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true}|}
+      ~name {|{"activation_mode":"autonomous"}|}
   in
   expect_http_status "missing revision HTTP 400" 400 raw;
   ignore
@@ -4521,7 +4520,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
       [ ( "expected_config_revision"
         , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
             expected_config )
-      ; "proactive_enabled", `Bool true
+      ; "activation_mode", `String "autonomous"
       ]
     |> Yojson.Safe.to_string
   in
@@ -4603,12 +4602,12 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     | Ok revision -> revision
     | Error detail -> failf "initial revision: %s" detail
   in
-  let body proactive_enabled =
+  let body activation_mode =
     `Assoc
       [ ( "expected_config_revision"
         , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
             initial_revision )
-      ; "proactive_enabled", `Bool proactive_enabled
+      ; "activation_mode", `String activation_mode
       ]
     |> Yojson.Safe.to_string
   in
@@ -4616,11 +4615,11 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
   in
   let winner_raw, _ =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body true)
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "autonomous")
   in
   expect_http_status "winner HTTP 200" 200 winner_raw;
   let loser_raw, loser_json =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body false)
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "manual")
   in
   expect_http_status "loser HTTP 409" 409 loser_raw;
   let open Yojson.Safe.Util in
@@ -4650,8 +4649,8 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "winner remains durable" (Some true)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled");
+  check (option string) "winner remains durable" (Some "autonomous")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode");
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -4670,7 +4669,7 @@ let test_config_post_restarts_from_atomic_toml () =
       let raw, response =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
            ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-           ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
+           ~name {|{"activation_mode":"autonomous"}|}
       in
       expect_http_status "atomic config restart HTTP 200" 200 raw;
       check string "readback carries manifest SHA-256 revision" "sha256"
@@ -4691,13 +4690,11 @@ let test_config_post_restarts_from_atomic_toml () =
       (match parsed with
        | Error error -> fail error
        | Ok doc ->
-         check (option bool) "autoboot committed" (Some true)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled");
-         check (option bool) "proactive committed" (Some true)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
+         check (option string) "activation committed" (Some "autonomous")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
       check bool "running projection converged" true
         (match Masc.Keeper_registry.get ~base_path:config.base_path name with
-         | Some entry -> entry.meta.proactive.enabled
+         | Some entry -> Keeper_activation_mode.spontaneous entry.meta.activation_mode
          | None -> false))
 
 let test_config_post_materializes_missing_toml () =
@@ -4714,12 +4711,12 @@ let test_config_post_materializes_missing_toml () =
       let raw, json =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-          ~name {|{"proactive_enabled":true,"sandbox_profile":"docker"}|}
+          ~name {|{"activation_mode":"autonomous","sandbox_profile":"docker"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
-      check bool "runtime projection applied proactive config" true
-        (json |> member "proactive" |> member "enabled" |> to_bool);
+      check string "runtime projection applied activation mode" "autonomous"
+        (json |> member "activation_mode" |> to_string);
       let path =
         Config_dir_resolver.keepers_dir_for_base_path
           ~base_path:config.Workspace.base_path
@@ -4736,8 +4733,8 @@ let test_config_post_materializes_missing_toml () =
       | Ok doc ->
         check (option string) "materialized sandbox profile" (Some "docker")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
-        check (option bool) "materialized proactive config" (Some true)
-          (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
+        check (option string) "materialized activation mode" (Some "autonomous")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
 
 let test_config_post_rolls_back_missing_runtime_assignment () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4752,7 +4749,7 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   let raw, json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true,"runtime_id":"missing.runtime"}|}
+      ~name {|{"activation_mode":"autonomous","runtime_id":"missing.runtime"}|}
   in
   expect_http_status "HTTP 503" 503 raw;
   let open Yojson.Safe.Util in
@@ -4770,8 +4767,8 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "TOML is rolled back" (Some false)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+  check (option string) "TOML is rolled back" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
 let test_config_post_prevalidates_mixed_request () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4781,7 +4778,7 @@ let test_config_post_prevalidates_mixed_request () =
   let raw, _ =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true,"allowed_paths":["*"]}|}
+      ~name {|{"activation_mode":"autonomous","allowed_paths":["*"]}|}
   in
   expect_http_status "HTTP 400" 400 raw;
   let doc =
@@ -4792,8 +4789,8 @@ let test_config_post_prevalidates_mixed_request () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "activation was not committed" (Some false)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+  check (option string) "activation was not committed" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
 let test_config_post_round_trips_typed_tools_patch () =
   with_test_env @@ fun ~env ~sw ~config ->

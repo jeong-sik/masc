@@ -148,7 +148,7 @@ let write_keeper_seed repo_root =
   mkdir_p (Filename.concat repo_root "config/keepers/alpha");
   write_file
     (Filename.concat repo_root "config/keepers/alpha.toml")
-    "[keeper]\nautoboot_enabled = true\ninstructions = \"Keep working autonomously.\"\n"
+    "[keeper]\nactivation_mode = \"autonomous\"\ninstructions = \"Keep working autonomously.\"\n"
 
 let write_fake_eio_exe ~commit exe_path =
   mkdir_p (Filename.dirname exe_path);

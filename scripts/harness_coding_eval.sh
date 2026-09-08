@@ -727,8 +727,7 @@ run_one() {
       name: $name,
       instructions: $instructions,
       runtime_id: $runtime_id,
-      autoboot_enabled: false,
-      proactive_enabled: false
+      activation_mode: "manual"
     }')"
 
   if ! call_mcp_tool 4000 "masc_keeper_up" "${create_args}" 45; then

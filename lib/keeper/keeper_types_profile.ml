@@ -111,9 +111,9 @@ let string_has_operator_todo_placeholder value =
 
 let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =
   let has_runtime_identity = Option.is_some defaults.instructions in
-  match defaults.autoboot_enabled with
-  | Some true -> true
-  | Some false | None -> has_runtime_identity
+  match defaults.activation_mode with
+  | Some (Keeper_activation_mode.On_demand | Autonomous) -> true
+  | Some Manual | None -> has_runtime_identity
 ;;
 
 let keeper_toml_path_opt name =

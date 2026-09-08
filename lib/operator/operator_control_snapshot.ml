@@ -436,7 +436,7 @@ let keepers_json
                              , Json_util.string_opt_to_json latest_action_source )
                            ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
                            ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
-                           ; "proactive_enabled", `Bool meta.proactive.enabled
+                           ; "activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode
                            ; ( "last_proactive_reason"
                              , Json_util.string_opt_to_json
                                  (let value =

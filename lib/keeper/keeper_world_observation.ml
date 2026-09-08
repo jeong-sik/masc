@@ -1596,11 +1596,9 @@ let keeper_cycle_decision
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
-  (* RFC-0297 P0-1: reactive and proactive turns run only when their lifecycle
-     gate is enabled — the global kill-switch AND the per-keeper flag. Resolved
-     through the single SSOT [Keeper_lifecycle_gate_env.enabled] so the enabled
-     decision is not re-derived inline. Before this the global switches did not
-     exist, so [reactive]/[proactive] enabled = false were silently dropped. *)
+  (* Lifecycle policy is resolved once at the environment boundary. Spontaneous
+     work uses the global autonomy setting and the Keeper activation mode;
+     an explicit due schedule supplies its own execution authority below. *)
   let reactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Reactive meta
   in
@@ -1699,7 +1697,11 @@ let keeper_cycle_decision
         else
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
-      if not proactive_gate_enabled
+      let requested_schedule_due =
+        scheduled_due_from_queue
+        || observation.scheduled_automation.due_ready_count > 0
+      in
+      if not proactive_gate_enabled && not requested_schedule_due
       then
         { should_run = false
         ; channel = Scheduled_autonomous

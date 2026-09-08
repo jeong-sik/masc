@@ -278,7 +278,11 @@ module Response = struct
       Httpun.Response.create ~headers `Not_modified, ""
 
   let json ?status ?compress ?extra_headers ?request ?etag body reqd =
-    let request = Option.value request ~default:(Httpun.Reqd.request reqd) in
+    let request =
+      match request with
+      | Some request -> request
+      | None -> Httpun.Reqd.request reqd
+    in
     let response, final_body =
       prepare_json ?status ?compress ?extra_headers ~request ?etag body
     in
@@ -330,7 +334,11 @@ module Response = struct
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
 
   let json_value_on_cpu ?status ?compress ?extra_headers ?request value reqd =
-    let request = Option.value request ~default:(Httpun.Reqd.request reqd) in
+    let request =
+      match request with
+      | Some request -> request
+      | None -> Httpun.Reqd.request reqd
+    in
     let response, body =
       Executor_pool_ref.submit_or_inline (fun () ->
         prepare_json ?status ?compress ?extra_headers ~request

@@ -31,8 +31,7 @@ Keeper 는 MASC 가 띄우고 지켜보고 기록하는 상주 에이전트입�
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
 
@@ -49,10 +48,9 @@ instructions = """
 
 | 항목 | 쓰는 곳 | 무엇을 정하나 |
 |---|---:|---|
-| `autoboot_enabled` | 11/11 | 서버가 켜질 때 이 Keeper 도 같이 띄울지 |
+| `activation_mode` | — | 수동 시작(`manual`), 요청 시 실행(`on_demand`), 주기 자율 실행(`autonomous`) |
 | `instructions` | 11/11 | Keeper 의 프롬프트 전부. 비면 거부됩니다 |
 | `sandbox_profile` | 11/11 | `docker` 는 컨테이너에서 실행. `local`(호스트 실행)은 기본 비활성 — fail-closed, RFC-0394 |
-| `proactive_enabled` | 9/11 | 스스로 턴을 돌지, 불렸을 때만 움직일지 |
 | `mention_targets` | 7/11 | 보드에서 이 Keeper 를 부르는 이름들 |
 | `network_mode` | 6/11 | 샌드박스에서 네트워크가 닿는 범위 |
 | `name` | 5/11 | 파일 이름과 표시 이름이 다를 때 |
@@ -148,7 +146,7 @@ masc_keeper_status(name="reviewer")
 masc_keeper_down(name="reviewer")
 ```
 
-`autoboot_enabled = true` 면 서버와 같이 뜨니까, 이 명령들은 평소 부팅용이 아니라
+`activation_mode = "autonomous"` 또는 `"on_demand"` 면 서버와 같이 뜨니까, 이 명령들은 평소 부팅용이 아니라
 중간에 마음을 바꿀 때 씁니다.
 
 상태는 축이 **두 개**이고, 둘이 같이 보이는 건 정상입니다.
@@ -230,3 +228,13 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 | [`docs/ENV-CONTRACT.md`](ENV-CONTRACT.md) | 런타임이 읽는 환경 변수 |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | bearer 토큰과 대시보드 쓰기 권한 |
 | [`README.ko.md`](../README.ko.md) | 설치, MCP 클라이언트 설정, 대시보드 |
+
+`activation_mode` is the single Keeper activation setting. `manual` does not
+restore an owner automatically; explicit requested work may activate it.
+`on_demand` restores the owner at startup but does not invent periodic work.
+`autonomous` also allows periodic self-directed turns. Direct messages,
+approval continuations, and due schedules remain requested work in every mode;
+operator pause and shutdown still prevent execution. The global
+`autonomous.enabled` setting controls automatic startup and spontaneous work.
+The live periodic interval is `keeper.keepalive_interval_sec`; wake hints do
+not reset its pending deadline or create work by themselves.

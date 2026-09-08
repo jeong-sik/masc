@@ -336,7 +336,7 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 | `frontend` | 프론트엔드 구현과 검증 |
 | `qa` | 요구사항에 대한 테스트·검증 |
 
-이 preset은 `autoboot_enabled=true`, `sandbox_profile="docker"`,
+이 preset은 `activation_mode="autonomous"`, `sandbox_profile="docker"`,
 `network_mode="inherit"`를 사용하고 fleet 기본 모델을 따릅니다. 역할 지침은
 컴파일러나 인증을 설치하지 않으며 개별 `skills` 패키지도 추가하지 않습니다.
 

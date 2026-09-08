@@ -199,19 +199,23 @@ let test_disk_load () =
   check bool "the full file name resolves too" true (is_completed r)
 ;;
 
-(* With a BIOS and a real .dsk on this host, the boot chain runs: the machine
-   keeps stepping and the clock advances frame by frame. CI has no ROM images
-   (they are not in the repository), so without MSX_ROMS and MSX_DISK this
-   case records that it did not run instead of pretending to. *)
+(* With a BIOS and a real .dsk on this host, the boot chain runs: the load
+   itself carries the warm-up replay (disk_boot_frames + boot_frames), then
+   the machine keeps stepping and the clock advances frame by frame. CI has no
+   ROM images (they are not in the repository), so without MSX_ROMS and
+   MSX_DISK this case records that it did not run instead of pretending to. *)
 let test_disk_boot_smoke () =
   match Sys.getenv_opt "MSX_ROMS", Sys.getenv_opt "MSX_DISK" with
   | Some roms, Some disk when roms <> "" && disk <> "" ->
     with_workspace @@ fun base_path ->
     let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String roms); ("cart", `String disk) ] in
     check bool "load with a BIOS and a disk completes" true (is_completed r);
+    check int "the load clock carries the warm-up replay"
+      (Msx_lane.disk_boot_frames + Msx_lane.boot_frames) (frame_of r);
     let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 300) ] in
     check bool "the machine steps past the boot" true (is_completed r);
-    check int "the clock is boot plus the step" (Msx_lane.boot_frames + 300) (frame_of r);
+    check int "the clock is replay plus boot plus the step"
+      (Msx_lane.disk_boot_frames + Msx_lane.boot_frames + 300) (frame_of r);
     (* HALT is a normal VSync wait mid-boot, not a fault — the smoke's claim
        is that the chain keeps observing a named mode. *)
     check bool "a display mode is named" true

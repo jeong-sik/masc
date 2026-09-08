@@ -118,6 +118,7 @@ val run_named :
   ?tool_requirement:Keeper_required_tools.t ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
+  ?recovery_view:Keeper_recovery_transmission.t ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->

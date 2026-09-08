@@ -91,9 +91,16 @@ let verification_projection ~config =
     match records with
     | Error detail -> Goal_verification.ledger_error_to_yojson detail
     | Ok records ->
-        let record = List.find_opt
-          (fun (record : Goal_verification.record) -> String.equal record.goal_id goal.id) records
-          |> Option.value ~default:(Goal_verification.default_record ~goal_id:goal.id) in
+        let record =
+          match List.find_opt
+            (fun (record : Goal_verification.record) -> String.equal record.goal_id goal.id) records with
+          | Some record -> record
+          | None ->
+              (* The primary ledger decoded successfully and contains no row
+                 for this Goal. Only this known absence projects idle; read
+                 failures were returned above. *)
+              Goal_verification.default_record ~goal_id:goal.id
+        in
         Goal_verification.record_to_yojson_for_goal ~goal record
 
 let rec tree_node_to_json ?(events_for_goal = fun _ -> [])

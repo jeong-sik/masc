@@ -48,24 +48,44 @@ let store ~dir (raw : string) : (handle, string) result =
      | Ok () -> Ok h
      | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
 
-let load ~dir (h : handle) : (string, string) result =
-  if not (is_canonical h) then
-    Error
-      (Printf.sprintf
-         "Vision_artifact_store.load: malformed handle (expected 64-char \
-          lowercase hex): %S"
-         h)
+type load_error =
+  | Malformed_handle of string
+  | Missing_artifact of string
+  | Hash_mismatch of string
+  | Read_failed of string
+
+let load_error_to_string = function
+  | Malformed_handle h -> Printf.sprintf
+      "Vision_artifact_store.load: malformed handle (expected 64-char lowercase hex): %S" h
+  | Missing_artifact path -> "Vision_artifact_store.load: not found: " ^ path
+  | Hash_mismatch path -> "Vision_artifact_store.load: content hash mismatch for " ^ path
+  | Read_failed detail -> "Vision_artifact_store.load: read failed: " ^ detail
+
+let load ~dir (h : handle) : (string, load_error) result =
+  if not (is_canonical h) then Error (Malformed_handle h)
   else
-  let path = path_of ~dir h in
-  match Fs_compat.load_file_opt path with
-  | None -> Error (Printf.sprintf "Vision_artifact_store.load: not found: %s" path)
-  | Some bytes ->
-    (* Verify content-addressing on read: stored bytes must hash back to the
-       handle. Catches corruption and forged/wrong handles — fail closed rather
-       than return mismatched bytes. *)
-    if String.equal (hash bytes) h then Ok bytes
-    else
-      Error
-        (Printf.sprintf
-           "Vision_artifact_store.load: content hash mismatch for %s"
-           path)
+    let path = path_of ~dir h in
+    try
+      (* Use typed OS failures to distinguish an absent reference from a denied
+         or broken store. The actual read retains Fs_compat's path checks. *)
+      ignore (Unix.stat path);
+      let bytes = Fs_compat.load_file path in
+      if String.equal (hash bytes) h then Ok bytes
+      else Error (Hash_mismatch path)
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing_artifact path)
+    | Unix.Unix_error (error, operation, _) ->
+        Error (Read_failed (operation ^ ": " ^ Unix.error_message error))
+    | Sys_error detail ->
+        (* The file can disappear between the first stat and the read, whose
+           filesystem adapter may report Sys_error rather than Unix_error.
+           Recheck with typed OS errors; never classify from message text. *)
+        (try
+           ignore (Unix.stat path);
+           Error (Read_failed detail)
+         with
+         | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing_artifact path)
+         | Unix.Unix_error (error, operation, _) ->
+             Error (Read_failed (operation ^ ": " ^ Unix.error_message error))
+         | Sys_error recheck_detail -> Error (Read_failed recheck_detail))
+    | End_of_file -> Error (Read_failed "unexpected end of file while reading artifact")

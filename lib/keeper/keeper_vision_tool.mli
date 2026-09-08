@@ -166,8 +166,11 @@ val handle_with_outcome
     [sw], [net], and [clock]; missing Eio context is [Runtime_failure]. Returns a JSON
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
-    one of [invalid_args | eio_context_unavailable | artifact_load_failed |
+    one of [invalid_args | invalid_artifact | artifact_not_found |
+    eio_context_unavailable | artifact_load_failed |
     image_too_large | invalid_media_type | invalid_request |
     no_capable_runtime | timeout | provider_error | empty_extraction |
     truncated_extraction]. [complete] defaults to the live provider call (inject
-    in tests). Never returns a raw empty success. *)
+    in tests). Malformed artifact handles are [Policy_rejection], absent artifacts
+    are [Workflow_rejection], and read/integrity failures remain [Runtime_failure].
+    Never returns a raw empty success. *)

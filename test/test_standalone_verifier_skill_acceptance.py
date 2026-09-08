@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The acceptance receipt must reject incomplete or unrelated tool evidence."""
 import copy
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -12,20 +13,25 @@ from standalone_verifier_skill_acceptance import assess
 class ReceiptTests(unittest.TestCase):
     def setUp(self):
         self.proof_root = Path("/tmp/standalone-verifier-test-proof").resolve()
+        self.expected_content = '{"revision":"fixture-sha","passed":3,"total":3}\n'
         self.goal = {"id": "goal-probe", "phase": "completed", "verification": {
             "completion": {"state": "proof_proven", "verdict": {"verification_run_id": "run-1"}}}}
         self.run = {"run_id": "run-1", "goal_id": "goal-probe", "status": "committed", "tools": [
             {"tool_name": "keeper_skill", "disposition": "completed", "finished_at": 1,
              "input": {"identity": {"name": "evidence-review"}}},
             {"tool_name": "tool_read_file", "disposition": "completed", "finished_at": 2,
-             "input": {"file_path": "probe/matching.json"}},
+             "input": {"file_path": "probe/matching.json"}, "output_truncated": False,
+             "output_excerpt": json.dumps({"ok": True, "truncated": False,
+                 "path": str(self.proof_root / "probe/matching.json"),
+                 "content": self.expected_content})},
             {"tool_name": "report_review_verdict", "disposition": "completed", "finished_at": 3,
              "input": {"verdict": "APPROVE"}},
         ]}
 
     def passed(self, run):
         return assess(self.goal, run, "proof_proven", "probe/matching.json",
-                      evidence_readable=True, proof_root=self.proof_root)["passed"]
+                      evidence_readable=True, proof_root=self.proof_root,
+                      expected_content=self.expected_content)["passed"]
 
     def test_correlated_complete_trace(self):
         self.assertTrue(self.passed(self.run))
@@ -54,6 +60,31 @@ class ReceiptTests(unittest.TestCase):
                 run = copy.deepcopy(self.run)
                 run["tools"][1]["input"] = arguments
                 self.assertFalse(self.passed(run))
+
+    def test_partial_empty_or_different_returned_content_cannot_pass(self):
+        for content in ("{\n", "", '{"passed":3}', self.expected_content + "extra"):
+            with self.subTest(content=content):
+                run = copy.deepcopy(self.run)
+                payload = json.loads(run["tools"][1]["output_excerpt"])
+                payload["content"] = content
+                run["tools"][1]["output_excerpt"] = json.dumps(payload)
+                self.assertFalse(self.passed(run))
+
+    def test_failed_truncated_or_foreign_output_cannot_pass(self):
+        for field, value in (("ok", False), ("truncated", True), ("path", "/tmp/other.json")):
+            with self.subTest(field=field):
+                run = copy.deepcopy(self.run)
+                payload = json.loads(run["tools"][1]["output_excerpt"])
+                payload[field] = value
+                run["tools"][1]["output_excerpt"] = json.dumps(payload)
+                self.assertFalse(self.passed(run))
+        for excerpt in ("", "not json", "[]", "null"):
+            run = copy.deepcopy(self.run)
+            run["tools"][1]["output_excerpt"] = excerpt
+            self.assertFalse(self.passed(run))
+        run = copy.deepcopy(self.run)
+        run["tools"][1]["output_truncated"] = True
+        self.assertFalse(self.passed(run))
 
     def test_verdict_alone_does_not_prove_skill_workflow(self):
         for removed in (0, 1):
@@ -101,11 +132,15 @@ class ReceiptTests(unittest.TestCase):
         self.goal["phase"] = "executing"
         self.goal["verification"]["completion"]["state"] = "proof_refuted"
         self.run["tools"][1]["input"]["file_path"] = "probe/wrong-revision.json"
+        payload = json.loads(self.run["tools"][1]["output_excerpt"])
+        payload["path"] = str(self.proof_root / "probe/wrong-revision.json")
+        self.run["tools"][1]["output_excerpt"] = json.dumps(payload)
         self.run["tools"][2]["input"]["verdict"] = "REJECT"
 
         def assessed(run):
             return assess(self.goal, run, "proof_refuted", "probe/wrong-revision.json",
-                          evidence_readable=True, proof_root=self.proof_root)["passed"]
+                          evidence_readable=True, proof_root=self.proof_root,
+                      expected_content=self.expected_content)["passed"]
 
         self.assertTrue(assessed(self.run))
         for field, value in (("disposition", "failed"), ("input", {"file_path": "unrelated.json"})):

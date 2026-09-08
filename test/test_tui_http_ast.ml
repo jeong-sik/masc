@@ -1970,7 +1970,43 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          ; "Frame_presenter.setup"
          ; "request_full_repaint"
          ]);
-  check int "the local input loop propagates one Break" 1
+  (* Signal-driven quit and the armed q shortcut are separate exits. Pin
+     the condition of each rather than letting an arbitrary second raise
+     satisfy the count; both must still unwind through the root switch. *)
+  let raises_break (expression : Parsetree.expression) =
+    match expression.pexp_desc with
+    | Pexp_apply (callee, [Asttypes.Nolabel, argument]) ->
+        Ast_grep.expression_is_identifier "raise" callee
+        && Ast_grep.expression_is_constructor "Break" argument
+    | _ -> false
+  in
+  let count_exit matches =
+    Ast_grep.count_expressions_outside_calls_in_value_binding
+      ~module_path:main_path ~binding_name:"run_loop" ~callees:[] ~matches
+  in
+  let signal_exit = count_exit (fun expression ->
+    match expression.Parsetree.pexp_desc with
+    | Pexp_match ({pexp_desc = Pexp_apply (callee, _); _}, cases)
+      when Ast_grep.expression_is_identifier "Masc_tui_exit_signals.poll" callee ->
+        List.exists (fun (case : Parsetree.case) ->
+          match case.pc_lhs.ppat_desc, case.pc_guard with
+          | Ppat_construct ({txt; _}, None), None ->
+              String.equal (Ast_grep.longident_to_string txt) "Masc_tui_exit_signals.Quit"
+              && raises_break case.pc_rhs
+          | _ -> false) cases
+    | _ -> false) in
+  let armed_key_exit = count_exit (fun expression ->
+    match expression.Parsetree.pexp_desc with
+    | Pexp_ifthenelse
+        ({pexp_desc = Pexp_field (receiver, {txt; _}); _}, yes, Some _)
+      when Ast_grep.expression_is_identifier "state" receiver
+           && String.equal (Ast_grep.longident_to_string txt) "quit_armed" ->
+        raises_break yes
+    | _ -> false) in
+  check int "signal poll Quit propagates Break" 1 signal_exit;
+  check int "q propagates Break only once armed" 1 armed_key_exit;
+  check int "no Break raises outside the signal and armed-key exits"
+    (signal_exit + armed_key_exit)
     (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
        ~module_path:main_path ~binding_name:"run_loop" ~callee:"raise"
        ~position:0 ~constructor:"Break");

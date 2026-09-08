@@ -98,13 +98,14 @@ let one_dynamic_tool
       ?on_result_handoff
       ?on_tool_boundary
       ?(runtime_label = "test")
+      ?(name = "effect")
       ~active
       handler
   =
   let tool =
     Agent_core.Tool.create
       ?descriptor
-      ~name:"effect"
+      ~name
       ~description:"test effect"
       ~parameters:[]
       handler
@@ -336,8 +337,8 @@ let test_scoped_boundary_spans_official_attempts () =
           calls := scoped_observation :: !calls)
         ~on_tool_boundary:(fun () ->
           incr boundary_calls;
-          Masc.Keeper_agent_run.For_testing.direct_repetition_boundary
-            ~execution ~tool_calls:!calls)
+          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:(Some execution) ~tool_calls:!calls)
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; _meta = None })
       in
@@ -381,8 +382,8 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
           Scope.Execution.observe execution ~target observation;
           calls := observation :: !calls)
         ~on_tool_boundary:(fun () ->
-          Masc.Keeper_agent_run.For_testing.direct_repetition_boundary
-            ~execution ~tool_calls:!calls)
+          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:(Some execution) ~tool_calls:!calls)
         (fun _input ->
           Ok { Agent_core.Types.content =
                  Printf.sprintf "appended line %d" (!appended + 1)
@@ -407,6 +408,94 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
     [ "Codex"; "Claude Code"; "Antigravity" ]
 ;;
 
+(* #34083: an autonomous official-client turn admits no execution scope, and
+   until this boundary was installed for it the host kept only its own
+   exact-adjacent counter. The production boundary now runs for that turn
+   too, reading the turn accumulator without a scope. Reproduce the issue's
+   shape -- the Execute script one keeper ran 186 times with byte-identical
+   input -- through the host wiring and hold both axes: identical output
+   stops at [repeated_tool_call_yield_threshold] (3), moving output at
+   [repeated_tool_call_input_yield_threshold] (5). *)
+let execute_script_input =
+  `Assoc
+    [ "cwd", `String "."
+    ; "script", `String "hostname; id -un; uname -m; pwd; cat /proc/1/comm"
+    ; "shell", `String "sh"
+    ]
+;;
+
+let execute_observation ~output_text : Masc.Keeper_agent_result.tool_call_detail =
+  match
+    Masc.Keeper_tool_progress_identity.digest_tool_io
+      ~tool_name:"Execute"
+      ~input:execute_script_input
+      ~output_text
+  with
+  | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+    { scoped_observation with
+      tool_name = "Execute"
+    ; input_fingerprint = Some input_fingerprint
+    ; output_fingerprint = Some output_fingerprint
+    }
+  | None -> fail "digest_tool_io refused the Execute fixture input"
+;;
+
+let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
+  List.iter (fun runtime_label ->
+    let run ~label ~(output_text : int -> string) ~stops_at =
+      with_active_raw_trace (fun ~path:_ ~active ->
+        let calls = ref [] in
+        let boundary_calls = ref 0 in
+        let executions = ref 0 in
+        let tool, terminal_error =
+          one_dynamic_tool ~active ~runtime_label ~name:"Execute"
+            ~on_result_handoff:(fun ~invocation:_ ~content ->
+              calls := execute_observation ~output_text:content :: !calls)
+            ~on_tool_boundary:(fun () ->
+              incr boundary_calls;
+              Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+                ~repetition_execution:None ~tool_calls:!calls)
+            (fun _input ->
+              incr executions;
+              Ok { Agent_core.Types.content = output_text !executions; _meta = None })
+        in
+        let call index =
+          tool.call ~call_id:(Printf.sprintf "%s-%d" label index) execute_script_input
+        in
+        for index = 1 to stops_at - 1 do
+          check bool
+            (Printf.sprintf "%s %s call %d continues" runtime_label label index)
+            true
+            (Option.is_none (call index).abort_turn)
+        done;
+        (match (call stops_at).abort_turn with
+         | Some (Repeated_tool_call { tool_name; repeated_count }) ->
+           check string (label ^ " repeated tool") "Execute" tool_name;
+           check int (label ^ " repeat count") stops_at repeated_count
+         | Some (Terminal_tool_boundary _) ->
+           fail (label ^ " produced a terminal-tool stop instead of a repeat stop")
+         | None ->
+           fail
+             (Printf.sprintf
+                "%s %s: autonomous official-client loop was not stopped at call %d"
+                runtime_label label stops_at));
+        check int (label ^ " boundary decided every call") stops_at !boundary_calls;
+        check int (label ^ " every call executed") stops_at !executions;
+        check (option string) (label ^ " repeat stop is not failure") None !terminal_error)
+    in
+    (* The issue's shape: the container answers the same bytes every time. *)
+    run ~label:"identical-output"
+      ~output_text:(fun _ -> "host-a\nkeeper\naarch64\n/work\nsh\n")
+      ~stops_at:3;
+    (* Moving output: the exact axis cannot match, the input axis still can,
+       and the host's own counter could never have fired here because it
+       fingerprints the output. *)
+    run ~label:"moving-output"
+      ~output_text:(fun n -> Printf.sprintf "host-a\nkeeper\naarch64\n/work\nsh\n%d\n" n)
+      ~stops_at:5)
+    [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
 let test_scoped_boundary_error_stops_immediately () =
   List.iter (fun runtime_label ->
     with_active_raw_trace (fun ~path:_ ~active ->
@@ -417,8 +506,8 @@ let test_scoped_boundary_error_stops_immediately () =
           Scope.Execution.observe execution ~target
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun () ->
-          Masc.Keeper_agent_run.For_testing.direct_repetition_boundary
-            ~execution ~tool_calls:[])
+          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:(Some execution) ~tool_calls:[])
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -1875,6 +1964,10 @@ let () =
             "identical-input loop with moving output aborts at the input threshold"
             `Quick
             test_moving_output_input_loop_aborts_at_input_threshold
+        ; test_case
+            "autonomous official-client Execute loop stops without a scope"
+            `Quick
+            test_autonomous_official_boundary_stops_execute_loop_without_scope
         ; test_case "scope observation failure stops official tool call" `Quick
             test_scoped_boundary_error_stops_immediately
         ; test_case "scope stop preserves exact terminal priority" `Quick

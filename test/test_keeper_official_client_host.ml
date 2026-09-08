@@ -388,16 +388,19 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
                  Printf.sprintf "appended line %d" (!appended + 1)
              ; _meta = None })
       in
-      let fourth = tool.call ~call_id:"input-loop-call-4" (`Assoc []) in
+      ignore (tool.call ~call_id:"input-loop-call-1" (`Assoc []));
+      ignore (tool.call ~call_id:"input-loop-call-2" (`Assoc []));
+      let third = tool.call ~call_id:"input-loop-call-3" (`Assoc []) in
       check bool "moving output keeps the turn below the input threshold"
+        true (Option.is_none third.abort_turn);
+      let fourth = tool.call ~call_id:"input-loop-call-4" (`Assoc []) in
+      check bool "the fourth call still runs below the input threshold"
         true (Option.is_none fourth.abort_turn);
+      (* The boundary counts the current call together with the recorded
+         observations, so the fifth identical-input call's boundary sees a
+         streak of five and aborts the turn. *)
       let fifth = tool.call ~call_id:"input-loop-call-5" (`Assoc []) in
-      check bool "the fifth call still runs below the input threshold"
-        true (Option.is_none fifth.abort_turn);
-      (* The boundary counts recorded observations including the latest, so the
-         abort lands on the sixth call, whose boundary sees five recorded. *)
-      let sixth = tool.call ~call_id:"input-loop-call-6" (`Assoc []) in
-      (match sixth.abort_turn with
+      (match fifth.abort_turn with
        | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 5 }) -> ()
        | _ -> fail (runtime_label ^ " missed the identical-input loop"));
       check (option string) "input-loop stop is not failure" None !terminal_error))

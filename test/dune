@@ -990,11 +990,9 @@
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
   exec_ssh_protocol))
 
-; Extracted from the big (tests ...) group above: the cases pass
-; sandbox_profile = "local" explicitly to exercise admission fencing around
-; creation — the profile is incidental to the transaction semantics under
-; test — and keeper-up validation now rejects Local fail-closed without the
-; hatch.
+; Extracted from the big (tests ...) group above: these cases measure
+; admission fencing around creation, so the sandbox profile is incidental --
+; they declare a loadable one only because keeper-up validation requires it.
 (test
  (name test_keeper_create_admission_transaction)
  (modules test_keeper_create_admission_transaction)
@@ -3863,6 +3861,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-schedule-delivery)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-schedule-source-status)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   schedule-source-status)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-schedule-source-status)))
 
 ; The spectator draws the machine's frame outside the frame presenter, and
 ; nothing walked that path. It is what holds the frame's shape: revert the grid

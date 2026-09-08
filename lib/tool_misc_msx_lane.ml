@@ -225,7 +225,8 @@ let handle_press ~tool_name ~start_time ~who args =
     of_lane ~tool_name ~start_time
       (Msx_lane.press ~who ~keys
          ~hold_frames:(get_int args "hold_frames" 5)
-         ~step_frames:(get_int args "frames" 30))
+         ~step_frames:(get_int args "frames" 30)
+         ~sequence:(get_bool args "sequence" false))
 ;;
 
 (* Checkpoints use names within saves/, never caller-provided host paths. *)

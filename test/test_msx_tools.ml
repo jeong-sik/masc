@@ -339,7 +339,7 @@ let disk_swap_fixture base_path =
 
 let read_guest_disk expected =
   let result = Msx_lane.press ~who:"disk-test" ~keys:[Msx_lane.key_of_string "space" |> Result.get_ok]
-    ~hold_frames:1 ~step_frames:2 |> lane_observation "guest disk read" in
+    ~hold_frames:1 ~step_frames:2 ~sequence:false |> lane_observation "guest disk read" in
   check char "guest reads retained disk bytes" expected result.screen_text.[0]
 ;;
 
@@ -533,6 +533,24 @@ let test_two_keepers_share_one_machine () =
     (List.map (fun (e : Msx_lane.entry) -> e.who) downs)
 ;;
 
+let test_press_sequence () =
+  with_workspace @@ fun base_path ->
+  ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
+  let r =
+    dispatch ~base_path ~agent:"keeper-a" "masc_msx_press"
+      [ ("keys", `List [ `String "down"; `String "return" ])
+      ; ("hold_frames", `Int 2)
+      ; ("frames", `Int 4)
+      ; ("sequence", `Bool true)
+      ]
+  in
+  check bool "sequence press completes" true (is_completed r);
+  (* each key gets the whole frames window, so two keys advance twice as far as
+     a chord would -- they are tapped in turn, not held together. *)
+  check int "sequence advances frames per key" (Msx_lane.boot_frames + (2 * 4)) (frame_of r);
+  check int "two keys still make four edges" 4 (List.length (Msx_lane.ledger ()))
+;;
+
 let () =
   run "msx tools"
     [ ( "lane"
@@ -540,6 +558,7 @@ let () =
         ; test_case "load, step, screen, eject" `Quick test_load_and_clock
         ; test_case "press writes the ledger" `Quick test_press_ledger
         ; test_case "press validation" `Quick test_press_validation
+        ; test_case "press sequence taps keys in turn" `Quick test_press_sequence
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "disk image loads into the drive" `Quick test_disk_load
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip

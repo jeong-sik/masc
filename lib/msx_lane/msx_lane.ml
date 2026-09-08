@@ -328,7 +328,18 @@ let press_all st keys =
   go [] keys
 ;;
 
-let press ~who ~keys ~hold_frames ~step_frames =
+let tap_one st ~who ~hold_frames ~step_frames k =
+  (* [k]'s matrix place was checked by [press_all] before any tap ran, so its
+     edges cannot miss. Down, hold, up, then the rest of the window idle. *)
+  ignore (Msx.set_key st.m k ~pressed:true : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = true };
+  advance st hold_frames;
+  ignore (Msx.set_key st.m k ~pressed:false : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = false };
+  advance st (step_frames - hold_frames)
+;;
+
+let press ~who ~keys ~hold_frames ~step_frames ~sequence =
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else
@@ -339,8 +350,17 @@ let press ~who ~keys ~hold_frames ~step_frames =
           (Invalid_request
              (Printf.sprintf "hold_frames (%d) cannot exceed frames (%d)" hold_frames step_frames))
       | Ok (), Ok () -> (
+        (* [press_all] validates every key against the matrix up front, so a
+           bad key in a sequence is refused before any tap advances time. *)
         match press_all st keys with
         | Error e -> Error e
+        | Ok () when sequence ->
+          (* [press_all] left the keys down with no frame advanced; release them
+             and tap each one in turn, so ["down"; "return"] is a menu
+             sequence, not a chord held together. *)
+          List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
+          List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+          Ok (observe st)
         | Ok () ->
           List.iter
             (fun k ->

@@ -3,9 +3,8 @@
 import { html } from 'htm/preact'
 import { useTaskSearchText, TaskSearchFeedback } from '../common/task-search-text'
 import { signal } from '@preact/signals'
-import { useRef, useEffect, useState } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
-import autoAnimate from '@formkit/auto-animate'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { SectionCard } from '../common/card'
@@ -281,14 +280,6 @@ function TaskColumn({
   badgeClass: string
   children: ComponentChildren
 }) {
-  const listRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (listRef.current) {
-      autoAnimate(listRef.current, { duration: 250, easing: 'ease-out' })
-    }
-  }, [listRef])
-
   return html`
     <section class="v2-workspace-panel flex min-h-60 flex-col ${DECK_PANEL}" aria-label=${title}>
       <div class="v2-workspace-toolbar ${DECK_HEAD} flex items-start justify-between gap-3">
@@ -298,7 +289,7 @@ function TaskColumn({
         </div>
         <span class="rounded-[var(--r-0)] px-1.5 py-0.5 font-mono text-3xs font-semibold ${badgeClass}">${count}</span>
       </div>
-      <div ref=${listRef} class="flex max-h-170 flex-col gap-2 overflow-y-auto p-2.5 pr-1.5 custom-scrollbar">
+      <div class="flex max-h-170 flex-col gap-2 overflow-y-auto p-2.5 pr-1.5 custom-scrollbar">
         ${children}
       </div>
     </section>

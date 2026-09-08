@@ -19,6 +19,10 @@ type rotate_class =
   | No_progress_truncated
   | Attempt_rejected
 
+type fence_disposition =
+  | Fenced_effect_attempted
+  | Fenced_observation_unavailable
+
 type terminal_class =
   | Deterministic_request
   | Context_overflow
@@ -31,8 +35,8 @@ type terminal_class =
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
   | Terminal_effect_operator_cancelled
-  | Provider_attempt_effect_fenced
-  | Tool_correction_lost
+  | Provider_attempt_effect_fenced of fence_disposition
+  | Tool_correction_lost of fence_disposition
   | Internal_opaque
 
 type failure_provenance =
@@ -152,16 +156,19 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
     (match effect_disposition with
      | Keeper_provider_attempt_effect_core.No_effect_observed ->
        exhaust_failure Contract_violation
-     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Effect_attempted ->
+       exhaust_failure (Provider_attempt_effect_fenced Fenced_effect_attempted)
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
-       exhaust_failure Provider_attempt_effect_fenced)
+       exhaust_failure
+         (Provider_attempt_effect_fenced Fenced_observation_unavailable))
   | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
     (match effect_disposition with
      | Keeper_provider_attempt_effect_core.No_effect_observed ->
        exhaust_failure Contract_violation
-     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Effect_attempted ->
+       exhaust_failure (Tool_correction_lost Fenced_effect_attempted)
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
-       exhaust_failure Tool_correction_lost)
+       exhaust_failure (Tool_correction_lost Fenced_observation_unavailable))
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     exhaust_failure Internal_opaque
@@ -310,8 +317,13 @@ let terminal_class_label = function
   | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
   | Terminal_effect_operator_cancelled -> "terminal_effect_operator_cancelled"
-  | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
-  | Tool_correction_lost -> "tool_correction_lost"
+  | Provider_attempt_effect_fenced Fenced_effect_attempted ->
+    "provider_attempt_effect_fenced"
+  | Provider_attempt_effect_fenced Fenced_observation_unavailable ->
+    "provider_attempt_effect_fenced_observation_unavailable"
+  | Tool_correction_lost Fenced_effect_attempted -> "tool_correction_lost"
+  | Tool_correction_lost Fenced_observation_unavailable ->
+    "tool_correction_lost_observation_unavailable"
   | Internal_opaque -> "internal_opaque"
 
 let route_class_label = function
@@ -381,10 +393,19 @@ let response_observed = function
      | Provider_integration
      (* unparseable, provider-reported, or unknown-variant reply: no usable
         answer is on record. *)
-     | Internal_opaque ->
-       (* unhandled exceptions and internal families. An accept rejection
-          without a no-progress hint also lands here, but the route cannot
-          tell it from an exception, so the evidence keeps its wake. *)
+     | Internal_opaque
+     (* unhandled exceptions and internal families. An accept rejection
+        without a no-progress hint also lands here, but the route cannot
+        tell it from an exception, so the evidence keeps its wake. *)
+     | Provider_attempt_effect_fenced Fenced_observation_unavailable
+     | Tool_correction_lost Fenced_observation_unavailable ->
+       (* the adapter could not say whether a tool effect was attempted,
+          and it says so before any answer: the claude-code lane marks it
+          when the process is spawned ([Keeper_claude_code_runtime]
+          on_spawned), the codex lane when the turn input could not be
+          written ([Keeper_codex_runtime] Turn_input_write_failed). The
+          request may never have reached the provider, so the evidence
+          keeps its wake. *)
        false
      | Contract_violation
      (* an incomplete tool transcript or a proven pre-effect tool failure:
@@ -397,11 +418,11 @@ let response_observed = function
      | Terminal_effect_workflow_rejection
      | Terminal_effect_operator_cancelled
      (* a tool the model called failed terminally: the call is the answer. *)
-     | Provider_attempt_effect_fenced
-     (* the driver fences an attempt only after a tool effect was attempted
+     | Provider_attempt_effect_fenced Fenced_effect_attempted
+     (* a dynamic tool handler was entered before the attempt was fenced
         ([Keeper_turn_driver], masc#28885): the model answered with that
         call, and what failed came after it. *)
-     | Tool_correction_lost ->
+     | Tool_correction_lost Fenced_effect_attempted ->
        (* the same fence on a turn that also recorded pre_tool_use
           rejections: the model answered, the correction round did not
           land. *)

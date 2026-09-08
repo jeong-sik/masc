@@ -73,8 +73,18 @@ let test_every_failure_route_preserves_batch () =
   ; "deterministic request", exhausted "deterministic request" KFR.Deterministic_request
   ; "configuration mismatch", exhausted "configuration mismatch" KFR.Config_mismatch
   ; "provider integration", exhausted "provider integration" KFR.Provider_integration
-  ; "effect fenced", exhausted "effect fenced" KFR.Provider_attempt_effect_fenced
-  ; "tool correction lost", exhausted "tool correction lost" KFR.Tool_correction_lost
+  ; ( "effect fenced"
+    , exhausted "effect fenced"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted) )
+  ; ( "effect fenced without observation"
+    , exhausted "effect fenced without observation"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable) )
+  ; ( "tool correction lost"
+    , exhausted "tool correction lost"
+        (KFR.Tool_correction_lost KFR.Fenced_effect_attempted) )
+  ; ( "tool correction lost without observation"
+    , exhausted "tool correction lost without observation"
+        (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable) )
   ]
   |> List.iter (fun (label, route) ->
     assert_no_queue_action label (failed_outcome route);
@@ -101,8 +111,12 @@ let observed_failure_routes =
   ; "contract violation", exhausted_route "contract violation" KFR.Contract_violation
   ; ( "terminal effect runtime failure"
     , exhausted_route "terminal effect runtime failure" KFR.Terminal_effect_runtime_failure )
-  ; "effect fenced", exhausted_route "effect fenced" KFR.Provider_attempt_effect_fenced
-  ; "tool correction lost", exhausted_route "tool correction lost" KFR.Tool_correction_lost
+  ; ( "effect fenced after a tool effect"
+    , exhausted_route "effect fenced"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted) )
+  ; ( "tool correction lost after a tool effect"
+    , exhausted_route "tool correction lost"
+        (KFR.Tool_correction_lost KFR.Fenced_effect_attempted) )
   ]
 ;;
 
@@ -121,6 +135,15 @@ let unobserved_failure_routes =
   ; "configuration mismatch", exhausted_route "configuration mismatch" KFR.Config_mismatch
   ; "provider integration", exhausted_route "provider integration" KFR.Provider_integration
   ; "internal opaque", exhausted_route "internal opaque" KFR.Internal_opaque
+    (* The lanes set this before any answer: claude-code on spawn, codex when
+       the turn input could not be written. A continuation that fails this
+       way must keep its wake, or the model never sees the replay. *)
+  ; ( "effect fenced without observation"
+    , exhausted_route "effect fenced without observation"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable) )
+  ; ( "tool correction lost without observation"
+    , exhausted_route "tool correction lost without observation"
+        (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable) )
   ]
 ;;
 

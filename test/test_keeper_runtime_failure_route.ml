@@ -341,6 +341,8 @@ let test_response_observed_per_class () =
     ; terminal KFR.Config_mismatch
     ; terminal KFR.Provider_integration
     ; terminal KFR.Internal_opaque
+    ; terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable)
+    ; terminal (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable)
     ];
   List.iter
     (check_observed true)
@@ -353,8 +355,8 @@ let test_response_observed_per_class () =
     ; terminal KFR.Terminal_effect_runtime_failure
     ; terminal KFR.Terminal_effect_workflow_rejection
     ; terminal KFR.Terminal_effect_operator_cancelled
-    ; terminal KFR.Provider_attempt_effect_fenced
-    ; terminal KFR.Tool_correction_lost
+    ; terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted)
+    ; terminal (KFR.Tool_correction_lost KFR.Fenced_effect_attempted)
     ]
 
 (* Through production routing: the MaxTokens accept rejection the #32956
@@ -382,6 +384,71 @@ let test_response_observed_through_route_of_error () =
        (route_of_agent_core_error
           (Agent_core.Error.Api
              (Llm_provider.Retry.Timeout { message = "deadline"; phase = None }))))
+
+(* The two effect fences carry what the lane had observed. The codex lane
+   fences with [Observation_unavailable] when the turn input could not be
+   written ([Keeper_codex_runtime] Turn_input_write_failed) and the
+   claude-code lane sets it when the process is spawned ([on_spawned]), so a
+   spawn-only failure arrives the same way: no answer is on record. A fence
+   after a tool handler was entered is an answer. *)
+let test_response_observed_fences_follow_the_disposition () =
+  let fenced effect_disposition ~runtime_id ~diagnostic =
+    internal_err
+      (Keeper_internal_error.Provider_attempt_effect_fenced
+         { runtime_id; effect_disposition; diagnostic })
+  in
+  let lost effect_disposition ~runtime_id =
+    internal_err
+      (Keeper_internal_error.Tool_correction_lost
+         { runtime_id
+         ; effect_disposition
+         ; reject_count = 2
+         ; diagnostic = "turn died after two corrective tool rejections"
+         })
+  in
+  let observed label err =
+    Alcotest.(check bool) label true (KFR.response_observed (route_of_masc_error err))
+  in
+  let unobserved label err =
+    Alcotest.(check bool) label false (KFR.response_observed (route_of_masc_error err))
+  in
+  unobserved
+    "codex: the turn input could not be written, so no answer exists"
+    (fenced
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"codex_app_server.gpt-5.5"
+       ~diagnostic:"Turn_input_write_failed");
+  unobserved
+    "claude-code: the process was spawned and failed before any answer"
+    (fenced
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"claude_code.opus"
+       ~diagnostic:"Process_exited before a turn result");
+  unobserved
+    "a lost correction with no observation is not an answer either"
+    (lost
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"codex_app_server.gpt-5.5");
+  observed
+    "a fence after a tool handler was entered is an answer"
+    (fenced
+       Keeper_provider_attempt_effect_core.Effect_attempted
+       ~runtime_id:"antigravity_subscription.gemini-3-6-flash-high"
+       ~diagnostic:"stream closed after a tool effect");
+  observed
+    "a lost correction after a tool handler was entered is an answer"
+    (lost
+       Keeper_provider_attempt_effect_core.Effect_attempted
+       ~runtime_id:"antigravity_subscription.gemini-3-6-flash-high");
+  Alcotest.(check string)
+    "the unavailable observation keeps its own label"
+    "provider_attempt_effect_fenced_observation_unavailable"
+    (KFR.route_class_label
+       (route_of_masc_error
+          (fenced
+             Keeper_provider_attempt_effect_core.Observation_unavailable
+             ~runtime_id:"codex_app_server.gpt-5.5"
+             ~diagnostic:"Turn_input_write_failed")))
 
 let () =
   Alcotest.run
@@ -430,5 +497,9 @@ let () =
             "through route_of_error"
             `Quick
             test_response_observed_through_route_of_error
+        ; Alcotest.test_case
+            "fences follow the lane's observation"
+            `Quick
+            test_response_observed_fences_follow_the_disposition
         ] )
     ]

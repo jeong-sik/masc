@@ -213,6 +213,9 @@ module Payload = struct
         Ok (Review_cancelled { detail })
       | label -> Error (Printf.sprintf "unknown Goal review outcome %S" label)
     in
+    let* () = match outcome, evaluated_verdict with
+      | (Reviewed | Committed), None -> Error "reviewed or committed run requires an evaluated verdict"
+      | _ -> Ok () in
     Ok { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; tools }
   ;;
 end

@@ -120,6 +120,37 @@ let test_superseded_review_retains_its_bound_criterion_and_verdict () =
   | _ -> fail "superseded review lost its historical evidence"
 ;;
 
+let test_judged_run_without_verdict_is_not_replayed_as_judged () =
+  List.iter (fun outcome -> with_path (fun path ->
+    let registry = R.create ~path () in
+    let run_id = "invalid-judged-run" in
+    R.register_running registry ~run_id ~goal_id:"goal-a"
+      ~request_id:"request-a" ~criterion ~review_kind:R.Proof
+      ~authority_actor:"verifier_exact" ~started_at:10.;
+    R.mark_completed registry ~run_id ~outcome
+      ~evaluated_verdict:(Some (R.Approved { reason = "measured three" }))
+      ~tools:[] ~elapsed_s:1. ();
+    (match R.get (R.replay path) ~run_id with Some _ -> () | None -> fail "valid baseline did not replay");
+    let lines = In_channel.with_open_bin path In_channel.input_all
+      |> String.split_on_char '\n' |> List.filter (fun line -> line <> "") in
+    let malformed = List.map (fun line ->
+      match Yojson.Safe.from_string line with
+      | `Assoc fields ->
+        `Assoc (List.map (function
+          | "completion", `Assoc completion ->
+            "completion", `Assoc (List.map (function
+              | "evaluated_verdict", _ -> "evaluated_verdict", `Null
+              | field -> field) completion)
+          | field -> field) fields)
+      | json -> json) lines in
+    Out_channel.with_open_bin path (fun ch -> List.iter (fun json ->
+      output_string ch (Yojson.Safe.to_string json ^ "\n")) malformed);
+    match R.get (R.replay path) ~run_id with
+    | None -> ()
+    | Some _ -> fail "a missing verdict replayed as a completed judgement"))
+    [ R.Reviewed; R.Committed ]
+;;
+
 let test_running_attempt_is_not_claimed_after_restart () =
   with_path
   @@ fun path ->
@@ -182,6 +213,10 @@ let () =
             "superseded review retains criterion and evaluated verdict"
             `Quick
             test_superseded_review_retains_its_bound_criterion_and_verdict
+        ; test_case
+            "judged run without verdict does not replay as judged"
+            `Quick
+            test_judged_run_without_verdict_is_not_replayed_as_judged
         ; test_case
             "running attempt is not claimed after restart"
             `Quick

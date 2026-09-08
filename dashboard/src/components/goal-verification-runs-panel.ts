@@ -24,6 +24,8 @@ export function goalVerificationRunTone(status: GoalVerificationRunStatus): Stat
     case 'reviewed': return 'info'
     case 'committed': return 'ok'
     case 'deferred': return 'info'
+    case 'superseded': return 'info'
+    case 'review_cancelled': return 'warn'
     case 'raised': return 'bad'
   }
 }
@@ -34,6 +36,8 @@ export function goalVerificationRunLabel(status: GoalVerificationRunStatus): str
     case 'reviewed': return '판정 기록됨'
     case 'committed': return '커밋됨'
     case 'deferred': return '보류'
+    case 'superseded': return '새 요청으로 대체됨'
+    case 'review_cancelled': return '판정 취소'
     case 'raised': return '예외'
   }
 }
@@ -92,7 +96,14 @@ function GoalVerificationRunRow({ row }: { row: GoalVerificationRunRecord }) {
       <td class="py-2 pr-2 tabular-nums">${formatElapsed(row.elapsedSeconds)}</td>
       <td class="py-2 pr-2 whitespace-nowrap">${relativeTime(new Date(row.startedAt * 1000).toISOString())}</td>
       <td class="py-2 pr-2 break-words">
-        ${row.retryable === false ? html`<strong>[수동 확인 필요]</strong> ` : null}${row.detail ?? ''}
+        ${row.evaluatedVerdict ? html`<div><strong>${row.evaluatedVerdict.decision === 'approved' ? '판정: 승인' : '판정: 반박'}</strong> · ${row.evaluatedVerdict.reason}</div>` : null}
+        ${row.detail ?? ''}
+        <details><summary>검토한 성공 조건</summary>
+          <div>${row.criterion.title}</div>
+          <div>${row.criterion.metric ?? '—'} · 목표 ${row.criterion.target_value ?? '—'}</div>
+          <div>요청 <code>${row.requestId}</code></div>
+          <div>조건 revision <code>${row.criterion.revision}</code></div>
+        </details>
       </td>
       <td class="py-2"><${ToolCalls} row=${row} /></td>
     </tr>

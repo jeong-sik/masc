@@ -165,6 +165,10 @@ for file in SKILL.md references/advanced.md references/connection.md references/
 done
 echo "install-smoke: installer seeded the complete browser-lanes Skill package"
 
+[ -f "$base/.masc/skills/evidence-review/SKILL.md" ] || {
+  echo "install-smoke: evidence-review Skill missing" >&2; exit 1;
+}
+
 # Reinstall the actual compiled artifact through the upgrade branch. This
 # proves init --skills-only against real embedded assets, not a fixture CLI.
 # Same-version --force is deliberate: this checks preservation, not migration

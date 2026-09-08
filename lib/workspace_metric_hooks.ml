@@ -386,6 +386,15 @@ let install () =
       on_tool_result ~input:args result;
       result
     in
+    let native_tools =
+      match Standalone_skill_tools.for_workspace
+              ~config:(Workspace.default_config base_path)
+              ~on_result:on_tool_result () with
+      | Ok tools -> tools
+      | Error detail ->
+        Log.Task.warn "verification Skills unavailable: %s" detail;
+        []
+    in
     let apply_review_verdict_output_contract provider_cfg =
       Ok
         (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
@@ -406,6 +415,7 @@ let install () =
              today's slots are API providers, so nothing reaches that. *)
           ~system_prompt:""
           ~masc_tools:(report_tool_schema :: lookup_schemas)
+          ~native_tools
           ~dispatch
           ~provider_config_transform:apply_review_verdict_output_contract
           ~on_runtime_attempt_error

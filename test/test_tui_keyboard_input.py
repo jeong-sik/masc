@@ -10237,8 +10237,9 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            # 14 surface rows plus the fixture agenda and composer rows.
-            rows=16,
+            # 14 surface rows plus navigation; this fixture's agenda is silent
+            # and the composer yields its row at this minimum size.
+            rows=15,
             columns=220,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
@@ -10252,8 +10253,9 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            # 14 surface rows plus the fixture agenda and composer rows.
-            rows=16,
+            # 14 surface rows plus navigation; this fixture's agenda is silent
+            # and the composer yields its row at this minimum size.
+            rows=15,
             columns=100,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
@@ -10291,8 +10293,9 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            # 14 surface rows plus the fixture agenda and composer rows.
-            rows=16,
+            # 14 surface rows plus navigation; this fixture's agenda is silent
+            # and the composer yields its row at this minimum size.
+            rows=15,
             columns=220,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),

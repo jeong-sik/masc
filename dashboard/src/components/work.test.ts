@@ -220,6 +220,23 @@ describe('Work', () => {
       }
     })
 
+    it.each([
+      ['idle', { state: 'current', completion: { state: 'idle' } }, '검증 · 미제출'],
+      ['stale', { state: 'stale', historical: { state: 'proven',
+        criterion: { revision: 'old', title: 'Old goal', metric: null, target_value: null },
+        requestId: 'old-request', runId: 'old-run', evidence: 'old evidence',
+        recordedAt: '2026-09-08', actor: 'verifier_exact' } }, '검증 · 기준 변경 · 재검증 필요'],
+      ['unreadable', { state: 'unreadable', detail: 'primary ledger failed' }, '검증 · 확인 불가'],
+    ] as const)('shows %s proof independently of a completed Goal phase', (_state, verification, label) => {
+      goals.value = [{ id: 'proof-goal', title: 'Measured goal', priority: 1,
+        phase: 'completed', created_at: '2026-09-08', updated_at: '2026-09-09', verification }]
+      render(html`<${Work} />`)
+      const card = screen.getByTestId('goal-card')
+      expect(within(card).getByText(label)).toBeTruthy()
+      expect(card.querySelector('.wk-goal-phase')?.textContent).toBe('completed')
+      expect(card.querySelector('[data-goal-proof]')?.getAttribute('data-goal-proof')).toBe(_state)
+    })
+
     it('renders the reference 5 KPI counts from goals and tasks', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

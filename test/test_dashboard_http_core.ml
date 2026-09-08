@@ -2103,6 +2103,80 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
+let test_goal_proof_surfaces_share_persisted_criterion_truth () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
+      ~metric:"passing cases" ~target_value:"10" ()) in
+  let goal_id = goal.Goal_store.id in
+  let open Yojson.Safe.Util in
+  let find_goal nodes =
+    nodes |> to_list |> List.find (fun row -> row |> member "id" |> to_string = goal_id)
+  in
+  let check_surfaces ~phase ~proof_state =
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    let planned = find_goal (member "goals" planning) in
+    let tree = Dashboard_goals.dashboard_goals_tree_json ~config in
+    let tree_goal = find_goal (member "tree" tree) in
+    let detail = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id) in
+    let detail_goal = member "goal" detail in
+    (* The Keeper detail assembles its own forest and uses this exact callback.
+       Exercise that caller shape against the same persisted source too. *)
+    let goals = Goal_store.list_goals config () in
+    let projection = Dashboard_goals.verification_projection ~config in
+    let keeper_goal =
+      Dashboard_goals.build_forest ~config ~goals ~tasks:[] ~pending_approvals:[]
+      |> List.find (fun (node : Dashboard_goals.tree_node) -> node.goal.id = goal_id)
+      |> Dashboard_goals.tree_node_to_json ~verification_for_goal:projection
+    in
+    let expected = member "verification" planned in
+    List.iter (fun (name, row) ->
+      check string (name ^ " lifecycle") phase (row |> member "phase" |> to_string);
+      let proof = member "verification" row in
+      let actual_state =
+        match member "state" proof with
+        | `String "ledger_error" -> "ledger_error"
+        | _ -> proof |> member "completion" |> member "state" |> to_string
+      in
+      check string (name ^ " proof state") proof_state actual_state;
+      (* Idle rows have no persisted record yet, so each projection stamps its
+         own default observation time. Every persisted proof compares exactly. *)
+      let comparable value = if proof_state = "idle" then member "completion" value else value in
+      check string (name ^ " same source projection")
+        (Yojson.Safe.to_string (comparable expected))
+        (Yojson.Safe.to_string (comparable proof)))
+      [ "planning", planned; "tree", tree_goal; "detail", detail_goal; "keeper", keeper_goal ];
+    expected
+  in
+  ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
+  let _, pending = get_ok (Workspace_goals.request_current_proof config ~goal_id) in
+  let request_id, criterion = match pending.Goal_verification.completion with
+    | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
+    | _ -> fail "request did not persist pending proof"
+  in
+  ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
+  let committed = Workspace_goals.commit_verifier_decision
+    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
+    ~decision:Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
+  check bool "internal verifier committed" true (Tool_result.is_success committed);
+  let proven = check_surfaces ~phase:"completed" ~proof_state:"proof_proven" in
+  ignore (get_ok (Goal_store.upsert_goal config ~id:goal_id
+    ~title:"Measured dashboard Goal" ~target_value:"20" ()));
+  let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
+  check string "stale projection preserves the original proof"
+    (Yojson.Safe.to_string (member "completion" proven))
+    (Yojson.Safe.to_string (stale |> member "completion" |> member "historical_completion"));
+  let path = Goal_verification.verifications_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  Fs_compat.save_file path "invalid primary proof ledger";
+  ignore (check_surfaces ~phase:"executing" ~proof_state:"ledger_error");
+  check string "display never repairs primary from mirror"
+    "invalid primary proof ledger" (Fs_compat.load_file path);
+  check string "display preserves historical mirror" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -5339,6 +5413,8 @@ let () =
             test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "bootstrap omits eager goal tree" `Quick
             test_dashboard_bootstrap_omits_eager_goal_tree;
+          test_case "Goal proof surfaces share persisted criterion truth" `Quick
+            test_goal_proof_surfaces_share_persisted_criterion_truth;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick

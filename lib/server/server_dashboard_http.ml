@@ -578,7 +578,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
      does not decode renders the explicit [ledger_error] marker per goal —
      never the pre-verification default, which would disguise corruption as
      "not verified yet". *)
-  let records = Goal_verification.load_records config in
+  let records = Goal_verification.load_records_authoritative config in
   let goal_json (goal : Goal_store.goal) =
     let verification =
       match records with
@@ -592,7 +592,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
          with
          | Some record -> record
          | None -> Goal_verification.default_record ~goal_id:goal.id)
-        |> Goal_verification.record_to_yojson
+        |> Goal_verification.record_to_yojson_for_goal ~goal
     in
     match Goal_store.goal_to_yojson goal with
     | `Assoc fields ->

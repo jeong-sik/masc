@@ -63,6 +63,11 @@ val boot_frames : int
 (** Frames run at {!load} before the first observation, so the first picture
     is the C-BIOS logo rather than a blank screen — the TUI's convention. *)
 
+val disk_boot_frames : int
+(** Extra frames a disk load runs before {!boot_frames}: the C-BIOS warm-up
+    the second-stage-call replay ([Msx.boot_disk]) needs before it puts the
+    machine in the loader's hands. *)
+
 val load :
   ledger_dir:string ->
   roms_dir:string ->
@@ -74,10 +79,12 @@ val load :
     the empty string means no BIOS and the bus reads 0xFF. The ledger is
     [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
 
-    [disk_path] plugs a raw .dsk floppy image into drive A: C-BIOS finds the
-    disk interface ROM that [Msx.load_disk] rides in the cartridge slot and
-    boots the image's sector. A disk therefore wins over [cart_path] — the
-    slot is one, and a disk game needs the interface in it. *)
+    [disk_path] plugs a raw .dsk floppy image into drive A and boots it
+    through the warm-up replay: {!disk_boot_frames} of C-BIOS, then
+    [Msx.boot_disk] re-enters the image's boot sector with the loader
+    running — the path a game's loader reaches its title screen on (the
+    cart-INIT path the core also wires reboots mid-boot). A disk therefore
+    wins over [cart_path] — the slot is one, and the replay wants it empty. *)
 
 val eject : unit -> (unit, error) result
 val screen : unit -> (observation, error) result

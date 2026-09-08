@@ -318,3 +318,91 @@ let route_class_label = function
   | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
   | Rotate_now { rotate } -> rotate_class_label rotate
   | Exhausted_visible_alive { terminal; _ } -> terminal_class_label terminal
+
+(* Whether the provider answered the request that carried the turn's input.
+   Read by the heartbeat to settle a Gate continuation that failed on this
+   route: an answer means the model already saw the replay evidence the turn
+   carried (#32956). Every constructor is named so a new class has to say
+   which side it is on. *)
+let response_observed = function
+  | Retry_after_observed { retry_class; retry_after = _ } ->
+    (match retry_class with
+     | Rate_limited
+     (* 429: the request was refused before any generation. *)
+     | Hard_quota
+     (* 402: refused before any generation. *)
+     | Capacity_backpressure
+     (* overload / capacity pool exhausted: refused before any generation. *)
+     | Server_error
+     (* 5xx, provider unavailable, or an empty completion: nothing the model
+        said is on record. *)
+     | Network_transient
+     (* the transport failed; no answer arrived. *)
+     | Provider_timeout ->
+       (* the deadline expired before an answer. *)
+       false)
+  | Rotate_now { rotate } ->
+    (match rotate with
+     | Auth_failed
+     (* the credential was refused before any generation. *)
+     | Model_unavailable
+     (* the model or endpoint was not found: no generation. *)
+     | Resumable_cli_session
+     (* the CLI session ended without an answer; a recovery lane resumes it. *)
+     | Candidates_filtered
+     (* the candidate set emptied before any answer. *)
+     | Attempt_rejected
+     (* the candidate's own policy refused the request before the wire
+        (#34475): no generation. *)
+     | Runtime_exhausted ->
+       (* a whole-runtime exhaustion wrapper: it carries no answer. *)
+       false
+     | No_progress_empty
+     (* the provider answered with an empty body and the accept gate
+        rejected that answer. *)
+     | No_progress_thinking_only
+     (* the provider answered with thinking only; rejected by the accept
+        gate. *)
+     | No_progress_truncated ->
+       (* the provider answered and stopped at MaxTokens; rejected by the
+          accept gate. *)
+       true)
+  | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
+    (match terminal with
+     | Deterministic_request
+     (* invalid request or input capacity: refused before any generation. *)
+     | Context_overflow
+     (* the request did not fit the window: no generation. *)
+     | Protocol_error
+     (* an MCP protocol failure; whether an answer arrived is not on the
+        route. *)
+     | Config_mismatch
+     (* missing key or invalid configuration: no generation. *)
+     | Provider_integration
+     (* unparseable, provider-reported, or unknown-variant reply: no usable
+        answer is on record. *)
+     | Internal_opaque ->
+       (* unhandled exceptions and internal families. An accept rejection
+          without a no-progress hint also lands here, but the route cannot
+          tell it from an exception, so the evidence keeps its wake. *)
+       false
+     | Contract_violation
+     (* an incomplete tool transcript or a proven pre-effect tool failure:
+        the model answered and the turn's own contract over that answer
+        failed. The two effect fences reach this class only with
+        [No_effect_observed], which the driver never produces. *)
+     | Terminal_effect_dependency_unavailable
+     | Terminal_effect_policy_rejection
+     | Terminal_effect_runtime_failure
+     | Terminal_effect_workflow_rejection
+     | Terminal_effect_operator_cancelled
+     (* a tool the model called failed terminally: the call is the answer. *)
+     | Provider_attempt_effect_fenced
+     (* the driver fences an attempt only after a tool effect was attempted
+        ([Keeper_turn_driver], masc#28885): the model answered with that
+        call, and what failed came after it. *)
+     | Tool_correction_lost ->
+       (* the same fence on a turn that also recorded pre_tool_use
+          rejections: the model answered, the correction round did not
+          land. *)
+       true)

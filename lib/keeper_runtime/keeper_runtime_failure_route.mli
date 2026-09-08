@@ -139,3 +139,23 @@ val route_kind_label : route -> string
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /
     [terminal_class_label] respectively). *)
+
+val response_observed : route -> bool
+(** Whether the provider answered the request that carried the turn's input,
+    so that what failed is the answer or what the turn did with it, not the
+    delivery of the input. A Gate continuation that fails on such a route has
+    already shown the model its replay evidence; the heartbeat settles the
+    approval instead of carrying the same evidence into the next cycle
+    (#32956: one approval rode 24 turns in 51 minutes, every turn ending at
+    [MaxTokens]).
+
+    [true]: the three [No_progress_*] rotations (the accept gate rejected an
+    answer), [Contract_violation] (an incomplete tool transcript or a proven
+    pre-effect tool failure), the five [Terminal_effect_*] classes (a tool
+    the model called failed terminally), and the two effect fences (the
+    driver raises them only after a tool effect was attempted).
+
+    [false]: every [Retry_after_observed] class and every other rotation and
+    terminal class. [Internal_opaque] is [false] although it also holds an
+    accept rejection without a no-progress hint: the route cannot tell that
+    apart from an unhandled exception, so the evidence keeps its wake. *)

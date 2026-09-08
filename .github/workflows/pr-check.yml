@@ -71,6 +71,19 @@ jobs:
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
 
+      # Runs before the lints because it answers whether this run is about the
+      # current head at all. The payload carries the sha the run was created
+      # for; a push that lands afterwards leaves that sha behind, and every
+      # verdict below then describes a commit nobody is looking at. It cannot
+      # live in run-lint-suite.sh -- that takes a base sha and knows nothing
+      # about the head branch or the payload.
+      - name: PR run is not stale
+        run: |
+          bash scripts/check-pr-sync.sh \
+            --head-branch "${{ github.event.pull_request.head.ref }}" \
+            --expected-head-sha "${{ github.event.pull_request.head.sha }}" \
+            --pr-number "${{ github.event.pull_request.number }}"
+
       - name: Blocking lints
         run: |
           bash scripts/ci/run-lint-suite.sh blocking-pr \

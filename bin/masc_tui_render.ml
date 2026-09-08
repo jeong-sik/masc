@@ -3602,7 +3602,12 @@ let render_board_compose (state : state) =
       in
       Printf.sprintf "s:send  e:edit in $EDITOR%s  d:discard  esc:keep writing" hearth_hint
     else
-      "type to write  Ctrl-E:$EDITOR  esc:menu  Tab:surfaces  q:quit"
+      (* No [q] here. While the draft has the keys, [q] is a printable
+         scalar and goes into the draft like any other letter; the footer
+         offered it as quit, so the operator who took the offer got a [q]
+         in their post. Leaving the pane is [esc] and then [d], which the
+         armed footer above names. *)
+      "type to write  Ctrl-E:$EDITOR  esc:menu  Tab:surfaces"
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   let cursor =

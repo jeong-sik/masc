@@ -14021,6 +14021,46 @@ def run_schedule_source_status_regression(executable: str) -> None:
         )
 
 
+# The Board draft is written in the default keyboard lane, which stops at an
+# earlier scenario's exit step (#34125). This lane runs the one thing: the
+# footer's offer and what the key it offered actually does.
+def run_board_compose_footer_regression(executable: str) -> None:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        palette_go(process, master_fd, output, b"go board", b"MASC Board")
+        writing = send_and_wait(process, master_fd, output, b"w", b"type to write")
+        if b"q:quit" in CSI_RE.sub(b"", writing):
+            raise AssertionError(
+                "the writing footer offers q:quit, and q types a q: "
+                f"{CSI_RE.sub(b'', writing)!r}"
+            )
+        # The other half of the same fact. The footer may not name a key as
+        # quit while the draft takes it as a letter, so the letter has to be
+        # seen landing.
+        try:
+            send_and_wait(process, master_fd, output, b"quit-goes-in", b"quit-goes-in")
+        except AssertionError as timed_out:
+            raise AssertionError(
+                "the draft did not take 'quit-goes-in' as text, so whether the "
+                f"footer may name q as quit is unmeasured here: {timed_out}"
+            ) from timed_out
+        # Out the way the armed footer names, not the way the old one did.
+        send_and_wait(process, master_fd, output, b"\x1b", b"d:discard")
+        send_and_wait(process, master_fd, output, b"d", b"MASC Board")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="The Board writing footer offers no key that types",
+        interact=interact,
+    )
+
+
 def run_chat_clarity_regression(executable: str) -> None:
     fixtures = chat_clarity_http_fixtures()
     tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
@@ -14934,6 +14974,10 @@ def main() -> None:
         run_msx_size_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX size regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "board-compose-footer":
+        run_board_compose_footer_regression(os.path.abspath(sys.argv[1]))
+        print("tui board compose footer regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "schedule-delivery":
         run_schedule_delivery_regression(os.path.abspath(sys.argv[1]))
         print("tui schedule delivery regression: PASS")
@@ -15002,8 +15046,10 @@ def main() -> None:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|schedule-source-status|runtime|resources|keepers-lanes|"
-            "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose|tools-request-identity]"
+            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|"
+            "schedule-source-status|board-compose-footer|runtime|resources|"
+            "keepers-lanes|board-json|code-memo|memory-journal|"
+            "skill-usage-coverage|tools-purpose|tools-request-identity]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

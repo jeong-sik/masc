@@ -61,8 +61,11 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
     Printf.sprintf
       "Analyze the attached image for this request:\n\
        %s\n\n\
-       Return only a JSON object with a non-empty string field named text. Do \
-       not include markdown fences or prose outside the JSON object."
+       Return only a JSON object with a non-empty string field named text. When \
+       the requested content is not visible, explicitly describe its absence \
+       in text; do not invent content to fill the field. Distinguish no visible \
+       content from content that is present but unreadable. Do not include \
+       markdown fences or prose outside the JSON object."
       req.Va.query
   in
   Agent_core.Types.make_message

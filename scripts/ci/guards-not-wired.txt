@@ -12,6 +12,11 @@
 #   red    -- run on untouched main and failed
 #   green  -- run on untouched main and passed, so wiring it costs nothing now
 #
+# 2026-09-08: a "report" note here was first written from a grep for `exit 1`,
+# which is not how a shell script says no. audit-dashboard-prompt-keys exits 2
+# on its verdict and is wired now; the rest were re-read and say what their
+# non-zero exit actually is.
+#
 # 2026-09-08: "green" turned out to be weaker than it reads. Six of the
 # fifteen so marked were re-run with a violation planted and failed, and are
 # wired now. Three others exit 0 no matter what they find -- there is no
@@ -44,16 +49,19 @@ scripts/check_silent_failure.sh  # report by default; --strict, the only mode th
 #   enforces, is red on main
 scripts/viewer-local-e2e-check.sh  # tool: needs a running viewer
 scripts/audit-agent-core-payload.py  # tool: reads the live .masc trace store
-scripts/audit-catchall.sh  # report
-scripts/audit-code-smell.sh  # report
-scripts/audit-cross-module-exhaustive-match.sh  # report
-scripts/audit-dashboard-prompt-keys.sh  # report: no failing exit anywhere in it
+scripts/audit-catchall.sh  # report; --strict enforces and is red on main at 611
+#   uncategorised catch-all arms out of 2,857
+scripts/audit-code-smell.sh  # report; --strict enforces and is red on main at 216
+#   ignore() sites without a justification
+scripts/audit-cross-module-exhaustive-match.sh  # report: its only non-zero exit is
+#   a usage error or a missing rg
 scripts/audit-dead-surface.py  # tool: needs --modules/--exports/--stanzas
 scripts/audit-hardcoding-truth.sh  # report: prints "Status: findings", exits 0
-scripts/audit-keeper-credential-drift.sh  # report
+scripts/audit-keeper-credential-drift.sh  # report, and reads the operator's live
+#   .masc/auth/agents: its only non-zero exit is that directory being absent
 scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc credential store
 scripts/audit-keeper-tool-boundary-matrix.sh  # tool
-scripts/audit-rfc-closeout-lag.sh  # report
+scripts/audit-rfc-closeout-lag.sh  # report: its only non-zero exit is a usage error
 scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-ollama-model-context.py  # tool: needs OLLAMA_CLOUD_API_KEY and network
 scripts/lib/worktree-cleanup-guards.sh  # not a check: a function library the name

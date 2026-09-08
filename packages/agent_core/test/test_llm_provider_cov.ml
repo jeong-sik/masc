@@ -1333,7 +1333,9 @@ let provider_model_capabilities provider_label model_id =
 let test_for_provider_model_deepseek_v4_flash () =
   match provider_model_capabilities "deepseek" "deepseek-v4-flash" with
   | Some c ->
-    Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
+    (* 1048576, not a round million: #34133 took the shipped context windows
+       from the provider-published catalog, which gives 1024 * 1024 here. *)
+    Alcotest.(check (option int)) "1M context" (Some 1_048_576) c.max_context_tokens;
     Alcotest.(check (option int)) "384K output" (Some 384_000) c.max_output_tokens;
     Alcotest.(check bool) "tools" true c.supports_tools;
     Alcotest.(check bool) "reasoning" true c.supports_reasoning;

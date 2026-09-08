@@ -66,6 +66,20 @@ type thread_mode =
   | Start
   | Resume of { thread_id : string }
 
+(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
+   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
+   cached prefix and [output_tokens] already includes reasoning, the same
+   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
+   defaults to 0 on the wire. *)
+type token_usage =
+  { input_tokens : int
+  ; cached_input_tokens : int
+  ; cache_write_input_tokens : int
+  ; output_tokens : int
+  ; reasoning_output_tokens : int
+  ; total_tokens : int
+  }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -75,6 +89,10 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
+  ; usage : token_usage option
+    (* [None] when no thread/tokenUsage/updated for this turn arrived before
+       turn/completed; the host then reports the usage scope as unavailable
+       rather than a count of zero. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

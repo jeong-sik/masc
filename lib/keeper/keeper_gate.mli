@@ -84,6 +84,13 @@ type authorization_source =
       (** The request is a closed-set observation-only argv inside a
           per-keeper disposable guest — docker container or microvm
           ({!Keeper_gate_readonly}); allowed without judgment. *)
+  | Local_output
+      (** The operation's effect lands only on the operator's own outputs:
+          a speak ({!voice_speak_gate_operation}) plays on the operator's
+          speakers and is appended to the keeper's own chat. [Auto_judge]
+          allows it without a judge; Manual still parks it for the operator,
+          and the per-keeper and [voice.gate] exemptions still skip the Gate
+          entirely. *)
   | Observed_in_box of boxed_execution
       (** The request ran once inside the executor's box. Under
           [Observe] the guest kernel refused every file write outside a

@@ -147,6 +147,7 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
+  | Local_output
   | Observed_in_box
 
 type approval_rule =
@@ -215,6 +216,7 @@ let authorization_source_to_string = function
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
   | Readonly_sandbox -> "readonly_sandbox"
+  | Local_output -> "local_output"
   | Observed_in_box -> "observed_in_box"
 ;;
 
@@ -224,6 +226,7 @@ let authorization_source_of_string = function
   | "keeper_always_allow" -> Some Keeper_always_allow
   | "workspace_always_allow" -> Some Workspace_always_allow
   | "readonly_sandbox" -> Some Readonly_sandbox
+  | "local_output" -> Some Local_output
   | "observed_in_box" -> Some Observed_in_box
   | _ -> None
 ;;

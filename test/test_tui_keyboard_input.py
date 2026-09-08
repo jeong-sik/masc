@@ -543,6 +543,15 @@ def tab_until(
     output: bytearray,
     needle: Needle,
 ) -> bytes:
+    """Press Tab until the screen shows [needle], or give up after a lap.
+
+    Name the surface the walk is going to, not one on the way. The ring is
+    not fixed: Masc_tui_types.is_surface_active leaves Approvals out of it
+    while nothing is pending, so a walk that stopped there first burned
+    every press on a screen that did not exist. Six scenarios used it as a
+    waypoint to Board, and a seventh fabricated a pending tool approval in
+    its fixtures to keep the waypoint alive.
+    """
     for _ in range(TAB_CYCLE_BOUND):
         read_available(master_fd, output)
         start = len(output)
@@ -1410,29 +1419,6 @@ def board_json_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/board/post-markdown?format=flat"] = (
         200,
         {"post": posts[1], "comments": []},
-    )
-    # The scenario tabs to "MASC Approvals" before Board, but
-    # Masc_tui_types.is_surface_active keeps Approvals off the visible
-    # surface ring while approval_items is empty, so tab_until would burn
-    # every key without the screen ever existing. Seed one pending keeper
-    # tool approval (shape mirrors compact_input_gate_http_fixtures) to put
-    # the surface back on the ring.
-    fixtures["/api/v1/keepers/tool-approvals"] = (
-        200,
-        {
-            "pending": [
-                {
-                    "keeper": "alpha",
-                    "tool_call_id": "tool-board-json-probe",
-                    "tool": "Execute",
-                    "args": "{}",
-                    "question": "Run the board-json probe?",
-                    "because": None,
-                    "asked_at": 1787766400.0,
-                    "timeout_sec": 300.0,
-                }
-            ]
-        },
     )
     return fixtures
 
@@ -2827,7 +2813,6 @@ def assert_row_budgeted_surfaces(
         final_cursor=b"\x1b[?25l",
     )
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Approvals")
     tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
 
@@ -3881,7 +3866,6 @@ def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
             process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (4)"))
         resize_and_wait(
             process,
@@ -3943,7 +3927,6 @@ def board_json_interaction() -> Interaction:
     ) -> None:
         wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (2)"))
         resize_and_wait(
             process,
@@ -4018,7 +4001,6 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         )
 
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (3)"))
         resize_and_wait(
             process,
@@ -4131,7 +4113,6 @@ def open_loaded_board(
         timeout=3.0,
     )
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Approvals")
     tab_until(
         process,
         master_fd,
@@ -4245,7 +4226,6 @@ def board_detail_authority_interaction(
             tab_until(process, master_fd, output, b"MASC Activity")
             tab_until(process, master_fd, output, b"late-list-applied")
             tab_until(process, master_fd, output, b"MASC Keepers")
-            tab_until(process, master_fd, output, b"MASC Approvals")
             board = tab_until(
                 process,
                 master_fd,

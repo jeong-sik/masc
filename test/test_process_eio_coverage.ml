@@ -801,9 +801,8 @@ let test_exit_reason_classifies_the_timeout_status () =
 (* Cancelling a running child used to send SIGTERM and SIGKILL back to back:
    the switch release hook fired before the child could act on the first.
    Measured on the voice recorder, that cost the last quarter second of every
-   stopped capture. The cancellation path now waits, up to
-   [child_exit_grace_seconds], for the child to close the pipes this side
-   holds. Two children prove the two halves: one that traps SIGTERM and writes
+   stopped capture. The cancellation path preserves [child_exit_grace_seconds] even if
+   the child closes its pipes before finishing cleanup. Two children prove the two halves: one that traps SIGTERM and writes
    a marker on its way out shows the wait happened; one that ignores SIGTERM
    shows the wait is bounded.
 
@@ -811,7 +810,10 @@ let test_exit_reason_classifies_the_timeout_status () =
    watcher that returns as soon as the child says it is running. *)
 let with_process_runtime f =
   Eio_main.run @@ fun env ->
-  let proc_mgr = Eio.Stdenv.process_mgr env in
+  (* Match server_runtime_bootstrap's manager. eio_linux v1.3 immediately
+     KILLs from its cancelled reap daemon, before this finalizer can grant
+     grace; that foreign owner's policy is not the installed runtime's. *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
   Process_eio.init ~cwd_default ~proc_mgr ~clock;
@@ -871,6 +873,42 @@ let test_cancel_waits_for_the_child_to_act_on_sigterm () =
          (outcome = `Stopped_by_the_watcher);
        check bool "the child ran its SIGTERM handler before the kill" true
          (Sys.file_exists finished))
+;;
+
+(* Exercise the installed manager, including Linux's SIGCHLD bridge. A
+   TERM handler closes output before doing work; EOF must not shorten grace. *)
+let cancel_closed_output_child ~redirected () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock;
+  let started = fresh_marker ".started" in
+  let finished = fresh_marker ".finished" in
+  let output = fresh_marker ".output" in
+  Fun.protect
+    ~finally:(fun () -> List.iter remove_if_present [ started; finished; output ])
+    (fun () ->
+      let script = Printf.sprintf
+        "trap 'sleep 0.2; : > %s; exit 0' TERM; exec 1>&- 2>&-; : > %s; while :; do sleep 0.05; done"
+        (Filename.quote finished) (Filename.quote started) in
+      let destination =
+        if redirected then Process_eio.Written_to { path = output; append = true }
+        else Process_eio.Captured in
+      let outcome = Eio.Fiber.first
+        (fun () ->
+          ignore (Process_eio.run_argv_with_redirects
+            ~stdin:Process_eio.Inherited ~stdout:destination ~stderr:destination
+            [ "/bin/sh"; "-c"; script ]);
+          `Exited)
+        (fun () ->
+          let rec wait () =
+            if Sys.file_exists started then ()
+            else (Eio.Time.sleep clock 0.01; wait ()) in
+          wait ();
+          `Cancelled) in
+      check bool "watcher cancelled the owning switch" true (outcome = `Cancelled);
+      check bool "closed outputs do not truncate TERM handler" true
+        (Sys.file_exists finished))
 ;;
 
 let test_cancel_grace_is_waited_out_when_the_child_ignores_sigterm () =
@@ -1218,6 +1256,11 @@ let () =
          ] );
       ( "cancellation-grace",
         [
+          test_case "cancel-file-redirects-preserves-term-handler" `Quick
+            (cancel_closed_output_child ~redirected:true);
+          test_case "cancel-early-pipe-eof-preserves-term-handler" `Quick
+            (cancel_closed_output_child ~redirected:false);
+
           test_case "cancel-waits-for-the-child-to-act-on-sigterm" `Quick
             test_cancel_waits_for_the_child_to_act_on_sigterm;
           test_case "cancel-grace-is-bounded-when-the-child-ignores-sigterm" `Quick

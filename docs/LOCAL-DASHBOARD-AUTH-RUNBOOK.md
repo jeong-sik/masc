@@ -97,6 +97,17 @@ Expected invariants are `status == "ok"`, `role == "admin"`, and
 `mcp_client.token_env_var == "MASC_ADMIN_TOKEN"`. `auth_change` reports whether
 login found bearer auth already required or enabled it during this mint.
 
+Here `--client-env MASC_ADMIN_TOKEN` names the client-side shell export and MCP
+configuration field. The HTTP request is authorized by resolving that bearer
+against the workspace credential store and checking its Admin permission.
+The server does not compare each request directly with an environment variable.
+
+When supplied to the **server process at startup**, `MASC_ADMIN_TOKEN` instead
+provides the token to synchronize to the initial Admin credential. If absent,
+startup attempts to mint one; absence does not disable authentication. Failures
+are reported in the startup logs. Use the explicit login result above to obtain
+an operator bearer rather than relying on an unset server variable.
+
 ## 4. Agent-Code MCP Bearer or OAuth Login
 
 MASC supports two MCP authentication modes on the same loopback server:

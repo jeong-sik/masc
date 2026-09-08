@@ -2,7 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { selectedTask } from './task-detail-selection'
-import { fetchTaskEvents } from '../../api/actions'
+import { fetchTaskEvents, fetchTaskDetail } from '../../api/actions'
 import { extractApiError } from '../../api/core'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
 import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/session-trace-state'
@@ -257,6 +257,13 @@ export function filterGoalRelations(
 
 // -- Overlay signals ------------------------------------------------
 
+export type TaskDetailsState =
+  | { kind: 'ready' }
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+export const taskDetailsState = signal<TaskDetailsState>({ kind: 'ready' })
+let detailsFetchToken = 0
+
 export const taskEvents = signal<NormalizedTaskEvent[]>([])
 export const taskEventsLoading = signal(false)
 export const taskEventsError = signal<string | null>(null)
@@ -276,6 +283,7 @@ const activityFetchToken = signal(0)
 // -- State lifecycle ------------------------------------------------
 
 function resetState(): void {
+  taskDetailsState.value = { kind: 'ready' }
   taskEvents.value = []
   taskEventsLoading.value = false
   taskEventsError.value = null
@@ -290,12 +298,16 @@ function resetState(): void {
 }
 
 export function openTaskDetail(task: Task): void {
+  detailsFetchToken++
+  activityFetchToken.value++
   resetState()
   selectedTask.value = task
+  if (task.detail_level === 'summary') void loadTaskDetails(task)
   void loadTaskEvents(task.id)
 }
 
 export function closeTaskDetail(): void {
+  detailsFetchToken++
   selectedTask.value = null
   eventsFetchToken.value++
   activityFetchToken.value++
@@ -303,13 +315,49 @@ export function closeTaskDetail(): void {
 }
 
 export function switchToActivityTab(task: Task): void {
+  const current = selectedTask.value
+  if (!current || current.id !== task.id || current.detail_level === 'summary'
+    || taskDetailsState.value.kind !== 'ready' || !current.assignee) return
   activeTab.value = 'activity'
-  if (task.assignee && activityEvents.value.length === 0 && !activityLoading.value) {
-    void loadActivity(task)
+  if (activityEvents.value.length === 0 && !activityLoading.value) {
+    void loadActivity(current)
   }
 }
 
+function resetActivity(): void {
+  activityFetchToken.value++
+  activeTab.value = 'overview'
+  activityEvents.value = []
+  activityLoading.value = false
+  activityError.value = null
+  activeFilter.value = 'all'
+  activityListSearchQuery.value = ''
+}
+
 // -- Fetch with stale guard -----------------------------------------
+
+async function loadTaskDetails(task: Task): Promise<void> {
+  const token = ++detailsFetchToken
+  resetActivity()
+  taskDetailsState.value = { kind: 'loading' }
+  try {
+    const complete = await fetchTaskDetail(task.id)
+    if (token !== detailsFetchToken || selectedTask.value?.id !== task.id) return
+    if (selectedTask.value.assignee !== complete.assignee) resetActivity()
+    selectedTask.value = complete
+    taskDetailsState.value = { kind: 'ready' }
+  } catch (error) {
+    if (token !== detailsFetchToken || selectedTask.value?.id !== task.id) return
+    taskDetailsState.value = { kind: 'error', message: extractApiError(error, '작업 상세를 불러오지 못했습니다').message }
+  }
+}
+
+export function retryTaskDetails(): void {
+  const task = selectedTask.value
+  if (task?.detail_level === 'summary' && taskDetailsState.value.kind !== 'loading') {
+    void loadTaskDetails(task)
+  }
+}
 
 async function loadTaskEvents(taskId: string): Promise<void> {
   const token = ++eventsFetchToken.value
@@ -332,7 +380,8 @@ async function loadTaskEvents(taskId: string): Promise<void> {
 // -- Activity loading (keeper: timeline + trajectory, else: timeline only) --
 
 async function loadActivity(task: Task): Promise<void> {
-  if (!task.assignee) return
+  if (!task.assignee || task.detail_level === 'summary'
+    || taskDetailsState.value.kind !== 'ready') return
   const token = ++activityFetchToken.value
   activityLoading.value = true
   activityError.value = null

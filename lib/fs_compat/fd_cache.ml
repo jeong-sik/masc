@@ -43,8 +43,21 @@ let evict_lru_locked () =
      | None -> ())
 ;;
 
+let writer_matches_path path w =
+  try
+    let opened = Unix.fstat (Unix.descr_of_out_channel w.oc) in
+    let current = Unix.stat path in
+    opened.Unix.st_dev = current.Unix.st_dev
+    && opened.Unix.st_ino = current.Unix.st_ino
+  with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> false
+;;
+
 (* Caller must already hold [mu]. *)
 let get_or_open_locked path now =
+  (match Hashtbl.find_opt cached path with
+   | Some w when not (writer_matches_path path w) -> drop_cached_writer_locked path w
+   | Some _ | None -> ());
   match Hashtbl.find_opt cached path with
   | Some w ->
     w.last_used <- now;

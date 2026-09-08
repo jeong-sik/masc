@@ -6,6 +6,9 @@
 
 (** {1 Global init (call once from main_eio.ml)} *)
 
+(** Native foreground commands own a separate process group through the
+    foreground manager. [proc_mgr] supplies pipe plumbing; direct callers of
+    that manager (LSP and official clients) retain their own lifecycle. *)
 val init :
   cwd_default:Eio.Fs.dir_ty Eio.Path.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
@@ -231,7 +234,7 @@ type spawn_refusal =
       (** argv[0], as the caller gave it, resolved to no file. Eio's spawner
           does the PATH resolution and raises
           [Eio.Process.Executable_not_found]; the Unix fallback learns the
-          same from [Unix.create_process_env] raising [ENOENT] at the spawn. *)
+          same from its group-owning [posix_spawnp] raising [ENOENT] at the spawn. *)
   | Spawn_failed of
       { executable : string
       ; error : Unix.error

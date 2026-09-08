@@ -1172,8 +1172,8 @@ let () =
             refused (Exec_dispatch.dispatch_pipeline [ Simple head; Simple stage ]);
             refused (Exec_dispatch.dispatch
               (Sequence { head = Simple head; tail = [ Seq, Simple stage ] }));
-            gate_refused (Gate.gate_typed ~ir:(Simple stage) ~syntax_policy ~sandbox ());
-            gate_refused (Gate.lower_typed_pipeline ~stages:[ head; stage ] ~sandbox ()))
+            gate_refused (Gate.gate_typed ~ir:(Simple stage) ~syntax_policy ~sandbox:{ target = sandbox } ());
+            gate_refused (Gate.lower_typed_pipeline ~stages:[ head; stage ] ~sandbox:{ target = sandbox } ()))
          [ simple sandbox [ variable ] []
          ; simple sandbox [ Concat [ Lit ("prefix", default_meta); variable ] ] []
          ; simple sandbox [] [ "FORWARDED", variable ] ])

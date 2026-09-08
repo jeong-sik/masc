@@ -108,7 +108,9 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-기본 Keeper 명단은 비어 있으며 `browser-lanes` skill 지침이 설치됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+기본 Keeper 명단에는 `imp` 하나가 들어 있고 `browser-lanes` skill 지침이 설치됩니다.
+`imp`는 autoboot이 꺼진 채로 설치되므로, 아래 모델과 실행 환경을 준비하기 전까지는
+서버가 이 Keeper를 띄우려 하지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 

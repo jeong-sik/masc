@@ -219,7 +219,8 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
                  [ "key", `String e.key
                  ; "value", `String e.value
                  ; "bytes", `Int (String.length e.value)
-                 ; "contract_revision", `String e.contract_revision
+                 ; "authored_against", `String e.authored_against
+                 ; "template_variables", strings e.template_variables
                  ])
              s.prompt_overrides) )
     ; ( "instructions"
@@ -622,15 +623,12 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
          one. *)
       (Prompt_registry.override_entries ())
   in
+  (* Each entry keeps the binding it was captured with, so a restored
+     override reads as "written against an older default" when that is what
+     it is, instead of looking freshly authored against today's text. *)
   List.fold_left
     (fun acc (e : Override.entry) ->
-      match
-        Prompt_registry.set_override_persisted
-          ~expected_contract_revision:e.Override.contract_revision
-          ~base_path
-          e.Override.key
-          e.Override.value
-      with
+      match Prompt_registry.restore_persisted_entry ~base_path e with
       | Ok () -> { acc with applied = e.Override.key :: acc.applied }
       | Error (Prompt_registry.Validation_error message)
       | Error (Prompt_registry.Persistence_error message) ->

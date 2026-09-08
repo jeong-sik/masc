@@ -134,7 +134,6 @@ type invalid_answer =
   | Duplicate_choice of { question_id : string; choice_id : string }
   | Multiple_choices_for_single of { question_id : string; count : int }
   | Empty_selection of { question_id : string }
-  | Free_text_not_offered of { question_id : string }
   | Free_text_blank of { question_id : string }
   | Answered_twice of { question_id : string }
   | Unanswered of { question_id : string }
@@ -168,11 +167,11 @@ let validate_chose (q : question) choice_ids =
 let validate_response (q : question) response =
   match response with
   | Skipped -> []
-  | Wrote text -> (
-      match q.free_text with
-      | Choices_only -> [ Free_text_not_offered { question_id = q.question_id } ]
-      | Free_text_allowed _ ->
-          if is_blank text then [ Free_text_blank { question_id = q.question_id } ] else [])
+  | Wrote text ->
+      (* Choices are suggestions to a human, not a restriction on their answer.
+         The question's free_text field describes the author's offered input;
+         an operator can always supply an alternative in their own words. *)
+      if is_blank text then [ Free_text_blank { question_id = q.question_id } ] else []
   | Chose { choice_ids } -> validate_chose q choice_ids
 
 let parse_answers ~ask ~submissions =
@@ -296,7 +295,7 @@ let invalid_question_to_string = function
   | Question_id_blank -> "question_id is blank"
   | Header_blank -> "header is blank"
   | Prompt_blank -> "prompt is blank"
-  | No_way_to_answer -> "question offers no choices and refuses free text"
+  | No_way_to_answer -> "question offers neither choices nor a writing prompt"
   | Duplicate_choice_ids ids -> "duplicate choice_id: " ^ String.concat ", " ids
 
 let invalid_ask_to_string = function
@@ -314,8 +313,6 @@ let invalid_answer_to_string = function
   | Multiple_choices_for_single { question_id; count } ->
       Printf.sprintf "question %s takes one choice, got %d" question_id count
   | Empty_selection { question_id } -> "question " ^ question_id ^ " selected nothing"
-  | Free_text_not_offered { question_id } ->
-      "question " ^ question_id ^ " does not accept free text"
   | Free_text_blank { question_id } -> "question " ^ question_id ^ " got blank free text"
   | Answered_twice { question_id } -> "question " ^ question_id ^ " answered more than once"
   | Unanswered { question_id } -> "question " ^ question_id ^ " has no submission"

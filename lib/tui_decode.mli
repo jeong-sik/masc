@@ -1543,6 +1543,10 @@ type runtime_param_row =
   ; rpr_value_type : string
   ; rpr_min_json : string option
   ; rpr_max_json : string option
+  ; rpr_choices : string list
+    (** The closed set of values this param accepts, when it has one. Empty
+        for a param whose value the reader types. A partly closed domain
+        lists its named values here and still accepts the rest. *)
   }
 
 val decode_runtime_params :
@@ -1827,6 +1831,11 @@ type prompt_row = {
   pr_file_path : string;
   pr_source : prompt_source;
   pr_template_variables : string list;
+  pr_override_default_moved : bool;
+      (** The override in force was written against a default that has since
+          changed -- its body, or the variables it declares. The override
+          still applies; the text it replaced is not the text it replaced
+          then. False for a row without an override. *)
 }
 
 type runtime_prompt_asset = {
@@ -1839,17 +1848,17 @@ type runtime_prompt_asset = {
 type held_back_override = {
   hbo_key : string;
   hbo_bytes : int;
-  hbo_contract_revision : string;
-      (** The revision the override was written against. It no longer matches
-          the prompt's current contract, which is why the override is on disk
-          and not in force. *)
+  hbo_reason : string;
+      (** Why the registry is not applying it: the override names a template
+          variable the prompt no longer declares, so it cannot render. *)
 }
 (** An override the operator saved and the registry declined to restore.
 
-    A prompt override pins the revision of the body it was written against,
-    and a release that edits that body invalidates the pin, so masc falls
-    back to the shipped text. The override is kept rather than deleted --
-    writing the key again re-pins it to the current revision. *)
+    A default body that changed since the override was written is not a
+    reason: the override applies and the row reads as
+    [pr_override_default_moved]. What holds one back is a contract it cannot
+    render under. The override is kept rather than deleted -- writing the key
+    again, without the stale variable, puts it back in force. *)
 
 type prompts_snapshot = {
   ps_rows : prompt_row list;

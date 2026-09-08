@@ -2577,8 +2577,7 @@ let box_wrapped_field buf cols ~head ~style body =
 
 (* The question the ask cursor is on, or none when nothing is waiting. The
    footer asks for it to decide which keys it can honestly name: a question
-   with no choices makes [1-9] a promise the surface cannot keep, and one that
-   refuses free text makes [t] the same. *)
+   with no choices makes [1-9] a promise the surface cannot keep. *)
 let selected_ask_question (state : state) =
   match state.asks_snapshot with
   | None -> None
@@ -2691,9 +2690,9 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  match question.Masc.Tui_decode.aq_free_text with
-  | Masc.Tui_decode.Ask_choices_only -> ()
-  | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } -> (
+  let slot = Ask_projection.free_text_slot question in
+  let aft_hint = Ask_projection.free_text_hint slot in
+  (
       (* The editor belongs to one question, and the slot it holds names
          which. Matching on that rather than on the cursor means a snapshot
          arriving mid-sentence cannot move the typing onto another row. *)
@@ -2713,18 +2712,20 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
       | Some entry ->
           draw_ask_text_entry buf cols ~draft ~question entry
       | None -> (
-          (* The key that opens the editor is named by the footer, which knows
-             whether the question under the cursor takes text; naming it on
-             every row that welcomes free text would offer [t] on rows it does
-             nothing to. *)
-          match aft_hint with
-          | None ->
-              box_line buf cols
-                (Printf.sprintf "      %sfree text welcome%s" Ansi.dim Ansi.reset)
-          | Some hint ->
-              box_wrapped_field buf cols
-                ~head:(Printf.sprintf "      %sfree text welcome -- " Ansi.dim)
-                ~style:Ansi.dim hint))
+          let key =
+            if not (answering && selected_question) then ""
+            else match Ask_projection.alternative_position question with
+              | Some position -> Printf.sprintf "[%d/t] " position
+              | None -> "[t] "
+          in
+          let label =
+            if question.Masc.Tui_decode.aq_choices = [] then "Write your answer"
+            else "Other: write your own answer"
+          in
+          box_line buf cols
+            (Printf.sprintf "      %s%s%s%s" (Theme.info ()) key label Ansi.reset);
+          Option.iter (fun hint ->
+            box_wrapped_field buf cols ~head:"      " ~style:Ansi.dim hint) aft_hint))
 
 (* The reason is what separates a decision that matters from one that does
    not, so it is drawn, not hidden behind a detail view. *)
@@ -3011,7 +3012,7 @@ let question_hints (state : state) =
                  in
                  let takes_text =
                    match question with
-                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
+                   | Some _ -> true
                    | None -> false
                  in
                  Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \
@@ -4992,6 +4993,35 @@ let schedule_row_subject (row : Masc_tui_types.schedule_row) =
 let schedule_status_color status =
   semantic_status_color status
 
+(* What became of the wake, for a list row that has one line to say it in.
+
+   The word is the server's own [projection_status], not a reading of it.
+   That status is written at a dozen places in
+   [server_dashboard_schedule_projection.ml] as bare strings, and the live
+   store holds values this file has never heard of; a table of meanings
+   here would be a second classifier over that same open axis, drifting
+   from the ledger's the first time the server learns a word. Showing the
+   word the server wrote cannot drift.
+
+   The [matched_] prefix comes off. It sits on most of the values and
+   separates none of them, which is the reason the subject drops
+   [keeper:] a few lines below.
+
+   [None] is the ledger saying nothing, and the row then shows an em dash
+   rather than a delivery it does not know. That is not the same as a wake
+   that failed, which [wake:] beside it already names. *)
+let schedule_delivery_word (row : schedule_row) =
+  let matched = "matched_" in
+  let cut status =
+    let n = String.length matched in
+    if String.length status > n && String.equal (String.sub status 0 n) matched then
+      String.sub status n (String.length status - n)
+    else status
+  in
+  match row.sch_reaction_projection_status with
+  | None -> "\xe2\x80\x94"
+  | Some status -> cut status
+
 let schedule_delivery_summary (row : schedule_row) =
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -5130,7 +5160,7 @@ let render_schedule_list (state : state) =
                  Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s  %s"
+                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
                    status_color
                    (fit_width row.sch_status 10)
                    Ansi.reset
@@ -5147,6 +5177,13 @@ let render_schedule_list (state : state) =
                    (schedule_status_color last_wake)
                    (fit_width (Terminal_text.single_line last_wake) 10)
                    Ansi.reset
+                   (* The enqueue result and what became of the wake are two
+                      facts, and the list carried only the first: a wake the
+                      queue cancelled forty seconds later still read
+                      [wake:succeeded]. Both are here now, in that order. *)
+                   (fit_width
+                      (Terminal_text.single_line (schedule_delivery_word row))
+                      12)
                    (Ansi.dim ^ row.sch_recurrence_summary ^ Ansi.reset)
                in
                let content =
@@ -16227,15 +16264,21 @@ let render_runtime_params (state : state) =
        && List.mem (runtime_param_type_name edit.rpe_value_type)
             [ "bool"; "boolean" ]
      in
+     (* A param with a closed set is walked the way a bool is toggled — the
+        reader is choosing, not typing — so both draw as a choice. *)
+     let friendly_choice =
+       edit.rpe_mode = Friendly_value && edit.rpe_choices <> []
+     in
+     let picking = friendly_bool || friendly_choice in
      let field_label =
        match edit.rpe_mode with
        | Advanced_json -> "JSON>"
-       | Friendly_value when friendly_bool -> "choice>"
+       | Friendly_value when picking -> "choice>"
        | Friendly_value -> "value>"
      in
      let draft = Terminal_text.single_line edit.rpe_draft in
      let draft =
-       if edit.rpe_replace_on_type && not friendly_bool
+       if edit.rpe_replace_on_type && not picking
        then Theme.selection ^ draft ^ Ansi.reset
        else draft
      in
@@ -16250,6 +16293,13 @@ let render_runtime_params (state : state) =
            | Advanced_json -> "advanced JSON · Enter apply · Esc cancel"
            | Friendly_value when friendly_bool ->
              "Left/Right/Space toggle · Enter apply · Esc cancel"
+           | Friendly_value when friendly_choice ->
+             (* The set is spelled out: a reader walking it one key at a time
+                cannot otherwise see how many values there are, or that a form
+                they can type by hand exists beside them. *)
+             Printf.sprintf
+               "Left/Right/Space cycle (%s) · Enter apply · Esc cancel"
+               (String.concat " · " edit.rpe_choices)
            | Friendly_value ->
              "type to replace · Enter apply · Esc cancel")));
   box_bottom buf cols;
@@ -16262,6 +16312,9 @@ let render_runtime_params (state : state) =
                  && List.mem (runtime_param_type_name edit.rpe_value_type)
                       [ "bool"; "boolean" ] ->
             "Left/Right/Space:toggle  Enter:apply  Esc:cancel"
+          | Some edit
+            when edit.rpe_mode = Friendly_value && edit.rpe_choices <> [] ->
+            "Left/Right/Space:cycle  Enter:apply  Esc:cancel"
           | Some { rpe_mode = Friendly_value; _ } ->
             "type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | Some { rpe_mode = Advanced_json; _ } ->
@@ -16423,7 +16476,16 @@ let render_prompt_registry (state : state) =
             (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
                (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
           box_line_styled buf cols ~style:(Theme.recede ())
-            "  이 프롬프트의 원본이 바뀌어 핀이 어긋났습니다 \xc2\xb7 같은 키를 다시 저장하면 현재 원본에 다시 물립니다");
+            (Printf.sprintf
+               "  지금 계약으로는 렌더링할 수 없습니다: %s \xc2\xb7 그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다"
+               (Terminal_text.single_line entry.Tui_decode.hbo_reason)));
+       (* The override applies. This line says only that the shipped text it
+          replaced has changed since it was written, so the reader knows to
+          compare the two once rather than discovering a new default months
+          later. *)
+       if row.Tui_decode.pr_override_default_moved then
+         box_line_styled buf cols ~style:(Theme.warn ())
+           "  \xe2\x96\xb3 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요";
        let input_contract =
          if String.equal row.pr_category "librarian" then
            "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"

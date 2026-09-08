@@ -963,7 +963,13 @@ let test_shipped_keeper_profiles_load () =
     else []
   in
   let config_files = toml_files (Filename.concat repo "config/keepers") in
+  (* The roster a fresh workspace is seeded with. It reaches an operator who
+     has authored nothing, so it is the one set where an unloadable profile is
+     met before there is anything to compare it against. *)
+  let default_roster_files = toml_files (Filename.concat repo "config/keepers-default") in
   check bool "config/keepers holds keeper TOMLs" true (config_files <> []);
+  check bool "config/keepers-default holds the fresh-install roster" true
+    (default_roster_files <> []);
   check bool "presets hold keeper TOMLs" true (preset_files <> []);
   List.iter
     (fun path ->
@@ -974,7 +980,38 @@ let test_shipped_keeper_profiles_load () =
         (match KTP.profile_defaults_of_toml doc with
          | Ok _ -> ()
          | Error detail -> fail (path ^ ": " ^ detail)))
-    (config_files @ preset_files)
+    (config_files @ default_roster_files @ preset_files)
+
+(* The fresh-install roster reaches a host with no model and no sandbox: that
+   is the state a fresh install is in. A Keeper that autoboots there fails on
+   first start, which is what excluding [config/keepers] from the seed was
+   written for after 2026-09-05. Shipping one Keeper is only safe while it
+   waits to be started. *)
+let test_default_roster_does_not_autoboot () =
+  let repo = repo_root () in
+  let dir = Filename.concat repo "config/keepers-default" in
+  let files =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun file -> Filename.check_suffix file ".toml")
+    |> List.sort String.compare
+  in
+  check bool "fresh-install roster is non-empty" true (files <> []);
+  List.iter
+    (fun file ->
+      let path = Filename.concat dir file in
+      match TL.parse_toml (read_text_file path) with
+      | Error error -> fail (path ^ ": " ^ error)
+      | Ok doc ->
+        (match KTP.profile_defaults_of_toml doc with
+         | Error detail -> fail (path ^ ": " ^ detail)
+         | Ok defaults ->
+           check
+             (option bool)
+             (file ^ " autoboot_enabled")
+             (Some false)
+             defaults.KTP.autoboot_enabled))
+    files
 
 let concrete_keeper_inventory_path repo =
   Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"
@@ -1880,6 +1917,8 @@ let () =
             test_bundled_keeper_profiles_resolve_prompt_defaults;
           test_case "every shipped keeper TOML loads" `Quick
             test_shipped_keeper_profiles_load;
+          test_case "fresh-install roster does not autoboot" `Quick
+            test_default_roster_does_not_autoboot;
           test_case "OCaml sources exclude concrete Keeper identities" `Quick
             test_ocaml_sources_exclude_declared_concrete_keeper_identities;
         ] );

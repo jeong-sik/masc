@@ -34,15 +34,32 @@ val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
     behind both keeper-dir SSOT functions; the input/output relocation flips it. *)
 
+val default_keepers_dirname : string
+(** Config-tree directory holding the roster a fresh workspace starts with.
+    Distinct from {!keepers_runtime_dirname}, which is where it lands. *)
+
 val seeds_into_fresh_config_root : string -> bool
 (** Whether a distribution config asset may be written into a fresh runtime
-    config root. Takes an asset path relative to the embedded [config/] tree
-    ([runtime.toml], [prompts/keeper.md]) or a bare top-level entry name, so the
-    filesystem seed and the embedded seed answer from one place.
+    config root {b verbatim}. Takes an asset path relative to the embedded
+    [config/] tree ([runtime.toml], [prompts/keeper.md]) or a bare top-level
+    entry name, so the filesystem seed and the embedded seed answer from one
+    place.
 
     [false] for keeper manifests — the roster is declared per workspace, and the
-    shipped examples autoboot into a sandbox the host may not have — and for
-    [dune], a build input rather than runtime config. *)
+    shipped examples autoboot into a sandbox the host may not have — for
+    {!default_keepers_dirname}, which seeds under a different name and so is
+    routed through {!fresh_config_root_keeper_seed_target}, and for [dune], a
+    build input rather than runtime config. *)
+
+val fresh_config_root_keeper_seed_target : string -> string option
+(** Where a {!default_keepers_dirname} asset lands in a fresh config root:
+    [keepers-default/x.toml] becomes [Some "keepers/x.toml"]. [None] for every
+    other path, including a non-[.toml] file in that directory.
+
+    A fresh workspace gets exactly what this directory holds. It carries no
+    autoboot, so it cannot repeat the 2026-09-05 failure the exclusion above
+    was written for, and both seed paths route through here so the filesystem
+    and embedded roots agree on the roster. *)
 
 val keepers_runtime_dir_of_base : base_path:string -> string
 (** [<base_path>/.masc/keepers] for callers holding only a [base_path]

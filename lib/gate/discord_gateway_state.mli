@@ -298,6 +298,12 @@ val state : t -> connection_state
 val config : t -> config
 val resume_context : t -> (string * int option) option
 
+val with_trigger_policy : t -> trigger_policy -> t
+(** Replace the trigger policy carried in [config], leaving every other field
+    of the state alone. The I/O layer applies this immediately before each
+    {!step} so a policy an operator changes takes effect on the next inbound
+    message without a restart. *)
+
 (** {2 Transition function} *)
 
 val step : t -> now_mono:float -> input -> t * gateway_effect list

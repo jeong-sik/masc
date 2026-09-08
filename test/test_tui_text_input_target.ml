@@ -21,6 +21,7 @@ let target =
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
       | Some Tui_types.Text_browser_url -> "browser-url"
+      | Some Tui_types.Text_ask_answer -> "ask-answer"
       | Some Tui_types.Text_board_draft -> "board-draft"))
     ( = )
 ;;
@@ -89,6 +90,7 @@ let test_an_inline_setting_claims_over_the_palette () =
       ; rpe_draft = "12"
       ; rpe_replace_on_type = true
       ; rpe_mode = Tui_types.Friendly_value
+      ; rpe_choices = []
       };
   state.Tui_types.palette_open <- true;
   check target "runtime param first" (Some Tui_types.Text_runtime_param)
@@ -227,11 +229,32 @@ let test_reader_discards_active_and_queued_voice () =
      = Some Masc.Voice_bridge.Keep_what_was_heard)
 ;;
 
+let test_ask_answer_input_ownership () =
+  let state = fresh_state () in
+  let question : Masc.Tui_decode.ask_question =
+    { aq_id = "q1"; aq_header = "Route"; aq_prompt = "Which route?";
+      aq_mode = Masc.Tui_decode.Ask_single;
+      aq_free_text = Masc.Tui_decode.Ask_choices_only;
+      aq_choices = [{ac_id = "route"; ac_label = "Offered route"; ac_description = None}] }
+  in
+  state.Tui_types.view <- Tui_types.Approvals;
+  state.Tui_types.ask_text_entry <- Some
+    { ate_slot = Masc_tui_ask_projection.free_text_slot question; ate_text = "draft" };
+  check target "answer owns typing and paste" (Some Tui_types.Text_ask_answer) (resolved state);
+  check target "compact frame hides answer editor" None (resolved ~compact_viewport:true state);
+  state.Tui_types.context_inspector_open <- true;
+  check target "inspector hides answer editor" None (resolved state);
+  state.Tui_types.context_inspector_open <- false;
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "retained answer cannot capture another surface" None (resolved state)
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
-        [ test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
+        [ test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
+          test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
           test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
           test_case "nothing claims a plain surface" `Quick

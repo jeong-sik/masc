@@ -275,12 +275,24 @@ let test_a_settle_without_a_number_names_no_turn () =
   check bool "settles with its state" true (contains "settled" header);
   check bool "no turn is named" false (contains "turn" header)
 
+(* An offline keeper has no fleet row any more, but the operator can still
+   select one and its focus block draws. That block is where the reading has to
+   stay honest: the last turn never settled because the end event died with the
+   keeper, so nothing here may read as running. *)
 let test_a_gone_keepers_turn_is_not_read_as_running () =
-  let row = find_row_in dead_texts "goner" in
-  check bool "the gone row wears the gone glyph" true (contains "! " row);
-  check bool "the gone row says what it saw" true (contains "Read" row);
-  check bool "and counts it as at least that many" true (contains "1+ calls" row);
-  check bool "the gone row does not say running" false (contains "running" row)
+  check bool "no fleet row for an offline keeper" false
+    (List.exists
+       (fun row -> contains "\xe2\x97\x8f" row && contains "goner" row)
+       dead_texts);
+  let header = find_row_in dead_texts "goner" in
+  check bool "the focus header says the process is gone" true
+    (contains "process gone" header);
+  check bool "and that the turn never settled" true (contains "unsettled" header);
+  check bool "the focus block does not say running" false
+    (contains "running" header);
+  let body = find_row_in dead_texts "Read" in
+  check bool "what it saw is still named" true (contains "Read" body);
+  check bool "under the gone glyph" true (contains "! " body)
 
 let test_a_settled_row_counts_only_what_the_settle_confirmed () =
   (* The ledger row above landed after the settle and carries no turn
@@ -775,7 +787,9 @@ let test_reused_chunks_keep_presentation_inputs_live () =
     (contains "last event 10.0s" (header_of "sangsu" initial));
   let changed = { input with Pane.now = now +. 20.; selected = Some "rondo";
     keepers = List.map (fun (keeper : Pane.keeper) ->
-      if keeper.name = "sangsu" then { keeper with health = Some Masc.Tui_decode.Health_offline }
+      (* Zombie, not offline: both read as an unfinished record and give the
+         row the same glyph, and an offline keeper has no fleet row to read. *)
+      if keeper.name = "sangsu" then { keeper with health = Some Masc.Tui_decode.Health_zombie }
       else keeper) input.keepers } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
   check bool "age advances independently of chunks" true
@@ -1059,6 +1073,70 @@ let test_an_earlier_turn_row_opens_the_keepers_calls () =
   check string "the turn row opens the calls surface" "calls:sangsu"
     (target_text (List.nth value.Pane.targets index))
 
+(* The pane answers what every keeper is doing now, and a keeper with no agent
+   present is doing nothing. Its row pushed working keepers past the fold. *)
+let offline_fixture : Pane.input =
+  { fixture with
+    Pane.keepers =
+      [ keeper "quiet-one" ~tone:Pane.Dim
+      ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-one"
+      ; keeper "sangsu"
+      ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-two"
+      ; keeper "rondo"
+      ]
+  ; selected = Some "sangsu"
+  }
+
+let offline_texts () =
+  List.map text (Pane.lines ~rows ~cols ~scroll:0 offline_fixture).Pane.rows
+
+let test_offline_keepers_do_not_draw () =
+  let drawn = offline_texts () in
+  let says name = List.exists (fun row -> contains name row) drawn in
+  check bool "an offline keeper has no row" false (says "gone-one");
+  check bool "nor the second one" false (says "gone-two");
+  check bool "the working ones still draw" true (says "sangsu");
+  check bool "including a quiet one" true (says "quiet-one");
+  check bool "and the last of them" true (says "rondo")
+
+(* Dropping rows without saying so makes a short list read as the whole fleet.
+   The count is over what is drawn, and what was left out is named beside it. *)
+let test_the_header_names_what_it_left_out () =
+  let header = List.hd (offline_texts ()) in
+  check bool "the count is of the drawn keepers" true (contains "3 keepers" header);
+  check bool "and the hidden ones are named" true (contains "(2 offline)" header);
+  let clean =
+    List.hd (List.map text (Pane.lines ~rows ~cols ~scroll:0 fixture).Pane.rows)
+  in
+  check bool "no parenthetical when none are offline" false (contains "offline" clean)
+
+(* Only Health_offline. A zombie is a keeper that should be running and is not,
+   which is the reading an operator most needs; a filter that took it too would
+   hide the fleet's problems. A keeper whose health did not read is not a keeper
+   reading offline, and dropping those empties the pane whenever the roster
+   fails to load. *)
+let test_only_offline_is_dropped () =
+  let with_health h name = keeper ~health:(Some h) name in
+  let input =
+    { fixture with
+      Pane.keepers =
+        [ with_health Masc.Tui_decode.Health_zombie "zombie-one"
+        ; with_health Masc.Tui_decode.Health_stale "stale-one"
+        ; with_health Masc.Tui_decode.Health_degraded "degraded-one"
+        ; keeper "unread-one"
+        ; with_health Masc.Tui_decode.Health_offline "gone-one"
+        ]
+    ; selected = Some "zombie-one"
+    }
+  in
+  let drawn = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let says name = List.exists (fun row -> contains name row) drawn in
+  check bool "a zombie still draws" true (says "zombie-one");
+  check bool "a stale keeper still draws" true (says "stale-one");
+  check bool "a degraded one still draws" true (says "degraded-one");
+  check bool "and one whose health did not read" true (says "unread-one");
+  check bool "only the offline one is gone" false (says "gone-one")
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -1152,6 +1230,14 @@ let () =
         ; test_case "earlier turn row gives up its cost before its parts" `Quick
             test_earlier_turn_row_gives_up_its_cost_before_its_parts
         ; test_case "fleet rows carry no clock" `Quick test_fleet_rows_carry_no_clock
+        ] )
+    ; ( "offline"
+      , [ test_case "offline keepers do not draw" `Quick
+            test_offline_keepers_do_not_draw
+        ; test_case "the header names what it left out" `Quick
+            test_the_header_names_what_it_left_out
+        ; test_case "only offline is dropped" `Quick
+            test_only_offline_is_dropped
         ] )
     ; ( "beside the roster"
       , [ test_case "only the selected keeper's record draws" `Quick

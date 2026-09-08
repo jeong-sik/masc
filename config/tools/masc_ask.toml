@@ -51,7 +51,7 @@ description = "Mode: single or multi."
 [[params.items.params]]
 name = "free_text"
 type = "boolean"
-description = "Allow free text input."
+description = "Offer a free-text input prompt. Operators can always write an alternative answer."
 
 [[params.items.params]]
 name = "free_text_hint"

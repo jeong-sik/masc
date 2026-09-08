@@ -1,6 +1,13 @@
 # Concrete runtime Keeper identities forbidden in tracked OCaml source.
 # Protocol roles such as verifier, operator, reviewer, and executor are not
 # runtime Keeper identities and intentionally remain valid collision fixtures.
+#
+# The fresh-install roster's Keeper is deliberately absent: this list is matched
+# as a substring, and its name occurs inside ordinary English words that fill
+# this tree. Adding it would fail every file holding "import" or "implementation"
+# rather than catching a fixture collision. Nothing in OCaml source names it —
+# Common.fresh_config_root_keeper_seed_target maps a directory, not a Keeper —
+# so there is nothing here for this guard to protect.
 taskmaster
 sangsu
 cheolsu

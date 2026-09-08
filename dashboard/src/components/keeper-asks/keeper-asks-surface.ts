@@ -70,13 +70,12 @@ function ChoiceRow({ row, question, choice }: {
 
 function FreeText({ row, question }: { row: AskRow; question: AskQuestion }) {
   const slot = freeTextSlot(question)
-  if (slot === null) return null
   const draft = draftForRow(row)
   const response = responseFor(draft, question)
   const value = response?.kind === 'wrote' ? response.text : ''
   return html`
     <label class="ka-freetext">
-      <span class="ka-freetext-hint">${slot.hint ?? '직접 적어도 됩니다'}</span>
+      <span class="ka-freetext-hint">${slot.hint ?? (question.choices.length > 0 ? '다른 답변 직접 입력' : '답변 직접 입력')}</span>
       <textarea
         rows="2"
         value=${value}

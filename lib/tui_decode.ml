@@ -6725,6 +6725,10 @@ type runtime_param_row =
   ; rpr_value_type : string
   ; rpr_min_json : string option
   ; rpr_max_json : string option
+  ; rpr_choices : string list
+    (** The closed set of values this param accepts, when it has one. Empty
+        for a param whose value the reader types. A partly closed domain
+        lists its named values here and still accepts the rest. *)
   }
 
 let decode_runtime_params json =
@@ -6762,6 +6766,16 @@ let decode_runtime_params json =
         ; rpr_value_type = meta_string "value_type"
         ; rpr_min_json = meta_json "min_value"
         ; rpr_max_json = meta_json "max_value"
+        ; rpr_choices =
+            (* Absent and empty mean the same thing here — no closed set — so a
+               non-list, or a list holding anything but strings, reads as no
+               choices rather than as a partial set the picker would offer. *)
+            (match meta_field "choices" with
+             | Some (`List items) ->
+               List.filter_map
+                 (function `String c -> Some c | _ -> None)
+                 items
+             | Some _ | None -> [])
         }
       in
       loop (row :: acc) rest
@@ -7128,6 +7142,7 @@ type prompt_row = {
   pr_file_path : string;
   pr_source : prompt_source;
   pr_template_variables : string list;
+  pr_override_default_moved : bool;
 }
 
 type runtime_prompt_asset = {
@@ -7140,7 +7155,7 @@ type runtime_prompt_asset = {
 type held_back_override = {
   hbo_key : string;
   hbo_bytes : int;
-  hbo_contract_revision : string;
+  hbo_reason : string;
 }
 
 type prompts_snapshot = {
@@ -7197,6 +7212,14 @@ let decode_prompt_row json =
     | `Null -> Error (Printf.sprintf "missing required field '%s'" "source")
     | value -> field_type_error "source" "a string" value
   in
+  (* Absent reads as false: a row with no override has nothing to have
+     moved, and the server sends the field for every row. *)
+  let* pr_override_default_moved =
+    match member "override_default_moved" json with
+    | `Null -> Ok false
+    | `Bool moved -> Ok moved
+    | value -> field_type_error "override_default_moved" "a boolean" value
+  in
   Ok
     { pr_key
     ; pr_category = string_or "category"
@@ -7206,6 +7229,7 @@ let decode_prompt_row json =
     ; pr_file_path = string_or "file_path"
     ; pr_source
     ; pr_template_variables
+    ; pr_override_default_moved
     }
 ;;
 
@@ -7220,8 +7244,8 @@ let decode_runtime_prompt_asset json =
 let decode_held_back_override json =
   let* hbo_key = required_string_field json "key" in
   let* hbo_bytes = required_int_field json "bytes" in
-  let* hbo_contract_revision = required_string_field json "contract_revision" in
-  Ok { hbo_key; hbo_bytes; hbo_contract_revision }
+  let* hbo_reason = required_string_field json "reason" in
+  Ok { hbo_key; hbo_bytes; hbo_reason }
 ;;
 
 let decode_prompts json =

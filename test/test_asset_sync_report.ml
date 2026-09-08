@@ -49,8 +49,11 @@ let test_deletion_line_says_why () =
   let r = result ~removed:[ "tools/operator_own.toml" ] () in
   let removed = line_exn (MAS.removed_line ~label:"tool" r) in
   (* A path name alone reads as a distribution detail. The reason is what
-     tells the operator their file is not coming back. *)
-  check bool "the reason is stated" true (contains ~needle:"manifest" removed)
+     tells the operator their file is not coming back. The word is the one
+     removed_line uses: #31283 retired the hand-written manifest, and the line
+     has said "embedded set" since. *)
+  check bool "the reason is stated" true
+    (contains ~needle:"not in the embedded set" removed)
 ;;
 
 let test_nothing_removed_is_no_line () =

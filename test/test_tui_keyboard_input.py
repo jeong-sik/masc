@@ -11219,8 +11219,20 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                     "due_at_iso": "2026-08-25T10:00:00Z",
                     "next_due_at_iso": "2026-08-25T10:30:00Z",
                     "expires_at_iso": "2026-08-26T10:00:00Z",
+                    # The loader requires this beside the summary. It was
+                    # missing until 2026-09-08: the scenario that reads this
+                    # fixture sits behind the stall in the default keyboard
+                    # lane (#34125), so nothing rejected it.
+                    "recurrence": {"kind": "interval", "interval_sec": 1800},
                     "recurrence_summary": "every 30 minutes",
                     "payload_digest": "digest-proof-701",
+                    "payload": {
+                        "kind": "masc.keeper_wake",
+                        "body": {
+                            "keeper_name": "alpha",
+                            "title": "detailed scheduled sweep",
+                        },
+                    },
                     "payload_kind": "keeper_wake",
                     "payload_support": "supported",
                     "payload_dispatch_tool": "keeper_wake",
@@ -11274,6 +11286,13 @@ def schedule_detail_interaction() -> Interaction:
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
             b"wake:succeeded",
+            # What became of the wake, on the row itself. The enqueue result
+            # beside it is "succeeded" on a wake the queue cancelled forty
+            # seconds later, so the list said nothing about delivery until
+            # the cursor was moved onto the row. The separator is part of the
+            # needle because the word alone also appears in the reaction line
+            # below the list, which is the surface this is not testing.
+            "\u00b7consumed_ack".encode(),
             # The list used to carry a dispatch chip beside these. #31562
             # dropped it because it only ever repeated the row's own status,
             # which the identity line above the delivery row already names.
@@ -13759,6 +13778,44 @@ def run_changes_newline_regression(executable: str) -> None:
     )
 
 
+# The schedule scenario lives inside the default keyboard lane, which stops
+# at an earlier scenario's exit step (#34125): an assertion added there is
+# never reached. This lane runs the one scenario, so the assertion is
+# measured rather than assumed.
+def run_schedule_delivery_regression(executable: str) -> None:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        listing = palette_go(
+            process, master_fd, output, b"go schedules", b"MASC Schedules"
+        )
+        plain = CSI_RE.sub(b"", listing)
+        for needle in (
+            # The enqueue result, which the row already carried.
+            b"wake:succeeded",
+            # What became of the wake, beside it. The separator is part of
+            # the needle: the word alone also appears in the reaction line
+            # under the list, which is the surface this is not testing.
+            "\u00b7consumed_ack".encode(),
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"Schedule list omitted {needle!r}: {plain!r}"
+                )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Schedule list rows say what became of the wake",
+        interact=interact,
+        http_fixtures=schedule_detail_http_fixtures(),
+    )
+
+
 def run_chat_clarity_regression(executable: str) -> None:
     fixtures = chat_clarity_http_fixtures()
     tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
@@ -14440,7 +14497,7 @@ def held_back_prompts_http_fixtures() -> HttpFixtures:
                 {
                     "key": "keeper",
                     "bytes": 1240,
-                    "contract_revision": "01e7760f",
+                    "reason": "Unknown template variables: facts_json",
                 }
             ],
         },
@@ -14639,6 +14696,10 @@ def main() -> None:
         run_msx_size_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX size regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "schedule-delivery":
+        run_schedule_delivery_regression(os.path.abspath(sys.argv[1]))
+        print("tui schedule delivery regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
         run_changes_newline_regression(os.path.abspath(sys.argv[1]))
         print("tui Changes newline projection regression: PASS")
@@ -14695,7 +14756,7 @@ def main() -> None:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|mermaid-chat|changes-newline|runtime|resources|keepers-lanes|"
+            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|runtime|resources|keepers-lanes|"
             "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))

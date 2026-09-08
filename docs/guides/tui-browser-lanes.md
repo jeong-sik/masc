@@ -84,8 +84,8 @@ they run in the existing browser-screenshot CI test alias. No local Dune build w
 ## Gecko scene view
 
 After reading a connected Firefox or Zen tab, press `s` to observe its viewport
-as real text and numbered controls. `n`/`p` select a control; `Enter` clicks that
-observed element and reads a fresh scene. The selected control number also appears
+as real text and numbered elements. `n`/`p` select an element; `Enter` clicks that
+observed element when it is clickable and reads a fresh scene. The selected control number also appears
 in the body. `j`/`k` scroll the terminal text, and `r` observes the browser again.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
@@ -100,3 +100,22 @@ TUI scene controls support clicking; literal text filling is available through
 Scene support requires the updated coordinator/native host and extension 0.3.0
 in the selected browser profile. Source changes and script-level Gecko evidence
 alone do not establish that an installed TUI has been updated.
+
+
+## Selected element to source
+
+Scene view now selects text and images as well as controls. The source row shows
+an original location when the page is served by the MASC development Vite server.
+Press `y` to send the selected element context to the terminal clipboard, then paste
+it into the Keeper conversation with the requested change. Clipboard delivery
+depends on terminal OSC52 support; MASC cannot read back the terminal clipboard.
+
+The context retains lane/client/tab, document/node identity and source SHA-256.
+The Keeper verifies the chosen checkout and hash before editing. JSX locations
+identify the opening element; HTM locations identify the tagged template. External
+pages without instrumentation explicitly report source unavailable.
+
+The builtin browser-design, frontend-implement and frontend-verify packages cover
+visual intent, verified source editing and browser evidence. They are discoverable
+skills; users need not name a skill for an ordinary UI request. Newly built MASC
+installs seed missing packages through the existing builtin-skill installer.

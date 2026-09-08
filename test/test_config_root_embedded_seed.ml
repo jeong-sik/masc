@@ -75,7 +75,7 @@ let test_backfill_repairs_only_startup_required () =
 
 let test_builtin_skill_package () =
   let base_path = fresh_dst () in
-  check int "one complete first-party package" 1
+  check int "four complete first-party packages" 4
     (Seed.seed_missing_builtin_skills ~base_path);
   let root = Filename.concat base_path ".masc/skills" in
   List.iter
@@ -93,7 +93,8 @@ let test_builtin_skill_package () =
     (Seed.seed_missing_builtin_skills ~base_path);
   check string "operator body survives" "operator's own skill" (read_file body);
   check bool "operator resource deletion survives" false (Sys.file_exists resource);
-  check (list string) "no staging residue" [ "browser-lanes" ] (entries_of root)
+  check (list string) "all packages present without staging residue"
+    [ "browser-design"; "browser-lanes"; "frontend-implement"; "frontend-verify" ] (entries_of root)
 
 let () =
   run "Config root embedded seed"

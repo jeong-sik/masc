@@ -82,9 +82,23 @@ let () =
   List.iter (fun line ->
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
       failwith "scene line plus indentation exceeds the framed content width") lines;
-  if String.concat "" lines <> node.text then failwith "scene wrapping lost Unicode/ASCII text";
+  (match lines with
+   | "[>1 p]" :: content_lines when String.concat "" content_lines = node.text -> ()
+   | _ -> failwith "scene wrapping lost Unicode/ASCII text or the selected target prefix");
   let pending = {view with load=Loading (42,Scene_read 1)} in
   assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
   assert ((Lane.accept_scene ~generation:42 (Ok {scene with tab_id=2}) pending).scene = None);
   assert ((Lane.accept_scene ~generation:42 (Ok scene) pending).scene = Some scene);
-  print_endline "PASS scene wrapping and asynchronous source/tab ownership"
+  assert (List.length (Lane.scene_targets {view with scene=Some {scene with content={content with nodes=[node;node]}}})=1);
+  let located : Masc.Browser_source_context.location = {file="dashboard/src/a.ts";line=2;column=3;
+    kind=Template;digest=String.make 64 'a'} in
+  let mapped = {node with source_context=Masc.Browser_source_context.Located located} in
+  let view = {view with scene=Some {scene with content={content with nodes=[mapped]}}} in
+  (match Lane.scene_context view with
+   | None -> failwith "selected element context missing"
+   | Some text ->
+       let open Yojson.Safe.Util in
+       let json=Yojson.Safe.from_string text in
+       assert (json |> member "nodeId" |> to_string = mapped.node_id);
+       assert (json |> member "source" |> member "sha256" |> to_string = located.digest));
+  print_endline "PASS scene wrapping, source handoff, node deduplication and asynchronous ownership"

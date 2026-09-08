@@ -2981,11 +2981,33 @@ module Browser_lane_view = struct
          | Error detail -> {t with scene = None; load = Failed detail})
     | _ -> t
 
-  let scene_controls t = match t.scene with
+  let scene_targets t = match t.scene with
     | None -> []
-    | Some scene -> List.filter (fun (node : Masc.Browser_scene.node) ->
-        match node.kind with Control {clickable=true; disabled=false; _} -> true | _ -> false)
-        scene.content.nodes
+    | Some scene ->
+        let _, nodes = List.fold_left (fun (seen, nodes) (node : Masc.Browser_scene.node) ->
+          if List.mem node.node_id seen then seen, nodes
+          else node.node_id :: seen, node :: nodes) ([], []) scene.content.nodes in
+        List.rev nodes
+
+  let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
+
+  let scene_context t =
+    match t.scene, selected_scene_target t with
+    | Some scene, Some node ->
+        let source = match node.source_context with
+          | Masc.Browser_source_context.Unmapped -> `Null
+          | Invalid detail -> `Assoc ["error", `String detail]
+          | Located source -> `Assoc ["file",`String source.file;"line",`Int source.line;
+              "column",`Int source.column;"precision",`String (match source.kind with Template -> "template" | Element -> "element");
+              "sha256",`String source.digest] in
+        Some (Yojson.Safe.pretty_to_string (`Assoc [
+          "context",`String "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.";
+          "lane",`String (source_name scene.source);
+          "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
+          "tabId",`Int scene.tab_id;"url",`String scene.content.url;
+          "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "tag",`String node.tag;"text",`String node.text;"source",source]))
+    | _ -> None
 
   let viewport_request ~tab_id ~expected_url ~y t =
     `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
@@ -3049,20 +3071,18 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
   match view.scene with
   | Some scene -> List.concat_map (fun (node : Masc.Browser_scene.node) ->
-      let prefix = match node.kind with
-        | Text -> ""
-        | Raster -> "[image · Ctrl-O] "
-        | Control {disabled=true;_} -> "[disabled] "
-        | Control control ->
-            let rec index i = function
-              | [] -> None
-              | (candidate : Masc.Browser_scene.node) :: rest ->
-                  if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
-            let label = if control.editable then "input" else "button/link" in
-            (match index 0 (Browser_lane_view.scene_controls view) with
-             | None -> "[" ^ label ^ "] "
-             | Some i -> Printf.sprintf "[%s%d %s] "
-                 (if i = view.scene_cursor then ">" else "") (i + 1) label) in
+      let rec index i = function
+        | [] -> None
+        | (candidate : Masc.Browser_scene.node) :: rest ->
+            if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
+      let label = match node.kind with
+        | Text -> node.tag | Raster -> "image · Ctrl-O"
+        | Control {disabled=true;_} -> "disabled"
+        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
+      let prefix = match index 0 (Browser_lane_view.scene_targets view) with
+        | None -> ""
+        | Some i -> Printf.sprintf "[%s%d %s] "
+            (if i = view.scene_cursor then ">" else "") (i + 1) label in
       wrap (prefix ^ node.text)) scene.content.nodes
   | None -> match view.reading with
   | None -> []

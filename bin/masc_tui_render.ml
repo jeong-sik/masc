@@ -13697,7 +13697,7 @@ let render_changes (state : state) =
    an operator acts on. *)
 let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let room = max 0 (max 1 (body_rows - 5) - 6) in
+  let room = max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6)) in
   max 0 (List.length (browser_lane_page_lines ~cols view) - room)
 
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
@@ -13718,7 +13718,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None, None when Option.is_some view.scene -> "s:text  n/p:control  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
+      | None, None when Option.is_some view.scene -> "s:text  n/p:element  y:copy context  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -13771,10 +13771,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
          | None when Option.is_some view.scene ->
-             (match List.nth_opt (scene_controls view) view.scene_cursor with
-              | Some node -> Printf.sprintf "  Control %d/%d: %s • n/p:select • Enter:click"
-                  (view.scene_cursor + 1) (List.length (scene_controls view)) (Terminal_text.single_line node.text)
-              | None -> "  No clickable controls in this viewport • Ctrl-O:image")
+             (match List.nth_opt (scene_targets view) view.scene_cursor with
+              | Some node -> Printf.sprintf "  Element %d/%d: %s • n/p:select • y:copy context"
+                  (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
+              | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
              | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live");
@@ -13804,9 +13804,15 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
+      (match view.scene with
+       | None -> ()
+       | Some _ -> c.push_styled ~style:(Theme.recede ())
+           (match selected_scene_target view with
+            | None -> "  Source unavailable"
+            | Some node -> "  " ^ Terminal_text.single_line (Masc.Browser_source_context.label node.source_context)));
       c.push_divider ();
       let lines = browser_lane_page_lines ~cols view in
-      let room = max 0 (budget - 6) in
+      let room = max 0 (budget - (if Option.is_some view.scene then 7 else 6)) in
       let max_scroll = max 0 (List.length lines - room) in
       let scroll = min max_scroll view.scroll in
       lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)

@@ -735,7 +735,15 @@ let bounded_model_input_projection
             ~measure_message_bytes
             ~capacity_bytes
             ~reserved_bytes
-            ~base_path:ctx.base_path
+            (* #27268 A/B kill-switch: an empty base path makes
+               [plan_and_window_model_input] keep every atom verbatim, so the
+               RFC-0363 demotion effect can be measured on and off in one
+               deployment. Default on preserves current behavior. *)
+            ~base_path:
+              (if
+                 Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+               then ctx.base_path
+               else "")
             ~demote_before
             messages
         with

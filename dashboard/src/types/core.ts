@@ -47,6 +47,8 @@ export interface Agent {
 }
 
 export interface Task {
+  /** Summary rows require a detail read before rendering complete task fields. */
+  detail_level?: 'summary' | 'full'
   id: string
   title: string
   goal_id?: string | null

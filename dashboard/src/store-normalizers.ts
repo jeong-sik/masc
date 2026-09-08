@@ -75,6 +75,7 @@ export function normalizeTask(raw: unknown): Task | null {
   const id = asString(raw.id)
   const title = asString(raw.title)
   if (!id || !title) return null
+  if (raw.detail_level !== undefined && raw.detail_level !== 'summary' && raw.detail_level !== 'full') return null
   const contract = isRecord(raw.contract)
     ? {
         strict: asBoolean(raw.contract.strict),
@@ -105,11 +106,12 @@ export function normalizeTask(raw: unknown): Task | null {
     id,
     title,
     goal_id: asString(raw.goal_id) ?? null,
+    detail_level: raw.detail_level as Task['detail_level'],
     status: normalizeTaskStatus(raw.status),
     status_raw: asString(raw.status_raw) ?? null,
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),
-    description: asString(raw.description),
+    description: typeof raw.description === 'string' ? raw.description : undefined,
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
     completed_at: asString(raw.completed_at),

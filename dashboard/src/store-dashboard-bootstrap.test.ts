@@ -125,6 +125,24 @@ describe('refreshDashboard bootstrap', () => {
     expect(goalTreeState.goalTreeData.value?.summary.total_goals).toBe(0)
   })
 
+  it('preserves a Goal store bootstrap failure instead of retaining a zero-goal success', async () => {
+    const failure = { ok: false, error_code: 'goal_store_unavailable', error: 'goals.json criterion_revision missing' }
+    apiMocks.fetchDashboardBootstrap.mockResolvedValue({
+      shell: { generated_at: '2026-09-09', status: {}, counts: {}, providers: {} },
+      execution: { generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
+        messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
+      planning: failure,
+      goals: failure,
+    })
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+    await store.refreshDashboard({ force: true })
+    expect(goalTreeState.goalTreeError.value).toContain(failure.error)
+    expect(goalTreeState.goalTreeApprovalQueueState.value).toBeNull()
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.goals.value).toEqual([])
+  })
+
   it('does not fetch the full goal tree during startup when bootstrap omits goals', async () => {
     apiMocks.fetchDashboardBootstrap.mockResolvedValue({
       served_at: '2026-06-26T00:00:00Z',
@@ -300,7 +318,7 @@ describe('refreshDashboard bootstrap', () => {
     expect(goalTreeState.goalTreeData.value).toBeNull()
     expect(store.lastGoalsRefreshAt.value).toBeNull()
     expect(goalTreeState.goalTreeError.value).toBe(
-      '! Gate observation unavailable: Goal Store tree payload was malformed',
+      'Goal Store tree payload was malformed',
     )
     expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(

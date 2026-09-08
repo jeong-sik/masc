@@ -5245,7 +5245,14 @@ let decode_system_log_snapshot json =
   let* sys_latest_seq = required_int_field json "latest_seq" in
   Ok { sys_entries; sys_total; sys_latest_seq }
 
+let goal_store_unavailable_detail json =
+  match member "ok" json, member "error_code" json, member "error" json with
+  | `Bool false, `String "goal_store_unavailable", `String detail -> Some detail
+  | _ -> None
+
 let decode_planning_snapshot json =
+  let* () = match goal_store_unavailable_detail json with
+    | Some detail -> Error detail | None -> Ok () in
   let* goals_json = required_list_field json "goals" in
   let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
   let* rollup_json = required_object_field json "rollup" in
@@ -8965,6 +8972,9 @@ let decode_goal_timeline_event json =
   Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
+  match goal_store_unavailable_detail json with
+  | Some detail -> Ok (Goal_timeline_unavailable detail)
+  | None ->
   match member "timeline" json with
   | `Null ->
       let detail =

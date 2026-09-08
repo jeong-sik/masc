@@ -807,6 +807,12 @@ function hydrateDashboardBootstrap(
       )
     }
   }
+  const goalSourceErrors = [data.planning, data.goals]
+    .filter(bootstrapSliceError).map(slice => slice.error)
+  if (goalSourceErrors.length > 0) {
+    goals.value = []
+    hydrateGoalTreeObservationError(goalSourceErrors.join('; '))
+  }
 }
 
 export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {

@@ -83,6 +83,26 @@ let test_keeper_capture () =
       check int "screen did not advance" obs.frame
         (match Msx_lane.screen () with Ok o -> o.frame | Error _ -> fail "no machine");
       check int "no input ledger changes" 0 (List.length (Msx_lane.ledger ()));
+      let first_png = match Keeper_msx_screen.encode_frame frame with
+        | Ok png -> png | Error e -> fail e in
+      Gc.full_major ();
+      let allocated_before = Gc.allocated_bytes () in
+      for _ = 1 to 100 do
+        match Keeper_msx_screen.encode_frame frame with
+        | Ok repeated -> if repeated != first_png then fail "unchanged RGB re-encoded PNG"
+        | Error e -> fail e
+      done;
+      Printf.printf "100 retained PNG reads allocated %.0f bytes (PNG %d bytes)\n%!"
+        (Gc.allocated_bytes () -. allocated_before) (String.length first_png);
+      let changed_frame = { frame with rgb = String.make (String.length frame.rgb) '\255' } in
+      let changed_png = match Keeper_msx_screen.encode_frame changed_frame with
+        | Ok png -> png | Error e -> fail e in
+      decode_with_python ~png:changed_png ~rgb:changed_frame.rgb
+        ~width:changed_frame.width ~height:changed_frame.height;
+      let reshaped = { changed_frame with width = changed_frame.height; height = changed_frame.width } in
+      (match Keeper_msx_screen.encode_frame reshaped with
+       | Ok png -> decode_with_python ~png ~rgb:reshaped.rgb ~width:reshaped.width ~height:reshaped.height
+       | Error e -> fail e);
       let again = screen () in
       check string "unchanged frame deduplicates artifact" handle
         (Option.get again.data |> member "artifact" |> to_string);

@@ -18,30 +18,16 @@ let () =
 
 let () =
   let open Masc_exec.Shell_ir in
-  Unix.putenv "MASC_TEST_P7_VAR" "world";
-  let result = Masc_exec.Exec_dispatch.(resolve_arg (Var ("MASC_TEST_P7_VAR", default_meta))) in
-  assert (result = "world")
-
-let () =
-  let open Masc_exec.Shell_ir in
-  let result =
-    Masc_exec.Exec_dispatch.(resolve_arg (Var ("__MASC_NONEXISTENT_P7__", default_meta)))
-  in
-  assert (result = "")
-
-let () =
-  let open Masc_exec.Shell_ir in
-  Unix.putenv "MASC_TEST_P7_VAR" "world";
-  let result =
-    Masc_exec.Exec_dispatch.(
-      resolve_arg
-        (Concat
-           [ Lit ("prefix-", default_meta)
-           ; Var ("MASC_TEST_P7_VAR", default_meta)
-           ; Lit ("-suffix", default_meta)
-           ]))
-  in
-  assert (result = "prefix-world-suffix");
+  Unix.putenv "MASC_TEST_P7_VAR" "server-only-canary";
+  List.iter
+    (fun arg ->
+       match Masc_exec.Exec_dispatch.resolve_arg arg with
+       | exception Invalid_argument _ -> ()
+       | _ -> failwith "unresolved variable escaped the target environment boundary")
+    [ Var ("MASC_TEST_P7_VAR", default_meta)
+    ; Var ("__MASC_NONEXISTENT_P7__", default_meta)
+    ; Concat [ Lit ("prefix-", default_meta); Var ("MASC_TEST_P7_VAR", default_meta) ]
+    ];
   Unix.putenv "MASC_TEST_P7_VAR" ""
 
 (* --- dispatch_simple with real process --- *)
@@ -1131,5 +1117,75 @@ let () =
   | Error other ->
     failwith (Printf.sprintf "a flat pipeline must still run, got %s" (refusal_tag other))
 ;;
+let () =
+  let open Masc_exec in
+  let open Shell_ir in
+  let calls = ref 0 in
+  let runner : Sandbox_target.runner =
+    fun ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv ~env:_ ~cwd:_ ->
+      incr calls;
+      Sandbox_target.Ran
+        { status = Unix.WEXITED 0; stdout = String.concat " " argv
+        ; stderr = ""; output_files = None }
+  in
+  let pipeline_runner : Sandbox_target.pipeline_runner =
+    fun ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ ->
+      incr calls;
+      Sandbox_target.Ran
+        { status = Unix.WEXITED 0; stdout = ""; stderr = ""; output_files = None }
+  in
+  let endpoint : Sandbox_target.ssh_endpoint =
+    { name = "fixture"; host = "unused.invalid"; user = "fixture"; port = 22
+    ; identity_file = "unused"; known_hosts_file = "unused"; remote_root = "/fixture"
+    ; connect_timeout_sec = 1; env_allowlist = [] }
+  in
+  let targets =
+    [ Sandbox_target.host ()
+    ; Sandbox_target.docker ~image:"fixture" ~runner ~pipeline_runner ()
+    ; Sandbox_target.micro_vm ~image:"fixture" ~runner ~pipeline_runner ()
+    ; Sandbox_target.ssh ~endpoint ~runner ~pipeline_runner ()
+    ; Sandbox_target.delegated ~caller:runner () ]
+  in
+  let simple sandbox args env =
+    { bin = Exec_program.of_string "echo" |> Result.get_ok
+    ; args; env; cwd = None; redirects = []; sandbox }
+  in
+  let variable = Var ("MASC_TARGET_ENV_CANARY", default_meta) in
+  let head = simple (Sandbox_target.delegated ~caller:runner ()) [ Lit ("head", default_meta) ] [] in
+  let refused result =
+    assert (result.Exec_dispatch.status = Unix.WEXITED 2);
+    assert (result.stdout = "");
+    assert (!calls = 0)
+  in
+  let module Gate = Masc_exec_command_gate.Shell_command_gate in
+  let syntax_policy : Gate.syntax_policy = { redirect_allowed = true; allow_pipes = true } in
+  let gate_refused = function
+    | Gate.Too_complex { reason = Gate.Unsupported_construct `Param_expansion } -> ()
+    | _ -> failwith "typed expansion bypassed the command boundary"
+  in
+  Unix.putenv "MASC_TARGET_ENV_CANARY" "server-only-canary";
+  List.iter
+    (fun sandbox ->
+       List.iter
+         (fun stage ->
+            refused (Exec_dispatch.dispatch_simple ~base_host_env:[||] stage);
+            refused (Exec_dispatch.dispatch_pipeline [ Simple head; Simple stage ]);
+            refused (Exec_dispatch.dispatch
+              (Sequence { head = Simple head; tail = [ Seq, Simple stage ] }));
+            gate_refused (Gate.gate_typed ~ir:(Simple stage) ~syntax_policy ~sandbox ());
+            gate_refused (Gate.lower_typed_pipeline ~stages:[ head; stage ] ~sandbox ()))
+         [ simple sandbox [ variable ] []
+         ; simple sandbox [ Concat [ Lit ("prefix", default_meta); variable ] ] []
+         ; simple sandbox [] [ "FORWARDED", variable ] ])
+    targets;
+  Unix.putenv "MASC_TARGET_ENV_CANARY" "";
+  let literal = simple (Sandbox_target.delegated ~caller:runner ())
+      [ Lit ("$MASC_TARGET_ENV_CANARY", default_meta) ] [] in
+  let result = Exec_dispatch.dispatch_simple literal in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "echo $MASC_TARGET_ENV_CANARY");
+  assert (!calls = 1)
+;;
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

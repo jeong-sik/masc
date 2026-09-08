@@ -32,6 +32,50 @@ let primary_alias aliases =
   | _blank_alias :: _ -> None
 ;;
 
+let latest_named_artifact artifacts name =
+  List.fold_left
+    (fun acc (artifact : Runtime.artifact) ->
+       if not (String.equal artifact.name name)
+       then acc
+       else (
+         match acc with
+         | None -> Some artifact
+         | Some current when artifact.created_at >= current.created_at -> Some artifact
+         | Some _ -> acc))
+    None
+    artifacts
+;;
+
+let get_named_artifact ?session_root ~session_id ~name () =
+  let* artifacts = Artifact_service.list ?session_root ~session_id () in
+  match latest_named_artifact artifacts name with
+  | Some artifact -> Ok artifact
+  | None ->
+    Error
+      (file_read_error
+         ~path:name
+         ~detail:(Printf.sprintf "Artifact '%s' not found in session %s" name session_id))
+;;
+
+let get_raw_trace_dir ?session_root ~session_id () =
+  let* store = make_store ?session_root () in
+  Ok (Runtime_store.raw_traces_dir store session_id)
+;;
+
+let get_raw_trace_files ?session_root ~session_id () =
+  let* dir = get_raw_trace_dir ?session_root ~session_id () in
+  if not (Sys.file_exists dir)
+  then Ok []
+  else
+    dir
+    |> Sys.readdir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+    |> List.sort String.compare
+    |> List.map (fun name -> Filename.concat dir name)
+    |> fun paths -> Ok paths
+;;
+
 let get_report ?session_root ~session_id () =
   let* store = make_store ?session_root () in
   let path = Runtime_store.report_json_path store session_id in
@@ -202,6 +246,8 @@ let get_raw_trace_summaries ?session_root ~session_id () =
   let* runs = get_raw_trace_runs ?session_root ~session_id () in
   summarize_runs runs
 ;;
+
+let validate_runs runs = runs |> List.map Raw_trace_query.validate_run |> result_all
 
 let get_raw_trace_validations ?session_root ~session_id () =
   let* runs = get_raw_trace_runs ?session_root ~session_id () in

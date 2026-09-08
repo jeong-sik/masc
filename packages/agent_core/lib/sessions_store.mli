@@ -21,7 +21,10 @@
     - [get_raw_trace_manifest] — agent_core.raw_trace_manifest.v1
 
     Anything the audit reports here beyond those six is a reader nothing
-    accounts for, and the thirteen that were in that position are gone. *)
+    accounts for. Thirteen were in that position and none are exported now:
+    eight are gone, and five stayed as private values because the six above
+    call them -- [get_named_artifact], [get_raw_trace_dir],
+    [get_raw_trace_files], [latest_named_artifact] and [validate_runs]. *)
 
 open Sessions_types
 

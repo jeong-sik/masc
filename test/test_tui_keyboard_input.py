@@ -8148,6 +8148,32 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
     return fixtures, alpha_history
 
 
+# The width at which the roster shares the screen with the chat and nothing
+# else does. Two thresholds bound it, and 140 sat between them: the roster
+# needs the surface at Masc_tui_roster_pane.threshold_cols (110), and from
+# Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
+# columns off the top, which leaves the surface 76 and takes the roster away
+# again. Measured on the built TUI: 120 and 131 draw the roster, 132 does not,
+# 166 draws both panes.
+# The status row names the keeper, then its automation and gate, then the
+# runtime. Joining the health word to the runtime pinned that order, and the
+# two fields that arrived between them broke both readings at once. The pair
+# these scenarios care about is "this keeper's own health and its own
+# runtime", which is a question about one row.
+def assert_runtime_row(
+    frame: bytes, *, health: bytes, runtime: bytes, description: str
+) -> None:
+    rows = screen_rows(frame)
+    row = screen_row_of(rows, runtime)
+    if row < 0 or health not in rows[row]:
+        raise AssertionError(
+            f"{description} did not carry {health!r} beside {runtime!r}: {frame!r}"
+        )
+
+
+ROSTER_BESIDE_CHAT_COLUMNS = 120
+
+
 def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -8161,7 +8187,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"MASC Overview",
         )
         send_and_wait(
@@ -8216,15 +8242,20 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=31,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         beta_plain = CSI_RE.sub(b"", beta_frame)
+        assert_runtime_row(
+            beta_frame,
+            health=b"idle",
+            runtime=b"paused anthropic.claude-sonnet-4",
+            description="switched beta chat",
+        )
         for expected in (
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
-            b"idle \xc2\xb7 paused anthropic.claude-sonnet-4",
             b"beta-current-history-marker",
         ):
             if expected not in beta_plain:
@@ -8256,14 +8287,19 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
+        assert_runtime_row(
+            alpha_frame,
+            health=b"healthy",
+            runtime=b"running anthropic.claude-opus-5",
+            description="restored alpha chat",
+        )
         for expected in (
-            b"healthy \xc2\xb7 running anthropic.claude-opus-5",
             b"alpha-current-history-marker",
             b"> alpha-draft",
         ):
@@ -8286,7 +8322,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=31,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
@@ -8316,7 +8352,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",

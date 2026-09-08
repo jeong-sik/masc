@@ -221,10 +221,50 @@ webdriver_url = "http://LOCALHOST:4444/"|}];
     (Result.is_error (parse {|[browser]
 webdriver_url = "http://127.invalid:4444/"|}))
 
+(* A keeper's first question is whether a session already exists. Every other
+   verb answers that only by being refused, which costs a lane round trip and
+   reads as a failure. Session_status answers it directly, from the backend's
+   own record, and stays answerable while the session is closed. *)
+let test_session_status_answers_while_closed () =
+  Eio_main.run (fun _ ->
+    let calls = ref [] in
+    let request ~method_ ~path ~body:_ =
+      calls := (method_, path) :: !calls;
+      match method_, path with
+      | `POST, "/session" ->
+        Ok (`Assoc ["sessionId", `String "owned";
+                    "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
+      | _ -> fail ("unexpected request: " ^ path)
+    in
+    let driver = Driver.create ~start_downloads ~request () in
+    let status () = match Driver.execute driver Lane.Session_status with
+      | Lane.Answered (`Assoc fields) ->
+        (match List.assoc_opt "data" fields with
+         | Some (`Assoc data) -> data
+         | _ -> fail "status answer carries no data")
+      | _ -> fail "status must answer whether or not a session exists"
+    in
+    check bool "closed session reports open=false" true
+      (List.assoc_opt "open" (status ()) = Some (`Bool false));
+    check int "status on a closed session contacts no backend" 0 (List.length !calls);
+    ignore (Driver.execute driver (Lane.Session_open {headless = Some true}));
+    let opened = status () in
+    check bool "open session reports open=true" true
+      (List.assoc_opt "open" opened = Some (`Bool true));
+    check bool "open session reports its id" true
+      (List.assoc_opt "sessionId" opened = Some (`String "owned"));
+    check bool "open session reports its tab count" true
+      (List.assoc_opt "tabs" opened = Some (`Int 0));
+    check int "status on an open session adds no backend request" 1 (List.length !calls);
+    check bool "status is a read" true (Lane.verb_is_read Lane.Session_status);
+    check bool "status is not offered on the live lane" false
+      (Lane.verb_allowed_on_live Lane.Session_status))
+
 let () = run "native Firefox lane" ["behavior", [
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;
+  test_case "session status answers while closed" `Quick test_session_status_answers_while_closed;
   test_case "closed tab error" `Quick test_backend_failure;
   test_case "malformed response" `Quick test_malformed_success;
   test_case "closed current window keeps remaining tabs discoverable" `Quick test_closed_current_window;

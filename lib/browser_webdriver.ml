@@ -240,6 +240,23 @@ let execute_unlocked t = function
          Ok (`Assoc ["opened", `Bool true; "reused", `Bool false; "backend", `String "firefox-webdriver"])))
   | Browser_lane.Session_close ->
     let* () = close_unlocked t in Ok (`Assoc ["closed", `Bool true])
+  | Browser_lane.Session_status ->
+    (* Reports the backend's own record. No request is issued, so this answers
+       whether or not a session exists, and cannot itself fail on a closed one.
+       [downloads] is reported because a session can be open with BiDi setup
+       incomplete, and every later download call refuses with that detail. *)
+    (match t.session with
+     | None -> Ok (`Assoc ["open", `Bool false])
+     | Some session ->
+       Ok (`Assoc
+         [ "open", `Bool true
+         ; "sessionId", `String session.id
+         ; "tabs", `Int (List.length session.handles)
+         ; "downloads",
+           (match session.downloads with
+            | Ok _ -> `String "ready"
+            | Error detail -> `String detail)
+         ]))
   | Browser_lane.Page_downloads {tab_id=id} ->
     (* Retain readable interruption evidence even when further actions refuse. *)
     (match t.session with

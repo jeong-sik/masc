@@ -161,6 +161,11 @@ module Make (Payload : Payload) : sig
       retain first-completion evidence without a racy [get] then [complete]. *)
 
   val list_entries : t -> entry list
+  val get_metadata : t -> id:string -> entry option
+  (** The immutable in-memory entry for this id, without sorting or disk
+      access. Payload fields may be shed; callers that need their values must
+      hydrate them and report whether that read succeeded. [None] means the
+      id is not retained. Unrelated mutations preserve this entry's identity. *)
   val get : t -> id:string -> entry option
   val cut_replay_log : execute:bool -> string -> cut_report
   (** Rewrites [path] from the state a replay of it produces. A hard-cut field

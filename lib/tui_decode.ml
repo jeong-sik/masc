@@ -7786,6 +7786,7 @@ type lane_run_gate_judgment =
   | Lane_run_not_gate_judgment
   | Lane_run_gate_judgment_pending
   | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_judgment_unavailable
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
@@ -7903,6 +7904,8 @@ type lane_run_detail =
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_input_availability : Exact_lane_run_registry.payload_availability
+  ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
@@ -7965,10 +7968,33 @@ let decode_lane_run_detail json =
   let* summary = decode_lane_run_summary run in
   let* input = required_object_field run "input" in
   let* lrd_input_payload = required_member input "payload" in
-  let lrd_output =
-    match member "output" run with
-    | `Null -> None
-    | value -> Some value
+  let* availability = required_object_field run "payload_availability" in
+  let* input_availability = required_member availability "input" in
+  let* lrd_input_availability =
+    Exact_lane_run_registry.availability_of_yojson input_availability
+  in
+  let* output_availability = required_member availability "output" in
+  let* lrd_output_availability =
+    match output_availability with
+    | `Null -> Ok None
+    | value ->
+      let* value = Exact_lane_run_registry.availability_of_yojson value in
+      Ok (Some value)
+  in
+  let* () =
+    match summary.lrs_status, lrd_output_availability with
+    | Lane_run_running, None -> Ok ()
+    | Lane_run_running, Some _ -> Error "running lane run cannot report output availability"
+    | _, None -> Error "terminal lane run must report output availability"
+    | _, Some _ -> Ok ()
+  in
+  let* lrd_output =
+    match lrd_output_availability with
+    | Some Exact_lane_run_registry.Available ->
+      let* output = required_member run "output" in
+      Ok (Some output)
+    | None | Some (Exact_lane_run_registry.Not_loaded
+                  | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_tool_evidence =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
@@ -7976,8 +8002,15 @@ let decode_lane_run_detail json =
   in
   let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
-    decode_lane_run_gate_judgment ~lane:summary.lrs_lane
-      ~status:summary.lrs_status ~output:lrd_output
+    match lrd_output_availability with
+    | Some (Exact_lane_run_registry.Not_loaded
+           | Exact_lane_run_registry.Unavailable _)
+      when String.equal summary.lrs_lane
+        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge) ->
+      Ok Lane_run_gate_judgment_unavailable
+    | _ ->
+      decode_lane_run_gate_judgment ~lane:summary.lrs_lane
+        ~status:summary.lrs_status ~output:lrd_output
   in
   Ok
     { lrd_run_id = summary.lrs_run_id
@@ -7990,6 +8023,8 @@ let decode_lane_run_detail json =
     ; lrd_elapsed_s = summary.lrs_elapsed_s
     ; lrd_selected_slot = summary.lrs_selected_slot
     ; lrd_input_payload
+    ; lrd_input_availability
+    ; lrd_output_availability
     ; lrd_output
     ; lrd_tool_evidence
     ; lrd_skill_evidence

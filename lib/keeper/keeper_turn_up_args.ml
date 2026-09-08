@@ -12,11 +12,10 @@ open Keeper_types_profile
 type parsed_args = {
   name : string;
   runtime_id_opt : string option;
-  autoboot_enabled_opt : bool option;
+  activation_mode_opt : Keeper_activation_mode.t option;
   mention_targets_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
-  proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
   microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
@@ -219,10 +218,9 @@ let creation_stem =
 let known_turn_up_args =
   [ "name"
   ; "runtime_id"
-  ; "autoboot_enabled"
+  ; "activation_mode"
   ; "mention_targets"
   ; "max_context_override"
-  ; "proactive_enabled"
   ; "sandbox_profile"
   ; "microvm_backend"
   ; "remote_endpoint"
@@ -307,9 +305,19 @@ let parse
       Ok runtime_id_opt,
       Ok (native_tool_posture_present, native_tool_posture_opt),
       Ok (skill_names_present, skill_names_opt) ->
-    let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
+    let activation_mode_result =
+      match Json_util.assoc_member_opt "activation_mode" args with
+      | None -> Ok None
+      | Some (`String raw) ->
+        (match Keeper_activation_mode.of_string raw with
+         | Some mode -> Ok (Some mode)
+         | None -> Error "activation_mode must be manual, on_demand, or autonomous")
+      | Some _ -> Error "activation_mode must be a string"
+    in
+    match activation_mode_result with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok activation_mode_opt ->
     let max_context_override_res = parse_max_context_override args in
-    let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
@@ -491,11 +499,10 @@ let parse
     {
       name;
       runtime_id_opt;
-      autoboot_enabled_opt;
+      activation_mode_opt;
       mention_targets_opt;
       max_context_override_opt;
       max_context_override_present;
-      proactive_enabled_opt;
       sandbox_profile_opt;
       microvm_backend_patch;
       remote_endpoint_opt;

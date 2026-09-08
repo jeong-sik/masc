@@ -12,7 +12,7 @@ val create_response_json :
   name:string ->
   trace_id:string ->
   instructions:string ->
-  proactive_enabled:bool ->
+  activation_mode:Keeper_activation_mode.t ->
   max_context_override:int option ->
   sandbox_profile:sandbox_profile ->
   network_mode:network_mode ->

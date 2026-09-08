@@ -1,3 +1,4 @@
+import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import {
   parseTaskStatus,
@@ -504,7 +505,7 @@ function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeep
   if (!name) return null
   return {
     name,
-    autoboot_enabled: asBoolean(raw.autoboot_enabled) ?? null,
+    activation_mode: parseKeeperActivationMode(raw.activation_mode),
     pause_kind: asString(raw.pause_kind) ?? null,
     paused_elapsed_sec: asNumber(raw.paused_elapsed_sec) ?? null,
     missing_pause_root_cause: asBoolean(raw.missing_pause_root_cause) ?? null,

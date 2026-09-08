@@ -395,12 +395,6 @@ let telemetry_entries =
       "Enable OpenTelemetry span collection";
   ]
 
-let tempo_entries =
-  [
-    entry ~default:"300.0" "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
-      "Polling interval published to operator surfaces (seconds)";
-  ]
-
 let test_entries =
   [
     entry ~default:"false" "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
@@ -454,7 +448,7 @@ let category_specs () =
     "process", shutdown_entries;
     "worker", worker_entries;
     "web_search", keeper_web_search_entries;
-    "session", session_entries @ tempo_entries;
+    "session", session_entries;
   ]
 
 let all_categories () =

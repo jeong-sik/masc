@@ -262,7 +262,7 @@ start_live_server() {
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
-    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
@@ -276,7 +276,7 @@ start_live_server() {
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
-    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
@@ -549,8 +549,7 @@ run_live_case() {
       name: $name,
       instructions: $instructions,
       runtime_id: $runtime_id,
-      autoboot_enabled: false,
-      proactive_enabled: false,
+      activation_mode: "manual",
     }')"
 
   if ! call_mcp_tool 2000 "masc_keeper_up" "${create_args}" 45; then

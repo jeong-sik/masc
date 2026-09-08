@@ -47,7 +47,7 @@ val cache_rank : t -> int
     least puts the blocks that rarely change in front of the blocks that
     always do — regardless of their size.
 
-    Measured over 386 consecutive sangsu turns (2026-09-08), distinct contents
+    Measured over 386 consecutive one measured Keeper turns (2026-09-08), distinct contents
     per block: [skill_compositions] 1, [keeper_instructions] 5,
     [memory_os_recall] 65, [dynamic_context] 295, [temporal_summary] 306.
     Size runs the other way: [memory_os_recall] was 51,518 B of the 88,177 B

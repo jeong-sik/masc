@@ -1257,16 +1257,10 @@ let test_tui_current_projection_wiring () =
     ; "decode_planning_backlog"
     ; "decode_planning_snapshot"
     ];
-  (* [proactive_enabled] left the keeper detail row in #29311, and that row is
-     now built from [Keeper_meta_contract] rather than raw keys, so it cannot
-     come back through it. The one literal left is [decode_keeper_runtime],
-     which reads GET /api/v1/gate/keepers -- a live route, not the durable
-     metadata the retirement was about. Counted, so a second reader still
-     fails. *)
-  check int "proactive_enabled is read only by decode_keeper_runtime" 1
+  check int "activation_mode is decoded by the runtime row" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
-       ~needle:"proactive_enabled");
+       ~needle:"activation_mode");
   check int "verify appears only inside verifying_count" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"

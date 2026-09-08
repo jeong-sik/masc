@@ -11,12 +11,12 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        activation_mode: 'autonomous',
         config_revision: {
           manifest: { state: 'sha256', value: 'a'.repeat(64) },
           runtime_assignment: { state: 'runtime_config_missing' },
         },
         max_context_override: null,
-        proactive: { enabled: true },
         skills: { names: null },
         sources: {
           live_meta_path: '/workspace/.masc/keepers/rtprobe.json',
@@ -24,9 +24,9 @@ describe('keeper config source projection', () => {
           default_source_kind: 'toml',
           precedence: ['live_meta', 'keeper_config'],
           has_live_override: true,
-          override_fields: ['proactive.enabled'],
+          override_fields: ['activation_mode'],
           override_field_sources: [{
-            field: 'proactive.enabled',
+            field: 'activation_mode',
             source: 'live_meta',
             live_source: 'runtime_overlay',
             default_source: 'toml',
@@ -34,8 +34,8 @@ describe('keeper config source projection', () => {
             default_manifest_path: '/workspace/.masc/config/keepers/rtprobe.toml',
             default_manifest_exists: true,
             default_missing: false,
-            default_value: false,
-            live_value: true,
+            default_value: 'manual',
+            live_value: 'autonomous',
           }],
         },
       }), {
@@ -46,9 +46,9 @@ describe('keeper config source projection', () => {
 
     const config = await fetchKeeperConfig('rtprobe')
 
-    expect(config.proactive.enabled).toBe(true)
+    expect(config.activation_mode).toBe('autonomous')
     expect(config.sources.override_field_sources).toEqual([{
-      field: 'proactive.enabled',
+      field: 'activation_mode',
       source: 'live_meta',
       live_source: 'runtime_overlay',
       default_source: 'toml',
@@ -56,8 +56,8 @@ describe('keeper config source projection', () => {
       default_manifest_path: '/workspace/.masc/config/keepers/rtprobe.toml',
       default_manifest_exists: true,
       default_missing: false,
-      default_value: false,
-      live_value: true,
+      default_value: 'manual',
+      live_value: 'autonomous',
     }])
   })
 
@@ -65,6 +65,7 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        activation_mode: 'autonomous',
         effective_config: null,
         config_error: {
           keeper: 'rtprobe',
@@ -100,6 +101,7 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        activation_mode: 'autonomous',
         config_revision: revision,
         config_write: {
           revision,
@@ -146,6 +148,7 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        activation_mode: 'autonomous',
         config_revision: { state: 'unavailable', detail: 'manifest store offline' },
         max_context_override: null,
         skills: { names: null },
@@ -166,6 +169,7 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        activation_mode: 'autonomous',
         config_revision: {
           manifest: { state: 'sha256', value: 'a'.repeat(64) },
           runtime_assignment: { state: 'runtime_config_missing' },
@@ -203,6 +207,7 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        activation_mode: 'autonomous',
         config_revision: revision,
         config_write: configWrite(revision),
         max_context_override: null,
@@ -224,6 +229,7 @@ describe('keeper config source projection', () => {
   it('reads remote_endpoint, and yields null when the response omits it', async () => {
     const body = (extra: Record<string, unknown>) => JSON.stringify({
       name: 'rtprobe',
+        activation_mode: 'autonomous',
       config_revision: {
         manifest: { state: 'sha256', value: 'a'.repeat(64) },
         runtime_assignment: { state: 'runtime_config_missing' },
@@ -249,6 +255,7 @@ describe('keeper config source projection', () => {
   it('reads voice_always_allow, and yields null when omitted', async () => {
     const body = (extra: Record<string, unknown>) => JSON.stringify({
       name: 'sangsu',
+        activation_mode: 'autonomous',
       config_revision: {
         manifest: { state: 'sha256', value: 'a'.repeat(64) },
         runtime_assignment: { state: 'runtime_config_missing' },

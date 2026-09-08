@@ -186,7 +186,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ("current_work", member_assoc "current_task_id" keeper);
                       ("tool_audit_at", member_assoc "tool_audit_at" keeper);
-                      ("proactive_enabled", member_assoc "proactive_enabled" keeper);
+                      ("activation_mode", member_assoc "activation_mode" keeper);
                       ("paused", member_assoc "paused" keeper);
                       (* The rank above is computed from [health], but the row it
                          ranks did not carry it, so no reader could reproduce or

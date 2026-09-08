@@ -78,7 +78,7 @@ let with_server_workspace f =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
             [ "name", `String submitter
-            ; "autoboot_enabled", `Bool false
+            ; "activation_mode", `String "manual"
             ])
     with
     | Ok meta -> meta

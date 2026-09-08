@@ -1,5 +1,5 @@
 [keeper]
-autoboot_enabled = true
+activation_mode = "autonomous"
 # sandbox_profile takes docker / microvm / remote_ssh. If the server itself runs
 # inside a container, docker here means Docker-in-Docker — mount the host docker
 # socket or use microvm.

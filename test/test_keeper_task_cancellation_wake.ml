@@ -44,7 +44,7 @@ let ensure_keeper config ~keeper_name =
       (Masc_test_deps.meta_of_json_fixture
          (`Assoc
              [ "name", `String keeper_name
-             ; "autoboot_enabled", `Bool false
+             ; "activation_mode", `String "manual"
              ]))
       (Keeper_meta_store.replace_snapshot config)
   with

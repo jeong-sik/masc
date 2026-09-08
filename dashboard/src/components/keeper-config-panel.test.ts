@@ -90,7 +90,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       manifest: { state: 'sha256', value: 'a'.repeat(64) },
       runtime_assignment: { state: 'runtime_config_missing' },
     },
-    autoboot_enabled: true,
+    activation_mode: 'autonomous',
     max_context_override: null,
     sandbox_profile: 'docker',
     network_mode: 'inherit',
@@ -112,9 +112,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       selected_runtime_id: 'tier-group.keeper_unified',
       selected_runtime_canonical: 'tier-group.keeper_unified',
       runtime_options: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
-    },
-    proactive: {
-      enabled: true,
     },
     hooks: {
       scope: 'keeper_runtime_composite',
@@ -584,16 +581,13 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       manifest: { state: 'missing' },
       runtime_assignment: { state: 'runtime_config_missing' },
     },
-    autoboot_enabled: true,
+    activation_mode: 'on_demand',
     max_context_override: null,
     sandbox_profile: 'docker',
     network_mode: 'inherit',
     sandbox_roots: [],
     prompt: {} as KeeperConfig['prompt'],
     execution: {} as KeeperConfig['execution'],
-    proactive: {
-      enabled: false,
-    } as KeeperConfig['proactive'],
     skills: { names: null },
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
@@ -630,11 +624,10 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
   it('uses the declarative proactive value when live meta has drifted', () => {
     const base = makeKeeperConfigForSandbox()
     const c = makeKeeperConfigForSandbox({
-      proactive: { enabled: true },
       sources: {
         ...base.sources,
         override_field_sources: [{
-          field: 'proactive.enabled',
+          field: 'activation_mode',
           source: 'live_meta',
           live_source: 'runtime_overlay',
           default_source: 'toml',
@@ -642,17 +635,17 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
           default_manifest_path: '/tmp/config/keepers/rtprobe.toml',
           default_manifest_exists: true,
           default_missing: false,
-          default_value: false,
-          live_value: true,
+          default_value: 'on_demand',
+          live_value: 'autonomous',
         }],
       },
     })
 
-    expect(initRuntimeDraftFromConfig(c).proactive_enabled).toBe(false)
+    expect(initRuntimeDraftFromConfig(c).activation_mode).toBe('on_demand')
     expect(buildRuntimePayload({
       ...initRuntimeDraftFromConfig(c),
-      proactive_enabled: true,
-    }, c)).toEqual({ proactive_enabled: true })
+      activation_mode: 'autonomous',
+    }, c)).toEqual({ activation_mode: 'autonomous' })
   })
 
   it('diffs and rebases voice_always_allow correctly', () => {
@@ -671,12 +664,12 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
 
     const fresh = makeKeeperConfigForSandbox({
       voice_always_allow: false,
-      autoboot_enabled: true,
+      activation_mode: 'autonomous',
     })
     const editedDraft = { ...draft, voice_always_allow: true }
     const rebased = rebaseRuntimeDraftOnFreshConfig(editedDraft, c, fresh)
     expect(rebased.voice_always_allow).toBe(true)
-    expect(rebased.autoboot_enabled).toBe(true)
+    expect(rebased.activation_mode).toBe('autonomous')
   })
 
   it('leaves sandbox_profile unset when config is missing it', () => {
@@ -864,14 +857,14 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       sandbox_profile: 'docker',
       remote_endpoint: 'builder',
     })
-    const result = buildRuntimePayloadResult(draftFrom(c, { autoboot_enabled: false }), c)
+    const result = buildRuntimePayloadResult(draftFrom(c, { activation_mode: 'manual' }), c)
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.control).toBe('remote_endpoint')
       expect(result.error).toContain('remote_ssh')
       // The autoboot edit is still expressible: the footer and the dirty
       // markers read this payload, and only the save path branches on `ok`.
-      expect(result.payload.autoboot_enabled).toBe(false)
+      expect(result.payload.activation_mode).toBe('manual')
     }
   })
 
@@ -882,11 +875,11 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       remote_endpoint: 'builder',
     })
     const payload = buildRuntimePayload(
-      draftFrom(c, { autoboot_enabled: false, remote_endpoint: '' }),
+      draftFrom(c, { activation_mode: 'manual', remote_endpoint: '' }),
       c,
     )
     expect(payload.remote_endpoint).toBeNull()
-    expect(payload.autoboot_enabled).toBe(false)
+    expect(payload.activation_mode).toBe('manual')
     expect(payload.sandbox_profile).toBeUndefined()
   })
 
@@ -967,14 +960,14 @@ describe('buildRuntimePayload — sandbox diffing', () => {
 
   it('emits autoboot and max_context_override edits', () => {
     const c = makeKeeperConfigForSandbox({
-      autoboot_enabled: true,
+      activation_mode: 'autonomous',
       max_context_override: null,
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      autoboot_enabled: false,
+      activation_mode: 'manual',
       max_context_override: '64000',
     }), c)
-    expect(payload.autoboot_enabled).toBe(false)
+    expect(payload.activation_mode).toBe('manual')
     expect(payload.max_context_override).toBe(64000)
   })
 
@@ -1299,11 +1292,12 @@ describe('KeeperConfigPanel', () => {
     document.body.appendChild(container)
     resetKeeperConfig()
     resetRuntimeCatalog()
-    mocks.fetchKeeperConfig.mockClear()
+    mocks.fetchKeeperConfig.mockReset()
+    mocks.fetchKeeperConfig.mockImplementation(async () => makeKeeperConfig())
     mocks.fetchDashboardGoalsTree.mockClear()
     mocks.fetchRuntimeProfiles.mockClear()
     mocks.fetchRuntimeProviders.mockClear()
-    mocks.patchKeeperConfig.mockClear()
+    mocks.patchKeeperConfig.mockReset()
     mocks.refreshKeeperRuntimeStatus.mockReset()
     mocks.refreshKeeperRuntimeStatus.mockResolvedValue(undefined)
     mocks.showToast.mockClear()
@@ -1383,7 +1377,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
-    expect(container.textContent).toContain('자동 부팅 설정')
+    expect(container.textContent).toContain('실행 방식')
     expect(container.textContent).toContain('레지스트리 등록')
     expect(container.textContent).toContain('실행 주의')
     expect(container.textContent).not.toContain('자동 부팅 등록')
@@ -1424,7 +1418,7 @@ describe('KeeperConfigPanel', () => {
   it('runs lifecycle directives from the health tab and refreshes the config snapshot', async () => {
     mocks.fetchKeeperConfig
       .mockResolvedValueOnce(makeKeeperConfig({
-        autoboot_enabled: false,
+        activation_mode: 'manual',
         runtime: {
           paused: false,
           registered: false,
@@ -1434,7 +1428,7 @@ describe('KeeperConfigPanel', () => {
         },
       }))
       .mockResolvedValueOnce(makeKeeperConfig({
-        autoboot_enabled: false,
+        activation_mode: 'manual',
         runtime: {
           paused: false,
           registered: true,
@@ -1451,7 +1445,7 @@ describe('KeeperConfigPanel', () => {
     selectKcfTab(container, '상태·진단')
     await flush()
     expect(container.textContent).toContain('missing')
-    expect(container.textContent).toContain('자동 부팅 설정')
+    expect(container.textContent).toContain('실행 방식')
     expect(container.textContent).toContain('레지스트리 등록')
 
     const resumeButton = Array.from(container.querySelectorAll('button')).find(button =>
@@ -1549,7 +1543,7 @@ describe('KeeperConfigPanel', () => {
     selectKcfTab(container, '실행 정책')
     await flush()
     expect(container.querySelector('input[aria-label="토큰 게이트"]')).toBeNull()
-    expect(container.querySelector('button[aria-label="자동 부팅"]')).not.toBeNull()
+    expect(container.querySelector('select[aria-label="실행 방식"]')).not.toBeNull()
     selectKcfTab(container, '권한·샌드박스')
     await flush()
     expect(container.querySelector('select[aria-label="sandbox_profile"]')).not.toBeNull()
@@ -1768,7 +1762,7 @@ describe('KeeperConfigPanel', () => {
   it('patches autoboot and max-context override from the dashboard panel', async () => {
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
-        autoboot_enabled: false,
+        activation_mode: 'manual',
         max_context_override: 64000,
       }),
     )
@@ -1787,9 +1781,10 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '실행 정책')
     await flush()
-    const autoboot = container.querySelector('button[aria-label="자동 부팅"]') as HTMLButtonElement | null
+    const autoboot = container.querySelector('select[aria-label="실행 방식"]') as HTMLSelectElement | null
     expect(autoboot).not.toBeNull()
-    autoboot!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    autoboot!.value = 'manual'
+    autoboot!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
@@ -1802,7 +1797,7 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
       expect.objectContaining({
-        autoboot_enabled: false,
+        activation_mode: 'manual',
         max_context_override: 64000,
       }),
       makeKeeperConfig().config_revision,
@@ -1911,12 +1906,11 @@ describe('KeeperConfigPanel', () => {
   it('edits proactive policy from TOML truth when live meta has drifted', async () => {
     const base = makeKeeperConfig()
     const drifted = makeKeeperConfig({
-      proactive: { enabled: true },
       sources: {
         ...base.sources,
-        override_fields: ['proactive.enabled'],
+        override_fields: ['activation_mode'],
         override_field_sources: [{
-          field: 'proactive.enabled',
+          field: 'activation_mode',
           source: 'live_meta',
           live_source: 'runtime_overlay',
           default_source: 'toml',
@@ -1924,32 +1918,31 @@ describe('KeeperConfigPanel', () => {
           default_manifest_path: '/tmp/config/keepers/rtprobe.toml',
           default_manifest_exists: true,
           default_missing: false,
-          default_value: false,
-          live_value: true,
+          default_value: 'on_demand',
+          live_value: 'autonomous',
         }],
       },
     })
     mocks.fetchKeeperConfig.mockResolvedValueOnce(drifted)
     mocks.patchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
-      proactive: { enabled: true },
     }))
 
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
 
-    expect(container.textContent).toContain('프로액티브 설정 드리프트')
-    expect(container.textContent).toContain('TOML OFF / live meta ON')
+    expect(container.textContent).toContain('실행 방식 설정 드리프트')
+    expect(container.textContent).toContain('TOML on_demand / live meta autonomous')
 
     selectKcfTab(container, '실행 정책')
     await flush()
-    const proactive = container.querySelector('button[aria-label="프로액티브 활성"]') as HTMLButtonElement | null
-    expect(proactive?.getAttribute('aria-checked')).toBe('false')
-    expect(container.textContent).toContain('TOML OFF / live meta ON')
+    const activation = container.querySelector('select[aria-label="실행 방식"]') as HTMLSelectElement | null
+    expect(activation?.value).toBe('on_demand')
+    expect(container.textContent).toContain('TOML on_demand / live meta autonomous')
 
-    proactive?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    if (activation) { activation.value = 'autonomous'; activation.dispatchEvent(new Event('change', { bubbles: true })) }
     await flush()
-    expect(proactive?.getAttribute('aria-checked')).toBe('true')
+    expect(activation?.value).toBe('autonomous')
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('Keeper 설정 저장'),
@@ -1960,7 +1953,7 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
-      { proactive_enabled: true },
+      { activation_mode: 'autonomous' },
       drifted.config_revision,
     )
   })
@@ -2280,7 +2273,8 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     document.body.appendChild(container)
     resetKeeperConfig()
     resetRuntimeCatalog()
-    mocks.fetchKeeperConfig.mockClear()
+    mocks.fetchKeeperConfig.mockReset()
+    mocks.fetchKeeperConfig.mockImplementation(async () => makeKeeperConfig())
     mocks.fetchRuntimeProviders.mockClear()
     storeMocks.keepers.value = []
   })

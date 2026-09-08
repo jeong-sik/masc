@@ -321,7 +321,7 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
   in
   (* Surface the autoboot exclusion reason so the roster can show *why* a keeper
      is not booting/proactive (declarative_autoboot_disabled / paused /
-     autoboot_disabled).  paused/proactive_enabled already ride on the snapshot
+     autoboot_disabled).  paused/activation_mode already ride on the snapshot
      keeper row; exclusion_reason is the missing visibility piece. *)
   (match result with
    | `Assoc fields ->

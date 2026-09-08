@@ -2,9 +2,8 @@ type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
-  autoboot_enabled : bool option;
+  activation_mode : Keeper_activation_mode.t option;
   mention_targets : string list;
-  proactive_enabled : bool option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
@@ -50,9 +49,8 @@ let empty_keeper_profile_defaults =
     id = None;
     manifest_path = None;
     instructions = None;
-    autoboot_enabled = None;
+    activation_mode = None;
     mention_targets = [];
-    proactive_enabled = None;
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;

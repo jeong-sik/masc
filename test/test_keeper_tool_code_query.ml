@@ -35,7 +35,7 @@ let meta () : Keeper_meta_contract.keeper_meta =
       (`Assoc
         [ "name", `String "probe"
         ; "trace_id", `String "trace-probe"
-        ; "autoboot_enabled", `Bool false
+        ; "activation_mode", `String "manual"
         ])
   with
   | Ok meta -> meta

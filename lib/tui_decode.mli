@@ -1023,14 +1023,15 @@ val keeper_health_reading : keeper_health -> keeper_health_reading
     same mark as a working one. *)
 
 
+type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
+
 type keeper_runtime = {
   kr_name : string;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
-  kr_autoboot_enabled : bool;
-  kr_proactive_enabled : bool;
+  kr_activation_mode : keeper_activation_mode;
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   kr_sandbox_profile : string;

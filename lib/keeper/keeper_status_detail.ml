@@ -642,8 +642,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                  (fun age_s -> `Float (age_s /. Masc_time_constants.hour))
                  keeper_age_s );
            ]);
+           ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
            ("proactive", `Assoc [
-             ("enabled", `Bool m.proactive.enabled);
+             ("enabled", `Bool (Keeper_activation_mode.spontaneous m.activation_mode));
              ("count_total", `Int m.runtime.proactive_rt.count_total);
              ("visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
              ("last_ts", `Float m.runtime.proactive_rt.last_ts);

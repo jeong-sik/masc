@@ -536,7 +536,7 @@ create_keeper() {
       name:$name,
       goal:$goal,
       instructions:$instructions,
-      proactive_enabled:false,
+      activation_mode:"on_demand",
       drift_enabled:false
     } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60

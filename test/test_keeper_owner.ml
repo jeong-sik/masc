@@ -60,7 +60,7 @@ let make_meta name =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "autoboot_enabled", `Bool false
+        ; "activation_mode", `String "manual"
         ])
   with
   | Ok meta -> meta
@@ -303,9 +303,8 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata
     ; network_mode = current.network_mode
     ; mention_targets = [ "profile-target" ]
-    ; proactive_enabled = true
+    ; activation_mode = Masc.Keeper_activation_mode.Autonomous
     ; max_context_override = Some 32_000
-    ; autoboot_enabled = true
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24
     ; always_allow = Some false
@@ -323,7 +322,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     "profile update preserves additive turns"
     current.runtime.usage.total_turns
     committed.runtime.usage.total_turns;
-  check bool "profile update changes autoboot" true committed.autoboot_enabled;
+  check bool "profile update changes autoboot" true (Masc.Keeper_activation_mode.restore_owner committed.activation_mode);
   check bool "profile update changes voice_always_allow" true (committed.voice_always_allow = Some false)
 ;;
 
@@ -397,8 +396,8 @@ let test_mailbox_backpressures_without_drop () =
       (owner_ok
          (Owner.apply_meta
             owner
-            (Set_autoboot
-               { enabled = index mod 2 = 0
+            (Set_activation_mode
+               { mode = (if index mod 2 = 0 then Masc.Keeper_activation_mode.Autonomous else Manual)
                ; updated_at = string_of_int index
                })));
     mark_completed ()
@@ -452,7 +451,7 @@ let test_enqueued_request_settles_before_cancellation_unwinds () =
          ignore
            (Owner.apply_meta
               owner
-              (Set_autoboot { enabled = true; updated_at = "committed" })))
+              (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "committed" })))
      with
      | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
     Eio.Promise.resolve resolve_caller_done ());
@@ -470,7 +469,7 @@ let test_enqueued_request_settles_before_cancellation_unwinds () =
     bool
     "enqueued mutation committed before authority scope unwound"
     true
-    (Option.get (Owner.projection owner).meta).autoboot_enabled
+    (Masc.Keeper_activation_mode.restore_owner (Option.get (Owner.projection owner).meta).activation_mode)
 ;;
 
 let test_store_failure_fences_mutations () =
@@ -490,7 +489,7 @@ let test_store_failure_fences_mutations () =
   (match
      Owner.apply_meta
        owner
-       (Set_autoboot { enabled = true; updated_at = "must-not-publish" })
+       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-not-publish" })
    with
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong store error: " ^ Owner.error_to_string error)
@@ -498,11 +497,11 @@ let test_store_failure_fences_mutations () =
   check bool
     "failed persistence leaves projection unchanged"
     false
-    (Option.get (Owner.projection owner).meta).autoboot_enabled;
+    (Masc.Keeper_activation_mode.restore_owner (Option.get (Owner.projection owner).meta).activation_mode);
   (match
      Owner.apply_meta
        owner
-       (Set_autoboot { enabled = true; updated_at = "must-remain-fenced" })
+       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
    with
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
@@ -512,7 +511,7 @@ let test_store_failure_fences_mutations () =
     check bool
       "store fence keeps exact projection readable"
       false
-      (Option.get projection.meta).autoboot_enabled
+      (Masc.Keeper_activation_mode.restore_owner (Option.get projection.meta).activation_mode)
   | Error error -> fail ("store fence blocked exact projection: " ^ Owner.error_to_string error)
 ;;
 
@@ -563,7 +562,7 @@ let test_identity_and_delete_guards () =
     (owner_ok
        (Owner.apply_meta
           empty
-          (Set_autoboot { enabled = true; updated_at = "changed-before-delete" })));
+          (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "changed-before-delete" })));
   (match Owner.apply_meta empty (Delete_if_snapshot stale_digest) with
    | Error (Owner.Reducer_rejected Reducer.Snapshot_changed) -> ()
    | Error error -> fail ("wrong stale delete error: " ^ Owner.error_to_string error)
@@ -609,7 +608,7 @@ let test_shutdown_releases_full_mailbox_requests () =
     let result =
       Owner.apply_meta
         owner
-        (Set_autoboot { enabled = true; updated_at = string_of_int index })
+        (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = string_of_int index })
     in
     Eio.Stream.add results result
   in
@@ -650,7 +649,7 @@ let test_stopping_rejects_new_commands () =
   (match
      Owner.apply_meta
        owner
-       (Set_autoboot { enabled = true; updated_at = "rejected" })
+       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "rejected" })
    with
    | Error (Owner.Reducer_rejected Reducer.Owner_stopping) -> ()
    | Error error -> fail ("wrong stopping error: " ^ Owner.error_to_string error)
@@ -1834,7 +1833,7 @@ let test_operation_store_failure_fences_owner_mutations () =
        match
          Owner.apply_meta
            owner
-           (Set_autoboot { enabled = true; updated_at = "must-remain-fenced" })
+           (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
        with
        | Error (Owner.Store_unavailable _) -> ()
        | Error error -> fail ("wrong global fence error: " ^ Owner.error_to_string error)
@@ -1873,7 +1872,7 @@ let test_keeper_owners_do_not_cross_block () =
     ignore
       (Owner.apply_meta
          first
-         (Set_autoboot { enabled = true; updated_at = "blocked" })));
+         (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "blocked" })));
   Eio.Promise.await blocked;
   let accepted =
     owner_ok
@@ -2926,7 +2925,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
          | Error _ -> fail "failed to acquire lifecycle reservation"
        in
        let command =
-         Reducer.Set_autoboot { enabled = true; updated_at = "reserved-command" }
+         Reducer.Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "reserved-command" }
        in
        (match Owner_registry.apply_meta ~base_path ~keeper_name:meta.name command with
         | Error (Owner_registry.Command_lifecycle_reserved _) -> ()
@@ -2942,7 +2941,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
             ~keeper_name:meta.name
             command
         with
-        | Ok (Some updated) -> check bool "reservation owner committed" true updated.autoboot_enabled
+        | Ok (Some updated) -> check bool "reservation owner committed" true (Masc.Keeper_activation_mode.restore_owner updated.activation_mode)
         | Ok None -> fail "reservation owner removed metadata"
         | Error error -> fail (Owner_registry.command_error_to_string error));
        match Keeper_lifecycle_reservation.release token with

@@ -33,8 +33,7 @@ load by `lib/keeper/keeper_types_profile.ml`, not started with an empty prompt.
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
 
@@ -51,10 +50,9 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 
 | Field | Used by | What it decides |
 |---|---:|---|
-| `autoboot_enabled` | 11/11 | Whether the server starts this Keeper on boot |
+| `activation_mode` | — | Manual start, on-demand owner, or autonomous periodic execution |
 | `instructions` | 11/11 | The Keeper's whole prompt; rejected if empty |
 | `sandbox_profile` | 11/11 | `docker` runs in a container. `local` (host execution) is fail-closed by default — RFC-0394 |
-| `proactive_enabled` | 9/11 | Whether it takes turns on its own, or only when addressed |
 | `mention_targets` | 7/11 | The names that route a board mention to it |
 | `network_mode` | 6/11 | Network reachability for its sandbox |
 | `name` | 5/11 | Display name when it differs from the filename |
@@ -157,7 +155,7 @@ masc_keeper_status(name="reviewer")
 masc_keeper_down(name="reviewer")
 ```
 
-`autoboot_enabled = true` starts it with the server, so these are for changing
+`activation_mode = "autonomous"` or `"on_demand"` starts it with the server, so these are for changing
 your mind, not for normal boot.
 
 Two axes are reported separately and both are normal to see together:
@@ -241,3 +239,13 @@ Re-run them on your own root before treating any of them as a target.
 | [`docs/ENV-CONTRACT.md`](ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Bearer tokens and dashboard write access |
 | [`README.md`](../README.md) | Install, MCP client setup, and the dashboard |
+
+`activation_mode` is the single Keeper activation setting. `manual` does not
+restore an owner automatically; explicit requested work may activate it.
+`on_demand` restores the owner at startup but does not invent periodic work.
+`autonomous` also allows periodic self-directed turns. Direct messages,
+approval continuations, and due schedules remain requested work in every mode;
+operator pause and shutdown still prevent execution. The global
+`autonomous.enabled` setting controls automatic startup and spontaneous work.
+The live periodic interval is `keeper.keepalive_interval_sec`; wake hints do
+not reset its pending deadline or create work by themselves.

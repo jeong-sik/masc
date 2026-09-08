@@ -20,7 +20,6 @@ val default_runtime_id : unit -> string
     provider/model policy is applied here. *)
 val validate_max_context_override_value : int -> (int, string) result
 
-val default_proactive_enabled : bool
 
 (** Maximum bytes of Keeper instructions included in the rendered prompt.
     Drives [normalize_prompt_text] when called from prompt rendering.

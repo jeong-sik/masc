@@ -1991,11 +1991,10 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let parsed : Turn_up_args.parsed_args =
         { name = live_name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
@@ -2255,11 +2254,10 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
@@ -2374,7 +2372,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let clock = Eio.Stdenv.clock env in
       let meta =
         { (make_meta name) with
-          proactive = { enabled = false }
+          activation_mode = Masc.Keeper_activation_mode.On_demand
         }
       in
       create_owner_meta_exn config meta;
@@ -2429,11 +2427,10 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = Some Masc.Keeper_activation_mode.On_demand
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = Some false
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
@@ -2602,8 +2599,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
                      ~args:
                        (`Assoc
                           [ "name", `String target_name
-                          ; "proactive_enabled", `Bool false
-                          ; "autoboot_enabled", `Bool false
+                          ; "activation_mode", `String "manual"
                           ])))
             with
             | Eio.Time.Timeout -> None
@@ -4437,8 +4433,8 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
           Keeper_owner_registry.apply_meta
             ~base_path:config.base_path
             ~keeper_name:meta.name
-            (Masc.Keeper_owner_reducer.Set_autoboot
-               { enabled = true; updated_at = "newer-snapshot" })
+            (Masc.Keeper_owner_reducer.Set_activation_mode
+               { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "newer-snapshot" })
         with
         | Ok (Some _) -> ()
         | Ok None -> fail "concurrent metadata update removed its snapshot"
@@ -4453,7 +4449,7 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
         | Ok _ -> fail "stale cleanup authority deleted a newer metadata snapshot");
        match Keeper_meta_store.read_meta config meta.name with
        | Ok (Some current) ->
-         check bool "newer metadata survives stale cleanup" true current.autoboot_enabled
+         check bool "newer metadata survives stale cleanup" true (Masc.Keeper_activation_mode.restore_owner current.activation_mode)
        | Ok None -> fail "stale cleanup removed newer metadata"
        | Error detail -> fail detail)
 
@@ -5053,11 +5049,10 @@ let test_field_only_update_honors_toml_declared_profile () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None

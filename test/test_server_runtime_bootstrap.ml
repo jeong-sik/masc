@@ -240,7 +240,7 @@ let test_keeper_msg_startup_recovery_settles_disk_only_running_request () =
 let write_example_keeper config =
   write_file
     (Filename.concat config "keepers/example.toml")
-    "[keeper]\nautoboot_enabled = true\ninstructions = \"example instructions\"\n"
+    "[keeper]\nactivation_mode = \"autonomous\"\ninstructions = \"example instructions\"\n"
 
 let make_config_root root =
   let config = Filename.concat root "config" in
@@ -460,9 +460,9 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = %b\nsandbox_profile = \"docker\"\n"
+       "[keeper]\ninstructions = \"instructions-%s\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\n"
        name
-       autoboot_enabled)
+       (if autoboot_enabled then "autonomous" else "manual"))
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -479,8 +479,7 @@ let write_basepath_keeper_toml base_path name =
     (Filename.concat keepers_dir (name ^ ".toml"))
 {|[keeper]
 instructions = "example"
-proactive_enabled = false
-autoboot_enabled = true
+activation_mode = "on_demand"
 sandbox_profile = "docker"
 |}
 let find_free_port_from start =
@@ -1500,8 +1499,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (durable_paused_detail |> member "pause_kind" |> to_string);
           Alcotest.(check bool) "pause missing root cause" true
             (durable_paused_detail |> member "missing_pause_root_cause" |> to_bool);
-          Alcotest.(check bool) "pause detail keeps autoboot" true
-            (durable_paused_detail |> member "autoboot_enabled" |> to_bool);
+          Alcotest.(check string) "pause detail keeps activation mode" "autonomous"
+            (durable_paused_detail |> member "activation_mode" |> to_string);
           Alcotest.(check bool) "union includes durable paused keeper" true
             (List.exists (( = ) "durable-paused") names);
           Alcotest.(check bool) "union excludes active durable keeper" false
@@ -1758,7 +1757,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     write_config_root_keeper_toml config_root "mad-improver";
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
-      "[keeper]\ninstructions = \"test keeper\"\nautoboot_enabled = false\n";
+      "[keeper]\ninstructions = \"test keeper\"\nactivation_mode = \"manual\"\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -1825,7 +1824,7 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "base.toml")
-      "[keeper]\nautoboot_enabled = true\n";
+      "[keeper]\nactivation_mode = \"autonomous\"\n";
     write_keeper_instructions
       (Filename.concat config_root "keepers")
       "base"
@@ -1903,7 +1902,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "omega.toml")
-      "[keeper]\nautoboot_enabled = false\n";
+      "[keeper]\nactivation_mode = \"manual\"\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -2375,7 +2374,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
           (fun () ->
             write_keeper_meta_exn
               config
-              { cached_disabled with autoboot_enabled = false };
+              { cached_disabled with activation_mode = Masc.Keeper_activation_mode.Manual };
             write_keeper_meta_exn config paused;
             with_owner_inventory config (fun () ->
             let missing_meta_path =
@@ -2519,8 +2518,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
             ()
           |> fun meta ->
           { meta with
-            autoboot_enabled = true
-          ; proactive = { enabled = true }
+            activation_mode = Masc.Keeper_activation_mode.Autonomous
           }
         in
         write_keeper_meta_exn config meta;
@@ -2606,7 +2604,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
             ~name:"non-target-running"
             ~trace_id:"trace-non-target-running"
             ()
-          |> fun meta -> { meta with proactive = { enabled = false } }
+          |> fun meta -> { meta with activation_mode = Masc.Keeper_activation_mode.On_demand }
         in
         List.iter
           (write_keeper_meta_exn config)
@@ -3998,7 +3996,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4168,7 +4166,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4390,7 +4388,7 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4474,7 +4472,7 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4546,7 +4544,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4617,7 +4615,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]

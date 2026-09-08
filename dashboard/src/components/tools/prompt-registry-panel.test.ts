@@ -214,6 +214,27 @@ describe('PromptRegistryPanel', () => {
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt')
   })
 
+  it('previews a shipped language before saving only the keeper body', async () => {
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [
+      ...defaultPromptItems(),
+      makePrompt({ key: 'keeper.en', file_value: 'English instructions', effective: 'custom reference', source: 'override' }),
+    ] })
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+    const english = Array.from(container.querySelectorAll('[data-keeper-prompt-language] button'))
+      .find(button => button.textContent?.trim() === 'English') as HTMLButtonElement
+    fireEvent.click(english)
+    await flush()
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('English instructions')
+    expect(mocks.savePromptOverride).not.toHaveBeenCalled()
+    expect(english.disabled).toBe(true)
+    const save = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('오버라이드 적용')) as HTMLButtonElement
+    fireEvent.click(save)
+    await waitFor(() => expect(mocks.savePromptOverride).toHaveBeenCalledWith('keeper', 'English instructions'))
+  })
+
   it('names the Librarian exact lane, effective prompt source, and every input section', async () => {
     render(html`<${PromptRegistryPanel} />`, container)
     await flush()

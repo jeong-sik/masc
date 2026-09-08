@@ -30,6 +30,21 @@ jobs:
           corepack enable && corepack prepare pnpm@10.31.0 --activate
           pnpm install --frozen-lockfile
 
+      - name: Verify Keeper activation UI and API contracts
+        working-directory: dashboard
+        run: >-
+          pnpm exec vitest run --config vitest.config.ts
+          --no-file-parallelism --maxWorkers=1
+          src/components/keeper-config-panel.test.ts
+          src/api/dashboard-keeper-config.test.ts
+          src/api/dashboard.test.ts
+          src/api/gate-keepers.test.ts
+          src/api/schemas/gate-keepers.test.ts
+          src/store-normalizers.test.ts
+          src/components/fleet-health-panel.test.ts
+          src/components/tool-monitor/tool-monitor-operations.test.ts
+          src/components/tool-monitor/tool-monitor-reactivity.test.ts
+
       - name: Verify production bundle contract
         working-directory: dashboard
         run: pnpm exec vitest run --config vitest.config.ts src/dashboard-bundle-preload.test.ts

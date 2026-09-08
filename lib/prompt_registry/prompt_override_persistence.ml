@@ -31,10 +31,8 @@ type error =
     }
   | Duplicate_override_key of string
 
-(* 2: [contract_revision] (one digest over body and variables, and a gate)
-   became [authored_against] (the body digest, informational) and
-   [template_variables] (the declared contract, informational). A version-1
-   file is refused whole; the operator re-saves each override once. *)
+(* One envelope version is readable: the one this module writes. Any other
+   is refused whole, and the operator saves each override once more. *)
 let schema_version = 2
 
 let error_to_string = function

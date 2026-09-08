@@ -1846,7 +1846,7 @@ type held_back_override = {
   hbo_bytes : int;
   hbo_reason : string;
       (** Why the registry is not applying it: the override names a template
-          variable the prompt no longer declares, so it cannot render. *)
+          variable the prompt does not declare, so it cannot render. *)
 }
 (** An override the operator saved and the registry declined to restore.
 

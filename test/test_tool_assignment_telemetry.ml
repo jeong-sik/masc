@@ -51,6 +51,51 @@ let append_raw_tool_event json =
   let store = Dated_jsonl.create ~base_dir:dir () in
   Dated_jsonl.append store json
 
+(* The store answers for the base path in force. A test executable moves
+   between workspaces and deletes the ones it leaves; a store bound to the
+   first one wrote into a deleted directory, which #34341 turned from a silent
+   write into a reopen failure (three production Codex tests, 2026-09-08). *)
+let test_store_follows_the_base_path () =
+  with_eio_temp_base_path (fun () ->
+    Tool_assignment_telemetry.reset_for_testing ();
+    let first = Env_config.base_path () in
+    let (_ : string) =
+      Tool_assignment_telemetry.emit_assigned
+        ~agent_id:"agent-move"
+        ~profile:"keeper"
+        ~tool_list:[ "bash" ]
+        ~reason:"first workspace"
+        ()
+    in
+    let second = temp_dir () in
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.putenv "MASC_BASE_PATH" first;
+        cleanup_dir second)
+      (fun () ->
+        cleanup_dir first;
+        Unix.putenv "MASC_BASE_PATH" second;
+        let assignment_id =
+          Tool_assignment_telemetry.emit_assigned
+            ~agent_id:"agent-move"
+            ~profile:"keeper"
+            ~tool_list:[ "read" ]
+            ~reason:"second workspace"
+            ()
+        in
+        check bool "the second workspace holds the store" true
+          (Sys.file_exists (Filename.concat second "data/tool-events"));
+        (match Tool_assignment_telemetry.find_latest_assignment_id ~agent_id:"agent-move" with
+         | Some id -> check string "index restarted with the new workspace" assignment_id id
+         | None -> fail "the new workspace's assignment is not indexed");
+        match Tool_assignment_telemetry.read_recent ~n:1 with
+        | Ok [ Tool_assignment_telemetry.Assigned { assignment_id = newest; reason; _ } ] ->
+          check string "newest event is the second workspace's" assignment_id newest;
+          check string "reason" "second workspace" reason
+        | Ok events ->
+          fail (Printf.sprintf "expected one assigned event, got %d" (List.length events))
+        | Error error -> fail error))
+
 (* --- Test 1: Assigned snapshot has all fields --- *)
 
 let test_assigned_snapshot_has_all_fields () =
@@ -254,6 +299,8 @@ let () =
         [
           test_case "assigned snapshot has all fields" `Quick
             test_assigned_snapshot_has_all_fields;
+          test_case "the store follows the base path" `Quick
+            test_store_follows_the_base_path;
           test_case "called links to assignment_id" `Quick
             test_called_links_to_assignment_id;
           test_case "completed temporal ordering" `Quick

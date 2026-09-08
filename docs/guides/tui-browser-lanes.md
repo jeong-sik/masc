@@ -79,3 +79,24 @@ Validation: the production pure Browser state module was interpreted against 14
 fixtures, including equal tab IDs across clients, stale discovery, disconnected pins,
 and screenshot ownership. PTY scenarios cover two-client choice and explicit recovery;
 they run in the existing browser-screenshot CI test alias. No local Dune build was run.
+
+
+## Gecko scene view
+
+After reading a connected Firefox or Zen tab, press `s` to observe its viewport
+as real text and numbered controls. `n`/`p` select a control; `Enter` clicks that
+observed element and reads a fresh scene. The selected control number also appears
+in the body. `j`/`k` scroll the terminal text, and `r` observes the browser again.
+Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
+The image viewport retains its browser scrolling controls.
+
+The scene is DOM-order text, controls and image placeholders. CSS geometry is
+available to tools; this first TUI projection does not reproduce CSS layout or
+compose inline raster regions. Use image view for the browser's painted result.
+TUI scene controls support clicking; literal text filling is available through
+`masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
+`scene`. A detached element or document reload requires a fresh observation.
+
+Scene support requires the updated coordinator/native host and extension 0.3.0
+in the selected browser profile. Source changes and script-level Gecko evidence
+alone do not establish that an installed TUI has been updated.

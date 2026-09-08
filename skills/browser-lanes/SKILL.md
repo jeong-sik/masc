@@ -30,6 +30,12 @@ live가 끊겼다면 같은 인증 화면을 automation으로 대체하지 않�
 
 - `BrowserRead mode=text`로 URL·제목·내용을, `mode=elements`로 조작 대상을 읽는다.
   `truncated=true`이면 읽지 못한 부분까지 확인한 것으로 판단하지 않는다.
+- 화면 안의 텍스트·버튼·입력과 CSS 좌표를 함께 볼 때는 관측한 `tabId`로
+  `BrowserRead mode=scene`을 사용한다. click/fill은 scene의 `documentId`와
+  `nodeId` 쌍을 `BrowserInteract`에 전달할 수 있다. 이때 selector는 섞지 않는다.
+  재배치되어도 같은 요소를 가리키며, 교체·새로고침으로 참조가 만료되면 다시 관측한다.
+  scene은 top document의 DOM 순서와 사각형이다. 가림·페인트 순서·iframe 내부·
+  shadow tree·전체 CSS 배치를 확인하려면 screenshot이나 해당 문맥을 추가로 읽는다.
 - selector는 같은 탭·프레임에서 반환된 **디코딩된 문자열 그대로** 사용한다.
   `>`와 따옴표, 기존 CSS escape를 보존한다. JSON 표시용 escape를 문자열에
   다시 삽입하거나 모든 backslash를 일괄 제거하지 않는다.

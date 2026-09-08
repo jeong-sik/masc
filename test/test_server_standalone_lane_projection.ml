@@ -421,7 +421,7 @@ let goal_verification_run ~run_id ~started_at : Goal_verification.run =
   { run_id
   ; goal_id = "goal-4"
   ; request_id = "proof-request-4"
-  ; criterion = Masc.Goal_store.Criterion
+  ; criterion = Goal_store.Criterion
       { revision = "criterion-4"; title = "Four verified services";
         metric = Some "verified services"; target_value = Some "4" }
   ; review_kind = Goal_verification.Proof

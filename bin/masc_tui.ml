@@ -13505,8 +13505,7 @@ and is loaded on demand through keeper_skill.
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
-           Frame_presenter.invalidate frame_presenter;
-           Render_schedule.request render_schedule Render_schedule.Force
+           invalidate_frame_for_resize frame_presenter render_schedule
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed

@@ -345,6 +345,133 @@ let test_styling_statements_change_nothing () =
   Alcotest.(check int) "same nodes" (List.length plain.nodes) (List.length styled.nodes);
   Alcotest.(check int) "same edges" (List.length plain.edges) (List.length styled.edges)
 
+(* {1 Subgraphs} *)
+
+(* A subgraph is laid out on its own and the drawing is placed in the scope
+   above as one box, with the title on its top edge. That title is what
+   tells a box holding boxes apart from a node's box. *)
+let test_a_subgraph_draws_a_titled_box_around_its_members () =
+  Alcotest.check rows "subgraph"
+    [ {|┌─ Group ─┐|}
+    ; {|│┌───┐    │|}
+    ; {|││ A │    │|}
+    ; {|│└─┬─┘    │|}
+    ; {|│  │      │|}
+    ; {|│  v      │|}
+    ; {|│┌─┴─┐    │|}
+    ; {|││ B │    │|}
+    ; {|│└───┘    │|}
+    ; {|└─────────┘|}
+    ]
+    (render "graph TD\nsubgraph One [\"Group\"]\nA --> B\nend")
+
+(* Nesting is the same thing one level down, so it needs no rule of its
+   own: the inner box is an item of the outer scope. *)
+let test_a_nested_subgraph_is_a_box_inside_a_box () =
+  Alcotest.check rows "nested"
+    [ {|┌─ Out ──┐|}
+    ; {|│┌─ In ─┐│|}
+    ; {|││┌───┐ ││|}
+    ; {|│││ A │ ││|}
+    ; {|││└─┬─┘ ││|}
+    ; {|││  │   ││|}
+    ; {|││  v   ││|}
+    ; {|││┌─┴─┐ ││|}
+    ; {|│││ B │ ││|}
+    ; {|││└───┘ ││|}
+    ; {|│└──────┘│|}
+    ; {|└────────┘|}
+    ]
+    (render "graph TD\nsubgraph Outer [\"Out\"]\nsubgraph Inner [\"In\"]\nA --> B\nend\nend")
+
+(* An edge may name a subgraph, and then it joins the boxes. This is the
+   way to draw a link between two groups. *)
+let test_an_edge_may_name_a_subgraph () =
+  Alcotest.check rows "between groups"
+    [ {|┌─ Left ─┐|}
+    ; {|│┌───┐   │|}
+    ; {|││ A │   │|}
+    ; {|│└───┘   │|}
+    ; {|└────┬───┘|}
+    ; {|     │|}
+    ; {|     v|}
+    ; {|┌─ Right ─┐|}
+    ; {|│┌───┐    │|}
+    ; {|││ B │    │|}
+    ; {|│└───┘    │|}
+    ; {|└─────────┘|}
+    ]
+    (render "graph TD\nsubgraph L [\"Left\"]\nA\nend\nsubgraph R [\"Right\"]\nB\nend\nL --> R")
+
+(* [direction] inside a subgraph turns that box and nothing else. Mermaid
+   ignores one at the top level, where the header already said which way
+   the diagram reads, and so do we -- the outer graph here stays TD while
+   its one subgraph reads across. *)
+let test_direction_inside_a_subgraph_turns_that_box_only () =
+  Alcotest.check rows "inner direction"
+    [ {|┌─ Side ─────┐|}
+    ; {|│┌───┐  ┌───┐│|}
+    ; {|││ A ├─>┤ B ││|}
+    ; {|│└───┘  └───┘│|}
+    ; {|└────────────┘|}
+    ]
+    (render "graph TD\nsubgraph One [\"Side\"]\ndirection LR\nA --> B\nend")
+
+(* The box is the item, so a line from outside to a member would have to
+   cross a border the box owns. Rather than draw that, the refusal names
+   both ends: naming the subgraph on one side is what draws the link. *)
+let test_an_edge_that_crosses_a_subgraph_boundary_is_refused () =
+  match failure "graph TD\nsubgraph One\nA --> B\nend\nB --> C" with
+  | Mermaid.Unsupported what ->
+      Alcotest.(check bool) "names the construct" true (contains "crosses a subgraph boundary" what);
+      Alcotest.(check bool) "names both ends" true (contains "B to C" what)
+  | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not Unsupported"
+
+let test_an_end_with_no_subgraph_is_refused () =
+  match failure "graph TD\nA --> B\nend" with
+  | Mermaid.Parse_error { line; what } ->
+      Alcotest.(check int) "the end's own line" 3 line;
+      Alcotest.(check string) "says which way round" "an end with no subgraph" what
+  | Mermaid.Unsupported _ | Mermaid.Too_wide _ -> Alcotest.fail "not Parse_error"
+
+let test_a_subgraph_with_no_end_is_refused () =
+  match failure "graph TD\nsubgraph One\nA --> B" with
+  | Mermaid.Unsupported what ->
+      Alcotest.(check string) "names the subgraph left open" "subgraph One with no end" what
+  | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not Unsupported"
+
+(* An empty subgraph is a title and nothing else. It draws rather than
+   fails: the source says a group exists, and an empty group is a fact
+   about the diagram, not a mistake in it. *)
+let test_an_empty_subgraph_is_a_title_and_nothing_else () =
+  Alcotest.check rows "empty"
+    [ {|┌─ nothing here ─┐|}; {|└────────────────┘|} ]
+    (render "graph TD\nsubgraph Empty [\"nothing here\"]\nend")
+
+(* A subgraph is laid out inside a budget two cells smaller than the pane,
+   for its own border. The reader has the pane, not the budget, so the
+   refusal counts the border in and names the width they can see. *)
+let test_a_subgraph_too_wide_counts_its_border_and_names_the_pane () =
+  match
+    failure ~cols:30
+      "graph TD\nsubgraph Wide [\"w\"]\nA[\"a label that is far too wide for this pane\"]\nend"
+  with
+  | Mermaid.Too_wide { cells; cols; turning_it_fits = _ } ->
+      Alcotest.(check int) "the pane the reader has" 30 cols;
+      (* The node alone needs 46; the box around it needs two more. *)
+      Alcotest.(check int) "the box, not the budget handed down" 48 cells
+  | Mermaid.Unsupported _ | Mermaid.Parse_error _ -> Alcotest.fail "not Too_wide"
+
+(* A quoted label runs to its quote, so a bracket inside it is text. The
+   keeper diagram that prompted this work labels every node this way. *)
+let test_a_quoted_label_may_hold_a_bracket () =
+  Alcotest.check rows "bracket in a label"
+    [ {|┌──────────────────────┐|}
+    ; {|│ fixed [HOLD: see #1] │|}
+    ; {|└──────────────────────┘|}
+    ]
+    (render "graph TD\nA[\"fixed [HOLD: see #1]\"]")
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -397,6 +524,27 @@ let () =
         ; Alcotest.test_case "turning is not offered when it does not help" `Quick
             test_turning_is_not_offered_when_it_does_not_help
         ; Alcotest.test_case "a self edge is refused" `Quick test_a_self_edge_is_refused
+        ; Alcotest.test_case "an edge that crosses a subgraph boundary is refused" `Quick
+            test_an_edge_that_crosses_a_subgraph_boundary_is_refused
+        ; Alcotest.test_case "an end with no subgraph is refused" `Quick
+            test_an_end_with_no_subgraph_is_refused
+        ; Alcotest.test_case "a subgraph with no end is refused" `Quick
+            test_a_subgraph_with_no_end_is_refused
+        ] )
+    ; ( "subgraphs"
+      , [ Alcotest.test_case "a subgraph draws a titled box around its members" `Quick
+            test_a_subgraph_draws_a_titled_box_around_its_members
+        ; Alcotest.test_case "a nested subgraph is a box inside a box" `Quick
+            test_a_nested_subgraph_is_a_box_inside_a_box
+        ; Alcotest.test_case "an edge may name a subgraph" `Quick test_an_edge_may_name_a_subgraph
+        ; Alcotest.test_case "direction inside a subgraph turns that box only" `Quick
+            test_direction_inside_a_subgraph_turns_that_box_only
+        ; Alcotest.test_case "an empty subgraph is a title and nothing else" `Quick
+            test_an_empty_subgraph_is_a_title_and_nothing_else
+        ; Alcotest.test_case "a subgraph too wide counts its border and names the pane" `Quick
+            test_a_subgraph_too_wide_counts_its_border_and_names_the_pane
+        ; Alcotest.test_case "a quoted label may hold a bracket" `Quick
+            test_a_quoted_label_may_hold_a_bracket
         ] )
     ; ( "reading"
       , [ Alcotest.test_case "statements split on semicolons and skip comments" `Quick

@@ -576,7 +576,7 @@ let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
 
 (* The WARN names the runtime being left and the runtime being taken. It used to
    print [assignment_id] on the left, which for a keeper whose assignment is a
-   bare runtime id reads as a reroute from a runtime to itself — the "kimi -> kimi"
+   bare runtime id reads as a reroute from a runtime to itself — the "<id> -> <id>"
    lines that made a working reroute look like a no-op. The assignment is still
    reported, as the assignment. *)
 let first_runtime_after_modality_reroute ~keeper_name ~assignment_id

@@ -51,7 +51,7 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 | `BrowserTabs` | `masc_browser_tabs` | 양쪽: 탭 목록과 live 연결 식별자 탐색 |
 | `BrowserRead` | `masc_browser_read` | 양쪽: 텍스트·보이는 요소·viewport PNG 읽기 |
 | `BrowserInteract` | `masc_browser_interact` | 양쪽: 명시적으로 선택한 탭 click·fill·scroll |
-| `BrowserSession` | `masc_browser_session` | automation: 세션 열기/닫기 |
+| `BrowserSession` | `masc_browser_session` | automation: 세션 열기/닫기/상태 확인 |
 | `BrowserGoto` | `masc_browser_goto` | automation: HTTP(S) URL로 이동 |
 | `BrowserAct` | `masc_browser_act` | automation: 탭 열기/닫기, click·fill·press·select·scroll·back·forward·reload |
 

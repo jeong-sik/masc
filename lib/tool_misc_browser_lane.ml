@@ -107,9 +107,14 @@ let handle_session ~tool_name ~start_time args : Tool_result.result =
   | "close" ->
     answer_to_result ~tool_name ~start_time
       (Browser_lane.issue ~lane_name:"automation" ~verb:Browser_lane.Session_close ~timeout_sec:60.0)
+  | "status" ->
+    (* Reads the backend's record rather than the browser, so the short timeout
+       is the lane round trip, not a page load. *)
+    answer_to_result ~tool_name ~start_time
+      (Browser_lane.issue ~lane_name:"automation" ~verb:Browser_lane.Session_status ~timeout_sec:10.0)
   | _ ->
     make_workflow_err ~tool_name ~start_time
-      "action must be one of: open, close"
+      "action must be one of: open, close, status"
 ;;
 
 let handle_goto ~tool_name ~start_time args : Tool_result.result =

@@ -41,6 +41,15 @@ let parse = function
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
+let perform request =
+  let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
+  let* target = Browser_lane.resolve_target ~lane_name ~client_id:request.client_id in
+  Browser_lane.issue_for ~target
+    ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
+      expected_url=request.expected_url; action=request.action})
+    ~timeout_sec:20.
+  |> Browser_surface.decode_answer
+
 let script = {js|function interactInPage(args) {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");

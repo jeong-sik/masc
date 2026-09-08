@@ -30,17 +30,14 @@ let temp_base_path prefix =
 
 let with_base_dir prefix f =
   let base_dir = temp_base_path prefix in
-  Fun.protect ~finally:(fun () -> try remove_tree base_dir with _ -> ()) (fun () -> f base_dir)
+  Fun.protect
+    ~finally:(fun () ->
+      try remove_tree base_dir with
+      | Sys_error _ | Unix.Unix_error _ -> ())
+    (fun () -> f base_dir)
 ;;
 
 let keeper_name = "loop-projection-fixture"
-
-let contains ~needle haystack =
-  let n = String.length needle
-  and h = String.length haystack in
-  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
-  n = 0 || at 0
-;;
 
 let start ~index ~tool_id ~tool_name =
   Agent_core.Types.ContentBlockStart
@@ -86,8 +83,8 @@ let approval_key id =
 
 let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-fixture" ~absolute_turn:7
 
-let persist ?(turn_failed = false) t ~base_dir ~key =
-  P.persist t ~base_dir ~keeper_name ~delivery_key:key ~turn_ref ~turn_failed
+let persist ?(turn_failed = false) t ~base_dir ~approval_id =
+  P.persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_failed
 ;;
 
 (* One sealed tool call with its canonical execution identity. *)
@@ -102,38 +99,36 @@ let test_continuation_rows_land_once () =
   with_base_dir "keeper-loop-projection-lands" (fun base_dir ->
     let t = P.create () in
     feed_one_sealed_call t;
-    let execution_id = Ids.Execution_id.of_string "exec-1" in
-    P.on_tool_result_ready t ~tool_call_id:"call-1" ~turn:0 ~planned_index:0 ~execution_id;
     let key = approval_key "approval-1" in
-    (match persist t ~base_dir ~key with
+    (match persist t ~base_dir ~approval_id:"approval-1" with
      | P.Projected (K.Appended _) -> ()
      | P.Projected (K.Already_present _) -> fail "first append reported as already present"
      | P.Nothing_to_project -> fail "a sealed call projected nothing"
-     | P.Projection_dropped detail -> fail detail);
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
     (match K.load ~base_dir ~keeper_name with
      | [ row ] ->
        check bool "tool role" true (K.Role.equal row.role K.Role.Tool);
        check (option string) "tool name" (Some "Edit") row.tool_call_name;
        check string "args are the row content" {|{"path":"lib/a.ml"}|} row.content;
-       check bool "canonical execution identity" true
-         (Option.equal Ids.Execution_id.equal (Some execution_id) row.execution_id);
+       check bool "delivery-only: no canonical execution identity" true
+         (Option.is_none row.execution_id);
        check bool "turn ref of the continuation turn" true
          (Option.equal Ids.Turn_ref.equal (Some turn_ref) row.turn_ref);
        (match row.delivery_provenance with
         | Some { delivery_key; transcript_slot } ->
           check bool "delivered under the approval's identity" true
             (Keeper_chat_delivery_identity.delivery_key_equal key delivery_key);
-          check bool "slot is the canonical execution" true
+          check bool "slot is the store-owned delivery ordinal" true
             (Keeper_chat_delivery_identity.transcript_slot_equal
-               (Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal = 0 })
+               (Keeper_chat_delivery_identity.Tool_delivery { ordinal = 0 })
                transcript_slot)
         | None -> fail "row carries no delivery provenance")
      | rows -> fail (Printf.sprintf "expected one tool row, got %d" (List.length rows)));
-    (match persist t ~base_dir ~key with
+    (match persist t ~base_dir ~approval_id:"approval-1" with
      | P.Projected (K.Already_present _) -> ()
      | P.Projected (K.Appended _) -> fail "a second persist appended the rows again"
      | P.Nothing_to_project -> fail "second persist saw no rows"
-     | P.Projection_dropped detail -> fail detail);
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
     check int "still one row" 1 (List.length (K.load ~base_dir ~keeper_name)))
 ;;
 
@@ -144,10 +139,10 @@ let test_rejected_mapping_drops_the_projection () =
     P.on_event t (start ~index:0 ~tool_id:"open-call" ~tool_name:"Read");
     P.on_event t (json_snapshot ~index:0 {|{"path":"partial.ml"}|});
     P.on_tool_stream_observation t (turn_collected [ 0 ]);
-    (match persist t ~base_dir ~key:(approval_key "approval-2") with
-     | P.Projection_dropped detail ->
-       check bool "the reason names the mapping" true
-         (contains ~needle:"mapping rejected" detail)
+    (match persist t ~base_dir ~approval_id:"approval-2" with
+     | P.Projection_dropped (P.Mapping_rejected _) -> ()
+     | P.Projection_dropped (P.Invalid_approval_id _ | P.Append_failed _) ->
+       fail "rejected mapping reported under another reason"
      | P.Projected _ -> fail "rejected mapping still projected rows"
      | P.Nothing_to_project -> fail "rejected mapping reported as nothing to project");
     check int "no row" 0 (List.length (K.load ~base_dir ~keeper_name)))
@@ -157,10 +152,10 @@ let test_no_tool_calls_projects_nothing () =
   with_base_dir "keeper-loop-projection-empty" (fun base_dir ->
     let t = P.create () in
     P.on_tool_stream_observation t (turn_collected []);
-    (match persist t ~base_dir ~key:(approval_key "approval-3") with
+    (match persist t ~base_dir ~approval_id:"approval-3" with
      | P.Nothing_to_project -> ()
      | P.Projected _ -> fail "a turn without tool calls projected rows"
-     | P.Projection_dropped detail -> fail detail);
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
     check int "no row" 0 (List.length (K.load ~base_dir ~keeper_name)))
 ;;
 
@@ -173,14 +168,49 @@ let test_failed_turn_keeps_only_sealed_evidence () =
     P.on_event t (start ~index:0 ~tool_id:"failed-call" ~tool_name:"Write");
     P.on_event t (json_snapshot ~index:0 {|{"path":"failed.ml"}|});
     P.on_event t (stop ~index:0);
-    (match persist ~turn_failed:true t ~base_dir ~key:(approval_key "approval-4") with
+    (match persist ~turn_failed:true t ~base_dir ~approval_id:"approval-4" with
      | P.Projected (K.Appended _) -> ()
      | P.Projected (K.Already_present _) -> fail "first append reported as already present"
      | P.Nothing_to_project -> fail "sealed evidence projected nothing"
-     | P.Projection_dropped detail -> fail detail);
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
     (match K.load ~base_dir ~keeper_name with
      | [ row ] -> check (option string) "only the sealed call" (Some "Edit") row.tool_call_name
      | rows -> fail (Printf.sprintf "expected the sealed row only, got %d" (List.length rows))))
+;;
+
+let test_invalid_approval_id_drops_the_projection () =
+  with_base_dir "keeper-loop-projection-bad-id" (fun base_dir ->
+    let t = P.create () in
+    feed_one_sealed_call t;
+    (match persist t ~base_dir ~approval_id:"" with
+     | P.Projection_dropped (P.Invalid_approval_id _) -> ()
+     | P.Projection_dropped (P.Mapping_rejected _ | P.Append_failed _) ->
+       fail "an unusable approval id was reported under another reason"
+     | P.Projected _ -> fail "rows were appended under an unusable approval id"
+     | P.Nothing_to_project -> fail "a sealed call reported as nothing to project");
+    check int "no row" 0 (List.length (K.load ~base_dir ~keeper_name)))
+;;
+
+(* A rejection belongs to the attempt that produced it. The next attempt
+   boundary quarantines that attempt's rows, so a clean second attempt is
+   projected on its own. *)
+let test_a_new_attempt_clears_the_previous_rejection () =
+  with_base_dir "keeper-loop-projection-attempt-reset" (fun base_dir ->
+    let t = P.create () in
+    P.on_tool_stream_observation t (attempt_started ~lane_attempt_index:0);
+    P.on_event t (start ~index:0 ~tool_id:"open-call" ~tool_name:"Read");
+    P.on_event t (json_snapshot ~index:0 {|{"path":"partial.ml"}|});
+    P.on_tool_stream_observation t (turn_collected [ 0 ]);
+    P.on_tool_stream_observation t (attempt_started ~lane_attempt_index:1);
+    feed_one_sealed_call t;
+    (match persist t ~base_dir ~approval_id:"approval-5" with
+     | P.Projected (K.Appended _) -> ()
+     | P.Projected (K.Already_present _) -> fail "first append reported as already present"
+     | P.Nothing_to_project -> fail "the clean attempt projected nothing"
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
+    (match K.load ~base_dir ~keeper_name with
+     | [ row ] -> check (option string) "only the clean attempt's call" (Some "Edit") row.tool_call_name
+     | rows -> fail (Printf.sprintf "expected the clean attempt's row only, got %d" (List.length rows))))
 ;;
 
 let () =
@@ -195,6 +225,10 @@ let () =
             test_no_tool_calls_projects_nothing
         ; test_case "a failed turn keeps only sealed evidence" `Quick
             test_failed_turn_keeps_only_sealed_evidence
+        ; test_case "an unusable approval id drops the projection" `Quick
+            test_invalid_approval_id_drops_the_projection
+        ; test_case "a new attempt clears the previous rejection" `Quick
+            test_a_new_attempt_clears_the_previous_rejection
         ] )
     ]
 ;;

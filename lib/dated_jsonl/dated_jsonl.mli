@@ -244,6 +244,34 @@ val fold_range_appended
     zero, so such a caller double-counts rather than under-counts. Compare the
     returned cursor against the one passed to detect it. *)
 
+type append_cursor
+(** File identities, observed sizes and complete-line boundaries from one
+    successful strict incremental read. Owned by this module. *)
+
+type 'a appended_read =
+  | Appended of 'a * append_cursor
+  | Cursor_invalidated
+
+val fold_range_appended_result :
+  t -> since:string -> until:string -> cursor:append_cursor option ->
+  init:'a -> f:('a -> Yojson.Safe.t -> 'a) ->
+  ('a appended_read, read_error) result
+(** Strict incremental read using the same complete range as
+    {!range_day_file_paths_result}. Missing previous files, replacement,
+    shrinkage or a same-size metadata change invalidate the cursor before
+    invoking [f]. The caller must discard its accumulator and read with
+    [cursor:None]. New files and appended bytes are read without replaying
+    retained files. In-place prefix edits combined with growth are outside
+    the append-only file contract.
+
+    Reads use verified regular-file handles and stop at captured sizes;
+    incomplete trailing lines are retried on the next call. A file or layout
+    change observed during the read is an error, as are inspection/open/read
+    failures. [f] may already have run before an error or exception, so a
+    mutable accumulator must be discarded in either case. Only [Appended]
+    authorizes retaining the returned cursor. Malformed JSON rows are skipped
+    as in {!fold_range_appended}; callback exceptions propagate unchanged. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

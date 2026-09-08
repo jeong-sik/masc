@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include <caml/alloc.h>
 #include <caml/fail.h>
@@ -67,7 +68,7 @@ static void free_strings(char **strings)
   caml_stat_free(strings);
 }
 
-/* masc_posix_spawn executable argv env cwd_opt fds
+/* masc_posix_spawn executable argv env (cwd_opt, own_group) fds
    fds: (child_fd, parent_fd) list. Equal fds are inherited in place;
    others are dup2'd. Every other descriptor is closed in the child.
 
@@ -101,10 +102,12 @@ static void free_strings(char **strings)
 
    Returns the child's pid or raises Unix.Unix_error with the errno
    posix_spawn reported. */
-CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
-                                value v_cwd, value v_fds)
+static value spawn_process(value v_executable, value v_argv, value v_env,
+                           value v_options, value v_fds, int search_path)
 {
-  CAMLparam5(v_executable, v_argv, v_env, v_cwd, v_fds);
+  CAMLparam5(v_executable, v_argv, v_env, v_options, v_fds);
+  value v_cwd = Field(v_options, 0);
+  int own_group = Bool_val(Field(v_options, 1));
   char *executable = caml_stat_strdup(String_val(v_executable));
   char **argv = strings_of_array(v_argv);
   char **env = strings_of_array(v_env);
@@ -133,6 +136,10 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
     sigset_t empty;
     sigemptyset(&empty);
     rc = posix_spawnattr_setsigmask(&attr, &empty);
+    if (rc == 0 && own_group) {
+      flags |= POSIX_SPAWN_SETPGROUP;
+      rc = posix_spawnattr_setpgroup(&attr, 0);
+    }
     if (rc == 0) rc = posix_spawnattr_setflags(&attr, flags);
   }
   if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
@@ -183,7 +190,9 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
   pid_t pid = 0;
   if (rc == 0) {
     caml_enter_blocking_section();
-    rc = posix_spawn(&pid, executable, &actions, &attr, argv, env);
+    rc = search_path
+      ? posix_spawnp(&pid, executable, &actions, &attr, argv, env)
+      : posix_spawn(&pid, executable, &actions, &attr, argv, env);
     caml_leave_blocking_section();
   }
   posix_spawn_file_actions_destroy(&actions);
@@ -197,12 +206,41 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
   if (rc != 0) {
     caml_stat_free(executable);
     errno = rc;
-    uerror("posix_spawn", v_executable);
+    uerror(search_path ? "posix_spawnp" : "posix_spawn", v_executable);
   }
   caml_stat_free(executable);
   CAMLreturn(Val_int(pid));
 }
 
+CAMLprim value masc_posix_spawn(value executable, value argv, value env,
+                                value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 0);
+}
+
+/* Unix fallback retains libc's PATH lookup semantics without duplicating
+   descriptor setup or group creation. */
+CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
+                                 value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 1);
+}
+
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
+/* Observe only. The OCaml owner serializes this with group signalling and
+   final waitpid; no PID can be reused between the last signal and reap. */
+CAMLprim value masc_process_exited_without_reaping(value v_pid)
+{
+  CAMLparam1(v_pid);
+  siginfo_t info;
+  memset(&info, 0, sizeof(info));
+  int rc;
+  do {
+    rc = waitid(P_PID, (id_t)Int_val(v_pid), &info, WEXITED | WNOWAIT | WNOHANG);
+  } while (rc < 0 && errno == EINTR);
+  if (rc < 0) uerror("waitid", Nothing);
+  CAMLreturn(Val_bool(info.si_pid != 0));
+}

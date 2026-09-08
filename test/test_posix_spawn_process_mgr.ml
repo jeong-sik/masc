@@ -183,9 +183,124 @@ let test_this_spawn_does_not_inherit_an_unlisted_pipe () =
         saw_eof)
 ;;
 
+let group_fixture = {|import os, signal, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN if sys.argv[2] == "ignore" else lambda *_: sys.exit(0))
+r, w = os.pipe()
+child = os.fork()
+if child == 0:
+    os.close(r)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    for fd in (0, 1, 2):
+        os.close(fd)
+    with open(sys.argv[1], "w") as f:
+        f.write(str(os.getpid()))
+    os.write(w, b"r")
+    os.close(w)
+    time.sleep(60)
+    os._exit(0)
+os.close(w)
+os.read(r, 1)
+os.close(r)
+if sys.argv[2] == "exit":
+    sys.exit(0)
+while True:
+    signal.pause()
+|}
+
+let with_group_fixture f =
+  let marker = Filename.temp_file "foreground-group" ".pid" in
+  Sys.remove marker;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () -> Eio_main.run (fun env -> f env marker))
+;;
+
+let wait_for_marker clock marker =
+  Eio.Time.with_timeout_exn clock 10. (fun () ->
+    let rec loop () =
+      if Sys.file_exists marker && (Unix.stat marker).Unix.st_size > 0 then ()
+      else (Eio.Time.sleep clock 0.01; loop ()) in
+    loop ());
+  let ic = open_in marker in
+  Fun.protect ~finally:(fun () -> close_in ic) (fun () -> int_of_string (input_line ic))
+;;
+
+let assert_descendant_stopped env pid =
+  (* Orphan zombies may await the platform's init reaper. They cannot run;
+     group cleanup does not claim to reap a process that is not our child. *)
+  let stopped () =
+    let state = Eio.Process.parse_out (Eio.Stdenv.process_mgr env)
+      Eio.Buf_read.take_all ~is_success:(fun _ -> true)
+      [ "/bin/ps"; "-o"; "stat="; "-p"; string_of_int pid ] |> String.trim in
+    state = "" || state.[0] = 'Z' in
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
+    let rec loop () =
+      if stopped () then () else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; loop ()) in
+    loop ())
+;;
+
+let test_group_term_keeps_owner_after_leader_exit ~mode () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+    Eio.Switch.run (fun sw ->
+      let sibling = Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/sleep"; "60" ] in
+      let proc = Eio.Process.spawn ~sw mgr [ "python3"; "-c"; group_fixture; marker; mode ] in
+      let descendant = wait_for_marker clock marker in
+      let requested_at = Eio.Time.now clock in
+      Eio.Process.signal proc Sys.sigterm;
+      ignore (Eio.Process.await proc);
+      check bool "leader exit does not retire the group TERM grace" true
+        (Eio.Time.now clock -. requested_at >= 2.);
+      assert_descendant_stopped env descendant;
+      Unix.kill (Eio.Process.pid sibling) 0;
+      Eio.Process.signal sibling Sys.sigkill))
+;;
+
+let test_group_normal_exit_reaps_in_long_lived_switch () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+    Eio.Switch.run (fun sw ->
+      for _ = 1 to 12 do
+        let proc = Eio.Process.spawn ~sw mgr [ "/bin/true" ] in
+        ignore (Eio.Process.await proc);
+        (match Unix.waitpid [ Unix.WNOHANG ] (Eio.Process.pid proc) with
+         | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+         | _ -> fail "foreground leader left unreaped in a live switch")
+      done;
+      let proc = Eio.Process.spawn ~sw mgr [ "python3"; "-c"; group_fixture; marker; "exit" ] in
+      let descendant = wait_for_marker clock marker in
+      ignore (Eio.Process.await proc);
+      assert_descendant_stopped env descendant))
+;;
+
+let test_native_command_cancel_cleans_closed_pipe_descendant () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
+      ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock;
+    let descendant = ref None in
+    Eio.Fiber.first
+      (fun () -> ignore (Process_eio.run_argv_with_status_split
+         [ "python3"; "-c"; group_fixture; marker; "wait" ]))
+      (fun () -> descendant := Some (wait_for_marker clock marker));
+    match !descendant with
+    | Some pid -> assert_descendant_stopped env pid
+    | None -> fail "command exited before cancellation fixture was ready")
+;;
+
 let () =
   run "posix_spawn_process_mgr"
-    [ ( "parity with eio_posix"
+    [ ( "foreground group ownership",
+        [ test_case "TERM leader exits before closed-pipe descendant" `Quick
+            (test_group_term_keeps_owner_after_leader_exit ~mode:"wait")
+        ; test_case "TERM-ignoring leader still reaches group escalation" `Quick
+            (test_group_term_keeps_owner_after_leader_exit ~mode:"ignore")
+        ; test_case "normal leaders reap inside a long-lived switch" `Quick
+            test_group_normal_exit_reaps_in_long_lived_switch
+        ; test_case "native command cancellation cleans its group" `Quick
+            test_native_command_cancel_cleans_closed_pipe_descendant ])
+    ; ( "parity with eio_posix"
       , [ test_case "captures stdout" `Quick test_stdout_capture
         ; test_case "reports the exit status" `Quick test_exit_status
         ; test_case "honours cwd and env" `Quick test_cwd_and_env

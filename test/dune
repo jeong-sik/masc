@@ -1701,6 +1701,8 @@
   test_set_util
   test_board_core_payload)
  (libraries
+  ; The fallback descendant fixture uses the monotonic deadline owner.
+  masc.monotonic_deadline
  masc_test_deps
   masc.masc_webmcp
   masc_test_runtime

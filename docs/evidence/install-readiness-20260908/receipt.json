@@ -1,0 +1,43 @@
+{
+  "source_commit": "6b07cc4c38c9d6eec157330427084b0997b6fdd0",
+  "version": "0.34.0",
+  "workflow_run": 34180682229,
+  "artifact_id": 10038983632,
+  "platform": "macos-arm64",
+  "binary_sha256": "0be0a433b8c867244c51e2d44e1e58210f68f26ff9c994943407df6a60922797",
+  "native_install_smoke": "PASS: isolated HOME, no provider credentials, server health and installed dashboard bytes",
+  "config_files": 331,
+  "config_categories": {
+    "agent-core-models-overlay.toml": 1,
+    "runtime.toml": 1,
+    "tools": 161,
+    "identity": 89,
+    "mcp": 2,
+    "prompts": 24,
+    "themes": 53
+  },
+  "keeper_manifests": 0,
+  "skill_packages": 0,
+  "apple_container_version": "1.3.1",
+  "apple_image": "masc-sandbox:general",
+  "apple_image_digest": "sha256:8f75d07123d72a4b02c9c09e19d74f91d0b42301f8bf508fb7dfcde0aacb60bb",
+  "apple_image_probe": "PASS: existing image basic tools, read-only root; no model turn",
+  "not_proven": [
+    "new image build on macOS",
+    "Linux microVM",
+    "authenticated Keeper first turn",
+    "final combined release with PR34245 and later fixes"
+  ],
+  "linux_x64": {
+    "job_id": 101919061507,
+    "conclusion": "success",
+    "completed_at": "2026-09-08T02:53:26Z",
+    "checks": [
+      "native runner install",
+      "fresh Ubuntu24.04 container install",
+      "guest shim checksum",
+      "server health",
+      "installed dashboard bytes"
+    ]
+  }
+}

@@ -13,6 +13,9 @@
 - Repair interactive provider selection, explicit-provider configuration changes and login-probe reporting. Invalid input can be corrected; unsupported probes remain unverified.
 - Correct Keeper TOML and MCP bearer-header examples, including generated Claude Desktop configuration, and complete source/browser onboarding instructions.
 
+- Route `sandbox-image --runtime nerdctl_kata` to nerdctl rather than Docker, and add release image/tool smoke. Linux Kata Keeper work volumes remain unsupported.
+- Document initial prompts, skill discovery and empty/default team rosters; stop assuming fresh Keepers already have GitHub credentials.
+
 ### Runtime changes since 0.33.0
 
 - **The embedded tree is the managed asset set; the hand-written manifest is

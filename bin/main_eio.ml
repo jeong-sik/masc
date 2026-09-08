@@ -2214,18 +2214,15 @@ let sandbox_image_build_in_a_directory_exit ~cli ~tag =
         Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" cli n;
         Cmd.Exit.some_error)
 
-let sandbox_image_build_exit ~tag =
-  let argv =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @ Keeper_sandbox_image.build_argv ~tag
-  in
-  match argv with
+let sandbox_image_build_exit ~command ~tag =
+  match command with
   | [] ->
-    prerr_endline "sandbox-image: no docker command resolved";
+    prerr_endline "sandbox-image: no image build command resolved";
     Cmd.Exit.some_error
   | bin :: _ ->
-    (* docker exiting first would otherwise kill this process mid-write, and
-       the exit status we want to report is docker's own. *)
+    let argv = command @ Keeper_sandbox_image.build_argv ~tag in
+    (* The runtime exiting first would otherwise kill this process mid-write, and
+       the exit status we want to report is the runtime's own. *)
     let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
     let read_fd, write_fd = Unix.pipe () in
     Unix.set_close_on_exec write_fd;
@@ -2243,17 +2240,18 @@ let sandbox_image_build_exit ~tag =
     (match status with
      | Unix.WEXITED 0 ->
        Printf.printf
-         "built %s\n\
+         "built %s via %s\n\
           Point a Keeper at it with sandbox_image = %S in its TOML, or set \
           MASC_KEEPER_SANDBOX_DOCKER_IMAGE to make it that Keeper's default.\n"
          tag
+         (String.concat " " command)
          tag;
        Cmd.Exit.ok
      | Unix.WEXITED code ->
-       Printf.eprintf "sandbox-image: docker build exited %d\n" code;
+       Printf.eprintf "sandbox-image: %s build exited %d\n" bin code;
        Cmd.Exit.some_error
      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-       Printf.eprintf "sandbox-image: docker build stopped by signal %d\n" n;
+       Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" bin n;
        Cmd.Exit.some_error)
 
 (* Which store to build into. Docker stays the default because that is where
@@ -2263,10 +2261,14 @@ let sandbox_image_build_exit ~tag =
    only be made by naming that runtime here. *)
 let sandbox_image_build_for_runtime ~runtime ~tag =
   match runtime with
-  | None -> sandbox_image_build_exit ~tag
+  | None ->
+    sandbox_image_build_exit
+      ~command:(Keeper_sandbox_runtime.docker_command_argv ()) ~tag
   | Some backend ->
     (match Keeper_microvm_backend.recipe_delivery backend with
-     | Keeper_microvm_backend.On_stdin -> sandbox_image_build_exit ~tag
+     | Keeper_microvm_backend.On_stdin ->
+       sandbox_image_build_exit
+         ~command:[ Keeper_microvm_backend.cli_name backend ] ~tag
      | Keeper_microvm_backend.In_a_context_directory ->
        sandbox_image_build_in_a_directory_exit
          ~cli:(Keeper_microvm_backend.cli_name backend)
@@ -2307,7 +2309,9 @@ let sandbox_image_cmd =
         "This builds the other one: bash, ripgrep and git on a Debian base, \
          which is what a turn needs to read, search and edit a repository. The \
          recipe is embedded in this binary and goes straight to the runtime's \
-         build command, so no checkout and no registry is involved."
+         build command, so no source checkout or prepublished MASC image is \
+         needed. The initial Debian base image pull and package downloads \
+         require network access."
     ; `P
         "It carries gh and python3 because MASC itself asks the guest for \
          them: it mounts a GitHub CLI config there, and its own \

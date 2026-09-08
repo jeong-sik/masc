@@ -23,6 +23,20 @@ let with_workspace f =
     (fun () ->
       let config = Workspace.default_config dir in
       ignore (Workspace.init config ~agent_name:(Some "keeper-probe-agent"));
+      (* Config owns the sandbox_profile, and since #32078 a keeper without
+         one has no effective meta -- so the tool's own path resolution
+         refuses before it reaches the question, and every case that hands it
+         a path reads that refusal instead of the one it asked about. *)
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin
+        (Filename.concat keepers_dir "probe.toml")
+        (fun channel ->
+          Out_channel.output_string
+            channel
+            "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"code query fixture\"\n");
       f env config)
 ;;
 

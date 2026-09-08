@@ -66,12 +66,9 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
 
           iTerm2 is left on the mosaic: its protocol carries a file, not a
           pixel buffer, so it needs the encoder this path avoids. *)
-       let box =
-         { Masc_tui_graphics.columns = max 1 cols; rows = max 1 screen_rows }
-       in
        let escape =
          Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
-           ~pixel_height:f.msx_height box
+           ~pixel_height:f.msx_height ~rows:(max 1 screen_rows)
        in
        if String.equal escape "" then for _ = 1 to screen_rows do blank_row () done
        else begin

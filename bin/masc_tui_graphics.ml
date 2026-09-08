@@ -83,7 +83,7 @@ let payload_media_type = "image/png"
    send RGB bytes under [f=100], which is exactly the silent drop the comment
    above warns about. A caller holding a frame reaches for this one because
    it is the one that asks for the frame's dimensions. *)
-let place_rgb ~data ~pixel_width ~pixel_height { columns; rows } =
+let place_rgb ~data ~pixel_width ~pixel_height ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -94,9 +94,8 @@ let place_rgb ~data ~pixel_width ~pixel_height { columns; rows } =
     if offset = 0
     then
       Buffer.add_string out
-        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T,c=%d,r=%d,q=2,m=%d;%s%s" apc
-           (max 1 pixel_width) (max 1 pixel_height) (max 1 columns) (max 1 rows)
-           more
+        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 pixel_width) (max 1 pixel_height) (max 1 rows) more
            (String.sub encoded offset size)
            st)
     else
@@ -114,7 +113,7 @@ let place_rgb ~data ~pixel_width ~pixel_height { columns; rows } =
   end
 ;;
 
-let place ~data { columns; rows } =
+let place ~data ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -127,8 +126,8 @@ let place ~data { columns; rows } =
        complete and may be drawn. *)
     if offset = 0 then
       Buffer.add_string out
-        (Printf.sprintf "%sf=100,a=T,c=%d,r=%d,q=2,m=%d;%s%s" apc
-           (max 1 columns) (max 1 rows) more
+        (Printf.sprintf "%sf=100,a=T,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 rows) more
            (String.sub encoded offset size)
            st)
     else

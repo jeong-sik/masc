@@ -6713,7 +6713,9 @@ let draw_image state ?(caption = []) ~refuse ~title data =
         | Masc_tui_graphics.ITerm2_protocol ->
             Masc_tui_graphics.iterm2_place ~data box
         | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
-            Masc_tui_graphics.place ~data box
+            (* Kitty derives the width from the row count, so the image keeps
+               its shape instead of being stretched into the box. *)
+            Masc_tui_graphics.place ~data ~rows:box.Masc_tui_graphics.rows
       in
       let header =
         String.concat ""

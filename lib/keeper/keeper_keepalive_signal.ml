@@ -214,6 +214,22 @@ let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
 let post_heartbeat_tick ~(wakeup : bool Atomic.t) = ignore wakeup
   [@@fsm_guard "Atomic.get wakeup = false"]
 
+(* Single loop-owned periodic boundary. Attention hints neither consume nor
+   reset it. The supplied times are monotonic elapsed seconds in production. *)
+type periodic_cadence = Initial_due of float | After_periodic of float
+
+let periodic_due_at ~interval = function
+  | Initial_due at -> at
+  | After_periodic completed_at -> completed_at +. interval
+
+let periodic_remaining ~now ~interval cadence =
+  Float.max 0. (periodic_due_at ~interval cadence -. now)
+
+let periodic_is_due ~now ~interval cadence =
+  now >= periodic_due_at ~interval cadence
+
+let consume_periodic ~now = After_periodic now
+
 type sleep_outcome =
   | Stopped
   | Woken

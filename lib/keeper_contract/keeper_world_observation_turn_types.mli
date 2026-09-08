@@ -50,6 +50,7 @@ type turn_reason =
 type skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
+  | No_periodic_or_scheduled_stimulus
   | Reactive_disabled
 
 type turn_verdict =

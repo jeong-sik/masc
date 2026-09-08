@@ -79,6 +79,17 @@ blocking_lints() {
   run_lint "Prompt source words agree" \
     bash scripts/lint/prompt-source-words-agree.sh
 
+  # Both gates read source text only, so they belong in the blocking suite.
+  # Until this change nothing ran either of them: the wiring checker's name
+  # pattern did not include the word "gate".
+  run_lint "Keeper host_cwd leak gate" \
+    bash scripts/keeper-cwd-leak-gate.sh
+  run_self_test_when_changed "Turn-path provider-agnostic self-test" \
+    scripts/turn-path-provider-agnostic-gate.sh \
+    bash scripts/turn-path-provider-agnostic-gate.sh --self-test
+  run_lint "Turn-path provider-agnostic gate" \
+    bash scripts/turn-path-provider-agnostic-gate.sh
+
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
   # "run" reports a failure the change did not cause, which is how a report

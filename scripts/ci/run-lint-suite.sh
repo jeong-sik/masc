@@ -370,6 +370,13 @@ blocking_pr_lints() {
   # Dashboard module reports it.
   run_lint "Dashboard env knob count" \
     bash scripts/lint-timeout-env-count.sh --strict
+  # Green for the first time. It read 11 sites, of which two were the
+  # docstring of the module written to replace this anti-pattern -- its
+  # exclusion glob said lib/telemetry_observe and the file is at
+  # lib/workspace/ -- and one was a comment saying a bare `try ... with _ ->
+  # ()` would swallow cancellation. The remaining eight are teardown paths
+  # and each now carries its reason on the line.
+  run_lint "Silent failure" bash scripts/check_silent_failure.sh --strict
   # A per-pattern ratchet over dashboard/src for Tailwind spellings whose
   # replacement already exists. It was reporting one unit of slack --
   # text-px-literal measured 50 against a baseline of 51 -- which is one free

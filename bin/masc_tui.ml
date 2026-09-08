@@ -6752,7 +6752,7 @@ let download_remote_image url =
     | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
         Ok target_file
     | _ ->
-        (try Sys.remove target_file with _ -> ());
+        (try Sys.remove target_file with _ -> ())  (* @observe-allowed: removing a partial download on the failure path; the caller's error is the download failure, not this *);
         Error "could not download remote image"
 
 let convert_to_png input_path =
@@ -6778,7 +6778,7 @@ let convert_to_png input_path =
           | Unix.WEXITED 0 when Sys.file_exists target_png && (Unix.stat target_png).st_size > 0 ->
               Ok target_png
           | _ ->
-              (try Sys.remove target_png with _ -> ());
+              (try Sys.remove target_png with _ -> ())  (* @observe-allowed: this converter failed and the next is tried; the discard says nothing about that attempt *);
               try_cmd rest
     in
     try_cmd commands

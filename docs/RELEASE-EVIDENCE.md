@@ -39,6 +39,26 @@ scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/lo
 위 명령은 이미 빌드된 바이너리에 사용합니다. 코딩 에이전트는 로컬 빌드 대신
 `Release` workflow의 `workflow_dispatch`로 현재 브랜치의 바이너리와 증거를 생성합니다.
 
+## One-commit candidate verification
+
+태그를 만들기 전 다음 명령으로 검증할 브랜치의 한 커밋을 선택합니다.
+
+```bash
+gh workflow run release-candidate.yml --ref main
+```
+
+이 실행은 같은 커밋의 기존 `CI`, 전체 `Test`, 4개 플랫폼 `Release` 설치
+검증과 최종 배포 자산 조립을 함께 호출합니다. 부분 suite를 선택하는
+입력은 없습니다. 기존
+`test/ci-known-failures.txt` 정책은 그대로 적용되므로 전체 Test 통과를
+모든 알려진 결함의 해결로 해석하지 않습니다.
+
+`candidate-verification-<sha>` artifact는 커밋과 세 결과를 기록합니다.
+실패·취소·건너뜀은 성공으로 기록하지 않습니다. 공개 Release는 생성하지
+않으며, 태그 push의 게시 경로만 유지합니다. 새 main 커밋을 태그할 때는
+그 커밋으로 다시 실행해야 합니다. 과거 freeze 브랜치의 초록 결과를
+현재 main의 증거로 재사용하지 않습니다.
+
 ## Workflow Contract
 
 - [`Release`](../.github/workflows/release.yml)는 macOS ARM64/x64와 Linux ARM64/x64를 모두 빌드한다. 각 job은 `release-evidence-<arch>.md`와 raw captures를 `masc-<arch>` Actions artifact에 업로드한다.

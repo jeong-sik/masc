@@ -37,6 +37,17 @@ name: Test
 # backend difference from a scheduling one.
 
 on:
+  workflow_call:
+    inputs:
+      candidate_verification:
+        type: boolean
+        default: false
+      suite:
+        type: string
+        default: ""
+      eio_backend:
+        type: string
+        default: ""
   schedule:
     # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
     - cron: "43 17 * * *"
@@ -85,7 +96,7 @@ permissions:
 # with '' by coercing both to 0, so the test below is false and the
 # scheduled run keeps its lane.
 concurrency:
-  group: ${{ inputs.suite != '' && format('test-targeted-{0}', github.run_id) || format('test-{0}', github.event_name) }}
+  group: ${{ inputs.candidate_verification && format('candidate-test-{0}', github.run_id) || inputs.suite != '' && format('test-targeted-{0}', github.run_id) || format('test-{0}', github.event_name) }}
   cancel-in-progress: true
 
 jobs:

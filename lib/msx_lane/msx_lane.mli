@@ -102,10 +102,15 @@ val press :
   keys:key list ->
   hold_frames:int ->
   step_frames:int ->
+  sequence:bool ->
   (observation, error) result
-(** Holds [keys] for [hold_frames], then runs the rest of [step_frames]
-    released. [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key
-    the matrix has no place for is refused before anything is pressed. *)
+(** With [sequence] false, holds every key in [keys] together for
+    [hold_frames], then runs the rest of [step_frames] released -- a chord.
+    With [sequence] true, taps each key in turn (down [hold_frames], up, then
+    the rest of [step_frames] idle) so [keys] is a menu sequence, not a chord;
+    the call advances [List.length keys * step_frames] frames.
+    [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key the matrix
+    has no place for is refused before anything is pressed. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

@@ -174,7 +174,7 @@ let test_every_block_ranks_apart () =
     (List.length (List.sort_uniq Int.compare ranks))
 ;;
 
-(* The measured fix: over 386 sangsu turns the 51,518 B memory block changed
+(* The measured fix: over 386 fixture_worker turns the 51,518 B memory block changed
    65 times while the 81 B clock line ahead of it changed 306, so every turn
    re-billed the memory block. Whatever else moves, the rarely-changing blocks
    stay in front of the two that change nearly every turn. *)

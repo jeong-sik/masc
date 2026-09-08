@@ -767,7 +767,7 @@ let runtime_id_of_masc_internal_error = function
    defers the next cycle to that sibling. The identical second generation
    itself is the dialect's silent drop, tracked separately.
 
-   The remaining shape got the same hint on 2026-09-05 (#33260): sangsu on
+   The remaining shape got the same hint on 2026-09-05 (#33260): one measured Keeper on
    ollama_cloud deepseek-v4-flash-0731 repeated one sentence up to the output
    cap right after a Read tool call, the accept gate rejected the response at
    [MaxTokens] with deliverable content, the same-run retry was deferred

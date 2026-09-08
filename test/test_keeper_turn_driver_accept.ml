@@ -470,7 +470,7 @@ let test_a_rejected_response_leaves_the_checkpoint_either_way () =
     Alcotest.fail "the rejected response must leave the checkpoint"
 
 (* The cut has to reach the durable checkpoint, or the rejected text is back
-   as input next turn: sangsu carried the same 31 KB collapse four times,
+   as input next turn: fixture_worker carried the same 31 KB collapse four times,
    2026-09-05 (#33267). The drop is persisted through the keeper's own sink
    under its own stage, at the turn count of the checkpoint it replaces. *)
 let test_a_dropped_response_is_written_through_the_sink () =

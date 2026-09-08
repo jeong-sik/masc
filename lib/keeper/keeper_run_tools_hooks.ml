@@ -890,7 +890,7 @@ let assemble_hooks
                   (* The assembly is a cached prefix, so a block that changes
                      every turn re-bills every block behind it. Order by how
                      often each one actually changes rather than by the order
-                     the producers happened to run in: over 386 sangsu turns
+                     the producers happened to run in: over 386 one measured Keeper turns
                      the 51,518 B memory block changed 65 times while the 81 B
                      clock line ahead of it changed 306, and that turn paid
                      314,080 cache-creation tokens against 50,788 reads.

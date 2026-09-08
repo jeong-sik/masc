@@ -58,16 +58,16 @@ let chunks names values =
 
 let lane = "agent_core-glm-coding.glm-5.3"
 
-(* sangsu is mid-turn: one call returned, a second still out. rondo settled a
+(* fixture_worker is mid-turn: one call returned, a second still out. fixture_settled settled a
    turn earlier. polisher is waiting on an approval. quiet-one never acted.
-   The full list is eight rows: four fleet rows, the rule, and sangsu's
+   The full list is eight rows: four fleet rows, the rule, and fixture_worker's
    three focus rows (its header, Read, Execute). *)
 let fixture_entries =
   entries
-        [ (900., settled ~at:900. "rondo")
+        [ (900., settled ~at:900. "fixture_settled")
         ; ( 905.
           , Observer.Keeper_tool_call
-              { Observer.kt_keeper = "rondo"
+              { Observer.kt_keeper = "fixture_settled"
               ; kt_turn = None
               ; kt_tool = "keeper_artifact_read"
               ; kt_duration_ms = Some 5.
@@ -82,16 +82,16 @@ let fixture_entries =
               } )
         ; ( 980.
           , agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
-              ~correlation:"trace-sangsu" lane )
+              ~correlation:"trace-fixture_worker" lane )
         ; ( 981.
           , agent_core ~tool:"Read" ~turn:5 ~tool_use_id:"a" ~at:981.
-              ~correlation:"trace-sangsu" lane )
+              ~correlation:"trace-fixture_worker" lane )
         ; ( 983.
           , agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:5
-              ~tool_use_id:"a" ~at:983. ~correlation:"trace-sangsu" lane )
+              ~tool_use_id:"a" ~at:983. ~correlation:"trace-fixture_worker" lane )
         ; ( 990.
           , agent_core ~tool:"Execute" ~turn:5 ~tool_use_id:"b" ~at:990.
-              ~correlation:"trace-sangsu" lane )
+              ~correlation:"trace-fixture_worker" lane )
         ]
 
 let fixture : Pane.input =
@@ -101,13 +101,13 @@ let fixture : Pane.input =
   ; feed = Pane.Feed_live 1_234
   ; keepers =
       [ keeper "quiet-one" ~tone:Pane.Dim
-      ; keeper "sangsu"
-      ; keeper "rondo"
+      ; keeper "fixture_worker"
+      ; keeper "fixture_settled"
       ; keeper "polisher"
       ]
-  ; selected = Some "sangsu"
+  ; selected = Some "fixture_worker"
   ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
-  ; chunks = chunks [ "quiet-one"; "sangsu"; "rondo"; "polisher" ] fixture_entries
+  ; chunks = chunks [ "quiet-one"; "fixture_worker"; "fixture_settled"; "polisher" ] fixture_entries
   ; changes = Pane.Changes_absent
   }
 
@@ -237,7 +237,7 @@ let dead_fixture : Pane.input =
       :: keeper "mute"
       :: fixture.Pane.keepers
   ; selected = Some "goner"
-  ; chunks = chunks [ "goner"; "bare"; "mute"; "quiet-one"; "sangsu"; "rondo"; "polisher" ]
+  ; chunks = chunks [ "goner"; "bare"; "mute"; "quiet-one"; "fixture_worker"; "fixture_settled"; "polisher" ]
       (fixture_entries
       @ entries
           [ ( 995.
@@ -298,7 +298,7 @@ let test_a_settled_row_counts_only_what_the_settle_confirmed () =
   (* The ledger row above landed after the settle and carries no turn
      number; before the fix it made the settled row count the running
      ledger total instead of the turn's confirmed calls. *)
-  let row = find_row "rondo" in
+  let row = find_row "fixture_settled" in
   check bool "the settle's count stands" true (contains "    3" row);
   check bool "no running total took the count" false (contains "    4" row);
   check bool "a fleet row carries no clock" false (contains "last event" row)
@@ -323,12 +323,12 @@ let test_a_gone_keepers_focus_header_says_unfinished () =
 let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper ~health:(Some Masc.Tui_decode.Health_idle) "sangsu" ]
+      Pane.keepers = [ keeper ~health:(Some Masc.Tui_decode.Health_idle) "fixture_worker" ]
     ; approvals = []
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
-  let header = List.nth texts (last_index_of_in texts "sangsu") in
+  let header = List.nth texts (last_index_of_in texts "fixture_worker") in
   check bool "idle health preserves the unresolved feed record" true
     (contains "unsettled" header);
   check bool "and does not blame the process" false (contains "gone" header);
@@ -339,15 +339,15 @@ let test_idle_health_does_not_turn_an_open_record_into_current_work () =
 let test_event_age_uses_local_receipt_not_producer_time () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; chunks = chunks [ "sangsu" ] @@ entries
+      Pane.keepers = [ keeper "fixture_worker" ]; approvals = []
+    ; chunks = chunks [ "fixture_worker" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:3 ~at:100.
-            ~correlation:"trace-sangsu" lane ]
+            ~correlation:"trace-fixture_worker" lane ]
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
-  let row = find_row_in texts "sangsu" in
-  let header = List.nth texts (last_index_of_in texts "sangsu") in
+  let row = find_row_in texts "fixture_worker" in
+  let header = List.nth texts (last_index_of_in texts "fixture_worker") in
   check bool "local receipt is ten seconds old" true (contains "last event 10.0s" header);
   check bool "no observed calls is explicit" true (contains "    -" row);
   check bool "producer's fifteen-minute age is not substituted" false
@@ -355,31 +355,31 @@ let test_event_age_uses_local_receipt_not_producer_time () =
 
 let test_settled_unknown_call_total_stays_unknown () =
   let event =
-    match settled ~at:990. "sangsu" with
+    match settled ~at:990. "fixture_worker" with
     | Observer.Keeper_turn_complete value ->
       Observer.Keeper_turn_complete { value with tc_tool_calls = None }
     | _ -> fail "settled fixture must carry a turn completion"
   in
   let input =
     { fixture with
-      Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; chunks = chunks [ "sangsu" ] @@ entries [ 990., event ]
+      Pane.keepers = [ keeper "fixture_worker" ]; approvals = []
+    ; chunks = chunks [ "fixture_worker" ] @@ entries [ 990., event ]
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
-  let row = find_row_in texts "sangsu" in
+  let row = find_row_in texts "fixture_worker" in
   check bool "unknown count is named" true (contains "    ?" row);
   check bool "unknown count is not zero" false (contains "    0" row)
 
 let test_earlier_unclosed_record_is_not_presented_as_settled () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; chunks = chunks [ "sangsu" ] @@ entries
+      Pane.keepers = [ keeper "fixture_worker" ]; approvals = []
+    ; chunks = chunks [ "fixture_worker" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
-            ~correlation:"trace-sangsu" lane
+            ~correlation:"trace-fixture_worker" lane
         ; 980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
-            ~correlation:"trace-sangsu" lane
+            ~correlation:"trace-fixture_worker" lane
         ]
     }
   in
@@ -387,7 +387,7 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
   (* The header says unsettled for the current record; the earlier one is
      the later row that says it again. *)
   let prior = List.nth texts (last_index_of_in texts "unsettled") in
-  check bool "the earlier row is not the header" false (contains "sangsu" prior);
+  check bool "the earlier row is not the header" false (contains "fixture_worker" prior);
   check bool "earlier missing settlement remains unsettled" true (contains "~ unsettled" prior);
   check bool "earlier record uses an observed count" true (contains "no calls yet" prior);
   check bool "no settled marker is invented" false
@@ -440,26 +440,26 @@ let test_header_states_tabs_fleet_and_feed () =
   check bool "the legend row is drawn whole" true (contains Pane.legend (nth 1))
 
 let test_fleet_orders_waiting_then_working_then_settled_then_quiet () =
-  let polisher = index_of "polisher" and sangsu = index_of "sangsu"
-  and rondo = index_of "rondo" and quiet = index_of "quiet-one" in
-  check bool "approval first" true (polisher < sangsu);
-  check bool "working before settled" true (sangsu < rondo);
-  check bool "settled before quiet" true (rondo < quiet)
+  let polisher = index_of "polisher" and fixture_worker = index_of "fixture_worker"
+  and fixture_settled = index_of "fixture_settled" and quiet = index_of "quiet-one" in
+  check bool "approval first" true (polisher < fixture_worker);
+  check bool "working before settled" true (fixture_worker < fixture_settled);
+  check bool "settled before quiet" true (fixture_settled < quiet)
 
 let test_fleet_rows_read_the_state () =
   check bool "waiting names the tool" true (contains "approval" (find_row "polisher"));
   check bool "waiting names which tool" true (contains "tool_execute" (find_row "polisher"));
-  check bool "working names the call out" true (contains "Execute" (find_row "sangsu"));
-  check bool "working counts its calls as at least" true (contains "   2+" (find_row "sangsu"));
-  check bool "settled counts its calls" true (contains "    3" (find_row "rondo"));
+  check bool "working names the call out" true (contains "Execute" (find_row "fixture_worker"));
+  check bool "working counts its calls as at least" true (contains "   2+" (find_row "fixture_worker"));
+  check bool "settled counts its calls" true (contains "    3" (find_row "fixture_settled"));
   (* The fleet column carries the sum. The two figures apart are the focus
      block's job: nine cells cannot hold "in 73.9k · out 358". *)
   check bool "settled shows the token total" true
-    (contains "    74.2k" (find_row "rondo"));
+    (contains "    74.2k" (find_row "fixture_settled"));
   check bool "quiet says so" true (contains "no events" (find_row "quiet-one"))
 
 let test_focus_block_names_the_latest_observed_record () =
-  let header = last_index_of "sangsu" in
+  let header = last_index_of "fixture_worker" in
   check bool "the record has no observed settlement" true (contains "unsettled" (nth header));
   check bool "the header carries the receipt age" true (contains "last event 10.0s" (nth header));
   check bool "first call returned" true (contains "Read" (nth (header + 1)));
@@ -475,8 +475,8 @@ let test_focus_block_names_the_latest_observed_record () =
 let test_focus_falls_back_to_who_acted_last () =
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.selected = None } in
   let texts = List.map text drawn.Pane.rows in
-  check bool "sangsu acted last" true
-    (List.exists (fun row -> contains "sangsu" row) texts)
+  check bool "fixture_worker acted last" true
+    (List.exists (fun row -> contains "fixture_worker" row) texts)
 
 let test_narrow_budget_folds_the_fleet () =
   let drawn = Pane.lines ~rows:4 ~cols ~scroll:0 fixture in
@@ -529,15 +529,15 @@ let test_targets_name_the_keeper_under_each_fleet_row () =
   check string "the header switches the tab" "next-tab" (List.nth targets 0);
   check string "the legend acts on nothing" "none" (List.nth targets 1);
   check string "first fleet row is the waiting keeper" "keeper:polisher" (List.nth targets 2);
-  check string "then the working one" "keeper:sangsu" (List.nth targets 3);
-  check string "then the settled one" "keeper:rondo" (List.nth targets 4);
+  check string "then the working one" "keeper:fixture_worker" (List.nth targets 3);
+  check string "then the settled one" "keeper:fixture_settled" (List.nth targets 4);
   check string "then the quiet one" "keeper:quiet-one" (List.nth targets 5);
   check string "the rule acts on nothing" "none" (List.nth targets 6);
-  let header = last_index_of "sangsu" in
+  let header = last_index_of "fixture_worker" in
   check string "the focus header acts on nothing" "none" (List.nth targets header);
-  check string "a call row opens the keeper's calls" "calls:sangsu"
+  check string "a call row opens the keeper's calls" "calls:fixture_worker"
     (List.nth targets (header + 1));
-  check string "so does the call still out" "calls:sangsu" (List.nth targets (header + 2));
+  check string "so does the call still out" "calls:fixture_worker" (List.nth targets (header + 2));
   check string "padding acts on nothing" "none" (List.nth targets (rows - 1))
 
 (* ── scroll ─────────────────────────────────────────────────────────── *)
@@ -563,10 +563,10 @@ let test_scrolling_walks_the_full_list_under_the_header () =
   check bool "the top indicator counts what is above" true
     (contains "\xe2\x86\x91 1 more" (List.nth texts header_rows));
   check bool "the first visible row is the second fleet row" true
-    (contains "sangsu" (List.nth texts (header_rows + 1)));
+    (contains "fixture_worker" (List.nth texts (header_rows + 1)));
   check bool "the bottom indicator counts what is below" true
     (contains "\xe2\x86\x93 5 more" (List.nth texts (short_rows - 1)));
-  check string "a visible fleet row still names its keeper" "keeper:sangsu"
+  check string "a visible fleet row still names its keeper" "keeper:fixture_worker"
     (target_text (List.nth scrolled.Pane.targets (header_rows + 1)));
   check string "indicators act on nothing" "none"
     (target_text (List.nth scrolled.Pane.targets header_rows));
@@ -598,7 +598,7 @@ let test_legend_preserves_reachable_targets_in_small_windows () =
         (fun name ->
           check bool (Printf.sprintf "%d rows can reach %s" rows name) true
             (List.mem (Pane.Target_keeper name) targets))
-        [ "polisher"; "sangsu"; "rondo"; "quiet-one" ];
+        [ "polisher"; "fixture_worker"; "fixture_settled"; "quiet-one" ];
       List.iter
         (fun value ->
           check int "small window keeps row budget" rows (List.length value.Pane.rows);
@@ -631,7 +631,7 @@ let test_event_and_count_labels_fit_the_existing_width () =
   check bool "observed count is whole" true (contains "   1+" row);
   check int "pane width remains unchanged" 56 Pane.pane_cols;
   check bool "settled count and its token total fit" true
-    (contains "    3" (find_row "rondo") && contains "    74.2k" (find_row "rondo"))
+    (contains "    3" (find_row "fixture_settled") && contains "    74.2k" (find_row "fixture_settled"))
 
 (* ── changes tab ────────────────────────────────────────────────────── *)
 
@@ -647,7 +647,7 @@ let file ?(kind = Pane.File_edited) ?(succeeded = true) ?where ~at path : Pane.f
    and an edit that did not land. Fetched ten seconds ago. *)
 let ready : Pane.changes =
   Pane.Changes_ready
-    { keeper = "sangsu"
+    { keeper = "fixture_worker"
     ; files =
         [ file ~at:990. ~where:"L12-40" "masc:bin/masc_tui_acting_pane.ml"
         ; file ~at:985. ~kind:Pane.File_written ~where:"L1-80" "masc:test/test_tui_acting_pane.ml"
@@ -678,7 +678,7 @@ let test_changes_header_marks_its_tab () =
 
 let test_changes_status_names_the_keeper_and_the_fetch () =
   let status = List.nth changes_texts 1 in
-  check bool "names the keeper" true (contains "sangsu" status);
+  check bool "names the keeper" true (contains "fixture_worker" status);
   check bool "counts the files" true (contains "3 files" status);
   check bool "states the window" true (contains "24h" status);
   check bool "states how old the answer is" true (contains "10.0s ago" status);
@@ -718,15 +718,15 @@ let test_changes_status_reads_each_state () =
   check bool "no keeper" true
     (contains "no keeper selected" (status_of ready None));
   check bool "not fetched" true
-    (contains "changes not fetched" (status_of Pane.Changes_absent (Some "sangsu")));
-  check bool "loading" true (contains "loading" (status_of Pane.Changes_loading (Some "sangsu")));
+    (contains "changes not fetched" (status_of Pane.Changes_absent (Some "fixture_worker")));
+  check bool "loading" true (contains "loading" (status_of Pane.Changes_loading (Some "fixture_worker")));
   check bool "failed says why" true
-    (contains "failed" (status_of (Pane.Changes_failed "connection refused") (Some "sangsu"))
+    (contains "failed" (status_of (Pane.Changes_failed "connection refused") (Some "fixture_worker"))
      && contains "connection refused"
-          (status_of (Pane.Changes_failed "connection refused") (Some "sangsu")));
+          (status_of (Pane.Changes_failed "connection refused") (Some "fixture_worker")));
   let empty =
     Pane.Changes_ready
-      { keeper = "sangsu"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
+      { keeper = "fixture_worker"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
       ; over_budget = 0; malformed = 0 }
   in
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = empty } in
@@ -735,7 +735,7 @@ let test_changes_status_reads_each_state () =
     (List.exists (fun row -> contains "no writes in 7 calls" row) texts);
   let dropped =
     Pane.Changes_ready
-      { keeper = "sangsu"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
+      { keeper = "fixture_worker"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
       ; over_budget = 2; malformed = 1 }
   in
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = dropped } in
@@ -779,7 +779,7 @@ let test_state_text_reads_each_case () =
     (contains "no events" (plain (Pane.keeper_state_text ~health:None ~approval:None None)))
 
 let test_reused_chunks_keep_presentation_inputs_live () =
-  let traces = [ "sangsu", "trace-sangsu"; "rondo", "trace-rondo" ] in
+  let traces = [ "fixture_worker", "trace-fixture_worker"; "fixture_settled", "trace-fixture_settled" ] in
   let projection = Acting.refresh_projection ~previous:None ~traces fixture_entries in
   let reused = Acting.refresh_projection ~previous:(Some projection)
     ~traces:(List.map Fun.id traces) fixture_entries in
@@ -794,29 +794,29 @@ let test_reused_chunks_keep_presentation_inputs_live () =
     List.nth texts (last_index_of_in texts name)
   in
   check bool "initial event age on the header" true
-    (contains "last event 10.0s" (header_of "sangsu" initial));
-  let changed = { input with Pane.now = now +. 20.; selected = Some "rondo";
+    (contains "last event 10.0s" (header_of "fixture_worker" initial));
+  let changed = { input with Pane.now = now +. 20.; selected = Some "fixture_settled";
     keepers = List.map (fun (keeper : Pane.keeper) ->
       (* Zombie, not offline: both read as an unfinished record and give the
          row the same glyph, and an offline keeper has no fleet row to read. *)
-      if keeper.name = "sangsu" then { keeper with health = Some Masc.Tui_decode.Health_zombie }
+      if keeper.name = "fixture_worker" then { keeper with health = Some Masc.Tui_decode.Health_zombie }
       else keeper) input.keepers } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
   check bool "age advances independently of chunks" true
-    (contains "last event 1m55s" (header_of "rondo" later));
+    (contains "last event 1m55s" (header_of "fixture_settled" later));
   (* The state column, not a glyph: a record whose keeper is gone reads "gone"
      where a live one reads "unsettled". *)
   check bool "new health changes the state column" true
-    (contains "gone" (row_for "sangsu" later));
+    (contains "gone" (row_for "fixture_worker" later));
   let later_text = List.map text later.Pane.rows in
   check bool "new selection changes focus keeper" true
-    (contains "turn 41" (List.nth later_text (last_index_of_in later_text "rondo")));
+    (contains "turn 41" (List.nth later_text (last_index_of_in later_text "fixture_settled")));
   let pending = { changed with approvals =
-    [ { Pane.approval_keeper = "sangsu"; approval_tool = "Write" } ] } in
+    [ { Pane.approval_keeper = "fixture_worker"; approval_tool = "Write" } ] } in
   let approved_view = Pane.lines ~rows:6 ~cols ~scroll:0 pending in
   check bool "new approval is visible and takes ordering priority" true
-    (contains "approval" (row_for "sangsu" approved_view));
-  check string "click target follows newly prioritized keeper" "keeper:sangsu"
+    (contains "approval" (row_for "fixture_worker" approved_view));
+  check string "click target follows newly prioritized keeper" "keeper:fixture_worker"
     (target_text (List.nth approved_view.Pane.targets 2));
   check int "viewport budget remains live" 6 (List.length approved_view.Pane.rows)
 
@@ -837,14 +837,14 @@ let test_hidden_rows_do_not_allocate_text_layout () =
     let events = List.init count (fun i ->
       let at = 900. +. float_of_int i in
       at, agent_core ~tool:(label long i) ~turn:5
-        ~tool_use_id:(string_of_int i) ~at ~correlation:"trace-sangsu" lane) in
-    { empty with Pane.selected = Some "sangsu";
-      chunks = chunks ["sangsu"] (entries events) }
+        ~tool_use_id:(string_of_int i) ~at ~correlation:"trace-fixture_worker" lane) in
+    { empty with Pane.selected = Some "fixture_worker";
+      chunks = chunks ["fixture_worker"] (entries events) }
   in
   let changes long = { empty with Pane.tab = Pane.Tab_changes;
-    selected = Some "sangsu";
+    selected = Some "fixture_worker";
     changes = Pane.Changes_ready {
-      keeper = "sangsu";
+      keeper = "fixture_worker";
       files = List.init count (fun i -> file ~at:990. (label long i));
       fetched_at = 990.; window_hours = 24.; calls = count;
       over_budget = 0; malformed = 0 } } in
@@ -904,7 +904,7 @@ let test_legend_row_fits_whole () =
    it fits the pane whole now that no clock shares the row. *)
 let test_widest_settled_reading_fits_whole () =
   let event =
-    match settled ~at:990. "sangsu" with
+    match settled ~at:990. "fixture_worker" with
     | Observer.Keeper_turn_complete value ->
       Observer.Keeper_turn_complete
         { value with
@@ -916,16 +916,16 @@ let test_widest_settled_reading_fits_whole () =
   in
   let input =
     { fixture with
-      Pane.keepers = [ keeper "sangsu" ]; approvals = []
-    ; chunks = chunks [ "sangsu" ] @@ entries [ 990., event ]
+      Pane.keepers = [ keeper "fixture_worker" ]; approvals = []
+    ; chunks = chunks [ "fixture_worker" ] @@ entries [ 990., event ]
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
-  let row = find_row_in texts "sangsu" in
+  let row = find_row_in texts "fixture_worker" in
   check bool "the count is whole" true (contains "  123" row);
   check bool "the summed figure is whole" true (contains "     2.0M" row)
 
-(* sangsu's session turn 5 opened, settled as the keeper's turn 3141 twenty
+(* fixture_worker's session turn 5 opened, settled as the keeper's turn 3141 twenty
    seconds ago, and session turn 6 has opened since: the earlier turn draws
    under the header. The order is the feed's own; a settle folded before its
    turn's start would take the later start into itself, since a settled
@@ -933,7 +933,7 @@ let test_widest_settled_reading_fits_whole () =
    row carries no receipt age; with the fixture's tokens and cost it is 48
    cells against a 56-cell pane and keeps everything. *)
 let settled_earlier ?(calls = 3) ?(input = 73_877) ?(output = 358) ?(cost = 0.0258) () =
-  match settled ~at:980. "sangsu" with
+  match settled ~at:980. "fixture_worker" with
   | Observer.Keeper_turn_complete value ->
     Observer.Keeper_turn_complete
       { value with
@@ -947,13 +947,13 @@ let settled_earlier ?(calls = 3) ?(input = 73_877) ?(output = 358) ?(cost = 0.02
 
 let earlier_turn_input ?calls ?input ?output ?cost () =
   { fixture with
-    Pane.keepers = [ keeper "sangsu" ]; approvals = []
-  ; chunks = chunks [ "sangsu" ] @@ entries
+    Pane.keepers = [ keeper "fixture_worker" ]; approvals = []
+  ; chunks = chunks [ "fixture_worker" ] @@ entries
       [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
-          ~correlation:"trace-sangsu" lane
+          ~correlation:"trace-fixture_worker" lane
       ; 980., settled_earlier ?calls ?input ?output ?cost ()
       ; 970., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:970.
-          ~correlation:"trace-sangsu" lane
+          ~correlation:"trace-fixture_worker" lane
       ]
   }
 
@@ -1002,8 +1002,8 @@ let test_beside_the_roster_only_the_selected_keepers_record_draws () =
   check (list string) "no fleet row" [] (keeper_targets view);
   check bool "no rule" false (List.exists (fun row -> contains rule_glyphs row) texts);
   check bool "the selected keeper's header is first under the legend" true
-    (contains "sangsu" (List.nth texts 2) && contains "last event 10.0s" (List.nth texts 2));
-  check string "its call rows open its calls" "calls:sangsu" (target_text (List.nth view.Pane.targets 3));
+    (contains "fixture_worker" (List.nth texts 2) && contains "last event 10.0s" (List.nth texts 2));
+  check string "its call rows open its calls" "calls:fixture_worker" (target_text (List.nth view.Pane.targets 3));
   check int "everything fits" 0 view.Pane.scroll_max;
   List.iteri
     (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
@@ -1018,8 +1018,8 @@ let test_beside_the_roster_keepers_waiting_on_approval_still_draw () =
   check bool "and the row says what it waits on" true
     (contains "approval" (List.nth texts 2) && contains "tool_execute" (List.nth texts 2));
   check bool "a rule separates it from the record" true (contains rule_glyphs (List.nth texts 3));
-  check bool "the selected keeper's header follows" true (contains "sangsu" (List.nth texts 4));
-  check string "its call rows still open its calls" "calls:sangsu"
+  check bool "the selected keeper's header follows" true (contains "fixture_worker" (List.nth texts 4));
+  check string "its call rows still open its calls" "calls:fixture_worker"
     (target_text (List.nth view.Pane.targets 5))
 
 (* A sixteen-cell name, a four-digit settled turn and the clock share one
@@ -1050,12 +1050,12 @@ let test_beside_the_roster_a_long_record_folds_and_scrolls () =
     List.init 12 (fun i ->
       let at = 900. +. float_of_int i in
       at, agent_core ~tool:(Printf.sprintf "call-%02d" i) ~turn:5
-        ~tool_use_id:(string_of_int i) ~at ~correlation:"trace-sangsu" lane)
+        ~tool_use_id:(string_of_int i) ~at ~correlation:"trace-fixture_worker" lane)
   in
   let input =
     { fixture with
-      Pane.scope = Pane.Selected_only; keepers = [ keeper "sangsu" ]; approvals = []
-    ; chunks = chunks [ "sangsu" ] (entries events)
+      Pane.scope = Pane.Selected_only; keepers = [ keeper "fixture_worker" ]; approvals = []
+    ; chunks = chunks [ "fixture_worker" ] (entries events)
     }
   in
   let folded = Pane.lines ~rows:6 ~cols ~scroll:0 input in
@@ -1076,13 +1076,13 @@ let test_fleet_rows_carry_no_clock () =
       | _ -> ())
     drawn.Pane.rows drawn.Pane.targets;
   check bool "the focus header has the one clock" true
-    (contains "last event" (nth (last_index_of "sangsu")))
+    (contains "last event" (nth (last_index_of "fixture_worker")))
 
 let test_an_earlier_turn_row_opens_the_keepers_calls () =
   let value = Pane.lines ~rows ~cols ~scroll:0 (earlier_turn_input ()) in
   let texts = List.map text value.Pane.rows in
   let index = index_of_in texts "turn 3141" in
-  check string "the turn row opens the calls surface" "calls:sangsu"
+  check string "the turn row opens the calls surface" "calls:fixture_worker"
     (target_text (List.nth value.Pane.targets index))
 
 (* The pane answers what every keeper is doing now, and a keeper with no agent
@@ -1092,11 +1092,11 @@ let offline_fixture : Pane.input =
     Pane.keepers =
       [ keeper "quiet-one" ~tone:Pane.Dim
       ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-one"
-      ; keeper "sangsu"
+      ; keeper "fixture_worker"
       ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-two"
-      ; keeper "rondo"
+      ; keeper "fixture_settled"
       ]
-  ; selected = Some "sangsu"
+  ; selected = Some "fixture_worker"
   }
 
 let offline_texts () =
@@ -1107,9 +1107,9 @@ let test_offline_keepers_do_not_draw () =
   let says name = List.exists (fun row -> contains name row) drawn in
   check bool "an offline keeper has no row" false (says "gone-one");
   check bool "nor the second one" false (says "gone-two");
-  check bool "the working ones still draw" true (says "sangsu");
+  check bool "the working ones still draw" true (says "fixture_worker");
   check bool "including a quiet one" true (says "quiet-one");
-  check bool "and the last of them" true (says "rondo")
+  check bool "and the last of them" true (says "fixture_settled")
 
 (* Dropping rows without saying so makes a short list read as the whole fleet.
    The count is over what is drawn, and what was left out is named beside it. *)

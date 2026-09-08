@@ -1405,7 +1405,7 @@ let truncation_recovery ~enable_thinking ~result ~checkpoint =
    response, at [After_assistant_collected]; this write, at the same turn
    count, replaces it. The lane's callers do not persist what this function
    returns: the Error branch drops [checkpoint_after], so the durable state
-   would otherwise still hold the refused text. Measured on sangsu,
+   would otherwise still hold the refused text. Measured on one measured Keeper,
    2026-09-05: the same 31 KB collapse sat in the checkpoint four times, one
    copy per rejected turn (#33267). *)
 let persist_dropped_response

@@ -90,7 +90,7 @@ bash /tmp/masc-install.sh --version "$TAG"
 자동 설치합니다. Homebrew가 없으면 대화형 터미널에서 공식 설치 절차를
 시작하며, 비대화형 설치는 Homebrew를 미리 준비해야 합니다. Apple Silicon은
 macOS 14 이상, Intel은 macOS 15 이상이 필요합니다. 플랫폼별 준비물, 설치 파일,
-첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.md)에 정리했습니다.
+첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.ko.md)에 정리했습니다.
 
 ### 소스에서
 
@@ -410,7 +410,7 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 커밋과 파일 체크섬을 검증합니다. 사용하려고 Node.js나 소스를 설치하거나
 프론트엔드를 빌드할 필요가 없습니다. 이미 실행 중인 서버는 재시작할 때 새
 번들을 사용합니다. [배포 구조](docs/design/installed-dashboard-distribution.md)와
-[설치 가이드](docs/INSTALL.md)를 참고하세요. 이전 태그는 해당 태그의 설치
+[설치 가이드](docs/INSTALL.ko.md)를 참고하세요. 이전 태그는 해당 태그의 설치
 스크립트를 사용합니다.
 
 대시보드는 TUI가 읽는 상태를 그대로 읽고, TUI에 없는 화면 둘(실험적인 IDE

@@ -7,7 +7,6 @@
     "lib/config_dir_resolver/config_dir_resolver.ml": 1,
     "lib/dashboard/dashboard_cache.ml": 1,
     "lib/dashboard_tla_specs/dashboard_tla_specs.ml": 2,
-    "lib/exec/exec_dispatch.ml": 1,
     "lib/exec_shim/exec_shim.ml": 1,
     "lib/graphql_client.ml": 1,
     "lib/graphql_endpoint.ml": 2,

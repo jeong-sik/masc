@@ -4,7 +4,27 @@
     with the typed Sessions domain.
 
     @stability Internal
-    @since 0.93.1 *)
+    @since 0.93.1
+
+    {2 Readers with no caller}
+
+    Six readers below still have no caller, and
+    [scripts/audit-dead-surface.py --exports] reports them every run. They are
+    kept on purpose: their artifact writers were removed in v0.217.x and the
+    readers were retained, recorded as frozen surfaces in
+    [docs/schema-surfaces/runtime-output-surfaces.v1.json].
+
+    - [get_report] — agent_core.runtime_report.v1
+    - [get_proof] — agent_core.runtime_proof.v1
+    - [get_telemetry], [get_telemetry_structured] — agent_core.runtime_telemetry_report.v1
+    - [get_evidence] — agent_core.runtime_evidence_bundle.v1
+    - [get_raw_trace_manifest] — agent_core.raw_trace_manifest.v1
+
+    Anything the audit reports here beyond those six is a reader nothing
+    accounts for. Thirteen were in that position and none are exported now:
+    eight are gone, and five stayed as private values because the six above
+    call them -- [get_named_artifact], [get_raw_trace_dir],
+    [get_raw_trace_files], [latest_named_artifact] and [validate_runs]. *)
 
 open Sessions_types
 
@@ -17,8 +37,6 @@ val make_store : ?session_root:string -> unit -> (Runtime_store.t, Error.t) resu
 val file_read_error : path:string -> detail:string -> Error.t
 val first_some : 'a option -> 'a option -> 'a option
 val primary_alias : string list -> string option
-val latest_named_artifact : Runtime.artifact list -> string -> Runtime.artifact option
-
 (** {1 Session access} *)
 
 val list_sessions
@@ -30,11 +48,6 @@ val get_session
   :  ?session_root:string
   -> string
   -> (Runtime.session, Error.t) result
-
-val get_session_events
-  :  ?session_root:string
-  -> string
-  -> (Runtime.event list, Error.t) result
 
 (** {1 Report / Proof} *)
 
@@ -49,35 +62,6 @@ val get_proof
   -> session_id:string
   -> unit
   -> (Runtime.proof, Error.t) result
-
-(** {1 Artifacts} *)
-
-val get_named_artifact
-  :  ?session_root:string
-  -> session_id:string
-  -> name:string
-  -> unit
-  -> (Runtime.artifact, Error.t) result
-
-val get_optional_named_artifact
-  :  ?session_root:string
-  -> session_id:string
-  -> name:string
-  -> unit
-  -> (Runtime.artifact option, Error.t) result
-
-val list_artifacts
-  :  ?session_root:string
-  -> session_id:string
-  -> unit
-  -> (Runtime.artifact list, Error.t) result
-
-val get_artifact_text
-  :  ?session_root:string
-  -> session_id:string
-  -> artifact_id:string
-  -> unit
-  -> (string, Error.t) result
 
 (** {1 Telemetry} *)
 
@@ -107,35 +91,7 @@ val get_raw_trace_manifest
   -> unit
   -> (raw_trace_manifest, Error.t) result
 
-(** {1 Hooks} *)
-
-val get_hook_summary
-  :  ?session_root:string
-  -> session_id:string
-  -> unit
-  -> (hook_summary list, Error.t) result
-
-(** {1 Tool catalog} *)
-
-val get_tool_catalog
-  :  ?session_root:string
-  -> session_id:string
-  -> unit
-  -> (tool_contract list, Error.t) result
-
 (** {1 Raw trace} *)
-
-val get_raw_trace_dir
-  :  ?session_root:string
-  -> session_id:string
-  -> unit
-  -> (string, Error.t) result
-
-val get_raw_trace_files
-  :  ?session_root:string
-  -> session_id:string
-  -> unit
-  -> (string list, Error.t) result
 
 val get_raw_trace_runs
   :  ?session_root:string
@@ -187,28 +143,8 @@ val get_raw_trace_summaries
   -> unit
   -> (raw_trace_summary list, Error.t) result
 
-val validate_runs
-  :  raw_trace_run list
-  -> (raw_trace_validation list, Error.t) result
-
 val get_raw_trace_validations
   :  ?session_root:string
   -> session_id:string
   -> unit
   -> (raw_trace_validation list, Error.t) result
-
-(** {1 Session mutation} *)
-
-val rename_session
-  :  ?session_root:string
-  -> session_id:string
-  -> title:string
-  -> unit
-  -> (unit, Error.t) result
-
-val tag_session
-  :  ?session_root:string
-  -> session_id:string
-  -> tag:string option
-  -> unit
-  -> (unit, Error.t) result

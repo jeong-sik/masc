@@ -60,6 +60,53 @@ let runtime_manifest_content ~domain current =
   ^ "\n"
 ;;
 
+(* The paths the previous pass recorded as this distribution's. What a pass
+   may delete is drawn from here, never from the directory listing: a file
+   the operator put beside the managed ones was in no manifest, so it is
+   not masc's to remove, and the registry reads it like any other prompt.
+   No manifest means no owned paths, so a first pass deletes nothing. A
+   manifest that does not read, or that another domain wrote, is reported
+   and also yields nothing to delete. *)
+let previously_owned ~domain ~dest_dir =
+  let path = Filename.concat dest_dir "managed-assets.json" in
+  match read_file_opt path with
+  | exception Sys_error message -> Error ("runtime manifest unreadable: " ^ message)
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "runtime manifest unreadable: %s(%s): %s"
+         operation
+         argument
+         (Unix.error_message error))
+  | None -> Ok String_set.empty
+  | Some content ->
+    (match Yojson.Safe.from_string content with
+     | exception Yojson.Json_error message ->
+       Error (Printf.sprintf "runtime manifest is not JSON: %s" message)
+     | `Assoc fields ->
+       (match List.assoc_opt "schema" fields, List.assoc_opt "paths" fields with
+        | Some (`String schema), _ when not (String.equal schema (manifest_schema domain)) ->
+          Error
+            (Printf.sprintf
+               "runtime manifest schema %S is not %S"
+               schema
+               (manifest_schema domain))
+        | Some (`String _), Some (`List paths) ->
+          List.fold_left
+            (fun acc entry ->
+              match acc, entry with
+              | Error _, _ -> acc
+              | Ok owned, `String rel when relative_asset_path rel ->
+                Ok (String_set.add rel owned)
+              | Ok _, `String rel ->
+                Error (Printf.sprintf "runtime manifest lists an unsafe path: %s" rel)
+              | Ok _, _ -> Error "runtime manifest paths must be strings")
+            (Ok String_set.empty)
+            paths
+        | _ -> Error "runtime manifest lacks a schema string or a paths list")
+     | _ -> Error "runtime manifest must be a JSON object")
+;;
+
 let current_assets ~domain files =
   let asset_prefix = prefix domain in
   let prefix_len = String.length asset_prefix in
@@ -282,7 +329,7 @@ let sync ~domain ~read ~files ~dest_dir () =
      What that comparison also caught was an empty embedded set: a crunch
      step that lost the tree. Without a second list that case is caught on
      its own, and refused, because every domain ships assets and projecting
-     an empty set would delete the operator's whole runtime directory. *)
+     an empty set would retire every asset the previous manifest lists. *)
   (* Validate the complete authority set before removing absent runtime files
      or writing even a valid asset that precedes an invalid one. *)
   if invalid_paths <> [] then { initial with failed = invalid_paths }
@@ -300,24 +347,45 @@ let sync ~domain ~read ~files ~dest_dir () =
     match runtime_asset_paths ~domain ~dest_dir with
     | Error msg -> { initial with failed = [ prefix domain, msg ] }
     | Ok runtime ->
-      let removable = String_set.diff runtime current in
-      let purged =
-        String_set.fold (remove_runtime_asset ~domain ~dest_dir) removable initial
+      let owned_before, manifest_failure =
+        match previously_owned ~domain ~dest_dir with
+        | Ok owned -> owned, []
+        | Error msg -> String_set.empty, [ manifest_path domain, msg ]
       in
-      List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
-      |> write_runtime_manifest
-           ~domain
-           ~dest_dir
-           (runtime_manifest_content ~domain current))
+      (* Retired: recorded as masc's by the previous pass and no longer
+         shipped. The listing only says which of those are still here. *)
+      let removable = String_set.inter runtime (String_set.diff owned_before current) in
+      let purged =
+        String_set.fold
+          (remove_runtime_asset ~domain ~dest_dir)
+          removable
+          { initial with failed = manifest_failure }
+      in
+      let synced =
+        List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
+      in
+      (* A manifest this pass could not read stays as it is. Rewriting it
+         would make the next boot read clean, so the failure would show
+         once and the paths it recorded would be nobody's to retire.
+         Left in place, the same line comes back every boot until the
+         operator repairs or removes the file, and the next pass then
+         starts from what it says. *)
+      match manifest_failure with
+      | _ :: _ -> synced
+      | [] ->
+        write_runtime_manifest
+          ~domain
+          ~dest_dir
+          (runtime_manifest_content ~domain current)
+          synced)
 ;;
 
 (* Two lines, two budgets. The bootstrap used to concatenate copied,
    overwritten and removed into one sample and cut it at ten: a version bump
    copies enough assets to fill that sample on its own, so the removed paths
-   never reached the line and the operator got a count with no names. For
-   [Tools] those names are the whole message — a definition an operator put
-   in the runtime directory is deleted at the next boot, because tool
-   definitions have no runtime edit layer. *)
+   never reached the line and the operator got a count with no names. A
+   removal is a distribution asset retiring, and the name is what tells the
+   operator which one. *)
 let sample_budget = 10
 
 let sample paths =
@@ -372,8 +440,8 @@ let removed_line ~label result =
     let shown, more = sample removed in
     Some
       (Printf.sprintf
-         "%s assets deleted from the runtime directory (not in the embedded \
-          set): %s%s"
+         "%s assets retired from the runtime directory (recorded by the \
+          previous sync, no longer embedded): %s%s"
          label
          shown
          more)

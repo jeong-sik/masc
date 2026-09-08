@@ -9,7 +9,7 @@
 # failed every push for ~29 hours (#25663).
 #
 # Nothing here contacts a provider: every endpoint is an isolated dead port and
-# release-evidence.sh sets MASC_KEEPER_BOOTSTRAP_ENABLED=false. This fixture
+# release-evidence.sh sets MASC_KEEPER_AUTONOMOUS_ENABLED=false. This fixture
 # only proves the installed binary boots and serves /health.
 
 [runtime]

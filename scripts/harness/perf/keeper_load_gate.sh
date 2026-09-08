@@ -11,7 +11,7 @@
 # (RFC-0204 §5) and the committed-CI form of the keeper-load path.
 #
 # It boots the server directly (NOT via harness_start_server, which hardcodes
-# MASC_KEEPER_BOOTSTRAP_ENABLED off) with autoboot enabled, and confirms turns
+# MASC_KEEPER_AUTONOMOUS_ENABLED off) with autoboot enabled, and confirms turns
 # actually fire by watching the mock request log before it trusts the numbers.
 #
 # Exit codes mirror Mode A: 0 GREEN, 2 RED (starved), 1 ERROR (harness failure).
@@ -295,7 +295,7 @@ harness_seed_server_config "$REPO_ROOT" "$BASE_PATH" >/dev/null 2>&1 || true
 (
   export MASC_BASE_PATH="$BASE_PATH"
   export MASC_BASE_PATH_INPUT="$BASE_PATH"
-  export MASC_KEEPER_BOOTSTRAP_ENABLED="true"
+  export MASC_KEEPER_AUTONOMOUS_ENABLED="true"
   export MASC_ORCHESTRATOR_ENABLED="1"
   export MASC_KEEPER_HEARTBEAT_INTERVAL_SEC="$HEARTBEAT_SEC"
   export GRAPHQL_API_KEY=""

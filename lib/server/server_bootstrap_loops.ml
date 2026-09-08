@@ -1724,7 +1724,7 @@ let start_keeper_loops_owned
      supervisor startup or sibling lanes. See #5717. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     if not Env_config.KeeperBootstrap.enabled
-    then Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
+    then Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false"
     else (
       wait_for_lazy_startup ();
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";

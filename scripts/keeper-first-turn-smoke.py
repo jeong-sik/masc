@@ -406,7 +406,7 @@ def run(args):
             env.pop('DOCKER_CONFIG', None)
             if docker_host:
                 env['DOCKER_HOST'] = docker_host
-            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_BOOTSTRAP_ENABLED='true',
+            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true',
                        MASC_KEEPER_SANDBOX_DOCKER_IMAGE=args.image)
             command([binary, 'init', '--base-path', str(base)], env)
             if args.backend == 'nerdctl_kata':

@@ -204,7 +204,7 @@ that prompt into its ephemeral base path from the explicit root.
 3. **The keeper TOML must set `sandbox_profile = "docker"`** — boot rejects without it, and the
    `"local"` playground profile is fail-closed by default (RFC-0394). Dev/test harnesses may lift
    the gate per process with `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1`.
-4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
+4. Boot env: `MASC_KEEPER_AUTONOMOUS_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
    **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
 5. Every generated Keeper has a non-empty

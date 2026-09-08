@@ -8,7 +8,7 @@
     the real registry flag (via a boot override — the same precedence a
     runtime.toml value takes) and pin:
 
-    1. MASC_KEEPER_PROACTIVE_ENABLED=false suppresses the scheduled-autonomous
+    1. MASC_KEEPER_AUTONOMOUS_ENABLED=false suppresses the scheduled-autonomous
        turn even though meta.proactive.enabled is true.
     2. MASC_KEEPER_REACTIVE_ENABLED=false suppresses a reactive (mention) turn
        (Skip Reactive_disabled).
@@ -169,7 +169,7 @@ let test_default_proactive_runs () =
   check bool "default: scheduled automation attention runs" true d.should_run
 
 let test_global_proactive_off_suppresses () =
-  with_flag "MASC_KEEPER_PROACTIVE_ENABLED" "false" @@ fun () ->
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
   let meta = ready_meta () in
   check bool "precondition: per-keeper proactive still enabled" true
     meta.proactive.enabled;
@@ -198,7 +198,7 @@ let test_global_reactive_off_does_not_suppress_typed_mention () =
 (* Review-flagged: a pending reactive trigger must not, on its own, starve
    the scheduled-autonomous decision when the reactive gate is off -- a
    persistent trigger (e.g. a stuck mention) would otherwise permanently
-   block proactive turns even though MASC_KEEPER_PROACTIVE_ENABLED=true and
+   block proactive turns even though MASC_KEEPER_AUTONOMOUS_ENABLED=true and
    the keeper is due for scheduled work. *)
 let test_global_reactive_off_does_not_starve_scheduled_autonomous () =
   with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->

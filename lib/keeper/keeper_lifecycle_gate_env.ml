@@ -15,9 +15,9 @@ open Keeper_meta_contract
 (* Global kill-switches from the feature-flag registry. All default true. *)
 let global () : Keeper_lifecycle_gate.flags =
   { reactive = Feature_flag_registry.get_bool "MASC_KEEPER_REACTIVE_ENABLED"
-  ; proactive = Feature_flag_registry.get_bool "MASC_KEEPER_PROACTIVE_ENABLED"
+  ; proactive = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
   ; autonomous = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
-  ; bootstrap = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
+  ; bootstrap = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
   }
 
 (* SSOT projection: which per-keeper meta field backs each gate.

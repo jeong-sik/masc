@@ -113,7 +113,7 @@ let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
     if meta.proactive.enabled
     then
       Some
-        "set MASC_KEEPER_PROACTIVE_ENABLED=true (global kill-switch; \
+        "set MASC_KEEPER_AUTONOMOUS_ENABLED=true (global kill-switch; \
          per-keeper proactive_enabled is already true) before expecting \
          scheduled autonomous work"
     else

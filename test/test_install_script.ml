@@ -819,11 +819,11 @@ let test_oneclick_empty_key_disables_implicit_classic_autoboot () =
   assert_contains
     "classic empty-key guard preserves explicit bootstrap override"
     entrypoint
-    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}" ]|};
+    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}" ]|};
   assert_contains
     "classic empty-key guard disables implicit autoboot"
     entrypoint
-    "export MASC_KEEPER_BOOTSTRAP_ENABLED=false"
+    "export MASC_KEEPER_AUTONOMOUS_ENABLED=false"
 ;;
 
 let test_oneclick_image_stamps_copied_dashboard_bundle () =

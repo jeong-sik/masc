@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import {
   normalizeBranch,
@@ -7,7 +6,6 @@ import {
 } from './repo-detail-panel'
 import { formatDateTimeKo as formatDate } from '../lib/format-time'
 import { normalizeRepoStatus } from './repo-sidebar'
-import type { BranchInfo } from './repo-detail-panel'
 
 describe('normalizeBranch', () => {
   it('returns null for null input', () => {

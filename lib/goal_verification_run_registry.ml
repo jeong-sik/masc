@@ -220,6 +220,8 @@ module Payload = struct
   ;;
 end
 
+let evaluated_verdict_of_yojson = Payload.evaluated_verdict_of_yojson
+
 module Store = Run_registry_core.Make (Payload)
 
 type t = Store.t

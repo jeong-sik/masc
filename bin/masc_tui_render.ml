@@ -6869,10 +6869,7 @@ let lane_run_payload_lines ~width json =
   else rendered
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
-  match
-    Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
-      ~status:detail.lrd_status
-  with
+  match detail.lrd_decision with
   | Tui_decode.Lane_run_decision_approved -> Theme.ok (), "APPROVED"
   | Tui_decode.Lane_run_decision_rejected -> Theme.warn (), "REJECTED"
   | Tui_decode.Lane_run_decision_reviewed -> Theme.ok (), "REVIEWED"

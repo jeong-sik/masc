@@ -472,14 +472,14 @@ let observed_verification_run (run : Verification_run_registry.run) =
 ;;
 
 let terminal_of_goal_verification_outcome ~evaluated_verdict = function
-  | Goal_verification_run_registry.Raised _
-  | Goal_verification_run_registry.Deferred _ -> Failed
-  | Goal_verification_run_registry.Reviewed
-  | Goal_verification_run_registry.Committed -> Succeeded
   | Goal_verification_run_registry.Review_cancelled _ -> Cancelled
+  | Goal_verification_run_registry.Raised _
+  | Goal_verification_run_registry.Deferred _
+  | Goal_verification_run_registry.Reviewed
+  | Goal_verification_run_registry.Committed
   | Goal_verification_run_registry.Superseded _ ->
-    (* The lane measures whether a judgement was produced, independently of
-       whether its original request was still current when it returned. *)
+    (* This is judgement production, not application success. Replacing a
+       request, or a later commit failure, cannot change whether it evaluated. *)
     (match evaluated_verdict with Some _ -> Succeeded | None -> Failed)
 ;;
 

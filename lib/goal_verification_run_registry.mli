@@ -7,6 +7,8 @@ type review_kind = Proof
 
 type evaluated_verdict = Approved of { reason : string } | Rejected of { reason : string }
 
+val evaluated_verdict_of_yojson : Yojson.Safe.t -> (evaluated_verdict option, string) result
+
 type outcome =
   | Reviewed
   | Committed

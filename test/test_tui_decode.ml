@@ -6837,6 +6837,35 @@ let test_lane_detail_distinguishes_null_missing_and_unavailable () =
     (decoded.lrd_output_availability = Some unavailable);
   Alcotest.(check bool) "unavailable is not JSON null" true (decoded.lrd_output = None)
 
+let test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement () =
+  let make status verdict =
+    match hitl_lane_run_detail_json "approve" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      let replaced = [ "run_kind"; "lane"; "status"; "output" ] in
+      `Assoc [ "run", `Assoc
+        ([ "run_kind", `String "goal_verification";
+           "lane", `String Runtime.verifier_exact_lane_id;
+           "status", `String status;
+           "output", `Assoc ([ "tools", `List [] ] @ verdict) ]
+         @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) ]
+    | _ -> Alcotest.fail "invalid fixture"
+  in
+  List.iter (fun (status, decision, expected) ->
+    let json = make status [ "evaluated_verdict", `Assoc
+      [ "decision", `String decision; "reason", `String "measured original criterion" ] ] in
+    let detail = Tui_decode.decode_lane_run_detail json |> Result.get_ok in
+    Alcotest.(check bool) "actual evaluator decision is preserved" true (detail.lrd_decision = expected);
+    Alcotest.(check string) "run settlement remains separate" status
+      (Tui_decode.lane_run_status_label detail.lrd_status))
+    [ "committed", "rejected", Tui_decode.Lane_run_decision_rejected;
+      "superseded", "approved", Tui_decode.Lane_run_decision_approved ];
+  List.iter (fun verdict ->
+    Alcotest.(check bool) "committed run cannot omit or invent judgement" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (make "committed" verdict))))
+    [ []; [ "evaluated_verdict", `Null ];
+      [ "evaluated_verdict", `Assoc [ "decision", `String "maybe"; "reason", `String "unknown" ] ] ]
+;;
+
 let test_decode_lane_run_detail_requires_the_payload () =
   let json =
     `Assoc
@@ -8520,6 +8549,8 @@ let () =
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick
           test_decode_lane_run_detail_requires_the_payload;
+        Alcotest.test_case "Goal evaluated decision is independent of run settlement" `Quick
+          test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement;
         Alcotest.test_case "lane detail distinguishes null, missing and unavailable output" `Quick
           test_lane_detail_distinguishes_null_missing_and_unavailable;
       ] );

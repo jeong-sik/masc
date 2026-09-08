@@ -2089,6 +2089,7 @@ type lane_run_detail =
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
+  ; lrd_decision : lane_run_decision
   }
 
 val decode_lane_run_page :

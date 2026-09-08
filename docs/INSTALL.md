@@ -81,7 +81,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 `--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
 `.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
-제안하므로 그대로 선택하면 데이터는 `~/.masc`에 생깁니다. 현재 디렉터리에
+제안하므로 그대로 선택하면 데이터는 그 workspace 아래 `.masc`에 생깁니다. 현재 디렉터리에
 기존 `.masc/config`가 있으면 그 workspace를 제안합니다. 명시한 `--base-path`는
 질문 없이 사용하며, 비대화형 또는 `--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
 작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
@@ -386,8 +386,8 @@ bash /tmp/masc-install.sh --uninstall
 중단된 설치 transaction이 남아 있으면 이를 먼저 복구하라는 오류를 냅니다.
 
 데이터도 제거하려면 **실제 설치했던 workspace 경로**를 명시해야 합니다.
-아래 예시는 `$HOME/masc-workspace/.masc`를 삭제합니다. HOME을 workspace로
-선택했다면 `--base-path "$HOME"`입니다. `~/.masc` 자체를 base path로 넣지 마세요.
+아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. HOME을 workspace로
+선택했다면 `--base-path "$HOME"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
 
 ```bash
 bash /tmp/masc-install.sh --uninstall --purge-data \

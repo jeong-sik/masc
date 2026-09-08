@@ -203,14 +203,10 @@ let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
 
-let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
-  (** [Unix.create_process_env] does not accept a child working directory, and
-      we no longer mutate the parent process CWD with [Sys.chdir].  The public
-      [run_argv*] [?cwd] parameter is documented as ignored on the Unix
-      fallback path; on the Eio path the spawn helper handles CWD correctly in
-      the child via its [~cwd] argument.  This removes the process-wide
-      [Sys.chdir] race documented in the adversarial audit (P0). *)
-  Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd stderr_fd
+let create_process_env owner prog argv env stdin_fd stdout_fd stderr_fd =
+  (* The synchronous fallback preserves its documented no-cwd behavior and
+     libc PATH lookup, but owns the foreground group before exec begins. *)
+  Unix_foreground_process.spawn owner prog argv env stdin_fd stdout_fd stderr_fd
 
 (* Everything the two spawn paths can raise before a child process exists,
    read from the sources rather than guessed:
@@ -242,9 +238,9 @@ let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
    the only calls are [Eio.Process.pipe] twice and [Eio.Process.spawn], so a
    [Failure] seen in the [Spawn] phase is eio's child report and nothing else.
 
-   Unix fallback ([Unix.create_process_env], OCaml 5.5 otherlibs/unix/spawn.c):
+   Unix fallback ([Unix_foreground_process], shared posix_spawn stubs):
    - with [posix_spawnp] (macOS, glibc) every failure is
-     [Unix_error (errno, "create_process", executable)] (spawn.c:80);
+     [Unix_error (errno, "posix_spawnp", executable)];
      [ENOENT] is the program not found, anything else ([EACCES], [E2BIG],
      [ENOEXEC], [ENOMEM], ...) is [Spawn_failed] with that errno.
    - the pipe and stderr capture file are [Unix.pipe] / [Unix.openfile];
@@ -337,13 +333,14 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
        before that is a refusal; after it the child is running and the error
        is the capture's. *)
     let spawned = ref false in
+    let owner = Unix_foreground_process.create () in
     let stdout_r_ref = ref None in
     let stdout_w_ref = ref None in
     let stderr_fd_ref = ref None in
     let stderr_path_ref = ref None in
     let stdin_r_ref = ref None in
     let stdin_w_ref = ref None in
-    let cleanup () =
+    let cleanup_files () =
       Option.iter close_quietly !stdin_r_ref;
       stdin_r_ref := None;
       Option.iter close_quietly !stdin_w_ref;
@@ -358,6 +355,10 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
         remove_temp_file_quietly
         !stderr_path_ref;
       stderr_path_ref := None
+    in
+    let cleanup () =
+      Fun.protect ~finally:cleanup_files (fun () ->
+        Unix_foreground_process.close owner)
     in
     (try
        let env = default_env env in
@@ -391,8 +392,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          | Some fd -> fd
          | None -> Unix.stdin
        in
-       let pid =
-         try create_process_env prog argv env stdin_fd stdout_w stderr_fd with
+       let () =
+         try create_process_env owner prog argv env stdin_fd stdout_w stderr_fd with
          | Unix.Unix_error (Unix.ENOENT, _, _) as exn ->
              raise (Refused_at_spawn (Executable_not_found prog, exn))
        in
@@ -420,27 +421,10 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                trigger (2026-05-19 01:26Z, 13:01Z). The ref is nulled on
                the success path AFTER [close_quietly] below; [close_quietly]
                is idempotent so double-close from cleanup is harmless. *)
-            let rec waitpid_blocking () =
-              try Unix.waitpid [] pid
-              with
-              | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_blocking ()
-              | Unix.Unix_error (Unix.ECHILD, _, _) -> (pid, Unix.WEXITED 127)
-            in
             let kill_and_wait status_ref =
-              (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-              if Option.is_none !status_ref then
-                let (_pid, status) = waitpid_blocking () in
-                status_ref := Some status
+              status_ref := Some (Unix_foreground_process.terminate owner)
             in
-            let waitpid_nohang () =
-              try
-                match Unix.waitpid [ Unix.WNOHANG ] pid with
-                | 0, _ -> None
-                | _, status -> Some status
-              with
-              | Unix.Unix_error (Unix.EINTR, _, _) -> None
-              | Unix.Unix_error (Unix.ECHILD, _, _) -> Some (Unix.WEXITED 127)
-            in
+            let waitpid_nohang () = Unix_foreground_process.poll owner in
             let stdout_buf = create_capture () in
             let chunk = Bytes.create 4096 in
             let read_available () =
@@ -505,7 +489,16 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
              | Some _, Some _ | None, None -> ()
              | None, Some _ | Some _, None -> close_stdin ());
             while (not (!stdout_eof && !stdin_closed)) && not !timed_out do
-              if deadline_reached () then begin
+              if Option.is_none !status_ref then
+                status_ref := waitpid_nohang ();
+              if Option.is_some !status_ref then begin
+                close_stdin ();
+                (* The foreground leader is already gone and its group has
+                   been signalled. Preserve bytes it left buffered, then stop
+                   waiting for a descendant's inherited descriptor. *)
+                ignore (read_available () : [ `Eof | `Would_block ]);
+                stdout_eof := true
+              end else if deadline_reached () then begin
                 timed_out := true;
                 close_stdin ();
                 kill_and_wait status_ref;
@@ -555,9 +548,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               else
                 match !status_ref with
                 | Some status -> status
-                | None ->
-                    let (_pid, status) = waitpid_blocking () in
-                    status
+                | None -> Unix_foreground_process.terminate owner
             in
             let stdout = Exec_buffer.render stdout_buf in
             let stderr = captured_stderr_or_empty !stderr_path_ref in
@@ -576,9 +567,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
             in
             (match timeout_event with
              | Some timeout_sec ->
-               (* Unix fallback starts the timeout clock after
-                  [create_process_env] returns, so this timeout is always
-                  attributable to the running child. *)
+               (* Spawn returned an owned child; this timeout is reported
+                  against that running command. *)
                observe_process_timeout argv
                  ~timeout_sec
                  ~origin:Timeout_origin.Command

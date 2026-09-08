@@ -102,8 +102,8 @@ static void free_strings(char **strings)
 
    Returns the child's pid or raises Unix.Unix_error with the errno
    posix_spawn reported. */
-CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
-                                value v_options, value v_fds)
+static value spawn_process(value v_executable, value v_argv, value v_env,
+                           value v_options, value v_fds, int search_path)
 {
   CAMLparam5(v_executable, v_argv, v_env, v_options, v_fds);
   value v_cwd = Field(v_options, 0);
@@ -190,7 +190,9 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
   pid_t pid = 0;
   if (rc == 0) {
     caml_enter_blocking_section();
-    rc = posix_spawn(&pid, executable, &actions, &attr, argv, env);
+    rc = search_path
+      ? posix_spawnp(&pid, executable, &actions, &attr, argv, env)
+      : posix_spawn(&pid, executable, &actions, &attr, argv, env);
     caml_leave_blocking_section();
   }
   posix_spawn_file_actions_destroy(&actions);
@@ -204,10 +206,24 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
   if (rc != 0) {
     caml_stat_free(executable);
     errno = rc;
-    uerror("posix_spawn", v_executable);
+    uerror(search_path ? "posix_spawnp" : "posix_spawn", v_executable);
   }
   caml_stat_free(executable);
   CAMLreturn(Val_int(pid));
+}
+
+CAMLprim value masc_posix_spawn(value executable, value argv, value env,
+                                value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 0);
+}
+
+/* Unix fallback retains libc's PATH lookup semantics without duplicating
+   descriptor setup or group creation. */
+CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
+                                 value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 1);
 }
 
 #if defined(__clang__)

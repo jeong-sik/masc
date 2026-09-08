@@ -6725,13 +6725,23 @@ let render_lane_run_list (state : state) ~lane_id =
     | Some runs -> runs
   in
   let shown = List.length runs in
+  let coverage =
+    let count = match state.lane_runs_total with
+      | Some total -> Printf.sprintf "%d loaded / %d retained" shown total
+      | None -> Printf.sprintf "%d loaded" shown in
+    let continuation =
+      if state.lane_runs_loading then " · loading"
+      else match state.lane_runs_next with
+        | Some _ -> " · ] older"
+        | None -> if Option.is_some state.lane_runs then " · end" else "" in
+    count ^ continuation in
   let header =
-    Printf.sprintf "%s · %s (%d runs)  %s"
+    Printf.sprintf "%s · %s (%s)  %s"
       (screen_title " MASC Lanes")
       (fit_width
          (Terminal_text.single_line (standalone_lane_label state lane_id))
          20)
-      shown (connection_badge state)
+      coverage (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

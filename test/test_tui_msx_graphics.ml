@@ -73,6 +73,81 @@ let test_every_other_terminal_still_gets_the_mosaic () =
     ]
 ;;
 
+(* Restore the cell size for the same reason [with_protocol] restores the
+   protocol: it is module state and a case must not leak it. *)
+let with_cell_pixels px f =
+  Msx.set_cell_pixels px;
+  Fun.protect ~finally:(fun () -> Msx.set_cell_pixels None) f
+;;
+
+(* The row count out of the placement escape: "...,r=N,...". Kitty derives the
+   width from it, so it is the only number that decides how wide the image is
+   drawn, and reading it back is how the fit is measured. *)
+let rows_of out =
+  let needle = ",r=" in
+  let n = String.length needle and h = String.length out in
+  let rec at i =
+    if i + n > h then None
+    else if String.sub out i n = needle then begin
+      let start = i + n in
+      let rec digits j = if j < h && out.[j] >= '0' && out.[j] <= '9' then digits (j + 1) else j in
+      let stop = digits start in
+      if stop > start then int_of_string_opt (String.sub out start (stop - start)) else None
+    end
+    else at (i + 1)
+  in
+  at 0
+;;
+
+(* A 256x192 frame is 4:3 and a terminal grid is not. Kitty takes the row
+   count and derives the width from the frame's shape, so a row count that
+   fills the height puts the width past the right edge on any grid that is
+   wider than 4:3 in pixels -- and the terminal cuts it there. Only the cell
+   size says where that edge is.
+
+   The cell size is derived from the grid rather than written down: the width
+   binds only when the grid is wide relative to the frame, and a pair of
+   numbers that binds at 80x24 stops binding at another size. Picking half the
+   break-even width keeps the width the tighter of the two wherever this runs,
+   and the case checks that premise before it checks the fit. *)
+let test_the_image_is_kept_inside_the_screen () =
+  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let screen_rows = max 4 (rows - 2) in
+  let cell_height = 20 in
+  let break_even_width = screen_rows * cell_height * 256 / (192 * cols) in
+  let cell_width = max 1 (break_even_width / 2) in
+  let available_width = cols * cell_width in
+  let available_height = screen_rows * cell_height in
+  let height_the_width_allows = available_width * 192 / 256 in
+  check bool "the width is the binding constraint here" true
+    (height_the_width_allows < available_height);
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    with_cell_pixels (Some (cell_width, cell_height)) (fun () ->
+      match rows_of (drawn ()) with
+      | None -> failf "the placement carried no row count"
+      | Some drawn_rows ->
+        (* Filling the height would have overflowed the width, so the row count
+           has to come down. Without this the case passes on a placement that
+           ignores the cell size entirely. *)
+        check bool "the rows came down from the screen's" true
+          (drawn_rows < screen_rows);
+        check bool "and it still drew something" true (drawn_rows >= 1);
+        let drawn_width = drawn_rows * cell_height * 256 / 192 in
+        check bool "and its width fits the terminal" true
+          (drawn_width <= available_width)))
+;;
+
+(* Without an answer there is nothing to compute with, and guessing a cell size
+   would size every placement against a number no terminal gave. *)
+let test_no_cell_size_leaves_the_rows_alone () =
+  let rows, _ = Masc_tui_ansi.get_terminal_size () in
+  let screen_rows = max 4 (rows - 2) in
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    with_cell_pixels None (fun () ->
+      check (option int) "the screen's rows, unchanged" (Some screen_rows)
+        (rows_of (drawn ()))))
+;;
+
 let () =
   run "masc_tui_msx graphics"
     [ ( "path"
@@ -80,6 +155,12 @@ let () =
             test_a_graphics_terminal_gets_the_pixels
         ; test_case "every other terminal still gets the mosaic" `Quick
             test_every_other_terminal_still_gets_the_mosaic
+        ] )
+    ; ( "fit"
+      , [ test_case "the image is kept inside the screen" `Quick
+            test_the_image_is_kept_inside_the_screen
+        ; test_case "no cell size leaves the rows alone" `Quick
+            test_no_cell_size_leaves_the_rows_alone
         ] )
     ]
 ;;

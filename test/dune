@@ -5004,7 +5004,8 @@
 (test
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
- (libraries alcotest unix masc_tui_types masc_tui_graphics masc_tui_msx))
+ (libraries alcotest unix masc_tui_types masc_tui_graphics masc_tui_msx
+   masc_tui_ansi))
 
 (test
  (name test_tui_runtime_config_view)

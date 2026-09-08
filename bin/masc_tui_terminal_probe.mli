@@ -12,6 +12,11 @@ type result =
             the palette does not: a multiplexer passes DECSET 996 and 2031
             through and answers no OSC colour query. *)
   ; graphics : Masc_tui_graphics.query_reply option
+  ; cell_pixels : (int * int) option
+        (** Width and height of one character cell in pixels, from the
+            terminal's answer to CSI 16 t. [None] where it did not answer,
+            and a caller that needs pixels then has none: the cell grid is
+            all the TUI knows about its own size. *)
   ; replay : string
   }
 

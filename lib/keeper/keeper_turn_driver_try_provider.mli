@@ -198,6 +198,7 @@ val run_try_provider :
   * (string * Obj.t) option
 
 val run_try_provider_with_context_overflow_shrink :
+  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -205,6 +206,7 @@ val run_try_provider_with_context_overflow_shrink :
   * (string * Obj.t) option
 
 val run_try_provider_with_truncation_recovery :
+  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result

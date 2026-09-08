@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -12,7 +11,8 @@ function makeError(overrides: Partial<(typeof errors.value)[number]> = {}) {
     agentName: 'Alpha',
     taskId: 'task-1',
     message: 'something broke',
-    errorCode: 'internal_error' as const,
+    errorCode: 'exception' as const,
+    domain: 'internal' as const,
     severity: 'critical' as const,
     timestamp: Date.now() - 30000,
     acknowledged: false,
@@ -56,11 +56,16 @@ describe('ErrorPanel', () => {
     expect(container.textContent).toContain('Alpha')
   })
 
-  it('renders error code label', () => {
-    errors.value = [makeError({ errorCode: 'timeout', severity: 'warning' })]
+  it('renders the domain as the badge and the raw code as its tooltip', () => {
+    errors.value = [makeError({
+      domain: 'provider',
+      errorCode: 'anthropic:overloaded_error',
+      severity: 'warning',
+    })]
     const container = document.createElement('div')
     render(h(ErrorPanel, { onClose: vi.fn() }), container)
-    expect(container.textContent).toContain('지연')
+    expect(container.textContent).toContain('provider')
+    expect(container.querySelector('[title="anthropic:overloaded_error"]')).not.toBeNull()
   })
 
   it('renders task id when present', () => {
@@ -106,11 +111,11 @@ describe('ErrorPanel', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('renders info severity with Info icon', () => {
-    errors.value = [makeError({ severity: 'info', errorCode: 'not_found' })]
+  it('marks an unmodelled domain instead of rendering a blank badge', () => {
+    errors.value = [makeError({ domain: null, errorCode: 'quantum_flux' })]
     const container = document.createElement('div')
     render(h(ErrorPanel, { onClose: vi.fn() }), container)
-    expect(container.textContent).toContain('404')
+    expect(container.textContent).toContain('?')
   })
 
   it('renders alert role when errors present', () => {

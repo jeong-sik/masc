@@ -132,6 +132,10 @@ curl http://127.0.0.1:8935/health
 curl 'http://127.0.0.1:8935/health?full=1'
 ```
 
+`/health` 응답은 HTTP listener가 열렸다는 뜻입니다. 첫 Keeper를 만들기 전에는
+full health의 `startup.state_ready`가 `true`인지도 확인합니다. 부팅 초기에는
+listener가 먼저 응답하고 내부 상태 초기화는 진행 중일 수 있습니다.
+
 브라우저에서 `http://127.0.0.1:8935/dashboard/`를 엽니다. 대시보드는 설치된
 번들을 자동 선택하므로 소스 디렉터리에서 시작할 필요가 없습니다.
 [인증 안내](LOCAL-DASHBOARD-AUTH-RUNBOOK.md)에 따라 쓰기 권한을 설정합니다.

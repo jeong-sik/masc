@@ -73,7 +73,7 @@ let test_plain_listing_footer_shape () =
      hints between its own keys and the shared meta tail. That order is the
      shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "B:Browser Lane  j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "B:Browser Lane  j/k:scroll  Ctrl-O:Browser screenshot  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
@@ -781,7 +781,7 @@ let test_fleet_total_cost () =
 
 let test_config_footer_names_child_hops () =
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
+    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =

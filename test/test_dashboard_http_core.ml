@@ -3258,7 +3258,7 @@ let test_asks_list_publishes_written_alternative_capability () =
           question "hinted" Ask.Single (Ask.Free_text_allowed {hint = Some "Explain the constraint"}) ]
       in
       let ask = match Ask.ask ~ask_id:"ask-capability" ~keeper_name:name ~questions
-        ~continuation:(Masc.Keeper_continuation_channel.unrouted "projection fixture")
+        ~continuation:(Keeper_continuation_channel.unrouted "projection fixture")
         ~asked_at:100. () with
         | Ok ask -> ask
         | Error error -> fail (Ask.invalid_ask_to_string error)

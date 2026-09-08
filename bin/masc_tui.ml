@@ -14515,6 +14515,10 @@ and is loaded on demand through keeper_skill.
            in
            (match text_target with
             | None -> ()
+            | Some Text_ask_answer ->
+                edit_ask_text state (fun draft ->
+                  draft ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true
+                    paste.Masc_tui_paste.text)
             | Some Text_preset_name ->
                 state.preset_save_draft <-
                   Some
@@ -14585,6 +14589,9 @@ and is loaded on demand through keeper_skill.
                      paste.Masc_tui_paste.text))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
+       | Some (Pasted _) when state.view = Approvals && Option.is_some state.ask_text_entry ->
+           (* An obscured answer editor cannot redirect its paste to chat. *)
+           ()
        | Some (Pasted _) when Option.is_some (browser_lane_on_screen state) ->
            (* The URL field above owns paste while open; a page reader has
               no hidden Keeper composer or attachment destination. *)
@@ -14690,8 +14697,9 @@ and is loaded on demand through keeper_skill.
       let quit_key =
         match key with
         | Some k ->
-            text_input_target state ~compact_viewport <> Some Text_browser_url
-            && Render_schedule.Input_shortcut.is_quit ~message_mode k
+            (match text_input_target state ~compact_viewport with
+             | Some Text_browser_url | Some Text_ask_answer -> false
+             | _ -> Render_schedule.Input_shortcut.is_quit ~message_mode k)
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
@@ -14757,6 +14765,7 @@ and is loaded on demand through keeper_skill.
         && Option.is_none state.runtime_param_edit
         && Option.is_none state.search
         && text_input_target state ~compact_viewport <> Some Text_browser_url
+        && text_input_target state ~compact_viewport <> Some Text_ask_answer
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key

@@ -29,7 +29,7 @@ def interaction(requests):
         h.send_and_wait(process, fd, output, b'a', b'[5/t] Other: write your own answer')
         h.send_and_wait(process, fd, output, b'1', b'1 (o) ')
         h.send_and_wait(process, fd, output, b'5', b'write: ')
-        h.send_and_wait(process, fd, output, b'cancelled draft', b'cancelled draft')
+        h.send_and_wait(process, fd, output, b'q5 i s c cancelled draft', b'q5 i s c cancelled draft')
         h.send_and_wait(process, fd, output, b'\x1b', b'1 (o) ')
         if any(path == h.KEEPER_ASK_ANSWER_PATH for path, _ in requests):
             raise AssertionError('cancelling an alternative sent an answer')
@@ -46,6 +46,8 @@ def interaction(requests):
         h.wait_for_http_request(process, fd, output, requests, path=h.KEEPER_ASK_ANSWER_PATH)
         h.wait_for_output(process, fd, output, b'none -- no Keeper is waiting on a decision',
                           start=submitted_at, timeout=10)
+        if any(path != h.KEEPER_ASK_ANSWER_PATH for path, _ in requests):
+            raise AssertionError(f'answer input escaped into another action: {requests!r}')
         sent = [json.loads(body) for path, body in requests if path == h.KEEPER_ASK_ANSWER_PATH]
         if len(sent) != 1:
             raise AssertionError(f'expected exactly one answer, got {len(sent)}')

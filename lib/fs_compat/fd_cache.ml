@@ -45,7 +45,7 @@ let evict_lru_locked () =
 
 let writer_matches_path path w =
   try
-    let opened = Unix.fstat (Stdlib.descr_of_out_channel w.oc) in
+    let opened = Unix.fstat (Unix.descr_of_out_channel w.oc) in
     let current = Unix.stat path in
     opened.Unix.st_dev = current.Unix.st_dev
     && opened.Unix.st_ino = current.Unix.st_ino

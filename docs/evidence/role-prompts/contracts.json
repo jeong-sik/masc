@@ -1,0 +1,38 @@
+[
+  {
+    "file": "config/prompts/verification.md",
+    "before_bytes": 9763,
+    "after_bytes": 9050,
+    "slot_contract_preserved": true
+  },
+  {
+    "file": "config/prompts/judge.md",
+    "before_bytes": 8432,
+    "after_bytes": 9252,
+    "slot_contract_preserved": true
+  },
+  {
+    "file": "config/prompts/goal_verification.md",
+    "before_bytes": 4435,
+    "after_bytes": 4849,
+    "slot_contract_preserved": true
+  },
+  {
+    "file": "config/prompts/librarian.md",
+    "before_bytes": 16811,
+    "after_bytes": 10087,
+    "slot_contract_preserved": true
+  },
+  {
+    "file": "config/prompts/fusion.judge.md",
+    "before_bytes": 2982,
+    "after_bytes": 3994,
+    "slot_contract_preserved": true
+  },
+  {
+    "file": "config/prompts/eval.calibration.few_shot.md",
+    "before_bytes": 443,
+    "after_bytes": 637,
+    "slot_contract_preserved": true
+  }
+]

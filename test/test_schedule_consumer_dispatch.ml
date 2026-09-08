@@ -142,6 +142,22 @@ let keeper_meta_for_name keeper_name =
   | Error msg -> fail ("keeper meta parse failed: " ^ msg)
 ;;
 
+(* A snapshot alone does not make a keeper readable. Effective metadata merges
+   the snapshot with the keeper's declared profile, and since #32078 a keeper
+   that declares none is rejected outright ("sandbox_profile is required"), so
+   the wake path cannot see a target registered by snapshot only. *)
+let declare_keeper_profile config keeper_name =
+  let path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path:config.Workspace_utils.base_path
+      ~agent_name:keeper_name
+  in
+  if not (Sys.file_exists path)
+  then (
+    mkdir_p (Filename.dirname path);
+    write_file path "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n")
+;;
+
 let persist_keeper_meta ?proactive_enabled config keeper_name =
   let meta =
     let meta = keeper_meta_for_name keeper_name in
@@ -153,6 +169,7 @@ let persist_keeper_meta ?proactive_enabled config keeper_name =
       ; proactive = { enabled }
       }
   in
+  declare_keeper_profile config keeper_name;
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail ("keeper meta write failed: " ^ detail));
@@ -170,6 +187,7 @@ let register_keeper ?proactive_enabled config keeper_name =
       ; proactive = { enabled }
       }
   in
+  declare_keeper_profile config keeper_name;
   (match
      Keeper_owner_registry.create_meta
        ~base_path:config.Workspace_utils.base_path
@@ -195,6 +213,7 @@ let register_offline_keeper ?proactive_enabled config keeper_name =
       ; proactive = { enabled }
       }
   in
+  declare_keeper_profile config keeper_name;
   (match
      Keeper_owner_registry.create_meta
        ~base_path:config.Workspace_utils.base_path

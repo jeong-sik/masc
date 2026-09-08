@@ -41,6 +41,10 @@ type observation = {
           [..] for name 0. Other modes: empty. *)
   sprites : sprite list;  (** SAT entries before the 0xD0 terminator *)
   cartridge : string option;  (** cartridge file name, if one is plugged in *)
+  disk : string option;
+      (** floppy image file name (.dsk), if one is in the drive. A disk boots
+          through the interface ROM that takes the cartridge slot, so a disk
+          and a cartridge cannot both run — see {!load}. *)
 }
 
 type entry = { at_frame : int; who : string; key_name : string; down : bool }
@@ -63,11 +67,17 @@ val load :
   ledger_dir:string ->
   roms_dir:string ->
   cart_path:string option ->
+  disk_path:string option ->
   (observation, error) result
 (** Creates the workspace machine, replacing any previous one. [roms_dir]
     holds the C-BIOS triple (cbios_main_msx2 / cbios_logo_msx2 / cbios_sub);
     the empty string means no BIOS and the bus reads 0xFF. The ledger is
-    [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger. *)
+    [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
+
+    [disk_path] plugs a raw .dsk floppy image into drive A: C-BIOS finds the
+    disk interface ROM that [Msx.load_disk] rides in the cartridge slot and
+    boots the image's sector. A disk therefore wins over [cart_path] — the
+    slot is one, and a disk game needs the interface in it. *)
 
 val eject : unit -> (unit, error) result
 val screen : unit -> (observation, error) result
@@ -95,6 +105,7 @@ type frame = {
   rgb : string;  (** width*height*3 bytes, row-major RGB *)
   mode : string;
   cartridge : string option;
+  disk : string option;  (** floppy image file name, if one is in the drive *)
 }
 
 val frame : unit -> frame option

@@ -4,6 +4,8 @@
 
 ### Installation and distribution
 
+- Update the release-attached `install.sh` with automatic macOS dependency setup and an early binary startup check that exposes loader errors. Interactive first installs can enter the official Homebrew setup. The published 0.34.0 binaries and source tag remain unchanged; installer provenance is recorded in the release notes.
+
 - Ship the browser native host with the server, TUI, preflight tools and matched dashboard.
 - Add Intel macOS release assets and require every advertised platform build to pass.
 - Exercise Linux installation in a fresh Ubuntu 24.04 container as well as native runners.

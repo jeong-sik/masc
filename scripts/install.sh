@@ -10,11 +10,15 @@
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
-#   --base-path DIR    .masc seed target (default: $PWD)
+#   --base-path DIR    Workspace containing .masc (asked in a terminal;
+#                      noninteractive default: $PWD)
 #   --no-seed          Skip writing default config files
 #   --force            Refresh existing binaries; preserve workspace config
 #   --reset-config     Overwrite seeded config and selected team preset files
 #   --dry-run          Print what would happen, do not write
+#   --uninstall        Remove installed executables/releases; stop MASC first
+#   --purge-data       Also remove <base-path>/.masc; requires --uninstall and
+#                      an explicit --base-path. Homebrew dependencies remain.
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
 #   --no-wizard        Skip the provider setup wizard
@@ -63,6 +67,10 @@ SEED_CONFIG=1
 FORCE=0
 RESET_CONFIG=0
 DRY_RUN=0
+UNINSTALL=0
+PURGE_DATA=0
+BASE_PATH_EXPLICIT=0
+INSTALL_ACTION_FLAGS=()
 GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
@@ -799,6 +807,20 @@ maybe_run_wizard() {
 # Prompts use stderr; stdout is captured by $(prompt_provider).
 is_tty() { [ -t 0 ] && [ -t 2 ]; }
 
+choose_install_base_path() {
+  [ -z "$BASE_PATH" ] || return 0
+  local suggested="$PWD" answer
+  if [ "$WIZARD" != "0" ] && is_tty; then
+    [ -d "$PWD/.masc/config" ] || suggested="$HOME"
+    printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
+    printf '? Workspace directory [%s]: ' "$suggested" >&2
+    IFS= read -r answer || die "workspace selection cancelled"
+    BASE_PATH="${answer:-$suggested}"
+  else
+    BASE_PATH="$suggested"
+  fi
+}
+
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
 [ -t 1 ] || { c_red=""; c_yel=""; c_grn=""; c_dim=""; c_off=""; }
@@ -816,13 +838,19 @@ require_flag_value() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --uninstall|--purge-data|--prefix|--base-path|--dry-run|-h|--help) ;;
+    *) INSTALL_ACTION_FLAGS+=("$1") ;;
+  esac
+  case "$1" in
     --version) require_flag_value "$1" "${2-}"; VERSION="$2"; shift 2 ;;
     --prefix)  require_flag_value "$1" "${2-}"; PREFIX="$2";  shift 2 ;;
-    --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; shift 2 ;;
+    --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; BASE_PATH_EXPLICIT=1; shift 2 ;;
     --no-seed) SEED_CONFIG=0; shift ;;
     --force)   FORCE=1; shift ;;
     --reset-config) RESET_CONFIG=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --purge-data) PURGE_DATA=1; shift ;;
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
@@ -834,6 +862,52 @@ while [ $# -gt 0 ]; do
     *) die "unknown flag: $1 (try --help)" ;;
   esac
 done
+
+# Uninstall runs before platform/dependency checks and all downloads. Only the
+# installation's named entries are owned; neither the prefix nor its parent is.
+uninstall_masc() {
+  [ "${#INSTALL_ACTION_FLAGS[@]}" -eq 0 ] ||
+    die "--uninstall cannot be combined with install options: ${INSTALL_ACTION_FLAGS[*]}"
+  if [ "$PURGE_DATA" -eq 1 ] && [ "$BASE_PATH_EXPLICIT" -ne 1 ]; then
+    die "--purge-data requires an explicit --base-path"
+  fi
+  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name
+  case "$uninstall_prefix" in '~') uninstall_prefix="$HOME" ;; '~/'*) uninstall_prefix="$HOME/${uninstall_prefix#\~/}" ;; esac
+  case "$uninstall_base" in '~') uninstall_base="$HOME" ;; '~/'*) uninstall_base="$HOME/${uninstall_base#\~/}" ;; esac
+  case "$uninstall_prefix" in /*) ;; *) uninstall_prefix="$PWD/$uninstall_prefix" ;; esac
+  if [ -e "$uninstall_prefix/.masc-install-transaction" ] || [ -L "$uninstall_prefix/.masc-install-transaction" ]; then
+    die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
+  fi
+  local targets=()
+  for name in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+    target="$uninstall_prefix/$name"
+    [ ! -d "$target" ] || [ -L "$target" ] || die "refusing to remove unexpected executable directory: $target"
+    targets+=("$target")
+  done
+  targets+=("$uninstall_prefix/.masc-releases")
+  if [ "$PURGE_DATA" -eq 1 ]; then
+    case "$uninstall_base" in /*) ;; *) uninstall_base="$PWD/$uninstall_base" ;; esac
+    targets+=("$uninstall_base/.masc")
+  fi
+  log "stop running MASC servers and TUI sessions before uninstalling; no processes will be killed"
+  for target in "${targets[@]}"; do
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would remove: $target"
+    else
+      # No trailing slash: rm removes a symlink itself, never its target tree.
+      rm -rf -- "$target" || die "could not remove: $target"
+      log "removed: $target"
+    fi
+  done
+  [ "$PURGE_DATA" -eq 1 ] || log "workspace .masc data preserved (use --purge-data --base-path PATH to remove it)"
+  log "Homebrew and runtime dependencies preserved"
+}
+
+if [ "$UNINSTALL" -eq 1 ]; then
+  uninstall_masc
+  exit 0
+fi
+[ "$PURGE_DATA" -eq 0 ] || die "--purge-data is only valid with --uninstall"
 
 case "$ALLOW_UNVERIFIED" in
   0|1) ;;
@@ -861,7 +935,123 @@ if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
   die "--sandbox requires --team; existing keepers use their own sandbox_profile"
 fi
 
-[ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
+choose_install_base_path
+
+# --- macOS dependency bootstrap ---
+installer_python_ready() {
+  "$1" -c 'import json, tarfile, sys; sys.exit(0 if sys.version_info >= (3, 8) else "Python 3.8 or newer is required")'
+}
+
+macos_formula_ready() {
+  local brew_prefix="$1" formula="$2"
+  case "$formula" in
+    openssl@3) [ -r "$brew_prefix/opt/openssl@3/lib/libssl.3.dylib" ] &&
+               [ -r "$brew_prefix/opt/openssl@3/lib/libcrypto.3.dylib" ] ;;
+    gmp) [ -r "$brew_prefix/opt/gmp/lib/libgmp.10.dylib" ] ;;
+    zstd) [ -r "$brew_prefix/opt/zstd/lib/libzstd.1.dylib" ] ;;
+    python) command -v python3 >/dev/null 2>&1 &&
+            installer_python_ready python3 >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+activate_macos_python() {
+  local brew_prefix="$1" python_prefix bin_dir
+  # Installing a new executable does not invalidate Bash's cached command path.
+  hash -r
+  macos_formula_ready "$brew_prefix" python && return 0
+  python_prefix=$(brew --prefix python) || return 1
+  # Formula-local commands also work when Homebrew's global links are absent.
+  for bin_dir in "$python_prefix/bin" "$python_prefix/libexec/bin"; do
+    if [ -x "$bin_dir/python3" ] && installer_python_ready "$bin_dir/python3" >/dev/null 2>&1; then
+      PATH="$bin_dir:$PATH"
+      export PATH
+      hash -r
+      return 0
+    fi
+  done
+  return 1
+}
+
+bootstrap_macos_homebrew() (
+  local installer
+  installer=$(mktemp) || die "cannot create Homebrew installer download"
+  trap 'rm -f "$installer"' EXIT
+  curl -fL --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" \
+    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+    -o "$installer" || die "could not download the official Homebrew installer"
+  # Homebrew owns its interactive confirmation and administrator prompt.
+  /bin/bash "$installer"
+)
+
+ensure_macos_dependencies() {
+  [ "$(uname -s)" = Darwin ] || return 0
+  local arch os_version major minimum brew_prefix actual_prefix formula
+  arch=$(uname -m)
+  case "$arch" in
+    arm64) minimum=14; brew_prefix=/opt/homebrew ;;
+    x86_64) minimum=15; brew_prefix=/usr/local ;;
+    *) die "unsupported macOS architecture: $arch" ;;
+  esac
+  os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
+  major=${os_version%%.*}
+  case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
+  [ "$major" -ge "$minimum" ] ||
+    die "macOS $os_version is below the released $arch binary minimum macOS $minimum.0"
+  if ! command -v brew >/dev/null 2>&1; then
+    if [ -x "$brew_prefix/bin/brew" ]; then
+      PATH="$brew_prefix/bin:$PATH"
+      export PATH
+    elif [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would install official Homebrew at $brew_prefix, then missing macOS dependencies"
+      return 0
+    elif is_tty; then
+      log "installing Homebrew from its official installer; Homebrew will ask for confirmation and any administrator password"
+      bootstrap_macos_homebrew || die "Homebrew setup failed; see its diagnostic above and https://brew.sh/"
+      [ -x "$brew_prefix/bin/brew" ] || die "Homebrew setup did not provide $brew_prefix/bin/brew"
+      PATH="$brew_prefix/bin:$PATH"
+      export PATH
+    else
+      die "Homebrew is required at $brew_prefix for macOS $arch dependencies. Run this installer in a terminal for guided Homebrew setup, or install it from https://brew.sh/ first."
+    fi
+  fi
+  actual_prefix=$(brew --prefix) || die "cannot determine Homebrew prefix"
+  [ "$actual_prefix" = "$brew_prefix" ] ||
+    die "Homebrew prefix $actual_prefix does not match macOS $arch ($brew_prefix). Use the native architecture Homebrew in PATH and rerun."
+  # Default Homebrew prefixes are part of the published Mach-O load paths.
+  # Inspect installed dylibs directly: a complete offline install needs no
+  # brew update or formula download. Do not alter shell startup files.
+  PATH="$brew_prefix/bin:$PATH"
+  export PATH
+  activate_macos_python "$brew_prefix" || true
+  local missing=()
+  for formula in openssl@3 gmp zstd python; do
+    if ! macos_formula_ready "$brew_prefix" "$formula"; then
+      missing+=("$formula")
+    fi
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    log "macOS dependencies ready ($arch, $brew_prefix)"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would run: brew install ${missing[*]}"
+    return 0
+  fi
+  log "installing missing macOS dependencies: ${missing[*]}"
+  brew install "${missing[@]}" || die "Homebrew dependency installation failed; see its diagnostic above"
+  if ! activate_macos_python "$brew_prefix"; then
+    warn "Python startup failed at $(command -v python3 || printf 'python3 not found'); diagnostic follows"
+    installer_python_ready python3 || true
+    die "installed Python cannot run the installer; see its startup error above"
+  fi
+  for formula in "${missing[@]}"; do
+    macos_formula_ready "$brew_prefix" "$formula" ||
+      die "dependency $formula is still unavailable at $brew_prefix; inspect Homebrew output and repair it with brew reinstall $formula"
+  done
+}
+# --- end macOS dependency bootstrap ---
 
 require() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 require curl
@@ -869,8 +1059,16 @@ require uname
 require chmod
 require mkdir
 require mktemp
+ensure_macos_dependencies
+if [ "$DRY_RUN" -eq 1 ] && ! macos_formula_ready "" python; then
+  log "[dry-run] remaining installation checks require the planned Python dependency; no files changed"
+  exit 0
+fi
 require python3
-PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$PREFIX")"
+PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
+BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
+log "workspace: $BASE_PATH"
+log "configuration and data: $BASE_PATH/.masc"
 
 # --- checksum helpers ---------------------------------------------------------
 has_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
@@ -1203,6 +1401,12 @@ else
     binary_input="$(mktemp "$PREFIX/.masc-download.XXXXXX")"
     PARTIAL_FILES+=("$binary_input")
     fetch_bundle_asset "$ASSET" "$binary_input"
+  fi
+  # Diagnose the executable itself before fetching the dashboard. This also
+  # exposes dyld/loader stderr when installing an older release bundle helper.
+  if [ "$SKIP_DL" -ne 1 ]; then chmod +x "$binary_input"; fi
+  if ! run_masc_with_install_env "$binary_input" build-commit; then
+    die "downloaded executable cannot start; see loader stderr above (check OS/CPU and native runtime dependencies)"
   fi
   BUNDLE_HELPER="$(mktemp)"
   bundle_archive="$(mktemp)"

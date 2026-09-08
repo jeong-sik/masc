@@ -3,6 +3,7 @@ import errno
 import os
 from pathlib import Path
 import pty
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -77,6 +78,38 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
+    def test_new_workspace_prompts_and_defaults_to_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result, terminal = run_shell(
+                '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
+                'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertIn('Workspace directory', terminal)
+        self.assertIn('workspace=' + os.environ['HOME'], result.stdout)
+
+    def test_existing_workspace_remains_the_suggested_location(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / '.masc/config').mkdir(parents=True)
+            result, terminal = run_shell(
+                '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
+                'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+            self.assertIn('workspace=' + directory, result.stdout)
+        self.assertEqual(result.returncode, 0, terminal)
+
+    def test_custom_workspace_with_spaces_is_preserved(self):
+        result, terminal = run_shell(
+            '\nBASE_PATH=""\nchoose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n',
+            b'/tmp/masc workspace\n')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertIn('workspace=/tmp/masc workspace', result.stdout)
+
+    def test_explicit_workspace_does_not_prompt(self):
+        result, terminal = run_shell(
+            '\nchoose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertNotIn('Workspace directory', terminal)
+        self.assertIn('workspace=/fixture', result.stdout)
+
     def test_terminal_choice_survives_captured_stdout(self):
         result, terminal = run_shell('\nrun_wizard "$BASE_PATH"\n', b'2\n')
         self.assertEqual(result.returncode, 0, terminal)

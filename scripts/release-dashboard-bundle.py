@@ -12,6 +12,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import tarfile
@@ -85,8 +86,16 @@ def validate_receipt(receipt, asset):
 
 
 def binary_commit(binary):
-    result = subprocess.run([str(binary), "build-commit"], check=True, text=True,
+    result = subprocess.run([str(binary), "build-commit"], text=True, errors="replace",
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        if result.returncode < 0:
+            termination = f"signal {signal.Signals(-result.returncode).name}"
+        else:
+            termination = f"exit status {result.returncode}"
+        diagnostic = result.stderr.strip() or "The executable produced no stderr."
+        fail(f"binary startup failed during build-commit ({termination}): {binary}\n"
+             f"{diagnostic}")
     value = result.stdout.strip()
     hex_value(value, 40)
     return value

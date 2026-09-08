@@ -56,6 +56,8 @@ jobs:
         run: |
           python3 test/test_installer_wizard.py
           python3 test/test_installer_upgrade.py
+          python3 test/test_installer_uninstall.py
+          python3 test/test_installer_dependencies.py
 
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -333,6 +335,8 @@ jobs:
 
       - name: Verify advertised release assets
         run: |
+          mkdir -p release-assets
+          cp scripts/install.sh release-assets/install.sh
           for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
@@ -346,6 +350,7 @@ jobs:
                 echo "required release asset missing: $asset"
                 exit 1
               fi
+              cp "dist/$asset" "release-assets/$asset"
             done
           done
           # The exec shim (RFC-0427 B-1): one static Linux binary per guest
@@ -355,11 +360,12 @@ jobs:
               echo "required release asset missing: $shim"
               exit 1
             fi
+            cp "dist/$shim" "release-assets/$shim"
           done
 
       - name: Generate release checksums
         run: |
-          cd dist
+          cd release-assets
           artifact_count="$(find . -maxdepth 1 -type f ! -name SHA256SUMS | wc -l | tr -d ' ')"
           if [ "$artifact_count" -eq 0 ]; then
             echo "no release artifacts found in dist"
@@ -385,5 +391,5 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/*
+          files: release-assets/*
           generate_release_notes: true

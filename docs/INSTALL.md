@@ -37,25 +37,55 @@ macOS ([Homebrew 설치 조건](https://docs.brew.sh/Installation)):
 brew install python gmp libpq openssl@3 zstd
 ```
 
-관리자 패키지 설치는 운영자가 실행합니다. MASC 설치 스크립트는 `sudo`나
-패키지 관리자를 자동 실행하지 않습니다. macOS의 Homebrew 라이브러리 경로는
-해당 CPU의 기본 prefix를 사용합니다. 실제 로더 실패가 나면 그 오류를 기준으로
-누락 라이브러리를 보충하세요.
+개선된 macOS 설치기는 다운로드 전에 OS 버전과 Homebrew 런타임 의존성을
+확인하고, 없는 패키지만 설치합니다. Homebrew가 없는 터미널에서는 공식
+Homebrew 설치 프로그램으로 이어지며, 그 프로그램의 확인·암호 입력을 거칩니다.
+비대화형 실행에서는 Homebrew를 미리 준비해야 합니다. `--dry-run`은 패키지를
+설치하지 않습니다. Linux 시스템 패키지는 위 명령으로 준비합니다.
+
+macOS의 Homebrew 라이브러리 경로는 해당 CPU의 기본 prefix를 사용합니다.
+Apple Silicon의 Intel Homebrew 등 다른 prefix로 연결된 환경은 다운로드 전에
+원인을 안내합니다. 패키지 설치 후에도 바이너리가 시작되지 않으면 설치기가
+실행 파일의 stderr 원문을 바로 표시합니다.
+
+### macOS에서 `SIGABRT` 또는 `build-commit` 실패
+
+`SIGABRT`는 프로세스의 종료 신호이며, 그 자체로 원인을 알려주지 않습니다.
+`dyld: Library not loaded` 같은 stderr 원문과 실패한 실행 파일 경로를 확인하세요.
+종료 신호만으로 누락 라이브러리라고 단정하지 않습니다.
+
+0.34.0 배포 파일의 Mach-O 최소 OS는 Apple Silicon **macOS 14.0**,
+Intel **macOS 15.0**입니다. 해당 CPU의 기본 Homebrew prefix
+(Apple Silicon `/opt/homebrew`, Intel `/usr/local`)에 의존성을 준비합니다.
+
+```bash
+brew install python gmp libpq openssl@3 zstd
+sw_vers -productVersion
+uname -m
+```
+
+`otool -L <실패한-실행파일>`로 실제 연결 라이브러리 경로를 확인할 수 있습니다.
+의존성과 OS 조건을 맞춘 뒤에도 중단되면 종료 신호와 stderr 원문을 함께 보고하세요.
+`--force`는 재다운로드 옵션이며 loader나 OS 호환성 문제를 해결하지 않습니다.
 
 ## 설치
 
 ```bash
 TAG=v0.34.0
-curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`--prefix` 기본값은 `$HOME/.local/bin`, `--base-path` 기본값은 설치 명령을
-실행한 디렉터리입니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
-작업 데이터 위치는 독립적입니다. 스크립트와 자산은 반드시 같은 태그를 사용합니다.
+`--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
+`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
+제안하므로 그대로 선택하면 데이터는 그 workspace 아래 `.masc`에 생깁니다. 현재 디렉터리에
+기존 `.masc/config`가 있으면 그 workspace를 제안합니다. 명시한 `--base-path`는
+질문 없이 사용하며, 비대화형 또는 `--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
+작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
+릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
 
 `--no-wizard`는 모델 선택을 건너뜁니다. `--provider <id>`는
@@ -108,9 +138,10 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-기본 Keeper 명단에는 `imp` 하나가 들어 있고 `browser-lanes` skill 지침이 설치됩니다.
-`imp`는 autoboot이 꺼진 채로 설치되므로, 아래 모델과 실행 환경을 준비하기 전까지는
-서버가 이 Keeper를 띄우려 하지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+공개된 **0.34.0 바이너리**는 기본 Keeper를 만들지 않고 `browser-lanes` skill을 설치합니다.
+동결 이후의 `main` 소스 빌드는 autoboot이 꺼진 `imp` 하나를 seed합니다.
+릴리스 설치기는 설정을 바이너리에서 가져오므로, 설치기만 갱신해도 0.34.0의 명단은
+바뀌지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
@@ -268,7 +299,7 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 이 파일 하나가 전체 요청을 대신하지 않습니다. 개발 계약인 `constitution.xml`은
 Keeper runtime 시스템 프롬프트가 아닙니다.
 
-기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
+공개 0.34.0의 기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
 `browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
 지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
 0.34.0의 Gecko scene 기능은 새 native host와 브라우저 확장 0.3.0을 함께 사용합니다.
@@ -298,7 +329,7 @@ MASC에 자동 복사되는 것은 아닙니다.
 
 ## 업그레이드와 복구
 
-같은 태그의 스크립트를 새로 받은 뒤, 기존과 같은 prefix/base path로 실행합니다.
+릴리스에 첨부된 `install.sh`를 새로 받은 뒤, 기존과 같은 prefix/base path로 실행합니다.
 
 ```bash
 bash /tmp/masc-install.sh --version "$TAG" \
@@ -339,3 +370,29 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 검증된 커밋에 `v0.34.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
+
+## 제거
+
+실행 중인 MASC 서버와 TUI를 종료한 뒤, 릴리스에서 받은 최신 설치기를 사용합니다.
+기본 제거는 프로그램과 대시보드만 삭제하며, 설정·Keeper·기록과 Homebrew 의존성은 보존합니다.
+
+```bash
+bash /tmp/masc-install.sh --uninstall --dry-run
+bash /tmp/masc-install.sh --uninstall
+```
+
+설치할 때 `--prefix`를 지정했다면 제거할 때도 같은 값을 지정하세요.
+제거는 네트워크, Python, Homebrew 없이 실행되며 prefix 디렉터리나 다른 파일은 지우지 않습니다.
+중단된 설치 transaction이 남아 있으면 이를 먼저 복구하라는 오류를 냅니다.
+
+데이터도 제거하려면 **실제 설치했던 workspace 경로**를 명시해야 합니다.
+아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. HOME을 workspace로
+선택했다면 `--base-path "$HOME"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
+
+```bash
+bash /tmp/masc-install.sh --uninstall --purge-data \
+  --base-path "$HOME/masc-workspace" --dry-run
+# 삭제 대상 확인 후 --dry-run 없이 실행
+```
+
+다른 경로를 가리키는 `.masc` 또는 배포 디렉터리 symlink는 링크 자체만 삭제합니다.

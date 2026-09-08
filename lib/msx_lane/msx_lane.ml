@@ -10,6 +10,7 @@ type observation = {
   pc : int;
   halted : bool;
   screen_text : string;
+  screen_view : string;
   tiles : string list;
   sprites : sprite list;
   cartridge : string option;
@@ -85,6 +86,8 @@ let key_to_string : key -> string = function
 type machine = {
   m : Msx.t;
   mutable frame : int;
+  mutable pixels : (int * int * string) option;
+  (* Immutable RGB snapshot for this machine state, guarded by [lock]. *)
   cart : string option;
   disk : string option;
   disk_id : string option;
@@ -150,6 +153,56 @@ let sprites_of m (mode : Msx.display_mode) =
     go 0 []
 ;;
 
+(* A coarse text picture of the frame, so a keeper with no vision runtime can
+   still recognise the screen (a title, a menu, a map) in any mode. Each cell is
+   the average luminance of the pixels under it, mapped to a ramp. Not a
+   replacement for [screen_text] -- that reads a text-mode name table and is
+   exact when the pattern set is a font; [screen_view] works in every mode,
+   including the bitmap modes where the name table is not characters. *)
+let screen_view_cols = 64
+let screen_view_rows = 24
+let screen_view_ramp = " .:-=+*#%@"
+
+let ascii_view rgb ~w ~h =
+  if w <= 0 || h <= 0 || String.length rgb < w * h * 3 then ""
+  else begin
+    let ramp = screen_view_ramp in
+    let levels = String.length ramp in
+    let cols = screen_view_cols and rows = screen_view_rows in
+    let buf = Buffer.create (rows * (cols + 1)) in
+    for ry = 0 to rows - 1 do
+      let y0 = ry * h / rows and y1 = (ry + 1) * h / rows in
+      for cx = 0 to cols - 1 do
+        let x0 = cx * w / cols and x1 = (cx + 1) * w / cols in
+        let sum = ref 0 and n = ref 0 in
+        for y = y0 to max y0 (y1 - 1) do
+          for x = x0 to max x0 (x1 - 1) do
+            let i = ((y * w) + x) * 3 in
+            let r = Char.code rgb.[i]
+            and g = Char.code rgb.[i + 1]
+            and b = Char.code rgb.[i + 2] in
+            sum := !sum + (((r * 30) + (g * 59) + (b * 11)) / 100);
+            incr n
+          done
+        done;
+        let lum = if !n = 0 then 0 else !sum / !n in
+        Buffer.add_char buf ramp.[lum * (levels - 1) / 255]
+      done;
+      Buffer.add_char buf '\n'
+    done;
+    Buffer.contents buf
+  end
+;;
+
+let rendered_pixels st =
+  match st.pixels with
+  | Some pixels -> pixels
+  | None ->
+      let width, height = Msx.frame_dims st.m in
+      let pixels = width, height, Msx.frame_rgb st.m in
+      st.pixels <- Some pixels;
+      pixels
+
 let observe st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
@@ -161,6 +214,9 @@ let observe st =
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
   ; disk = st.disk
+  ; screen_view =
+      (let w, h, rgb = rendered_pixels st in
+       ascii_view rgb ~w ~h)
   }
 ;;
 
@@ -262,6 +318,7 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
         Out_channel.with_open_bin ledger_path (fun _ -> ());
         let st =
           { m
+          ; pixels = None
           ; frame = pre_frames
           ; cart =
               (if Option.is_some disk then None
@@ -297,6 +354,8 @@ let check_frames ~what n =
 ;;
 
 let advance st n =
+  (* Invalidate before mutating even if stepping raises after partial progress. *)
+  st.pixels <- None;
   Msx.step st.m ~frames:n;
   st.frame <- st.frame + n
 ;;
@@ -328,7 +387,19 @@ let press_all st keys =
   go [] keys
 ;;
 
-let press ~who ~keys ~hold_frames ~step_frames =
+let tap_one st ~who ~hold_frames ~step_frames k =
+  (* Tap [k] in its own frame window: down, hold, up, then the rest idle. *)
+  (* See Msx.set_key: press_all checked [k]'s matrix place, so this edge cannot miss. *)
+  ignore (Msx.set_key st.m k ~pressed:true : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = true };
+  advance st hold_frames;
+  (* See Msx.set_key: the key just went down, so its release cannot miss. *)
+  ignore (Msx.set_key st.m k ~pressed:false : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = false };
+  advance st (step_frames - hold_frames)
+;;
+
+let press ~who ~keys ~hold_frames ~step_frames ~sequence =
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else
@@ -339,8 +410,18 @@ let press ~who ~keys ~hold_frames ~step_frames =
           (Invalid_request
              (Printf.sprintf "hold_frames (%d) cannot exceed frames (%d)" hold_frames step_frames))
       | Ok (), Ok () -> (
+        (* [press_all] validates every key against the matrix up front, so a
+           bad key in a sequence is refused before any tap advances time. *)
         match press_all st keys with
         | Error e -> Error e
+        | Ok () when sequence ->
+          (* [press_all] left the keys down with no frame advanced; release them
+             and tap each in turn, so ["down"; "return"] is a menu sequence, not
+             a chord held together. *)
+          (* See Msx.set_key: press_all just checked every key, so these cannot miss. *)
+          List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
+          List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+          Ok (observe st)
         | Ok () ->
           List.iter
             (fun k ->
@@ -377,11 +458,11 @@ type frame = {
 }
 
 let frame_of (st : machine) =
-      let width, height = Msx.frame_dims st.m in
+      let width, height, rgb = rendered_pixels st in
         { number = st.frame
         ; width
         ; height
-        ; rgb = Msx.frame_rgb st.m
+        ; rgb
         ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
         ; cartridge = st.cart
         ; disk = st.disk
@@ -490,7 +571,7 @@ let restore ~path ~ledger_dir =
       try
         let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
         atomic_write ledger_path ledger_bytes;
-        let st = {m; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
+        let st = {m; pixels = None; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
         state := Some st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
@@ -513,7 +594,7 @@ let change_disk ~path ~backup_path =
           | Error message -> Error (Invalid_request message)
           | Ok () ->
             atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
-            let next = {st with m; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
+            let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
             state := Some next;
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))

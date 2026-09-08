@@ -32,6 +32,7 @@ let observation_fields (o : Msx_lane.observation) =
   ; ("cartridge", match o.cartridge with Some c -> `String c | None -> `Null)
   ; ("disk", match o.disk with Some d -> `String d | None -> `Null)
   ; ("screen_text", `String o.screen_text)
+  ; ("screen_view", `String o.screen_view)
   ; ("tiles", `List (List.map (fun row -> `String row) o.tiles))
   ; ("sprites", `List (List.map sprite o.sprites))
   ]
@@ -225,7 +226,8 @@ let handle_press ~tool_name ~start_time ~who args =
     of_lane ~tool_name ~start_time
       (Msx_lane.press ~who ~keys
          ~hold_frames:(get_int args "hold_frames" 5)
-         ~step_frames:(get_int args "frames" 30))
+         ~step_frames:(get_int args "frames" 30)
+         ~sequence:(get_bool args "sequence" false))
 ;;
 
 (* Checkpoints use names within saves/, never caller-provided host paths. *)

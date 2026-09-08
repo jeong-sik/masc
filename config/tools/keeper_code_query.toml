@@ -1,8 +1,8 @@
 name = "keeper_code_query"
 description = """
-Query the language server for definition, hover type/docs, or references of a symbol at a specific file and line.
+Ask the language server about a symbol: definition, type/docs, or references.
 
-Locate the symbol and line with Grep first. Answers reflect the compiler index."""
+Give it the file and the line the symbol appears on. Locate them with Grep first. Answers reflect the compiler index."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.

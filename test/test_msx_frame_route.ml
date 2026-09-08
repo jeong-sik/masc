@@ -130,7 +130,7 @@ let () =
             (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
              | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
             (match Lane.press ~who:"operator" ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
-                     ~hold_frames:2 ~step_frames:6 with
+                     ~hold_frames:2 ~step_frames:6 ~sequence:false with
              | Ok obs ->
                let j = Route.press_result_json ~ok:true (Some obs) in
                check (option bool) "ok true" (Some true)

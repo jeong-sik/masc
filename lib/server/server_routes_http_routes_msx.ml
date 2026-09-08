@@ -27,6 +27,9 @@ let json_field name = function
 let int_field name ~default json =
   match json_field name json with Some (`Int n) -> n | _ -> default
 
+let bool_field name ~default json =
+  match json_field name json with Some (`Bool b) -> b | _ -> default
+
 let string_list_field name json =
   match json_field name json with
   | Some (`List items) ->
@@ -91,6 +94,7 @@ let handle_press request reqd =
             Msx_lane.press ~who:(presser_of request) ~keys
               ~hold_frames:(int_field "hold_frames" ~default:5 json)
               ~step_frames:(int_field "frames" ~default:15 json)
+              ~sequence:(bool_field "sequence" ~default:false json)
           in
           match result with
           | Ok obs -> respond ~status:`OK (press_result_json ~ok:true (Some obs))

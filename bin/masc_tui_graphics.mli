@@ -81,6 +81,14 @@ val place_rgb
 
     Chunked and silent for the same reasons as {!place}. *)
 
+val replace_rgb : image_id:int -> placement_id:int -> data:string
+  -> pixel_width:int -> pixel_height:int -> rows:int -> string
+(** Transmit and display a replacement under a stable image and placement ID.
+    The caller owns both IDs and must retire the image when leaving its surface. *)
+
+val delete_image : image_id:int -> string
+(** Delete this image's placements and free its stored pixels. *)
+
 val place : data:string -> rows:int -> string
 (** Bytes that put [data] -- the contents of a PNG file -- on the terminal at
     the cursor.

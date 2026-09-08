@@ -20,7 +20,7 @@ TELEMETRY = '/api/v1/dashboard/telemetry/summary'
 
 
 class ResponseLatencyProbeTest(unittest.TestCase):
-    def run_probe(self, tools_payloads, *, compressed=False):
+    def run_probe(self, tools_payloads, *, compressed=False, extra_args=(), identity_changes=False):
         counts = {}
         responses = {
             TOOLS: tools_payloads,
@@ -50,17 +50,21 @@ class ResponseLatencyProbeTest(unittest.TestCase):
 
             def do_GET(self):
                 if self.path.startswith('/health'):
+                    identity_count = counts.get('identity', 0)
+                    counts['identity'] = identity_count + 1
                     self.reply({'status': 'ok', 'build': {
                         'binary_commit': 'fake-commit',
                         'executable_sha256': 'fake-binary-sha256',
-                        'runtime_instance_id': 'fake-runtime',
+                        'runtime_instance_id': (f'fake-runtime-{identity_count}'
+                                                if identity_changes else 'fake-runtime'),
                     }})
                     return
                 sequence = responses[self.path]
                 ordinal = counts.get(self.path, 0)
                 counts[self.path] = ordinal + 1
                 self.reply(sequence[min(ordinal, len(sequence) - 1)],
-                           use_gzip=compressed and self.path == TOOLS)
+                           use_gzip=compressed and self.path == TOOLS
+                           and self.headers.get('Accept-Encoding') == 'gzip')
 
             def do_POST(self):
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -80,7 +84,7 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                     [sys.executable, str(PROBE), '--base-url',
                      f'http://127.0.0.1:{server.server_port}',
                      '--output', str(output), '--samples', '2', '--timeout', '3',
-                     '--target-ms', '10000', '--token-env', 'RESPONSE_PROBE_TEST_TOKEN'],
+                     '--target-ms', '10000', '--token-env', 'RESPONSE_PROBE_TEST_TOKEN', *extra_args],
                     env=env, capture_output=True, text=True, timeout=15,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -88,7 +92,7 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 evidence = json.loads(output.read_text())
                 printed = json.loads(result.stdout)
                 self.assertEqual(printed['summary'], evidence['summary'])
-                self.assertTrue(evidence['same_runtime'])
+                self.assertEqual(evidence['same_runtime'], not identity_changes)
                 self.assertTrue(evidence['mcp_initialize']['valid'])
                 self.assertFalse(evidence['authenticated'])
                 return evidence
@@ -96,6 +100,54 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 worker.join(timeout=2)
+
+    def test_selected_get_json_requirement_excludes_unloaded_without_affecting_identity_or_mcp(self):
+        evidence = self.run_probe([{'loaded': False}, {'loaded': True}],
+                                  extra_args=('--path', TOOLS, '--require-json', '/loaded=true'))
+        self.assertEqual(evidence['sample_paths'], [TOOLS])
+        self.assertEqual(list(evidence['summary']), [TOOLS])
+        samples = evidence['samples']
+        self.assertEqual([row['valid'] for row in samples], [False, True])
+        self.assertEqual(samples[0]['semantic_errors'],
+                         [{'pointer': '/loaded', 'reason': 'expected value mismatch'}])
+        self.assertEqual(evidence['summary'][TOOLS]['p95_ms'], samples[1]['total_ms'])
+        self.assertFalse(evidence['summary'][TOOLS]['all_samples_within_target'])
+        self.assertTrue(evidence['same_runtime'])
+        self.assertTrue(evidence['mcp_initialize']['valid'])
+
+    def test_requirement_mismatch_missing_pointer_and_json_boolean_type(self):
+        cases = [({'loaded': 1}, '/loaded=true', 'expected value mismatch'),
+                 ({'loaded': True}, '/missing=true', 'missing JSON pointer'),
+                 ({'mode': 'warming'}, '/mode="ready"', 'expected value mismatch'),
+                 ({'a/b': [{'~value': False}]}, '/a~1b/0/~0value=true', 'expected value mismatch')]
+        for payload, requirement, reason in cases:
+            with self.subTest(requirement=requirement, payload=payload):
+                evidence = self.run_probe([payload], extra_args=('--path', TOOLS, '--require-json', requirement))
+                self.assertEqual(evidence['summary'][TOOLS]['valid'], 0)
+                self.assertIsNone(evidence['summary'][TOOLS]['p95_ms'])
+                self.assertEqual(evidence['samples'][0]['semantic_errors'][0]['reason'], reason)
+
+    def test_read_decode_and_client_timings_preserve_wire_total(self):
+        evidence = self.run_probe([{'loaded': True}], compressed=True,
+                                  extra_args=('--path', TOOLS, '--require-json', '/loaded=true'))
+        for sample in evidence['samples']:
+            self.assertEqual(sample['content_encoding'], 'gzip')
+            self.assertGreaterEqual(sample['decode_ms'], 0)
+            self.assertAlmostEqual(sample['total_ms'], sample['headers_ms'] + sample['body_read_ms'])
+            self.assertAlmostEqual(sample['client_total_ms'], sample['total_ms'] + sample['decode_ms'])
+
+    def test_identity_encoding_can_be_requested(self):
+        evidence = self.run_probe([{'loaded': True}], compressed=True,
+                                  extra_args=('--path', TOOLS, '--accept-encoding', 'identity'))
+        self.assertEqual(evidence['accept_encoding'], 'identity')
+        for sample in evidence['samples']:
+            self.assertIsNone(sample['content_encoding'])
+
+    def test_runtime_change_is_not_a_same_runtime_measurement(self):
+        evidence = self.run_probe([{'loaded': True}], identity_changes=True,
+                                  extra_args=('--path', TOOLS, '--require-json', '/loaded=true'))
+        self.assertFalse(evidence['same_runtime'])
+        self.assertNotEqual(evidence['identity_before'], evidence['identity_after'])
 
     def test_explicit_warming_then_ready_excludes_only_warming_sample(self):
         cases = [

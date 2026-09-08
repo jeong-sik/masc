@@ -19,9 +19,29 @@ module Frame = Masc_tui_image_mosaic
    spectator does not need it threaded through [render], [open_screen] and
    [consume] as a parameter each. Unsupported until told otherwise, so a
    terminal that never answered draws the mosaic. *)
+(* Owned only by the serialized TUI loop. Commit after a successful write;
+   a failed or interrupted write must force the next frame to repaint. *)
+type retained_frame = {
+  geometry : int * int * int * int * (int * int) option;
+  frame : Masc_tui_types.msx_frame;
+}
+let retained : retained_frame option ref = ref None
+let invalidate () = retained := None
+let image_may_exist = ref false
+let image_id = 32
+let placement_id = 1
+let synchronized_output = ref false
+let set_synchronized_output enabled = synchronized_output := enabled
+let delete_image = Masc_tui_graphics.delete_image ~image_id
+let write_batch ~write payload =
+  if !synchronized_output then write ("\027[?2026h" ^ payload ^ "\027[?2026l")
+  else write payload
+
 let graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 
-let set_graphics_protocol p = graphics_protocol := p
+let set_graphics_protocol p =
+  invalidate ();
+  graphics_protocol := p
 
 (* What the terminal said one character cell measures, or [None] where it did
    not answer. Only the image path reads it: the mosaic already works in cells
@@ -115,38 +135,41 @@ let render ~(write : string -> unit)
   let picture_rows =
     max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
   in
-  let buf = Buffer.create (cols * 24 * screen_rows) in
-  Buffer.add_string buf "\027[2J\027[H";
+  let geometry = (rows, cols, header_rows, picture_rows, !cell_pixels) in
+  let kitty = match frame, !graphics_protocol with
+    | Some f, Masc_tui_graphics.Kitty_protocol ->
+        f.msx_width > 0 && f.msx_height > 0
+        && String.length f.msx_rgb = f.msx_width * f.msx_height * 3
+    | _ -> false
+  in
+  let previous = !retained in
+  (* Invalidate before output so even a partially written batch cannot be
+     mistaken for an accepted frame on the next call. *)
+  invalidate ();
+  let same_layout = match previous, frame with
+    | Some old, Some f when kitty ->
+        old.geometry = geometry && old.frame.msx_width = f.msx_width
+        && old.frame.msx_height = f.msx_height
+    | _ -> false
+  in
+  let same_pixels = match previous, frame with
+    | Some old, Some f when same_layout -> String.equal old.frame.msx_rgb f.msx_rgb
+    | _ -> false
+  in
+  let buf = Buffer.create 1024 in
+  if same_layout then Buffer.add_string buf "\027[H"
+  else begin
+    if kitty || !image_may_exist then Buffer.add_string buf delete_image;
+    Buffer.add_string buf "\027[2J\027[H"
+  end;
   Buffer.add_string buf (fit_line cols (title_of ~connection frame));
   Buffer.add_string buf "\027[0K\r\n";
   Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
-   | Some f
-     when String.length f.msx_rgb = f.msx_width * f.msx_height * 3
-          && (match !graphics_protocol with
-              | Masc_tui_graphics.Kitty_protocol -> true
-              | Masc_tui_graphics.ITerm2_protocol
-              | Masc_tui_graphics.Unsupported_protocol -> false) ->
-       (* A terminal that draws images gets the frame's own pixels. The mosaic
-          below is a good picture of a frame and still throws most of it away:
-          a character cell can carry two colours, so at 150 columns the whole
-          256x192 screen arrives as about 8,500 of its 49,152 pixels, and no
-          finer block character raises that -- more subdivisions per cell do
-          not add colours to the cell. Handing the pixels over is the only
-          step that does.
-
-          Raw RGB rather than PNG: the frame is already three bytes per pixel
-          in exactly the layout [place_rgb] wants, and masc has no PNG
-          encoder. The length test above is [=] rather than [>=] because
-          [place_rgb] refuses a frame that disagrees with its dimensions, and
-          a refusal here would clear the screen and draw nothing.
-
-          iTerm2 is left on the mosaic: its protocol carries a file, not a
-          pixel buffer, so it needs the encoder this path avoids. *)
-       (* The rows asked for are what the reader chose; these are what the
-          screen can hold. Kitty derives the width from the row count, so a
-          count the width cannot take is drawn off the right edge and cut. *)
+   | Some f when kitty ->
+       (* Keep full RGB detail. Stable image and placement IDs replace the
+          previous picture; unchanged pixels need no encoding or transfer. *)
        let drawn_rows =
          rows_that_fit ~cols ~rows:picture_rows ~frame_width:f.msx_width
            ~frame_height:f.msx_height
@@ -157,17 +180,14 @@ let render ~(write : string -> unit)
        Buffer.add_string buf
          (Printf.sprintf "\027[%d;1H" (header_rows + 1 + ((screen_rows - drawn_rows) / 2)));
        let escape =
-         Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
+         if same_pixels then "" else
+         Masc_tui_graphics.replace_rgb ~image_id ~placement_id ~data:f.msx_rgb ~pixel_width:f.msx_width
            ~pixel_height:f.msx_height ~rows:drawn_rows
        in
-       if String.equal escape "" then for _ = 1 to screen_rows do blank_row () done
-       else begin
-         Buffer.add_string buf escape;
-         (* The image is drawn at the cursor and the terminal does not move it,
-            so the footer needs the rows stepped over by hand. *)
-         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
-       end
-   | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
+       Buffer.add_string buf escape;
+       Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
+   | Some f when f.msx_width > 0 && f.msx_height > 0
+                 && String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to
           the terminal alone drew that shape stretched to whatever the window
@@ -198,10 +218,16 @@ let render ~(write : string -> unit)
        for _ = 1 to screen_rows do blank_row () done);
   Buffer.add_string buf (fit_line cols (footer ()));
   Buffer.add_string buf "\027[0K";
-  write (Buffer.contents buf)
+  image_may_exist := !image_may_exist || kitty;
+  write_batch ~write (Buffer.contents buf);
+  image_may_exist := kitty;
+  if kitty then Option.iter (fun frame -> retained := Some { geometry; frame }) frame
 
 let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   if String.equal key "esc" then begin
+    invalidate ();
+    if !image_may_exist then write_batch ~write delete_image;
+    image_may_exist := false;
     state.msx_open <- false;
     false
   end
@@ -257,10 +283,12 @@ let entry_label (state : Masc_tui_types.state) = function
   | Stay | Closed -> ""
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
+  invalidate ();
   clamp_index state;
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let entries = menu_entries state in
   let buf = Buffer.create 1024 in
+  if !image_may_exist then Buffer.add_string buf delete_image;
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (match state.msx_menu_mode with
     | Masc_tui_types.Boot_game -> menu_title
@@ -297,7 +325,8 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   for _ = drawn to max 4 (rows - 1) do
     Buffer.add_string buf "\027[0K\r\n"
   done;
-  write (Buffer.contents buf)
+  write_batch ~write (Buffer.contents buf);
+  image_may_exist := false
 
 let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (state : Masc_tui_types.state) =
   state.msx_menu_mode <- mode;

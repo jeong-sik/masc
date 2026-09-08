@@ -67,6 +67,12 @@ blocking_lints() {
   # They are asserted only in test/, which this CI does not run, so a typo in
   # prompt_source_to_string type-checks and passes every other lint while
   # breaking the dashboard's filter and the TUI's label.
+  # The selector that decides which suites a pull request runs. Its fixtures
+  # are changed-file lists, so they answer in a second and do not need the
+  # GitHub API; the mapping they pin is what #34247 slipped past.
+  run_self_test_when_changed "Edited-tests selector self-test" \
+    scripts/ci/run-edited-tests.sh \
+    bash scripts/ci/run-edited-tests.sh --self-test
   run_self_test_when_changed "Prompt source words self-test" \
     scripts/lint/prompt-source-words-agree.sh \
     bash scripts/lint/prompt-source-words-agree.sh --self-test

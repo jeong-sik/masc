@@ -15,7 +15,7 @@
 # reached a fresh host and died on "no runtime config path". The seed now comes
 # out of the binary, so the smoke drives it and asserts what landed.
 #
-# Usage: install-smoke.sh <binaries_dir> <arch>
+# Usage: install-smoke.sh <binaries_dir> <arch> [keeper_image]
 #   binaries_dir holds the release-named files:
 #     masc-<arch>, masc-tui-<arch>,
 #     masc-deployment-preflight-helper-<arch>,
@@ -26,6 +26,8 @@ set -euo pipefail
 
 BIN_DIR="${1:?usage: install-smoke.sh <binaries_dir> <arch>}"
 ARCH="${2:?usage: install-smoke.sh <binaries_dir> <arch>}"
+KEEPER_IMAGE="${3:-}"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
@@ -142,6 +144,14 @@ if [ -n "$(ls -A "$base/.masc/config/keepers" 2>/dev/null)" ]; then
 fi
 echo "install-smoke: installer seeded config and left the keeper roster empty"
 
+# Built-in skill packages come from the verified binary, not a source checkout.
+for file in SKILL.md references/advanced.md references/connection.md references/verification.md; do
+  [ -f "$base/.masc/skills/browser-lanes/$file" ] || {
+    echo "install-smoke: browser-lanes package missing $file" >&2; exit 1;
+  }
+done
+echo "install-smoke: installer seeded the complete browser-lanes Skill package"
+
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"
 mkdir -p "$work/outside-checkout"
@@ -166,4 +176,9 @@ esac
 
 python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
   --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"
+if [ -n "$KEEPER_IMAGE" ]; then
+  python3 "$REPO_ROOT/scripts/keeper-first-turn-smoke.py" \
+    --binary "$prefix/masc" --image "$KEEPER_IMAGE" \
+    --output-dir "$BIN_DIR/first-keeper-turn-$ARCH"
+fi
 echo "install-smoke: PASS"

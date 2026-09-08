@@ -338,22 +338,23 @@ What a Keeper needs before its first turn runs:
   A `remote_ssh` Keeper names a `remote_endpoint` declared under
   `[exec.ssh.endpoints]` in `runtime.toml`.
 - **An image.** `docker` and `microvm` turns run inside an image, and until
-  it exists every turn stops at `docker_preflight_failed`. `masc sandbox-image`
+  it exists image preflight refuses the turn. `masc sandbox-image`
   builds `masc-sandbox:general` (bash, ripgrep, git on Debian) from a recipe
   embedded in the binary. A Keeper that has to build a project names that
   project's toolchain image in `sandbox_image`. The container runs with a
   read-only rootfs, `--cap-drop=ALL`, and your uid, so an image has to carry
   `bash` and the toolchain already; nothing can be installed during a turn.
 - **A network mode.** Sandboxes start on `network_mode = "none"`: no web
-  search, no `git push`, no HTTP. `inherit` gives the host's network.
+  search, no `git push`, no HTTP. `inherit` enables the backend's outbound network.
   `policy` gives only the destinations listed under
   `[egress.keepers.<name>]` in `runtime.toml`, through a proxy the server
   owns. `masc keeper-create` requires `--network-mode` and does not choose
   for you.
-- **A provider key in the server's environment.** `runtime.toml` names the
+- **An authenticated model provider.** HTTP API providers use a key in the server's environment; `runtime.toml` names the
   variable per provider; the server reads it from the shell it was started
   in. On the TUI path, export it before launching, because the server the TUI
-  starts inherits the TUI's environment.
+  starts inherits the TUI's environment. CLI providers require their CLI installation
+  and login instead; local model servers follow their configured authentication.
 
 Two approval lanes gate what a Keeper does. The workspace lane starts in
 `auto_judge`: a model reads each gated call and decides. That judgement runs

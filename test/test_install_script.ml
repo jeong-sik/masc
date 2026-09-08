@@ -444,6 +444,18 @@ let stage_release_mirror base_path =
     (Unix.realpath
        (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
     gate;
+  (* The installer places but does not execute the guest shim. As with the
+     companion fixtures, reuse the test binary bytes and retain the production
+     asset name so missing-shim failures cannot hide wizard behavior. *)
+  let shim_arch =
+    match suffix with
+    | "linux-x64" | "macos-x64" -> "amd64"
+    | "linux-arm64" | "macos-arm64" -> "arm64"
+    | other -> failf "unsupported guest shim fixture platform: %s" other
+  in
+  let shim = Filename.concat dir ("masc-exec-shim-linux-" ^ shim_arch) in
+  unlink_if_exists shim;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) shim;
   let bundle_helper =
     Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
   in
@@ -999,10 +1011,10 @@ let test_wizard_offers_subscription_runtime () =
         "subscription default runtime is set"
         output
         {|[dry-run] would set [runtime].default = "claude_code.claude-sonnet-5"|};
-      assert_contains
-        "subscription needs no API key"
+      assert_not_contains
+        "subscription does not ask to export an API credential"
         output
-        "does not require an API key";
+        "is not set; export it in the shell that starts masc";
       assert_not_contains
         "subscription record is not rejected as unknown kind"
         output
@@ -1064,10 +1076,41 @@ let test_wizard_warns_when_selected_local_server_is_down () =
         {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
 ;;
 
+(* A non-dry default update validates AGENT_CORE capabilities, unlike catalog
+   display. Use a registered provider/model with a keyless closed-loopback
+   transport; fictional local_llama.qwen would fail before the ping is reached. *)
+let write_runtime_catalog_for_connectivity_probe base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file (Filename.concat config_dir "runtime.toml")
+    {|
+[runtime]
+default = "deepseek.deepseek-v4-flash"
+
+[providers.deepseek]
+display-name = "Local connectivity fixture"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+|}
+;;
+
 (* The interactive wizard offers a connectivity test and can retry or abort. The
    non-TTY path (CI, scripted --provider, or the zero-config auto-select) used to
    return blind after writing the default. It now runs the same check
-   report-only: local_llama is keyless and bound to a closed loopback port, so
+   report-only: the fixture is keyless and bound to a closed loopback port, so
    the check fails instantly without any network, and the install must still
    finish 0 -- a first-run install surfaces an unreachable provider, it does not
    gate on it. This is not a --dry-run: the run reaches the post-write step. *)
@@ -1078,15 +1121,12 @@ let test_wizard_nontty_runs_report_only_connectivity_check () =
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      ignore (write_runtime_catalog_with_local_server tmpdir);
+      write_runtime_catalog_for_connectivity_probe tmpdir;
       let output, status =
-        run_install_status [ "--provider"; "local_llama" ] tmpdir
+        run_install_status [ "--provider"; "deepseek" ] tmpdir
       in
-      check
-        bool
-        "a failed connectivity check does not fail the install"
-        true
-        (status = Unix.WEXITED 0);
+      if status <> Unix.WEXITED 0 then
+        failf "connectivity probe installer failed:\n%s" output;
       assert_contains
         "the non-TTY wizard reports the connectivity result instead of returning blind"
         output
@@ -1103,14 +1143,15 @@ let test_wizard_nontty_connectivity_check_opt_out () =
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      ignore (write_runtime_catalog_with_local_server tmpdir);
+      write_runtime_catalog_for_connectivity_probe tmpdir;
       let output, status =
         run_install_status
           ~extra_env:"MASC_INSTALL_NO_PING=1"
-          [ "--provider"; "local_llama" ]
+          [ "--provider"; "deepseek" ]
           tmpdir
       in
-      check bool "opt-out install still exits 0" true (status = Unix.WEXITED 0);
+      if status <> Unix.WEXITED 0 then
+        failf "connectivity opt-out installer failed:\n%s" output;
       assert_not_contains
         "the opt-out skips the post-write connectivity check"
         output

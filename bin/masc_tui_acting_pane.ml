@@ -508,22 +508,26 @@ let focus_header_line ~cols ~now ~health name current =
   match current with
   | Some (current : Acting.chunk) ->
       let state = record_state ~health current in
-      let named =
+      let clock =
+        { text = middle_dot ^ last_event_text ~now current.Acting.ck_at; tone = Dim }
+      in
+      (* A named turn is a settled one, since only a settle names it: the
+         number says what the word would, and the word pushed the clock off
+         the row behind a sixteen-cell name. Every other record spells its
+         state, the long form first, and gives that up before the clock. *)
+      let states =
         match turn_name current with
-        | Some text -> [ { text = middle_dot ^ text; tone = Plain } ]
-        | None -> []
+        | Some turn when state = Record_settled -> [ [ { text = middle_dot ^ turn; tone = Plain } ] ]
+        | Some _ | None ->
+            List.map
+              (fun (word, tone) -> [ { text = middle_dot ^ word; tone } ])
+              [ record_word_long state; record_word state ]
       in
-      let line (state_word, state_tone) =
-        with_border
-          ( { text = name; tone = Accent }
-          :: named
-          @ [ { text = middle_dot ^ state_word; tone = state_tone }
-            ; { text = middle_dot ^ last_event_text ~now current.Acting.ck_at; tone = Dim }
-            ] )
-      in
-      (* The long form of the state word goes before the clock does. *)
       fit_line ~cols
-        (first_fitting ~room:cols [ line (record_word_long state); line (record_word state) ])
+        (first_fitting ~room:cols
+           (List.map
+              (fun words -> with_border (({ text = name; tone = Accent } :: words) @ [ clock ]))
+              states))
   | None ->
       fit_line ~cols
         (with_border
@@ -658,17 +662,34 @@ let fleet_lines ~below ~scroll input =
     | Some name -> focus_rows input chunks name
     | None -> []
   in
-  (* The full list: every fleet row, then the rule and the focus block when
-     there is one. Scrolling walks this; the overview folds it. *)
-  let fleet_rows =
-    List.map (fun keeper -> Fleet_row (keeper, Hashtbl.find_opt newest keeper.name)) ordered
-  in
+  let fleet_row_of keeper = Fleet_row (keeper, Hashtbl.find_opt newest keeper.name) in
   match input.scope with
   | Selected_only ->
-      (* Beside the roster every fleet row is a roster row said twice; the
-         selected keeper's record is the only news. *)
-      window ~below ~scroll focus_rows ~overview:(fun () -> folded_rows ~below focus_rows)
+      (* Beside the roster every fleet row is a roster row said twice, except
+         a keeper waiting on the reader: the roster does not say who is
+         waiting on an approval, so those rows stay, above the selected
+         keeper's record. The focus block already carries its own. *)
+      let waiting =
+        List.filter
+          (fun keeper ->
+            Option.is_some (approval_for input.approvals keeper.name)
+            &&
+            match focus with
+            | Some name -> not (String.equal name keeper.name)
+            | None -> true)
+          ordered
+        |> List.map fleet_row_of
+      in
+      let body =
+        match waiting, focus_rows with
+        | [], rows | rows, [] -> rows
+        | waiting, rows -> waiting @ (Rule :: rows)
+      in
+      window ~below ~scroll body ~overview:(fun () -> folded_rows ~below body)
   | Whole_fleet ->
+      (* The full list: every fleet row, then the rule and the focus block
+         when there is one. Scrolling walks this; the overview folds it. *)
+      let fleet_rows = List.map fleet_row_of ordered in
       let body =
         fleet_rows
         @ (match focus_rows with

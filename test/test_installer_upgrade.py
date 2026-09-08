@@ -26,6 +26,9 @@ class UpgradeConfigTest(unittest.TestCase):
             keeper = config / 'keepers/custom.toml'
             keeper.parent.mkdir()
             keeper.write_text('custom instructions\n')
+            skill = base / '.masc/skills/custom/SKILL.md'
+            skill.parent.mkdir(parents=True)
+            skill.write_text('operator skill\n')
             binary = base / 'masc'
             binary.write_text('''#!/usr/bin/env bash
 set -eu
@@ -35,6 +38,11 @@ for name in runtime.toml agent-core-models-overlay.toml; do
     echo seeded > "$cfg/$name"
   fi
 done
+skill_root="$3/.masc/skills"
+if [ ! -e "$skill_root/browser-lanes" ]; then
+  mkdir -p "$skill_root/browser-lanes"
+  echo builtin > "$skill_root/browser-lanes/SKILL.md"
+fi
 echo initialized
 ''')
             binary.chmod(0o755)
@@ -78,6 +86,8 @@ curl() {
             self.assertEqual(keeper.read_text(), 'reset instructions\n' if reset else 'custom instructions\n')
             self.assertEqual((base / 'wizard-ran').exists(), reset)
             self.assertTrue(overlay.exists())
+            self.assertEqual(skill.read_text(), 'operator skill\n')
+            self.assertEqual((base / '.masc/skills/browser-lanes/SKILL.md').read_text(), 'builtin\n')
 
     def test_force_upgrade_preserves_custom_config_and_team(self):
         self.exercise()

@@ -46,6 +46,12 @@ val default_config : config
 (** [{ max_idle_per_host = 8; max_total_idle = 256;
        idle_ttl_seconds = 60.0; connect_timeout_seconds = 5.0 }]. *)
 
+val shutdown : t -> unit
+(** Idempotently stop accepting idle connections and close parked clients.
+    Call before leaving a short-lived switch: client fibers must be closed
+    before that switch can finish joining them. In-flight requests must have
+    completed; late releases close their clients instead of parking them. *)
+
 val create :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

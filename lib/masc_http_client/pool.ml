@@ -160,10 +160,10 @@ let evict_expired_entries t now =
           unwinding promptly. *))
 
 let start_eviction_fiber t =
-  Eio.Fiber.fork ~sw:t.sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
     let clock = Eio.Stdenv.clock t.env in
     let rec loop () =
-      if Atomic.get t.stop then ()
+      if Atomic.get t.stop then `Stop_daemon
       else begin
         Eio.Time.sleep clock (t.config.idle_ttl_seconds /. 2.0);
         let now = Eio.Time.now clock in
@@ -185,6 +185,21 @@ let start_eviction_fiber t =
 
 (* ── create / shutdown ─────────────────────────────────────────── *)
 
+let shutdown t =
+  Eio.Cancel.protect (fun () ->
+    if Atomic.compare_and_set t.stop false true then (
+      let leftover =
+        with_mu t (fun () ->
+          let all = Host_map.fold (fun _ entries acc -> entries @ acc) t.idle [] in
+          t.idle <- Host_map.empty;
+          all)
+      in
+      List.iter (fun e ->
+        try Piaf.Client.shutdown e.client with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Log.Http.warn "HTTP pool shutdown: %s" (Printexc.to_string exn))
+        leftover))
+
 let create ~sw ~env ?(config = default_config) () : t =
   let t = {
     sw;
@@ -195,27 +210,7 @@ let create ~sw ~env ?(config = default_config) () : t =
     stop = Atomic.make false;
     counters = new_counters ();
   } in
-  (* Pool teardown: stop eviction fiber + close all idle clients on
-     switch release. In-flight requests outlive this via per-call
-     sub-switches. *)
-  Eio.Switch.on_release sw (fun () ->
-    Atomic.set t.stop true;
-    (* Snapshot+clear under lock; close outside lock. *)
-    let leftover =
-      with_mu t (fun () ->
-        let all = Host_map.fold
-                    (fun _ entries acc -> entries @ acc)
-                    t.idle []
-        in
-        t.idle <- Host_map.empty;
-        all)
-    in
-    List.iter (fun e ->
-      try Piaf.Client.shutdown e.client
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> ()
-    ) leftover);
+  Eio.Switch.on_release sw (fun () -> shutdown t);
   start_eviction_fiber t;
   t
 
@@ -333,7 +328,8 @@ let release t key client ~close_only =
     let parked = ref false in
     with_mu t (fun () ->
       let existing = Host_map.find_opt key t.idle |> Option.value ~default:[] in
-      if List.length existing < t.config.max_idle_per_host then begin
+      if not (Atomic.get t.stop)
+         && List.length existing < t.config.max_idle_per_host then begin
         let entry = { client; last_used_ts = now } in
         t.idle <- Host_map.add key (entry :: existing) t.idle;
         parked := true

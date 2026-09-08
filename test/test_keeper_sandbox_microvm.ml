@@ -1053,9 +1053,9 @@ let test_leaves_foreign_base_guest_untouched () =
    found". *)
 let test_sweep_skips_listing_when_cli_is_unavailable () =
   let spawn_count = ref 0 in
-  let run_argv ~timeout_sec:_ _argv =
+  let run_argv ~timeout_sec:_ argv =
     incr spawn_count;
-    Unix.WEXITED 0, "[]"
+    Unix.WEXITED 0, (match argv with "nerdctl" :: _ -> "" | _ -> "[]")
   in
   let asked = ref [] in
   let unavailable =
@@ -1082,27 +1082,15 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
       ~is_pid_alive
       ~run_argv
   in
-  (* Only Apple's runtime has an established labelled listing today, so it is
-     the only row and the only spawn. *)
-  Alcotest.(check int) "available listing count" 1 !spawn_count;
-  match available with
-  | [] -> Alcotest.fail "available CLI did not run the sweep"
-  | [ (backend, outcome) ] ->
-    Alcotest.(check string)
-      "the row names the runtime it swept"
-      "apple_container"
-      (Backend.to_string backend);
+  (* Apple and Kata have independently parsed labelled inventories. *)
+  Alcotest.(check int) "available listing count" 2 !spawn_count;
+  Alcotest.(check (list string)) "available backend inventory rows"
+    [ "apple_container"; "nerdctl_kata" ]
+    (List.map (fun (backend, _) -> Backend.to_string backend) available);
+  List.iter (fun (_, outcome) ->
     Alcotest.(check (list string)) "available removed" [] outcome.M.removed;
-    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)
-  | rows ->
-    Alcotest.failf
-      "expected one swept runtime, got %d"
-      (List.length rows)
+    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)) available
 
-(* Exercise the production boot entrypoint against the sweep's paused CLI
-   inventory. A fake CLI permits the boot's stop/delete/probe calls, then
-   refuses its image. This tests the actual lifecycle without guest
-   credentials, a shim binary, or a container daemon. *)
 
 let test_startup_sweep_serializes_inventory_with_boot () =
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
@@ -1354,6 +1342,61 @@ let test_volume_create_argv_carries_a_size () =
   (* The image is sparse -- 4 GiB nominal measured at 84 MB on disk -- so the
      size is a ceiling, not an allocation. *)
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
+;;
+
+let test_nerdctl_volume_ensure_confirms_persistent_identity () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "nerdctl-volume-cli-" in
+  let cli = Filename.concat dir "nerdctl" in
+  let log = Filename.concat dir "calls" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p) [cli; log];
+      Unix.rmdir dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let run ~create_exit ~inspect_exit ~payload =
+    let oc = open_out cli in
+    Printf.fprintf oc
+      "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\ncase \"$*\" in\n'volume create masc-keeper-work-fixture') exit %d;;\n'volume inspect masc-keeper-work-fixture') printf '%%s\\n' %s; exit %d;;\n*) exit 99;;\nesac\n"
+      (Filename.quote log) create_exit (Filename.quote payload) inspect_exit;
+    close_out oc;
+    Unix.chmod cli 0o755;
+    M.ensure_work_volume_for Masc.Keeper_microvm_backend.Nerdctl_kata
+      ~volume_name:"masc-keeper-work-fixture" ~size:"256g" ~timeout_sec:5.0
+  in
+  let valid = {|[{"Name":"masc-keeper-work-fixture","Mountpoint":"/managed/fixture/_data"}]|} in
+  for _ = 1 to 2 do
+    match run ~create_exit:0 ~inspect_exit:0 ~payload:valid with
+    | Ok `Ensured -> ()
+    | _ -> Alcotest.fail "repeated ensure must confirm identity without claiming new creation"
+  done;
+  let ic = open_in log in
+  let calls = In_channel.input_all ic in
+  close_in ic;
+  Alcotest.(check string) "only idempotent create and inspect, no size/list/remove"
+    "volume create masc-keeper-work-fixture\nvolume inspect masc-keeper-work-fixture\nvolume create masc-keeper-work-fixture\nvolume inspect masc-keeper-work-fixture\n"
+    calls;
+  List.iter
+    (fun payload ->
+      match run ~create_exit:0 ~inspect_exit:0 ~payload with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "malformed or mismatched inspect must fail")
+    [ "[]"; "not json"; {|[{"Name":"other","Mountpoint":"/managed/x"}]|}
+    ; {|[{"Name":"masc-keeper-work-fixture","Mountpoint":"relative"}]|}
+    ; {|[{"Name":"masc-keeper-work-fixture","Name":"other","Mountpoint":"/managed/x"}]|} ];
+  List.iter
+    (fun (create_exit, inspect_exit) ->
+      match run ~create_exit ~inspect_exit ~payload:valid with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "CLI failure must not be read as an ensured volume")
+    [1, 0; 0, 1]
 ;;
 
 let test_work_volume_is_named_and_mounted_at_its_root () =
@@ -2210,7 +2253,9 @@ let () =
             test_live_turn_runtime_cat
         ] )
     ; ( "work volume"
-      , [ Alcotest.test_case "work volume is named and mounted at its root" `Quick
+      , [ Alcotest.test_case "nerdctl ensure confirms persistent volume identity" `Quick
+            test_nerdctl_volume_ensure_confirms_persistent_identity
+        ; Alcotest.test_case "work volume is named and mounted at its root" `Quick
             test_work_volume_is_named_and_mounted_at_its_root
         ; Alcotest.test_case "create argv carries a size" `Quick
             test_volume_create_argv_carries_a_size

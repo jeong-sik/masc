@@ -240,6 +240,7 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
   then
     true
+  else if Keeper_recovery_transmission.should_try_next error then true
   else if Keeper_turn_driver_try_runtime.candidate_access_should_try_next error
   then
     true
@@ -845,6 +846,7 @@ let run_named
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?(initial_messages = [])
     ?model_input_projection
+    ?recovery_view
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
@@ -1120,16 +1122,27 @@ let run_named
         , None
         , Keeper_provider_attempt_effect.No_effect_observed )
       | Resolved_runtime runtime ->
+      let agent_core_tools = match runtime.Runtime.execution, agent_ref with
+        | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
+            ~agent_cell ~built:agent_core_tools
+        | _ -> agent_core_tools in
+      let source_reader_ready = match recovery_view, runtime.Runtime.execution with
+        | Some _, Runtime_execution.Agent_core _ ->
+          Keeper_recovery_transmission.require_reader agent_core_tools
+          |> Result.map_error Keeper_recovery_transmission.to_core_error
+        | _ -> Ok () in
       let has_tools, surface_enabled = match runtime.Runtime.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
-      (match Keeper_required_tools.check_surface tool_requirement
-          ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools with
+      (match Result.bind source_reader_ready (fun () ->
+          Keeper_required_tools.check_surface tool_requirement
+            ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
+          |> Result.map_error Keeper_required_tools.to_core_error) with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-         Error (Keeper_required_tools.to_core_error failure), None,
+         Error failure, None,
          Keeper_provider_attempt_effect.No_effect_observed
        | Ok () ->
       (* Shadows the caller's inputs with this candidate's dispatch view; the
@@ -1139,7 +1152,12 @@ let run_named
           ; attempt_agent_core_checkpoint = agent_core_checkpoint
           ; attempt_replay_prefix_projection = replay_prefix_projection
           } =
-        project_input_for_attempt
+        match recovery_view with
+        | Some _ ->
+          {attempt_goal_blocks=goal_blocks;attempt_initial_messages=initial_messages;
+           attempt_agent_core_checkpoint=agent_core_checkpoint;
+           attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
+        | None -> project_input_for_attempt
           ~project_images
           ~keeper_name
           ~emit_runtime_manifest
@@ -1166,6 +1184,13 @@ let run_named
           ()
       in
       match runtime.Runtime.execution with
+      | (Runtime_execution.Codex_app_server _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Antigravity_cli _) when Option.is_some recovery_view ->
+        (Error (Keeper_recovery_transmission.to_core_error
+          (Keeper_recovery_transmission.Client_projection_not_integrated
+            {runtime_id=attempt_runtime_id})), None,
+         Keeper_provider_attempt_effect.No_effect_observed)
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
           let on_transmitted_model_input transmitted =
@@ -1519,7 +1544,8 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
-        (match Keeper_required_tools.check_provider tool_requirement
+        (match Keeper_required_tools.check_provider
+            (match recovery_view with Some _ -> Keeper_required_tools.Required | None -> tool_requirement)
             ~runtime_id:attempt_runtime_id provider_config with
          | Error failure ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -1573,16 +1599,10 @@ let run_named
                  take [tools] whole. A caller that named no lane view is not
                  deferring anything, so this lane sends every tool too --
                  which is what every caller did before the listing existed. *)
-              tools =
-                (match agent_ref with
-                 | None -> agent_core_tools
-                 | Some agent_cell ->
-                   (* A previous provider attempt may have loaded more tools.
-                      Carry its actual callable set into the next agent. *)
-                   Keeper_agent_tool_surface.on_the_wire
-                     ~agent_cell ~built:agent_core_tools)
+              tools = agent_core_tools
             ; initial_messages
             ; model_input_projection
+            ; recovery_view
             ; stream_idle_timeout_s
             ; first_event_timeout_s =
                 (* Keeper policy knob, injected from the resolved layer like

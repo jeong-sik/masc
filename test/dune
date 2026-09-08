@@ -2362,6 +2362,7 @@
 (include stanzas/test_keeper_owned_checkpoint.inc)
 (include stanzas/test_keeper_recovery_work.inc)
 (include stanzas/test_keeper_recovery_projection.inc)
+(include stanzas/test_keeper_recovery_transmission.inc)
 (include stanzas/test_keeper_recovery_worker.inc)
 
 
@@ -5091,3 +5092,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_shim_builder_bootstrap)))
+
+(include stanzas/test_keeper_nerdctl_image_admission.inc)
+
+(include stanzas/test_keeper_kata_inventory.inc)

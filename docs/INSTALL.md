@@ -108,7 +108,7 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-기본 Keeper 명단은 비어 있습니다. 모델 가중치, 모델 CLI, API 키, Docker,
+기본 Keeper 명단은 비어 있으며 `browser-lanes` skill 지침이 설치됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
@@ -132,6 +132,10 @@ curl http://127.0.0.1:8935/health
 curl 'http://127.0.0.1:8935/health?full=1'
 ```
 
+`/health` 응답은 HTTP listener가 열렸다는 뜻입니다. 첫 Keeper를 만들기 전에는
+full health의 `startup.state_ready`가 `true`인지도 확인합니다. 부팅 초기에는
+listener가 먼저 응답하고 내부 상태 초기화는 진행 중일 수 있습니다.
+
 브라우저에서 `http://127.0.0.1:8935/dashboard/`를 엽니다. 대시보드는 설치된
 번들을 자동 선택하므로 소스 디렉터리에서 시작할 필요가 없습니다.
 [인증 안내](LOCAL-DASHBOARD-AUTH-RUNBOOK.md)에 따라 쓰기 권한을 설정합니다.
@@ -152,6 +156,25 @@ Keeper를 실행하려면 모델 출처와 도구 실행 환경을 모두 준비
    미리 구성된 팀이 필요하면 설치 시 `--team classic --sandbox docker`를 사용합니다.
    팀 파일은 다음 서버 시작 시 Keeper를 자동 부팅하므로 모델·sandbox를 먼저 준비합니다.
 
+서버가 실행 중이고 Docker 이미지와 모델을 준비했다면, 별도 터미널에서 첫 Keeper를
+명시적으로 만들 수 있습니다. `login`과 `keeper-create`는 같은 base path, agent,
+host/port를 사용합니다.
+
+```bash
+masc login --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
+  --agent local-admin --role admin --no-expiry --json
+masc keeper-create --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
+  --agent local-admin --name scout --sandbox-profile docker --network-mode none \
+  --no-skills --no-autoboot --no-proactive \
+  --instructions '주어진 작업을 수행하고 실제 도구 결과를 근거로 보고한다.'
+```
+
+생성 요청은 Keeper를 즉시 부팅합니다. `--no-autoboot`는 이후 서버 재시작 때의
+자동 부팅을 끄며, `--no-proactive`는 자발적 활동을 끕니다. TUI나 대시보드에서
+`scout`에게 작업을 보내세요. 이 예제의 `none`은 guest 외부 네트워크를 막으므로
+웹·Git 원격 작업에는 `inherit` 등 작업에 맞는 네트워크 설정이 필요합니다.
+같은 이름으로 다시 실행하면 기존 Keeper를 재설정합니다.
+
 Keeper는 설정된 모델로 턴을 수행하고, sandbox에서 도구를 실행하며, 작업·보드·채팅을
 통해 협업합니다. 일정 실행, 승인 판단, 외부 connector와 브라우저 조작은 해당
 runtime/credential/backend 설정이 있어야 합니다. 브라우저는 별도
@@ -168,7 +191,7 @@ Debian base image와 패키지를 받는 네트워크가 필요합니다.
 |---|---|---|
 | Linux + Docker | Docker daemon을 별도 설치·시작하고 `masc sandbox-image` 실행 | 서버 설치와 이미지 생성/도구 실행은 별도 검사 |
 | Apple Silicon + Apple Container | macOS 26 및 `container` 설치, 아래 runtime 지정 빌드 | macOS 14 서버 CI 통과만으로 이 backend를 증명하지 않음 |
-| Linux + nerdctl/Kata | containerd/nerdctl/Kata와 가상화 지원, backend 명시, 해당 store에 이미지 생성 | 현재 Keeper 작업 볼륨 경로가 `microvm_work_volume_unsupported`로 거부: 이미지 빌드만으로 Keeper 부팅 불가 |
+| Linux + nerdctl/Kata | containerd/nerdctl/Kata와 가상화 지원, backend 명시, 해당 store에 이미지 생성 | 작업 볼륨을 멱등 생성·inspect 확인; 실제 Kata 검증 필요, policy networking 미지원 |
 | remote SSH | 원격 endpoint와 인증·shim·도구 준비 | 로컬 Docker/microVM 이미지와 독립적인 원격 환경 |
 
 ```bash
@@ -184,9 +207,15 @@ masc sandbox-image --runtime nerdctl_kata
 
 `--runtime`만 바꿔도 hypervisor나 daemon을 설치하지는 않습니다.
 Docker store에 있는 이미지는 Apple Container/nerdctl store에 자동 복사되지 않습니다.
-현재 Linux nerdctl/Kata Keeper는 작업 볼륨 지원이 없어 부팅을 거부합니다.
-위 nerdctl 명령은 이미지 저장소에 빌드하는 경로이며 Keeper 지원 완료를 뜻하지 않습니다.
-Linux에서 Keeper를 실행할 때는 Docker 또는 별도로 준비한 remote SSH 경로를 사용합니다.
+Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 inspect로
+이름과 mountpoint를 확인합니다. guest를 다시 만들어도 같은 볼륨을 연결합니다.
+이 저장소는 호스트의 관리 디렉터리이며 Apple의 guest ext4 디스크와 다릅니다.
+`MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE`는 nerdctl에서 강제되지 않고 실제 사용 가능한
+공간은 호스트 filesystem을 따릅니다. 이 차이는 부팅 로그에 표시합니다.
+Apple에서 측정한 host descriptor 특성이 Linux에서도 같다고 보장하지 않습니다.
+`network_mode=none` 또는 `inherit`를 사용하며 Linux의 `policy`는 지원하지 않습니다.
+실제 Kata 환경 검증에는 `scripts/smoke-nerdctl-kata-volume.sh`를 사용합니다.
+이 검증 전에는 Linux microVM 지원 완료로 판단하지 않습니다.
 [Apple Container](https://github.com/apple/container#requirements)는 Apple Silicon과
 macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-containers/blob/main/docs/installation.md)는
 호스트 가상화 조건을 확인해야 합니다. Microsandbox의 현재 MASC 연결은 필수 격리
@@ -209,7 +238,9 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 이 파일 하나가 전체 요청을 대신하지 않습니다. 개발 계약인 `constitution.xml`은
 Keeper runtime 시스템 프롬프트가 아닙니다.
 
-기본 설치는 **Keeper 0명, 배포되는 skill 패키지 0개**입니다.
+기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
+`browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
+지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
 `--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
 
 | Keeper | 개별 지침의 역할 |
@@ -241,8 +272,8 @@ bash /tmp/masc-install.sh --version "$TAG" \
 ```
 
 0.34.0부터 `--force`는 바이너리를 갱신하며 기존 runtime 설정, 모델 선택,
-Keeper 파일을 보존합니다. runtime 설정이나 model overlay가 누락된 경우
-기존 파일을 보존하며 기본 seed를 실행합니다. 설정 초기화가 목적일
+Keeper 파일을 보존합니다. 기본 seed는 매 설치마다 누락된 배포 자산과
+새 내장 skill을 보충하되 기존 설정과 skill 패키지는 보존합니다. 설정 초기화가 목적일
 때만 `--reset-config`를 추가합니다. 이 옵션은 seeded 설정과 선택한 팀 파일을
 덮어쓰므로 사용자 설정을 별도 보관한 다음 사용하세요.
 
@@ -263,6 +294,11 @@ workspace의 guest shim과 명시적으로 초기화한 설정은 이 prefix tra
 사용하는 `file://` 설치 → config seed → 설치된 서버 health → 대시보드 검증을
 수행합니다. Linux는 OCaml 개발 환경이 없는 새 Ubuntu container에서도 같은
 설치를 실행합니다. TUI와 browser host의 `--help`로 동적 로더가 동작하는지도 확인합니다.
+Linux native runner에서는 설치된 실행 파일로 새 Keeper를 생성하고 로컬 모델
+fixture가 요청한 도구를 실제 Docker에서 실행하는 첫 턴 검증도 수행합니다.
+ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable checkpoint가
+일치해야 통과합니다. 모델 품질·실제 API 인증·장시간 연속성은 이 fixture가
+증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
 검증된 커밋에 `v0.34.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와

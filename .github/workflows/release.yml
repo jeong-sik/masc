@@ -133,6 +133,9 @@ jobs:
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
 
+      - name: Keeper creation CLI exits after HTTP response
+        run: python3 test/test_keeper_create_cli_exit.py _build/default/bin/main_eio.exe
+
       - name: Sandbox image CLI runtime routing
         run: python3 test/test_sandbox_image_cli.py _build/default/bin/main_eio.exe
 
@@ -275,7 +278,11 @@ jobs:
       - name: Installer smoke (offline)
         run: |
           chmod +x scripts/install-smoke.sh
-          scripts/install-smoke.sh dist ${{ matrix.arch }}
+          install_args=(dist "${{ matrix.arch }}")
+          if [ "${{ runner.os }}" = Linux ]; then
+            install_args+=("masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}")
+          fi
+          scripts/install-smoke.sh "${install_args[@]}"
 
       # A build runner has development libraries that a fresh user host lacks.
       - name: Fresh Ubuntu installation (no OCaml or checkout dependencies)
@@ -287,6 +294,16 @@ jobs:
               apt-get install -y -qq --no-install-recommends ca-certificates curl python3 libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
               bash scripts/install-smoke.sh dist "${{ matrix.arch }}"
             '
+
+      - name: Upload failed installation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: install-failure-${{ matrix.arch }}
+          if-no-files-found: ignore
+          path: |
+            dist/general-sandbox-*.log
+            dist/first-keeper-turn-*/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -45,20 +45,22 @@
 # fail in the sweep -- shared fixtures, or a timing window that only closes
 # under load. So the four are candidates, not removals.
 #
-# What settles it is the nightly, and the nightly has not settled anything
-# since 09-04: cut at the 90-minute suite deadline on 09-05 and 09-06, twice
-# for different reasons (#32154 for the first, #33807 for the second). A cut
-# produces no failure set, so this ratchet compares nothing and a row that
-# should have come off can sit. Four have.
+# What settles it is the nightly. It went unsettled from 09-04 to 09-06 -- cut
+# at the 90-minute suite deadline twice for different reasons (#32154, then
+# #33807) -- and a cut produces no failure set, so this ratchet compared
+# nothing and four rows that should have come off sat here.
+#
+# #33809 fixed the hang. The 09-07 run (34148793721, commit 45016f15) finished
+# in 917s of its 5400s deadline and produced a set, and it named those four as
+# passing. They are gone below. The same run also named 102 failing suites this
+# file does not list: 89 under test/, 13 under packages/agent_core/test/,
+# 220 failing cases in all. That number is #33782's to answer; this change is
+# only the four the runner asked for by name.
 
 # --- assertions that fail -------------------------------------------------
-test/test_fs_compat                               # save_file_atomic: strict payload cancellation [2026-09-07 alone: passes, run 34136503118]
 test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation [2026-09-07 alone: fails, run 34136506495]
 test/test_fs_compat_capability_write              # publication: replace fatal and cancellation [2026-09-07 alone: fails, run 34136509328]
 test/test_keeper_fs_directory_durability          # durable commit observer: observer exception [2026-09-07 alone: fails, run 34136512035]
-test/test_keeper_board_attention_exact_flow       # production adapter: resumable status gate [2026-09-07 alone: passes, run 34136514998]
-test/test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle [2026-09-07 alone: passes, run 34136517651]
-test/test_server_mcp_session_persist              # persistence: save/forget/load round-trip [2026-09-07 alone: passes, run 34136520946]
 
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a

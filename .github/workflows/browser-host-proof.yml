@@ -28,6 +28,12 @@ on:
       - 'test/test_browser_native_host.py'
       - '.github/workflows/browser-host-proof.yml'
   workflow_dispatch:
+  # Weekly on main so main holds a macOS opam switch in the cache store.
+  # Pull requests only restore (see .github/actions/setup-ocaml-toolchain),
+  # and this workflow is the only one that runs on macOS, so without a
+  # main-scoped run there would be nothing for them to restore.
+  schedule:
+    - cron: "17 18 * * 1"
 
 permissions:
   contents: read

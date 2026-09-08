@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
+import shlex
 import tempfile
 import unittest
 
@@ -94,6 +96,83 @@ ensure_macos_dependencies
         self.assertIn('brew.sh', result.stdout + result.stderr)
         self.assertEqual(calls, [])
 
+
+
+class PythonActivation(unittest.TestCase):
+    def exercise(self, unlinked):
+        source = INSTALLER.read_text().split('# --- macOS dependency bootstrap ---', 1)[1].split(
+            '# --- end macOS dependency bootstrap ---', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prefix = root / 'brew'
+            old = root / 'old'
+            old.mkdir()
+            (prefix / 'bin').mkdir(parents=True)
+            formula = prefix / 'opt/python'
+            destination = formula / 'libexec/bin' if unlinked else prefix / 'bin'
+            destination.mkdir(parents=True, exist_ok=True)
+            stale = old / 'python3'
+            stale.write_text('#!/bin/sh\nexit 1\n')
+            stale.chmod(0o755)
+            good = root / 'good-python'
+            good.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n')
+            good.chmod(0o755)
+            # Map only the platform installation root into this fixture. The
+            # Python readiness body and activation logic remain production code.
+            source = source.replace('/opt/homebrew', str(prefix))
+            source = source.replace('macos_formula_ready() {', 'actual_formula_ready() {', 1)
+            script = source + r"""
+log() { :; }
+die() { echo "$*" >&2; exit 1; }
+is_tty() { return 1; }
+uname() { if [ "${1:-}" = -m ]; then echo arm64; else echo Darwin; fi; }
+sw_vers() { echo 14.0; }
+macos_formula_ready() {
+  if [ "$2" = python ]; then actual_formula_ready "$@"; else return 0; fi
+}
+brew() {
+  case "$1" in
+    --prefix) if [ "${2:-}" = python ]; then echo "$FORMULA"; else echo "$PREFIX_FIXTURE"; fi ;;
+    install)
+      [ "$2" = python ] || exit 91
+      # The failed readiness probe executed the stale interpreter. Prove the
+      # shell cache is populated before installing the new executable.
+      [ "$(hash -t python3)" = "$OLD_PYTHON" ] || exit 92
+      /bin/cp "$GOOD_PYTHON" "$DESTINATION/python3"
+      ;;
+    *) exit 93 ;;
+  esac
+}
+ensure_macos_dependencies
+actual_formula_ready "$PREFIX_FIXTURE" python
+[ "$(command -v python3)" = "$DESTINATION/python3" ]
+"""
+            env = dict(os.environ, PATH=str(prefix / 'bin') + ':' + str(old) + ':/usr/bin:/bin',
+                       DRY_RUN='0', FORMULA=str(formula), PREFIX_FIXTURE=str(prefix),
+                       OLD_PYTHON=str(stale), GOOD_PYTHON=str(good), DESTINATION=str(destination))
+            result = subprocess.run(['/bin/bash', '-eu', '-c', script], env=env,
+                                    text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_readiness_does_not_require_unused_tomllib(self):
+        source = INSTALLER.read_text().split('# --- macOS dependency bootstrap ---', 1)[1].split(
+            '# --- end macOS dependency bootstrap ---', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / 'python3'
+            interpreter.write_text('#!/bin/sh\ncase "$*" in *tomllib*) exit 42 ;; esac\nexec ' +
+                                   shlex.quote(sys.executable) + ' "$@"\n')
+            interpreter.chmod(0o755)
+            result = subprocess.run(['/bin/bash', '-eu', '-c', source +
+                                     '\nmacos_formula_ready /unused python\n'],
+                env=dict(os.environ, PATH=directory + ':/usr/bin:/bin'),
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_newly_linked_python_replaces_cached_old_interpreter(self):
+        self.exercise(unlinked=False)
+
+    def test_unlinked_formula_libexec_python_is_selected(self):
+        self.exercise(unlinked=True)
 
 if __name__ == '__main__':
     unittest.main()

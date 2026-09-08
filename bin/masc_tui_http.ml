@@ -282,6 +282,14 @@ let frame_of_json json : Masc_tui_types.msx_frame option =
         ; msx_cartridge = member "cartridge" json |> to_string_option
         ; msx_disk = member "disk" json |> to_string_option
         ; msx_rgb = member "rgb_base64" json |> to_string |> Base64.decode_exn
+        ; msx_players =
+            (match member "players" json with
+             | `List items ->
+               List.filter_map
+                 (fun it ->
+                   match member "who" it with `String w -> Some w | _ -> None)
+                 items
+             | _ -> [])
         }
     with _ -> None)
   | _ -> None

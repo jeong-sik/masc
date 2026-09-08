@@ -78,8 +78,13 @@ let title_of ~(connection : Masc_tui_types.connection_status)
         | Some c, _ | None, Some c -> " · " ^ c
         | None, None -> ""
       in
-      Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode media
-        f.msx_number
+      let playing =
+        match f.msx_players with
+        | [] -> ""
+        | who -> "   조작: " ^ String.concat ", " who
+      in
+      Printf.sprintf " MSX — %s%s   frame %d%s   (spectating the server)" f.msx_mode
+        media f.msx_number playing
 
 (* How much of the terminal the picture takes: 1.0 fills the screen, and
    the size keys step it in eighths between a quarter and full. A local

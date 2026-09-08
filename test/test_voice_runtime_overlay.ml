@@ -367,12 +367,12 @@ let test_keeper_voice_speak_refuses_before_the_gate_when_unconfigured () =
     check string "error status" "error"
       Yojson.Safe.Util.(member "status" json |> to_string);
     (match outcome.Masc.Keeper_tool_execution.disposition with
-     | Masc.Tool_result.Failed Masc.Tool_result.Dependency_unavailable -> ()
-     | Masc.Tool_result.Failed other ->
+     | Tool_result.Failed Tool_result.Dependency_unavailable -> ()
+     | Tool_result.Failed other ->
        fail
          ("an unconfigured voice refused as "
-          ^ Masc.Tool_result.tool_failure_class_to_string other)
-     | Masc.Tool_result.Completed () | Masc.Tool_result.Deferred () ->
+          ^ Tool_result.tool_failure_class_to_string other)
+     | Tool_result.Completed () | Tool_result.Deferred () ->
        fail "an unconfigured voice did not refuse");
     let message = Yojson.Safe.Util.(member "message" json |> to_string) in
     check bool "the model is told voice is not configured" true

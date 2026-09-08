@@ -176,18 +176,16 @@ let test_or_refusal_carries_the_spawn_errno () =
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
-(* Eio path, same file: PATH resolution finds it, the forked child's execve
-   fails, and eio hands the parent that failure as text over its error pipe
-   (fork_action.c, low_level.ml). The text arrives as a value, unparsed. *)
-let test_or_refusal_carries_the_child_setup_text_eio () =
+(* Native foreground execution owns a posix_spawn group. A failed exec
+   therefore reports libc's errno, rather than a fork error-pipe string. *)
+let test_or_refusal_carries_the_native_spawn_errno () =
   with_runtime_reset @@ fun () ->
   with_noexec_file @@ fun path ->
   match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
-  | Error (Process_eio.Child_setup_failed { executable; detail }) ->
-    check string "the refusal names the file" path executable;
-    check bool "eio's text is carried" true (String.length detail > 0)
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.EACCES }) ->
+    check string "the refusal names the file" path executable
   | Error refusal ->
-    failf "expected Child_setup_failed, got %s" (Process_eio.spawn_refusal_to_string refusal)
+    failf "expected Spawn_failed EACCES, got %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
@@ -263,6 +261,112 @@ let test_run_argv_with_status_fallback_enforces_timeout () =
   in
   let code = match status with Unix.WEXITED c -> c | _ -> -1 in
   check int "fallback timeout exit code" 124 code
+
+(* A socket owned by the grandchild proves descriptor release even when
+   Linux init has not reaped its zombie yet. A PID existence probe cannot. *)
+let with_fallback_descendant mode run =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_file "fallback-group-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let socket_path = Filename.concat root "witness.sock" in
+  let started = Filename.concat root "started" in
+  let listener = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  let script = {|
+import os, socket, subprocess, sys, time
+child_script = """
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+s.sendall(b'ready')
+if sys.argv[3] == 'closed':
+    os.close(0); os.close(1); os.close(2)
+open(sys.argv[2], 'w').close()
+time.sleep(60)
+"""
+subprocess.Popen([sys.executable, '-c', child_script, *sys.argv[1:]])
+while not os.path.exists(sys.argv[2]): time.sleep(0.01)
+if sys.argv[3] == 'normal':
+    print('leader-output', flush=True)
+    sys.exit(7)
+while True: time.sleep(60)
+|} in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close listener;
+      List.iter (fun path -> if Sys.file_exists path then Sys.remove path)
+        [ socket_path; started ];
+      Unix.rmdir root)
+    (fun () ->
+      Unix.bind listener (Unix.ADDR_UNIX socket_path);
+      Unix.listen listener 1;
+      let outcome = run started [ "python3"; "-c"; script; socket_path; started; mode ] in
+      let ready, _, _ = Unix.select [ listener ] [] [] 5. in
+      check bool "grandchild reached its witness socket" true (ready <> []);
+      let witness, _ = Unix.accept listener in
+      Fun.protect ~finally:(fun () -> Unix.close witness) (fun () ->
+        let bytes = Bytes.create 32 in
+        let received = Buffer.create 5 in
+        let rec drain () =
+          let ready, _, _ = Unix.select [ witness ] [] [] 5. in
+          check bool "owned grandchild releases its socket" true (ready <> []);
+          match Unix.read witness bytes 0 (Bytes.length bytes) with
+          | 0 -> ()
+          | n -> Buffer.add_subbytes received bytes 0 n; drain ()
+        in
+        drain ();
+        check string "witness came from the started grandchild" "ready"
+          (Buffer.contents received));
+      outcome)
+
+let test_fallback_normal_exit_cleans_descendant_and_preserves_sibling () =
+  let sibling = Unix.create_process "/bin/sleep" [| "sleep"; "60" |]
+      Unix.stdin Unix.stdout Unix.stderr in
+  let sibling_reaped = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !sibling_reaped then (
+        Unix.kill sibling Sys.sigkill;
+        ignore (Unix.waitpid [] sibling)))
+    (fun () ->
+      let status, stdout, _ = with_fallback_descendant "normal" (fun _ argv ->
+        (* The fixture ceiling makes the broken EOF-first runner return a
+           timeout instead of hanging the suite. A healthy exit preserves 7. *)
+        Process_eio.run_argv_with_status_split ~timeout_sec:5. argv) in
+      check bool "leader status preserved" true (status = Unix.WEXITED 7);
+      check string "buffered leader output preserved" "leader-output\n" stdout;
+      let reaped, _ = Unix.waitpid [ Unix.WNOHANG ] sibling in
+      sibling_reaped := reaped <> 0;
+      check int "unrelated sibling is still running" 0 reaped)
+
+let test_fallback_timeout_cleans_descendant_with_closed_stdio () =
+  let status, _, _ = with_fallback_descendant "closed" (fun _ argv ->
+    Process_eio.run_argv_with_status_split ~timeout_sec:1. argv) in
+  check bool "explicit timeout preserved" true
+    (Process_eio.exit_reason_of_status status = Process_eio.Timed_out)
+
+exception Fallback_owner_fixture_failure
+
+let test_fallback_owner_exception_cleanup () =
+  with_fallback_descendant "closed" (fun started argv ->
+    let owner = Unix_foreground_process.create () in
+    let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+      match Fun.protect
+        ~finally:(fun () -> Unix_foreground_process.close owner)
+        (fun () ->
+          Unix_foreground_process.spawn owner "python3" argv (Unix.environment ())
+            dev_null dev_null dev_null;
+          let deadline = Monotonic_deadline.after ~seconds:5. in
+          while not (Sys.file_exists started) do
+            if Monotonic_deadline.passed deadline then
+              fail "grandchild did not start";
+            ignore (Unix.select [] [] [] 0.01)
+          done;
+          raise Fallback_owner_fixture_failure)
+      with
+      | () -> fail "fixture must raise"
+      | exception Fallback_owner_fixture_failure -> ()))
 
 let with_timeout_observer f =
   let previous = Atomic.get Process_eio.process_timeout_observer_fn in
@@ -972,7 +1076,7 @@ let timeout_with_a_grandchild_holding_stdout run =
          (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
        check string "nothing printed after the budget comes back" "" stdout;
        check bool
-         "the call came back while the grandchild still held stdout"
+         "timed-out group did not produce its late completion marker"
          false
          (Sys.file_exists released))
 ;;
@@ -1173,7 +1277,7 @@ let () =
             test_or_refusal_carries_the_spawn_errno;
           test_case "argv-with-status-split-or-refusal-carries-child-setup-text-eio"
             `Quick
-            test_or_refusal_carries_the_child_setup_text_eio;
+            test_or_refusal_carries_the_native_spawn_errno;
           test_case "argv-with-status-split-or-refusal-refuses-empty-argv-both-paths"
             `Quick
             test_or_refusal_refuses_empty_argv_on_both_paths;
@@ -1182,6 +1286,12 @@ let () =
             test_or_refusal_names_the_missing_cwd_eio;
           test_case "argv-with-status-fallback-enforces-timeout" `Quick
             test_run_argv_with_status_fallback_enforces_timeout;
+          test_case "fallback-normal-exit-cleans-descendant-preserves-sibling" `Quick
+            test_fallback_normal_exit_cleans_descendant_and_preserves_sibling;
+          test_case "fallback-timeout-cleans-closed-stdio-descendant" `Quick
+            test_fallback_timeout_cleans_descendant_with_closed_stdio;
+          test_case "fallback-owner-exception-cleanup" `Quick
+            test_fallback_owner_exception_cleanup;
           test_case "argv-with-status-fallback-observes-timeout" `Quick
             test_run_argv_with_status_fallback_observes_timeout;
           test_case "timeout-log-keeps-subsecond-precision" `Quick

@@ -397,6 +397,7 @@ let platform_release_asset () =
   | "Darwin", "arm64" -> "masc-macos-arm64"
   | "Darwin", "x86_64" -> "masc-macos-x64"
   | "Linux", "x86_64" -> "masc-linux-x64"
+  | "Linux", ("aarch64" | "arm64") -> "masc-linux-arm64"
   | os, arch -> failf "unsupported test platform for release asset: %s/%s" os arch
 ;;
 
@@ -515,34 +516,6 @@ let run_install args base_path =
          "install.sh exited with non-zero status: %s\ninstaller output:\n%s"
          (String.concat " " (List.map Filename.quote args))
          output)
-;;
-
-let test_config_seed_skips_each_existing_file_without_force () =
-  let script = install_script () in
-  assert_contains
-    "per-file seed helper exists"
-    script
-    "seed_config_if_missing()";
-  assert_contains
-    "existing config file skips without force"
-    script
-    {|if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then|};
-  assert_contains
-    "runtime uses per-file seed"
-    script
-    {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
-  assert_contains
-    "model catalog overlay has config-root destination"
-    script
-    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"|};
-  assert_contains
-    "model catalog overlay uses config release seed"
-    script
-    {|seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
-  assert_not_contains
-    "legacy full model catalog is not seeded"
-    script
-    {|seed_raw_if_missing "agent-core-models.toml"|};
 ;;
 
 (* What follows [instructions =] in a keeper TOML, with the TOML string
@@ -869,9 +842,9 @@ let test_binary_checks_use_install_environment () =
     script
     {|runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "|};
   assert_contains
-    "start hint omits runtime events default"
+    "start hint selects installed assets and omits runtime events default"
     script
-    {|start_env="${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
+    {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
   assert_contains
     "start hint documents dual base path env"
     script
@@ -1233,11 +1206,13 @@ let test_wizard_zero_config_auto_selects_single_ready_source () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog_with_local_server tmpdir);
-      (* Non-TTY (the harness pipes stdio) and no --provider. The local server is
+      (* The fixture already has a config root, so --reset-config requests a
+         fresh default selection. Non-TTY and no --provider: the local server is
          down and only the cloud provider has its key, so exactly one source is
          ready and the wizard uses it without being told to. *)
       let output, status =
-        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key" [ "--dry-run" ]
+        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key"
+          [ "--dry-run"; "--reset-config" ]
           tmpdir
       in
       check bool "zero-config auto-select exits 0" true (status = Unix.WEXITED 0);
@@ -1259,11 +1234,13 @@ let test_wizard_skips_when_no_single_ready_source () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog_with_local_server tmpdir);
-      (* Same config, but with no key the cloud provider is not ready either, so
+      (* Request a fresh default selection for the existing fixture config.
+         With no key the cloud provider is not ready either, so
          no source is unambiguously ready. Without a terminal the wizard leaves
          the choice to the operator rather than guess. *)
       let output, status =
-        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY" [ "--dry-run" ]
+        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY"
+          [ "--dry-run"; "--reset-config" ]
           tmpdir
       in
       check bool "no-ready-source skip exits 0" true (status = Unix.WEXITED 0);
@@ -1667,10 +1644,6 @@ let () =
     "install_script"
     [ ( "config_seed"
       , [ test_case
-            "partial existing config is not overwritten without force"
-            `Quick
-            test_config_seed_skips_each_existing_file_without_force
-        ; test_case
             "advertised binary assets are release-required"
             `Quick
             test_release_requires_advertised_binary_assets

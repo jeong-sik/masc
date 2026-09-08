@@ -298,8 +298,9 @@ let test_profile_update_preserves_owner_runtime_state () =
   let current = Option.get (Reducer.projection state).meta in
   let update : Reducer.profile_update =
     { instructions = "updated instructions"
-    ; sandbox_profile = current.sandbox_profile
+    ; sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
     ; sandbox_image = current.sandbox_image
+    ; microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata
     ; network_mode = current.network_mode
     ; mention_targets = [ "profile-target" ]
     ; proactive_enabled = true
@@ -316,6 +317,8 @@ let test_profile_update_preserves_owner_runtime_state () =
   let state = reducer_ok (Reducer.apply_meta state (Update_profile update)) in
   let committed = Option.get (Reducer.projection state).meta in
   check string "profile instructions updated" update.instructions committed.instructions;
+  check bool "profile backend reaches owner projection" true
+    (committed.microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata);
   check int
     "profile update preserves additive turns"
     current.runtime.usage.total_turns

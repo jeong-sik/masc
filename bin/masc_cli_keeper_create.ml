@@ -11,6 +11,7 @@ type flags =
   ; instructions : string
   ; sandbox_profile : string
   ; network_mode : string option
+  ; microvm_backend : string option
   ; remote_endpoint : string option
   ; mention_targets : string list
   ; skills : string list option
@@ -110,6 +111,11 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
             | None -> []
             | Some text -> [ "instructions", `String text ]
           in
+          let microvm_backend =
+            match flags.microvm_backend with
+            | None -> []
+            | Some backend -> [ "microvm_backend", `String backend ]
+          in
           let remote_endpoint =
             match flags.remote_endpoint with
             | None -> []
@@ -147,6 +153,7 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
                  ; "network_mode", `String network_mode
                  ]
                  @ instructions
+                 @ microvm_backend
                  @ remote_endpoint
                  @ mention_targets
                  @ skills

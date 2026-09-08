@@ -411,6 +411,7 @@ let ensure_keeper_meta_with_cause config name =
              { instructions = persisted_updated.instructions
              ; sandbox_profile = persisted_updated.sandbox_profile
              ; sandbox_image = persisted_updated.sandbox_image
+             ; microvm_backend = persisted_updated.microvm_backend
              ; network_mode = persisted_updated.network_mode
              ; mention_targets = persisted_updated.mention_targets
              ; proactive_enabled = persisted_updated.proactive.enabled

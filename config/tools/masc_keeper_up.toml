@@ -89,6 +89,14 @@ when it is not. Omit to leave an existing allowlist unchanged; pass an empty \
 array to clear it, which leaves the keeper reaching nothing."""
 
 [[params]]
+name = "microvm_backend"
+type = "string"
+description = """
+MicroVM runtime: apple_container, microsandbox, or nerdctl_kata. Valid only \
+with sandbox_profile = "microvm"; Linux requires an explicit backend. Omit to \
+keep the existing choice; pass null to clear it when changing profiles."""
+
+[[params]]
 name = "remote_endpoint"
 type = "string"
 description = """

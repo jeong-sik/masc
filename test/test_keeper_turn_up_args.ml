@@ -324,6 +324,108 @@ remote_root = "/srv/masc/playground"
   check (option string) "remote endpoint null removes key" None (read_back ())
 ;;
 
+let test_microvm_backend_persistence_round_trip () =
+  with_persisting_context @@ fun ctx ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let masc_dir = Filename.concat ctx.config.base_path ".masc" in
+  if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)
+  let config_dir = Filename.concat masc_dir "config" in
+  if not (Sys.file_exists config_dir) then Unix.mkdir config_dir 0o700;
+  let name = "microvm-persist-fixture" in
+  let base_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match parse_stating_a_profile ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed meta =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config name)
+        ~config:ctx.config ~parsed ~meta ()
+    with
+    | Ok _ -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path name
+    with
+    | Ok defaults -> Option.map Keeper_microvm_backend.to_string defaults.Keeper_types_profile.microvm_backend
+    | Error error ->
+      failf "read back: %s"
+        (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  let create =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "instructions", `String "fixture instructions"
+         ; "sandbox_profile", `String "microvm"
+         ; "microvm_backend", `String "nerdctl_kata"
+         ])
+  in
+  persist create
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm; microvm_backend = create.profile_defaults.microvm_backend };
+  check (option string) "backend persisted" (Some "nerdctl_kata") (read_back ());
+  let omitted = parse_or_fail (`Assoc
+      [ "name", `String name; "sandbox_profile", `String "microvm"
+      ; "instructions", `String "updated instructions" ]) in
+  persist omitted
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
+                     microvm_backend = omitted.profile_defaults.microvm_backend };
+  check (option string) "omitted backend survives update" (Some "nerdctl_kata") (read_back ());
+  let changed = parse_or_fail (`Assoc
+      [ "name", `String name; "sandbox_profile", `String "microvm"
+      ; "microvm_backend", `String "apple_container" ]) in
+  persist changed
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
+                     microvm_backend = changed.profile_defaults.microvm_backend };
+  check (option string) "explicit backend update persists" (Some "apple_container") (read_back ());
+  let clear =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "sandbox_profile", `String "docker"
+         ; "microvm_backend", `Null
+         ])
+  in
+  persist clear
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
+                     microvm_backend = clear.profile_defaults.microvm_backend };
+  check (option string) "backend clear permits Docker transition" None (read_back ())
+;;
+
+let test_microvm_backend_rejects_invalid_declarations () =
+  with_test_context @@ fun ctx ->
+  List.iter
+    (fun (profile, backend) ->
+      match parse_stating_a_profile ctx (`Assoc
+          [ "name", `String "backend-validation"
+          ; "sandbox_profile", `String profile
+          ; "microvm_backend", backend ]) with
+      | Error _ -> ()
+      | Ok _ -> fail "invalid backend/profile declaration was admitted")
+    [ "docker", `String "nerdctl_kata"
+    ; "microvm", `String "unknown"
+    ; "microvm", `Bool true ]
+;;
+
+
 let test_tools_patch_round_trips_and_rejects_invalid_values () =
   with_persisting_context @@ fun ctx ->
   let name = "tools-persist-fixture" in
@@ -1848,6 +1950,10 @@ let () =
             "remote endpoint persists and null clears"
             `Quick
             test_remote_endpoint_persistence_round_trip
+        ; test_case "microvm backend persists and clears on profile change" `Quick
+            test_microvm_backend_persistence_round_trip
+        ; test_case "microvm backend rejects unknown type and profile combinations" `Quick
+            test_microvm_backend_rejects_invalid_declarations
         ] )
     ; ( "network_mode"
       , [ test_case

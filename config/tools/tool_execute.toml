@@ -5,7 +5,11 @@ script: argv is one non-empty argv process vector run without a shell, tokens \
 verbatim, and script is one line handed to a real shell. cwd is a relative \
 path inside the path jail, and MASC never interprets program or subcommand \
 meaning. A call runs to completion or stops at timeout_sec; there is no \
-background task lifecycle."""
+background task lifecycle. In auto mode an enforced Observe run returns its \
+actual exit status and output, including failed writes; this never authorizes \
+execution outside Observe. Use intent=request_effect when the command needs \
+persistent writes or network effects: the configured Gate decides permission \
+before effect execution. A nonzero exit alone is not a permission request."""
 additional_properties = false
 
 [[params]]
@@ -48,3 +52,10 @@ description = "Direct form with argv."
 required = ["script"]
 forbidden = ["argv"]
 description = "Shell form with script."
+
+[[params]]
+name = "intent"
+type = "string"
+enum = ["auto", "request_effect"]
+default = "auto"
+description = "auto permits restricted execution as configured; request_effect asks the existing Gate for effect authorization, never grants permission by itself."

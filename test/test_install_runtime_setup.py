@@ -22,7 +22,7 @@ MODULE.loader.exec_module(SETUP)
 
 def spec(choice='vllm'):
     result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
@@ -54,7 +54,7 @@ class RuntimeSetup(unittest.TestCase):
                 self.assertIn('setup_' + choice, identity)
                 self.assertIn(b'operator/model-exact', runtime)
                 self.assertIn(b'"max-context" = 8192', runtime)
-                if choice in ('vllm', 'llama_cpp'):
+                if choice in ('vllm', 'llama_cpp', 'openai_compatible'):
                     self.assertIn(b'"provider_name" = "setup_' + choice.encode() + b'"', overlay)
                     self.assertIn(b'"supports_tools" = true', overlay)
                     self.assertIn(b'"supports_reasoning" = false', overlay)

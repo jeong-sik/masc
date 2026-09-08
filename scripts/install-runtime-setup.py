@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 CHOICES = {
     'llama_cpp': ('openai-compatible-http', None),
     'vllm': ('openai-compatible-http', None),
+    'openai_compatible': ('openai-compatible-http', None),
     'claude_code': ('claude-code', 'claude'),
     'codex': ('codex-app-server', 'codex'),
     'antigravity': ('antigravity-cli', 'agy'),

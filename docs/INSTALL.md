@@ -147,7 +147,7 @@ Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 �
 ## 모델 연결 선택
 
 터미널 마법사는 기존 API/Ollama 설정 외에도 **llama.cpp, vLLM, Claude Code,
-Codex, Antigravity**를 선택지로 표시합니다. 설치돼 있지 않아도 선택지가 사라지지 않습니다.
+Codex, Antigravity**와 일반 **OpenAI-compatible endpoint**를 선택지로 표시합니다. 설치돼 있지 않아도 선택지가 사라지지 않습니다.
 로컬 서버는 다른 컴퓨터의 endpoint를 지정할 수도 있습니다.
 
 선택한 연결만 추가하며 모델 ID와 context 크기는 실제 서버·CLI 설정에 맞게 입력합니다.

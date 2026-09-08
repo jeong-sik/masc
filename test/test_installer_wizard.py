@@ -106,7 +106,8 @@ class Wizard(unittest.TestCase):
         definition = 'prompt_runtime_source() {' + SCRIPT.split('prompt_runtime_source() {', 1)[1].split('\nruntime_setup_input()', 1)[0]
         for choice, expected in [(b'2\n', 'llama_cpp'), (b'3\n', 'vllm'),
                                  (b'4\n', 'claude_code'), (b'5\n', 'codex'),
-                                 (b'6\n', 'antigravity'), (b'7\n', 'later')]:
+                                 (b'6\n', 'antigravity'), (b'7\n', 'openai_compatible'),
+                                 (b'8\n', 'later')]:
             with self.subTest(expected=expected):
                 result, terminal = run_shell('\n' + definition + '\nprompt_runtime_source\n', choice)
                 self.assertEqual(result.returncode, 0, terminal)

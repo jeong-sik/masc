@@ -660,7 +660,7 @@ ping_provider() {
 prompt_runtime_source() {
   local answer
   printf '\nChoose a model connection (availability is checked separately):\n' >&2
-  printf '  1) Configured API providers / Ollama\n  2) llama.cpp server\n  3) vLLM server\n  4) Claude Code\n  5) Codex\n  6) Antigravity\n  7) Configure later\n' >&2
+  printf '  1) Configured API providers / Ollama\n  2) llama.cpp server\n  3) vLLM server\n  4) Claude Code\n  5) Codex\n  6) Antigravity\n  7) Other OpenAI-compatible endpoint\n  8) Configure later\n' >&2
   while true; do
     printf '? Model connection [1]: ' >&2
     IFS= read -r answer || return 1
@@ -671,8 +671,9 @@ prompt_runtime_source() {
       4) echo claude_code; return ;;
       5) echo codex; return ;;
       6) echo antigravity; return ;;
-      7) echo later; return ;;
-      *) warn "choose a number from 1 to 7" ;;
+      7) echo openai_compatible; return ;;
+      8) echo later; return ;;
+      *) warn "choose a number from 1 to 8" ;;
     esac
   done
 }
@@ -712,7 +713,7 @@ configure_runtime_source() {
   local model context tools streaming helper spec receipt
   printf '\nConfigure %s. This connects to your server or CLI; it does not install model weights or authenticate an account.\n' "$source" >&2
   case "$source" in
-    llama_cpp|vllm)
+    llama_cpp|vllm|openai_compatible)
       endpoint=$(runtime_setup_input 'Server API base URL, including /v1') || die "runtime setup cancelled"
       key_env=$(runtime_setup_input 'API key environment variable name (blank for none; do not enter a key)') || die "runtime setup cancelled"
       ;;
@@ -741,7 +742,7 @@ def yes(value):
     raise ValueError('answer y or n for tool calling and streaming')
 try:
     spec = dict(choice=choice, model=model, max_context=int(context), tools=yes(tools), streaming=yes(streaming))
-    if choice in ('llama_cpp', 'vllm'):
+    if choice in ('llama_cpp', 'vllm', 'openai_compatible'):
         spec.update(endpoint=endpoint, api_key_env=key_env)
     elif choice == 'antigravity':
         spec.update(credential_file=credential, timeout_s=float(timeout))

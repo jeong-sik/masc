@@ -29,8 +29,8 @@ Three things it does:
 > **Status.** Pre-1.0, for local, trusted environments. Not a production
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
-> unsafe action. `main` moves faster than the published binaries; the latest
-> release is [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0) (2026-09-08).
+> unsafe action. `main` moves faster than the published binaries; available
+> builds are listed in [GitHub Releases](https://github.com/jeong-sik/masc/releases).
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -54,7 +54,7 @@ product grows (see [Dashboard](#dashboard)).
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases).
 It verifies and installs the assets for the selected release.
 
 ```bash
@@ -66,13 +66,15 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
-and runs a one-time wizard (`--no-wizard` skips it). The wizard reports what the host has and writes exactly one thing,
-`[runtime].default` in `runtime.toml`. It never asks for an API key and never
-stores one; the server reads keys from the environment it is started in.
+and runs a setup wizard (`--no-wizard` skips it). Choose an existing provider or
+configure llama.cpp, vLLM, another OpenAI-compatible endpoint, Claude Code, Codex,
+or Antigravity. New connections use your model metadata and are validated before
+saving provider/model bindings and the default runtime. API key values are never
+requested or stored; HTTP credentials use environment variable names.
 
 The wizard reports two axes:
 
-- **Model source.** A cloud provider (Anthropic, OpenAI, GLM, DeepSeek, ...)
+- **Model source.** A configured API provider
   keyed by its environment variable; a local server (Ollama, llama-server, MLX)
   probed at its health path and shown `reachable`, `authentication required`, or `unreachable`; or a
   subscription CLI (Claude Code, Codex, Antigravity) shown `installed` when it

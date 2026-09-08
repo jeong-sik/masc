@@ -28,8 +28,8 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 > **개발 상태.** 1.0 이전이고, 믿을 수 있는 내 컴퓨터 안에서 쓰는 걸 전제로
 > 합니다. 운영 서비스가 아니고 보안 경계도 아닙니다. Gate와 샌드박스는 특정
 > 작업을 막지만, 사람이 보지 않는 사이 에이전트가 하는 위험한 일을 전부 막지는
-> 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 최신 릴리스는
-> [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)(2026-09-08)입니다.
+> 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 공개 빌드는
+> [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인합니다.
 
 ![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -53,7 +53,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
 ```bash
@@ -65,15 +65,16 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
-마법사는 이 컴퓨터에 뭐가 있는지 보고하고, 딱 하나만 씁니다. `runtime.toml`의
-`[runtime].default`입니다. API 키는 묻지도 저장하지도 않습니다. 서버는 자기가
-시작된 환경에서 키를 읽습니다.
+기존 공급자를 고르거나 llama.cpp, vLLM, 다른 OpenAI-compatible endpoint,
+Claude Code, Codex, Antigravity 연결을 설정합니다. 새 연결은 입력한 모델 정보로
+검증한 뒤 provider/model 바인딩과 기본 runtime을 저장합니다. API 키 값은
+묻거나 저장하지 않으며 HTTP 인증은 환경변수 이름으로 지정합니다.
 
 마법사가 보고하는 축은 둘입니다.
 
-- **모델 출처.** 클라우드 프로바이더(Anthropic, OpenAI, GLM, DeepSeek 등)는
+- **모델 출처.** 설정된 API 공급자는
   환경 변수 이름으로, 로컬 서버(Ollama, llama-server, MLX)는 헬스체크 경로를
-  찔러 `reachable`/`not running`으로, 구독형 CLI(Claude Code, Codex,
+  찔러 `reachable`/`authentication required`/`unreachable`으로, 구독형 CLI(Claude Code, Codex,
   Antigravity)는 `PATH`에 있으면 `installed`, 자체 로그인 확인을 통과하면
   `signed in`으로 보여 줍니다. `--provider <id>`를 주면 묻지 않고 고릅니다.
 - **실행 샌드박스.** `docker`, `microvm`, `remote_ssh` 중 이 컴퓨터가 줄 수

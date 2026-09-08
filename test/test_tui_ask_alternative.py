@@ -42,7 +42,7 @@ def interaction(requests):
             raise AssertionError('saving the text draft sent it prematurely')
         h.send_and_wait(process, fd, output, b'\r', b'Press Enter again to send')
         submitted_at = len(output)
-        h.write_all(fd, b'\r')
+        h.write_all(fd, output, b'\r')
         h.wait_for_http_request(process, fd, output, requests, path=h.KEEPER_ASK_ANSWER_PATH)
         h.wait_for_output(process, fd, output, b'none -- no Keeper is waiting on a decision',
                           start=submitted_at, timeout=10)

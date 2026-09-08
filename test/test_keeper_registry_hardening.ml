@@ -598,8 +598,19 @@ let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
 let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
   let dir = temp_dir "registry_terminal_hook_degradation" in
   let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
+  (* A cancel routes to the operator and writes a verification request on the
+     way (RFC-0417 4.1), and the hook that persists one is filled at boot by
+     the server. This case is about what the terminal-committed hook does to a
+     commit, not about that storage boundary, so a persisting hook stands in
+     for the duration and is put back after -- the same stand-in
+     test_keeper_task_outcomes uses. *)
+  let previous_submit = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> Ok ());
   Fun.protect
     ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous_submit;
       Atomic.set Workspace_hooks.task_terminal_committed_fn previous_hook;
       cleanup_dir dir)
     (fun () ->
@@ -638,7 +649,13 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
          (match transition Masc_domain.Start with
           | Ok _ -> ()
           | Error error -> fail (Masc_domain.masc_error_to_string error));
-         (match transition Masc_domain.Cancel with
+         (* Done_action, not Cancel. A cancel is the operator's to make now:
+            it moves the task to AwaitingVerification and waits for a click
+            (RFC-0417 4.1), so it commits no terminal status and the hook
+            under test never fires. What this case is about is a terminal
+            commit meeting a degraded hook, and a task carrying no
+            verification contract reaches Done in one transition. *)
+         (match transition Masc_domain.Done_action with
           | Ok _ ->
             (match
                Masc.Workspace.get_tasks_raw config
@@ -697,7 +714,7 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
                  (Failure "injected post-commit cancellation")));
        let cancellation_propagated =
          try
-           ignore (transition Masc_domain.Cancel);
+           ignore (transition Masc_domain.Done_action);
            false
          with
          | Eio.Cancel.Cancelled _ -> true
@@ -731,6 +748,20 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
        in
        let playground_abs = Filename.concat config.base_path playground_rel in
        ignore (Masc.Keeper_fs.ensure_dir playground_abs : string);
+       (* Where a keeper's sandbox root sits is read off its profile, and
+          config owns that: a keeper with no TOML has no effective meta since
+          #32078, and the read of its own playground came back
+          path_outside_sandbox. *)
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       Fs_compat.mkdir_p keepers_dir;
+       Out_channel.with_open_bin
+         (Filename.concat keepers_dir (meta.name ^ ".toml"))
+         (fun channel ->
+           Out_channel.output_string
+             channel
+             "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"registry hardening fixture\"\n");
        let evidence_path = Filename.concat playground_abs "exact-meta.txt" in
        Out_channel.with_open_bin evidence_path (fun channel ->
          Out_channel.output_string channel evidence);

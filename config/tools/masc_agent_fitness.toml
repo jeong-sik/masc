@@ -1,6 +1,6 @@
 name = "masc_agent_fitness"
 description = """
-Get fitness scores for agents based on completion rate, reliability, and speed metrics."""
+Fitness scores for agents: completion rate, reliability, speed."""
 additional_properties = false
 
 

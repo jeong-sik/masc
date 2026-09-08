@@ -151,6 +151,18 @@ let api_attempt_rejected =
     (Llm_provider.Http_client.AcceptRejected
        { reason = "selected runtime cannot encode the request" })
 
+(* A provider's own 400, as the HTTP classifier reads it. On 2026-09-04
+   02:36Z-04:28Z a model that accepts one temperature answered 123 requests
+   with this body; unlike the pre-wire [AcceptRejected] above it carries no
+   typed reason, so the lane stops on it (#33057). *)
+let api_invalid_request_vendor_400 =
+  Agent_core.Error.Api
+    (Agent_core.Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:
+         {|{"error":{"message":"Invalid request (unknown): invalid temperature: only 0.6 is allowed for this model","type":"invalid_request_error"}}|})
+
 (* Until RFC-0370 §3.1, the Codex app-server boundary folded provider- and
    transport-side failures into [Internal] strings (the catch-all in
    [codex_error_to_core_error]); these three verbatim live-log classes
@@ -209,6 +221,7 @@ let census_rows =
   ; "internal:remote_command_failed", internal_remote_command_failed, 4
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
   ; "api:attempt_rejected", api_attempt_rejected, 0
+  ; "api:invalid_request_vendor_400", api_invalid_request_vendor_400, 0
   ; "api:turn_budget_timeout", api_turn_budget_timeout, 0
   ; "provider:parse_error", provider_parse_error, 0
   ; "provider:unknown_variant", provider_unknown_variant, 0
@@ -280,6 +293,7 @@ let expected_rotation =
   ; "internal:remote_command_failed", false
   ; "api:invalid_request", false
   ; "api:attempt_rejected", true
+  ; "api:invalid_request_vendor_400", false
   ; "api:turn_budget_timeout", true
   ; "provider:parse_error", false
   ; "provider:unknown_variant", false

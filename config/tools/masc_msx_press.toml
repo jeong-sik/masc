@@ -1,11 +1,15 @@
 name = "masc_msx_press"
 description = """
-Hold one or more keys on the shared MSX machine for hold_frames, then run \
-the rest of frames released, and return the observation (see \
-masc_msx_screen). Keys: up down left right space esc return trigger_a \
-trigger_b f1-f5 or one character. Games read input edges, so a short hold \
-(5 frames) is a press. Every edge is recorded in the ledger with your name \
-and the frame number. Frames are 1/60 s; at most 300 per call."""
+Press keys on the shared MSX machine and return the observation (see \
+masc_msx_screen). By default keys are held together as a chord for \
+hold_frames, then frames runs out released -- use this for a modifier or a \
+diagonal + fire, e.g. ["right", "space"]. Set sequence=true to tap the keys \
+one after another instead (each down hold_frames, up, then the rest of frames \
+idle) -- use this to walk a menu in one call, e.g. ["down", "down", "return"]; \
+the call then advances frames per key. Keys: up down left right space esc \
+return trigger_a trigger_b f1-f5 or one character. Games read input edges, so \
+a short hold (5 frames) is a press. Every edge is recorded in the ledger with \
+your name and the frame number. Frames are 1/60 s; at most 300 per key."""
 additional_properties = false
 
 defer_loading = true
@@ -33,3 +37,9 @@ description = "Total frames this call advances, including the hold. Default 30 (
 minimum = 1
 maximum = 300
 default = 30
+
+[[params]]
+name = "sequence"
+type = "boolean"
+description = "Tap the keys one after another (a menu sequence) instead of holding them together (a chord). Default false."
+default = false

@@ -6596,6 +6596,15 @@ let write_to_terminal payload =
    palette's "go MSX" both land here, so the two doors stay one door -- which
    is why the menu goes in the function rather than at the key. *)
 let open_msx_screen (state : Masc_tui_types.state) =
+  (* The spectator takes ownership from any image preview. A pending async
+     preview must not keep its old surface alive underneath the game. *)
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
   state.msx_frame <-
     Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
   state.msx_carts <-
@@ -6765,6 +6774,8 @@ let clamp_planning_cursor state =
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
 let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
+  if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
+  else begin
   state.browser_viewport <- None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
@@ -6809,6 +6820,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
                  (Message_layout.fit_width line (max 1 (columns - 1))))
              header_lines)
       in
+      Masc_tui_msx.invalidate ();
       write_to_terminal
         (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
         ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
@@ -6816,6 +6828,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width footer (max 1 (columns - 1))));
       state.image_open <- true
+  end
 
 let ensure_img_cache_dir () =
   let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
@@ -7148,6 +7161,7 @@ let close_image state =
   | false -> ()
   | true ->
       state.image_open <- false;
+      Masc_tui_msx.invalidate ();
       write_to_terminal Masc_tui_graphics.delete_all
 
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
@@ -11646,7 +11660,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Sent_image_ready { generation; view; keeper_name; name; result } ->
-      if generation = state.image_request_generation
+      if not state.msx_open && generation = state.image_request_generation
          && view = state.view && keeper_name = state.msg_target_keeper_name then begin
         let notice = chat_notice state ~keeper_name in
         let refuse reason =
@@ -11657,6 +11671,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Ok data -> draw_image state ~refuse ~title:name data
       end
   | Image_render_ready { title; caption; result } ->
+      if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
        | Ok data ->
@@ -11672,6 +11687,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     e opener title)
            | Error _ ->
                notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
+      end
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
@@ -12634,6 +12650,7 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
    rather than skipped as unchanged. Both doors below end here so the two
    cannot come to disagree about what a resize costs. *)
 let discard_frame_for_new_size frame_presenter render_schedule =
+  Masc_tui_msx.invalidate ();
   Frame_presenter.invalidate frame_presenter;
   Render_schedule.request render_schedule Render_schedule.Force
 
@@ -12948,6 +12965,8 @@ let main
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
+  Masc_tui_msx.set_synchronized_output
+    (Terminal_profile.synchronized_output terminal_profile);
   let frame_presenter =
     Frame_presenter.create
       ~synchronized_output:
@@ -14500,6 +14519,17 @@ and is loaded on demand through keeper_skill.
       (* The load menu owns the terminal while it is up: skip the frame poll so
          it does not repaint the picker with a game screen. The spectator poll
          resumes the moment a game is chosen and the menu closes. *)
+      (* Console writes damage whichever surface owns the terminal, including
+         the spectator whose output bypasses the ordinary frame presenter. *)
+      if Terminal_write_repair.consume_damage () then begin
+        Masc_tui_msx.invalidate ();
+        Frame_presenter.invalidate frame_presenter;
+        Render_schedule.request render_schedule Render_schedule.Force;
+        if state.msx_open then
+          if state.msx_menu_open then
+            Masc_tui_msx.render_menu ~write:write_to_terminal state
+          else state.msx_last_poll_ns <- 0L
+      end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
         if

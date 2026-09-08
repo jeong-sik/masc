@@ -54,7 +54,7 @@ let keys_and_payload body =
 let test_the_payload_is_the_file () =
   let data = String.init 9000 (fun index -> Char.chr (index mod 256)) in
   let escapes =
-    Masc_tui_graphics.place ~data { Masc_tui_graphics.columns = 40; rows = 20 }
+    Masc_tui_graphics.place ~data ~rows:20
   in
   let payload =
     bodies escapes |> List.map (fun body -> snd (keys_and_payload body))
@@ -71,7 +71,7 @@ let test_the_payload_is_the_file () =
 let test_every_chunk_but_the_last_says_more () =
   let data = String.make 20_000 'z' in
   let bodies =
-    Masc_tui_graphics.place ~data { Masc_tui_graphics.columns = 4; rows = 2 }
+    Masc_tui_graphics.place ~data ~rows:2
     |> bodies
   in
   if List.length bodies < 2 then
@@ -92,7 +92,7 @@ let test_every_chunk_but_the_last_says_more () =
 let test_only_the_first_escape_describes_the_image () =
   let data = String.make 12_000 'q' in
   match
-    Masc_tui_graphics.place ~data { Masc_tui_graphics.columns = 9; rows = 3 }
+    Masc_tui_graphics.place ~data ~rows:3
     |> bodies
   with
   | [] -> failf "no escapes"
@@ -104,7 +104,7 @@ let test_only_the_first_escape_describes_the_image () =
             failf "the first escape does not say %s: %S" expected first)
         (* q=2 keeps the terminal from answering a placement. Its reply
            would arrive on stdin and be typed into the composer. *)
-        [ "f=100"; "a=T"; "c=9"; "r=3"; "q=2" ];
+        [ "f=100"; "a=T"; "r=3"; "q=2" ];
       List.iteri
         (fun index body ->
           let keys, _ = keys_and_payload body in
@@ -127,7 +127,7 @@ let test_the_named_format_is_the_one_the_escape_asks_for () =
     Masc_tui_graphics.payload_media_type;
   match
     Masc_tui_graphics.place ~data:"bytes"
-      { Masc_tui_graphics.columns = 4; rows = 2 }
+      ~rows:2
     |> bodies
   with
   | [] -> failf "no escapes"
@@ -138,7 +138,7 @@ let test_the_named_format_is_the_one_the_escape_asks_for () =
 
 let test_an_empty_image_places_nothing () =
   check string "no escape at all" ""
-    (Masc_tui_graphics.place ~data:"" { Masc_tui_graphics.columns = 1; rows = 1 })
+    (Masc_tui_graphics.place ~data:"" ~rows:1)
 ;;
 
 let test_the_query_asks_without_drawing () =
@@ -228,8 +228,7 @@ let test_raw_rgb_states_its_pixel_dimensions () =
   let data = String.init (w * h * 3) (fun index -> Char.chr (index mod 256)) in
   let keys =
     match
-      Masc_tui_graphics.place_rgb ~data ~pixel_width:w ~pixel_height:h
-        { Masc_tui_graphics.columns = 10; rows = 5 }
+      Masc_tui_graphics.place_rgb ~data ~pixel_width:w ~pixel_height:h ~rows:5
       |> bodies
     with
     | first :: _ -> fst (keys_and_payload first)
@@ -239,8 +238,11 @@ let test_raw_rgb_states_its_pixel_dimensions () =
   check bool "the payload is raw RGB" true (says "f=24");
   check bool "and says how wide it is" true (says "s=4");
   check bool "and how tall" true (says "v=2");
-  check bool "the cell box is still the caller's" true (says "c=10");
-  check bool "in both axes" true (says "r=5");
+  check bool "the row count is the caller's" true (says "r=5");
+  (* No c=. Kitty derives the width from the row count only when one of the
+     two is absent; with both it scales into that exact rectangle, which is
+     how a 4:3 frame arrived stretched across a wider terminal. *)
+  check bool "and the width is left to the terminal" false (says "c=10");
   check bool "the terminal is asked not to answer" true (says "q=2");
   (* A file's key would have the terminal read three-byte pixels as a header,
      decode nothing, and say nothing about it. *)
@@ -251,11 +253,10 @@ let test_raw_rgb_states_its_pixel_dimensions () =
    terminal makes of the mismatch. Refusing gives the caller something to
    test; drawing gives it a wrong picture and no way to know. *)
 let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
-  let box = { Masc_tui_graphics.columns = 10; rows = 5 } in
   check string "three bytes are not a 4x2 frame" ""
-    (Masc_tui_graphics.place_rgb ~data:"xyz" ~pixel_width:4 ~pixel_height:2 box);
+    (Masc_tui_graphics.place_rgb ~data:"xyz" ~pixel_width:4 ~pixel_height:2 ~rows:5);
   check string "and neither is nothing" ""
-    (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 box)
+    (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
 ;;
 
 

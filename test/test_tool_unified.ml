@@ -148,13 +148,23 @@ let () =
                 (fun () ->
                   Tool_metrics.record
                     (make_completed ~name:"tool_execute" ~duration_ms:5.0);
-                  let report = Tool_unified.summary_report () in
+                  (* The same resolver the dashboard passes. #32677 stopped
+                     Tool_unified from reaching into the Keeper domain for
+                     public names, so the default answers [] and a report
+                     built without one cannot carry the name a model calls. *)
+                  let report =
+                    Tool_unified.summary_report
+                      ~public_names:
+                        Masc.Keeper_tool_descriptor_resolution
+                        .public_names_for_internal
+                      ()
+                  in
                   let open Yojson.Safe.Util in
                   match report |> member "by_tool" |> to_list with
                   | [ row ] ->
                     check string "counted under the internal name" "tool_execute"
                       (row |> member "name" |> to_string);
-                    (* The descriptors are a static list in the module, so this
+                    (* The descriptors are a static list in the resolver, so this
                        holds in any process and the assertion cannot pass by
                        finding nothing. A tool the model can call must name
                        itself; an empty list here would mean the join key is

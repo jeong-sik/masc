@@ -427,7 +427,8 @@ let test_multiple_resolution_projections_keep_fifo_order () =
              | Chat_store.Approval_replay_applied_with_warning
              | Chat_store.Approval_replay_failed
              | Chat_store.Approval_replay_indeterminate
-             | Chat_store.Approval_continuation_recorded -> None))
+             | Chat_store.Approval_continuation_recorded
+             | Chat_store.Approval_continuation_failed -> None))
        in
        Alcotest.(check (list string)) "chat projection preserves resolution FIFO"
          [ first; second ] projected_ids)

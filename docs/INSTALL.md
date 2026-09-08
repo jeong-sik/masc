@@ -158,6 +158,79 @@ runtime/credential/backend 설정이 있어야 합니다. 브라우저는 별도
 [native host 연결 안내](../connectors/browser/host/README.md)를 따릅니다.
 서버 설치 smoke는 모델 응답이나 장시간 Keeper 연속 실행을 증명하지 않습니다.
 
+## 이미지와 Linux/microVM의 경계
+
+설치 스크립트는 sandbox 이미지를 다운로드하거나 빌드하지 않습니다.
+`masc sandbox-image`는 일반 이미지의 **recipe**를 내장하고 있으며 첫 빌드에는
+Debian base image와 패키지를 받는 네트워크가 필요합니다.
+
+| 실행 환경 | 준비 | 검증 범위 |
+|---|---|---|
+| Linux + Docker | Docker daemon을 별도 설치·시작하고 `masc sandbox-image` 실행 | 서버 설치와 이미지 생성/도구 실행은 별도 검사 |
+| Apple Silicon + Apple Container | macOS 26 및 `container` 설치, 아래 runtime 지정 빌드 | macOS 14 서버 CI 통과만으로 이 backend를 증명하지 않음 |
+| Linux + nerdctl/Kata | containerd/nerdctl/Kata와 가상화 지원, backend 명시, 해당 store에 이미지 생성 | 현재 Keeper 작업 볼륨 경로가 `microvm_work_volume_unsupported`로 거부: 이미지 빌드만으로 Keeper 부팅 불가 |
+| remote SSH | 원격 endpoint와 인증·shim·도구 준비 | 로컬 Docker/microVM 이미지와 독립적인 원격 환경 |
+
+```bash
+# Docker Keeper의 이미지 저장소
+masc sandbox-image
+
+# Apple Container Keeper의 별도 이미지 저장소
+masc sandbox-image --runtime apple_container
+
+# nerdctl/Kata Keeper의 별도 이미지 저장소
+masc sandbox-image --runtime nerdctl_kata
+```
+
+`--runtime`만 바꿔도 hypervisor나 daemon을 설치하지는 않습니다.
+Docker store에 있는 이미지는 Apple Container/nerdctl store에 자동 복사되지 않습니다.
+현재 Linux nerdctl/Kata Keeper는 작업 볼륨 지원이 없어 부팅을 거부합니다.
+위 nerdctl 명령은 이미지 저장소에 빌드하는 경로이며 Keeper 지원 완료를 뜻하지 않습니다.
+Linux에서 Keeper를 실행할 때는 Docker 또는 별도로 준비한 remote SSH 경로를 사용합니다.
+[Apple Container](https://github.com/apple/container#requirements)는 Apple Silicon과
+macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-containers/blob/main/docs/installation.md)는
+호스트 가상화 조건을 확인해야 합니다. Microsandbox의 현재 MASC 연결은 필수 격리
+조건에 제약이 있어 검증된 대안으로 안내하지 않습니다.
+
+`masc-sandbox:general`에는 bash, CA certificates, curl, findutils, gh, git,
+less, procps, Python 3, ripgrep이 들어갑니다. **Node, pnpm, OCaml, 컴파일러,
+SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테스트가 목적이면
+필요한 toolchain이 있는 이미지를 준비하고 Keeper의 `sandbox_image`로 지정합니다.
+저장소의 `Dockerfile.keeper-sandbox`는 MASC 개발용 별도 이미지이며 일반 설치물이 아닙니다.
+
+## 초기 프롬프트·skills·Keeper
+
+공통 Keeper 지침은 [`config/prompts/keeper.md`](../config/prompts/keeper.md)이며
+설치된 `.masc/config/prompts/keeper.md`에서 관리됩니다. 기본 내용은 작업 범위,
+결과와 증거 보고, 독립 도구 호출 묶기, 과거 실패의 재확인, 브라우저 결과 검증,
+조건부 GitHub 인증, 예약·사람에게 질문하는 흐름, Keeper 정체성과 sandbox 경계입니다.
+그 위에 각 Keeper TOML의 `[keeper].instructions`를 조합합니다.
+실제 시스템 문맥에는 runtime의 tool guidance와 현재 상태·시간·기억도 들어가므로
+이 파일 하나가 전체 요청을 대신하지 않습니다. 개발 계약인 `constitution.xml`은
+Keeper runtime 시스템 프롬프트가 아닙니다.
+
+기본 설치는 **Keeper 0명, 배포되는 skill 패키지 0개**입니다.
+`--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
+
+| Keeper | 개별 지침의 역할 |
+|---|---|
+| `tech_lead` | 요구사항 분해, 역할 분배, diff/증거 검토 |
+| `backend` | 백엔드 구현과 검증 |
+| `frontend` | 프론트엔드 구현과 검증 |
+| `qa` | 요구사항에 대한 테스트·검증 |
+
+이 preset은 `autoboot_enabled=true`, `sandbox_profile="docker"`,
+`network_mode="inherit"`를 사용하고 fleet 기본 모델을 따릅니다. 역할 지침은
+컴파일러나 인증을 설치하지 않으며 개별 `skills` 패키지도 추가하지 않습니다.
+
+Skill 검색 경로는 `runtime.toml`의 `[[skills.sources]]`가 선언합니다.
+기본 순서는 `<base-path>/.masc/skills`, `<base-path>/.agents/skills`,
+`<user-home>/.masc/skills`, `<user-home>/.agents/skills`입니다.
+설치가 비어 있어도 **이미 존재하는 사용자 skill은 검색될 수 있습니다**.
+각 skill은 `<name>/SKILL.md`와 필요한 리소스로 구성하고, Keeper 생성 시
+`--skill` 또는 `--no-skills`로 선택을 명시합니다. Codex/Claude에 설치한 모든 skill이
+MASC에 자동 복사되는 것은 아닙니다.
+
 ## 업그레이드와 복구
 
 같은 태그의 스크립트를 새로 받은 뒤, 기존과 같은 prefix/base path로 실행합니다.

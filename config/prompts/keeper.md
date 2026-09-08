@@ -80,11 +80,12 @@ JSON으로 표시된 문자열은 디코딩된 값을 사용하여 `>`와 기존
 
 ## GitHub CLI와 이슈 작성
 
-`GH_CONFIG_DIR` 환경변수는 런타임이 사전 인증된 읽기 전용 설정 경로로 주입합니다.
-`gh auth status`가 이미 유효하므로, `gh` 명령(`gh issue`, `gh pr`, `gh api` 등)을 실행할 때
-새로운 `HOME`을 만들거나, `.config/gh` 디렉터리를 만들거나, 설정 파일을 복사하지 않고 그대로 직접 호출합니다.
-불필요한 디렉터리 생성이나 복사는 파일시스템 쓰기 효과로 분류되어 승인 큐(judge)에 대기하게 됩니다.
-읽기 조회가 대기 없이 즉시 실행되도록 `gh` 를 직접 실행하세요.
+Keeper에 GitHub identity가 연결되어 있으면 런타임이 `GH_CONFIG_DIR`로
+읽기 전용 인증 설정 경로를 전달합니다. 기본 설치만으로 인증되었다고 가정하지 않습니다.
+GitHub 작업 전에 현재 레인의 `gh auth status`를 확인합니다. 인증이 유효하면
+새로운 `HOME`이나 `.config/gh`를 만들거나 설정을 복사하지 않고 `gh`를 직접 호출합니다.
+인증이 없거나 실패하면 그 상태를 알리고 운영자의 Keeper GitHub identity 연결이
+필요하다고 안내합니다. 다른 Keeper의 자격증명을 가져오지 않습니다.
 
 `gh issue create` 전에 대상 저장소의 `.github/issue-taxonomy.json` 을 읽습니다.
 그 파일이 있으면 거기에 분류 어휘가 있습니다. 이슈 본문에 `masc-triage`

@@ -133,6 +133,33 @@ jobs:
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
 
+      - name: Sandbox image CLI runtime routing
+        run: python3 test/test_sandbox_image_cli.py _build/default/bin/main_eio.exe
+
+      # Exercise the image distributed as a recipe by the actual release CLI.
+      # This is guest tool readiness, not an authenticated Keeper/model turn.
+      - name: General sandbox image and guest tool smoke
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist sandbox-smoke-workspace
+          image="masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}"
+          _build/default/bin/main_eio.exe sandbox-image --tag "$image" \
+            > "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --user "$(id -u):$(id -g)" --tmpfs /tmp \
+            -v "$PWD/sandbox-smoke-workspace:/workspace" -w /workspace "$image" \
+            bash -lc '
+              set -eu
+              for tool in bash curl find gh git less ps python3 rg; do command -v "$tool"; done
+              git init --quiet
+              printf "release sandbox proof\n" > proof.txt
+              rg --fixed-strings "release sandbox proof" proof.txt
+              python3 -c "from pathlib import Path; assert Path(\"proof.txt\").read_text() == \"release sandbox proof\\n\""
+              printf "general-sandbox-tools: PASS\n"
+            ' >> "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
+          cat "dist/general-sandbox-${{ matrix.arch }}.log"
+          rm -r sandbox-smoke-workspace
+
       # Prove the self-contained claim: neither shipped binary may keep a
       # dynamic libsqlite3 dependency, or a bare Linux install breaks again.
       - name: Assert Linux binaries carry no dynamic SQLite

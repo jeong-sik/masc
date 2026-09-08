@@ -1433,9 +1433,10 @@ Next (choose the TUI or server-only command):
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# a Keeper runs each turn inside an image. Build the general one -- bash,${c_off}
-  ${c_dim}# ripgrep and git -- or every turn stops at docker_preflight_failed:${c_off}
-  $DEST sandbox-image
+  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
+  "$DEST" sandbox-image
+  ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
+  # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

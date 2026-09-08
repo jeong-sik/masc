@@ -72,7 +72,7 @@ let () =
   let node : Masc.Browser_scene.node = {
     node_id="n1";kind=Text;tag="p";text=String.make 152 'x' ^ "한글🙂";
     rects=[{x=0.;y=0.;width=800.;height=20.}];color="rgb(0,0,0)";
-    font_size=16.;font_weight="400";white_space="normal" } in
+    font_size=16.;font_weight="400";white_space="normal";source_context=Masc.Browser_source_context.Unmapped } in
   let content : Masc.Browser_scene.t = {
     document_id="document";url="https://example.org";title="Scene";
     width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false } in

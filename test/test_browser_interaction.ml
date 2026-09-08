@@ -42,7 +42,21 @@ let test_invalid_actions () =
      fields "click" @ ["selector", `String "#query"; "script", `String "arbitrary()"];
      fields "click" @ ["selector", `String "#query"; "tabId", `Int 9];
      fields "evaluate"]
+let test_source_context () =
+  let module Source = Masc.Browser_source_context in
+  let fields = ["schema",`String "masc.source.v1";"file",`String "dashboard/src/demo.ts";
+    "line",`Int 12;"column",`Int 4;"kind",`String "template";"digest",`String (String.make 64 'a')] in
+  (match Source.of_json (`Assoc fields) with
+   | Source.Located location -> check int "original template line" 12 location.line
+   | _ -> fail "valid development source context refused");
+  check bool "external page is explicitly unmapped" true (Source.of_json `Null = Source.Unmapped);
+  List.iter (fun path -> match Source.of_json (`Assoc (("file",`String path)::List.remove_assoc "file" fields)) with
+    | Source.Invalid _ -> () | _ -> fail ("unsafe source path accepted: " ^ path))
+    ["../secret";"/etc/passwd";"dashboard/../../secret";"C:\\secret";"dashboard//x";"dashboard/./x"];
+  (match Source.of_json (`Assoc (("line",`Int 4)::fields)) with
+   | Source.Invalid _ -> () | _ -> fail "duplicate source field accepted")
 let () = run "browser interaction" ["typed boundary", [
+  test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;
   test_case "malformed or mixed actions rejected" `Quick test_invalid_actions]]

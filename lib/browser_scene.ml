@@ -1,7 +1,7 @@
 type rect = { x : float; y : float; width : float; height : float }
 type kind = Text | Raster | Control of { clickable : bool; editable : bool; disabled : bool }
 type node = { node_id : string; kind : kind; tag : string; text : string;
-  rects : rect list; color : string; font_size : float; font_weight : string; white_space : string }
+  rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 type t = { document_id : string; url : string; title : string; width : float; height : float;
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool }
 let ( let* ) = Result.bind
@@ -43,7 +43,10 @@ let node json =
       let* editable = get boolean "editable" json in let* disabled = get boolean "disabled" json in
       Ok (Control {clickable;editable;disabled})
     | _ -> Error "unknown semantic scene node kind" in
-  Ok {node_id;kind;tag;text;rects;color;font_size;font_weight;white_space}
+  let source_context = match field "sourceContext" json with
+    | Ok value -> Browser_source_context.of_json value
+    | Error _ -> Browser_source_context.Unmapped in
+  Ok {node_id;kind;tag;text;rects;color;font_size;font_weight;white_space;source_context}
 let of_json json =
   let* schema = get string "schema" json in
   let* () = if schema = "masc.browser.scene.v1" then Ok () else Error "unknown semantic scene schema" in

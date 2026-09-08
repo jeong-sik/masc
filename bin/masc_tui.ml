@@ -14258,7 +14258,8 @@ and is loaded on demand through keeper_skill.
              keeper is pressing. A plain read would freeze between presses. *)
           state.msx_frame <-
             Masc_tui_http.tick_msx ~host:server_peer_host ~port:state.port;
-          Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+          Masc_tui_msx.render ~write:write_to_terminal
+                ~connection:state.connection_status state.msx_frame
         end
       end;
       let input = read_input ~timeout:input_timeout input_reader () in
@@ -14324,7 +14325,8 @@ and is loaded on demand through keeper_skill.
                    poll at once so the next tick refreshes it (parity with the
                    Watch arm). *)
                 state.msx_last_poll_ns <- 0L;
-                Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+                Masc_tui_msx.render ~write:write_to_terminal
+                ~connection:state.connection_status state.msx_frame
               end
               else begin
                 state.msx_open <- false;
@@ -14334,7 +14336,8 @@ and is loaded on demand through keeper_skill.
               state.msx_menu_open <- false;
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
-              Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              Masc_tui_msx.render ~write:write_to_terminal
+                ~connection:state.connection_status state.msx_frame
           | Load cart -> (
               match
                 Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port
@@ -14346,7 +14349,8 @@ and is loaded on demand through keeper_skill.
                     Masc_tui_http.fetch_msx_frame ~host:server_peer_host
                       ~port:state.port;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+                  Masc_tui_msx.render ~write:write_to_terminal
+                ~connection:state.connection_status state.msx_frame
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
@@ -14362,7 +14366,8 @@ and is loaded on demand through keeper_skill.
              terminal draws the cached frame and never reach the machine. *)
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
-          Masc_tui_msx.render ~write:write_to_terminal state.msx_frame)
+          Masc_tui_msx.render ~write:write_to_terminal
+                ~connection:state.connection_status state.msx_frame)
       | Some name -> (
           (* A game key: send it to the shared server machine (RFC-0439 §3.3),
              then re-fetch so the human sees the result of their own press
@@ -14378,7 +14383,8 @@ and is loaded on demand through keeper_skill.
               state.msx_frame <-
                 Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              Masc_tui_msx.render ~write:write_to_terminal state.msx_frame
+              Masc_tui_msx.render ~write:write_to_terminal
+                ~connection:state.connection_status state.msx_frame
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =

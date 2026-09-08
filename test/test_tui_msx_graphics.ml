@@ -26,7 +26,16 @@ let frame () =
 
 let drawn () =
   let buf = Buffer.create 65536 in
-  Msx.render ~write:(Buffer.add_string buf) (Some (frame ()));
+  Msx.render
+    ~write:(Buffer.add_string buf)
+    ~connection:Masc_tui_types.Connected
+    (Some (frame ()));
+  Buffer.contents buf
+;;
+
+let drawn_empty ~connection =
+  let buf = Buffer.create 4096 in
+  Msx.render ~write:(Buffer.add_string buf) ~connection None;
   Buffer.contents buf
 ;;
 
@@ -35,6 +44,35 @@ let mentions ~needle haystack =
   let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
   n = 0 || at 0
 ;;
+
+(* An empty cache reads the same whether the server said no machine is loaded
+   or could not be reached to say anything: Masc_tui_http maps a transport
+   failure onto the [None] a loaded:false answer gives. What is on screen has
+   to separate them, or an operator whose server is down is told to load a
+   machine. *)
+let test_a_connected_server_with_no_machine_says_so () =
+  let text = drawn_empty ~connection:Masc_tui_types.Connected in
+  check bool "names the loader" true (mentions ~needle:"masc_msx_load" text);
+  check bool "does not blame the connection" false
+    (mentions ~needle:"the server is" text)
+
+let test_an_unreachable_server_is_not_a_missing_machine () =
+  List.iter
+    (fun (connection, label) ->
+      let text = drawn_empty ~connection in
+      check bool
+        (label ^ ": says the server could not be asked")
+        true
+        (mentions ~needle:("the server is " ^ label) text);
+      check bool
+        (label ^ ": does not send the reader to the loader")
+        false
+        (mentions ~needle:"masc_msx_load" text))
+    [ Masc_tui_types.Disconnected, "disconnected"
+    ; Masc_tui_types.Reconnecting, "reconnecting..."
+    ; Masc_tui_types.Booting, "server booting..."
+    ; Masc_tui_types.Connecting, "connecting..."
+    ]
 
 (* Restore whatever the protocol was, so a case cannot leak its choice into
    the next one. The setter is the only way in, so there is nothing to read
@@ -161,6 +199,12 @@ let () =
             test_the_image_is_kept_inside_the_screen
         ; test_case "no cell size leaves the rows alone" `Quick
             test_no_cell_size_leaves_the_rows_alone
+        ] )
+    ; ( "empty"
+      , [ test_case "a connected server with no machine says so" `Quick
+            test_a_connected_server_with_no_machine_says_so
+        ; test_case "an unreachable server is not a missing machine" `Quick
+            test_an_unreachable_server_is_not_a_missing_machine
         ] )
     ]
 ;;

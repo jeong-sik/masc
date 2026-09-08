@@ -42,6 +42,26 @@ brew install python gmp libpq openssl@3 zstd
 해당 CPU의 기본 prefix를 사용합니다. 실제 로더 실패가 나면 그 오류를 기준으로
 누락 라이브러리를 보충하세요.
 
+### macOS에서 `SIGABRT` 또는 `build-commit` 실패
+
+`SIGABRT`는 프로세스의 종료 신호이며, 그 자체로 원인을 알려주지 않습니다.
+`dyld: Library not loaded` 같은 stderr 원문과 실패한 실행 파일 경로를 확인하세요.
+현재 보고된 설치 중단의 원인은 확인 중입니다. 누락 라이브러리로 단정하지 않습니다.
+
+0.34.0 배포 파일의 Mach-O 최소 OS는 Apple Silicon **macOS 14.0**,
+Intel **macOS 15.0**입니다. 해당 CPU의 기본 Homebrew prefix
+(Apple Silicon `/opt/homebrew`, Intel `/usr/local`)에 의존성을 준비합니다.
+
+```bash
+brew install python gmp libpq openssl@3 zstd
+sw_vers -productVersion
+uname -m
+```
+
+`otool -L <실패한-실행파일>`로 실제 연결 라이브러리 경로를 확인할 수 있습니다.
+의존성과 OS 조건을 맞춘 뒤에도 중단되면 종료 신호와 stderr 원문을 함께 보고하세요.
+`--force`는 재다운로드 옵션이며 loader나 OS 호환성 문제를 해결하지 않습니다.
+
 ## 설치
 
 ```bash

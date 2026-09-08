@@ -14674,6 +14674,11 @@ def run_fusion_history_regression(executable: str) -> None:
     run = fusion_run("history-701", keeper="not-a-proven-caller")
     post = fusion_detail_response(run, "historical-judge-synthesis-701")[1]["evidence"]["post"]
     post.update(author="board-author-701", body="original-board-body-701")
+    # A recorded zero remains a chart observation; a failed panel has no usage.
+    post["meta"]["panel"].append({
+        "model": "panel-zero-701", "status": "answered",
+        "answer": "zero-usage-answer-701", "input_tokens": 0, "output_tokens": 0,
+    })
     post["meta"]["observed_usage"] = {"input_tokens": 101, "output_tokens": 202}
     refreshed = json.loads(json.dumps(post))
     refreshed["meta"]["observed_usage"]["input_tokens"] = 303
@@ -14691,6 +14696,7 @@ def run_fusion_history_regression(executable: str) -> None:
     second_post = json.loads(json.dumps(post))
     second_post.update(id="post-history-702", title="Second historical Fusion", author="board-author-702")
     second_post["origin"]["fusion_run_id"] = "history-702"
+    second_post["meta"]["panel"] = [second_post["meta"]["panel"][1]]
     response[1]["historical_evidence"].append({
         "run_id": "history-702", "post_id": second_post["id"],
         "title": second_post["title"], "created_at": 1787557600.0,
@@ -14704,10 +14710,19 @@ def run_fusion_history_regression(executable: str) -> None:
     def interact(process, master_fd, slave_fd, output, base_path):
         palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
-        frame = resize_and_wait(
+        read_available(master_fd, output)
+        before_resize = len(output)
+        resize_and_wait(
             process, master_fd, output, rows=110, columns=170,
             needle=b"BOARD ORIGINAL", controls=(FULL_REDRAW,),
         )
+        redraw = output.find(FULL_REDRAW, before_resize)
+        if redraw < 0:
+            raise AssertionError("historical inspector resize did not fully redraw")
+        wait_for_output(process, master_fd, output, FRAME_END, start=redraw, timeout=3.0)
+        end = output.find(FRAME_END, redraw) + len(FRAME_END)
+        start = output.rfind(FRAME_START, before_resize, redraw)
+        frame = bytes(output[redraw if start < 0 else start:end])
         visible = CSI_RE.sub(b"", frame)
         for marker in (
             b"This Board evidence does not provide execution status or finish time",
@@ -14716,14 +14731,27 @@ def run_fusion_history_regression(executable: str) -> None:
             b"question-proof-501", b"panel-answer-first-501",
             b"historical-judge-synthesis-701", b"TOOL EXECUTIONS",
             b"original-board-body-701",
+            b"measured 2/3 panels: 10 input / 20 output tokens",
+            b"Panel 3 [answered] panel-zero-701  (0 in / 0 out)",
         ):
             if marker not in visible:
                 raise AssertionError(f"historical inspector missing {marker!r}: {visible!r}")
         if b"not-a-proven-caller" in visible:
             raise AssertionError("historical evidence invented a retained run caller")
+        chart = visible.split(b"Model token distribution (measured 2/3 panels):", 1)[1]
+        chart = chart.split(b"Panel 1 [answered]", 1)[0]
+        for model in (b"panel-first-501", b"panel-zero-701"):
+            if model not in chart:
+                raise AssertionError(f"recorded panel usage missing from chart: {chart!r}")
+        if b"panel-second-501" in chart:
+            raise AssertionError(f"unobserved failed-panel usage was charted: {chart!r}")
+        failed_card = visible.split(b"Panel 2 [failed]", 1)[1].split(b"Panel 3 [answered]", 1)[0]
+        if b"Token usage: not recorded" not in failed_card:
+            raise AssertionError(f"failed-panel usage must remain unknown: {failed_card!r}")
         print("FUSION_HISTORY_PTY_FRAME=" + json.dumps({
             "rows": 110, "columns": 170,
-            "ansi_base64": base64.b64encode(frame).decode("ascii"),
+            "ansi_zlib_base64": base64.b64encode(zlib.compress(frame)).decode("ascii"),
+            "ansi_bytes": len(frame),
         }), flush=True)
         send_and_wait(
             process, master_fd, output, b"r",
@@ -14740,7 +14768,12 @@ def run_fusion_history_regression(executable: str) -> None:
         if b"different-run-702" in CSI_RE.sub(b"", stale):
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
-        send_and_wait(process, master_fd, output, b"]", b"Board author: board-author-702")
+        all_failed = send_and_wait(
+            process, master_fd, output, b"]", b"panel token usage: not recorded",
+        )
+        all_failed = CSI_RE.sub(b"", frame_containing(all_failed, b"panel token usage: not recorded"))
+        if b"Board author: board-author-702" not in all_failed:
+            raise AssertionError(f"all-failed summary lost exact Board identity: {all_failed!r}")
         send_and_wait(process, master_fd, output, b"[", b"Board author: board-author-701")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")

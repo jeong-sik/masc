@@ -10,8 +10,15 @@ def fixtures():
     status, asks = h.keeper_asks_response()
     question = asks['asks'][0]['questions'][0]
     question['choices'] = [{'choice_id': f'route-{i}', 'label': f'Route {i}'} for i in range(1, 5)]
-    data[h.KEEPER_ASKS_PATH] = (status, asks)
-    data[h.KEEPER_ASK_ANSWER_PATH] = (200, {'ok': True})
+    answered = False
+
+    def answer():
+        nonlocal answered
+        answered = True
+        return 200, {'ok': True}
+
+    data[h.KEEPER_ASKS_PATH] = lambda: (status, {**asks, 'asks': [], 'open_count': 0} if answered else asks)
+    data[h.KEEPER_ASK_ANSWER_PATH] = answer
     return data
 
 
@@ -34,7 +41,11 @@ def interaction(requests):
         if any(path == h.KEEPER_ASK_ANSWER_PATH for path, _ in requests):
             raise AssertionError('saving the text draft sent it prematurely')
         h.send_and_wait(process, fd, output, b'\r', b'Press Enter again to send')
-        h.send_and_wait(process, fd, output, b'\r', b'Questions waiting on you')
+        submitted_at = len(output)
+        h.write_all(fd, b'\r')
+        h.wait_for_http_request(process, fd, output, requests, path=h.KEEPER_ASK_ANSWER_PATH)
+        h.wait_for_output(process, fd, output, b'none -- no Keeper is waiting on a decision',
+                          start=submitted_at, timeout=10)
         sent = [json.loads(body) for path, body in requests if path == h.KEEPER_ASK_ANSWER_PATH]
         if len(sent) != 1:
             raise AssertionError(f'expected exactly one answer, got {len(sent)}')

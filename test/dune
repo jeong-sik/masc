@@ -5027,7 +5027,7 @@
 (test
  (name test_keeper_tool_execute_observe)
  (modules test_keeper_tool_execute_observe)
- (libraries masc_test_deps))
+ (libraries masc_test_deps exec_ssh_protocol))
 
 (test
  (name test_keeper_execute_shim_evidence)

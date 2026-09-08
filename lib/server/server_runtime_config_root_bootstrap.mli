@@ -7,9 +7,11 @@ val seed_missing_from_embedded : dst:string -> int
 (** Write every distribution config asset the binary embeds that [dst] does not
     already hold, and return how many were written. Used when no filesystem
     [config/] source exists — a release install away from its repo — so a fresh
-    base path still gets a runtime.toml instead of failing startup. Keeper
-    manifests are excluded ({!Common.seeds_into_fresh_config_root}) and an
-    existing file is never overwritten. *)
+    base path still gets a runtime.toml instead of failing startup. The repo's
+    own [keepers/] is excluded ({!Common.seeds_into_fresh_config_root}); the
+    [keepers-default/] roster lands under [keepers/] instead
+    ({!Common.fresh_config_root_keeper_seed_target}), and an existing file is
+    never overwritten. *)
 
 val backfill_startup_required_from_embedded : config_root:string -> int
 (** Write the config files whose absence stops startup — runtime.toml and the

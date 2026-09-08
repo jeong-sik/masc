@@ -31,13 +31,33 @@ let test_writes_runtime_toml () =
   check bool "prompts present" true
     (Sys.is_directory (Filename.concat dst "prompts"))
 
-(* The whole reason the seed is filtered: the shipped keeper examples autoboot
-   into a sandbox the host may not have, so a fresh workspace gets no roster. *)
-let test_writes_no_keeper_manifests () =
+(* The seed is filtered because the repo's own keeper examples autoboot into
+   a sandbox the host may not have. Since #34310 a fresh workspace still gets a
+   roster: exactly the manifests [keepers-default/] holds, landing under
+   [keepers/], and none of them may autoboot. The expected names come from the
+   embedded listing through the same mapping the seeder uses, so a manifest
+   added to the default set is covered without editing this case. *)
+let test_writes_the_default_roster_with_autoboot_off () =
   let dst = fresh_dst () in
   ignore (Seed.seed_missing_from_embedded ~dst : int);
-  check (list string) "no keeper manifests" []
-    (entries_of (Filename.concat dst "keepers"))
+  let expected =
+    Embedded_config.file_list
+    |> List.filter_map Common.fresh_config_root_keeper_seed_target
+    |> List.map Filename.basename
+    |> List.sort_uniq String.compare
+  in
+  check bool "the default roster names at least one Keeper" true (expected <> []);
+  let keepers = Filename.concat dst "keepers" in
+  check (list string) "exactly the default roster" expected
+    (List.sort String.compare (entries_of keepers));
+  List.iter
+    (fun name ->
+       match Keeper_toml_loader.parse_toml (read_file (Filename.concat keepers name)) with
+       | Error detail -> fail (name ^ " did not parse: " ^ detail)
+       | Ok doc ->
+         check (option bool) (name ^ " waits to be started") (Some false)
+           (Keeper_toml_loader.toml_bool_opt doc "autoboot_enabled"))
+    expected
 
 let test_writes_no_dune_file () =
   let dst = fresh_dst () in
@@ -119,8 +139,8 @@ let () =
     ; ( "seed_missing_from_embedded"
       , [ test_case "writes runtime.toml and prompts" `Quick
             test_writes_runtime_toml
-        ; test_case "writes no keeper manifests" `Quick
-            test_writes_no_keeper_manifests
+        ; test_case "writes the default roster with autoboot off" `Quick
+            test_writes_the_default_roster_with_autoboot_off
         ; test_case "writes no dune file" `Quick test_writes_no_dune_file
         ; test_case "second pass keeps operator edits" `Quick
             test_second_pass_keeps_operator_edits

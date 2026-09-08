@@ -1,8 +1,11 @@
 (** Mcp_tool_runtime_board — MCP server-local board tool runtime.
 
-    Two external entries:
+    Three external entries:
     - {!dispatch}: invoked when the main MCP runtime router has
       no match (catch-all branch in {!Mcp_tool_runtime.dispatch}).
+    - {!bind_caller_identity}: the identity binding {!dispatch} applies
+      first, driven by the generated board registry, exposed so a test
+      can pin that every declared field is bound.
     - {!ensure_board_post_author}: caller-identity enforcement on
       [masc_board_post] [author] field, exposed for direct test
       coverage.
@@ -17,6 +20,16 @@
     plumbing. *)
 
 (** {1 Caller-identity enforcement (test-visible)} *)
+
+val bind_caller_identity :
+  name:string -> agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t
+(** [bind_caller_identity ~name ~agent_name args] applies
+    {!enforce_caller_identity} for every field
+    [Board_tool_registry.identity_fields_for_board_name] declares for
+    the board tool [name] resolves to, in declaration order. A [name]
+    that is not a board tool returns [args] unchanged. The registry is
+    generated from [config/tools/masc_board_*.toml], the same source the
+    Keeper runtime's [bind_board_identity] reads. *)
 
 val ensure_board_post_author :
   agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t

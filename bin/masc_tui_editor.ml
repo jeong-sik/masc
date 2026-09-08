@@ -53,7 +53,7 @@ let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string)
     Error (Editor_unavailable "no $EDITOR or $VISUAL is set")
   | Some editor ->
     let path = Filename.temp_file "masc-editor" suffix in
-    let finally () = (try Sys.remove path with _ -> ()) in
+    let finally () = (try Sys.remove path with _ -> ()) in  (* @observe-allowed: the editor's temp file, which some editors replace rather than write in place, so it may already be gone *)
     let outcome =
       try
         let oc = open_out path in

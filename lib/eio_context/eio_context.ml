@@ -93,7 +93,7 @@ let set_switch sw =
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
       | Some task ->
-        (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain *)
+        (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain. @observe-allowed: the switch is already releasing, so no caller is left to hand a task's failure to *)
         drain ()
       | None -> ()
     in
@@ -102,7 +102,7 @@ let set_switch sw =
     while true do
       let task = Eio.Stream.take dispatch_stream in
       Eio.Fiber.fork ~sw (fun () ->
-        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive *)
+        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive. @observe-allowed: same reason -- what reaches here was already reported by the task, or is teardown *)
     done;
     `Stop_daemon)
 

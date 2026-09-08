@@ -148,7 +148,7 @@ let test_a_retired_asset_reaches_the_log_line () =
    and says what was wrong with the manifest. *)
 let test_a_foreign_or_broken_manifest_retires_nothing () =
   List.iter
-    (fun (name, content) ->
+    (fun (name, content, expected_reason) ->
       with_temp_prompts_dir (fun dir ->
           let stray = Filename.concat dir "keeper.stray.md" in
           Out_channel.with_open_text stray (fun oc ->
@@ -161,15 +161,54 @@ let test_a_foreign_or_broken_manifest_retires_nothing () =
           check (list string) (name ^ ": managed assets still copied")
             [ "prompts/behavior/contract.md"; "prompts/keeper.example.md" ]
             (List.sort compare result.Managed_asset_sync.copied);
-          check bool (name ^ ": the manifest problem is reported") true
-            (List.exists
+          (match
+             List.filter
                (fun (rel, _) -> String.equal rel "prompts/managed-assets.json")
-               result.Managed_asset_sync.failed)))
-    [ "tool-domain manifest", manifest ~schema:"masc.tool-managed-assets.v1" [ "keeper.stray.md" ]
-    ; "not JSON", "{ this is not json"
-    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v1"}|}
-    ; "unsafe path", manifest [ "../keeper.stray.md" ]
+               result.Managed_asset_sync.failed
+           with
+           | [ (_, reason) ] ->
+             check bool (name ^ ": the report says what was wrong") true
+               (mentions ~line:reason expected_reason)
+           | reports ->
+             failf "%s: expected one manifest report, found %d" name (List.length reports));
+          (* The evidence stays: a rewrite would make the next boot read
+             clean and the report would have shown once. *)
+          check string (name ^ ": the manifest is left as it was") content
+            (read_file (Filename.concat dir "managed-assets.json"))))
+    [ ( "tool-domain manifest"
+      , manifest ~schema:"masc.tool-managed-assets.v1" [ "keeper.stray.md" ]
+      , "is not" )
+    ; "not JSON", "{ this is not json", "not JSON"
+    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v1"}|}, "lacks"
+    ; "unsafe path", manifest [ "../keeper.stray.md" ], "unsafe path"
     ]
+
+(* A manifest that exists and cannot be read is the same case with a
+   different cause: reported, nothing retired, and the file untouched. This
+   used to escape as Sys_error and end the boot. Root reads any file, so
+   the case is skipped there rather than reported as passing. *)
+let test_an_unreadable_manifest_retires_nothing () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_temp_prompts_dir (fun dir ->
+        let stray = Filename.concat dir "keeper.stray.md" in
+        Out_channel.with_open_text stray (fun oc ->
+            Out_channel.output_string oc "whatever was here\n");
+        let manifest_file = Filename.concat dir "managed-assets.json" in
+        write_runtime_manifest dir [ "keeper.stray.md" ];
+        Unix.chmod manifest_file 0o000;
+        Fun.protect
+          ~finally:(fun () -> try Unix.chmod manifest_file 0o600 with Unix.Unix_error _ -> ())
+          (fun () ->
+            let result = sync ~prompts_dir:dir in
+            check (list string) "removed" [] result.Managed_asset_sync.removed;
+            check bool "the stray file stays" true (Sys.file_exists stray);
+            match result.Managed_asset_sync.failed with
+            | [ ("prompts/managed-assets.json", reason) ] ->
+              check bool "the report names the read failure" true
+                (mentions ~line:reason "unreadable")
+            | failed ->
+              failf "expected the manifest report alone, found %d" (List.length failed)))
 
 (* An embedded tree with nothing under prompts/ is the crunch-lost-the-tree
    state. Every domain ships assets, so the sync refuses to project the
@@ -470,6 +509,8 @@ let () =
             test_a_retired_asset_reaches_the_log_line;
           test_case "a foreign or broken manifest retires nothing" `Quick
             test_a_foreign_or_broken_manifest_retires_nothing;
+          test_case "an unreadable manifest retires nothing" `Quick
+            test_an_unreadable_manifest_retires_nothing;
           test_case "empty embedded set fails closed" `Quick
             test_empty_embedded_set_fails_closed;
           test_case "unsafe embedded paths preserve runtime assets and manifest" `Quick

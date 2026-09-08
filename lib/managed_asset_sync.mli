@@ -54,12 +54,17 @@ val sync
     A file that was in no manifest is the operator's and stays. The
     manifest is then rewritten from the current set ([managed_by],
     [schema], sorted [paths]) as the record of what this binary owns there.
-    Without a readable manifest of this domain a pass deletes nothing; a
-    manifest that fails to read is reported in [failed].
+    Without a manifest a pass deletes nothing and writes one. A manifest
+    that does not read, or that another domain wrote, is reported in
+    [failed] and left as it is: the pass deletes nothing and writes no
+    manifest, so the same report returns every boot until the operator
+    repairs or removes the file, and what it recorded is not lost. One
+    entry that is not a safe relative path refuses the whole manifest the
+    same way.
 
     An empty embedded set is refused: every domain ships assets, so an empty
-    set is a lost tree, and projecting it would rewrite the manifest to
-    nothing and retire every asset at the next boot.
+    set is a lost tree, and projecting it would retire every asset the
+    previous manifest lists.
 
     [read]/[files] are typically [Embedded_config.read] /
     [Embedded_config.file_list], passed in by the server bootstrap so this

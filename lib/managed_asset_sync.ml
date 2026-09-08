@@ -70,6 +70,14 @@ let runtime_manifest_content ~domain current =
 let previously_owned ~domain ~dest_dir =
   let path = Filename.concat dest_dir "managed-assets.json" in
   match read_file_opt path with
+  | exception Sys_error message -> Error ("runtime manifest unreadable: " ^ message)
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Printf.sprintf
+         "runtime manifest unreadable: %s(%s): %s"
+         operation
+         argument
+         (Unix.error_message error))
   | None -> Ok String_set.empty
   | Some content ->
     (match Yojson.Safe.from_string content with
@@ -321,7 +329,7 @@ let sync ~domain ~read ~files ~dest_dir () =
      What that comparison also caught was an empty embedded set: a crunch
      step that lost the tree. Without a second list that case is caught on
      its own, and refused, because every domain ships assets and projecting
-     an empty set would delete the operator's whole runtime directory. *)
+     an empty set would retire every asset the previous manifest lists. *)
   (* Validate the complete authority set before removing absent runtime files
      or writing even a valid asset that precedes an invalid one. *)
   if invalid_paths <> [] then { initial with failed = invalid_paths }
@@ -353,11 +361,23 @@ let sync ~domain ~read ~files ~dest_dir () =
           removable
           { initial with failed = manifest_failure }
       in
-      List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
-      |> write_runtime_manifest
-           ~domain
-           ~dest_dir
-           (runtime_manifest_content ~domain current))
+      let synced =
+        List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
+      in
+      (* A manifest this pass could not read stays as it is. Rewriting it
+         would make the next boot read clean, so the failure would show
+         once and the paths it recorded would be nobody's to retire.
+         Left in place, the same line comes back every boot until the
+         operator repairs or removes the file, and the next pass then
+         starts from what it says. *)
+      match manifest_failure with
+      | _ :: _ -> synced
+      | [] ->
+        write_runtime_manifest
+          ~domain
+          ~dest_dir
+          (runtime_manifest_content ~domain current)
+          synced)
 ;;
 
 (* Two lines, two budgets. The bootstrap used to concatenate copied,

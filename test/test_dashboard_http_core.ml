@@ -3228,6 +3228,67 @@ let tools_h1_wire_response ~router ~headers target =
     String.trim (String.sub line (colon + 1) (String.length line - colon - 1))) in
   status, headers, String.sub raw (boundary + 4) (String.length raw - boundary - 4)
 
+let test_asks_list_publishes_written_alternative_capability () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module Ask = Masc.Keeper_ask in
+  let name = "ask-capability" in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String name; "trace_id", `String "ask-capability-trace" ]) with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta in
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+    (fun () ->
+      let choice = match Ask.choice ~choice_id:"offered" ~label:"Offered route" () with
+        | Ok choice -> choice
+        | Error error -> fail (Ask.invalid_choice_to_string error)
+      in
+      let question id mode free_text =
+        match Ask.question ~question_id:id ~header:id ~prompt:"Choose or explain another route"
+          ~choices:[choice] ~mode ~free_text with
+        | Ok question -> question
+        | Error error -> fail (Ask.invalid_question_to_string error)
+      in
+      let questions =
+        [ question "single" Ask.Single Ask.Choices_only;
+          question "multi" Ask.Multi Ask.Choices_only;
+          question "hinted" Ask.Single (Ask.Free_text_allowed {hint = Some "Explain the constraint"}) ]
+      in
+      let ask = match Ask.ask ~ask_id:"ask-capability" ~keeper_name:name ~questions
+        ~continuation:(Masc.Keeper_continuation_channel.unrouted "projection fixture")
+        ~asked_at:100. () with
+        | Ok ask -> ask
+        | Error error -> fail (Ask.invalid_ask_to_string error)
+      in
+      (match Masc.Keeper_ask_store.record_ask ~base_path:config.base_path ask with
+       | Ok () -> () | Error detail -> fail detail);
+      let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+      let router = Lib.Http_server_eio.Router.create ()
+        |> Lib.Http_server_eio.Router.get "/api/v1/keepers/asks"
+             (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
+      in
+      let status, _, body = tools_h1_wire_response ~router ~headers:[]
+        ("/api/v1/keepers/asks?name=" ^ name) in
+      check int "asks list HTTP success" 200 status;
+      let open Yojson.Safe.Util in
+      let wire_questions = Yojson.Safe.from_string body |> member "asks" |> index 0
+        |> member "questions" |> to_list in
+      check int "all authored questions published" 3 (List.length wire_questions);
+      List.iter (fun json -> check bool "every question permits a written alternative" true
+        (json |> member "free_text" |> member "allowed" |> to_bool)) wire_questions;
+      check string "author hint survives capability projection" "Explain the constraint"
+        (List.nth wire_questions 2 |> member "free_text" |> member "hint" |> to_string);
+      match Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:name with
+      | [_, (stored, Ask.Open)] ->
+        check bool "wire capability does not rewrite stored author metadata" true
+          (List.map (fun (q : Ask.question) -> q.free_text) stored.questions
+           = [Ask.Choices_only; Ask.Choices_only;
+              Ask.Free_text_allowed {hint = Some "Explain the constraint"}])
+      | _ -> fail "stored open question metadata changed")
+
 let tools_h2_wire_response ~handler ~headers target =
   let response = ref None in
   let body = Buffer.create 4096 in
@@ -5348,6 +5409,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper path extraction uses shared name grammar" `Quick
             test_keeper_name_extractors_use_shared_grammar;
+          test_case "asks list publishes the written alternative capability" `Quick
+            test_asks_list_publishes_written_alternative_capability;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper up route classifies and extracts" `Quick

@@ -44,6 +44,8 @@ type answer_mode =
   | Single
   | Multi
 
+(** The input offered by the question author. This does not restrict an
+    operator: every question also accepts a nonblank [Wrote] alternative. *)
 type free_text =
   | Free_text_allowed of { hint : string option }
   | Choices_only
@@ -53,8 +55,7 @@ type invalid_question =
   | Header_blank
   | Prompt_blank
   | No_way_to_answer
-      (** No choices were offered and free text was refused, so no submission
-          could ever satisfy this question. *)
+      (** The author supplied neither choices nor a free-text invitation. *)
   | Duplicate_choice_ids of string list
 
 type question = private {
@@ -133,7 +134,6 @@ type invalid_answer =
   | Duplicate_choice of { question_id : string; choice_id : string }
   | Multiple_choices_for_single of { question_id : string; count : int }
   | Empty_selection of { question_id : string }
-  | Free_text_not_offered of { question_id : string }
   | Free_text_blank of { question_id : string }
   | Answered_twice of { question_id : string }
   | Unanswered of { question_id : string }

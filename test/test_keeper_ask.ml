@@ -45,8 +45,7 @@ let agent_responder = responder_on Surface_ref.Agent
 
 let error_names errors = List.map invalid_answer_to_string errors
 
-(* A question that offers nothing and refuses free text cannot be answered by
-   any submission, so it must not be constructible. *)
+(* The author must supply choices or a writing prompt when creating a question. *)
 let question_with_no_answer_path_is_rejected () =
   match
     question ~question_id:"q1" ~header:"Route" ~prompt:"Which way?" ~choices:[] ~mode:Single
@@ -112,13 +111,19 @@ let multi_choice_question_accepts_two_picks () =
   | Ok _ -> Alcotest.fail "multi-select lost a pick"
   | Error errors -> fail_with "multi-select rejected" (String.concat "; " (error_names errors))
 
-let free_text_is_refused_when_not_offered () =
-  let a = ok_ask ~questions:[ two_choice_question ~mode:Single ~free_text:Choices_only ] in
-  match parse_answers ~ask:a ~submissions:[ ("q1", Wrote "something else") ] with
-  | Error [ Free_text_not_offered { question_id = "q1" } ] -> ()
-  | Error errors ->
-      fail_with "expected Free_text_not_offered" (String.concat "; " (error_names errors))
-  | Ok _ -> Alcotest.fail "free text was accepted by a choices-only question"
+let free_text_alternative_is_always_accepted () =
+  List.iter (fun mode ->
+    let a = ok_ask ~questions:[ two_choice_question ~mode ~free_text:Choices_only ] in
+    let text = "  다른 방법으로 진행해주세요.\n조건을 먼저 확인합니다.  " in
+    (match parse_answers ~ask:a ~submissions:[ ("q1", Wrote text) ] with
+     | Ok [ { question_id = "q1"; response = Wrote actual } ] ->
+         Alcotest.(check string) "operator's exact text" text actual
+     | Ok _ -> Alcotest.fail "alternative answer changed shape"
+     | Error errors -> fail_with "alternative refused" (String.concat "; " (error_names errors)));
+    match parse_answers ~ask:a ~submissions:[ ("q1", Wrote " \n\t ") ] with
+    | Error [ Free_text_blank { question_id = "q1" } ] -> ()
+    | _ -> Alcotest.fail "a blank alternative must remain unanswered"
+  ) [Single; Multi]
 
 let a_question_left_out_is_reported () =
   let a =
@@ -329,8 +334,8 @@ let () =
           Alcotest.test_case "single refuses two picks" `Quick
             single_choice_question_refuses_two_picks;
           Alcotest.test_case "multi accepts two picks" `Quick multi_choice_question_accepts_two_picks;
-          Alcotest.test_case "free text refused when not offered" `Quick
-            free_text_is_refused_when_not_offered;
+          Alcotest.test_case "operator can always write an alternative" `Quick
+            free_text_alternative_is_always_accepted;
           Alcotest.test_case "a question left out is reported" `Quick a_question_left_out_is_reported;
           Alcotest.test_case "every violation is reported at once" `Quick
             every_violation_is_reported_at_once;

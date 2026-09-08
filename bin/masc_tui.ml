@@ -8998,19 +8998,14 @@ let toggle_ask_choice state index =
    sentence. *)
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
-  | Some row, Some (question : Tui_decode.ask_question) -> (
-      match Ask.free_text_slot question with
-      | None ->
-          add_event state "system"
-            (Printf.sprintf "%s takes one of its choices, not free text"
-               question.Tui_decode.aq_header)
-      | Some slot ->
-          let existing =
-            match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
-            | Some (Ask.Draft_wrote text) -> text
-            | Some (Ask.Draft_chose _) | Some Ask.Draft_skipped | None -> ""
-          in
-          state.ask_text_entry <- Some { ate_slot = slot; ate_text = existing })
+  | Some row, Some question ->
+      let slot = Ask.free_text_slot question in
+      let existing =
+        match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
+        | Some (Ask.Draft_wrote text) -> text
+        | Some (Ask.Draft_chose _) | Some Ask.Draft_skipped | None -> ""
+      in
+      state.ask_text_entry <- Some { ate_slot = slot; ate_text = existing }
   | (Some _ | None), _ -> ()
 
 (* Typing edits the buffer alone. The draft is written once, on the key that
@@ -14965,7 +14960,10 @@ and is loaded on demand through keeper_skill.
                    position is not a choice. *)
                 match int_of_string_opt digit with
                 | Some position when position >= 1 && position <= 9 ->
-                    toggle_ask_choice state (position - 1)
+                    (match selected_ask_question state with
+                     | Some question when Ask.alternative_position question = Some position ->
+                         begin_ask_text_entry state
+                     | Some _ | None -> toggle_ask_choice state (position - 1))
                 | Some _ | None -> ())
             | _ -> ());
            Render_schedule.request render_schedule Render_schedule.Force

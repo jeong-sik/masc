@@ -123,8 +123,15 @@ type free_text_slot = { fts_question_id : string; fts_hint : string option }
 let free_text_slot (question : Decode.ask_question) =
   match question.aq_free_text with
   | Decode.Ask_free_text_allowed { aft_hint } ->
-      Some { fts_question_id = question.aq_id; fts_hint = aft_hint }
-  | Decode.Ask_choices_only -> None
+      { fts_question_id = question.aq_id; fts_hint = aft_hint }
+  | Decode.Ask_choices_only ->
+      { fts_question_id = question.aq_id; fts_hint = None }
+
+(* Digits are single-key shortcuts. Above eight offered choices, [t] remains
+   the unambiguous text key; a two-digit "10" would select "1" first. *)
+let alternative_position (question : Decode.ask_question) =
+  let count = List.length question.aq_choices in
+  if count > 0 && count < 9 then Some (count + 1) else None
 
 let free_text_hint slot = slot.fts_hint
 let free_text_question_id slot = slot.fts_question_id

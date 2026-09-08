@@ -86,6 +86,19 @@ let answering_closes_the_question_and_keeps_the_answer () =
   | Some _ -> Alcotest.fail "settled to something other than the recorded answer"
   | None -> Alcotest.fail "the ask disappeared"
 
+let a_written_alternative_survives_reload () =
+  let base_path = temp_dir () in
+  record base_path "ask-alternative";
+  let text = "제시된 선택지 대신 직접 확인해주세요.\n  원문 그대로  " in
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-alternative"
+     ~submissions:[("q1", Keeper_ask.Wrote text)] ~responder ~now:1100. with
+   | Ok _ -> ()
+   | Error e -> fail_with "alternative" (Keeper_ask_store.answer_failure_to_string e));
+  match Keeper_ask_store.settled ~base_path ~keeper_name:keeper ~ask_id:"ask-alternative" with
+  | Some (Keeper_ask.Answered_by { answers = [{response = Wrote actual; _}]; _ }) ->
+      Alcotest.(check string) "exact alternative is durable" text actual
+  | _ -> Alcotest.fail "alternative did not survive the durable log"
+
 (* The second surface has to be able to show what was already chosen, not just
    be told no. *)
 let a_second_answer_reports_what_already_landed () =
@@ -198,6 +211,7 @@ let () =
     [
       ( "what a Keeper asked survives",
         [
+          Alcotest.test_case "written alternative survives reload" `Quick a_written_alternative_survives_reload;
           Alcotest.test_case "a recorded question survives a reload" `Quick
             a_recorded_question_survives_a_reload;
           Alcotest.test_case "no log means no questions" `Quick

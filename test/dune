@@ -3845,6 +3845,22 @@
  (deps (alias runtest-test_tui_keyboard_input-msx-spectator)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-msx-size)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   msx-size)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-msx-size)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py

@@ -33,11 +33,32 @@ let title_of (frame : Masc_tui_types.msx_frame option) =
       Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode cart
         f.msx_number
 
-let footer = " esc: back   (keeper plays; this is a live view)"
+(* How much of the terminal the picture takes: 1.0 fills the screen, and
+   the size keys step it in eighths between a quarter and full. A local
+   view choice -- the machine and its frame are the server's; this only
+   says how big this terminal draws them. *)
+let screen_fraction = ref 1.0
+
+let step_fraction d =
+  let eighths = Float.round (!screen_fraction *. 8.0) +. d in
+  screen_fraction := Float.min 8.0 (Float.max 2.0 eighths) /. 8.0
+
+(* One step by the size keys: [+1.0] grows, [-1.0] shrinks, an eighth of the
+   screen each way. Called by the key loop, which owns every key the spectator
+   sees -- this module's [consume] answers [esc] only, the rest go to the
+   machine (RFC-0439 3.3), and the size keys are intercepted before that. *)
+let adjust_size d = step_fraction d
+
+let footer () =
+  Printf.sprintf " esc: back   +/-: size %d%%   (keeper plays; this is a live view)"
+    (int_of_float (!screen_fraction *. 100.0))
 
 let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let screen_rows = max 4 (rows - 2) in
+  let picture_rows =
+    max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
+  in
   let buf = Buffer.create (cols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (title_of frame));
@@ -66,17 +87,19 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
 
           iTerm2 is left on the mosaic: its protocol carries a file, not a
           pixel buffer, so it needs the encoder this path avoids. *)
+       (* The image is drawn where the cursor sits, so a smaller picture
+          starts mid-screen: park the cursor on its first row, centred, and
+          the footer still lands on the screen's last row. *)
+       Buffer.add_string buf
+         (Printf.sprintf "\027[%d;1H" (2 + ((screen_rows - picture_rows) / 2)));
        let escape =
          Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
-           ~pixel_height:f.msx_height ~rows:(max 1 screen_rows)
+           ~pixel_height:f.msx_height ~rows:picture_rows
        in
        if String.equal escape "" then for _ = 1 to screen_rows do blank_row () done
-       else begin
-         Buffer.add_string buf escape;
-         (* The image is drawn at the cursor and the terminal does not move it,
-            so the footer needs the rows stepped over by hand. *)
-         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
-       end
+       else
+         Buffer.add_string buf
+           (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to
@@ -85,7 +108,7 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
           rows and columns stay blank, so the picture is the picture. *)
        let pcols, prows =
          Frame.fit_grid ~src_w:f.msx_width ~src_h:f.msx_height ~max_cols:cols
-           ~max_rows:(2 * screen_rows)
+           ~max_rows:(2 * picture_rows)
        in
        let lines =
          Frame.render ~cols:pcols ~rows:prows
@@ -106,7 +129,7 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)
        for _ = 1 to screen_rows do blank_row () done);
-  Buffer.add_string buf (fit_line cols footer);
+  Buffer.add_string buf (fit_line cols (footer ()));
   Buffer.add_string buf "\027[0K";
   write (Buffer.contents buf)
 

@@ -13463,7 +13463,10 @@ def run_browser_viewport_regression(executable: str) -> None:
         assert len(actions) == 2 and len(captures) == 4, "busy input was queued or replayed"
         image_input(b"\x0f")
         changed[0] = True
-        restored = send_and_wait(process, master, output, b"r", b"expected URL mismatch")
+        # The long ownership error is clipped to the viewport width. Its
+        # visible prefix plus the assertions below establish refusal without
+        # requiring text that is correctly outside the rendered frame.
+        restored = send_and_wait(process, master, output, b"r", b"Read/action failed: screenshot source")
         assert FULL_REDRAW in restored, "async image dismissal reused the cleared text frame"
         visible = screen_text(restored[restored.rfind(FULL_REDRAW):])
         for row in (b"MASC Browser Lane", b"owned browser body", b"b:choose browser"):

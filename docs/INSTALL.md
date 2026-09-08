@@ -228,6 +228,9 @@ masc keeper-create --base-path "$HOME/masc-workspace" \
 `--edit`와 함께 지정하면 다른 선언 flag와 동일하게 충돌로 거부합니다.
 
 `--runtime`만 바꿔도 hypervisor나 daemon을 설치하지는 않습니다.
+`--runtime nerdctl_kata`로 직접 빌드하려면
+[nerdctl의 BuildKit 설정](https://github.com/containerd/nerdctl/blob/main/docs/build.md)도
+필요합니다. containerd와 Kata만 실행 중인 상태로는 이미지 빌드 준비가 끝난 것이 아닙니다.
 Docker store에 있는 이미지는 Apple Container/nerdctl store에 자동 복사되지 않습니다.
 Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 inspect로
 이름과 mountpoint를 확인합니다. guest를 다시 만들어도 같은 볼륨을 연결합니다.

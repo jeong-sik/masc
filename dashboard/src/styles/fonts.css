@@ -4,7 +4,7 @@
  * --font-mono load locally from /dashboard/assets/fonts/:
  *   Cinzel (display, TTF) and EB Garamond + JetBrains Mono (latin &
  *   latin-ext woff2 subsets, ~30KB each). The two upright faces are variable
- *   fonts: one file per subset carries the whole weight axis, so each face is
+ *   fonts: one file per subset carries a 400-800 weight axis, so each face is
  *   declared once with its weight range rather than once per weight. Korean text is covered by
  *   fonts-noto-sans-kr.css. No stylesheet in this app fetches Google Fonts:
  *   the subsets are vendored so a clean machine renders the design's metrics

@@ -27,11 +27,13 @@ describe('keeper-v2 brand assets', () => {
   })
 
   // The EB Garamond and JetBrains Mono upright files are variable fonts (an
-  // fvar table; one file per subset carries the whole weight axis), so the
-  // face is declared once with a weight range and the browser draws 600 from
-  // the same bytes it draws 400 from. #33209 read the identical 400/600 and
-  // 400/500/700 files as faces that lie; the lie was the single-weight
-  // descriptor repeated over one file, which this file no longer does.
+  // fvar table with a 400-800 weight axis, one file per subset), so the face
+  // is declared once with a weight range and the browser draws 600 from the
+  // same bytes it draws 400 from. #33209 read the identical 400/600 and
+  // 400/500/700 files as faces that lie. They did not lie: a single-weight
+  // descriptor over a variable file still renders that weight from the axis.
+  // The old declarations were duplicates, one file shipped three times
+  // under three faces, and this file no longer does that.
   it('declares each upright variable face once, with its weight range', () => {
     const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)]
       .map(m => m[1])

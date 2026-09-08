@@ -5168,3 +5168,14 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_runtime_default_catalog_cli)))
+
+(rule
+ (alias runtest-test_install_runtime_setup)
+ (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
+       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence))
+ (action
+  (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_runtime_setup)))

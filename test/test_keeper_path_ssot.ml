@@ -83,10 +83,15 @@ let write_keeper_toml ~config ~name ~sandbox_profile =
     (Filename.concat dir (name ^ ".toml"))
     (Printf.sprintf "[keeper]\nsandbox_profile = %S\n" sandbox_profile)
 
+(* One spelling. The keeper name is the only name a path lookup takes
+   (RFC-0393), so a fixture that files the TOML under [alpha] and then asks
+   about [keeper-alpha-agent] is asking about a keeper that does not exist --
+   which is what the raise said: "no keeper TOML, so no sandbox profile". The
+   expected paths below have always been the [alpha] ones. *)
 let test_config_agent_projection_docker () =
   let config = make_config () in
   write_keeper_toml ~config ~name:"alpha" ~sandbox_profile:"docker";
-  let agent_name = "keeper-alpha-agent" in
+  let agent_name = "alpha" in
   Alcotest.(check string)
     "config-backed backend"
     "docker"
@@ -111,18 +116,30 @@ let test_config_agent_projection_docker () =
     expected
     (Keeper_sandbox.host_path_of_visible_path ~config ~agent_name visible)
 
-let test_config_agent_projection_local () =
+(* A keeper with no TOML has no profile, and that is the answer. It used to
+   become the Local backend rooted at .masc/playground/<name>/, which was
+   host execution reached by omission; #32078 removed the arm, so there is
+   nothing left to default to. The projection now refuses, and refusing is
+   what this case pins. *)
+let test_config_agent_projection_without_a_toml_refuses () =
   let config = make_config () in
-  let agent_name = "keeper-alpha-agent" in
-  Alcotest.(check string)
-    "missing config defaults to local backend"
-    "local"
-    (Keeper_sandbox.backend_of_config_agent ~config ~agent_name
-     |> Keeper_sandbox.backend_to_string);
-  Alcotest.(check string)
-    "local host root rel"
-    ".masc/playground/alpha/"
-    (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name)
+  let agent_name = "alpha" in
+  let expected =
+    Keeper_sandbox_config.Invalid_keeper_sandbox_config
+      (Printf.sprintf
+         "%s: no keeper TOML, so no sandbox profile. Set keeper.sandbox_profile \
+          to one of: docker, microvm, remote_ssh"
+         (Keeper_sandbox_config.keeper_toml_path
+            ~base_path:config.Workspace.base_path
+            ~agent_name))
+  in
+  Alcotest.check_raises "no TOML is refused, not defaulted" expected (fun () ->
+    ignore (Keeper_sandbox.backend_of_config_agent ~config ~agent_name));
+  Alcotest.check_raises
+    "the host root has no answer either"
+    expected
+    (fun () ->
+       ignore (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name))
 
 (* ── Invariant: one projection, and it is fail-closed ─────────────────
 
@@ -213,18 +230,18 @@ let test_projection_docker_requires_segment_boundary () =
 (* Remote_ssh keepers keep a host bookkeeping bundle, so the projection is the
    identity. Containment is a separate question, decided by
    Keeper_alerting_path, and must not be smuggled in here. *)
-let test_projection_local_is_identity () =
+let test_projection_endpoint_owned_is_identity () =
   let config = make_config () in
   let meta = make_meta ~name:"alpha" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh in
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
   let outside = "/tmp/anywhere/at/all.ml" in
   Alcotest.(check string)
-    "local projection returns its input"
+    "an endpoint-owned tree returns its input"
     outside
     (Keeper_sandbox.visible_path_of_host
        sandbox
        (Keeper_sandbox.Path.of_host_abs outside)
-     |> visible_or_fail ~msg:"local")
+     |> visible_or_fail ~msg:"remote_ssh")
 
 (* [visible_path_of_raw] is the boundary parse for a cwd decoded from a
    keeper tool call. Keepers send both coordinate systems today, so both must
@@ -295,16 +312,16 @@ let test_config_agent_projection_rejects_legacy_alias () =
     "legacy sandbox_profile aliases are rejected"
     (Keeper_sandbox_config.Invalid_keeper_sandbox_config
        (Printf.sprintf
-          "%s: invalid sandbox_profile %S (allowed: local, docker, microvm, remote_ssh)"
+          "%s: invalid sandbox_profile %S (allowed: docker, microvm, remote_ssh)"
           (Keeper_sandbox_config.keeper_toml_path
              ~base_path:config.Workspace.base_path
-             ~agent_name:"keeper-alpha-agent")
+             ~agent_name:"alpha")
           "docker_hardened"))
     (fun () ->
        ignore
          (Keeper_sandbox_config.sandbox_profile_of_agent
             ~base_path:config.Workspace.base_path
-            ~agent_name:"keeper-alpha-agent"))
+            ~agent_name:"alpha"))
 
 let () =
   Alcotest.run "Keeper Path SSOT" [
@@ -312,8 +329,8 @@ let () =
       [
         Alcotest.test_case "docker projection" `Quick
           test_config_agent_projection_docker;
-        Alcotest.test_case "local projection" `Quick
-          test_config_agent_projection_local;
+        Alcotest.test_case "no TOML is refused, not defaulted" `Quick
+          test_config_agent_projection_without_a_toml_refuses;
         Alcotest.test_case "legacy profile rejected" `Quick
           test_config_agent_projection_rejects_legacy_alias;
       ] );
@@ -325,8 +342,8 @@ let () =
           test_projection_docker_rejects_outside_root;
         Alcotest.test_case "prefix-adjacent sibling is outside" `Quick
           test_projection_docker_requires_segment_boundary;
-        Alcotest.test_case "local projection is the identity" `Quick
-          test_projection_local_is_identity;
+        Alcotest.test_case "an endpoint-owned tree projects to itself" `Quick
+          test_projection_endpoint_owned_is_identity;
         Alcotest.test_case "raw cwd accepts either coordinate system" `Quick
           test_raw_accepts_either_coordinate_system;
         Alcotest.test_case "symlinked spellings project identically" `Quick

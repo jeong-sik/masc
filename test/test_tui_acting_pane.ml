@@ -452,7 +452,7 @@ let test_fleet_rows_read_the_state () =
   check bool "working counts its calls as at least" true (contains "2+ calls" (find_row "sangsu"));
   check bool "settled counts its calls" true (contains "3 calls" (find_row "rondo"));
   check bool "settled shows both token parts" true
-    (contains "73.9k+358 tok" (find_row "rondo"));
+    (contains "in 73.9k · out 358" (find_row "rondo"));
   check bool "quiet says so" true (contains "no events" (find_row "quiet-one"))
 
 let test_focus_block_names_the_latest_observed_record () =
@@ -628,7 +628,7 @@ let test_event_and_count_labels_fit_the_existing_width () =
   check bool "observed count is whole" true (contains "1+ calls" row);
   check int "pane width remains unchanged" 56 Pane.pane_cols;
   check bool "settled count and both token parts fit" true
-    (contains "3 calls" (find_row "rondo") && contains "73.9k+358 tok" (find_row "rondo"))
+    (contains "3 calls" (find_row "rondo") && contains "in 73.9k · out 358" (find_row "rondo"))
 
 (* ── changes tab ────────────────────────────────────────────────────── *)
 
@@ -875,7 +875,7 @@ let test_hidden_rows_do_not_allocate_text_layout () =
     ["fleet", 5, fleet; "focus", 6, focus; "changes", 4, changes]
 
 let test_tokens_and_ages_are_compact () =
-  check string "both sides as parts" "73.9k+358 tok" (Pane.tokens_text (Some 73_877, Some 358));
+  check string "both sides as parts" "in 73.9k · out 358" (Pane.tokens_text (Some 73_877, Some 358));
   check string "both sides summed" "74.2k tok" (Pane.tokens_sum_text (Some 73_877, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
   check string "unknown is empty" "" (Pane.tokens_text (None, None));
@@ -911,7 +911,7 @@ let test_widest_settled_reading_fits_whole () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let row = find_row_in texts "sangsu" in
   check bool "the count is whole" true (contains "123 calls" row);
-  check bool "both parts are whole" true (contains "999.9k+999.9k tok" row)
+  check bool "both parts are whole" true (contains "in 999.9k · out 999.9k" row)
 
 (* sangsu's session turn 5 opened, settled as the keeper's turn 3141 twenty
    seconds ago, and session turn 6 has opened since: the earlier turn draws
@@ -950,7 +950,7 @@ let earlier_turn_row input =
 
 let test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock () =
   let row = earlier_turn_row (earlier_turn_input ()) in
-  check bool "both token parts" true (contains "73.9k+358 tok" row);
+  check bool "both token parts" true (contains "in 73.9k · out 358" row);
   check bool "the cost" true (contains "$0.0258" row);
   check bool "no receipt age" false (contains "last event" row);
   check bool "the count" true (contains "3 calls" row)
@@ -962,7 +962,7 @@ let test_earlier_turn_row_gives_up_its_cost_before_its_parts () =
     earlier_turn_row
       (earlier_turn_input ~calls:123 ~input:999_900 ~output:999_900 ~cost:123456.789 ())
   in
-  check bool "both token parts" true (contains "999.9k+999.9k tok" row);
+  check bool "both token parts" true (contains "in 999.9k · out 999.9k" row);
   check bool "the cost is what it gave up" false (contains "$" row);
   check bool "the count" true (contains "123 calls" row)
 

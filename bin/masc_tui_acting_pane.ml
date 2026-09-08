@@ -9,7 +9,10 @@ module Reading = Masc.Tui_decode
    the configured names whole that the roster's window keeps whole. The
    reading's budget holds the record glyph, the newest tool or the count,
    and both token parts: [~ network_read · 3+ calls] and
-   [■ 123 calls · 999.9k+999.9k tok] at 31 cells. The age of the newest
+   [■ 123 calls · in 999.9k · out 999.9k] at exactly 36. No slack: labelling
+   the parts spent the five cells the old [999.9k+999.9k tok] left over, and
+   anything added to a settled reading now has to take width from somewhere
+   else. [test_widest_settled_reading_fits_whole] is what says so. The age of the newest
    event is one fact and sits on the focus header, not here. *)
 let border_cells = 1
 let mark_cells = 2
@@ -171,9 +174,14 @@ let compact_count n =
 (* Input and output as two parts. The input part is what a turn re-sends on
    every call, so it is what makes a twelve-call turn read in the millions;
    a reader who sees [3.4M+12k] can tell that from a long answer. *)
+(* Labelled, not joined by "+". The two figures are input and output, and a
+   plus sign between them reads as arithmetic -- the more so because
+   [tokens_sum_text] right below produces exactly that sum in the same shape.
+   One operator asked what 73.9k+358 added up to. *)
 let tokens_text = function
   | None, None -> ""
-  | Some i, Some o -> compact_count i ^ "+" ^ compact_count o ^ " tok"
+  | Some i, Some o ->
+    "in " ^ compact_count i ^ " · out " ^ compact_count o
   | Some n, None | None, Some n -> compact_count n ^ " tok"
 
 let tokens_sum_text = function
@@ -844,7 +852,7 @@ let materialize_row ~cols input = function
 (* One legend row: the two record glyphs a fleet row can start with, what
    a count with a plus means, and what the token figure adds up. It fits
    the 55 text cells the pane has beside its border. *)
-let legend = "~ unsettled · ! gone · 4+=seen so far · tok=in+out/turn"
+let legend = "~ unsettled · ! gone · 4+=seen so far · tok per turn"
 
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in

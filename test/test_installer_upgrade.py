@@ -31,14 +31,29 @@ class UpgradeConfigTest(unittest.TestCase):
             skill.write_text('operator skill\n')
             binary = base / 'masc'
             binary.write_text('''#!/usr/bin/env bash
+# Stands in for `masc init`, reading its flags the way the binary does:
+# --base-path <dir>, --force, and --skills-only (an upgrade seeds Skills
+# alone and leaves the config tree as it is).
 set -eu
-cfg="$3/.masc/config"
-for name in runtime.toml agent-core-models-overlay.toml; do
-  if [ ! -e "$cfg/$name" ] || [ "${4:-}" = --force ]; then
-    echo seeded > "$cfg/$name"
-  fi
+base=""; force=0; skills_only=0
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base-path) base="$2"; shift 2 ;;
+    --force) force=1; shift ;;
+    --skills-only) skills_only=1; shift ;;
+    *) echo "unexpected init argument: $1" >&2; exit 2 ;;
+  esac
 done
-skill_root="$3/.masc/skills"
+cfg="$base/.masc/config"
+if [ "$skills_only" -eq 0 ]; then
+  for name in runtime.toml agent-core-models-overlay.toml; do
+    if [ ! -e "$cfg/$name" ] || [ "$force" -eq 1 ]; then
+      echo seeded > "$cfg/$name"
+    fi
+  done
+fi
+skill_root="$base/.masc/skills"
 if [ ! -e "$skill_root/browser-lanes" ]; then
   mkdir -p "$skill_root/browser-lanes"
   echo builtin > "$skill_root/browser-lanes/SKILL.md"

@@ -22,6 +22,7 @@ let frame () =
   ; msx_mode = "screen2"
   ; msx_cartridge = Some "test.rom"
   ; msx_disk = None
+  ; msx_players = []
   }
 ;;
 

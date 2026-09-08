@@ -3158,6 +3158,7 @@ type msx_frame = {
   msx_mode : string;
   msx_cartridge : string option;
   msx_disk : string option;
+  msx_players : string list;  (* who pressed within the server's window, newest first *)
 }
 
 type state = {

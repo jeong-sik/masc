@@ -5251,6 +5251,11 @@
 
 (include stanzas/test_keeper_periodic_wake.inc)
 
+(test
+ (name test_standalone_skill_tools)
+ (modules test_standalone_skill_tools)
+ (libraries masc_test_deps masc.skill_reference masc.skill_snapshot
+  masc.skill_snapshot_service))
 (rule
  (alias runtest-test_tui_tools_poll_continuity)
  (deps test_tui_tools_poll_continuity.py test_tui_keyboard_input.py)

@@ -2561,6 +2561,8 @@ let internal_descriptors : t list =
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false
   ; masc_misc_descriptor "msx_eject" "masc_msx_eject" ~readonly:false
+  ; masc_misc_descriptor "msx_save" "masc_msx_save" ~readonly:false
+  ; masc_misc_descriptor "msx_restore" "masc_msx_restore" ~readonly:false
   ; masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false

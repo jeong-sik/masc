@@ -3304,6 +3304,7 @@ type state = {
      game, so its keys never reach the emulator. [msx_carts] is the inventory
      the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
   mutable msx_menu_open: bool;
+  mutable msx_notice: string option;
   mutable msx_carts: string list;
   mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
@@ -4885,6 +4886,7 @@ let create_state
   msx_frame = None;
   msx_last_poll_ns = 0L;
   msx_menu_open = false;
+  msx_notice = None;
   msx_carts = [];
   msx_menu_index = 0;
   palette_open = false;

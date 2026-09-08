@@ -116,6 +116,8 @@ masc_messages	always_loaded	none
 masc_msx_eject	deferrable	none
 masc_msx_load	deferrable	none
 masc_msx_press	deferrable	none
+masc_msx_restore	deferrable	none
+masc_msx_save	deferrable	none
 masc_msx_screen	deferrable	none
 masc_msx_step	deferrable	none
 masc_operator_action	always_loaded	none

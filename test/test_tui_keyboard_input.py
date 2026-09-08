@@ -14130,6 +14130,57 @@ def msx_spectator_interaction(
     os.write(master_fd, b"q")
 
 
+def msx_size_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """The size keys step how much of the screen the picture takes.
+
+    The footer carries the current size, so each key press is verified by the
+    number that lands after it -- the fraction steps in eighths, so the marks
+    are 100, 87, 75.
+    """
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b":go msx\r")
+    wait_for_output(process, master_fd, output, b"watch split.rom", start=start,
+                    timeout=5.0)
+    watched_from = len(output)
+    os.write(master_fd, b"\r")
+    wait_for_output(process, master_fd, output, b"size 100%", start=watched_from,
+                    timeout=5.0)
+
+    down_from = len(output)
+    os.write(master_fd, b"-")
+    wait_for_output(process, master_fd, output, b"size 87%", start=down_from,
+                    timeout=5.0)
+
+    down_again = len(output)
+    os.write(master_fd, b"-")
+    wait_for_output(process, master_fd, output, b"size 75%", start=down_again,
+                    timeout=5.0)
+
+    up_from = len(output)
+    os.write(master_fd, b"+")
+    wait_for_output(process, master_fd, output, b"size 87%", start=up_from,
+                    timeout=5.0)
+
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    os.write(master_fd, b"q")
+
+
+def run_msx_size_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="the size keys step the spectator's picture",
+        interact=msx_size_interaction,
+        http_fixtures={"/api/v1/msx/frame": msx_loaded_frame_fixture()},
+    )
+
+
 def run_msx_spectator_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -14406,6 +14457,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "msx-spectator":
         run_msx_spectator_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX spectator regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-size":
+        run_msx_size_regression(os.path.abspath(sys.argv[1]))
+        print("tui MSX size regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
         run_changes_newline_regression(os.path.abspath(sys.argv[1]))

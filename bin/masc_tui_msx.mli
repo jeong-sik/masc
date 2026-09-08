@@ -19,6 +19,11 @@ val render : write:(string -> unit) -> Masc_tui_types.msx_frame option -> unit
 (** Draw the frame as a truecolor mosaic, or a "no machine" line when it is
     [None] or too short. Writes the whole terminal. *)
 
+val adjust_size : float -> unit
+(** Step the picture's share of this terminal's screen by an eighth, clamped
+    between a quarter and full. A local view setting -- the machine's frame
+    is the server's and is never resized. *)
+
 val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 (** One key while open. [esc] closes the screen and returns [false] (the caller
     then owes the normal frame a full repaint). Every other key repaints the

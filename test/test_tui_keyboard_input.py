@@ -7026,8 +7026,11 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
+            # The skill row names an outcome now, not a chain of receipts.
+            # "DELIVERED · USED" was the evidence path; the label says what
+            # came of it, and the mark above already carries the state.
             re.compile(
-                rb"DELIVERED[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?USED"
+                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
@@ -9079,10 +9082,6 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
-                "payload_availability": {
-                    "input": {"state": "available"},
-                    "output": {"state": "available"},
-                },
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -9156,10 +9155,6 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
-                "payload_availability": {
-                    "input": {"state": "available"},
-                    "output": {"state": "available"},
-                },
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},

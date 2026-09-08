@@ -1231,18 +1231,25 @@ let test_json_terminal_and_id_boundaries () =
   (match Event.node_update_to_yojson (Event.Tool_input_snapshot invalid_tool_input) with
    | Error _ -> ()
    | Ok _ -> fail "non-finite JSON passed the public node update encoder");
-  let non_lossless_tool_result =
+  (* A tool result whose content is a JSON body is durable as it stands: the
+     content string is what the wire and the checkpoint carry, and the [json]
+     field beside it is a parse of that string which is never serialized.
+     This used to be refused because the record comparison saw the parse
+     disappear on decode; what the encoder still has to refuse is a value
+     that is not canonical, which the two cases above cover. *)
+  let tool_result_with_a_json_body =
     Llm_provider.Types.ToolResult
-      { tool_use_id = "provider-non-lossless"
+      { tool_use_id = "provider-json-body"
       ; content = "{\"value\":1}"
       ; outcome = Llm_provider.Types.Tool_succeeded
       ; json = None
       ; content_blocks = None
       }
   in
-  (match Event.node_update_to_yojson (Event.Tool_result non_lossless_tool_result) with
-   | Error _ -> ()
-   | Ok _ -> fail "a non-lossless canonical tool result was silently normalized");
+  (match Event.node_update_to_yojson (Event.Tool_result tool_result_with_a_json_body) with
+   | Ok _ -> ()
+   | Error detail ->
+     failf "a tool result carrying a JSON body was refused: %s" detail);
   let output =
     require_opened_node
       (Journal.open_node

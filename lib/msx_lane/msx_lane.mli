@@ -121,6 +121,10 @@ val frame : unit -> frame option
 (** The current native-resolution frame, or [None] when no machine is loaded.
     A spectator renders this; the pixels are the client's to downsample. *)
 
+val capture : unit -> (observation * frame, error) result
+(** Copy observation and pixels under the same machine lock. Does not advance
+    the machine. Consumers encode/persist the immutable copy outside the lock. *)
+
 val save : path:string -> (observation, error) result
 (** Atomically replace a named checkpoint with the complete machine and ledger.
     Does not advance or eject the machine. *)

@@ -2027,10 +2027,10 @@ let classify_before_judge (request : request) =
          ~input:request.input)
 ;;
 
-(* The box is asked after every cheaper authority has declined. Observe
-   failures retain the judge. Guest_local results have already executed on
-   the keeper's tree, even when they failed: returning their exact result
-   avoids replaying an arbitrary script's completed prefix. *)
+(* The box is asked after every cheaper authority has declined. A completed
+   payload remains its exact restricted result, including nonzero exits.
+   Only setup/refusal or unavailable-box evidence retains the Judge; payload
+   failure alone never requests effect permission or licenses replay. *)
 let decide_after_observation request ~observe =
   match observe with
   | None -> defer request Judge_requested

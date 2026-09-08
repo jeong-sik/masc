@@ -48,18 +48,12 @@ done
 
 mkdir -p "$(dirname "$OUTFILE")"
 
-# The report is the only thing that belongs beside the binaries. Everything
-# below is scratch the run produces on the way there -- a server log, four
-# captured HTTP exchanges, the dev token the probe minted -- and it used to be
-# written next to $OUTFILE. release.yml uploads dist/* wholesale, so all of it
-# became public release assets: v0.33.0 carried 21 of them and v0.34.0 carried
-# 28, including dashboard-dev-token.json with a 64-character admin token in
-# plain text. Scratch goes in the temp directory that already exists for it.
+# Publish only the report. Keep probe responses, logs and credentials in temporary
+# storage so they cannot become distribution assets.
 
 tmp="$(mktemp -d -t masc-release-evidence.XXXXXX)"
 # Everything the run writes except the report itself, kept off $OUTFILE's
-# directory so a new capture cannot land beside the binaries by default --
-# which is how these became release assets in the first place.
+# directory so a new capture cannot land beside the binaries by default.
 scratch_dir="$tmp/scratch"
 mkdir -p "$scratch_dir"
 base_path="$tmp/base"
@@ -490,23 +484,17 @@ md = f"""# Release Evidence Bundle
 - Source SHA: `{lifecycle.get("source_sha", "<missing>")}`
 - Correlation bundle: `{lifecycle.get("bundle_id", "<missing>")}`
 - Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
-- Human-readable matrix: `{pathlib.Path(lifecycle_bundle_md).resolve().relative_to(pathlib.Path(outfile).resolve().parent)}`
 
-## Raw Captures
+### Verified lifecycle matrix
 
-- `install-version.stdout`
-- `install-version.stderr`
-- `health.json`
-- `initialize.headers`
-- `initialize.json`
-- `tools-list.json`
-- `masc-status.json`
-- `dashboard-briefing.json`
-- `project-snapshot.json`
-- `server.log`
-- `keeper-full-lifecycle/bundle.json`
-- `keeper-full-lifecycle/bundle.md`
-- `keeper-full-lifecycle/v01-*.log` through `v15-*.log`
+{pathlib.Path(lifecycle_bundle_md).read_text(encoding="utf-8")}
+
+## Capture Retention
+
+Raw probe responses and logs are kept in temporary storage; cleanup is attempted
+when this command exits.
+The verified lifecycle matrix is embedded above; no temporary capture files are
+published with this report.
 
 ## Re-run
 

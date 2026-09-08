@@ -620,34 +620,6 @@ let test_the_image_inspect_argv_and_shape_agree () =
     (shape_label Backend.Nerdctl_kata)
 ;;
 
-(* Neither of the other two can be handed Apple's volume grammar, and a
-   create over a volume that already holds a keeper's tree is what the
-   existence check exists to prevent. Only the refusing arms are exercised
-   here: Apple's runs a process. *)
-let test_the_work_volume_refuses_where_its_grammar_is_unknown () =
-  List.iter
-    (fun backend ->
-      match
-        Microvm.ensure_work_volume_for
-          backend
-          ~volume_name:"masc-keeper-work-probe"
-          ~size:"4g"
-          ~timeout_sec:1.0
-      with
-      | Error detail ->
-        check
-          Alcotest.bool
-          (Backend.to_string backend ^ " names the code")
-          true
-          (String.length detail > 0
-           && String.starts_with ~prefix:"microvm_work_volume_unsupported:" detail)
-      | Ok _ ->
-        Alcotest.failf
-          "%s provisioned a work volume with a grammar this build has not read"
-          (Backend.to_string backend))
-    [ Backend.Microsandbox; Backend.Nerdctl_kata ]
-;;
-
 (* ── the parse ──────────────────────────────────────────────────────── *)
 
 let running = function
@@ -849,8 +821,6 @@ let () =
     ; ( "reaping"
       , [ Alcotest.test_case "only a labelled listing is offered" `Quick
             test_only_a_labelled_listing_is_offered
-        ; Alcotest.test_case "the work volume refuses an unknown grammar" `Quick
-            test_the_work_volume_refuses_where_its_grammar_is_unknown
         ] )
     ; ( "state"
       , [ Alcotest.test_case "each parser reads its own runtime's shape" `Quick

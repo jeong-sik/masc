@@ -1225,10 +1225,9 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
-  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
-    CONFIG_PREEXISTING=1
-    log "config already present at $CONFIG_DIR, skipping seed"
-  elif [ "$DRY_RUN" -eq 1 ]; then
+  # Init preserves existing config and complete operator Skill packages, while
+  # adding newly shipped assets on upgrade as well as on the first install.
+  if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else
     # The binary carries the whole config/ tree it was built from, so the seed

@@ -1962,6 +1962,7 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         Eio_context.set_clock (Eio.Stdenv.clock env);
         (* The same deadline the TUI's own create already runs under; this
            command does not invent a second one. *)
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
         match
           Masc_http_client.post_sync
             ~clock:(Eio.Stdenv.clock env)
@@ -1973,7 +1974,7 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         with
         | Error message -> Masc_cli_keeper_create.Unreachable message
         | Ok (status, response_body) ->
-          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body))
+          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body)))
   in
   let text, code = Masc_cli_keeper_create.render outcome in
   if code = 0 then print_endline text else prerr_endline text;

@@ -853,8 +853,9 @@ let stop_and_delete_microvm_container ?timeout_sec ~backend container_name =
          (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
 ;;
 
-(** The work volume (RFC-0400): the keeper's working tree, on ext4, where a
-    host descriptor is never pinned by a guest touching a file. Created if
+(** The work volume (RFC-0400): Apple's working tree is on a guest ext4 disk;
+    Linux nerdctl uses a persistent runtime-managed directory, without Apple's
+    capacity or flat host-descriptor guarantee. Created if
     it is not there yet; refusing rather than booting without it follows
     [image_present] in the same lane -- a guest with no work volume has no
     tree, and the remote lane has nowhere to run. *)

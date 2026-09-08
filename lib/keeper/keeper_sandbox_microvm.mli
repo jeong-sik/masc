@@ -271,9 +271,11 @@ val logs_tail_argv_for :
 
 (** {2 The work volume and the shim (RFC-0400)}
 
-    The keeper's working tree lives on a per-keeper ext4 volume mounted at
-    {!work_volume_guest_root}; that path is the remote lane's [remote_root]
-    for the guest. A tree on the virtiofs share pins one host file
+    The keeper's working tree lives on a per-keeper persistent volume mounted
+    at {!work_volume_guest_root}; that path is the remote lane's [remote_root].
+    Apple uses an ext4 disk; nerdctl uses a managed host directory with no
+    enforced capacity. The following FD measurements apply only to Apple.
+    A tree on Apple's virtiofs share pins one host file
     descriptor -- one host vnode -- per inode the guest touches against a
     [kern.maxvnodes] of 263,168; measured writing 20,000 files on container
     1.3.1: ext4 volume 26 -> 26 host descriptors, virtiofs 26 -> 20,027.
@@ -353,17 +355,22 @@ val classify_volume_probe
   -> listing:(Unix.process_status * string * string) option
   -> volume_probe_outcome
 
+(** Apple provisions a capacity-limited guest disk. Nerdctl provisions a
+    persistent managed directory and logs that [size] is not enforced.
+    [`Ensured] means idempotent create followed by strict inspect confirmation;
+    it does not claim to distinguish a new volume from an existing one. *)
 val ensure_work_volume_for
   :  Keeper_microvm_backend.t
   -> volume_name:string
   -> size:string
   -> timeout_sec:float
-  -> ([ `Created | `Already_present ], string) result
+  -> ([ `Created | `Already_present | `Ensured ], string) result
 
 val keeper_work_root_mkdir_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> keeper_name:string -> string list
 (** Create {!keeper_work_root} inside the guest, in one exec. The host
-    cannot: the directory lives inside the volume's ext4 image. The volume
+    does not access the working tree directly. Apple uses an ext4 disk and
+    nerdctl a runtime-managed directory. The volume
     root is initially root-owned and the user namespace refuses a later
     chmod, so creation runs as root with an explicit writable mode that
     applies only to a new directory. Idempotent. *)

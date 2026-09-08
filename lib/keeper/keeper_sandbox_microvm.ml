@@ -56,7 +56,8 @@ let command_argv_for backend = [ Backend.cli_name backend ]
 let unsupported_docker_flags = [ "--security-opt"; "--pids-limit" ]
 
 (** Guest mount point of the per-keeper work volume. The keeper's working
-    tree lives here, on ext4, and this path is the remote lane's
+    tree lives here (an ext4 disk on Apple, a managed directory on nerdctl),
+    and this path is the remote lane's
     [remote_root] for the guest: the same role [\[exec.ssh.endpoints\]
     .remote_root] plays for an OpenSSH endpoint.
 
@@ -1244,32 +1245,72 @@ let ensure_msb_work_volume ~volume_name ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
-(** The work volume, for whichever runtime this keeper declared.
+(* Nerdctl's volume store locks create and returns an existing named volume
+   unchanged. Listing is unsuitable as proof of absence: upstream skips
+   unreadable volume metadata while returning a successful list. Create then
+   inspect avoids that ambiguity and never removes or replaces existing data.
+   See containerd/nerdctl pkg/mountutil/volumestore/volumestore.go. *)
+let ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec =
+  let cli = command_argv_for Backend.Nerdctl_kata in
+  let run suffix = Process_eio.run_argv_with_status_split ~timeout_sec (cli @ suffix) in
+  let failure stage (status, stdout, stderr) =
+    Error
+      (Printf.sprintf "microvm_work_volume_%s_failed: %s (%s; %s)"
+         stage volume_name
+         (match status with
+          | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+          | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+         (output_for_log ~stdout ~stderr))
+  in
+  match run [ "volume"; "create"; volume_name ] with
+  | Unix.WEXITED 0, _, _ ->
+    (match run [ "volume"; "inspect"; volume_name ] with
+     | Unix.WEXITED 0, stdout, _ ->
+       let confirmed =
+         match Yojson.Safe.from_string stdout with
+         | exception Yojson.Json_error _ -> false
+         | `List [ `Assoc fields ] ->
+           let values key =
+             List.filter_map
+               (fun (name, value) -> if String.equal name key then Some value else None)
+               fields
+           in
+           (match values "Name", values "Mountpoint" with
+            | [ `String name ], [ `String mountpoint ] ->
+              String.equal name volume_name
+              && not (String.equal mountpoint "")
+              && not (Filename.is_relative mountpoint)
+            | _ -> false)
+         | _ -> false
+       in
+       if confirmed then (
+         Log.Keeper.warn
+           "microvm work volume=%s backend=nerdctl_kata storage=managed_directory requested_size=%s capacity_enforced=false; host filesystem capacity applies"
+           volume_name size;
+         Ok `Ensured)
+       else
+         Error
+           (Printf.sprintf
+              "microvm_work_volume_probe_failed: nerdctl inspect did not confirm exactly one named volume with an absolute mountpoint: %s"
+              volume_name)
+     | outcome -> failure "probe" outcome)
+  | outcome -> failure "create" outcome
+;;
 
-    Apple and msb are established; nerdctl still refuses. Apple takes a sized
-    disk volume; msb takes a directory-backed named volume with no size (see
-    {!msb_volume_create_argv} for why the kind is forced), so RFC-0400's size
-    ceiling reaches Apple and is dropped for msb, the way it is for nerdctl.
-    Existence: Apple probes inspect-then-listing; msb settles from the listing
-    alone because its [volume inspect] has no machine form.
-
-    For [nerdctl] there is nothing to establish -- its [volume create]
-    documents [--label] and no size flag (nerdctl command reference), so the
-    sized per-keeper volume RFC-0400 asks for has no nerdctl spelling. *)
+(** Apple takes a sized guest disk; msb and nerdctl use persistent managed
+    directories. The latter do not claim Apple's capacity or flat host-FD
+    behavior. All backends keep the working tree off the host playground. *)
 let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   match (backend : Backend.t) with
   | Backend.Apple_container -> ensure_apple_work_volume ~volume_name ~size ~timeout_sec
   | Backend.Microsandbox -> ensure_msb_work_volume ~volume_name ~timeout_sec
-  | Backend.Nerdctl_kata ->
-    Error
-      "microvm_work_volume_unsupported: nerdctl volume create documents \
-       --label only and no size flag, so the sized per-keeper work volume \
-       RFC-0400 puts the keeper's tree on has no nerdctl spelling."
+  | Backend.Nerdctl_kata -> ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec
 ;;
 
 (** The keeper's root on the work volume, created inside the guest.
 
-    The host cannot create it: it lives inside the volume's ext4 image. The
+    The host does not access it directly; all backends provision through guest exec. The
     volume root is initially owned by root, and Apple Container's user
     namespace refuses even guest root changing a mode afterwards, so the
     directory is made as root with the mode it will keep. [-m] applies only

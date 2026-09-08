@@ -444,6 +444,18 @@ let stage_release_mirror base_path =
     (Unix.realpath
        (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
     gate;
+  (* The installer places but does not execute the guest shim. As with the
+     companion fixtures, reuse the test binary bytes and retain the production
+     asset name so missing-shim failures cannot hide wizard behavior. *)
+  let shim_arch =
+    match suffix with
+    | "linux-x64" | "macos-x64" -> "amd64"
+    | "linux-arm64" | "macos-arm64" -> "arm64"
+    | other -> failf "unsupported guest shim fixture platform: %s" other
+  in
+  let shim = Filename.concat dir ("masc-exec-shim-linux-" ^ shim_arch) in
+  unlink_if_exists shim;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) shim;
   let bundle_helper =
     Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
   in
@@ -999,10 +1011,10 @@ let test_wizard_offers_subscription_runtime () =
         "subscription default runtime is set"
         output
         {|[dry-run] would set [runtime].default = "claude_code.claude-sonnet-5"|};
-      assert_contains
-        "subscription needs no API key"
+      assert_not_contains
+        "subscription does not ask to export an API credential"
         output
-        "does not require an API key";
+        "is not set; export it in the shell that starts masc";
       assert_not_contains
         "subscription record is not rejected as unknown kind"
         output

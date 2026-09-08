@@ -6,7 +6,25 @@ image="${1:-masc-sandbox:general}"
 [ "$(uname -s)" = Linux ] || { echo 'Linux host required' >&2; exit 1; }
 command -v nerdctl >/dev/null
 command -v python3 >/dev/null
-nerdctl image inspect "$image" >/dev/null
+# nerdctl 2.3.5 dockercompat inspect normalizes the requested empty tag to
+# "latest" but leaves a digest-only candidate tag empty, rejecting an image
+# just pulled by digest. Native inspect returns the containerd image record.
+# https://github.com/containerd/nerdctl/blob/v2.3.5/pkg/cmd/image/inspect.go#L109-L134
+# Native mode can return an empty list successfully, so confirm the record and
+# the requested immutable digest explicitly instead of trusting exit status.
+nerdctl image inspect --mode native "$image" | python3 -c '
+import json, sys
+requested = sys.argv[1]
+rows = json.load(sys.stdin)
+assert isinstance(rows, list) and rows, "native image inspection returned no image"
+images = [row["Image"] for row in rows]
+if "@" in requested:
+    name, digest = requested.rsplit("@", 1)
+    matches = [image for image in images if image["Name"] == requested and image["Target"]["digest"] == digest]
+    assert len(matches) == 1, "native image name/digest differs from the requested pin"
+    images = matches
+print(json.dumps([{"name": image["Name"], "target": image["Target"]["digest"]} for image in images]))
+' "$image"
 proof_name="masc-volume-proof-$(date +%s)-$$"
 volume="$proof_name-work"
 cleanup() {

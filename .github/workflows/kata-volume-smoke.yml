@@ -111,6 +111,7 @@ jobs:
         run: |
           set -o pipefail
           sudo /usr/local/bin/nerdctl pull "$PROOF_IMAGE" 2>&1 | tee kata-evidence/image-pull.log
+          sudo /usr/local/bin/nerdctl images --format json | tee kata-evidence/image-inventory.jsonl
           sudo env PATH=/usr/local/bin:/usr/bin:/bin \
             bash scripts/smoke-nerdctl-kata-volume.sh "$PROOF_IMAGE" \
             2>&1 | tee kata-evidence/volume-smoke.log

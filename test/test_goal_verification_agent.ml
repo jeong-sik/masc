@@ -68,6 +68,7 @@ let ensure_producer_playground (config : Workspace.config) producer =
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect

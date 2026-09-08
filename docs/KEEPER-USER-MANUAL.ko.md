@@ -229,12 +229,11 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | bearer 토큰과 대시보드 쓰기 권한 |
 | [`README.ko.md`](../README.ko.md) | 설치, MCP 클라이언트 설정, 대시보드 |
 
-`activation_mode` is the single Keeper activation setting. `manual` does not
-restore an owner automatically; explicit requested work may activate it.
-`on_demand` restores the owner at startup but does not invent periodic work.
-`autonomous` also allows periodic self-directed turns. Direct messages,
-approval continuations, and due schedules remain requested work in every mode;
-operator pause and shutdown still prevent execution. The global
-`autonomous.enabled` setting controls automatic startup and spontaneous work.
-The live periodic interval is `keeper.keepalive_interval_sec`; wake hints do
-not reset its pending deadline or create work by themselves.
+`activation_mode`는 Keeper 실행 방식의 단일 설정입니다. `manual`은 owner를
+자동 복구하지 않지만 명시적 요청이 들어오면 실행할 수 있습니다. `on_demand`는
+시작 시 owner를 복구하고 요청을 기다립니다. `autonomous`는 여기에 주기 자율
+턴을 허용합니다. 직접 메시지, 승인 후속 작업, 실행 시각이 된 예약은 모든 모드에서
+요청 작업으로 처리하며, 운영자 일시정지와 shutdown 상태가 실행보다 우선합니다.
+전역 `autonomous.enabled`는 자동 시작과 자발적 작업을 제어합니다.
+실제 주기 설정은 `keeper.keepalive_interval_sec`입니다. 기상 힌트만으로 작업을
+생성하거나 다음 주기 실행 시각을 다시 미루지 않습니다.

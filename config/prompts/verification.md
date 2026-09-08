@@ -59,7 +59,7 @@ URL, 경로, commit, board 기록, 명령 결과로 다루면 안 됩니다.
 verdict를 응답 텍스트로 돌려주지 않습니다. tool 호출이 없으면 잘못된
 verdict이고, Task는 종결되지 않은 채 남습니다.
 
-### evidence_posture.note_only (vars: none)
+### evidence_posture.note_only
 
 <evidence_posture>
 이 제출의 typed 증거 스냅샷에는 검사 가능한 artifact가 0개 있습니다. 항목이

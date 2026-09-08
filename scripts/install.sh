@@ -864,6 +864,10 @@ fi
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
 
 # --- macOS dependency bootstrap ---
+installer_python_ready() {
+  "$1" -c 'import json, tarfile, sys; sys.exit(0 if sys.version_info >= (3, 8) else "Python 3.8 or newer is required")'
+}
+
 macos_formula_ready() {
   local brew_prefix="$1" formula="$2"
   case "$formula" in
@@ -872,9 +876,27 @@ macos_formula_ready() {
     gmp) [ -r "$brew_prefix/opt/gmp/lib/libgmp.10.dylib" ] ;;
     zstd) [ -r "$brew_prefix/opt/zstd/lib/libzstd.1.dylib" ] ;;
     python) command -v python3 >/dev/null 2>&1 &&
-            python3 -c 'import json, tarfile, tomllib' >/dev/null 2>&1 ;;
+            installer_python_ready python3 >/dev/null 2>&1 ;;
     *) return 1 ;;
   esac
+}
+
+activate_macos_python() {
+  local brew_prefix="$1" python_prefix bin_dir
+  # Installing a new executable does not invalidate Bash's cached command path.
+  hash -r
+  macos_formula_ready "$brew_prefix" python && return 0
+  python_prefix=$(brew --prefix python) || return 1
+  # Formula-local commands also work when Homebrew's global links are absent.
+  for bin_dir in "$python_prefix/bin" "$python_prefix/libexec/bin"; do
+    if [ -x "$bin_dir/python3" ] && installer_python_ready "$bin_dir/python3" >/dev/null 2>&1; then
+      PATH="$bin_dir:$PATH"
+      export PATH
+      hash -r
+      return 0
+    fi
+  done
+  return 1
 }
 
 bootstrap_macos_homebrew() (
@@ -928,6 +950,7 @@ ensure_macos_dependencies() {
   # brew update or formula download. Do not alter shell startup files.
   PATH="$brew_prefix/bin:$PATH"
   export PATH
+  activate_macos_python "$brew_prefix" || true
   local missing=()
   for formula in openssl@3 gmp zstd python; do
     if ! macos_formula_ready "$brew_prefix" "$formula"; then
@@ -944,6 +967,11 @@ ensure_macos_dependencies() {
   fi
   log "installing missing macOS dependencies: ${missing[*]}"
   brew install "${missing[@]}" || die "Homebrew dependency installation failed; see its diagnostic above"
+  if ! activate_macos_python "$brew_prefix"; then
+    warn "Python startup failed at $(command -v python3 || printf 'python3 not found'); diagnostic follows"
+    installer_python_ready python3 || true
+    die "installed Python cannot run the installer; see its startup error above"
+  fi
   for formula in "${missing[@]}"; do
     macos_formula_ready "$brew_prefix" "$formula" ||
       die "dependency $formula is still unavailable at $brew_prefix; inspect Homebrew output and repair it with brew reinstall $formula"

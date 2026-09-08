@@ -1,0 +1,28 @@
+{
+  "schema": "masc.first_keeper_turn.v1",
+  "result": "PASS",
+  "binary_sha256": "5fd400e0b9f7c015b8ff55a43d4f91ca3907c40568b4655e7037f425ce3f0a0c",
+  "binary_commit": "215517f229fd74c5300ee7fc4aae91f29da1db4c",
+  "keeper": "first-turn-1ed0f4faae00",
+  "model": "scripted loopback fixture",
+  "model_requests": 2,
+  "image": "masc-kata-installed-proof:34194081312",
+  "container_id": "268d6c691e530f4e85f1eb8a063b3b11e5bc54dd4c640e9ebffb2a76169ee5c1",
+  "backend": "nerdctl_kata",
+  "checkpoint_relative_path": ".masc/traces/trace-1788848457823-00000/trace-1788848457823-00000.json",
+  "claims": [
+    "actual nerdctl_kata Execute",
+    "ToolResult returned to model",
+    "shim receipt and volume bytes survive guest recreation",
+    "canonical checkpoint contains final answer"
+  ],
+  "not_measured": [
+    "model quality",
+    "long-running Keeper continuity"
+  ],
+  "proof_artifacts": {
+    "raw_guest": "tool-proof.json",
+    "model_projected": "tool-proof-model-projected.json",
+    "raw_guest_after_recreation": "volume-recreated-proof.json"
+  }
+}

@@ -228,6 +228,9 @@ masc keeper-create --base-path "$HOME/masc-workspace" \
 `--edit`와 함께 지정하면 다른 선언 flag와 동일하게 충돌로 거부합니다.
 
 `--runtime`만 바꿔도 hypervisor나 daemon을 설치하지는 않습니다.
+`--runtime nerdctl_kata`로 직접 빌드하려면
+[nerdctl의 BuildKit 설정](https://github.com/containerd/nerdctl/blob/main/docs/build.md)도
+필요합니다. containerd와 Kata만 실행 중인 상태로는 이미지 빌드 준비가 끝난 것이 아닙니다.
 Docker store에 있는 이미지는 Apple Container/nerdctl store에 자동 복사되지 않습니다.
 Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 inspect로
 이름과 mountpoint를 확인합니다. guest를 다시 만들어도 같은 볼륨을 연결합니다.
@@ -266,6 +269,10 @@ Keeper runtime 시스템 프롬프트가 아닙니다.
 기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
 `browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
 지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
+0.34.0의 Gecko scene 기능은 새 native host와 브라우저 확장 0.3.0을 함께 사용합니다.
+기존 브라우저 확장은 별도로 갱신해야 합니다. 기존 `browser-lanes` 패키지도
+사용자 변경 보존 정책에 따라 덮어쓰지 않으므로, scene 안내가 필요하면 변경 내용을
+검토해 해당 패키지에 반영하세요.
 `--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
 
 | Keeper | 개별 지침의 역할 |

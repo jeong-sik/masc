@@ -4,7 +4,9 @@ category: evaluation
 operator_surface: fragment
 template_variables: [examples]
 ---
-Here are examples of correct verdicts for calibration:
+These historical examples illustrate verdicts, not evidence for the current submission.
+Apply the current task contract to evidence available in this run; do not infer a
+verdict from similarity of wording or reuse an example's claimed observations.
 
 {{examples}}
 

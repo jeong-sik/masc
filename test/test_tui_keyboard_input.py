@@ -7394,6 +7394,119 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         )
 
 
+def run_tools_request_identity_regression(executable: str) -> None:
+    fixtures = skills_usage_clarity_http_fixtures()
+
+    def inventory(keeper: str, tool: str) -> HttpResponse:
+        return 200, {
+            "tool_inventory": {"count": 0, "tools": []},
+            "effective_keeper_surface": {
+                "status": "available", "keeper_name": keeper,
+                "runtime_id": "fixture.tools", "official_client_kind": "agent_core",
+                "tool_delivery": {"status": "delivered"}, "native_posture": None,
+                "skill_snapshot_revision": "c" * 64,
+                "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
+                "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+                "count": 1, "tools": [{"name": tool, "origin": {"kind": "descriptor"}}],
+                "tool_surface_sha256": None,
+            },
+            "skill_activations": {"status": "no_session", "keeper_name": keeper},
+        }
+
+    alpha_late = GatedHttpResponse(inventory("alpha", "keeper_alpha_late"), hold_seconds=30.0)
+    beta_refresh_error = GatedHttpResponse(
+        (503, {"error": "obsolete beta refresh failure"}),
+        subsequent_response=inventory("beta", "keeper_beta_newest"), hold_seconds=30.0,
+    )
+    fixtures["/api/v1/dashboard/tools?keeper=alpha"] = alpha_late
+    fixtures["/api/v1/dashboard/tools?keeper=beta"] = inventory("beta", "keeper_beta_current")
+    async_calls = 0
+    async_lock = threading.Lock()
+    settled = {n: threading.Event() for n in range(1, 5)}
+
+    def async_read() -> HttpResponse:
+        nonlocal async_calls
+        # launch_tools_load enqueues Tools_loaded before this sequential GET.
+        # This is a response-settlement barrier, not an arbitrary sleep.
+        with async_lock:
+            async_calls += 1
+            event = settled.get(async_calls)
+        if event is not None:
+            event.set()
+        return 200, {
+            "schema": "masc.async-request-observation/v1", "status": "ready",
+            "summary": {"active": 0, "runtime_owned": 0, "ownership_unknown": 0, "record_errors": 0},
+            "requests": [], "record_errors": [], "startup_recovery": None,
+        }
+
+    fixtures["/api/v1/async-requests"] = async_read
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        def await_event(event: threading.Event, description: str) -> None:
+            if not wait_for_fixture_event(process, master_fd, output, event, timeout=10.0):
+                raise AssertionError(description)
+
+        def assert_current(expected: bytes, *, columns: int) -> None:
+            # The main loop handles resize, drains async_messages, then calls
+            # Render_schedule.take/present_frame. Require that completed full
+            # redraw, not merely an earlier frame containing the same label.
+            read_available(master_fd, output)
+            before_resize = len(output)
+            resize_and_wait(process, master_fd, output, rows=30, columns=columns,
+                            needle=expected, controls=(FULL_REDRAW,))
+            redraw = output.find(FULL_REDRAW, before_resize)
+            wait_for_output(process, master_fd, output, FRAME_END, start=redraw, timeout=3.0)
+            screen = screen_text(bytes(output))
+            for stale in (b"keeper_alpha_late", b"obsolete beta refresh failure"):
+                if stale in screen:
+                    raise AssertionError(f"stale Tools response replaced the current view: {screen!r}")
+
+        try:
+            resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Overview")
+            tab_until(process, master_fd, output, b"MASC Config")
+            os.write(master_fd, b"t")
+            await_event(alpha_late.requested, "alpha Tools request did not start")
+            send_and_wait(process, master_fd, output, b"]", b"keeper_beta_current")
+            await_event(settled[1], "beta Tools response did not settle")
+            with async_lock:
+                if async_calls != 1:
+                    raise AssertionError("held alpha request settled before its fixture response")
+            alpha_late.release.set()
+            await_event(settled[2], "late alpha response did not settle")
+            assert_current(b"keeper_beta_current", columns=119)
+
+            fixtures["/api/v1/dashboard/tools?keeper=beta"] = beta_refresh_error
+            os.write(master_fd, b"r")
+            await_event(beta_refresh_error.requested, "older beta refresh did not start")
+            send_and_wait(process, master_fd, output, b"r", b"keeper_beta_newest")
+            await_event(settled[3], "newer beta refresh did not settle")
+            with async_lock:
+                if async_calls != 3:
+                    raise AssertionError("held beta error settled before its fixture response")
+            beta_refresh_error.release.set()
+            await_event(settled[4], "obsolete same-keeper error did not settle")
+            assert_current(b"keeper_beta_newest", columns=120)
+            captured = bytes(output)
+            end = captured.rfind(FRAME_END) + len(FRAME_END)
+            redraw = captured.rfind(FULL_REDRAW, 0, end)
+            start = captured.rfind(FRAME_START, 0, redraw)
+            if min(start, redraw) < 0:
+                raise AssertionError("Tools request identity evidence has no completed redraw")
+            print("TOOLS_REQUEST_IDENTITY_PTY_EVIDENCE " + json.dumps({
+                "fixture": "A slow / B fast / A late; older same-Keeper error after newer success",
+                "settled_tool_responses": async_calls, "rows": 30, "columns": 120,
+                "binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+                "encoding": "base64", "pty": base64.b64encode(captured[start:end]).decode(),
+            }), flush=True)
+            os.write(master_fd, b"q")
+        finally:
+            alpha_late.release.set()
+            beta_refresh_error.release.set()
+
+    run_terminal_scenario(executable, description="Tools responses retain requested Keeper and generation",
+                          interact=interact, http_fixtures=fixtures)
+
+
 def run_tools_purpose_regression(executable: str) -> None:
     fixtures = skills_usage_clarity_http_fixtures()
     # Alpha has an empty current ledger; the workspace aggregate retains
@@ -14741,6 +14854,10 @@ def main() -> None:
         run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
         print("tui Skill usage coverage regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "tools-request-identity":
+        run_tools_request_identity_regression(os.path.abspath(sys.argv[1]))
+        print("tui Tools request identity regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "tools-purpose":
         run_tools_purpose_regression(os.path.abspath(sys.argv[1]))
         print("tui Tools purpose regression: PASS")
@@ -14757,7 +14874,7 @@ def main() -> None:
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
             "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|runtime|resources|keepers-lanes|"
-            "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose]"
+            "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose|tools-request-identity]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

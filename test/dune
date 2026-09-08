@@ -1977,7 +1977,9 @@
 (test
  (name test_schedule_consumer_dispatch)
  (modules test_schedule_consumer_dispatch)
- (libraries masc_test_deps masc_schedule masc_server))
+ ; masc.config: the fixture declares each keeper's sandbox profile through
+ ; Keeper_sandbox_config.keeper_toml_path rather than rebuilding that path.
+ (libraries masc_test_deps masc_schedule masc_server masc.config))
 
 (test
  (name test_server_dashboard_http_schedule_actions)
@@ -5180,3 +5182,13 @@
  (deps (alias runtest-test_install_runtime_setup)))
 
 (include stanzas/test_keeper_approval_input_admission.inc)
+
+(rule
+ (alias runtest-test_tui_keyboard_input-tools-request-identity)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} tools-request-identity)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-tools-request-identity)))

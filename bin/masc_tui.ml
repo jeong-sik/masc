@@ -1834,9 +1834,9 @@ type async_msg =
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
-  | Skills_catalog_loaded of (Masc.Tui_decode.skills_catalog, string) result
-  | Tools_async_observation_loaded of (Tui_decode.async_request_observation, string) result
+  | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
+  | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
+  | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
@@ -2770,6 +2770,8 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
    the pane stays responsive and a slow server costs the list rather than the
    keypress that asked for it. *)
 let launch_tools_load state ~mailbox =
+  state.tools_request_generation <- state.tools_request_generation + 1;
+  let generation = state.tools_request_generation in
   let host = server_peer_host in
   let port = state.port in
   let keeper =
@@ -2781,13 +2783,13 @@ let launch_tools_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Tools_loaded result);
+    enqueue_async mailbox (Tools_loaded (generation, keeper, result));
     let async_observation =
       try Masc_tui_http.fetch_async_request_observation ~host ~port with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Tools_async_observation_loaded async_observation)
+    enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
   in
   (* The skills catalog (usage + flows) is a separate read and must not
      delay the tool list: a slow catalog costs its own section, not the
@@ -2798,7 +2800,7 @@ let launch_tools_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Skills_catalog_loaded result)
+    enqueue_async mailbox (Skills_catalog_loaded (generation, result))
   in
   (match Eio_context.get_switch_opt () with
    | Some sw ->
@@ -2807,13 +2809,13 @@ let launch_tools_load state ~mailbox =
            `Stop_daemon)
    | None ->
        enqueue_async mailbox
-         (Skills_catalog_loaded (Error "Eio switch is unavailable")));
+         (Skills_catalog_loaded (generation, Error "Eio switch is unavailable")));
   match Eio_context.get_switch_opt () with
   | Some sw ->
       Eio.Fiber.fork_daemon ~sw (fun () ->
           run ();
           `Stop_daemon)
-  | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
+  | None -> enqueue_async mailbox (Tools_loaded (generation, keeper, Error "Eio switch is unavailable"))
 
 let tools_skill_profiles state =
   match state.tools_inventory with
@@ -11950,20 +11952,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (Printf.sprintf "journal for %s not loaded: %s"
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail)))
-  | Tools_loaded result -> (
+  | Tools_loaded (generation, keeper_name, result) ->
+      let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
+      if generation = state.tools_request_generation
+         && Option.equal String.equal keeper_name selected_name then (
       match result with
       | Ok snapshot ->
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None;
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
-  | Skills_catalog_loaded result -> (
+  | Skills_catalog_loaded (generation, result) ->
+      if generation = state.tools_request_generation then (
       match result with
       | Ok catalog ->
           state.skills_catalog <- Some catalog;
           state.skills_catalog_error <- None
       | Error detail -> state.skills_catalog_error <- Some detail)
-  | Tools_async_observation_loaded result -> (
+  | Tools_async_observation_loaded (generation, result) ->
+      if generation = state.tools_request_generation then (
       match result with
       | Ok observation ->
           state.tools_async_observation <- Some observation;

@@ -159,8 +159,9 @@ def slow_poll(binary, binary_sha, source):
             watching_ticks.set()
             assert h.wait_for_fixture_event(process, master, output, two_ticks, timeout=5.0)
             assert slow.calls == 1, f"automatic polls replaced the pending {source} read: {slow.calls}"
+            start = len(output)
             slow.release.set()
-            h.wait_for_output(process, master, output, label(source, 2), timeout=5.0)
+            h.wait_for_output(process, master, output, label(source, 2), start=start, timeout=5.0)
             assert h.wait_for_fixture_event(process, master, output, resumed, timeout=5.0)
             capture(binary_sha, source, "slow poll publishes and polling resumes",
                     process, master, output)

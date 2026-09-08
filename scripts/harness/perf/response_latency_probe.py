@@ -22,15 +22,54 @@ def percentile(values, fraction):
     return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)]
 
 
+def pointer_parts(pointer):
+    if pointer == "":
+        return []
+    if not pointer.startswith("/"):
+        raise ValueError("JSON pointer must be empty or start with /")
+    parts = pointer[1:].split("/")
+    for part in parts:
+        for index, char in enumerate(part):
+            if char == "~" and (index + 1 == len(part) or part[index + 1] not in "01"):
+                raise ValueError("invalid JSON pointer escape")
+    return [part.replace("~1", "/").replace("~0", "~") for part in parts]
+
+
+def pointer_value(document, pointer):
+    for part in pointer_parts(pointer):
+        if isinstance(document, dict):
+            document = document[part]
+        elif isinstance(document, list) and part.isascii() and part.isdigit() and (part == "0" or not part.startswith("0")):
+            document = document[int(part)]
+        else:
+            raise KeyError(pointer)
+    return document
+
+
+def json_equal(left, right):
+    # JSON booleans are not numbers, unlike Python's True == 1.
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(json_equal(left[k], right[k]) for k in left)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(json_equal(a, b) for a, b in zip(left, right))
+    return left == right
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--path', action='append', help='Override sampled GET paths; repeat for multiple surfaces')
+    parser.add_argument('--require-json', action='append', default=[], metavar='POINTER=JSON',
+                        help='Required JSON value on sampled GET responses only; repeat for multiple conditions')
     parser.add_argument('--samples', type=int, default=30)
     parser.add_argument('--timeout', type=float, default=10)
     parser.add_argument('--target-ms', type=float, default=0.1)
     parser.add_argument('--interval', type=float, default=0,
                         help='seconds between sample rounds; recorded in evidence')
+    parser.add_argument('--accept-encoding', choices=('identity', 'gzip'), default='gzip')
     parser.add_argument('--token-env', default='MCP_TOKEN')
     args = parser.parse_args()
     url = urlsplit(args.base_url)
@@ -40,16 +79,31 @@ def main():
         parser.error('base-url must be an origin without path, query or fragment')
     if args.samples < 1 or args.timeout <= 0 or args.target_ms <= 0 or args.interval < 0:
         parser.error('samples, timeout and target-ms must be positive')
+    paths = args.path or ['/health', '/api/v1/dashboard/shell?light=true',
+                          '/api/v1/dashboard/execution', '/api/v1/dashboard/tools',
+                          '/api/v1/dashboard/telemetry/summary']
+    if any(not path.startswith('/') or path.startswith('//') for path in paths):
+        parser.error('sample paths must start with / and remain on the supplied origin')
+    requirements = []
+    try:
+        for condition in args.require_json:
+            pointer, separator, expected = condition.partition('=')
+            if not separator:
+                raise ValueError('require-json must use POINTER=JSON')
+            pointer_parts(pointer)
+            requirements.append((pointer, json.loads(expected)))
+    except ValueError as error:
+        parser.error(str(error))
     connection_type = (http.client.HTTPSConnection if url.scheme == 'https'
                        else http.client.HTTPConnection)
     connection = connection_type(url.hostname, url.port, timeout=args.timeout)
     token = os.environ.get(args.token_env)
-    headers = {'Accept-Encoding': 'gzip'}
+    headers = {'Accept-Encoding': args.accept_encoding}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     rows = []
 
-    def request(label, path, *, method='GET', payload=None, extra=None):
+    def request(label, path, *, method='GET', payload=None, extra=None, check_json=False):
         started = time.perf_counter_ns()
         row = {'label': label, 'path': path, 'method': method}
         try:
@@ -65,6 +119,7 @@ def main():
             row.update(status=response.status, wire_bytes=len(wire),
                        headers_ms=(headers_at - started) / 1e6,
                        total_ms=(finished - started) / 1e6,
+                       body_read_ms=(finished - headers_at) / 1e6,
                        content_encoding=response.getheader('Content-Encoding'),
                        server_timing=response.getheader('Server-Timing'))
             decoded = gzip.decompress(wire) if row['content_encoding'] == 'gzip' else wire
@@ -80,6 +135,9 @@ def main():
                                and event.get('id') == payload.get('id')), None)
             else:
                 parsed = json.loads(decoded) if decoded else None
+            decoded_at = time.perf_counter_ns()
+            row.update(decode_ms=(decoded_at - finished) / 1e6,
+                       client_total_ms=(decoded_at - started) / 1e6)
             row['valid'] = (200 <= response.status < 300
                             and isinstance(parsed, dict) and 'error' not in parsed)
             if isinstance(parsed, dict):
@@ -96,6 +154,18 @@ def main():
             if payload is not None and 'id' in payload:
                 row['valid'] = (row['valid'] and parsed.get('id') == payload['id']
                                 and 'result' in parsed)
+            if check_json:
+                row['semantic_errors'] = []
+                for pointer, expected in requirements:
+                    try:
+                        actual = pointer_value(parsed, pointer)
+                    except (KeyError, IndexError):
+                        row['semantic_errors'].append({'pointer': pointer, 'reason': 'missing JSON pointer'})
+                    else:
+                        if not json_equal(actual, expected):
+                            row['semantic_errors'].append({'pointer': pointer, 'reason': 'expected value mismatch'})
+                if row['semantic_errors']:
+                    row['valid'] = False
             return row, parsed, response
         except (OSError, http.client.HTTPException, ValueError) as error:
             row.update(valid=False, error=type(error).__name__,
@@ -119,15 +189,12 @@ def main():
         mcp_headers['Mcp-Session-Id'] = session
         request('mcp_initialized', '/mcp', method='POST', payload={
             'jsonrpc': '2.0', 'method': 'notifications/initialized'}, extra=mcp_headers)
-    paths = ['/health', '/api/v1/dashboard/shell?light=true',
-             '/api/v1/dashboard/execution', '/api/v1/dashboard/tools',
-             '/api/v1/dashboard/telemetry/summary']
     try:
         for ordinal in range(args.samples):
             if ordinal and args.interval:
                 time.sleep(args.interval)
             for path in paths:
-                row, _, _ = request(path, path)
+                row, _, _ = request(path, path, check_json=True)
                 rows.append(row | {'ordinal': ordinal})
             if session:
                 row, _, _ = request('mcp_ping', '/mcp', method='POST', payload={
@@ -165,7 +232,11 @@ def main():
         'observed_at': datetime.now(timezone.utc).isoformat(),
         'base_url': args.base_url, 'target_ms': args.target_ms,
         'authenticated': bool(token), 'interval_s': args.interval,
-        'scope': 'sequential HTTP roundtrip including transfer; no injected load',
+        'accept_encoding': args.accept_encoding,
+        'scope': 'sequential HTTP roundtrip including transfer; no injected load; not objective readiness',
+        'timing_scope': 'total_ms ends at wire body receipt; decode_ms includes decompression and JSON/SSE parsing; client_total_ms includes both',
+        'sample_paths': paths,
+        'required_json': [{'pointer': pointer, 'expected': expected} for pointer, expected in requirements],
         'identity_before': identity(health_before),
         'identity_after': identity(health_after),
         'same_runtime': (initial['valid'] and final['valid']

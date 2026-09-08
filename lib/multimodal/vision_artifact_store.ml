@@ -44,9 +44,20 @@ let store ~dir (raw : string) : (handle, string) result =
   with
   | Error _ as e -> e
   | Ok () ->
-    (match Fs_compat.save_file_atomic (path_of ~dir h) raw with
-     | Ok () -> Ok h
-     | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
+    let path = path_of ~dir h in
+    (* Verify bytes on every store: a handle or cached stat cannot establish
+       that the destination still exists and contains this image. A failed
+       comparison falls through to the existing atomic repair/write path. *)
+    let already_stored =
+      try String.equal (Fs_compat.load_file path) raw with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Sys_error _ | Unix.Unix_error _ | End_of_file -> false
+    in
+    if already_stored then Ok h
+    else
+      (match Fs_compat.save_file_atomic path raw with
+       | Ok () -> Ok h
+       | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
 
 type load_error =
   | Malformed_handle of string

@@ -34,6 +34,34 @@ let test_content_addressed () =
   let h2 = ok (S.store ~dir "abc") in
   assert (String.equal (S.to_string h1) (S.to_string h2))
 
+(* Repeated reads preserve the durable inode and mtime, while deletion or
+   same-length corruption still requires a repair. No timing/sleep assertion. *)
+let test_repeated_store_preserves_and_repairs () =
+  let dir = temp_dir () in
+  let bytes = "original image" in
+  let h = ok (S.store ~dir bytes) in
+  let path = Filename.concat dir (S.to_string h) in
+  Unix.utimes path 1.0 1.0;
+  let before = Unix.stat path in
+  for _ = 1 to 100 do
+    assert (S.to_string (ok (S.store ~dir bytes)) = S.to_string h)
+  done;
+  let after = Unix.stat path in
+  assert (before.Unix.st_ino = after.Unix.st_ino);
+  assert (before.Unix.st_mtime = after.Unix.st_mtime);
+  Out_channel.with_open_bin path (fun oc ->
+    output_string oc (String.make (String.length bytes) 'x'));
+  ignore (ok (S.store ~dir bytes));
+  assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
+  Unix.unlink path;
+  ignore (ok (S.store ~dir bytes));
+  assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
+  Unix.unlink path;
+  Unix.mkdir path 0o700;
+  match S.store ~dir bytes with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
 (* distinct bytes -> distinct handles. *)
 let test_distinct () =
   let dir = temp_dir () in
@@ -112,6 +140,7 @@ let test_unreadable_is_not_missing () =
 let () =
   test_round_trip ();
   test_content_addressed ();
+  test_repeated_store_preserves_and_repairs ();
   test_distinct ();
   test_persisted_handle_reload ();
   test_missing_is_error ();

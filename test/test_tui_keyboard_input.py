@@ -10514,7 +10514,7 @@ def changes_keeper_and_arrow_detail_interaction(
         raise AssertionError(
             f"the diff drew no footer: {second_diff_plain[-800:]!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     # An open diff scrolls to its end and stops there. The keypress steps
     # without a bound -- the rows are the drawing's -- so the frame reports
     # what it could use and the loop stores that. Without the report the
@@ -10548,7 +10548,7 @@ def changes_keeper_and_arrow_detail_interaction(
     send_and_wait(
         process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
     )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     send_and_wait(
         process, master_fd, output, b"\x1b[A", b"preview masc:lib/second.ml"
     )
@@ -10564,7 +10564,7 @@ def changes_keeper_and_arrow_detail_interaction(
     detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"-1 +1")
     if b"MASC Change" not in CSI_RE.sub(b"", detail):
         raise AssertionError(f"Right did not open the selected diff: {detail!r}")
-    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     if b"MASC Changes alpha" not in CSI_RE.sub(b"", listing):
         raise AssertionError(f"Left did not return to the Changes list: {listing!r}")
     # v opens the row's file on the Code surface, read through the keeper's

@@ -5040,6 +5040,13 @@ let schedule_delivery_summary (row : schedule_row) =
       row.sch_status
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
+let schedule_source_warning (state : state) =
+  Terminal_text.optional_single_line state.schedules_error
+  |> Option.map (fun err ->
+         match state.schedules with
+         | None -> "조회 실패: " ^ err
+         | Some _ -> "이전 조회 유지 · 갱신 실패: " ^ err)
+
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
@@ -5065,7 +5072,7 @@ let render_schedule_list (state : state) =
 
   (match state.schedules with
    | None ->
-       (match Terminal_text.optional_single_line state.schedules_error with
+       (match schedule_source_warning state with
         | Some err ->
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
@@ -5074,6 +5081,14 @@ let render_schedule_list (state : state) =
          box_empty buf cols
        done
    | Some snapshot ->
+       let warning_rows =
+         match schedule_source_warning state with
+         | None -> 0
+         | Some err ->
+             box_line buf cols (data_unreliable_row ~cols err);
+             1
+       in
+       let rows = rows - warning_rows in
        if not (String.equal snapshot.scs_status "ok") then begin
          (* The server's "unknown" is a failed store read, not an empty list;
             the row says which, so a dead ledger cannot read as "nothing is
@@ -5516,6 +5531,13 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
+  let warning_rows =
+    match schedule_source_warning state with
+    | None -> 0
+    | Some err ->
+        box_line buf cols (data_unreliable_row ~cols err);
+        1
+  in
   let lines =
     schedule_detail_lines
       ~width:(max 1 (framed_inner_width cols))
@@ -5523,7 +5545,7 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
       ~wake_history:state.schedule_wake_history
       ~wake_history_error:state.schedule_wake_history_error
   in
-  let content_height = max 1 (rows - 6) in
+  let content_height = max 1 (rows - 6 - warning_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.schedule_scroll max_scroll) in
   for index = 0 to content_height - 1 do

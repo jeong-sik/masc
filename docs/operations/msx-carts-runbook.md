@@ -144,3 +144,12 @@ A zero-filled unformatted image is not a formatted DOS disk. Supply formatted
 blank media when the game requests a new data disk. Guest file writes remain
 in the emulated disk; save a named checkpoint or switch disks (which saves
 `before-disk-change`) to persist them. Inventory source images stay unchanged.
+
+## Disk BIOS versus game RAM
+
+Disk calls at addresses such as `0x4016` apply only when the disk interface
+slot is selected. A game's code in RAM at the same address must execute
+normally. Sangokushi II uses that address while converting HEXDATA; an
+unconditional disk trap returned early, skipped its file close and eventually
+exhausted the game's file handles. The slot-aware core retains ordinary RAM
+execution and direct/inter-slot disk calls.

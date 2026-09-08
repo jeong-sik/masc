@@ -5329,3 +5329,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_goal_proof_identity)))
+
+(test
+ (name test_dashboard_task_detail)
+ (modules test_dashboard_task_detail)
+ (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))

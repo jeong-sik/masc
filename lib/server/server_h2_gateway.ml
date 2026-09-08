@@ -1146,6 +1146,16 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/tasks/detail" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let task_id = Server_utils.query_param httpun_request "task_id" in
+            let config = Mcp_server.workspace_config state in
+            let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Server_dashboard_task_detail.read ~config ~task_id)
+              |> Server_dashboard_task_detail.response in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/tasks/history" ->
           with_h2_public_read h2_reqd (fun state ->
             let task_id =

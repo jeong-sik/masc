@@ -2663,6 +2663,16 @@ let add_routes ~sw ~clock router =
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/detail" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let task_id = Server_utils.query_param req "task_id" in
+         let config = Mcp_server.workspace_config state in
+         let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           Server_dashboard_task_detail.read ~config ~task_id)
+           |> Server_dashboard_task_detail.response in
+         Http.Response.json_value ~status:(status :> Httpun.Status.t)
+           ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd

@@ -125,6 +125,12 @@ let links_of_yojson = function
   | _ -> Error "goal_task_links: top level is not an object"
 ;;
 
+let read_goal_task_links_authoritative_r config =
+  match read_json_result config (goal_task_links_path config) with
+  | Ok json -> links_of_yojson json
+  | Error detail -> Error detail
+;;
+
 let read_goal_task_links_r config =
   let primary_path = goal_task_links_path config in
   match read_json_result config primary_path with

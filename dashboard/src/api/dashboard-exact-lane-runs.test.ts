@@ -1,5 +1,59 @@
-import { describe, expect, it } from 'vitest'
-import { parseExactLaneRunResponse, parseExactLaneRunsResponse } from './dashboard-exact-lane-runs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fetchExactLaneRuns, parseExactLaneRunResponse, parseExactLaneRunsResponse } from './dashboard-exact-lane-runs'
+import { clearStoredToken, setStoredToken } from './core'
+
+afterEach(() => {
+  clearStoredToken()
+  vi.unstubAllGlobals()
+})
+
+function detailFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    generated_at: '2026-09-08T00:00:00Z',
+    run: {
+      run_id: 'payload-run', run_kind: 'exact_output', lane: 'librarian_exact',
+      subject_id: null, actor: 'keeper-a', started_at: 1, status: 'succeeded',
+      elapsed_s: 0.4, selected_slot: null,
+      input: { kind: 'exact', payload: null }, output: null,
+      skill_evidence: { state: 'no_keeper_skills' },
+      payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
+      ...overrides,
+    },
+  }
+}
+
+describe('fetchExactLaneRuns', () => {
+  it('requests native filtering on both the initial and cursor page', async () => {
+    const requests: URL[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      requests.push(new URL(input, 'http://fixture.invalid'))
+      const before = requests.at(-1)!.searchParams.get('before_run_id')
+      return new Response(JSON.stringify({
+        generated_at: '2026-09-08T00:00:00Z', count: 1, total: 2, has_more: before === null,
+        runs: [{
+          run_kind: 'exact_output', run_id: before === null ? 'native-b' : 'native-a',
+          lane: 'librarian_exact', subject_id: null, actor: 'keeper-fixture',
+          started_at: 100, status: 'running',
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    setStoredToken('native-kind-fixture', { source: 'manual' })
+    const first = await fetchExactLaneRuns({ limit: 1 })
+    const last = first.runs[0]!
+    const second = await fetchExactLaneRuns({ limit: 1, before: { startedAt: last.startedAt, runId: last.runId } })
+    expect(requests).toHaveLength(2)
+    for (const request of requests) {
+      expect(request.pathname).toBe('/api/v1/dashboard/exact-lane-runs')
+      expect(request.searchParams.get('run_kind')).toBe('exact_output')
+      expect(request.searchParams.get('limit')).toBe('1')
+    }
+    expect(requests[0]!.searchParams.has('before_run_id')).toBe(false)
+    expect(requests[1]!.searchParams.get('before_run_id')).toBe('native-b')
+    expect(requests[1]!.searchParams.get('before_started_at')).toBe('100')
+    expect(first.total).toBe(2)
+    expect(second).toMatchObject({ total: 2, hasMore: false, runs: [{ runId: 'native-a' }] })
+  })
+})
 
 describe('parseExactLaneRunsResponse', () => {
   it('decodes one completed Auto Judge exact lane record', () => {
@@ -9,7 +63,7 @@ describe('parseExactLaneRunsResponse', () => {
       total: 1,
       has_more: false,
       runs: [{
-        run_id: 'exact-auto-judge-1',
+        run_kind: 'exact_output', run_id: 'exact-auto-judge-1',
         lane: 'hitl_auto_judge',
         subject_id: null,
         actor: 'keeper-a',
@@ -34,7 +88,7 @@ describe('parseExactLaneRunsResponse', () => {
       total: 1,
       has_more: false,
       runs: [{
-        run_id: 'x', lane: 'mystery', subject_id: 's', actor: 'a',
+        run_kind: 'exact_output', run_id: 'x', lane: 'mystery', subject_id: 's', actor: 'a',
         started_at: 1, status: 'running',
       }],
     })).toThrow('unknown value')
@@ -49,7 +103,7 @@ describe('parseExactLaneRunsResponse', () => {
       total: 1,
       has_more: false,
       runs: [{
-        run_id: 'librarian-1',
+        run_kind: 'exact_output', run_id: 'librarian-1',
         lane: 'librarian_exact',
         subject_id: 'trace-1',
         actor: 'keeper-a',
@@ -67,7 +121,7 @@ describe('parseExactLaneRunsResponse', () => {
       total: 5908,
       has_more: true,
       runs: [{
-        run_id: 'r', lane: 'librarian_exact', subject_id: 's', actor: 'a',
+        run_kind: 'exact_output', run_id: 'r', lane: 'librarian_exact', subject_id: 's', actor: 'a',
         started_at: 1, status: 'running',
       }],
     })
@@ -83,7 +137,7 @@ describe('parseExactLaneRunsResponse', () => {
       has_more: false,
       runs: [
         {
-          run_id: 'failed-append',
+          run_kind: 'exact_output', run_id: 'failed-append',
           lane: 'board_attention_exact',
           subject_id: 'trace-1',
           actor: 'keeper-a',
@@ -98,7 +152,7 @@ describe('parseExactLaneRunsResponse', () => {
           persistence_state: 'not_persisted',
         },
         {
-          run_id: 'unknown-append',
+          run_kind: 'exact_output', run_id: 'unknown-append',
           lane: 'librarian_exact',
           subject_id: 'trace-2',
           actor: 'keeper-b',
@@ -135,7 +189,7 @@ describe('parseExactLaneRunsResponse', () => {
       total: 1,
       has_more: false,
       runs: [{
-        run_id: 'mismatch',
+        run_kind: 'exact_output', run_id: 'mismatch',
         lane: 'board_attention_exact',
         subject_id: 'trace',
         actor: 'keeper-a',
@@ -157,7 +211,7 @@ describe('parseExactLaneRunsResponse', () => {
       total: 1,
       has_more: false,
       runs: [{
-        run_id: 'legacy-terminal',
+        run_kind: 'exact_output', run_id: 'legacy-terminal',
         lane: 'librarian_exact',
         subject_id: 'trace',
         actor: 'keeper-a',
@@ -170,11 +224,64 @@ describe('parseExactLaneRunsResponse', () => {
 })
 
 describe('parseExactLaneRunResponse', () => {
+  it('preserves the current native metadata and available JSON null', () => {
+    const run = parseExactLaneRunResponse(detailFixture())
+    expect(run).toMatchObject({
+      runId: 'payload-run', runKind: 'exact_output', status: 'succeeded',
+      input: { kind: 'exact', payload: null }, output: null,
+      skillEvidence: { state: 'no_keeper_skills' },
+      payloadAvailability: { input: { state: 'available' }, output: { state: 'available' } },
+    })
+  })
+
+  it('keeps per-side source failures without substituting an execution failure', () => {
+    const error = { code: 'invalid_record', message: 'Record 3: malformed', line: 3, detail: 'malformed' }
+    const run = parseExactLaneRunResponse(detailFixture({
+      output: { superseded: 'not usable' },
+      payload_availability: { input: { state: 'available' }, output: { state: 'unavailable', error } },
+    }))
+    expect(run.status).toBe('succeeded')
+    expect(run.input.payload).toBeNull()
+    expect(run.payloadAvailability.output).toEqual({ state: 'unavailable', error })
+    expect(run.output).toBeUndefined()
+  })
+
+  it('requires the current native run kind and Skill evidence contract', () => {
+    expect(() => parseExactLaneRunResponse(detailFixture({ run_kind: undefined }))).toThrow('run_kind')
+    expect(() => parseExactLaneRunResponse(detailFixture({ skill_evidence: undefined }))).toThrow('skill_evidence')
+    expect(() => parseExactLaneRunResponse(detailFixture({ skill_evidence: { state: 'unknown' } }))).toThrow('skill_evidence.state')
+  })
+
+  it.each([
+    undefined,
+    { input: { state: 'available' }, output: null },
+    { input: { state: 'mystery' }, output: { state: 'available' } },
+    { input: { state: 'available' }, output: { state: 'unavailable' } },
+    { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'unknown', message: 'not known' } } },
+    { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'invalid_record', message: 'bad', line: 0, detail: 'bad' } } },
+    { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'invalid_record', message: 'bad', line: 1 } } },
+  ])('rejects missing or malformed payload availability %#', availability => {
+    expect(() => parseExactLaneRunResponse(detailFixture({ payload_availability: availability }))).toThrow()
+  })
+
+  it('rejects an available output with no value and a running row with terminal availability', () => {
+    const absent: Record<string, unknown> = detailFixture().run
+    delete absent.output
+    expect(() => parseExactLaneRunResponse({ ...detailFixture(), run: absent })).toThrow('missing=[output]')
+    const running: Record<string, unknown> = detailFixture({ status: 'running' }).run
+    delete running.output
+    delete running.elapsed_s
+    delete running.selected_slot
+    expect(() => parseExactLaneRunResponse({ ...detailFixture(), run: running })).toThrow('null exactly while running')
+    running.payload_availability = { input: { state: 'available' }, output: null }
+    expect(parseExactLaneRunResponse({ ...detailFixture(), run: running }).output).toBeUndefined()
+  })
+
   it('decodes one opened run with both payloads', () => {
     const run = parseExactLaneRunResponse({
       generated_at: '2026-08-12T00:00:00Z',
       run: {
-        run_id: 'exact-librarian-1',
+        run_kind: 'exact_output', run_id: 'exact-librarian-1',
         lane: 'librarian_exact',
         subject_id: 'trace-1',
         actor: 'keeper-a',
@@ -182,6 +289,8 @@ describe('parseExactLaneRunResponse', () => {
         status: 'succeeded',
         elapsed_s: 0.4,
         selected_slot: null,
+        skill_evidence: { state: 'no_keeper_skills' },
+        payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
         input: { kind: 'exact', payload: { message_count: 4 } },
         output: { fact_count: 3 },
       },
@@ -195,12 +304,14 @@ describe('parseExactLaneRunResponse', () => {
     expect(() => parseExactLaneRunResponse({
       generated_at: '2026-08-09T00:00:00Z',
       run: {
-        run_id: 'librarian-research-1',
+        run_kind: 'exact_output', run_id: 'librarian-research-1',
         lane: 'librarian_exact',
         subject_id: 'trace-1',
         actor: 'keeper-a',
         started_at: 1,
         status: 'running',
+        skill_evidence: { state: 'no_keeper_skills' },
+        payload_availability: { input: { state: 'available' }, output: null },
         input: {
           kind: 'research',
           raw_trace_path: '/tmp/raw-traces/librarian-research-1.jsonl',

@@ -18,12 +18,20 @@ export type ExactLaneIntendedStatus = 'succeeded' | 'cancelled' | 'failed'
 export type ExactLanePersistenceState = 'not_persisted' | 'durability_unknown'
 
 export type ExactLaneRunInput = { kind: 'exact'; payload: unknown }
+export type ExactLanePayloadError =
+  | { code: 'source_unavailable' | 'missing_registration' | 'missing_completion' | 'snapshot_changed'; message: string }
+  | { code: 'invalid_record'; message: string; line: number; detail: string }
+export type ExactLanePayloadAvailability =
+  | { state: 'available' }
+  | { state: 'not_loaded' }
+  | { state: 'unavailable'; error: ExactLanePayloadError }
 
 // A listing row. The exact input and output payloads are deliberately absent:
 // a lane run embeds the whole rendered prompt, so carrying them here made one
 // listing 246 MB. They arrive from fetchExactLaneRun when a row is opened.
 export interface ExactLaneRunSummary {
   runId: string
+  runKind: 'exact_output'
   lane: ExactLane
   subjectId: string | null
   actor: string
@@ -46,6 +54,11 @@ export interface ExactLaneRunSummary {
 export interface ExactLaneRunRecord extends ExactLaneRunSummary {
   input: ExactLaneRunInput
   output?: unknown
+  payloadAvailability: {
+    input: ExactLanePayloadAvailability
+    output: ExactLanePayloadAvailability | null
+  }
+  skillEvidence: { state: 'no_keeper_skills' }
 }
 
 export interface DashboardExactLaneRunsResponse {
@@ -111,6 +124,60 @@ function parseInput(raw: unknown, context: string): ExactLaneRunInput {
   return fail(`${context}.kind has unknown value ${JSON.stringify(kind)}`)
 }
 
+function parsePayloadAvailability(raw: unknown, context: string): ExactLanePayloadAvailability {
+  if (!isRecord(raw)) fail(`${context} must be an object`)
+  if (raw.state === 'available' || raw.state === 'not_loaded') {
+    exactFields(raw, ['state'], [], context)
+    return { state: raw.state }
+  }
+  if (raw.state !== 'unavailable') fail(`${context}.state has an unknown value`)
+  exactFields(raw, ['state', 'error'], [], context)
+  const error = raw.error
+  if (!isRecord(error)) fail(`${context}.error must be an object`)
+  const message = string(error.message, `${context}.error.message`)
+  switch (error.code) {
+    case 'invalid_record': {
+      exactFields(error, ['code', 'message', 'line', 'detail'], [], `${context}.error`)
+      const line = number(error.line, `${context}.error.line`)
+      if (!Number.isSafeInteger(line) || line === 0) fail(`${context}.error.line must be a positive safe integer`)
+      return { state: 'unavailable', error: {
+        code: error.code, message, line, detail: string(error.detail, `${context}.error.detail`),
+      } }
+    }
+    case 'source_unavailable':
+    case 'missing_registration':
+    case 'missing_completion':
+    case 'snapshot_changed':
+      exactFields(error, ['code', 'message'], [], `${context}.error`)
+      return { state: 'unavailable', error: { code: error.code, message } }
+    default:
+      return fail(`${context}.error.code has an unknown value`)
+  }
+}
+
+function parsePayloads(raw: Record<string, unknown>, status: string, context: string) {
+  const availability = raw.payload_availability
+  if (!isRecord(availability)) fail(`${context}.payload_availability must be an object`)
+  exactFields(availability, ['input', 'output'], [], `${context}.payload_availability`)
+  const input = parsePayloadAvailability(availability.input, `${context}.payload_availability.input`)
+  const output = availability.output === null
+    ? null
+    : parsePayloadAvailability(availability.output, `${context}.payload_availability.output`)
+  if ((status === 'running') !== (output === null)) {
+    fail(`${context}.payload_availability.output must be null exactly while running`)
+  }
+  const skills = raw.skill_evidence
+  if (!isRecord(skills)) fail(`${context}.skill_evidence must be an object`)
+  exactFields(skills, ['state'], [], `${context}.skill_evidence`)
+  if (skills.state !== 'no_keeper_skills') fail(`${context}.skill_evidence.state has an unknown value`)
+  return {
+    input: parseInput(raw.input, `${context}.input`),
+    output: output?.state === 'available' ? raw.output : undefined,
+    payloadAvailability: { input, output },
+    skillEvidence: { state: 'no_keeper_skills' as const },
+  }
+}
+
 function parseRun(raw: unknown, index: number, withPayloads: false): ExactLaneRunSummary
 function parseRun(raw: unknown, index: number, withPayloads: true): ExactLaneRunRecord
 function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLaneRunSummary {
@@ -120,8 +187,9 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
   if (!STATUSES.includes(status)) fail(`${context}.status has unknown value ${JSON.stringify(status)}`)
   const lane = string(raw.lane, `${context}.lane`)
   if (!LANES.includes(lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
-  const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'status']
-    .concat(withPayloads ? ['input'] : [])
+  if (raw.run_kind !== 'exact_output') fail(`${context}.run_kind must be exact_output`)
+  const base = ['run_id', 'run_kind', 'lane', 'subject_id', 'actor', 'started_at', 'status']
+    .concat(withPayloads ? ['input', 'payload_availability', 'skill_evidence'] : [])
   // `output` rides with the payloads; a summary never carries it.
   const completion = withPayloads
     ? ['elapsed_s', 'output', 'selected_slot']
@@ -168,18 +236,14 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
       : string(raw.selected_slot, `${context}.selected_slot`)
   return {
     runId: string(raw.run_id, `${context}.run_id`),
+    runKind: 'exact_output',
     lane: lane as ExactLane,
     subjectId: raw.subject_id === null
       ? null
       : string(raw.subject_id, `${context}.subject_id`),
     actor: string(raw.actor, `${context}.actor`),
     startedAt: number(raw.started_at, `${context}.started_at`),
-    ...(withPayloads
-      ? {
-          input: parseInput(raw.input, `${context}.input`),
-          output: status === 'running' ? undefined : raw.output,
-        }
-      : {}),
+    ...(withPayloads ? parsePayloads(raw, status, context) : {}),
     status: status as ExactLaneRunStatus,
     elapsedSeconds: status === 'running' ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
     code: status === 'failed' ? string(raw.code, `${context}.code`) : undefined,
@@ -233,6 +297,9 @@ export async function fetchExactLaneRuns(
   opts?: AbortableRequestOptions & { limit?: number; before?: ExactLaneRunCursor },
 ): Promise<DashboardExactLaneRunsResponse> {
   const params = new URLSearchParams()
+  // This consumer decodes native exact-output rows; Task verification has
+  // its own monitor source. Keep the filter on every cursor request.
+  params.set('run_kind', 'exact_output')
   if (opts?.limit != null) params.set('limit', String(opts.limit))
   if (opts?.before != null) {
     params.set('before_started_at', String(opts.before.startedAt))

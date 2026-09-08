@@ -38,6 +38,83 @@ type run_status =
 
 type run_input = Exact_input of Yojson.Safe.t
 
+type payload_read_error =
+  | Source_unavailable of string
+  | Missing_registration
+  | Missing_completion
+  | Invalid_record of { line : int; detail : string }
+  | Snapshot_changed
+
+type payload_availability =
+  | Available
+  | Not_loaded
+  | Unavailable of payload_read_error
+
+let payload_read_error_to_string = function
+  | Source_unavailable detail -> detail
+  | Missing_registration -> "The retained run's registration payload is missing"
+  | Missing_completion -> "The retained run's completion payload is missing"
+  | Invalid_record { line; detail } -> Printf.sprintf "Record %d: %s" line detail
+  | Snapshot_changed -> "The selected run changed while its payload was being read"
+;;
+
+let availability_to_yojson = function
+  | Available -> `Assoc [ "state", `String "available" ]
+  | Not_loaded -> `Assoc [ "state", `String "not_loaded" ]
+  | Unavailable error ->
+    let code, extra =
+      match error with
+      | Source_unavailable _ -> "source_unavailable", []
+      | Missing_registration -> "missing_registration", []
+      | Missing_completion -> "missing_completion", []
+      | Invalid_record { line; detail } ->
+        "invalid_record", [ "line", `Int line; "detail", `String detail ]
+      | Snapshot_changed -> "snapshot_changed", []
+    in
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "error", `Assoc
+          ([ "code", `String code
+           ; "message", `String (payload_read_error_to_string error) ] @ extra)
+      ]
+;;
+
+let availability_of_yojson json =
+  let ( let* ) = Result.bind in
+  let module Json = Run_registry_core.Json in
+  let* fields = Json.object_fields json in
+  let* state = Json.string_field "state" fields in
+  match state with
+  | "available" | "not_loaded" ->
+    let* () = Json.exact_fields ~required:[ "state" ] fields in
+    Ok (if String.equal state "available" then Available else Not_loaded)
+  | "unavailable" ->
+    let* () = Json.exact_fields ~required:[ "state"; "error" ] fields in
+    let* error = List.assoc_opt "error" fields |> Option.to_result ~none:"missing error" in
+    let* fields = Json.object_fields error in
+    let* code = Json.string_field "code" fields in
+    let* message = Json.string_field "message" fields in
+    let* error =
+      match code with
+      | "invalid_record" ->
+        let* () = Json.exact_fields ~required:[ "code"; "message"; "line"; "detail" ] fields in
+        let* detail = Json.string_field "detail" fields in
+        (match List.assoc_opt "line" fields with
+         | Some (`Int line) when line > 0 -> Ok (Invalid_record { line; detail })
+         | _ -> Error "invalid_record requires a positive line number")
+      | "source_unavailable" | "missing_registration" | "missing_completion" | "snapshot_changed" ->
+        let* () = Json.exact_fields ~required:[ "code"; "message" ] fields in
+        Ok (match code with
+            | "source_unavailable" -> Source_unavailable message
+            | "missing_registration" -> Missing_registration
+            | "missing_completion" -> Missing_completion
+            | _ -> Snapshot_changed)
+      | _ -> Error (Printf.sprintf "unknown payload error code %S" code)
+    in
+    Ok (Unavailable error)
+  | _ -> Error (Printf.sprintf "unknown payload availability %S" state)
+;;
+
 type run =
   { run_id : string
   ; lane : lane
@@ -45,6 +122,8 @@ type run =
   ; started_at : float
   ; input : run_input
   ; status : run_status
+  ; input_availability : payload_availability
+  ; output_availability : payload_availability option
   }
 
 (* [lane_key] is exhaustive for the wire spelling. [all_lanes] is separately
@@ -355,6 +434,9 @@ let projected_run_of_entry failed_completions (entry : Store.entry) =
   ; started_at = entry.started_at
   ; input = Exact_input `Null
   ; status
+  ; input_availability = Not_loaded
+  ; output_availability =
+      (match status with Running -> None | Completed _ | Completion_persistence_failed _ -> Some Not_loaded)
   }
 ;;
 
@@ -386,6 +468,9 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
   ; started_at = entry.started_at
   ; input = entry.registration.input
   ; status
+  ; input_availability = Available
+  ; output_availability =
+      (match status with Running -> None | Completed _ | Completion_persistence_failed _ -> Some Available)
   }
 ;;
 
@@ -522,108 +607,149 @@ let recent_runs t ~limit ~before =
     { runs; total = List.length all; has_more })
 ;;
 
-let parse_disk_event_line line =
-  try
-    let json = Yojson.Safe.from_string line in
-    match json with
-    | `Assoc fields ->
-      let event = List.assoc_opt "event" fields in
-      let id = List.assoc_opt "id" fields in
-      (match event, id with
-       | Some (`String "register"), Some (`String id) ->
-         let started_at =
-           match List.assoc_opt "started_at" fields with
-           | Some (`Float f) -> f
-           | Some (`Int i) -> float_of_int i
-           | _ -> 0.0
-         in
-         (match List.assoc_opt "registration" fields with
-          | Some reg_json ->
-            (match Payload.registration_of_yojson reg_json with
-             | Ok reg -> Some (`Register (id, started_at, reg))
-             | Error _ -> None)
-          | None -> None)
-       | Some (`String "complete"), Some (`String id) ->
-         (match List.assoc_opt "completion" fields with
-          | Some comp_json ->
-            (match Payload.completion_of_yojson comp_json with
-             | Ok comp -> Some (`Complete (id, comp))
-             | Error _ -> None)
-          | None -> None)
-       | _ -> None)
-    | _ -> None
-  with
-  | Yojson.Json_error _ -> None
+type disk_payloads =
+  { registration : ((float * Payload.registration), payload_read_error) result
+  ; completion : (Payload.completion, payload_read_error) result
+  }
+
+let unread_payloads error =
+  { registration = Error error; completion = Error error }
+;;
+
+(* Parse identity before interpreting a record. A malformed record of another
+   known id does not alter this run. An unidentifiable record cannot prove that
+   it was unrelated, so it invalidates the preceding payloads until a later
+   registration/completion supplies their values again. *)
+let fold_payload_record ~run_id ~line payloads text =
+  let ( let* ) = Result.bind in
+  let module Json = Run_registry_core.Json in
+  let invalid detail = Invalid_record { line; detail } in
+  let envelope =
+    let* json =
+      try Ok (Yojson.Safe.from_string text) with
+      | Yojson.Json_error detail -> Error detail
+    in
+    let* fields = Json.object_fields json in
+    let* id =
+      match List.filter (fun (key, _) -> String.equal key "id") fields with
+      | [ _, `String id ] -> Ok id
+      | _ -> Error "record requires exactly one string id"
+    in
+    Ok (id, fields)
+  in
+  match envelope with
+  | Error detail -> unread_payloads (invalid detail)
+  | Ok (id, _) when not (String.equal id run_id) -> payloads
+  | Ok (_, fields) ->
+    (match Json.string_field "event" fields with
+     | Ok "register" ->
+       let registration =
+         let* () = Json.exact_fields
+             ~required:[ "event"; "id"; "started_at"; "registration" ] fields in
+         let* started_at = Json.float_field "started_at" fields in
+         let* () = if Float.is_finite started_at then Ok ()
+             else Error "started_at must be finite" in
+         let* json = List.assoc_opt "registration" fields
+             |> Option.to_result ~none:"missing registration" in
+         let* registration = Payload.registration_of_yojson json in
+         Ok (started_at, registration)
+       in
+       { registration = Result.map_error invalid registration
+       ; completion = Error Missing_completion
+       }
+     | Ok "complete" ->
+       let completion =
+         let* () = Json.exact_fields ~required:[ "event"; "id"; "completion" ] fields in
+         let* json = List.assoc_opt "completion" fields
+             |> Option.to_result ~none:"missing completion" in
+         Payload.completion_of_yojson json
+       in
+       { payloads with completion = Result.map_error invalid completion }
+     | Ok other -> unread_payloads (invalid (Printf.sprintf "unknown event %S" other))
+     | Error detail -> unread_payloads (invalid detail))
 ;;
 
 let load_payloads_from_disk ~path ~run_id =
-  if not (Fs_compat.file_exists path)
-  then None
-  else (
-    let id_pattern = Printf.sprintf "\"id\":\"%s\"" run_id in
-    let id_pattern_spaced = Printf.sprintf "\"id\": \"%s\"" run_id in
-    let disk_input = ref None in
-    let disk_output = ref None in
-    let matches_id line =
-      String_util.contains_substring line id_pattern
-      || String_util.contains_substring line id_pattern_spaced
-    in
     try
-      let _boundary =
-        Fs_compat.fold_appended_lines
-          ~path
-          ~from:0
-          ~init:()
-          ~f:(fun () line ->
-            if matches_id line
-            then (
-              match parse_disk_event_line line with
-              | Some (`Register (id, _started_at, reg)) when String.equal id run_id ->
-                disk_input := Some reg.input
-              | Some (`Complete (id, comp)) when String.equal id run_id ->
-                disk_output := Some comp.output
-              | _ -> ()))
+      (* A boolean existence probe would collapse permission failures into
+         "absent" and discard the filesystem's original diagnostic. *)
+      let _source = Unix.stat path in
+      let initial =
+        { registration = Error Missing_registration; completion = Error Missing_completion }
       in
-      Some (!disk_input, !disk_output)
+      let (payloads, count), boundary =
+        Fs_compat.fold_appended_lines ~path ~from:0 ~init:(initial, 0)
+          ~f:(fun (payloads, count) text ->
+            let line = count + 1 in
+            fold_payload_record ~run_id ~line payloads text, line)
+      in
+      (* An unterminated record cannot be identified as belonging to this run
+         or another one. Never silently reuse an older value behind it. *)
+      if (Unix.stat path).st_size = boundary then payloads
+      else unread_payloads
+          (Invalid_record { line = count + 1; detail = "registry has an unterminated or changing final record" })
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Log.Keeper.warn
-        "exact_lane_run_registry: disk load error for %s: %s"
-        run_id
-        (Printexc.to_string exn);
-      None)
+    | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+      unread_payloads (Source_unavailable (Printexc.to_string exn))
+;;
+
+let selected_entry t run_id =
+  Store.get_metadata t.store ~id:run_id
+;;
+
+let apply_payloads (entry : Store.entry) base_run payloads =
+  let input, input_availability =
+    match payloads.registration with
+    | Ok (started_at, registration)
+      when Float.equal started_at entry.started_at
+           && registration.Payload.lane = entry.registration.lane
+           && String.equal registration.actor entry.registration.actor ->
+      registration.input, Available
+    | Ok _ -> Exact_input `Null, Unavailable Snapshot_changed
+    | Error error -> Exact_input `Null, Unavailable error
+  in
+  let status, output_availability =
+    match base_run.status with
+    | Running -> Running, None
+    | Completion_persistence_failed _ as status ->
+      (* The failed append retained this exact output in memory. Disk failure
+         affects the input independently and must not erase the new result. *)
+      status, Some Available
+    | Completed completion ->
+      (match payloads.completion with
+       | Ok disk when disk.outcome = completion.outcome
+                      && Float.equal disk.elapsed_s completion.elapsed_s
+                      && Option.equal String.equal disk.selected_slot completion.selected_slot ->
+         Completed { completion with output = disk.output }, Some Available
+       | Ok _ ->
+         Completed { completion with output = `Null }, Some (Unavailable Snapshot_changed)
+       | Error error ->
+         Completed { completion with output = `Null }, Some (Unavailable error))
+  in
+  { base_run with input; input_availability; status; output_availability }
 ;;
 
 let get t ~run_id =
-  match Store.get t.store ~id:run_id with
+  match selected_entry t run_id with
   | None -> None
   | Some entry ->
     let failed_completions = Atomic.get t.failed_completions in
     let base_run = full_run_of_entry failed_completions entry in
-    (match t.path with
-     | None -> Some base_run
-     | Some path ->
-       (match load_payloads_from_disk ~path ~run_id with
-        | None -> Some base_run
-        | Some (disk_input, disk_output) ->
-          let input =
-            match disk_input with
-            | Some inp -> inp
-            | None -> base_run.input
-          in
-          let status =
-            match base_run.status with
-            | Completed comp ->
-              let output =
-                match disk_output with
-                | Some out -> out
-                | None -> comp.output
-              in
-              Completed { comp with output }
-            | other -> other
-          in
-          Some { base_run with input; status }))
+    match t.path with
+    | None -> Some base_run
+    | Some path ->
+      let payloads =
+        Eio_guard.run_in_systhread ~label:"exact-lane-payload-read"
+          (fun () -> load_payloads_from_disk ~path ~run_id)
+      in
+      let unchanged =
+        Option.equal ( == ) (Some entry) (selected_entry t run_id)
+        && Option.equal ( == ) (List.assoc_opt run_id failed_completions)
+             (List.assoc_opt run_id (Atomic.get t.failed_completions))
+      in
+      Some (apply_payloads entry base_run
+              (if unchanged then payloads else unread_payloads Snapshot_changed))
 ;;
 
 let status_label = function
@@ -710,7 +836,19 @@ let run_to_yojson run =
     | Completed { output; _ } | Completion_persistence_failed { output; _ } ->
       [ "output", output ]
   in
-  `Assoc ((run_summary_fields run @ [ "input", input_to_yojson run.input ]) @ output_field)
+  let payload_availability =
+    `Assoc
+      [ "input", availability_to_yojson run.input_availability
+      ; "output", (match run.output_availability with
+                   | None -> `Null
+                   | Some availability -> availability_to_yojson availability)
+      ]
+  in
+  `Assoc
+    (run_summary_fields run
+     @ [ "input", input_to_yojson run.input
+       ; "payload_availability", payload_availability ]
+     @ output_field)
 ;;
 
 type global_install_error = Already_installed

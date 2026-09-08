@@ -78,7 +78,7 @@ vi.mock('../fleet-health-panel', () => ({
   }),
   keepersNotRunning: (fleet: any) => {
     const executable = new Set(fleet?.executable_keeper_names ?? [])
-    return (fleet?.autoboot_enabled_keeper_names ?? [])
+    return (fleet?.activation_mode_keeper_names ?? [])
       .filter((name: string) => !executable.has(name))
       .sort()
   },
@@ -115,7 +115,7 @@ function runtimeSample() {
         read_errors: [{ keeper: 'ghost-04', error: 'paused-state read 실패' }],
         details: [{
           name: 'nick0cave',
-          autoboot_enabled: true,
+          activation_mode: 'autonomous',
           pause_kind: 'operator',
           paused_elapsed_sec: 1840,
           missing_pause_root_cause: false,

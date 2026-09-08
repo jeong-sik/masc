@@ -316,6 +316,16 @@ let test_explicit_effect_request_enters_gate_without_observe_or_write () =
 let test_approved_effect_replay_consumes_one_exact_grant () =
   with_execution_workspace @@ fun base_path ->
   let module AQ = Masc.Keeper_approval_queue in
+  (* Approval delivery requires an existing Keeper recipient. *)
+  let recipient = `Assoc
+    [ "name", `String "settlement"; "trace_id", `String "trace-settlement" ] in
+  (match Masc_test_deps.meta_of_json_fixture recipient with
+   | Error detail -> fail detail
+   | Ok meta ->
+       match Masc.Keeper_meta_store.replace_snapshot
+           (Masc.Workspace.default_config base_path) meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
   let intent = Masc.Keeper_tool_execute_typed_input.Request_effect in
   let argv = [ "sh"; "-c"; "printf x >> approved-effect.txt" ] in
   let first, _, _, _, _ = execute_through_gate ~intent ~run:observe_run ~argv base_path in
@@ -331,7 +341,9 @@ let test_approved_effect_replay_consumes_one_exact_grant () =
       | Keeper_event_queue.Hitl_resolved resolution when resolution.approval_id = approval_id ->
           Gate.cycle_grant_of_resolution resolution
       | _ -> None)
-    |> Option.get in
+    |> function
+    | Some grant -> grant
+    | None -> fail "approved request did not deliver its exact replay grant to the Keeper" in
   let decision, result, count, _, _ = execute_through_gate ~intent ~cycle_grant:grant
     ~run:observe_run ~argv base_path in
   check int "approved effect dispatches once" 1 count;

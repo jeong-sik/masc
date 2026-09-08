@@ -10,6 +10,9 @@
 - Preserve operator configuration during `--force` upgrades; `--reset-config` explicitly resets seeded configuration.
 - Document prerequisites, installed files, first use, optional integrations and upgrades in `docs/INSTALL.md`.
 
+- Repair interactive provider selection, explicit-provider configuration changes and login-probe reporting. Invalid input can be corrected; unsupported probes remain unverified.
+- Correct Keeper TOML and MCP bearer-header examples, including generated Claude Desktop configuration, and complete source/browser onboarding instructions.
+
 ### Runtime changes since 0.33.0
 
 - **The embedded tree is the managed asset set; the hand-written manifest is

@@ -88,12 +88,24 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 ### 소스에서
 
+Git, opam, C 개발 도구, Node.js 22와 Corepack을 먼저 설치합니다. Native
+라이브러리와 재현 가능한 빌드 절차는 [Release workflow](.github/workflows/release.yml)를
+참고합니다. 체크아웃에서 대시보드를 쓰려면 아래 frontend 빌드도 필요합니다.
+코딩 에이전트는 [저장소 실행 프로토콜](docs/constitution.xml)에 따라 CI에서 빌드합니다.
+
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-scripts/opam-pin-external-deps.sh --install
+opam init --bare
+opam switch create . ocaml-base-compiler.5.5.1
+eval "$(opam env)"
+scripts/opam-pin-external-deps.sh
 opam install . --deps-only
-dune build bin/main_eio.exe bin/masc_tui.exe
+opam exec -- dune build bin/main_eio.exe bin/masc_tui.exe
+corepack enable
+corepack prepare pnpm@10.31.0 --activate
+(cd dashboard && pnpm install --frozen-lockfile)
+scripts/build-dashboard-if-needed.sh --force
 ```
 
 컴파일러와 Dune 버전은 `dune-project`에 고정돼 있습니다. 첫 빌드는 몇 분
@@ -212,14 +224,16 @@ bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-Claude Desktop은 `mcp-remote`를 거칩니다.
+Claude Desktop은 [`mcp-remote`](https://github.com/punkpeye/mcp-remote#custom-headers)를
+거칩니다. `npx`용 Node.js/npm이 필요하며, 아래 header가 토큰을 HTTP 인증에 연결합니다.
 
 ```json
 {
   "mcpServers": {
     "masc": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp"],
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp",
+        "--header", "Authorization: Bearer ${MASC_TOKEN}"],
       "env": { "MASC_TOKEN": "여기에-토큰" }
     }
   }
@@ -288,13 +302,13 @@ sandbox_image = "node:22-bookworm"
 network_mode = "none"
 mention_targets = ["operator"]
 
-[keeper.tools]
-native = "read"   # "none" | "read" | "full"
-
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
 """
+
+[keeper.tools]
+native = "read"   # "none" | "read" | "full"
 ```
 
 모르는 키는 거부합니다. 모델은 여기가 아니라 `runtime.toml`에서 배정합니다.

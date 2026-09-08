@@ -307,7 +307,7 @@ let test_mcp_client_config_renders_each_client () =
   match
     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
       ~agent_name:"mcp-agent" ~role:Masc_domain.Worker
-      ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.Long_lived ()
+      ~token_env_var:"CUSTOM_MCP_TOKEN" ~token_lifetime:Auth_login.Long_lived ()
   with
   | Error err -> failf "mint failed: %s" (Masc_domain.masc_error_to_string err)
   | Ok report ->
@@ -334,6 +334,20 @@ let test_mcp_client_config_renders_each_client () =
         (string_contains claude "mcp-remote");
       check bool "claude-desktop block carries the minted token" true
         (string_contains claude report.bearer_token);
+      let json_start = String.index claude '\n' + 1 in
+      let config =
+        Yojson.Safe.from_string
+          (String.sub claude json_start (String.length claude - json_start))
+      in
+      let open Yojson.Safe.Util in
+      let server = config |> member "mcpServers" |> member "masc" in
+      check (list string) "bridge passes the bearer header explicitly"
+        [ "-y"; "mcp-remote"; report.mcp_url; "--header";
+          "Authorization: Bearer ${" ^ report.mcp_token_env_var ^ "}" ]
+        (server |> member "args" |> to_list |> List.map to_string);
+      check string "header variable resolves to the minted bearer"
+        report.bearer_token
+        (server |> member "env" |> member report.mcp_token_env_var |> to_string);
       let env = Auth_login.render_mcp_client_config report Auth_login.Env in
       check bool "env block equals the shell exports" true
         (String.equal env (Auth_login.render_shell report))

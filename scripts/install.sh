@@ -21,7 +21,8 @@
 #   --no-guest-shim    Do not place the guest exec shim (masc-exec-shim) and its
 #                      sha256 sidecar under <base-path>/.masc/microvm/shim; a
 #                      host that boots no microvm keeper needs neither
-#   --provider ID      Pre-select a provider for the wizard (e.g. deepseek)
+#   --provider ID      Select a provider, including on an existing workspace
+#                      (e.g. deepseek; incompatible with --no-wizard)
 #   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
 #   --sandbox PROFILE  Set the seeded team keepers' sandbox_profile
 #                        (docker|microvm|remote_ssh; use with --team)
@@ -495,11 +496,14 @@ prompt_provider() {
       elif [ -n "${PROVIDER_KEYS[$i]}" ]; then
         printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
       fi
-      printf >&2 '\n'
+      printf >&2 ' [%s; id: %s]\n' "${PROVIDER_AVAIL[$i]}" "${PROVIDER_IDS[$i]}"
     done
     printf >&2 '> '
     local choice
-    read -r choice || true
+    if ! read -r choice; then
+      warn "input closed; provider selection cancelled"
+      return 1
+    fi
     if [ -z "$choice" ]; then
       echo "$DEFAULT_PROVIDER_INDEX"
       return
@@ -508,13 +512,14 @@ prompt_provider() {
       warn "please enter a number"
       continue
     fi
-    idx=$((choice - 1))
-    if [ "$idx" -lt 0 ] || [ "$idx" -ge "${#PROVIDER_IDS[@]}" ]; then
-      warn "invalid choice"
-      continue
-    fi
-    echo "$idx"
-    return
+    # Match displayed choices, without evaluating unbounded input as arithmetic.
+    for idx in "${!PROVIDER_IDS[@]}"; do
+      if [ "$choice" = "$((idx + 1))" ]; then
+        echo "$idx"
+        return
+      fi
+    done
+    warn "invalid choice"
   done
 }
 
@@ -567,7 +572,10 @@ update_runtime_default() {
 provider_ping_possible() {
   local idx="$1" key="$2" key_var
   key_var=$(provider_key_var "$idx")
-  [ -z "$key_var" ] || [ -n "$key" ]
+  if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
+    return 0
+  fi
+  [ -n "${PROVIDER_PING_PATHS[$idx]}" ] && { [ -z "$key_var" ] || [ -n "$key" ]; }
 }
 
 ping_provider() {
@@ -577,20 +585,22 @@ ping_provider() {
   local key_var
   key_var=$(provider_key_var "$idx")
 
-  # A subscription has no endpoint to reach; the meaningful check is whether its
-  # CLI is on PATH. Being signed in is a deeper, per-CLI probe left to a later
-  # step (RFC-0408) -- here we only confirm the command exists.
+  # CLI presence alone does not prove that the subscription is signed in.
   if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
     local cli_command="${PROVIDER_COMMANDS[$idx]}"
-    if [ -z "$cli_command" ]; then
-      warn "subscription $(provider_name "$idx") has no CLI command in runtime.toml; skipping check"
-      return 0
+    if [ -z "$cli_command" ] || ! command -v "$cli_command" >/dev/null 2>&1; then
+      warn "$(provider_name "$idx") CLI is not installed; install and sign in before using it"
+      return 1
     fi
-    if command -v "$cli_command" >/dev/null 2>&1; then
-      return 0
-    fi
-    warn "$cli_command not found on PATH; sign in to $(provider_name "$idx") before using it"
-    return 1
+    local probe_status=0
+    "$DEST" runtime-probe --base-path "$BASE_PATH" \
+      "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" >/dev/null 2>&1 || probe_status=$?
+    case "$probe_status" in
+      0) return 0 ;;
+      3) return 3 ;; # runtime-probe explicitly reports unsupported
+      *) warn "$(provider_name "$idx") sign-in check did not pass; authenticate with its CLI"
+         return 1 ;;
+    esac
   fi
 
   if [ -z "$ping_path" ]; then
@@ -645,7 +655,7 @@ run_wizard() {
     # A terminal is here to choose, so move the menu default onto a source that
     # is actually ready and let the operator confirm or change it.
     prefer_available_default
-    provider_idx=$(prompt_provider)
+    provider_idx=$(prompt_provider) || die "provider selection cancelled"
   else
     # No terminal and no --provider. Make the choice only when it is not a
     # choice at all -- exactly one ready source; otherwise leave it to the
@@ -707,17 +717,21 @@ run_wizard() {
       return 0
     fi
     if ! provider_ping_possible "$provider_idx" "$key"; then
-      log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
-    elif ping_provider "$provider_idx" "$key"; then
-      log "provider connectivity: ok"
+      log "missing credential or healthcheck.path for $(provider_name "$provider_idx"); skipping the connectivity check"
     else
-      warn "provider connectivity check did not pass; masc will retry at first turn"
+      local ping_status=0
+      ping_provider "$provider_idx" "$key" || ping_status=$?
+      case "$ping_status" in
+        0) log "provider connectivity: ok" ;;
+        3) log "login probe unavailable for $(provider_name "$provider_idx"); verify sign-in with its CLI" ;;
+        *) warn "provider connectivity check did not pass; masc will retry at first turn" ;;
+      esac
     fi
     return 0
   fi
 
   if ! provider_ping_possible "$provider_idx" "$key"; then
-    log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
+    log "missing credential or healthcheck.path for $(provider_name "$provider_idx"); skipping the connectivity check"
     return 0
   fi
 
@@ -728,19 +742,23 @@ run_wizard() {
   case "$answer" in
     [Nn]*) ;;
     *)
-      if ping_provider "$provider_idx" "$key"; then
-        log "provider ping: ok"
-      else
-        echo >&2
-        printf '? Connectivity check failed. [retry/skip/abort] ' >&2
-        local action
-        read -r action || true
-        case "$action" in
-          retry|Retry|r) run_wizard "$base_path" ;;
-          skip|Skip|s) ;;
-          *) die "aborted by user" ;;
-        esac
-      fi
+      local ping_status=0
+      ping_provider "$provider_idx" "$key" || ping_status=$?
+      case "$ping_status" in
+        0) log "provider ping: ok" ;;
+        3) log "login probe unavailable for $(provider_name "$provider_idx"); verify sign-in with its CLI" ;;
+        *)
+          echo >&2
+          printf '? Connectivity check failed. [retry/skip/abort] ' >&2
+          local action
+          read -r action || true
+          case "$action" in
+            retry|Retry|r) run_wizard "$base_path" ;;
+            skip|Skip|s) ;;
+            *) die "aborted by user" ;;
+          esac
+          ;;
+      esac
       ;;
   esac
 }
@@ -754,7 +772,7 @@ maybe_run_wizard() {
   fi
 
   if [ ! -e "$runtime_file" ]; then
-    if [ "$WIZARD" = "1" ]; then
+    if [ "$WIZARD" = "1" ] || [ -n "$WIZARD_PROVIDER" ]; then
       die "runtime.toml not found; cannot run wizard (did you mean to seed config?)"
     fi
     log "runtime.toml not found; skipping first-time setup wizard"
@@ -765,7 +783,7 @@ maybe_run_wizard() {
   # "First-time" means the config root was not already here. A workspace that was
   # already configured keeps the [runtime].default it has; --wizard or --reset-config
   # asks for the choice again.
-  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$RESET_CONFIG" -eq 0 ] && [ "$WIZARD" != "1" ]; then
+  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$RESET_CONFIG" -eq 0 ] && [ "$WIZARD" != "1" ] && [ -z "$WIZARD_PROVIDER" ]; then
     log "config root was already here; skipping first-time setup wizard"
     log "run with --wizard to choose a provider again"
     return 0
@@ -778,7 +796,8 @@ maybe_run_wizard() {
   run_wizard "$base_path"
 }
 
-is_tty() { [ -t 0 ] && [ -t 1 ]; }
+# Prompts use stderr; stdout is captured by $(prompt_provider).
+is_tty() { [ -t 0 ] && [ -t 2 ]; }
 
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
@@ -834,6 +853,13 @@ case "$WIZARD_SANDBOX" in
   local) die "--sandbox local is not a loadable profile; use docker, microvm, or remote_ssh (or omit to keep the preset's own)" ;;
   *) die "--sandbox must be docker, microvm, or remote_ssh" ;;
 esac
+
+if [ "$WIZARD" = "0" ] && [ -n "$WIZARD_PROVIDER" ]; then
+  die "--provider requires the setup wizard; omit --no-wizard (or MASC_WIZARD=0)"
+fi
+if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
+  die "--sandbox requires --team; existing keepers use their own sandbox_profile"
+fi
 
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
 
@@ -1373,7 +1399,13 @@ cat <<EOF
 
 ${c_grn}masc ${VERSION} installed.${c_off}
 
-Next:
+Installed:
+  server + TUI + dashboard + browser host + deployment preflight tools
+  workspace: $BASE_PATH
+  provider credentials, Keeper creation and execution backend setup are separate
+  browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
+
+Next (choose the TUI or server-only command):
   ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
   ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
   ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
@@ -1383,20 +1415,20 @@ Next:
 
   ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
   ${c_dim}# the server here when nothing is answering the port${c_off}
-  $start_env $DEST --base-path "$BASE_PATH"
+  $start_env "$DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
-  $start_env $DEST start --base-path "$BASE_PATH"
+  $start_env "$DEST" start --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# to change provider or model later, edit:${c_off}
   #   $BASE_PATH/.masc/config/runtime.toml
 
-  ${c_dim}# sanity check${c_off}
+  ${c_dim}# sanity check in a second terminal while the server is running${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
   ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
   ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
-  $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
+  "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}

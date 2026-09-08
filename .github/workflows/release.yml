@@ -52,8 +52,10 @@ jobs:
             scripts/check-version-truth.sh
           fi
 
-      - name: Installer upgrade behavior
-        run: python3 test/test_installer_upgrade.py
+      - name: Installer behavior (terminal wizard and upgrades)
+        run: |
+          python3 test/test_installer_wizard.py
+          python3 test/test_installer_upgrade.py
 
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain

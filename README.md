@@ -91,12 +91,25 @@ prerequisites, exact installed contents and optional integrations.
 
 ### From source
 
+Install Git, opam, a native C toolchain, Node.js 22 and Corepack first. Native
+libraries and the reproducible build steps are listed in the
+[Release workflow](.github/workflows/release.yml). The dashboard build below
+is required for browser access from a checkout. Coding agents use CI builds
+according to [the repository execution protocol](docs/constitution.xml).
+
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-scripts/opam-pin-external-deps.sh --install
+opam init --bare
+opam switch create . ocaml-base-compiler.5.5.1
+eval "$(opam env)"
+scripts/opam-pin-external-deps.sh
 opam install . --deps-only
-dune build bin/main_eio.exe bin/masc_tui.exe
+opam exec -- dune build bin/main_eio.exe bin/masc_tui.exe
+corepack enable
+corepack prepare pnpm@10.31.0 --activate
+(cd dashboard && pnpm install --frozen-lockfile)
+scripts/build-dashboard-if-needed.sh --force
 ```
 
 The compiler and Dune versions are pinned in `dune-project`. The first build
@@ -222,14 +235,16 @@ bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-Claude Desktop, through `mcp-remote`:
+Claude Desktop, through [`mcp-remote`](https://github.com/punkpeye/mcp-remote#custom-headers)
+(requires Node.js/npm for `npx`; the header maps the token into HTTP authentication):
 
 ```json
 {
   "mcpServers": {
     "masc": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp"],
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp",
+        "--header", "Authorization: Bearer ${MASC_TOKEN}"],
       "env": { "MASC_TOKEN": "paste-the-token" }
     }
   }
@@ -300,13 +315,13 @@ sandbox_image = "node:22-bookworm"
 network_mode = "none"
 mention_targets = ["operator"]
 
-[keeper.tools]
-native = "read"   # "none" | "read" | "full"
-
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
 """
+
+[keeper.tools]
+native = "read"   # "none" | "read" | "full"
 ```
 
 Unknown keys are rejected. The model is assigned in `runtime.toml`, not here:

@@ -125,10 +125,11 @@ A → B → A reinserts the modified A, rather than rereading its original bytes
 Named checkpoints retain all those disk versions, so restoring the campaign
 restores its off-drive media too. Original files in the inventory are unchanged.
 
-The operator-provided Sangokushi II A image reached the new-game and scenario
-menus with the corrected core, then requested B media. The B image and actual
-campaign/ending verification are still outstanding; do not substitute another
-game image or treat the disk prompt as a completed playthrough.
+The operator-provided Sangokushi II A and B images were verified through
+scenario and ruler selection into the first game turn (January 220). The B
+image was present in an operator-owned download archive and was inserted
+without rebooting. Full campaign/ending verification remains separate; a
+successful disk prompt or first turn is not a completed playthrough.
 
 ## Game-created data disks
 

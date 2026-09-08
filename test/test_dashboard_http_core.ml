@@ -2138,6 +2138,19 @@ let test_goal_source_failure_is_not_empty () =
           (member field json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
       ["planning", planning (); "tree", tree (); "detail", detail]
   in
+  let invalid_schema =
+    match Yojson.Safe.from_string original with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if key = "goals" then
+            key, `List (value |> to_list |> List.map (function
+              | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+              | json -> json))
+          else key, value) fields)
+    | _ -> fail "saved Goal store must be an object"
+  in
+  Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
+  check_unavailable "invalid criterion schema: ";
   Fs_compat.save_file primary "unreadable primary";
   check_unavailable "valid mirror: ";
   check string "read does not replace primary" "unreadable primary"

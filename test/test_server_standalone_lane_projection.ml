@@ -420,12 +420,17 @@ let task_verification_run ~verification_id ~started_at : Verification.run =
 let goal_verification_run ~run_id ~started_at : Goal_verification.run =
   { run_id
   ; goal_id = "goal-4"
+  ; request_id = "proof-request-4"
+  ; criterion = Goal_store.Criterion
+      { revision = "criterion-4"; title = "Four verified services";
+        metric = Some "verified services"; target_value = Some "4" }
   ; review_kind = Goal_verification.Proof
   ; authority_actor = Runtime.verifier_exact_lane_id
   ; started_at
   ; status =
       Goal_verification.Completed
         { outcome = Goal_verification.Committed
+        ; evaluated_verdict = Some (Goal_verification.Approved { reason = "four verified" })
         ; evaluator_runtime = Some "verifier-secondary"
         ; elapsed_s = 2.
         ; tools = []
@@ -494,6 +499,27 @@ let test_verifier_runs_are_filtered_before_pagination () =
     (second |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
   check string "goal review kind" "goal_verification"
     (second |> Yojson.Safe.Util.member "run_kind" |> Yojson.Safe.Util.to_string)
+;;
+
+let test_goal_judgement_metric_does_not_depend_on_replacement_request () =
+  List.iter (fun outcome ->
+    let base = goal_verification_run ~run_id:"judged-old-request" ~started_at:10. in
+    let run = match base.status with
+      | Goal_verification.Completed completion ->
+        { base with status = Goal_verification.Completed { completion with outcome } }
+      | Goal_verification.Running -> fail "fixture must have completed evaluation"
+    in
+    let snapshot = Projection.For_testing.snapshot_json_with ~now:20.
+      ~resolve_lane:(fun _ -> Projection.Unconfigured "fixture")
+      ~exact_runs_total:0 ~exact_runs:[] ~verification_runs:[] ~goal_verification_runs:[ run ] in
+    let lane = lane_by_id snapshot Runtime.verifier_exact_lane_id in
+    check int "produced judgement succeeds independently of application" 1
+      (Yojson.Safe.Util.member "succeeded_count" lane |> Yojson.Safe.Util.to_int);
+    check int "application deferral does not become evaluator failure" 0
+      (Yojson.Safe.Util.member "failed_count" lane |> Yojson.Safe.Util.to_int))
+    [ Goal_verification.Deferred { detail = "criterion edited without another request" };
+      Goal_verification.Superseded { detail = "criterion edited and requested again" };
+      Goal_verification.Raised { detail = "persistence failed after evaluation" } ]
 ;;
 
 let test_native_kind_filter_preserves_quiet_pages_and_mixed_readers () =
@@ -751,6 +777,10 @@ let () =
     "server standalone lane projection"
     [ ( "snapshot"
       , [ test_case
+            "Goal judgement metric is independent of replacement request"
+            `Quick
+            test_goal_judgement_metric_does_not_depend_on_replacement_request
+        ; test_case
             "all four lanes and observation states"
             `Quick
             test_snapshot_names_every_lane_and_keeps_observed_truth

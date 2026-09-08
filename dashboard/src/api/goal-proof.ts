@@ -5,7 +5,7 @@ function nonblank(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function criterion(raw: unknown): GoalProofCriterion | null {
+export function decodeGoalProofCriterion(raw: unknown): GoalProofCriterion | null {
   if (!isRecord(raw) || !nonblank(raw.revision) || typeof raw.title !== 'string'
     || !(raw.metric === null || typeof raw.metric === 'string')
     || !(raw.target_value === null || typeof raw.target_value === 'string')) return null
@@ -17,7 +17,7 @@ function completion(raw: unknown): GoalProofCompletion | null {
   switch (raw.state) {
     case 'idle': return { state: 'idle' }
     case 'proof_pending': {
-      const bound = criterion(raw.criterion)
+      const bound = decodeGoalProofCriterion(raw.criterion)
       return bound && nonblank(raw.request_id) && nonblank(raw.requested_at)
         ? { state: 'pending', criterion: bound, requestId: raw.request_id, requestedAt: raw.requested_at }
         : null
@@ -26,7 +26,7 @@ function completion(raw: unknown): GoalProofCompletion | null {
     case 'proof_refuted': {
       const verdict = raw.verdict
       if (!isRecord(verdict)) return null
-      const bound = criterion(verdict.criterion)
+      const bound = decodeGoalProofCriterion(verdict.criterion)
       const authority = verdict.authority
       if (!bound || !nonblank(verdict.request_id) || !nonblank(verdict.verification_run_id)
         || !nonblank(verdict.evidence) || !nonblank(verdict.recorded_at)

@@ -866,6 +866,52 @@ let test_committed_refuted_proof_reconciles_without_rearm () =
   | _ -> fail "reconciliation overwrote the refuted ledger state"
 ;;
 
+let test_superseded_review_keeps_the_evaluated_original_criterion () =
+  let scenario request_new =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Historical verdict remains attached to its criterion" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let original_request, original_criterion = pending_identity config goal_id in
+  let before_verdict prompt =
+    check bool "review saw the original target" true
+      (String_util.contains_substring prompt "<target_value>3</target_value>");
+    ignore (must_succeed "edit" (dispatch ctx ~name:"masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "300" ]));
+    if request_new then
+      ignore (must_succeed "request revised proof" (transition ctx goal_id "request_complete"))
+  in
+  with_lane_and_reviewer ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:(recording_reviewer ~before_verdict (ref [])
+      [ "verifier-a", Stub_approve "three verified services meet target three" ])
+    (fun () -> drain config);
+  let registry = Goal_verification_run_registry.global () in
+  let runs = Goal_verification_run_registry.list_runs registry
+    |> List.filter (fun (run : Goal_verification_run_registry.run) -> String.equal run.goal_id goal_id) in
+  (match runs with
+   | [ { request_id; criterion; status = Goal_verification_run_registry.Completed
+       { outcome;
+         evaluated_verdict = Some (Goal_verification_run_registry.Approved { reason }); _ }; _ } ] ->
+     (match request_new, outcome with
+      | true, Goal_verification_run_registry.Superseded _
+      | false, Goal_verification_run_registry.Deferred _ -> ()
+      | _ -> fail "unexpected application settlement");
+     check string "run belongs to the original request" original_request request_id;
+     check bool "run holds the exact reviewed criterion" true
+       (Goal_store.criterion_equal original_criterion criterion);
+     check string "unapplied approval remains readable"
+       "three verified services meet target three" reason
+   | _ -> fail "superseded evaluation disappeared from its run history");
+  if request_new then (
+    let new_request, _ = pending_identity config goal_id in
+    check bool "historical approval does not replace the new request" false
+      (String.equal original_request new_request));
+  check string "old proof cannot complete either case"
+    (if request_new then "verifying" else "executing") (stored_phase config goal_id)
+  in
+  List.iter scenario [ false; true ]
+;;
+
 let test_wake_after_deferred_persist_survives_active_scan () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1002,7 +1048,10 @@ let () =
   configure_prompt_registry ();
   run
     "goal_verification_agent"
-    [ ( "drain"
+    [ ( "historical review evidence"
+      , [ test_case "superseded review keeps evaluated original criterion" `Quick
+            test_superseded_review_keeps_the_evaluated_original_criterion ] )
+    ; ( "drain"
       , [ test_case "wake after deferred persistence survives active scan" `Quick
             test_wake_after_deferred_persist_survives_active_scan
         ; test_case "pending before phase waits for explicit retry" `Quick

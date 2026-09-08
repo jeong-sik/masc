@@ -863,12 +863,104 @@ fi
 
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
 
+# --- macOS dependency bootstrap ---
+macos_formula_ready() {
+  local brew_prefix="$1" formula="$2"
+  case "$formula" in
+    openssl@3) [ -r "$brew_prefix/opt/openssl@3/lib/libssl.3.dylib" ] &&
+               [ -r "$brew_prefix/opt/openssl@3/lib/libcrypto.3.dylib" ] ;;
+    gmp) [ -r "$brew_prefix/opt/gmp/lib/libgmp.10.dylib" ] ;;
+    zstd) [ -r "$brew_prefix/opt/zstd/lib/libzstd.1.dylib" ] ;;
+    python) command -v python3 >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+bootstrap_macos_homebrew() (
+  local installer
+  installer=$(mktemp) || die "cannot create Homebrew installer download"
+  trap 'rm -f "$installer"' EXIT
+  curl -fL --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" \
+    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+    -o "$installer" || die "could not download the official Homebrew installer"
+  # Homebrew owns its interactive confirmation and administrator prompt.
+  /bin/bash "$installer"
+)
+
+ensure_macos_dependencies() {
+  [ "$(uname -s)" = Darwin ] || return 0
+  local arch os_version major minimum brew_prefix actual_prefix formula
+  arch=$(uname -m)
+  case "$arch" in
+    arm64) minimum=14; brew_prefix=/opt/homebrew ;;
+    x86_64) minimum=15; brew_prefix=/usr/local ;;
+    *) die "unsupported macOS architecture: $arch" ;;
+  esac
+  os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
+  major=${os_version%%.*}
+  case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
+  [ "$major" -ge "$minimum" ] ||
+    die "macOS $os_version is below the released $arch binary minimum macOS $minimum.0"
+  if ! command -v brew >/dev/null 2>&1; then
+    if [ -x "$brew_prefix/bin/brew" ]; then
+      PATH="$brew_prefix/bin:$PATH"
+      export PATH
+    elif [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would install official Homebrew at $brew_prefix, then missing macOS dependencies"
+      return 0
+    elif is_tty; then
+      log "installing Homebrew from its official installer; Homebrew will ask for confirmation and any administrator password"
+      bootstrap_macos_homebrew || die "Homebrew setup failed; see its diagnostic above and https://brew.sh/"
+      [ -x "$brew_prefix/bin/brew" ] || die "Homebrew setup did not provide $brew_prefix/bin/brew"
+      PATH="$brew_prefix/bin:$PATH"
+      export PATH
+    else
+      die "Homebrew is required at $brew_prefix for macOS $arch dependencies. Run this installer in a terminal for guided Homebrew setup, or install it from https://brew.sh/ first."
+    fi
+  fi
+  actual_prefix=$(brew --prefix) || die "cannot determine Homebrew prefix"
+  [ "$actual_prefix" = "$brew_prefix" ] ||
+    die "Homebrew prefix $actual_prefix does not match macOS $arch ($brew_prefix). Use the native architecture Homebrew in PATH and rerun."
+  # Default Homebrew prefixes are part of the published Mach-O load paths.
+  # Inspect installed dylibs directly: a complete offline install needs no
+  # brew update or formula download. Do not alter shell startup files.
+  PATH="$brew_prefix/bin:$PATH"
+  export PATH
+  local missing=()
+  for formula in openssl@3 gmp zstd python; do
+    if ! macos_formula_ready "$brew_prefix" "$formula"; then
+      missing+=("$formula")
+    fi
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    log "macOS dependencies ready ($arch, $brew_prefix)"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would run: brew install ${missing[*]}"
+    return 0
+  fi
+  log "installing missing macOS dependencies: ${missing[*]}"
+  brew install "${missing[@]}" || die "Homebrew dependency installation failed; see its diagnostic above"
+  for formula in "${missing[@]}"; do
+    macos_formula_ready "$brew_prefix" "$formula" ||
+      die "dependency $formula is still unavailable at $brew_prefix; inspect Homebrew output and repair it with brew reinstall $formula"
+  done
+}
+# --- end macOS dependency bootstrap ---
+
 require() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 require curl
 require uname
 require chmod
 require mkdir
 require mktemp
+ensure_macos_dependencies
+if [ "$DRY_RUN" -eq 1 ] && ! command -v python3 >/dev/null 2>&1; then
+  log "[dry-run] remaining installation checks require the planned Python dependency; no files changed"
+  exit 0
+fi
 require python3
 PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$PREFIX")"
 
@@ -1203,6 +1295,12 @@ else
     binary_input="$(mktemp "$PREFIX/.masc-download.XXXXXX")"
     PARTIAL_FILES+=("$binary_input")
     fetch_bundle_asset "$ASSET" "$binary_input"
+  fi
+  # Diagnose the executable itself before fetching the dashboard. This also
+  # exposes dyld/loader stderr when installing an older release bundle helper.
+  if [ "$SKIP_DL" -ne 1 ]; then chmod +x "$binary_input"; fi
+  if ! run_masc_with_install_env "$binary_input" build-commit; then
+    die "downloaded executable cannot start; see loader stderr above (check OS/CPU and native runtime dependencies)"
   fi
   BUNDLE_HELPER="$(mktemp)"
   bundle_archive="$(mktemp)"

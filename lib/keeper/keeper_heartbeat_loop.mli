@@ -253,6 +253,12 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  (** The production retention pass against the durable queue. Counts are
+      observations only; no pending source is acknowledged by this pass. *)
+  val retain_connector_attention_sources :
+    base_path:string -> keeper_name:string ->
+    Keeper_event_queue_state.pending_selection list -> unit
+
   (** Whether post-turn HITL settlement may project a continuation before its
       queue source is acknowledged. *)
   val batch_disposition_records_continuation : batch_disposition -> bool

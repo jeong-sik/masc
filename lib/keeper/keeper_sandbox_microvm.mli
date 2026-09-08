@@ -456,6 +456,9 @@ type container_listing =
   | Labelled_json_array of string list
       (** The argv whose output nests [configuration.labels], which is where
           the base path hash, the keeper name and the owner pid live. *)
+  | Nerdctl_labelled_json_lines of string list
+      (** Explicit Go-template fields including LabelsMap and Runtime.
+          This is nerdctl's own flat record, not an Apple-shaped projection. *)
   | Listing_not_established of string
       (** Why this runtime's listing cannot be scoped to a base path and
           keeper. Named rather than answered with the Apple argv: read as "no
@@ -464,10 +467,9 @@ type container_listing =
 
 val container_listing_for : Keeper_microvm_backend.t -> container_listing
 (** [Labelled_json_array] for [container list -a --format json].
-    [Listing_not_established] for [msb], whose listing rows carry no labels
-    (they live in [msb inspect] under [active_config.labels]), and for
-    [nerdctl], which has no [list] subcommand and no literal [--format
-    json]. *)
+    [Nerdctl_labelled_json_lines] for nerdctl ps with explicit LabelsMap.
+    [Listing_not_established] for msb, whose listing rows carry no labels
+    (they live in msb inspect under active_config.labels). *)
 
 val list_live_containers_for :
   Keeper_microvm_backend.t ->
@@ -496,6 +498,19 @@ val sweep_candidates_of_json :
 (** Guests in a [Labelled_json_array] listing that belong to this base path
     and whose owning server is gone. A guest whose scope or owner label is
     missing or unparseable is not a candidate. *)
+
+val nerdctl_live_containers_of_json_lines :
+  base_path:string -> keeper_name:string -> string ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Strictly decode nerdctl's explicit template and scope by Kata runtime,
+    component, base-path hash, keeper name and microVM kind. Running remains
+    unknown because ps Status is display text, not a state protocol. *)
+
+val nerdctl_sweep_candidates_of_json_lines :
+  base_path:string -> is_pid_alive:(int -> bool) -> string ->
+  (sweep_candidate list, string) result
+(** Only positively identified Kata guests with positive, parsed dead owner
+    PIDs are candidates. Malformed inventory rejects the whole snapshot. *)
 
 val sweep_abandoned_guests :
   base_path:string ->

@@ -46,6 +46,8 @@ nerdctl run --rm --runtime io.containerd.kata.v2 --network none \
   '
 for phase in write read; do
   nerdctl run -d --name "$proof_name" --runtime io.containerd.kata.v2 \
+    --label "masc.mcp.keeper=$proof_name" --label masc.mcp.component=keeper-sandbox \
+    --label masc.mcp.kind=keeper-vm --label "masc.mcp.owner_pid=$$" \
     --network none --read-only --cap-drop ALL --tmpfs /tmp --pull never \
     --user 60123:60123 -v "$volume:/masc-work" \
     -w /masc-work/keeper "$image" tail -f /dev/null
@@ -57,6 +59,26 @@ rows = json.load(sys.stdin)
 assert len(rows) == 1 and rows[0]["Runtime"]["Name"] == "io.containerd.kata.v2", rows
 print(json.dumps(rows, indent=2))
 '
+  # Exercise the production inventory template against the real Kata guest.
+  # This validates nerdctl output fields; it does not invoke MASC's sweep or
+  # claim installed Keeper acceptance. An ordinary --format json omits LabelsMap.
+  nerdctl ps -a --no-trunc --format '{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}' \
+    | python3 -c '
+import json, sys
+name, owner = sys.argv[1:]
+rows = [json.loads(line) for line in sys.stdin if line.strip()]
+matches = [row for row in rows if row["name"] == name]
+assert len(matches) == 1, "Kata guest absent or duplicated in native template listing"
+row = matches[0]
+assert len(row["id"]) == 64 and all(c in "0123456789abcdef" for c in row["id"]), row
+assert row["runtime"] == "io.containerd.kata.v2", row
+assert row["labels"]["masc.mcp.keeper"] == name, row
+assert row["labels"]["masc.mcp.owner_pid"] == owner, row
+assert row["labels"]["masc.mcp.component"] == "keeper-sandbox", row
+assert row["labels"]["masc.mcp.kind"] == "keeper-vm", row
+assert all(isinstance(row[key], str) for key in ["name", "image", "status", "created_at"]), row
+print("KATA_LABELLED_INVENTORY " + json.dumps(row, sort_keys=True))
+' "$proof_name" "$$"
   # Root owns /: a failed non-root touch would only prove Unix permissions.
   nerdctl exec --user 0:0 "$proof_name" sh -ec '
     test "$(id -u)" = 0

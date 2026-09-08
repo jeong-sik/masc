@@ -72,7 +72,7 @@ Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_
 | `BrowserTabs` | `masc_browser_tabs` | Both: list tabs and discover the live connection identity |
 | `BrowserRead` | `masc_browser_read` | Both: text, visible elements, or a viewport PNG |
 | `BrowserInteract` | `masc_browser_interact` | Both: click, fill, or scroll one explicit tab |
-| `BrowserSession` | `masc_browser_session` | Automation: open or close the session |
+| `BrowserSession` | `masc_browser_session` | Automation: open, close, or check the session |
 | `BrowserGoto` | `masc_browser_goto` | Automation: navigate to an HTTP(S) URL |
 | `BrowserAct` | `masc_browser_act` | Automation: open/close tabs, click, fill, press, select, scroll, back, forward, or reload |
 

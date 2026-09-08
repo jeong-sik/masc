@@ -1819,6 +1819,16 @@ def navigate_with_arrows_and_quit(
     )
 
 
+# The width at which the Keepers table still draws its LIFECYCLE / RUNTIME
+# column. Two thresholds bound it, and 140 sat between them: the column needs
+# 118 inner cells (Render_schedule.keeper_runtime_minimum_inner_width), and
+# from Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
+# columns off the top, which leaves too few again until 180. Measured on the
+# built TUI: 118 drops the column, 122 through 131 draw it, 132 through 176 do
+# not, 180 does.
+KEEPER_RUNTIME_COLUMN_COLUMNS = 126
+
+
 def keeper_runtime_phase_and_identity_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1831,7 +1841,7 @@ def keeper_runtime_phase_and_identity_interaction(
         master_fd,
         output,
         rows=30,
-        columns=140,
+        columns=KEEPER_RUNTIME_COLUMN_COLUMNS,
         needle=b"MASC Overview",
     )
     send_and_wait(
@@ -1872,7 +1882,7 @@ def keeper_long_runtime_identity_interaction(
         master_fd,
         output,
         rows=30,
-        columns=140,
+        columns=KEEPER_RUNTIME_COLUMN_COLUMNS,
         needle=b"MASC Overview",
     )
     # Both keepers run the same provider subscription, so their ids differ

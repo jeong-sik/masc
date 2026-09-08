@@ -67,6 +67,19 @@ select_sources() {
     | grep -E '^config/(prompts|tools|mcp)/' || [ $? -eq 1 ]; } | head -1)
   asset_guard="test/test_managed_assets_sync_from_binary.ml"
 
+  # The same shape, one axis over: a deferred tool is offered to the model as
+  # its description's first line, and test_keeper_tool_definition_source is
+  # what says that line fits the budget it is offered in. A pull request that
+  # adds config/tools/foo.toml edits no test/*.ml, so it never ran either.
+  #
+  # Measured 2026-09-08: #34409 brought twelve descriptions under the budget,
+  # and within a day five MSX tools were added over it -- change_disk at 278
+  # bytes, press at 745. The guard was green on main the whole time because
+  # nothing ran it.
+  tools_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
+  tool_definition_guard="test/test_keeper_tool_definition_source.ml"
+
   # A source edit runs the suites named after it. Before this, only editing a
   # test picked one, so a change under bin/ or lib/ that broke a suite ran
   # nothing: PR #34247 rewrote bin/masc_tui_msx.ml, dropped the line that writes
@@ -133,6 +146,12 @@ SOURCES
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${tools_changed}" ]; then
+    echo "this pull request changes tool definitions; adding ${tool_definition_guard}"
+    sources=$(printf '%s\n%s\n' "${sources}" "${tool_definition_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
   if [ -n "${module_suites}" ]; then
     echo "suites named after the sources this pull request edits:"
     printf '%s\n' "${module_suites}" | sed 's/^/  /'
@@ -176,8 +195,15 @@ self_test() {
     "bin/masc_tui.ml"
   check "a doc-only change selects nothing" "" \
     "docs/x.md"
-  check "a config asset still reaches its guard" \
-    "test/test_managed_assets_sync_from_binary.ml" "config/tools/foo.toml"
+  # A tool definition reaches both: the one that says the asset embeds and
+  # syncs, and the one that says its first line fits the line it is offered in.
+  check "a tool definition reaches both guards" \
+    "test/test_keeper_tool_definition_source.ml test/test_managed_assets_sync_from_binary.ml" \
+    "config/tools/foo.toml"
+  # Only tool definitions reach the second one; a prompt asset has no first
+  # line to fit.
+  check "a prompt asset reaches only the asset guard" \
+    "test/test_managed_assets_sync_from_binary.ml" "config/prompts/foo.md"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # Both halves together, deduplicated.

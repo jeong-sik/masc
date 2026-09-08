@@ -12,7 +12,15 @@
     failure memory) — recorded as one block until a real producer
     introduces a typed decomposition. This is a closed current contract:
     constructors without a producer and forward-compatible catch-alls
-    are intentionally excluded. *)
+    are intentionally excluded.
+
+    [Skill_compositions] names the composition Skills carried by this turn's
+    tool surface. It exists because nothing else says they are there to a model
+    that does not read tool descriptions: keeper prompt blocks mentioned Skills
+    only through [current_task.skills] / [held_task.skills], which render only
+    when a task names one, and 0 of 292 recorded tasks ever did (RFC-0411 §1.5).
+    Measured 2026-09, Skills were opened 250 times across 108,185 tool calls,
+    and the busiest runtime opened none in 24,041 calls. *)
 
 type t =
   | Keeper_instructions
@@ -20,6 +28,7 @@ type t =
   | Temporal_summary
   | Memory_os_recall
   | Operator_note
+  | Skill_compositions
 
 val equal : t -> t -> bool
 val to_string : t -> string

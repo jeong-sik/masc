@@ -35,7 +35,7 @@ val root_dir : t -> string
 (** Absolute path of the store root. Mainly for diagnostics/testing. *)
 
 val preview_max : int
-(** Hard ceiling on the preview length {!put} produces, in characters.
+(** Hard ceiling on the preview length {!put} produces, in bytes.
 
     Exported because a caller that must bound the size of a marker it has not
     stored yet has to build a saturating candidate, and the only alternative
@@ -51,8 +51,9 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
 
     Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
     [preview] is the leading sanitized run of [bytes], at most
-    {!preview_max} characters (control bytes replaced with [?], whitespace
-    collapsed to spaces).
+    {!preview_max} bytes. Valid Unicode is preserved; malformed UTF-8 sequences
+    (including a sequence cut at the prefix boundary) and control bytes are
+    replaced with [?], and newline, carriage return and tab become spaces.
 
     Idempotent: re-putting the same bytes atomically rewrites the same content
     address, repairing any corrupt prior bytes without a duplicate read/hash.

@@ -1225,9 +1225,21 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
-  # Init preserves existing config and complete operator Skill packages, while
-  # adding newly shipped assets on upgrade as well as on the first install.
-  if [ "$DRY_RUN" -eq 1 ]; then
+  # An upgrade keeps the operator's config as it is, files it removed
+  # included, and only installs builtin Skill packages that are missing;
+  # --reset-config is the one way to seed the whole config tree again.
+  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
+    CONFIG_PREEXISTING=1
+    log "preserving existing config at $CONFIG_DIR; installing missing builtin Skills"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would install builtin Skills from the binary"
+    else
+      if ! init_summary="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1 | tail -1)"; then
+        die "builtin Skill seed failed: $init_summary"
+      fi
+      log "$init_summary"
+    fi
+  elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else
     # The binary carries the whole config/ tree it was built from, so the seed

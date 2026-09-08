@@ -1,0 +1,197 @@
+{
+  "schema": "masc.zen_download_delivery_failure.v1",
+  "run": {
+    "keeper": "zen-download-81c10c0d",
+    "source": "c067555236735ea9baf55c990c134257a5e0197d",
+    "server_sha256": "04477fe2087779e4a75d47fb89e294e3b65b06bb33e202e072258b40a9aa3ec8",
+    "runtime_instance_id": "01a07eff-9278-7000-9cf4-fe60e5741907",
+    "instructions_sha256": "b2353c567b5ba59e2bbbfae5ce59ea268c3ca237e670d770e6190e228eac1515",
+    "binary_seed_measured": false,
+    "skill_installed_by_operator_fixture": true
+  },
+  "requested_files": {
+    "/a": {
+      "bytes": 40960,
+      "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+    },
+    "/b": {
+      "bytes": 41216,
+      "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b"
+    },
+    "/c": {
+      "bytes": 51,
+      "sha256": "d95f0978e89dbaf395e4b5f3dd75cb35cecf1e7b0cab65eca7bf2ac579cfa73b"
+    }
+  },
+  "actual_downloaded_files": [
+    {
+      "name": "same.bin",
+      "bytes": 40960,
+      "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+    }
+  ],
+  "requested_files_complete": false,
+  "calls": [
+    {
+      "id": "call_97efooj3",
+      "name": "BrowserSession",
+      "action": "open",
+      "mode": null,
+      "success": true,
+      "at": 1788837199.2469,
+      "input_sha256": "f5d82199ab3afd19c2908ede507bfc4a2314890f9f752c62eeeb8a1c7b41b107",
+      "error": null
+    },
+    {
+      "id": "call_z76wwsvb",
+      "name": "BrowserGoto",
+      "action": null,
+      "mode": null,
+      "success": true,
+      "at": 1788837203.276119,
+      "input_sha256": "6ef203d5907814d6c40147fc7f7d7adb5bbf652b475e636591145376de66f7f2",
+      "error": null
+    },
+    {
+      "id": "call_bwhbpnbj",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "text",
+      "success": true,
+      "at": 1788837204.924868,
+      "input_sha256": "cf5ebf697e64e115e72476c5a09f5a3a5c5f005a5ea1686c6c0d7149d53bc4c0",
+      "error": null
+    },
+    {
+      "id": "call_en4hfx3l",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "frames",
+      "success": false,
+      "at": 1788837207.057138,
+      "input_sha256": "aa4369812b34a1d397d22e62d03aa05af2371c3602bc4bdfd2dc23e507224a7c",
+      "error": "contextual read requires an observed tabId\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+    },
+    {
+      "id": "call_b7uhona3",
+      "name": "BrowserTabs",
+      "action": null,
+      "mode": null,
+      "success": true,
+      "at": 1788837211.032674,
+      "input_sha256": "e19151430a307564bfb50fc9d6b65b685c2d0b92c49d6afd2b84c256fd906ea5",
+      "error": null
+    },
+    {
+      "id": "call_zd65bpq5",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "frames",
+      "success": true,
+      "at": 1788837212.964464,
+      "input_sha256": "499272b007064e174915513baf99e334d6c7865e5fa8ef6d26ebae1dd72c4e0d",
+      "error": null
+    },
+    {
+      "id": "call_sy5ibyvl",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "text",
+      "success": true,
+      "at": 1788837216.555457,
+      "input_sha256": "fb58bd711a6a35e212019a01a29bd712c388741fa669e15bf2d6b5c01e2971b4",
+      "error": null
+    },
+    {
+      "id": "call_p8ji3gbd",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "elements",
+      "success": true,
+      "at": 1788837219.27901,
+      "input_sha256": "f278bb129b7dd7c1e0806122b4e108fbf2a2355cd9587b4d6e3f46276fcdad67",
+      "error": null
+    },
+    {
+      "id": "call_qd3dfiww",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "elements",
+      "success": false,
+      "at": 1788837221.200541,
+      "input_sha256": "8f22830d549e1d0e4dc8739a49ca741158aa666da319c9af054b2c21041fa5b4",
+      "error": "{\"message\":\"Tool 'BrowserRead' received unsupported field(s): elements; accepted: tabId, maxChars, lane, mode, framePath, clientId\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"policy_rejection\",\"next_move\":\"Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.\",\"masc.payload\":{\"schema_shape\":{\"properties\":[\"tabId\",\"maxChars\",\"lane\",\"mode\",\"framePath\",\"clientId\"],\"required\":[]},\"error\":\"Tool 'BrowserRead' received unsupported field(s): elements; accepted: tabId, maxChars, lane, mode, framePath, clientId\",\"validation\":\"agent_core_tool_middleware\",\"reason\":\"invalid_args\",\"failure_class\":\"policy_rejection\"}}"
+    },
+    {
+      "id": "call_573k1kpg",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "elements",
+      "success": true,
+      "at": 1788837223.656827,
+      "input_sha256": "047d3bf1f157059d81a663d71d9ba6e40e6c8b6d4d66251b8ef40ee3b394c0af",
+      "error": null
+    },
+    {
+      "id": "call_0rjd6xuw",
+      "name": "BrowserAct",
+      "action": "click",
+      "mode": null,
+      "success": true,
+      "at": 1788837226.661406,
+      "input_sha256": "bd33bd5ed4dc5a24a2a4b4d3e6535b7bfd0fdc35d5386c94faa3837905c0a0ae",
+      "error": null
+    },
+    {
+      "id": "call_o672s9sr",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "downloads",
+      "success": false,
+      "at": 1788837233.179424,
+      "input_sha256": "b8378b5573a28137f6834426135d3351e2fde4aad0eebc1e0d9189370c40c7b7",
+      "error": "tool output artifact storage failed"
+    },
+    {
+      "id": "call_a16z7by8",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "downloads",
+      "success": false,
+      "at": 1788837235.474547,
+      "input_sha256": "b8378b5573a28137f6834426135d3351e2fde4aad0eebc1e0d9189370c40c7b7",
+      "error": "tool output artifact storage failed"
+    },
+    {
+      "id": "call_xjevggpk",
+      "name": "BrowserRead",
+      "action": null,
+      "mode": "downloads",
+      "success": false,
+      "at": 1788837419.633287,
+      "input_sha256": "b8378b5573a28137f6834426135d3351e2fde4aad0eebc1e0d9189370c40c7b7",
+      "error": "tool output artifact storage failed"
+    },
+    {
+      "id": "call_0bn83m1p",
+      "name": "BrowserSession",
+      "action": "close",
+      "mode": null,
+      "success": true,
+      "at": 1788837422.892069,
+      "input_sha256": "a4ddf188128a137b9c07638fdcffec9e72e96e3d1369095d7b529bf7c808036b",
+      "error": null
+    }
+  ],
+  "counts": {
+    "calls": 15,
+    "success": 10,
+    "failure": 5
+  },
+  "trace_sha256": {
+    "turn-1788837196560-2e70-000000.jsonl": "a6578021a424578c2fe5d0446e21422f135b1a72c5c2a514c19757141ccff0e9",
+    "turn-1788837420245-2e70-000001.jsonl": "4cbd1b44e309f0ce5c36550b56711cff453f7b7547616f525948027d6c399cab"
+  },
+  "cause": "BrowserRead producer returns normalized file reference without the durable result manifest required by Tool_bridge.project_result.",
+  "verification_limit": "Source fix and new provider-boundary test are not in the measured binary. Operation success is not task success. Only one of three requested files was downloaded."
+}

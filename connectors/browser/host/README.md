@@ -56,6 +56,29 @@ The host accepts only HTTP origins at `127.0.0.1`, `localhost`, or `::1`.
 Remote destinations and URL credentials, paths, queries, and fragments are
 rejected before the token is read or sent.
 
+## Connecting an ordinary Firefox / Zen profile
+
+A `live` Browser Lane uses the extension in the browser profile you are currently
+using. A separate WebDriver `automation` session does not register a live browser.
+Installing MASC's built-in browser Skill does not install a browser extension.
+
+After registering the native host above, open
+`about:debugging#/runtime/this-firefox` in the intended Firefox / Zen profile,
+choose **Load Temporary Add-on**, and select
+`connectors/browser/extension/manifest.json` from this checkout. Then refresh the
+Browser Lane connections with `r` and choose that browser.
+
+This is a development installation: Firefox removes a temporary extension on
+browser restart, so it must be loaded again. See
+[Mozilla's extension installation instructions](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Your_first_WebExtension#installing).
+
+`coordinator HTTP [connected]` together with an empty browser list means the MASC
+server is reachable but has no active native browser connection. Check extension
+loading in the intended profile, then its native host registration and server
+configuration. Opening the browser alone is insufficient. The TUI now distinguishes
+this empty state from a failed HTTP request; an older installed TUI may still label
+it `HTTP failed`.
+
 The native protocol uses a 4-byte little-endian length followed by UTF-8 JSON.
 Mozilla specifies native byte order and a 1 MiB host-to-browser limit; the
 supported macOS/Linux release architectures are little-endian. This host

@@ -261,9 +261,36 @@ let test_an_unknown_direction_is_refused_on_the_header () =
 
 let test_a_drawing_wider_than_the_pane_says_how_wide () =
   match failure ~cols:20 "graph LR\nA --> B --> C --> D --> E" with
-  | Mermaid.Too_wide { cells; cols } ->
+  | Mermaid.Too_wide { cells; cols; turning_it_fits = _ } ->
       Alcotest.(check int) "cols asked" 20 cols;
       Alcotest.(check bool) "needs more" true (cells > cols)
+  | Mermaid.Unsupported _ | Mermaid.Parse_error _ -> Alcotest.fail "not Too_wide"
+
+(* A chain across a narrow pane is the case a reader meets in chat: it needs
+   several times the columns it would need rows, and "needs 150, has 81" alone
+   leaves them with nothing to do about it. *)
+let test_a_chain_too_wide_says_which_way_would_fit () =
+  match failure ~cols:20 "graph LR\nA --> B --> C --> D --> E" with
+  | Mermaid.Too_wide { turning_it_fits = Some direction; _ } ->
+      Alcotest.(check string) "names the direction the source would carry" "TD"
+        (Mermaid.direction_word direction);
+      (* The claim has to be true: the same graph, that way, draws. *)
+      (match Mermaid.render ~cols:20 "graph TD\nA --> B --> C --> D --> E" with
+       | Ok rows -> Alcotest.(check bool) "and it does draw" true (rows <> [])
+       | Error _ -> Alcotest.fail "the direction it named does not fit either")
+  | Mermaid.Too_wide { turning_it_fits = None; _ } ->
+      Alcotest.fail "a chain that fits downward was not offered"
+  | Mermaid.Unsupported _ | Mermaid.Parse_error _ -> Alcotest.fail "not Too_wide"
+
+(* Turning is not always the answer, and saying it is would send the reader to
+   rewrite a diagram that comes back the same size. A single node too wide for
+   the pane is too wide either way. *)
+let test_turning_is_not_offered_when_it_does_not_help () =
+  match failure ~cols:8 "graph TD\nA[a label far wider than eight cells]" with
+  | Mermaid.Too_wide { turning_it_fits = None; _ } -> ()
+  | Mermaid.Too_wide { turning_it_fits = Some direction; _ } ->
+      Alcotest.failf "offered %s for a graph no direction fits"
+        (Mermaid.direction_word direction)
   | Mermaid.Unsupported _ | Mermaid.Parse_error _ -> Alcotest.fail "not Too_wide"
 
 let test_a_self_edge_is_refused () =
@@ -365,6 +392,10 @@ let () =
             test_an_unknown_direction_is_refused_on_the_header
         ; Alcotest.test_case "wider than the pane says how wide" `Quick
             test_a_drawing_wider_than_the_pane_says_how_wide
+        ; Alcotest.test_case "too wide says which way would fit" `Quick
+            test_a_chain_too_wide_says_which_way_would_fit
+        ; Alcotest.test_case "turning is not offered when it does not help" `Quick
+            test_turning_is_not_offered_when_it_does_not_help
         ; Alcotest.test_case "a self edge is refused" `Quick test_a_self_edge_is_refused
         ] )
     ; ( "reading"

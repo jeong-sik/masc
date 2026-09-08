@@ -101,19 +101,25 @@ let fetch_error_to_string = function
    site would silently become an underestimate if this changed. *)
 let preview_max = 200
 
-(* Adds exactly one character per source byte and stops at [preview_max], so
-   the result length is a hard ceiling rather than an approximation. The
-   exported bound depends on that. *)
+(* Preview metadata travels inside JSON strings, even when the stored bytes
+   are binary. Decode the bounded prefix before copying Unicode sequences;
+   replacing malformed sequences with one ASCII byte cannot exceed the
+   exported byte ceiling. File and string ingestion use the same prefix. *)
 let make_preview bytes =
   let len = min (String.length bytes) preview_max in
+  let prefix = String.sub bytes 0 len in
   let buf = Buffer.create len in
   let i = ref 0 in
-  while !i < len && Buffer.length buf < preview_max do
-    let c = String.unsafe_get bytes !i in
-    if c = '\n' || c = '\r' || c = '\t' then Buffer.add_char buf ' '
-    else if Char.code c < 0x20 then Buffer.add_char buf '?'
-    else Buffer.add_char buf c;
-    incr i
+  while !i < len do
+    let decoded = String.get_utf_8_uchar prefix !i in
+    let width = Uchar.utf_decode_length decoded in
+    if Uchar.utf_decode_is_valid decoded then (
+      let c = String.unsafe_get prefix !i in
+      if c = '\n' || c = '\r' || c = '\t' then Buffer.add_char buf ' '
+      else if Char.code c < 0x20 then Buffer.add_char buf '?'
+      else Buffer.add_substring buf prefix !i width)
+    else Buffer.add_char buf '?';
+    i := !i + width
   done;
   Buffer.contents buf
 

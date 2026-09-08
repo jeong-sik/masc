@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import { formatPct, formatPct1, formatTokens, formatNumber, formatCost, formatMsCompact } from './format-number'
 

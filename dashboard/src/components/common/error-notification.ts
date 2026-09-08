@@ -1,8 +1,8 @@
 // Error notification action handler — dedup + toast integration.
 
 import { showToast } from './toast'
-import type { DashboardError, ErrorCode } from '../../types/error'
-import { classifyErrorCode, severityForCode } from '../../types/error'
+import type { DashboardError } from '../../types/error'
+import { parseErrorDomain, severityFor } from '../../types/error'
 import {
   errors,
   unacknowledgedErrors,
@@ -24,12 +24,17 @@ function generateFingerprint(agentName: string, message: string): string {
 export function handleAgentFailed(params: {
   agentName: string
   taskId?: string
-  errorCode?: ErrorCode
+  /** agent_failed.error_code, verbatim. */
+  errorCode: string
+  /** agent_failed.error_domain, verbatim. */
+  errorDomain: string
+  /** agent_failed.error_retryable, verbatim. */
+  errorRetryable: boolean
   error: string
 }): void {
-  const { agentName, taskId, error } = params
-  const errorCode = params.errorCode ?? classifyErrorCode(error)
-  const severity = severityForCode(errorCode)
+  const { agentName, taskId, error, errorCode } = params
+  const domain = parseErrorDomain(params.errorDomain)
+  const severity = severityFor(domain, params.errorRetryable)
   const fingerprint = generateFingerprint(agentName, error)
   const now = Date.now()
 
@@ -53,7 +58,7 @@ export function handleAgentFailed(params: {
         : e,
     )
     const taskLabel = taskId ? ` (${taskId})` : ''
-    showToast(`${agentName}${taskLabel}: ${error}`, severity === 'info' ? 'warning' : 'error')
+    showToast(`${agentName}${taskLabel}: ${error}`, 'error')
     return
   }
 
@@ -64,6 +69,7 @@ export function handleAgentFailed(params: {
     taskId: taskId ?? null,
     message: error,
     errorCode,
+    domain,
     severity,
     timestamp: now,
     acknowledged: false,
@@ -74,7 +80,7 @@ export function handleAgentFailed(params: {
   errors.value = [...errors.value, newError]
 
   const taskLabel = taskId ? ` (${taskId})` : ''
-  showToast(`${agentName}${taskLabel}: ${error}`, severity === 'info' ? 'warning' : 'error')
+  showToast(`${agentName}${taskLabel}: ${error}`, 'error')
 }
 
 /** Test-only: reset error state. */

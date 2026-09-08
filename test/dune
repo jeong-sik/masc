@@ -3664,7 +3664,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table))
+ (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)

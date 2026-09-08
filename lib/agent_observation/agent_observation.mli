@@ -9,6 +9,13 @@ val canonical_url_of_remote : string -> string option
     deterministic host_path slug. Returns [None] for blank, malformed, or
     traversal-looking inputs. *)
 
+val remote_url_syntax : string -> bool
+(** [remote_url_syntax token] is [true] when [token] is written as a git
+    remote: a scheme {!canonical_url_of_remote} strips, or the scp-like
+    [user@host:path] form it normalises. A bare [owner/repo], a relative
+    path, an API endpoint path or a refspec is [false]. The predicate reads
+    syntax only; it does not say the remote exists or is reachable. *)
+
 module Code_address : sig
   type t
   (** A code fact's address: [(codebase, path)] where [codebase] is a

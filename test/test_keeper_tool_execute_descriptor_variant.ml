@@ -114,23 +114,24 @@ let property_description (input_schema : Yojson.Safe.t) name =
 ;;
 
 (* The no-shell rule is stated where a model reaches for '|': once in the
-   tool description, and once more on [argv] itself. *)
+   tool description, and once more on [argv] itself. Both ask for the rule,
+   not for a sentence -- #33528 cut the schema below its byte ceiling and
+   reworded both, and matching the old phrasing reported a wording change as
+   a missing rule. "without a shell" is the rule's own words. *)
 let test_description_states_the_no_shell_rule () =
   let execute_schema =
     Tool_shard_types.typed_execute_tools
     |> find_execute_schema
   in
   Alcotest.(check bool)
-    "description names one non-empty argv process vector run without a shell"
+    "the description states there is no shell"
     true
-    (Astring.String.is_infix
-       ~affix:"one non-empty argv process vector run without a shell"
-       execute_schema.description);
+    (Astring.String.is_infix ~affix:"without a shell" execute_schema.description);
   Alcotest.(check bool)
     "argv says there is no shell"
     true
     (Astring.String.is_infix
-       ~affix:"There is no shell"
+       ~affix:"without a shell"
        (property_description execute_schema.input_schema "argv"))
 ;;
 

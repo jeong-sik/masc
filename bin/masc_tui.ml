@@ -2205,6 +2205,13 @@ let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
    budget rather than one per failed poll. [s] stays the manual path. *)
 let tui_auto_start_attempted = ref false
 
+(* Whether the credential decision taken at boot is still owed a second look.
+   Set only when that decision came back [Unavailable]: minting needs a
+   workspace that already exists, and on a first install this process runs
+   before any server has made one. Cleared once a retry against a reachable
+   server settles it. *)
+let tui_credential_retry_pending = ref false
+
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
    [Sys.file_exists] is the same presence test the installer's layout gives
    us; the executable bit is not re-checked here because a non-executable
@@ -2764,59 +2771,72 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
         (Keeper_chat_approval_answered
            (request, tool_call_id, allow, Error "Eio switch is unavailable"))
 
-(* Fetch the page before [before]. One at a time: msg_older_loading gates the
-   caller, so scrolling fast cannot open a request per keypress and land the
-   pages out of order. *)
-(* Load the verification queue. Its own fiber, like every other surface fetch:
-   the pane stays responsive and a slow server costs the list rather than the
-   keypress that asked for it. *)
-let launch_tools_load state ~mailbox =
-  state.tools_request_generation <- state.tools_request_generation + 1;
-  let generation = state.tools_request_generation in
-  let host = server_peer_host in
-  let port = state.port in
+(* Automatic polling shares a pending reading for the same Keeper. Explicit
+   refresh and selection changes supersede it, retaining the generation guard. *)
+let launch_tools_load ?(force = true) state ~mailbox =
   let keeper =
     Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
   in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_tools ~host ~port ?keeper () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Tools_loaded (generation, keeper, result));
-    let async_observation =
-      try Masc_tui_http.fetch_async_request_observation ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
+  let already_reading =
+    match state.tools_read_inflight with
+    | Some request -> Option.equal String.equal request.tri_keeper keeper
+    | None -> false
   in
-  (* The skills catalog (usage + flows) is a separate read and must not
-     delay the tool list: a slow catalog costs its own section, not the
-     screen. *)
-  let run_catalog () =
-    let result =
-      try Masc_tui_loader.load_skills_catalog ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if force || not already_reading then begin
+    state.tools_request_generation <- state.tools_request_generation + 1;
+    let generation = state.tools_request_generation in
+    state.tools_read_inflight <- Some
+      { tri_generation = generation
+      ; tri_keeper = keeper
+      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read; Tools_async_read ]
+      };
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_tools ~host ~port ?keeper () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Tools_loaded (generation, keeper, result));
+      let async_observation =
+        try Masc_tui_http.fetch_async_request_observation ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
     in
-    enqueue_async mailbox (Skills_catalog_loaded (generation, result))
-  in
-  (match Eio_context.get_switch_opt () with
-   | Some sw ->
-       Eio.Fiber.fork_daemon ~sw (fun () ->
-           run_catalog ();
-           `Stop_daemon)
-   | None ->
-       enqueue_async mailbox
-         (Skills_catalog_loaded (generation, Error "Eio switch is unavailable")));
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (Tools_loaded (generation, keeper, Error "Eio switch is unavailable"))
+    (* The skills catalog (usage + flows) is a separate read and must not
+       delay the tool list: a slow catalog costs its own section, not the
+       screen. *)
+    let run_catalog () =
+      let result =
+        try Masc_tui_loader.load_skills_catalog ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Skills_catalog_loaded (generation, result))
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw ->
+         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
+         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None ->
+         let error = Error "Eio switch is unavailable" in
+         enqueue_async mailbox (Tools_loaded (generation, keeper, error));
+         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
+         enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
+  end
+
+let settle_tools_read state ~generation part =
+  match state.tools_read_inflight with
+  | Some request when request.tri_generation = generation ->
+      let pending = List.filter (fun pending -> pending <> part) request.tri_pending in
+      state.tools_read_inflight <-
+        (match pending with
+         | [] -> None
+         | _ -> Some { request with tri_pending = pending })
+  | Some _ | None -> ()
 
 let tools_skill_profiles state =
   match state.tools_inventory with
@@ -10234,6 +10254,73 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
            Masc_tui_paste.max_bytes paste.Masc_tui_paste.dropped)
   end
 
+(* The status a completed refresh leaves behind, in the vocabulary the
+   server-start rule decides over. Exhaustive on purpose: a new connection
+   state has to say here whether it counts as a reading of the port, and the
+   compiler asks rather than a wildcard answering for it. *)
+let contact_of_connection_status :
+    Masc_tui_types.connection_status -> Masc_tui_server_lifecycle.contact =
+  function
+  | Masc_tui_types.Disconnected -> Masc_tui_server_lifecycle.Nothing_answered
+  | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
+      Masc_tui_server_lifecycle.Server_reached
+  | Masc_tui_types.Connecting | Masc_tui_types.Booting
+  | Masc_tui_types.Reconnecting ->
+      Masc_tui_server_lifecycle.Undecided
+
+(* A mint and a failure are not the same news. Both were reported as errors,
+   which reads a working first start as a broken one -- and on a first
+   install, where the client mints for itself, that is the ordinary path. *)
+let credential_notice_level = function
+  | Masc_tui_credential.Unavailable _ -> "error"
+  | Masc_tui_credential.Held | Masc_tui_credential.Minted
+  | Masc_tui_credential.Not_required -> "system"
+
+(* What a refresh completing owes the operator, decided from the status it
+   concluded rather than from which message carried it.
+
+   Both reactions used to hang off [Http_refresh_failed], which carries an
+   exception a surface load threw. Nothing listening on the port is not that:
+   each surface returns its own connection error, the refresh completes, and
+   [apply_http_surfaces] concludes [Disconnected] from the results. So the
+   one case a first install produces reached neither the server start the
+   installer promises nor a second look at a credential that could not be
+   minted yet. *)
+let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
+    ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  let contact = contact_of_connection_status state.connection_status in
+  if
+    Masc_tui_server_lifecycle.start_due ~contact
+      ~already_attempted:!tui_auto_start_attempted
+  then begin
+    tui_auto_start_attempted := true;
+    start_masc_server_here ~base_path ~host ~port
+      ~note:(fun msg -> add_event state "system" msg)
+      ~on_ready:(fun () ->
+        start_http_refresh state ~host ~port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox)
+  end;
+  (* A server answering here is the workspace appearing. The decision is the
+     same guarded one taken at boot -- it still refuses a base path that holds
+     no workspace, so a server reached on some other path changes nothing --
+     taken again at the moment its precondition can hold. It stays pending
+     while it keeps failing, because the server that would settle it may be
+     the one this session is still starting. *)
+  if
+    !tui_credential_retry_pending
+    && contact = Masc_tui_server_lifecycle.Server_reached
+  then begin
+    let outcome = Masc_tui_http.install_operator_token ~base_path ~host ~port in
+    if not (Masc_tui_credential.outcome_needs_retry outcome) then begin
+      tui_credential_retry_pending := false;
+      Option.iter
+        (add_event state (credential_notice_level outcome))
+        (Masc_tui_credential.outcome_notice outcome)
+    end
+  end
+
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
@@ -10343,6 +10430,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
+      react_to_server_contact state ~base_path ~host:server_peer_host
+        ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox;
       (* The held-call listing rides the same cadence as the surface that
          draws it. Fetched only while the surface is up: the waits are
          short-lived and every other surface would fetch rows it never
@@ -10569,24 +10659,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
-      (* Nothing is answering the port. The TUI is the front door and the
-         server is how it opens, so start one rather than leave the operator
-         looking at a disconnected workspace and a key to press. This is the
-         only place the TUI concludes Disconnected, and
-         [tui_auto_start_attempted] makes it one spawn for the whole session:
-         a refresh also fails for reasons a new server would not fix, and a
-         second masc on this port would only fail to bind. *)
-      if not !tui_auto_start_attempted then begin
-        tui_auto_start_attempted := true;
-        start_masc_server_here ~base_path ~host:server_peer_host
-          ~port:state.port
-          ~note:(fun msg -> add_event state "system" msg)
-          ~on_ready:(fun () ->
-            start_http_refresh state ~host:server_peer_host ~port:state.port
-              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
-              ~scoped_refresh_inflight:http_scoped_refresh_inflight
-              ~scoped_refresh_followup ~mailbox)
-      end;
+      react_to_server_contact state ~base_path ~host:server_peer_host
+        ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -11965,6 +12040,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail)))
   | Tools_loaded (generation, keeper_name, result) ->
+      settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
          && Option.equal String.equal keeper_name selected_name then (
@@ -11975,6 +12051,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
   | Skills_catalog_loaded (generation, result) ->
+      settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (
       match result with
       | Ok catalog ->
@@ -11982,6 +12059,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.skills_catalog_error <- None
       | Error detail -> state.skills_catalog_error <- Some detail)
   | Tools_async_observation_loaded (generation, result) ->
+      settle_tools_read state ~generation Tools_async_read;
       if generation = state.tools_request_generation then (
       match result with
       | Ok observation ->
@@ -13159,11 +13237,16 @@ let main
      holds one the operator sees the cause ahead of the symptom: a tokenless
      process cannot dispatch, and cannot reconcile a dispatch an authenticated
      predecessor left behind. *)
-  (match
-     Masc_tui_credential.outcome_notice
-       (Masc_tui_http.install_operator_token ~base_path ~host ~port)
-   with
-   | Some notice -> add_event state "error" notice
+  (let outcome = Masc_tui_http.install_operator_token ~base_path ~host ~port in
+   (* On a first install nothing has served this base path yet, so the mint
+      gate refuses and this is not the answer to keep: the server that makes
+      the workspace is the one this TUI is about to start. Latching the retry
+      here is what stops a fresh install from sending the operator to
+      [masc login]. *)
+   tui_credential_retry_pending :=
+     Masc_tui_credential.outcome_needs_retry outcome;
+   match Masc_tui_credential.outcome_notice outcome with
+   | Some notice -> add_event state (credential_notice_level outcome) notice
    | None -> ());
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
@@ -20313,9 +20396,9 @@ and is loaded on demand through keeper_skill.
              launch_runtime_surface_load state ~mailbox:async_messages
                ~force:false
          | Tools ->
-             (* The inventory is near-static, but a tool whose projection
-                changes is exactly what this surface is read for. *)
-             launch_tools_load state ~mailbox:async_messages
+             (* A slow current read must finish before the next automatic
+                poll; explicit refresh still replaces it. *)
+             launch_tools_load ~force:false state ~mailbox:async_messages
          | Config ->
              (* The file moves under hot-reload edits from other agents. *)
              launch_runtime_config_load state ~mailbox:async_messages

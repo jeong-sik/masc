@@ -408,8 +408,8 @@ let checkpoint_json (st : machine) =
     ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
     ; "cartridge", named st.cart
     ; "disk", named st.disk
-        ; "disk_id", named st.disk_id
-        ; "media", media_json st.media
+    ; "disk_id", named st.disk_id
+    ; "media", media_json st.media
     ; "ledger", `List (List.map entry_json (List.rev st.entries))
     ]
 ;;

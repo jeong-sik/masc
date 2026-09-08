@@ -45,7 +45,7 @@ let test_discover_not_found_carries_command () =
   in
   Alcotest.check discovery_testable "not found returns the manual command"
     (L.Not_found
-       { manual_command = "masc --base-path /ws --host 0.0.0.0 --port 9001" })
+       { manual_command = "masc start --base-path /ws --host 0.0.0.0 --port 9001" })
     d
 
 let test_server_argv () =
@@ -165,6 +165,49 @@ let test_start_stop_reaped () =
       (try Sys.remove script with Sys_error _ -> ());
       (try Unix.rmdir dir with Unix.Unix_error _ -> ())
 
+
+(* Nothing answering is the only reading that calls for a server, and one
+   spawn is the whole session's budget: a refresh also fails for reasons a new
+   server would not fix, and a second masc on this port would only fail to
+   bind.
+
+   The reading, not the message, is what decides. A port with nothing on it
+   refuses each request separately, so the refresh completes with every
+   surface in error rather than throwing -- which is the shape a first install
+   produces, and the shape that reached no server start while this was keyed
+   on a thrown refresh instead. *)
+let test_start_is_due_only_when_nothing_answered () =
+  Alcotest.(check bool)
+    "nothing answered starts one" true
+    (L.start_due ~contact:L.Nothing_answered ~already_attempted:false);
+  Alcotest.(check bool)
+    "a second failed poll does not start another" false
+    (L.start_due ~contact:L.Nothing_answered ~already_attempted:true);
+  Alcotest.(check bool)
+    "a server that answered needs none" false
+    (L.start_due ~contact:L.Server_reached ~already_attempted:false);
+  Alcotest.(check bool)
+    "no reading yet starts nothing" false
+    (L.start_due ~contact:L.Undecided ~already_attempted:false)
+
+(* The command handed to an operator whose TUI could not find the binary has
+   to start a server. Bare [masc] on a terminal is the front door and opens
+   the TUI, so without [start] the advice loops the operator back to the
+   screen they are already looking at. *)
+let test_manual_command_starts_a_server () =
+  match
+    L.discover_server_binary ~tui_exe:"/nowhere/masc-tui"
+      ~file_exists:(fun _ -> false)
+      ~path_lookup:(fun _ -> None)
+      ~base_path:"/ws" ~host:"127.0.0.1" ~port:8935
+  with
+  | L.Sibling _ | L.On_path _ -> Alcotest.fail "nothing should have been found"
+  | L.Not_found { manual_command } ->
+      Alcotest.(check string)
+        "the manual command serves rather than opening the TUI"
+        "masc start --base-path /ws --host 127.0.0.1 --port 8935"
+        manual_command
+
 let () =
   Alcotest.run "tui_server_lifecycle"
     [
@@ -185,6 +228,13 @@ let () =
           Alcotest.test_case "server exited" `Quick test_wait_server_exited;
           Alcotest.test_case "times out" `Quick test_wait_times_out;
           Alcotest.test_case "zero attempts" `Quick test_wait_zero_attempts;
+        ] );
+      ( "start_due",
+        [
+          Alcotest.test_case "only when nothing answered" `Quick
+            test_start_is_due_only_when_nothing_answered;
+          Alcotest.test_case "the manual command starts a server" `Quick
+            test_manual_command_starts_a_server;
         ] );
       ( "start_stop",
         [ Alcotest.test_case "start then stop is reaped" `Quick test_start_stop_reaped ]

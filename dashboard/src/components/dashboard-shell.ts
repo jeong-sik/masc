@@ -1017,9 +1017,6 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 //   monitoring → status.ts           <SurfaceHeader> <h1>Keeper Fleet</h1>
 //   command    → operations-panel.ts <SurfaceHeader> <h1>Actions</h1>
 //   lab        → lab.ts              <SurfaceHeader> <h1>Tools</h1>
-// board is a third case: it renders NO header at all (#22086, prototype is
-// headerless) but must still be in this set so the generic SurfaceLead does not
-// reintroduce a title (board regressed that way in #22021).
 //
 // Which header a surface renders. Every tab is listed because a
 // Record<TabId, _> is incomplete until it is, and the compiler says so; the
@@ -1028,34 +1025,39 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 // and board regressed a duplicate title in #22021 while rendering no header
 // of its own (#22086).
 //
-// 'own'     the surface renders the shared SurfaceHeader in its own body
-// 'generic' the surface has no header, so SurfaceLead supplies the title
+// 'own'   the surface renders the shared SurfaceHeader in its own body
+// 'none'  the surface deliberately renders no header at all
+// 'shell' the surface has no header, so SurfaceLead supplies the title
 //
-// Three are still 'generic'. Giving them their own header and deleting
-// SurfaceLead with the last of them is #34094; until then the classification
-// is at least complete.
-const SURFACE_LEAD_SOURCE: Record<TabId, 'own' | 'generic'> = {
+// board was 'own' and renders nothing (#22086) -- it sat there only because
+// the two values could not tell "renders its own" from "renders none", and
+// both need the lead suppressed. They are different facts about a surface and
+// the next reader of this table should not have to know that.
+//
+// Two are 'shell'. Giving them their own header and deleting SurfaceLead with
+// the last of them is #34094; until then the classification is at least
+// complete and each row is true.
+const SURFACE_LEAD_SOURCE: Record<TabId, 'own' | 'none' | 'shell'> = {
   cockpit: 'own',
   overview: 'own',
   monitoring: 'own',
-  keepers: 'generic',
-  registry: 'generic',
-  board: 'own',
+  keepers: 'own',
+  registry: 'shell',
+  board: 'none',
   schedule: 'own',
   fusion: 'own',
   command: 'own',
   connectors: 'own',
   workspace: 'own',
   lab: 'own',
-  code: 'generic',
+  code: 'shell',
   logs: 'own',
   settings: 'own',
   approvals: 'own',
 }
 
 export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
-  if (isKeeperDetailDashboardRoute(routeState)) return false
-  return SURFACE_LEAD_SOURCE[routeState.tab] === 'generic'
+  return SURFACE_LEAD_SOURCE[routeState.tab] === 'shell'
 }
 
 function SurfaceLead() {

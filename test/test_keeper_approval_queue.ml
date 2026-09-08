@@ -2099,10 +2099,11 @@ let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
        Alcotest.(check bool)
          "continuation receipt survives restart"
          true
-         (AQ.continuation_chat_projection_present
-            ~base_path
+         (Chat_store.approval_lifecycle_phase_present
+            ~base_dir:base_path
             ~keeper_name
-            ~approval_id))
+            ~approval_id
+            ~phase:Chat_store.Approval_continuation_recorded))
 ;;
 
 (* #32956: a turn that received the replay and then failed after the
@@ -2182,7 +2183,11 @@ let test_failed_continuation_receipt_settles_once_after_the_grant_is_spent () =
        Alcotest.(check bool)
          "the failed receipt is not a recorded receipt"
          false
-         (AQ.continuation_chat_projection_present ~base_path ~keeper_name ~approval_id);
+         (Chat_store.approval_lifecycle_phase_present
+            ~base_dir:base_path
+            ~keeper_name
+            ~approval_id
+            ~phase:Chat_store.Approval_continuation_recorded);
        Alcotest.(check bool)
          "the intake reads the failed receipt as settled"
          true

@@ -2744,8 +2744,16 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
   with
   | Error _ as error -> error
   | Ok (Approval_lifecycle_exact result) -> Ok result
-  | Ok (Approval_lifecycle_conflict _) ->
-    Error "approval lifecycle provenance exists with conflicting content"
+  | Ok (Approval_lifecycle_conflict existing) ->
+    (* The slot is settled once; say by what, so a caller that reports this
+       as "projection failed" still names the phase already there. *)
+    Error
+      (Printf.sprintf
+         "approval lifecycle provenance exists with conflicting content: \
+          approval %s already holds phase %s where phase %s was to be appended"
+         lifecycle.approval_id
+         (approval_lifecycle_phase_to_label existing.phase)
+         (approval_lifecycle_phase_to_label lifecycle.phase))
 ;;
 
 let existing_approval_lifecycle_at_slot

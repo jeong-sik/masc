@@ -1064,7 +1064,7 @@ let keeper_fleet_safety_health_json
   let keeper_bootstrap_enabled =
     match keeper_bootstrap_enabled_override with
     | Some value -> value
-    | None -> Env_config.KeeperBootstrap.enabled
+    | None -> Env_config.KeeperBootstrap.enabled ()
   in
   let runtime_base_path =
     match base_path with

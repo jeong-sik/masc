@@ -2,9 +2,15 @@ name: Browser Host Proof
 
 on:
   pull_request:
+    # Only the paths whose behaviour a real Firefox on macOS can change.
+    # bin/dune and test/dune used to be listed too, and that made this
+    # 20-minute macos-14 job run for most pull requests: on 2026-09-07,
+    # 19 of the 28 branches it ran for touched no browser file at all,
+    # only a dune stanza elsewhere. A broken stanza is caught by the Linux
+    # dune build @check on every pull request; nothing about Firefox
+    # depends on it.
     paths:
       - 'bin/masc_browser_host.ml'
-      - 'bin/dune'
       - 'lib/browser_lane/**'
       - 'lib/browser_webdriver.*'
       - 'lib/browser_download*'
@@ -20,7 +26,6 @@ on:
       - 'scripts/probe-firefox-controls.py'
       - 'scripts/fixtures/firefox_controls_probe.ml'
       - 'test/test_browser_native_host.py'
-      - 'test/dune'
       - '.github/workflows/browser-host-proof.yml'
   workflow_dispatch:
 

@@ -32,3 +32,8 @@ type admission =
 val prepare :
   identity:identity -> message:Agent_core.Types.message ->
   Agent_core.Checkpoint.t -> (admission, error) result
+
+(** Whether this transmission view still contains intact admitted evidence.
+    This is not persistence authority; [prepare] validates canonical history. *)
+val contains : identity:identity -> message:Agent_core.Types.message ->
+  Agent_core.Types.message list -> bool

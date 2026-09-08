@@ -983,12 +983,41 @@ let run_turn
       | (Some _ as blocks), None -> blocks
       | None, _ -> None
     in
-    let ctx_work =
-      match hitl_resolution with
-      | None -> ctx_work
-      | Some _ ->
-        let user_message = Agent_core.Types.user_msg user_message in
-        Keeper_context_runtime.append ctx_work user_message
+    let admission =
+      match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence with
+      | Some _, Some evidence ->
+        (match Keeper_gate_replay.approval_input evidence with
+         | Error error -> Error (Keeper_approval_input_admission.error_to_string error)
+         | Ok (identity, message) ->
+           let checkpoint = Keeper_context_runtime.checkpoint_of_context ctx_work in
+           let checkpoint = { checkpoint with Agent_core.Checkpoint.session_id = trace_id } in
+           Keeper_approval_input_checkpoint.admit
+             ~session_dir:session.session_dir ~identity ~message checkpoint
+           |> Result.map (fun checkpoint -> Some checkpoint))
+      | _ -> Ok None
+    in
+    match admission with
+    | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+    | Ok admitted_checkpoint ->
+    let continue_from_checkpoint = Option.is_some admitted_checkpoint in
+    let ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks =
+      match admitted_checkpoint with
+      | Some checkpoint ->
+        ( Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
+        , checkpoint.Agent_core.Checkpoint.messages
+        , Some checkpoint
+        (* Native continuation reads the persisted input without appending
+           this goal. Official vendor sessions still require explicit current
+           input; their resume API does not import this canonical history. *)
+        , user_message
+        , None )
+      | None ->
+        let ctx_work =
+          match hitl_resolution with
+          | None -> ctx_work
+          | Some _ -> Keeper_context_runtime.append ctx_work (Agent_core.Types.user_msg user_message)
+        in
+        ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks
     in
     let prompt_metrics =
       Keeper_agent_prompt_metrics.build_prompt_metrics
@@ -1320,6 +1349,7 @@ let run_turn
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
                       ~pre_tool_rejects
+                      ~continue_from_checkpoint
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~session_id:

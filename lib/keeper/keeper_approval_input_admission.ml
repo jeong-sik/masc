@@ -58,6 +58,23 @@ let decode_marker = function
      | _ -> Error Malformed_marker)
   | _ -> Error Malformed_marker
 
+let contains ~identity:expected ~message messages =
+  let expected_digest = digest message in
+  List.exists
+    (fun current ->
+      match marker_values current with
+      | [ marker ] ->
+        (match decode_marker marker with
+         | Ok (actual, body_digest) ->
+           current.Agent_core.Types.role = Agent_core.Types.User
+           && String.equal actual.approval_id expected.approval_id
+           && String.equal actual.evidence_fingerprint expected.evidence_fingerprint
+           && String.equal body_digest expected_digest
+           && String.equal body_digest (digest (without_marker current))
+         | Error _ -> false)
+      | _ -> false)
+    messages
+
 let prepare ~identity:expected ~message (checkpoint : Agent_core.Checkpoint.t) =
   if message.Agent_core.Types.role <> Agent_core.Types.User || marker_values message <> []
   then Error Invalid_input

@@ -60,7 +60,7 @@ verifies come from one release.
 
 ```bash
 TAG=v0.33.0
-curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"

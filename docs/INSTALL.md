@@ -37,16 +37,22 @@ macOS ([Homebrew 설치 조건](https://docs.brew.sh/Installation)):
 brew install python gmp libpq openssl@3 zstd
 ```
 
-관리자 패키지 설치는 운영자가 실행합니다. MASC 설치 스크립트는 `sudo`나
-패키지 관리자를 자동 실행하지 않습니다. macOS의 Homebrew 라이브러리 경로는
-해당 CPU의 기본 prefix를 사용합니다. 실제 로더 실패가 나면 그 오류를 기준으로
-누락 라이브러리를 보충하세요.
+개선된 macOS 설치기는 다운로드 전에 OS 버전과 Homebrew 런타임 의존성을
+확인하고, 없는 패키지만 설치합니다. Homebrew가 없는 터미널에서는 공식
+Homebrew 설치 프로그램으로 이어지며, 그 프로그램의 확인·암호 입력을 거칩니다.
+비대화형 실행에서는 Homebrew를 미리 준비해야 합니다. `--dry-run`은 패키지를
+설치하지 않습니다. Linux 시스템 패키지는 위 명령으로 준비합니다.
+
+macOS의 Homebrew 라이브러리 경로는 해당 CPU의 기본 prefix를 사용합니다.
+Apple Silicon의 Intel Homebrew 등 다른 prefix로 연결된 환경은 다운로드 전에
+원인을 안내합니다. 패키지 설치 후에도 바이너리가 시작되지 않으면 설치기가
+실행 파일의 stderr 원문을 바로 표시합니다.
 
 ### macOS에서 `SIGABRT` 또는 `build-commit` 실패
 
 `SIGABRT`는 프로세스의 종료 신호이며, 그 자체로 원인을 알려주지 않습니다.
 `dyld: Library not loaded` 같은 stderr 원문과 실패한 실행 파일 경로를 확인하세요.
-현재 보고된 설치 중단의 원인은 확인 중입니다. 누락 라이브러리로 단정하지 않습니다.
+종료 신호만으로 누락 라이브러리라고 단정하지 않습니다.
 
 0.34.0 배포 파일의 Mach-O 최소 OS는 Apple Silicon **macOS 14.0**,
 Intel **macOS 15.0**입니다. 해당 CPU의 기본 Homebrew prefix
@@ -66,7 +72,7 @@ uname -m
 
 ```bash
 TAG=v0.34.0
-curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -75,7 +81,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 `--prefix` 기본값은 `$HOME/.local/bin`, `--base-path` 기본값은 설치 명령을
 실행한 디렉터리입니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
-작업 데이터 위치는 독립적입니다. 스크립트와 자산은 반드시 같은 태그를 사용합니다.
+작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
+릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
 
 `--no-wizard`는 모델 선택을 건너뜁니다. `--provider <id>`는

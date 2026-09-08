@@ -19,6 +19,7 @@ val run_named_with_masc_tools :
   base_path:string ->
   system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
+  ?native_tools:Agent_core.Tool.t list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
@@ -46,7 +47,9 @@ val run_named_with_masc_tools :
     the typed per-candidate observation from {!Keeper_turn_driver.run_named}
     without changing its terminal result.
 
+    [native_tools] adds native tools without losing invocation identity or
+    handler observations.
+
     [goal_blocks] replaces the [goal] string as the turn input when present
     (same contract as {!Keeper_turn_driver.run_named}): the caller puts the
     prompt itself in a [Text] block first, then any media blocks. *)
-

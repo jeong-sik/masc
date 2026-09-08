@@ -266,6 +266,10 @@ Keeper runtime 시스템 프롬프트가 아닙니다.
 기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
 `browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
 지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
+0.34.0의 Gecko scene 기능은 새 native host와 브라우저 확장 0.3.0을 함께 사용합니다.
+기존 브라우저 확장은 별도로 갱신해야 합니다. 기존 `browser-lanes` 패키지도
+사용자 변경 보존 정책에 따라 덮어쓰지 않으므로, scene 안내가 필요하면 변경 내용을
+검토해 해당 패키지에 반영하세요.
 `--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
 
 | Keeper | 개별 지침의 역할 |

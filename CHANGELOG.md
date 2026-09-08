@@ -22,6 +22,11 @@
 
 ### Runtime changes since 0.33.0
 
+- Add Gecko semantic scenes and the TUI `s` scene view with observed control
+  selection/clicks (#34297, #34298). Scene replies remain bound to their browser,
+  tab and document. Live use requires the updated native host and extension 0.3.0;
+  the installer does not upgrade an existing browser extension.
+
 - **The embedded tree is the managed asset set; the hand-written manifest is
   gone.** `config/{tools,prompts,mcp}/managed-assets.json` listed the files
   beside it a second time, and five releases running shipped with a file on

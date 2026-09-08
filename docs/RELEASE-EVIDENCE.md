@@ -53,8 +53,9 @@ gh workflow run release-candidate.yml --ref main
 `test/ci-known-failures.txt` 정책은 그대로 적용되므로 전체 Test 통과를
 모든 알려진 결함의 해결로 해석하지 않습니다.
 
-`candidate-verification-<sha>` artifact는 커밋과 세 결과를 기록합니다.
-실패·취소·건너뜀은 성공으로 기록하지 않습니다. 공개 Release는 생성하지
+`candidate-verification-<sha>-attempt-<n>` artifact는 커밋과 세 결과를 기록합니다.
+실패·취소·건너뜀은 성공으로 기록하지 않습니다. 재실행 시 해당 job의
+중간 자산을 교체하며, 최종 배포 묶음과 receipt는 attempt별로 보존합니다. 공개 Release는 생성하지
 않으며, 태그 push의 게시 경로만 유지합니다. 새 main 커밋을 태그할 때는
 그 커밋으로 다시 실행해야 합니다. 과거 freeze 브랜치의 초록 결과를
 현재 main의 증거로 재사용하지 않습니다.

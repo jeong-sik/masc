@@ -42,6 +42,7 @@ jobs:
           CANDIDATE_RESULTS: ${{ toJSON(needs) }}
           CANDIDATE_COMMIT: ${{ github.sha }}
           CANDIDATE_REF: ${{ github.ref }}
+          CANDIDATE_ATTEMPT: ${{ github.run_attempt }}
           CANDIDATE_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python3 - <<'PYCODE'
@@ -54,6 +55,7 @@ jobs:
               'schema_version': 1,
               'commit': os.environ['CANDIDATE_COMMIT'],
               'ref': os.environ['CANDIDATE_REF'],
+              'run_attempt': int(os.environ['CANDIDATE_ATTEMPT']),
               'run_url': os.environ['CANDIDATE_RUN'],
               'results': results,
               'checks_passed': passed,
@@ -71,7 +73,7 @@ jobs:
       - name: Upload candidate receipt
         uses: actions/upload-artifact@v7
         with:
-          name: candidate-verification-${{ github.sha }}
+          name: candidate-verification-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: candidate-verification.json
           if-no-files-found: error
 

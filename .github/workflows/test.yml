@@ -391,6 +391,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: suite-runner-log
+          overwrite: ${{ inputs.candidate_verification == true }}
           path: ${{ runner.temp }}/ci-run-tests.log
           if-no-files-found: warn
           retention-days: 14

@@ -320,6 +320,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: masc-${{ matrix.arch }}
+          overwrite: ${{ inputs.candidate_verification == true }}
           path: dist/*
 
   release:
@@ -396,7 +397,7 @@ jobs:
       - name: Upload assembled distribution
         uses: actions/upload-artifact@v7
         with:
-          name: release-distribution
+          name: release-distribution-attempt-${{ github.run_attempt }}
           path: release-assets/*
           if-no-files-found: error
 

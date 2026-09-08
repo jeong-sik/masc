@@ -1713,6 +1713,7 @@ let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
   let toml_content =
     {|
 [keeper]
+instructions = "Exercise the declared custom sandbox image."
 sandbox_profile = "docker"
 sandbox_image = "masc-keeper-sandbox:custom-tag"
 network_mode = "none"
@@ -1842,7 +1843,7 @@ let test_parse_rejects_unknown_keys () =
     (List.sort String.compare
        [ "name"; "runtime_id"; "autoboot_enabled"; "mention_targets"
        ; "max_context_override"; "proactive_enabled"; "sandbox_profile"
-       ; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
+       ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
        ; "instructions"
        ])
     (List.sort String.compare Keeper_turn_up_args.known_turn_up_args);

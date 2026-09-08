@@ -9215,6 +9215,31 @@ def verifier_lane_runs_response() -> HttpResponse:
     )
 
 
+def standalone_lane_runtime_config_response() -> HttpResponse:
+    return (
+        200,
+        {
+            **runtime_config_read_metadata(),
+            "path": "/workspace/config/runtime.toml",
+            "source_text": "\n".join(
+                [
+                    "[runtime.exact_output_lanes.board_attention_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.hitl_auto_judge]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.librarian_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.verifier_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                ]
+            ),
+        },
+    )
+
+
 def verifier_lane_run_detail_response() -> HttpResponse:
     return (
         200,
@@ -10092,7 +10117,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=220,
             needle=b"Standalone LLM lanes",
             controls=(FULL_REDRAW,),
         )
@@ -10181,7 +10206,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=220,
             needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
             controls=(FULL_REDRAW,),
         )
@@ -10212,8 +10237,9 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            rows=14,
-            columns=140,
+            # 14 surface rows plus the fixture agenda and composer rows.
+            rows=16,
+            columns=220,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
         )
@@ -10226,7 +10252,8 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            rows=14,
+            # 14 surface rows plus the fixture agenda and composer rows.
+            rows=16,
             columns=100,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
@@ -10264,8 +10291,9 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            rows=14,
-            columns=140,
+            # 14 surface rows plus the fixture agenda and composer rows.
+            rows=16,
+            columns=220,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
         )
@@ -10283,7 +10311,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=220,
             needle=b"GATE RESOLUTION  NOT PROVEN BY THIS RUN",
             controls=(FULL_REDRAW,),
         )
@@ -12888,6 +12916,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
     lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
     lanes_fixtures[
         "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
@@ -14585,28 +14614,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[
         "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
     ] = hitl_lane_run_detail_response()
-    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
-        200,
-        {
-            **runtime_config_read_metadata(),
-            "path": "/workspace/config/runtime.toml",
-            "source_text": "\n".join(
-                [
-                    "[runtime.exact_output_lanes.board_attention_exact]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                    "",
-                    "[runtime.exact_output_lanes.hitl_auto_judge]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                    "",
-                    "[runtime.exact_output_lanes.librarian_exact]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                    "",
-                    "[runtime.exact_output_lanes.verifier_exact]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                ]
-            ),
-        },
-    )
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",

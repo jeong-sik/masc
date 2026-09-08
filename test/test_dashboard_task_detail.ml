@@ -1,4 +1,5 @@
 open Alcotest
+open Masc
 module Detail = Server_dashboard_task_detail
 
 let task id description =
@@ -55,12 +56,16 @@ let test_authoritative_storage () =
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let check_read id expected =
-        let status, body = Detail.read ~config ~task_id:id |> Detail.response in
+        let status, body = Detail.read ~config ~task_id:(Some id) |> Detail.response in
         check bool "authoritative storage status" true (status = expected);
         if status = `Service_unavailable then
           check string "storage diagnostics stay private" "task detail unavailable"
             Yojson.Safe.Util.(body |> member "error" |> to_string)
       in
+      let missing_status, _ = Detail.read ~config ~task_id:None |> Detail.response in
+      check bool "absent query is bad request before storage access" true
+        (missing_status = `Bad_request);
+      check_read " \t" `Bad_request;
       check_read "task-selected" `Service_unavailable;
       ignore (Masc.Workspace.init config ~agent_name:(Some "task-detail-test"));
       let backlog = match Masc.Workspace_backlog.read_backlog_r config with

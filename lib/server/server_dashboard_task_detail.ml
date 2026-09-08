@@ -9,6 +9,9 @@ let find ~tasks ~goal_task_index ~task_id =
     | Some task -> Ok (Dashboard_execution.task_json ~goal_task_index task)
 
 let read ~config ~task_id =
+  match task_id with
+  | None -> Error Missing_task_id
+  | Some task_id ->
   let task_id = String.trim task_id in
   if task_id = "" then Error Missing_task_id
   else
@@ -31,7 +34,9 @@ let read ~config ~task_id =
     | Sys_error _ | Unix.Unix_error _
     | Workspace_backlog.Backlog_read_failed _ -> Error Task_detail_unavailable
 
-let response = function
+type status = [ `OK | `Bad_request | `Not_found | `Service_unavailable ]
+
+let response result : status * Yojson.Safe.t = match result with
   | Ok task -> `OK, `Assoc ["task", task]
   | Error Missing_task_id ->
       `Bad_request, `Assoc ["error", `String "task_id is required"]

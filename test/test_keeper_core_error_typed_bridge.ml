@@ -148,8 +148,15 @@ let core_error_cases : (string * CoreError.t * string) list =
     , "agent_error_hook_execution_failed:hook=post_tool_use,stage=execute" )
   ; ( "Agent/TerminalToolEffectFailed"
     , terminal_effect_core_error
-    , "agent_error_terminal_tool_effect_failed:tool_use_id=tool-terminal,effect_disposition=proven_post_effect"
-    )
+      (* This one arm does not carry the agent_error_ prefix its neighbours
+         do. The kind is the wire spelling the terminal-reason reader matches
+         against, so the producer names it through
+         [Keeper_internal_error.terminal_effect_failed_kind] and a second
+         spelling here would decode as Unknown and leave the receipt
+         unmapped. Read the constant rather than copy what it says. *)
+    , Printf.sprintf
+        "%s:tool_use_id=tool-terminal,effect_disposition=proven_post_effect"
+        Keeper_internal_error.terminal_effect_failed_kind )
   ; ( "Agent/TerminalToolDurabilityFailed"
     , terminal_durability_core_error
     , "agent_error_terminal_tool_durability_failed:tool_use_id=tool-durable,effect_disposition=effect_outcome_unknown"

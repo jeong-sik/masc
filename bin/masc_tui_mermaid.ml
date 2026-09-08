@@ -30,10 +30,24 @@ type edge = {
   label : string option;
 }
 
+(* A [subgraph … end]. Its members are laid out on their own and the result
+   is placed in the enclosing scope as one item, so nesting is the same
+   thing one level down. [group_direction] is a [direction] statement
+   inside the subgraph; Mermaid ignores one at the top level, and so do
+   we. *)
+type group = {
+  group_id : string;
+  group_label : string;
+  group_direction : direction option;
+  group_nodes : string list;  (* ids declared directly inside, source order *)
+  group_children : group list;
+}
+
 type graph = {
   direction : direction;
-  nodes : node list;
+  nodes : node list;  (* every node of the diagram, source order *)
   edges : edge list;
+  groups : group list;  (* the subgraphs at the top level *)
 }
 
 (* ── Sequence diagrams ─────────────────────────────────────────────────── *)
@@ -208,22 +222,57 @@ let find_from text from needle =
 type statement_kind =
   | Skipped
   | Statement
+  | Group_open of string  (* the text after [subgraph] *)
+  | Group_close
+  | Group_direction of string
 
+(* The skipped words are styling and interaction. This renderer draws rows
+   of box-drawing characters and carries no colour or click, so dropping
+   them loses nothing that the output could have shown. Grouping is not in
+   that class, which is why [subgraph] is read. *)
 let statement_kind line =
-  let word =
+  let word, rest =
     match String.index_opt line ' ' with
-    | Some i -> String.sub line 0 i
-    | None -> line
+    | Some i ->
+        (String.sub line 0 i, String.trim (String.sub line (i + 1) (String.length line - i - 1)))
+    | None -> (line, "")
   in
   match word with
-  | "subgraph" | "end" | "classDef" | "class" | "style" | "linkStyle" | "click"
-  | "direction" ->
-      Skipped
+  | "subgraph" -> Group_open rest
+  | "end" when rest = "" -> Group_close
+  | "direction" -> Group_direction rest
+  | "classDef" | "class" | "style" | "linkStyle" | "click" -> Skipped
   | _ -> Statement
+
+(* [subgraph one], [subgraph one [Title]], [subgraph one ["Title"]]. With no
+   bracket the whole text is both the name and the title, as Mermaid reads
+   it; such a name may hold spaces, and then no edge can name it. *)
+let parse_group_header text =
+  match String.index_opt text '[' with
+  | None ->
+      let id = String.trim text in
+      if id = "" then Error "a subgraph with no name" else Ok (id, id)
+  | Some i ->
+      let id = String.trim (String.sub text 0 i) in
+      let rest = String.sub text i (String.length text - i) in
+      let n = String.length rest in
+      if id = "" then Error "a subgraph with no name"
+      else if n < 2 || rest.[n - 1] <> ']' then
+        Error ("the title of subgraph " ^ id ^ " is never closed")
+      else Ok (id, label_text (String.sub rest 1 (n - 2)))
 
 type declared = {
   mutable order : string list;  (* ids, newest first *)
   table : (string, node) Hashtbl.t;
+}
+
+(* One [subgraph] the parser has opened and not yet closed. *)
+type frame = {
+  f_id : string;
+  f_label : string;
+  mutable f_direction : direction option;
+  mutable f_nodes : string list;  (* reverse source order *)
+  mutable f_children : group list;  (* reverse source order *)
 }
 
 let declare declared id ~label ~shape ~explicit =
@@ -245,13 +294,26 @@ let parse_node c declared =
       | (opener, closer, shape) :: rest ->
           if starts c opener then (
             let start = c.pos + String.length opener in
-            match find_from c.text start closer with
-            | None -> Error (Printf.sprintf "%s after %s is never closed" opener id)
-            | Some stop ->
-                let raw = String.sub c.text start (stop - start) in
-                declare declared id ~label:(label_text raw) ~shape ~explicit:true;
-                c.pos <- stop + String.length closer;
-                Ok id)
+            (* A quoted label may hold the closing bracket as text, as in
+               [A["fixed [HOLD: see #1]"]]. Mermaid ends such a label at the
+               quote, so the bracket is looked for after it. *)
+            let after_quote =
+              if start < String.length c.text && c.text.[start] = '"' then
+                match find_from c.text (start + 1) "\"" with
+                | Some quote -> Some (quote + 1)
+                | None -> None
+              else Some start
+            in
+            match after_quote with
+            | None -> Error (Printf.sprintf "the quoted label after %s is never closed" id)
+            | Some from -> (
+                match find_from c.text from closer with
+                | None -> Error (Printf.sprintf "%s after %s is never closed" opener id)
+                | Some stop ->
+                    let raw = String.sub c.text start (stop - start) in
+                    declare declared id ~label:(label_text raw) ~shape ~explicit:true;
+                    c.pos <- stop + String.length closer;
+                    Ok id))
           else try_openers rest
     in
     try_openers openers
@@ -568,21 +630,92 @@ let parse text =
           in
           let declared = { order = []; table = Hashtbl.create 16 } in
           let edges = ref [] in
+          (* One open [subgraph]. Members are collected until its [end]; a
+             nested one closes into its parent's children. *)
+          let stack = ref [] in
+          let top_groups = ref [] in
+          let owner_of_new_nodes ids =
+            match !stack with
+            | frame :: _ -> frame.f_nodes <- List.rev_append ids frame.f_nodes
+            | [] -> ()
+          in
           let rec statements = function
             | [] -> Ok ()
             | (number, statement) :: more -> (
+                let fail what = Error (Parse_error { line = number; what }) in
                 match statement_kind statement with
                 | Skipped -> statements more
+                | Group_direction word -> (
+                    (* Mermaid honours [direction] inside a subgraph and
+                       ignores one at the top level, where the header
+                       already said which way the diagram reads. *)
+                    match !stack with
+                    | [] -> statements more
+                    | frame :: _ -> (
+                        match direction_of_word word with
+                        | Some direction ->
+                            frame.f_direction <- Some direction;
+                            statements more
+                        | None -> fail ("unknown direction " ^ word)))
+                | Group_open text -> (
+                    match parse_group_header text with
+                    | Error what -> fail what
+                    | Ok (id, label) ->
+                        if Hashtbl.mem declared.table id then
+                          fail ("subgraph " ^ id ^ " has the name of a node")
+                        else if List.exists (fun f -> String.equal f.f_id id) !stack then
+                          fail ("subgraph " ^ id ^ " is already open")
+                        else (
+                          stack :=
+                            { f_id = id
+                            ; f_label = label
+                            ; f_direction = None
+                            ; f_nodes = []
+                            ; f_children = []
+                            }
+                            :: !stack;
+                          statements more))
+                | Group_close -> (
+                    match !stack with
+                    | [] -> fail "an end with no subgraph"
+                    | frame :: rest ->
+                        let group =
+                          { group_id = frame.f_id
+                          ; group_label = frame.f_label
+                          ; group_direction = frame.f_direction
+                          ; group_nodes = List.rev frame.f_nodes
+                          ; group_children = List.rev frame.f_children
+                          }
+                        in
+                        stack := rest;
+                        (match rest with
+                         | parent :: _ -> parent.f_children <- group :: parent.f_children
+                         | [] -> top_groups := group :: !top_groups);
+                        statements more)
                 | Statement -> (
+                    let before = List.length declared.order in
                     match parse_statement statement declared edges with
-                    | Ok () -> statements more
-                    | Error what -> Error (Parse_error { line = number; what })))
+                    | Ok () ->
+                        (* [declared.order] is newest first, so the ids this
+                           statement added are its first [added] entries. *)
+                        let added = List.length declared.order - before in
+                        owner_of_new_nodes
+                          (List.filteri (fun i _ -> i < added) declared.order |> List.rev);
+                        statements more
+                    | Error what -> fail what))
           in
           let* () = statements (split_statements rest) in
+          let* () =
+            match !stack with
+            | [] -> Ok ()
+            | frame :: _ -> Error (Unsupported ("subgraph " ^ frame.f_id ^ " with no end"))
+          in
           let nodes =
             List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
           in
-          Ok (Graph { direction; nodes; edges = List.rev !edges })
+          Ok
+            (Graph
+               { direction; nodes; edges = List.rev !edges; groups = List.rev !top_groups })
       | [ "sequenceDiagram" ] ->
           let* sequence = parse_sequence rest in
           Ok (Sequence sequence)
@@ -730,9 +863,27 @@ let shown_label node =
 
 let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
 
+(* A subgraph already laid out: [c_rows] is its drawing, and the scope that
+   holds it treats the whole thing as one box. *)
+type cluster = {
+  c_group : group;
+  c_rows : string list;
+  c_width : int;
+  c_height : int;
+}
+
 type item =
   | Real of node
+  | Cluster of cluster
   | Dummy
+
+let cluster_pad = 2 (* the border, one cell each side *)
+let cluster_title_pad = 6 (* [(-- ] and [ --)] around the title, and both corners *)
+
+let cluster_width c =
+  max (c.c_width + cluster_pad) (Layout.display_width c.c_group.group_label + cluster_title_pad)
+
+let cluster_height c = c.c_height + cluster_pad
 
 type placed = {
   item : item;
@@ -760,11 +911,103 @@ let along_flow direction =
   | Top_down | Bottom_up -> `Rows
   | Left_right | Right_left -> `Cols
 
-let render_graph ~cols graph =
-  let node_count = List.length graph.nodes in
+let item_id = function
+  | Real node -> node.id
+  | Cluster c -> c.c_group.group_id
+  | Dummy -> ""
+
+let rec map_result f = function
+  | [] -> Ok []
+  | x :: rest ->
+      let* y = f x in
+      let* ys = map_result f rest in
+      Ok (y :: ys)
+
+(* Every id a subgraph holds, itself included. *)
+let rec ids_beneath group =
+  group.group_id :: (group.group_nodes @ List.concat_map ids_beneath group.group_children)
+
+(* Which item of a scope stands for [id]: the item itself when it is
+   declared right here, otherwise the subgraph that has it somewhere below. *)
+let owner_table ~nodes ~groups =
+  let table = Hashtbl.create 16 in
+  List.iter (fun node -> Hashtbl.replace table node.id node.id) nodes;
+  List.iter
+    (fun group -> List.iter (fun id -> Hashtbl.replace table id group.group_id) (ids_beneath group))
+    groups;
+  table
+
+(* An edge either joins two items of this scope, or lives entirely inside
+   one subgraph and belongs to that scope instead. An edge with one end
+   inside a subgraph and the other outside has no drawing here: the box is
+   the item, and a line to a member would have to cross a border the box
+   owns. Naming the subgraph on that side draws the link between boxes. *)
+let partition_edges ~nodes ~groups ~edges =
+  let owner = owner_table ~nodes ~groups in
+  let inside_a_group = Hashtbl.create 8 in
+  List.iter (fun group -> Hashtbl.replace inside_a_group group.group_id []) groups;
+  let rec walk here = function
+    | [] ->
+        (* Both lists were built by consing; source order is what the layout
+           breaks ties on, so both go back the way they were written. *)
+        Hashtbl.iter (fun id edges -> Hashtbl.replace inside_a_group id (List.rev edges))
+          (Hashtbl.copy inside_a_group);
+        Ok (List.rev here, inside_a_group)
+    | edge :: more -> (
+        match Hashtbl.find_opt owner edge.from_id, Hashtbl.find_opt owner edge.to_id with
+        | None, _ -> Error (Unsupported ("an edge from a node no statement declared: " ^ edge.from_id))
+        | _, None -> Error (Unsupported ("an edge to a node no statement declared: " ^ edge.to_id))
+        | Some from_owner, Some to_owner ->
+            if String.equal edge.from_id from_owner && String.equal edge.to_id to_owner then
+              walk (edge :: here) more
+            else if String.equal from_owner to_owner then (
+              Hashtbl.replace inside_a_group from_owner
+                (edge :: Option.value (Hashtbl.find_opt inside_a_group from_owner) ~default:[]);
+              walk here more)
+            else
+              Error
+                (Unsupported
+                   (Printf.sprintf "an edge that crosses a subgraph boundary, %s to %s"
+                      edge.from_id edge.to_id)))
+  in
+  walk [] edges
+
+(* One scope: the nodes and subgraphs declared directly in it, and the edges
+   that join them. A subgraph is laid out by this same function one level
+   down, and its drawing then stands in the scope above as a single box.
+   Returns the rows and the size they take, which is what the scope above
+   needs in order to place that box. *)
+let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
+  let* here, inner_edges = partition_edges ~nodes ~groups ~edges in
+  let* clusters =
+    map_result
+      (fun group ->
+        let* members = map_result node_of group.group_nodes in
+        let* rows, width, height =
+          match
+            layout_scope
+              ~cols:(max 1 (cols - cluster_pad))
+              ~direction:(Option.value group.group_direction ~default:direction)
+              ~node_of ~nodes:members ~groups:group.group_children
+              ~edges:(Option.value (Hashtbl.find_opt inner_edges group.group_id) ~default:[])
+          with
+          (* The box is the border plus what it holds, and the pane that
+             cannot take it is this one, not the budget handed down. *)
+          | Error (Too_wide { cells; cols = _; turning_it_fits }) ->
+              Error (Too_wide { cells = cells + cluster_pad; cols; turning_it_fits })
+          | (Ok _ | Error (Unsupported _ | Parse_error _)) as answer -> answer
+        in
+        Ok (Cluster { c_group = group; c_rows = rows; c_width = width; c_height = height }))
+      groups
+  in
+  (* Source order within each kind, nodes before subgraphs. The ordering
+     sweeps are stable, so ties fall back to this and the same source draws
+     the same rows every run. *)
+  let entries = Array.of_list (List.map (fun node -> Real node) nodes @ clusters) in
+  let node_count = Array.length entries in
   let index_of = Hashtbl.create 16 in
-  List.iteri (fun i node -> Hashtbl.replace index_of node.id i) graph.nodes;
-  let nodes = Array.of_list graph.nodes in
+  Array.iteri (fun i entry -> Hashtbl.replace index_of (item_id entry) i) entries;
+  let nodes = entries in
   (* Back edges are turned around for layering: a DFS in source order marks
      an edge whose target is still on the stack. *)
   let successors = Array.make node_count [] in
@@ -773,9 +1016,9 @@ let render_graph ~cols graph =
       match Hashtbl.find_opt index_of edge.from_id, Hashtbl.find_opt index_of edge.to_id with
       | Some s, Some t -> successors.(s) <- (t, edge_index) :: successors.(s)
       | None, _ | _, None -> ())
-    graph.edges;
+    here;
   Array.iteri (fun i list -> successors.(i) <- List.rev list) successors;
-  let reversed = Array.make (List.length graph.edges) false in
+  let reversed = Array.make (List.length here) false in
   let colour = Array.make node_count 0 in
   (* 0 unseen, 1 on the stack, 2 done *)
   let rec visit v =
@@ -800,7 +1043,7 @@ let render_graph ~cols graph =
         else if String.equal edge.from_id edge.to_id then
           Some ("an edge from " ^ edge.from_id ^ " to itself")
         else None)
-      graph.edges
+      here
   in
   match refused with
   | Some what -> Error (Unsupported what)
@@ -811,7 +1054,7 @@ let render_graph ~cols graph =
           (fun edge_index edge ->
             let s = Hashtbl.find index_of edge.from_id and t = Hashtbl.find index_of edge.to_id in
             if reversed.(edge_index) then (t, s) else (s, t))
-          graph.edges
+          here
       in
       (* Longest-path layers over a Kahn order, nodes in source order. *)
       let indegree = Array.make node_count 0 in
@@ -833,11 +1076,15 @@ let render_graph ~cols graph =
             if indegree.(t) = 0 then Queue.add t queue)
           dag_successors.(v)
       done;
-      let flow_axis = along_flow graph.direction in
-      let extents node =
-        match flow_axis with
-        | `Rows -> (box_width node, box_height)
-        | `Cols -> (box_height, box_width node)
+      let flow_axis = along_flow direction in
+      let extents item =
+        let cross, flow =
+          match item with
+          | Real node -> (box_width node, box_height)
+          | Cluster c -> (cluster_width c, cluster_height c)
+          | Dummy -> (1, 0)
+        in
+        match flow_axis with `Rows -> (cross, flow) | `Cols -> (flow, cross)
       in
       let items = ref [] in
       let item_count = ref 0 in
@@ -847,9 +1094,9 @@ let render_graph ~cols graph =
         incr item_count
       in
       Array.iteri
-        (fun i node ->
-          let cross_extent, flow_extent = extents node in
-          push_item (Real node) ~layer:layer.(i) ~cross_extent ~flow_extent)
+        (fun i entry ->
+          let cross_extent, flow_extent = extents entry in
+          push_item entry ~layer:layer.(i) ~cross_extent ~flow_extent)
         nodes;
       (* A dummy's index is the count before it is pushed: the real nodes
          took 0 .. n-1 in source order, dummies follow in creation order. *)
@@ -891,7 +1138,7 @@ let render_graph ~cols graph =
                 }
                 :: !segments)
             steps)
-        graph.edges;
+        here;
       let segments = List.rev !segments in
       let items = Array.of_list (List.rev !items) in
       let layer_count = 1 + Array.fold_left (fun acc p -> max acc p.layer) 0 items in
@@ -985,12 +1232,12 @@ let render_graph ~cols graph =
           let band = band_extent p.layer in
           p.flow_start <-
             (match p.item with
-             | Real _ -> band_start.(p.layer) + ((band - p.flow_extent) / 2)
+             | Real _ | Cluster _ -> band_start.(p.layer) + ((band - p.flow_extent) / 2)
              | Dummy -> band_start.(p.layer)))
         items;
       let flow_end i =
         match items.(i).item with
-        | Real _ -> items.(i).flow_start + items.(i).flow_extent - 1
+        | Real _ | Cluster _ -> items.(i).flow_start + items.(i).flow_extent - 1
         | Dummy -> items.(i).flow_start + band_extent items.(i).layer - 1
       in
       (* Along rows a label reaches past its layer's boxes; the canvas is as
@@ -1017,14 +1264,14 @@ let render_graph ~cols graph =
         (* (flow, cross) to (row, col), the flow axis reversed for the two
            directions that read against it. *)
         let rc (f, c) =
-          match graph.direction with
+          match direction with
           | Top_down -> (f, c)
           | Bottom_up -> (total_flow - 1 - f, c)
           | Left_right -> (c, f)
           | Right_left -> (c, total_flow - 1 - f)
         in
         let head_glyph ~forward =
-          match graph.direction, forward with
+          match direction, forward with
           | Top_down, true | Bottom_up, false -> "v"
           | Top_down, false | Bottom_up, true -> "^"
           | Left_right, true | Right_left, false -> ">"
@@ -1053,7 +1300,31 @@ let render_graph ~cols graph =
                   add_bits canvas r lft ~style:line ~round:false (up lor down);
                   add_bits canvas r rgt ~style:line ~round:false (up lor down)
                 done;
-                put_text canvas (top + 1) (lft + 2) (shown_label node))
+                put_text canvas (top + 1) (lft + 2) (shown_label node)
+            | Cluster c ->
+                let r0, c0 = rc (p.flow_start, p.cross_start) in
+                let r1, c1 =
+                  rc (p.flow_start + p.flow_extent - 1, p.cross_start + p.cross_extent - 1)
+                in
+                let top = min r0 r1 and bottom = max r0 r1 and lft = min c0 c1 and rgt = max c0 c1 in
+                let line = Solid in
+                add_bits canvas top lft ~style:line ~round:false (down lor right);
+                add_bits canvas top rgt ~style:line ~round:false (down lor left);
+                add_bits canvas bottom lft ~style:line ~round:false (up lor right);
+                add_bits canvas bottom rgt ~style:line ~round:false (up lor left);
+                for c = lft + 1 to rgt - 1 do
+                  add_bits canvas top c ~style:line ~round:false (left lor right);
+                  add_bits canvas bottom c ~style:line ~round:false (left lor right)
+                done;
+                for r = top + 1 to bottom - 1 do
+                  add_bits canvas r lft ~style:line ~round:false (up lor down);
+                  add_bits canvas r rgt ~style:line ~round:false (up lor down)
+                done;
+                (* The title rides the top edge, which is what tells a box
+                   holding other boxes apart from a node's box. *)
+                put_text canvas top (lft + 2) (" " ^ c.c_group.group_label ^ " ");
+                (* The drawing was laid out already; it goes in whole. *)
+                List.iteri (fun i row -> put_text canvas (top + 1 + i) (lft + 1) row) c.c_rows)
           items;
         (* Dummies: a straight run through their band. *)
         Array.iteri
@@ -1062,7 +1333,7 @@ let render_graph ~cols graph =
             | Dummy ->
                 let c = centre i in
                 draw_line canvas ~style:Solid (rc (p.flow_start, c)) (rc (flow_end i, c))
-            | Real _ -> ())
+            | Real _ | Cluster _ -> ())
           items;
         (* Segments. *)
         List.iteri
@@ -1093,14 +1364,50 @@ let render_graph ~cols graph =
                 | `Cols ->
                     let width = Layout.display_width label in
                     let f_start =
-                      match graph.direction with
+                      match direction with
                       | Left_right | Top_down | Bottom_up -> fs + 2
                       | Right_left -> fs + 1 + width
                     in
                     let r, c = rc (f_start, cs - 1) in
                     put_text canvas r c label))
           segments;
-        Ok (rows_of_canvas canvas)
+        Ok (rows_of_canvas canvas, cols_needed, rows)
+
+let render_graph ~cols graph =
+  let node_of_table = Hashtbl.create 16 in
+  List.iter (fun node -> Hashtbl.replace node_of_table node.id node) graph.nodes;
+  let grouped = Hashtbl.create 16 in
+  List.iter
+    (fun group -> List.iter (fun id -> Hashtbl.replace grouped id ()) (ids_beneath group))
+    graph.groups;
+  (* An edge may name a node or a subgraph; anything else names nothing. *)
+  let known id = Hashtbl.mem node_of_table id || Hashtbl.mem grouped id in
+  let refused =
+    List.find_map
+      (fun edge ->
+        if not (known edge.from_id) then
+          Some ("an edge from a node no statement declared: " ^ edge.from_id)
+        else if not (known edge.to_id) then
+          Some ("an edge to a node no statement declared: " ^ edge.to_id)
+        else None)
+      graph.edges
+  in
+  match refused with
+  | Some what -> Error (Unsupported what)
+  | None ->
+      let free =
+        List.filter (fun node -> not (Hashtbl.mem grouped node.id)) graph.nodes
+      in
+      let node_of id =
+        match Hashtbl.find_opt node_of_table id with
+        | Some node -> Ok node
+        | None -> Error (Unsupported ("a subgraph member no statement declared: " ^ id))
+      in
+      let* rows, _, _ =
+        layout_scope ~cols ~direction:graph.direction ~node_of ~nodes:free ~groups:graph.groups
+          ~edges:graph.edges
+      in
+      Ok rows
 
 (* ── Sequence layout ───────────────────────────────────────────────────── *)
 

@@ -54,10 +54,29 @@ type edge = {
   label : string option;
 }
 
+(** A [subgraph … end]. Its members are laid out on their own and the
+    drawing is placed in the enclosing scope as one item, which makes a
+    nested subgraph the same thing one level down. An edge may name a
+    subgraph, and then it joins the box; an edge with one end inside a
+    subgraph and the other outside it is refused, because the box would be
+    drawn around a member the line already left.
+
+    [group_direction] is a [direction] statement inside the subgraph.
+    Mermaid ignores one at the top level, where the header has already
+    said which way the diagram reads, and so do we. *)
+type group = {
+  group_id : string;
+  group_label : string;  (** the title on the box, [group_id] when untitled *)
+  group_direction : direction option;
+  group_nodes : string list;  (** ids declared directly inside, source order *)
+  group_children : group list;
+}
+
 type graph = {
   direction : direction;
-  nodes : node list;  (** in order of first appearance *)
+  nodes : node list;  (** every node of the diagram, in order of first appearance *)
   edges : edge list;  (** in source order, one per source-target pair *)
+  groups : group list;  (** the subgraphs at the top level, source order *)
 }
 
 (** A sequence diagram: participants across the top, one lifeline each,

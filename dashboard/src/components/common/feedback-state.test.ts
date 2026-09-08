@@ -227,7 +227,6 @@ describe('ErrorFatal', () => {
 })
 
 // Folded in from the former empty-state.test.ts (which duplicated EmptyState
-// coverage under a misleading filename + a @ts-nocheck pragma). These DOM-shape
 // assertions complement the metadata coverage in 'FeedbackState base primitives'.
 describe('EmptyState DOM', () => {
   it('renders with default props', () => {

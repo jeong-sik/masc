@@ -26,6 +26,10 @@ type verb =
   | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
+  (* Reads the backend's own record of whether a session exists. It issues no
+     browser request, so it answers while a session is closed -- which is the
+     question a keeper has before deciding to open one. *)
+  | Session_status
   | Page_goto of { url : string; tab_id : int option }
   | Page_elements of { tab_id : int option }
   | Page_act of Browser_action.t
@@ -39,6 +43,7 @@ let verb_to_string = function
   | Page_interact _ -> "page.interact"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
+  | Session_status -> "session.status"
   | Page_goto _ -> "page.goto"
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
@@ -80,6 +85,7 @@ let verb_json = function
         , `Assoc (Option.map (fun v -> ("headless", `Bool v)) headless |> Option.to_list) )
       ]
   | Session_close -> `Assoc [ ("verb", `String "session.close"); ("args", `Assoc []) ]
+  | Session_status -> `Assoc [ ("verb", `String "session.status"); ("args", `Assoc []) ]
   | Page_goto { url; tab_id } ->
     `Assoc ["verb", `String "page.goto"; "args", `Assoc
       (["url", `String url] @ Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
@@ -105,14 +111,17 @@ let verb_json = function
      Readers and explicit-tab interactions are supported. Session ownership
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ | Page_downloads _ -> true
+  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_context _ | Page_downloads _
+  | Session_status -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 let verb_allowed_on_live = function
   | Page_context _ | Page_downloads _ -> false
   | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_interact _ -> true
-  | Session_open _ | Session_close | Page_goto _ | Page_act _ -> false
+  (* The operator's browser owns itself, so it has no session to report on.
+     Answering here would describe something the automation backend holds. *)
+  | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> false
 ;;
 
 type issued = { id : string; verb_json : Yojson.Safe.t }

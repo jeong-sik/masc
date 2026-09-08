@@ -90,6 +90,14 @@ blocking_lints() {
   run_lint "Turn-path provider-agnostic gate" \
     bash scripts/turn-path-provider-agnostic-gate.sh
 
+  # A nocheck'd test file keeps compiling after the type its fixture builds has
+  # changed shape, so the fixture drifts silently. One did: see the script.
+  run_self_test_when_changed "Dashboard tests type-checked self-test" \
+    scripts/lint/dashboard-tests-are-type-checked.sh \
+    bash scripts/lint/dashboard-tests-are-type-checked.sh --self-test
+  run_lint "Dashboard tests type-checked" \
+    bash scripts/lint/dashboard-tests-are-type-checked.sh
+
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
   # "run" reports a failure the change did not cause, which is how a report

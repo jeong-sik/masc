@@ -4992,6 +4992,35 @@ let schedule_row_subject (row : Masc_tui_types.schedule_row) =
 let schedule_status_color status =
   semantic_status_color status
 
+(* What became of the wake, for a list row that has one line to say it in.
+
+   The word is the server's own [projection_status], not a reading of it.
+   That status is written at a dozen places in
+   [server_dashboard_schedule_projection.ml] as bare strings, and the live
+   store holds values this file has never heard of; a table of meanings
+   here would be a second classifier over that same open axis, drifting
+   from the ledger's the first time the server learns a word. Showing the
+   word the server wrote cannot drift.
+
+   The [matched_] prefix comes off. It sits on most of the values and
+   separates none of them, which is the reason the subject drops
+   [keeper:] a few lines below.
+
+   [None] is the ledger saying nothing, and the row then shows an em dash
+   rather than a delivery it does not know. That is not the same as a wake
+   that failed, which [wake:] beside it already names. *)
+let schedule_delivery_word (row : schedule_row) =
+  let matched = "matched_" in
+  let cut status =
+    let n = String.length matched in
+    if String.length status > n && String.equal (String.sub status 0 n) matched then
+      String.sub status n (String.length status - n)
+    else status
+  in
+  match row.sch_reaction_projection_status with
+  | None -> "\xe2\x80\x94"
+  | Some status -> cut status
+
 let schedule_delivery_summary (row : schedule_row) =
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -5130,7 +5159,7 @@ let render_schedule_list (state : state) =
                  Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s  %s"
+                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
                    status_color
                    (fit_width row.sch_status 10)
                    Ansi.reset
@@ -5147,6 +5176,13 @@ let render_schedule_list (state : state) =
                    (schedule_status_color last_wake)
                    (fit_width (Terminal_text.single_line last_wake) 10)
                    Ansi.reset
+                   (* The enqueue result and what became of the wake are two
+                      facts, and the list carried only the first: a wake the
+                      queue cancelled forty seconds later still read
+                      [wake:succeeded]. Both are here now, in that order. *)
+                   (fit_width
+                      (Terminal_text.single_line (schedule_delivery_word row))
+                      12)
                    (Ansi.dim ^ row.sch_recurrence_summary ^ Ansi.reset)
                in
                let content =

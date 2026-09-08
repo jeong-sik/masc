@@ -7886,6 +7886,42 @@ def live_markdown_interaction(
     os.write(master_fd, b"q")
 
 
+# The three metadata densities differ in where the origin sits, not in what it
+# says, so the reading that tells them apart is which screen row each piece
+# landed on. A frame is no help: it addresses rows absolutely and writes no
+# newlines, so two rows read as one string and "name then body" matches the
+# stacked layout as readily as the inline one.
+def origin_screen_shape(
+    output: bytearray, badge: bytes, body: bytes
+) -> tuple[bytes, int]:
+    """The screen row carrying [badge], and how far below it [body] sits."""
+    rows = screen_rows(bytes(output))
+    badge_row = screen_row_of(rows, badge)
+    body_row = screen_row_of(rows, body)
+    if badge_row < 0 or body_row < 0:
+        raise AssertionError(
+            f"chat screen lost {badge!r} or {body!r}: "
+            f"{screen_text(bytes(output))!r}"
+        )
+    return rows[badge_row], body_row - badge_row
+
+
+# The speaker's colour belongs to the badge. A body drawn in it turns the whole
+# message into the speaker's colour and the pane loses the one contrast it has.
+# Written as the escape rather than as the three colours a speaker happens to
+# use today, so a wash in a fourth is caught the day someone writes it.
+BODY_WASH = rb"\x1b\[(?:3[0-7]|4[0-7]|9[0-7]|10[0-7])m *"
+
+
+def assert_bodies_unwashed(frame: bytes, description: str) -> None:
+    for body in (b"operator-body-neutral", b"keeper-body-neutral"):
+        washed = re.search(BODY_WASH + re.escape(body), frame)
+        if washed is not None:
+            raise AssertionError(
+                f"{description} washed {body!r} in the speaker's colour: {frame!r}"
+            )
+
+
 def message_origin_badge_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -7898,9 +7934,9 @@ def message_origin_badge_interaction(
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-    send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
-    pane_start = len(output)
-    send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    # The pane draws before its history arrives, and every step below reads a
+    # row the history draws, so the walk starts once the later speaker is on
+    # screen.
     wait_for_output(
         process,
         master_fd,
@@ -7909,70 +7945,104 @@ def message_origin_badge_interaction(
         start=pane_start,
         timeout=5.0,
     )
-    keeper_end = end_of_needle(output, b"keeper-body-neutral", pane_start)
-    wait_for_output(
+    # The fixture names a speaker, so the operator's line arrives here as
+    # someone else's and takes the inbound mark rather than the one a line
+    # typed at this pane would take.
+    operator_badge = "◀ vincent".encode()
+    keeper_badge = "● alpha".encode()
+    operator_body = b"operator-body-neutral"
+    keeper_body = b"keeper-body-neutral"
+
+    # Ctrl-F walks bare -> inline -> row -> bare and the pane opens on inline,
+    # which is the one stop with no header word: the summary names the two
+    # projections away from the resting layout ("metadata:off" and
+    # "metadata:full") and stays silent about the layout itself. So the first
+    # press lands on the full row, and the press that comes back to inline is
+    # waited on by the short clock instead -- the one thing neither other stop
+    # draws.
+    full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    for badge, body, description in (
+        (operator_badge, operator_body, "operator"),
+        (keeper_badge, keeper_body, "Keeper"),
+    ):
+        row, gap = origin_screen_shape(output, badge, body)
+        if gap != 1:
+            raise AssertionError(
+                f"the full origin row did not put the {description} body on the "
+                f"row below its origin (gap {gap}): {screen_text(bytes(output))!r}"
+            )
+        if re.search(rb"\[\d\d:\d\d:\d\d\]", row) is None:
+            raise AssertionError(
+                f"the full {description} origin row carried no timestamp: {row!r}"
+            )
+    for name in (b"vincent", b"alpha"):
+        if b"\x1b[7m" + name not in full_row:
+            raise AssertionError(
+                f"chat origin did not keep its reverse-video badge for {name!r}: "
+                f"{full_row!r}"
+            )
+    assert_bodies_unwashed(full_row, "the full origin row")
+
+    bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")
+    for badge, body, description in (
+        (operator_badge, operator_body, "operator"),
+        (keeper_badge, keeper_body, "Keeper"),
+    ):
+        row, gap = origin_screen_shape(output, badge, body)
+        if gap != 0:
+            raise AssertionError(
+                f"the clock-free layout did not keep the {description} body beside "
+                f"its origin (gap {gap}): {screen_text(bytes(output))!r}"
+            )
+        if body not in row:
+            raise AssertionError(
+                f"the clock-free {description} row lost its body: {row!r}"
+            )
+        if re.search(rb"\d\d:\d\d", row) is not None:
+            raise AssertionError(
+                f"the clock-free {description} row still drew a clock: {row!r}"
+            )
+    assert_bodies_unwashed(bare, "the clock-free layout")
+
+    inline = send_and_wait(
         process,
         master_fd,
         output,
-        FRAME_END,
-        start=keeper_end,
-        timeout=3.0,
+        b"\x06",
+        re.compile(rb"\d\d:\d\d " + re.escape("◀".encode())),
     )
-    update_end = output.find(FRAME_END, keeper_end) + len(FRAME_END)
-    frame = bytes(output[pane_start:update_end])
-    plain_frame = CSI_RE.sub(b"", frame)
-    for pattern, description in (
-        (
-            b"\xe2\x96\xb6\\s+vincent[^\\n]*\\n\\s+operator-body-neutral",
-            "operator origin row and separated body",
-        ),
-        (
-            b"\xe2\x97\x8f\\s+alpha[^\\n]*\\n\\s+keeper-body-neutral",
-            "Keeper origin row and separated body",
-        ),
+    for badge, body, description in (
+        (operator_badge, operator_body, "operator"),
+        (keeper_badge, keeper_body, "Keeper"),
     ):
-        if re.search(pattern, plain_frame) is None:
-            raise AssertionError(f"chat frame omitted {description}: {frame!r}")
-    for name in (b"vincent", b"alpha"):
-        if b"\x1b[7m" + name not in frame:
+        row, gap = origin_screen_shape(output, badge, body)
+        if gap != 0:
             raise AssertionError(
-                f"chat origin did not keep its reverse-video badge for {name!r}: "
-                f"{frame!r}"
+                f"the inline layout did not keep the {description} body beside its "
+                f"origin (gap {gap}): {screen_text(bytes(output))!r}"
             )
-    for forbidden, description in (
-        (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),
-        (b"\x1b[34m  keeper-body-neutral", "Keeper body blue wash"),
-        (b"\x1b[32m  keeper-body-neutral", "Keeper body green wash"),
-    ):
-        if forbidden in frame:
-            raise AssertionError(f"chat frame retained {description}: {frame!r}")
-
-    bare = send_and_wait(process, master_fd, output, b"\x06", b"operator-body-neutral")
-    bare_plain = CSI_RE.sub(b"", bare)
-    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
-        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
-    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
-        raise AssertionError(f"clock-free metadata layout still rendered a clock: {bare!r}")
-
-    inline = send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
-    inline_plain = CSI_RE.sub(b"", inline)
-    for pattern in (
-        b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
-        b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
-    ):
-        if re.search(pattern, inline_plain) is None:
+        if body not in row:
             raise AssertionError(
-                f"Ctrl-F header said inline but its physical rows did not: {inline!r}"
+                f"the inline {description} row lost its body: {row!r}"
             )
+    # Only the first row of a minute draws the clock, so the operator's row
+    # carries it and the Keeper's row a second later does not.
+    operator_row, _ = origin_screen_shape(output, operator_badge, operator_body)
+    if re.search(rb"\d\d:\d\d " + re.escape("◀".encode()), operator_row) is None:
+        raise AssertionError(
+            f"the inline layout drew no clock beside the operator origin: "
+            f"{operator_row!r}"
+        )
+    assert_bodies_unwashed(inline, "the inline layout")
 
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[36m  > \x1b[0mdraft-neutral" not in draft_frame:
+    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
         raise AssertionError(
             f"chat composer did not limit accent to its prompt: {draft_frame!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
+    escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
 
 

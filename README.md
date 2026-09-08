@@ -498,4 +498,5 @@ Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE). Bundled fonts have their own
+[third-party notices](THIRD-PARTY-LICENSES.md).

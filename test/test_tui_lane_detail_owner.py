@@ -26,6 +26,7 @@ def run(binary, transition, old_fails):
     current["run"]["output"]["reason"] = "verified current proof"
     older = copy.deepcopy(current)
     older["run"].update(status="running", elapsed_s=None, output=None)
+    older["run"]["payload_availability"]["output"] = None
     obsolete = (503, {"error": "obsolete-lane-detail-error"}) if old_fails else (200, older)
     old = h.GatedHttpResponse(obsolete, subsequent_response=(200, current), hold_seconds=20.0)
     path = "/api/v1/dashboard/exact-lane-runs/run-owner-a"

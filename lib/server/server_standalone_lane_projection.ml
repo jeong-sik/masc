@@ -183,7 +183,24 @@ let retained_run_skill_evidence_json = function
 
 let retained_run_detail_json run =
   let with_skill_evidence fields =
-    `Assoc (("skill_evidence", retained_run_skill_evidence_json run) :: fields)
+    let available =
+      Exact_lane_run_registry.availability_to_yojson Exact_lane_run_registry.Available
+    in
+    let verifier_availability has_output =
+      [ "payload_availability", `Assoc
+          [ "input", available; "output", (if has_output then available else `Null) ] ]
+    in
+    let availability =
+      match run with
+      | Exact_run _ -> []
+      | Task_verification_run run ->
+        verifier_availability
+          (match run.Verification_run_registry.status with Running -> false | Completed _ -> true)
+      | Goal_verification_run run ->
+        verifier_availability
+          (match run.Goal_verification_run_registry.status with Running -> false | Completed _ -> true)
+    in
+    `Assoc (("skill_evidence", retained_run_skill_evidence_json run) :: availability @ fields)
   in
   match run with
   | Exact_run run ->

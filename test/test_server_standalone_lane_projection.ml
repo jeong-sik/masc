@@ -12,6 +12,12 @@ let exact_run ~run_id ~lane ~started_at ~status : Exact.run =
   ; started_at
   ; input = Exact.Exact_input (`Assoc [])
   ; status
+  ; input_availability = Exact.Available
+  ; output_availability =
+      (match status with
+       | Exact.Running -> None
+       | Exact.Completed _ | Exact.Completion_persistence_failed _ ->
+         Some Exact.Available)
   }
 ;;
 
@@ -583,6 +589,72 @@ let test_unknown_lane_and_duplicate_identity_fail_explicitly () =
     fail "duplicate retained run ids must not pick a registry by precedence"
 ;;
 
+let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
+  let path = Filename.temp_file "lane-detail-payload-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      let registry = Exact.create ~path () in
+      let run_id = "source-bound-detail" in
+      let detail () =
+        let run =
+          match Exact.get registry ~run_id with
+          | Some run -> run
+          | None -> fail "registered run disappeared"
+        in
+        match
+          Projection.For_testing.run_detail_json_with ~run_id
+            ~exact_runs:[ run ] ~verification_runs:[] ~goal_verification_runs:[]
+        with
+        | Projection.Detail_found json -> Yojson.Safe.Util.member "run" json
+        | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+          fail "registered detail is unavailable"
+      in
+      let availability name run =
+        run |> Yojson.Safe.Util.member "payload_availability"
+        |> Yojson.Safe.Util.member name
+      in
+      let state name run =
+        availability name run |> Yojson.Safe.Util.member "state"
+        |> Yojson.Safe.Util.to_string
+      in
+      Exact.register_running registry ~run_id ~lane:Exact.Librarian
+        ~actor:"keeper-fixture" ~started_at:10. ~input:(Exact.Exact_input `Null);
+      let running = detail () in
+      check string "running input was read" "available" (state "input" running);
+      check bool "running has no output availability yet" true
+        (availability "output" running = `Null);
+      (match
+         Exact.mark_completed registry ~run_id ~outcome:Exact.Succeeded
+           ~elapsed_s:1. ~selected_slot:None ~output:`Null
+       with
+       | Ok () -> ()
+       | Error error -> fail (Exact.completion_error_to_string error));
+      let completed = detail () in
+      check string "JSON null is available output" "available"
+        (state "output" completed);
+      check bool "the output field retains an explicit JSON null" true
+        (match completed with
+         | `Assoc fields -> List.assoc_opt "output" fields = Some `Null
+         | _ -> false);
+      Sys.remove path;
+      let unread = detail () in
+      check string "payload read failure does not change execution outcome"
+        "succeeded"
+        (unread |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      List.iter
+        (fun name ->
+          check string (name ^ " is explicitly unavailable") "unavailable"
+            (state name unread);
+          let error = availability name unread |> Yojson.Safe.Util.member "error" in
+          check string (name ^ " names the source failure") "source_unavailable"
+            (error |> Yojson.Safe.Util.member "code" |> Yojson.Safe.Util.to_string);
+          check bool (name ^ " retains a failure explanation") true
+            (error |> Yojson.Safe.Util.member "message"
+             |> Yojson.Safe.Util.to_string |> String.length |> ( < ) 0))
+        [ "input"; "output" ])
+;;
+
 let () =
   run
     "server standalone lane projection"
@@ -615,6 +687,10 @@ let () =
             "every retained run kind projects Skill evidence"
             `Quick
             test_every_retained_run_kind_projects_skill_evidence
+        ; test_case
+            "detail preserves outcome when original payloads are unavailable"
+            `Quick
+            test_detail_preserves_outcome_when_original_payloads_are_unavailable
         ; test_case
             "unknown lane and duplicate identity fail explicitly"
             `Quick

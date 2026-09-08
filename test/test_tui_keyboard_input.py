@@ -9082,6 +9082,10 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
+                "payload_availability": {
+                    "input": {"state": "available"},
+                    "output": {"state": "available"},
+                },
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -9155,6 +9159,10 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
+                "payload_availability": {
+                    "input": {"state": "available"},
+                    "output": {"state": "available"},
+                },
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},

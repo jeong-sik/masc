@@ -2,8 +2,8 @@
 //
 // jest-axe coverage for ErrorPanel — dropdown listing unacknowledged
 // errors. role="alert" on the wrapper (so AT announces when the
-// panel opens with content) and per-row icon-color + severity badge.
-// Tests pin both empty and populated states across severities.
+// panel opens with content) and per-row icon-color + domain badge.
+// Tests pin the empty state, both severities, and an unmodelled domain.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -20,7 +20,8 @@ function makeError(overrides: Partial<DashboardError> = {}): DashboardError {
     agentName: 'sigma',
     taskId: null,
     message: 'Test error',
-    errorCode: 'internal_error',
+    errorCode: 'exception',
+    domain: 'internal',
     severity: 'critical',
     timestamp: now,
     acknowledged: false,
@@ -54,11 +55,11 @@ describe('ErrorPanel a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('mixed severities (critical + warning + info) pass axe', async () => {
+  it('mixed severities and an unmodelled domain pass axe', async () => {
     errors.value = [
-      makeError({ id: 'a', severity: 'critical', errorCode: 'internal_error', message: 'Boom' }),
-      makeError({ id: 'b', severity: 'warning', errorCode: 'rate_limited', message: 'Slow down' }),
-      makeError({ id: 'c', severity: 'info', errorCode: 'not_found', message: 'Missing' }),
+      makeError({ id: 'a', severity: 'critical', domain: 'internal', errorCode: 'exception', message: 'Boom' }),
+      makeError({ id: 'b', severity: 'warning', domain: 'provider', errorCode: 'anthropic:overloaded_error', message: 'Slow down' }),
+      makeError({ id: 'c', severity: 'critical', domain: null, errorCode: 'quantum_flux', message: 'Missing' }),
     ]
     render(html`<${ErrorPanel} onClose=${() => {}} />`, container)
     expect(await axe(container)).toHaveNoViolations()

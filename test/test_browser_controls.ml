@@ -225,7 +225,49 @@ let test_context_arguments () =
      valid "accept_dialog" ["framePath",`List [`String "iframe"]];
      valid "upload" ["selector",`String "input";"paths",`List []];
      valid "upload" ["selector",`String "input";"paths",`List [`String "/file\n/other"]]]
+let test_download_result_reaches_provider () =
+  with_upload_context (fun config meta -> Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let path = Filename.concat config.base_path "download.bin" in
+      let bytes = String.init 40000 (fun i -> Char.chr (i mod 256)) in
+      Out_channel.with_open_bin path (fun oc -> output_string oc bytes);
+      let artifact = match Masc.Browser_download_artifact.publish ~base_path:config.base_path path with
+        | Ok value -> value | Error detail -> fail detail in
+      let payload = `Assoc ["downloads", `List [`Assoc ["artifact", artifact]]] in
+      Lane.install_automation_executor (Some (function
+        | Lane.Page_downloads {tab_id=1} ->
+          Lane.Answered (`Assoc ["ok",`Bool true;"data",payload])
+        | _ -> fail "unexpected browser action during download read"));
+      Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+      let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+          ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "downloads";"tabId",`Int 1]) in
+      check bool "browser read completes" true (execution.disposition = Tool_result.Completed ());
+      let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.0
+          ?data:execution.data ?metadata:execution.metadata () in
+      let output = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:config.base_path result with
+        | Ok output -> output | Error error -> fail error.message in
+      let reference = match Tool_output.decode_from_agent_core output.content with
+        | Tool_output.Decoded reference -> reference
+        | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> fail "provider did not receive a durable result manifest" in
+      let stored = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.base_path) ~sha256:reference.sha256 with
+        | Ok (Some bytes) -> bytes | Ok None -> fail "manifest missing"
+        | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+      check bool "binary download manifest is valid UTF-8 JSON" true (String.is_valid_utf_8 stored);
+      match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string stored) with
+      | Tool_output.Decoded_artifact_manifest {structured_content;artifact_refs;_} ->
+        check bool "download identity and reader survive" true (structured_content = payload);
+        (match artifact_refs with
+         | [file] ->
+           (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.base_path) ~sha256:file.sha256 with
+            | Ok (Some actual) -> check string "referenced bytes remain exact" bytes actual
+            | Ok None -> fail "download artifact missing"
+            | Error error -> fail (Tool_blob_store.fetch_error_to_string error))
+         | _ -> fail "expected exactly one downloadable file")
+      | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest")))
+
 let () = run "Firefox controls" ["behavior",[
+  test_case "download result reaches provider manifest" `Quick test_download_result_reaches_provider;
   test_case "navigation uses requested tab" `Quick test_targeted_goto;
   test_case "selectors must match exactly once" `Quick test_selector_contract;
   test_case "fill and press use native input" `Quick test_native_fill_and_key;

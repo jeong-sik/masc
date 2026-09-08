@@ -137,6 +137,20 @@ let test_screenshot_ownership_and_draft () =
 
 let test_client_connection_ownership () =
   let discover t = { t with load = Loading (20, Discover Read_after_discovery) } in
+  let empty, read = accept_clients ~generation:20 (Ok []) (discover (create ())) in
+  expect "empty successful discovery is a browser connection state"
+    (not read && empty.load = No_browser && read_status empty = Browser_missing);
+  expect "dismissing picker retains known connection absence"
+    (read_status { empty with client_picker = None } = Browser_missing);
+  let lost, read = accept_clients ~generation:20 (Ok []) (discover (loaded ())) in
+  expect "disconnected selected client stays pinned without calling another browser"
+    (not read && lost.selected_client = Some firefox && read_status lost = Browser_missing);
+  let restored, read = accept_clients ~generation:20 (Ok [firefox]) (discover lost) in
+  expect "same client can reconnect after empty discovery"
+    (read && restored.selected_client = Some firefox && restored.load = Idle);
+  let failed, read = accept_clients ~generation:20 (Error "HTTP 401") (discover (create ())) in
+  expect "discovery errors stay errors, not missing-browser guidance"
+    (not read && read_status failed = Read_failed && not (awaiting_browser failed));
   let choose, read = accept_clients ~generation:20 (Ok [firefox; zen]) (discover (create ())) in
   expect "two clients require explicit choice, no read" (not read && choose.selected_client = None && choose.client_picker = Some 0 && read_status choose = Unread);
   let first, read = accept_clients ~generation:20 (Ok [firefox]) (discover (create ())) in

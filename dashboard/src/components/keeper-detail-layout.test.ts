@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'

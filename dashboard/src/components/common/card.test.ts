@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -165,7 +164,7 @@ describe('SurfaceCard', () => {
 
   it('applies testId', () => {
     const container = document.createElement('div')
-    render(h(SurfaceCard, { testId: 'card-1' }, 'A'), container)
+    render(h(SurfaceCard, { testId: 'card-1', children: 'A' }), container)
     const el = container.querySelector('[data-testid="card-1"]')
     expect(el).not.toBeNull()
     expect(el?.getAttribute('data-surface-card-has-test-id')).toBe('true')
@@ -174,7 +173,7 @@ describe('SurfaceCard', () => {
 
   it('applies standard variant class', () => {
     const container = document.createElement('div')
-    render(h(SurfaceCard, { variant: 'standard' }, 'A'), container)
+    render(h(SurfaceCard, { variant: 'standard', children: 'A' }), container)
     const el = container.querySelector('div')
     expect(el?.classList.contains('card')).toBe(true)
     expect(el?.getAttribute('data-surface-card-variant')).toBe('standard')
@@ -182,7 +181,7 @@ describe('SurfaceCard', () => {
 
   it('applies light variant class', () => {
     const container = document.createElement('div')
-    render(h(SurfaceCard, { variant: 'light' }, 'A'), container)
+    render(h(SurfaceCard, { variant: 'light', children: 'A' }), container)
     const el = container.querySelector('div')
     expect(el?.classList.contains('!bg-transparent')).toBe(true)
     expect(el?.getAttribute('data-surface-card-variant')).toBe('light')
@@ -190,7 +189,7 @@ describe('SurfaceCard', () => {
 
   it('applies compact variant class', () => {
     const container = document.createElement('div')
-    render(h(SurfaceCard, { variant: 'compact' }, 'A'), container)
+    render(h(SurfaceCard, { variant: 'compact', children: 'A' }), container)
     const el = container.querySelector('div')
     expect(el?.classList.contains('!p-3.5')).toBe(true)
     expect(el?.getAttribute('data-surface-card-variant')).toBe('compact')
@@ -198,7 +197,7 @@ describe('SurfaceCard', () => {
 
   it('applies tone class', () => {
     const container = document.createElement('div')
-    render(h(SurfaceCard, { tone: 'ok' }, 'A'), container)
+    render(h(SurfaceCard, { tone: 'ok', children: 'A' }), container)
     const el = container.querySelector('div')
     expect(el?.classList.contains('ok')).toBe(true)
     expect(el?.getAttribute('data-surface-card-tone')).toBe('ok')
@@ -209,7 +208,7 @@ describe('SurfaceCard', () => {
 
   it('applies custom class', () => {
     const container = document.createElement('div')
-    render(h(SurfaceCard, { class: 'extra' }, 'A'), container)
+    render(h(SurfaceCard, { class: 'extra', children: 'A' }), container)
     const el = container.querySelector('div')
     expect(el?.classList.contains('extra')).toBe(true)
     expect(el?.getAttribute('data-surface-card-has-custom-class')).toBe('true')
@@ -220,7 +219,7 @@ describe('SurfaceCard', () => {
 describe('SectionCard', () => {
   it('renders label and children', () => {
     const container = document.createElement('div')
-    render(h(SectionCard, { label: 'Section A' }, h('p', null, 'Body')), container)
+    render(h(SectionCard, { label: 'Section A', children: h('p', null, 'Body') }), container)
     expect(container.textContent).toContain('Section A')
     expect(container.textContent).toContain('Body')
     const el = container.querySelector('[data-section-card]')
@@ -234,7 +233,7 @@ describe('SectionCard', () => {
 
   it('applies compact body padding', () => {
     const container = document.createElement('div')
-    render(h(SectionCard, { label: 'T', variant: 'compact' }, 'Body'), container)
+    render(h(SectionCard, { label: 'T', variant: 'compact', children: 'Body' }), container)
     expect(container.innerHTML).toContain('p-3.5')
     expect(container.querySelector('[data-section-card]')?.getAttribute('data-section-card-body-padding')).toBe('p-3.5')
   })
@@ -243,10 +242,10 @@ describe('SectionCard', () => {
     const container = document.createElement('div')
     render(
       h(
-        SectionCard,
-        { label: 'Section B', right: h('span', null, 'Tail'), testId: 'section-b' },
-        h('p', null, 'Body'),
-      ),
+        SectionCard, {
+          label: 'Section B', right: h('span', null, 'Tail'), testId: 'section-b',
+          children: h('p', null, 'Body'),
+        }),
       container,
     )
     const el = container.querySelector('[data-testid="section-b"]')
@@ -265,10 +264,10 @@ describe('SectionCard', () => {
     const container = document.createElement('div')
     render(
       h(
-        SectionCard,
-        { label: 'Transport', status: 'warn', eyebrow: 'degraded' },
-        h('p', null, 'Body'),
-      ),
+        SectionCard, {
+          label: 'Transport', status: 'warn', eyebrow: 'degraded',
+          children: h('p', null, 'Body'),
+        }),
       container,
     )
     expect(container.textContent).toContain('Transport')
@@ -287,10 +286,10 @@ describe('SectionCard', () => {
     const container = document.createElement('div')
     render(
       h(
-        SectionCard,
-        { label: 'Transport', status: ' Watch ', eyebrow: 'observing' },
-        h('p', null, 'Body'),
-      ),
+        SectionCard, {
+          label: 'Transport', status: ' Watch ', eyebrow: 'observing',
+          children: h('p', null, 'Body'),
+        }),
       container,
     )
     expect(container.innerHTML).toContain('bg-warning')
@@ -304,8 +303,7 @@ describe('SectionCard', () => {
     render(
       h(
         SectionCard,
-        { label: 'Transport', status: 'offline', eyebrow: 'not connected' },
-        h('p', null, 'Body'),
+        { label: 'Transport', status: 'offline', eyebrow: 'not connected', children: h('p', null, 'Body') },
       ),
       container,
     )

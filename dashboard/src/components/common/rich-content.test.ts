@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -68,7 +67,7 @@ describe('RichContent', () => {
         description: 'An example site',
         image_url: null,
         favicon_url: null,
-        kind: 'article',
+        kind: 'link',
       },
     })
     const container = document.createElement('div')

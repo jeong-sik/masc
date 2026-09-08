@@ -1,9 +1,8 @@
-// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const mockPersistDashboardActorName = vi.hoisted(() => vi.fn((v: string) => v))
-const mockResolveDashboardActorName = vi.hoisted(() => vi.fn(() => null))
+const mockResolveDashboardActorName = vi.hoisted(() => vi.fn<() => string | null>(() => null))
 
 vi.mock('../../lib/dashboard-actor', () => ({
   persistDashboardActorName: (v: string) => mockPersistDashboardActorName(v),

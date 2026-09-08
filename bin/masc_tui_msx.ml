@@ -23,11 +23,55 @@ let graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 
 let set_graphics_protocol p = graphics_protocol := p
 
+(* What the terminal said one character cell measures, or [None] where it did
+   not answer. Only the image path reads it: the mosaic already works in cells
+   and needs no pixels. *)
+let cell_pixels = ref None
+let set_cell_pixels px = cell_pixels := px
+
+(* Rows for an image placement that keeps the frame inside the screen.
+
+   Kitty derives the width from the row count, so a row count that fills the
+   height can put the width past the right edge, where it is cut. The height
+   that fits both is the smaller of the height available and the height the
+   available width allows at the frame's own shape; the row count is that
+   height in whole cells, rounded down so the last row is not a partial one.
+
+   Without a cell size there is nothing to compute with, and the caller keeps
+   the rows it asked for. *)
+let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
+  match !cell_pixels with
+  | Some (cell_width, cell_height)
+    when cell_width > 0 && cell_height > 0 && frame_width > 0 && frame_height > 0 ->
+      let available_width = cols * cell_width in
+      let available_height = rows * cell_height in
+      let height_the_width_allows = available_width * frame_height / frame_width in
+      let height = min available_height height_the_width_allows in
+      max 1 (min rows (height / cell_height))
+  | Some _ | None -> rows
+
 let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
-let title_of (frame : Masc_tui_types.msx_frame option) =
+(* An empty cache has two causes and they are not the same news. The server
+   answered and said no machine is loaded, or it was not reachable to be asked
+   -- Masc_tui_http maps a transport failure to the same [None] a loaded:false
+   answer gives. Telling an operator "no machine loaded" while the server is
+   down sends them to load one, which is not the thing that is wrong.
+
+   The connection the refresh loop already keeps is what separates them; this
+   reads it rather than keeping a second account of the same fact. *)
+let title_of ~(connection : Masc_tui_types.connection_status)
+    (frame : Masc_tui_types.msx_frame option) =
   match frame with
-  | None -> " MSX — no machine loaded. A keeper loads one with masc_msx_load."
+  | None -> (
+    match connection with
+    | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
+      " MSX — no machine loaded. A keeper loads one with masc_msx_load."
+    | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
+      | Masc_tui_types.Booting | Masc_tui_types.Reconnecting) as status ->
+      Printf.sprintf
+        " MSX — no frame: the server is %s, so nothing could be asked for."
+        (Masc_tui_types.connection_status_label status))
   | Some f ->
       let cart = match f.msx_cartridge with Some c -> " · " ^ c | None -> "" in
       Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode cart
@@ -53,7 +97,9 @@ let footer () =
   Printf.sprintf " esc: back   +/-: size %d%%   (keeper plays; this is a live view)"
     (int_of_float (!screen_fraction *. 100.0))
 
-let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
+let render ~(write : string -> unit)
+    ~(connection : Masc_tui_types.connection_status)
+    (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let screen_rows = max 4 (rows - 2) in
   let picture_rows =
@@ -61,7 +107,7 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   in
   let buf = Buffer.create (cols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols (title_of frame));
+  Buffer.add_string buf (fit_line cols (title_of ~connection frame));
   Buffer.add_string buf "\027[0K\r\n";
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
@@ -87,19 +133,29 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
 
           iTerm2 is left on the mosaic: its protocol carries a file, not a
           pixel buffer, so it needs the encoder this path avoids. *)
+       (* The rows asked for are what the reader chose; these are what the
+          screen can hold. Kitty derives the width from the row count, so a
+          count the width cannot take is drawn off the right edge and cut. *)
+       let drawn_rows =
+         rows_that_fit ~cols ~rows:picture_rows ~frame_width:f.msx_width
+           ~frame_height:f.msx_height
+       in
        (* The image is drawn where the cursor sits, so a smaller picture
           starts mid-screen: park the cursor on its first row, centred, and
           the footer still lands on the screen's last row. *)
        Buffer.add_string buf
-         (Printf.sprintf "\027[%d;1H" (2 + ((screen_rows - picture_rows) / 2)));
+         (Printf.sprintf "\027[%d;1H" (2 + ((screen_rows - drawn_rows) / 2)));
        let escape =
          Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
-           ~pixel_height:f.msx_height ~rows:picture_rows
+           ~pixel_height:f.msx_height ~rows:drawn_rows
        in
        if String.equal escape "" then for _ = 1 to screen_rows do blank_row () done
-       else
-         Buffer.add_string buf
-           (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+       else begin
+         Buffer.add_string buf escape;
+         (* The image is drawn at the cursor and the terminal does not move it,
+            so the footer needs the rows stepped over by hand. *)
+         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+       end
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to
@@ -141,7 +197,8 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   else begin
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
-    render ~write state.msx_frame;
+    render ~write ~connection:state.Masc_tui_types.connection_status
+      state.msx_frame;
     true
   end
 

@@ -462,9 +462,22 @@ let handle_browser_tabs_with_outcome ~args =
     (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
 ;;
 
-let handle_browser_read_with_outcome ~(meta : keeper_meta) ~args =
-  Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_read ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:0.0 args)
+let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
+  let result =
+    Tool_misc_browser_lane.handle_read ~keeper_name:meta.name
+      ~tool_name:"masc_browser_read" ~start_time:0.0 args
+  in
+  (* Downloads carry normalized references to durable files. The result's
+     manifest must be persisted by this producer before provider projection,
+     just as Execute and composition results preserve their artifact roots. *)
+  match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
+  | Ok result -> Keeper_tool_execution.of_tool_result result
+  | Error error ->
+    Log.Misc.error "browser result manifest persistence failed: %s" error.message;
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_post_effect
+      "Browser read completed, but its result manifest could not be preserved. Do not repeat the download."
 ;;
 
 let handle_browser_session_with_outcome ~args =

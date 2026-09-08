@@ -582,24 +582,28 @@ describe('shouldRenderSurfaceLead', () => {
 
   // Surfaces that render the shared SurfaceHeader in their own body must NOT
   // also get the generic SurfaceLead — otherwise the title renders twice.
-  // board regressed in #22021; monitoring/command/lab carried the same gap.
-  it.each(['monitoring', 'command', 'lab', 'board'] as const)(
+  // monitoring/command/lab carried that gap out of their SurfaceHeader
+  // adoption. keepers is here rather than behind the keeper-detail guard:
+  // that guard returns true for every keepers route, so the table row was
+  // never reached and said 'generic' about a surface that renders its own.
+  it.each(['monitoring', 'command', 'lab', 'keepers'] as const)(
     'suppresses the generic SurfaceLead for the %s surface (renders its own SurfaceHeader)',
     tab => {
       expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(false)
     },
   )
 
-  // code (IDE) has no bespoke header and is not a keeper-detail route, so it
-  // still relies on the generic SurfaceLead — a control that the set was not
-  // broadened to suppress the lead everywhere.
-  it('keeps the generic SurfaceLead for the code surface', () => {
-    expect(shouldRenderSurfaceLead({ tab: 'code', params: {}, postId: null })).toBe(true)
+  // board renders no header at all (#22086) and regressed a duplicate title
+  // when the lead supplied one (#22021). Suppressed for a different reason
+  // from the row above, which is why 'none' is its own value.
+  it('suppresses the generic SurfaceLead for the headerless board surface', () => {
+    expect(shouldRenderSurfaceLead({ tab: 'board', params: {}, postId: null })).toBe(false)
   })
 
-  // keepers always renders its own keeper UI (keeper-detail guard short-circuits
-  // before the set lookup), so it never gets the generic lead.
-  it('suppresses the generic SurfaceLead for the keepers surface via the keeper-detail guard', () => {
-    expect(shouldRenderSurfaceLead({ tab: 'keepers', params: {}, postId: null })).toBe(false)
+  // code (IDE) and registry have no bespoke header, so they still rely on the
+  // generic SurfaceLead — a control that the table was not broadened to
+  // suppress the lead everywhere.
+  it.each(['code', 'registry'] as const)('keeps the generic SurfaceLead for the %s surface', tab => {
+    expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(true)
   })
 })

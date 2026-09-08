@@ -870,6 +870,9 @@ let test_composable_output_registry_is_closed () =
     [ "Execute"
     ; "keeper_artifact_read"
     ; "keeper_lane_status"
+      (* keeper_spawn answers a start with the handle every later spawn call
+         names; declared so run-and-read can hand it from start to wait. *)
+    ; "keeper_spawn"
     ; "keeper_tasks_list"
     ; "keeper_time_now"
       (* masc_agent_card and masc_agent_timeline left this list with #29681:

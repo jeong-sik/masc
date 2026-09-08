@@ -84,13 +84,6 @@ let rec mkdir_p path =
     Unix.mkdir path 0o755
   end
 
-let playground_dir ~base ~name =
-  let dir =
-    List.fold_left Filename.concat base [ ".masc"; "playground"; name ]
-  in
-  mkdir_p dir;
-  dir
-
 (* The live workspace runs the Gate in always_allow mode (mode.json); the
    test mirrors that so tool_execute is authorized instead of deferred. *)
 let install_always_allow_gate ~base =
@@ -101,17 +94,25 @@ let install_always_allow_gate ~base =
     {|{"mode":"always_allow","updated_by":"test","updated_at":"2026-08-18T00:00:00Z"}|};
   close_out oc
 
-let run_execute ~config ~meta ~argv ~cwd =
+(* No cwd. The keeper has two roots -- the host directory the profile keeps
+   its playground in, and the path the keeper itself sees -- and naming the
+   host one here is refused as outside the sandbox:
+
+     {"error":"Requested cwd is outside the Keeper sandbox.",
+      "code":"cwd_outside_sandbox",
+      "playground_root":"/home/keeper/playground/background-holds"}
+
+   Omitting it leaves the runtime to stand in the keeper's own playground
+   root, which is where a caller that names no directory runs and what the
+   Execute probe in test_keeper_tool_dispatch_runtime relies on. Neither case
+   here needs a particular directory. *)
+let run_execute ~config ~meta ~argv =
   Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
     ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
     ~turn_sandbox_factory:None
     ~config
     ~meta
-    ~args:
-      (`Assoc
-        [ "argv", `List (List.map (fun a -> `String a) argv)
-        ; "cwd", `String cwd
-        ])
+    ~args:(`Assoc [ "argv", `List (List.map (fun a -> `String a) argv) ])
     ()
 
 let payload_of (execution : Keeper_tool_execution.t) =
@@ -131,7 +132,6 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
       let meta = make_meta ~name:"costume-advice" in
-      let cwd = playground_dir ~base ~name:"costume-advice" in
       (* [;] used to be the construct this test reached for; RFC-0391 put it
          in Shell_ir.connector, so a substitution stands in. What is being
          checked is unchanged: a costume the subset cannot say still runs, and
@@ -141,7 +141,6 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
           ~config
           ~meta
           ~argv:[ "sh"; "-c"; "echo $(echo two)" ]
-          ~cwd
       in
       (match execution.disposition with
        | Tool_result.Completed () -> ()
@@ -210,9 +209,8 @@ let test_a_backgrounded_child_still_holds_the_call () =
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
       let meta = make_meta ~name:"background-holds" in
-      let cwd = playground_dir ~base ~name:"background-holds" in
       let execution =
-        run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ] ~cwd
+        run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ]
       in
       let payload = payload_of execution in
       let elapsed =

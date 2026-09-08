@@ -100,9 +100,11 @@ let test_backfill_repairs_only_startup_required () =
 let embedded_packages () =
   Embedded_skills.file_list
   |> List.filter_map (fun rel ->
-       match String.index_opt rel '/' with
-       | Some slash -> Some (String.sub rel 0 slash)
-       | None -> None)
+       (* The seeder's own rule: a package is a directory that holds SKILL.md
+          directly, not any first path segment. *)
+       match String.split_on_char '/' rel with
+       | [ package; "SKILL.md" ] -> Some package
+       | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ -> None)
   |> List.sort_uniq String.compare
 
 let test_builtin_skill_package () =

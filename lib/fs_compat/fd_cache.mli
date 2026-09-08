@@ -17,7 +17,10 @@
 
 (** [with_writer path f] runs [f] with the cached writer for [path],
     opening one on the first request and bumping its LRU stamp on
-    every request. Evicts the least-recently-used inactive writer when
+    every request. Before reuse, the open descriptor must still identify the
+    file at [path]; a removed/replaced path opens a fresh writer. This detects
+    changes between leases, not a concurrent external rename during [f].
+    Evicts the least-recently-used inactive writer when
     the bound is exceeded. Active writers are leased until [f] returns,
     so LRU eviction cannot close an [out_channel] while a caller is
     still writing or flushing it. *)

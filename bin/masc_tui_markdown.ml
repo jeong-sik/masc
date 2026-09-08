@@ -452,10 +452,18 @@ let mermaid_failure_text = function
       "mermaid: " ^ what ^ " is not drawn here; the source follows"
   | Masc_tui_mermaid.Parse_error { line; what } ->
       Printf.sprintf "mermaid: line %d: %s; the source follows" line what
-  | Masc_tui_mermaid.Too_wide { cells; cols } ->
+  | Masc_tui_mermaid.Too_wide { cells; cols; turning_it_fits } ->
+      let turn =
+        match turning_it_fits with
+        | None -> ""
+        | Some direction ->
+            Printf.sprintf " (as %s it fits)"
+              (Masc_tui_mermaid.direction_word direction)
+      in
       Printf.sprintf
-        "mermaid: the drawing needs %d cells and this pane has %d; the source follows"
-        cells cols
+        "mermaid: the drawing needs %d cells and this pane has %d%s; the source \
+         follows"
+        cells cols turn
 
 let styled_piece palette (text, kind) =
   if String.length text = 0 then ""

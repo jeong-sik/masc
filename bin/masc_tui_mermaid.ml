@@ -84,9 +84,23 @@ type failure =
   | Too_wide of {
       cells : int;
       cols : int;
+      turning_it_fits : direction option;
     }
 
 let ( let* ) = Result.bind
+
+let direction_word = function
+  | Top_down -> "TD"
+  | Bottom_up -> "BT"
+  | Left_right -> "LR"
+  | Right_left -> "RL"
+
+(* The other axis. A graph laid across the pane is laid down it instead, and a
+   graph laid down it across. Whether that one fits is a question for the
+   renderer, not for this. *)
+let turned = function
+  | Left_right | Right_left -> Some Top_down
+  | Top_down | Bottom_up -> Some Left_right
 
 (* ── Source ────────────────────────────────────────────────────────────── *)
 
@@ -997,7 +1011,7 @@ let render_graph ~cols graph =
         | `Rows -> (total_flow, cross_total)
         | `Cols -> (cross_total, total_flow)
       in
-      if cols_needed > cols then Error (Too_wide { cells = cols_needed; cols })
+      if cols_needed > cols then Error (Too_wide { cells = cols_needed; cols; turning_it_fits = None })
       else
         let canvas = make_canvas ~rows ~cols:cols_needed in
         (* (flow, cross) to (row, col), the flow axis reversed for the two
@@ -1173,7 +1187,7 @@ let render_sequence ~cols (seq : sequence) =
     let header_rows = box_height + 1 in
     let body_rows = List.fold_left (fun acc event -> acc + event_rows event) 0 seq.events in
     let rows = header_rows + body_rows + 1 in
-    if width > cols then Error (Too_wide { cells = width; cols })
+    if width > cols then Error (Too_wide { cells = width; cols; turning_it_fits = None })
     else
       let canvas = make_canvas ~rows ~cols:width in
       let col i = margin + centre x i in
@@ -1286,5 +1300,20 @@ let render_sequence ~cols (seq : sequence) =
 let render ~cols text =
   let* diagram = parse text in
   match diagram with
-  | Graph graph -> render_graph ~cols graph
+  | Graph graph -> (
+    (* render_graph reports the width it needed; only here, holding the graph,
+       can we also answer whether the other axis would have fit. One extra
+       layout, on the refusal path only. *)
+    match render_graph ~cols graph with
+    | Error (Too_wide { cells; cols; turning_it_fits = _ }) ->
+      let turning_it_fits =
+        match turned graph.direction with
+        | None -> None
+        | Some direction -> (
+          match render_graph ~cols { graph with direction } with
+          | Ok _ -> Some direction
+          | Error (Too_wide _ | Unsupported _ | Parse_error _) -> None)
+      in
+      Error (Too_wide { cells; cols; turning_it_fits })
+    | (Ok _ | Error (Unsupported _ | Parse_error _)) as answer -> answer)
   | Sequence sequence -> render_sequence ~cols sequence

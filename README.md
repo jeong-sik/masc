@@ -30,7 +30,7 @@ Three things it does:
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
 > unsafe action. `main` moves faster than the published binaries; the latest
-> release is [v0.33.0](https://github.com/jeong-sik/masc/releases) (2026-09-06).
+> release is [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0) (2026-09-08).
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -54,13 +54,12 @@ product grows (see [Dashboard](#dashboard)).
 
 ### Published binaries
 
-Pick a tag from [GitHub Releases](https://github.com/jeong-sik/masc/releases)
-and run the installer from that same tag, so the script and the assets it
-verifies come from one release.
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0).
+It verifies and installs the assets for the selected release.
 
 ```bash
-TAG=v0.33.0
-curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+TAG=v0.34.0
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -83,9 +82,13 @@ The wizard reports two axes:
   host can offer. The wizard reports and does not choose. The sandbox is set
   per Keeper, or by a `--team <preset>` that carries its own choice.
 
-The next release, **0.34.0**, adds Intel macOS, installs `masc-browser-host`
-and the matched dashboard, and preserves configuration during `--force`
-upgrades. Until it is published, the example above remains pinned to 0.33.0.
+Release **0.34.0** includes Intel macOS, `masc-browser-host`, and the matched
+dashboard, and preserves configuration during `--force` reinstalls.
+The release installer checks macOS compatibility and installs missing Homebrew
+runtime dependencies. Without Homebrew, an interactive terminal enters its
+official setup; noninteractive installs require Homebrew beforehand. Apple
+Silicon requires macOS 14 or newer; Intel requires macOS 15 or newer. See
+[installation prerequisites](docs/INSTALL.md) for Linux packages and details.
 See [installation and upgrade guide](docs/INSTALL.md) for the platform matrix,
 prerequisites, exact installed contents and optional integrations.
 
@@ -491,7 +494,7 @@ source of truth for binaries. APIs and configuration may change before 1.0.
 Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 - `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
-  line is `0.33.0`.
+  line is `0.34.0`.
 - `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
   without caveats.
 - `v2.*` tags are history; they do not define the active line.

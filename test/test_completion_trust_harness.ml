@@ -200,7 +200,7 @@ let find_task config task_id =
 let await_condition ~clock label condition =
   match Eio.Time.with_timeout clock 5.0 (fun () ->
     let rec loop () =
-      if condition () then ()
+      if condition () then Ok ()
       else (Eio.Time.sleep clock 0.001; loop ())
     in
     loop ()) with

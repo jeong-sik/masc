@@ -36,7 +36,6 @@ type override_field_detail =
 
 let override_field = Keeper_status_bridge_override.override_field
 let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
-let maybe_bool_override = Keeper_status_bridge_override.maybe_bool_override
 let nonempty_string_list_override =
   Keeper_status_bridge_override.nonempty_string_list_override
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)

@@ -213,8 +213,7 @@ let test_every_row_says_whether_e_reaches_it () =
       in
       Alcotest.(check string) label (name expected) (name actual))
     [ "Runtime", `Editable
-    ; "Autoboot", `Editable
-    ; "Autonomous turns", `Editable
+    ; "Activation", `Editable
     ; "Context override", `Editable
     ; "Sandbox / network", `Editable
     ; "Mention targets", `Editable

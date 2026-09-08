@@ -316,9 +316,6 @@ let current_config_revision ~config ~keeper_name =
 let set_string value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string value)
 
-let set_bool value =
-  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_bool value)
-
 let set_int value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_int value)
 

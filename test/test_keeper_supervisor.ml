@@ -1871,8 +1871,8 @@ let assert_launch_bootstrap_policy ~mode ~expected_bootstrap () =
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       Masc.Keeper_registry_event_queue.enqueue ~base_path:config.base_path name
-        { post_id = "requested-bootstrap"; urgency = Masc.Keeper_event_queue.Normal
-        ; arrived_at = Unix.gettimeofday (); payload = Masc.Keeper_event_queue.Bootstrap };
+        { post_id = "requested-bootstrap"; urgency = Keeper_event_queue.Normal
+        ; arrived_at = Unix.gettimeofday (); payload = Keeper_event_queue.Bootstrap };
       (match
          Lane.reject_before_start reg.lane ~reason:(Failure "pre-claimed for test")
        with
@@ -1909,7 +1909,7 @@ let assert_launch_bootstrap_policy ~mode ~expected_bootstrap () =
         ~base_path:config.base_path name with
         | Ok pending -> pending | Error detail -> fail detail in
       let post_ids = List.map
-        (fun (selection : Masc.Keeper_event_queue_state.pending_selection) -> selection.source.post_id)
+        (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source.post_id)
         pending in
       check bool "explicit queued request survives launch" true
         (List.mem "requested-bootstrap" post_ids);

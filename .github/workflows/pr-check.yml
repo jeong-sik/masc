@@ -84,6 +84,13 @@ jobs:
             --expected-head-sha "${{ github.event.pull_request.head.sha }}" \
             --pr-number "${{ github.event.pull_request.number }}"
 
+      - name: Installer onboarding and removal behavior
+        run: |
+          python3 test/test_installer_dependencies.py -v
+          python3 test/test_installer_wizard.py -v
+          python3 test/test_installer_upgrade.py -v
+          python3 test/test_installer_uninstall.py -v
+
       - name: Blocking lints
         run: |
           bash scripts/ci/run-lint-suite.sh blocking-pr \
@@ -166,9 +173,6 @@ jobs:
 
       - name: Verify release distribution fixtures
         run: python3 test/test_release_dashboard_bundle.py -v
-
-      - name: Installer native dependency behavior
-        run: python3 test/test_installer_dependencies.py -v
 
       - name: Verify standalone namespace fixtures
         run: python3 test/test_run_standalone_suites.py --compile-fixtures -v

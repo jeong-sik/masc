@@ -79,8 +79,11 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`--prefix` 기본값은 `$HOME/.local/bin`, `--base-path` 기본값은 설치 명령을
-실행한 디렉터리입니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
+`--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
+`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
+제안하므로 그대로 선택하면 데이터는 `~/.masc`에 생깁니다. 현재 디렉터리에
+기존 `.masc/config`가 있으면 그 workspace를 제안합니다. 명시한 `--base-path`는
+질문 없이 사용하며, 비대화형 또는 `--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
 작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
@@ -367,3 +370,29 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 검증된 커밋에 `v0.34.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
+
+## 제거
+
+실행 중인 MASC 서버와 TUI를 종료한 뒤, 릴리스에서 받은 최신 설치기를 사용합니다.
+기본 제거는 프로그램과 대시보드만 삭제하며, 설정·Keeper·기록과 Homebrew 의존성은 보존합니다.
+
+```bash
+bash /tmp/masc-install.sh --uninstall --dry-run
+bash /tmp/masc-install.sh --uninstall
+```
+
+설치할 때 `--prefix`를 지정했다면 제거할 때도 같은 값을 지정하세요.
+제거는 네트워크, Python, Homebrew 없이 실행되며 prefix 디렉터리나 다른 파일은 지우지 않습니다.
+중단된 설치 transaction이 남아 있으면 이를 먼저 복구하라는 오류를 냅니다.
+
+데이터도 제거하려면 **실제 설치했던 workspace 경로**를 명시해야 합니다.
+아래 예시는 `$HOME/masc-workspace/.masc`를 삭제합니다. HOME을 workspace로
+선택했다면 `--base-path "$HOME"`입니다. `~/.masc` 자체를 base path로 넣지 마세요.
+
+```bash
+bash /tmp/masc-install.sh --uninstall --purge-data \
+  --base-path "$HOME/masc-workspace" --dry-run
+# 삭제 대상 확인 후 --dry-run 없이 실행
+```
+
+다른 경로를 가리키는 `.masc` 또는 배포 디렉터리 symlink는 링크 자체만 삭제합니다.

@@ -872,6 +872,8 @@ uninstall_masc() {
     die "--purge-data requires an explicit --base-path"
   fi
   local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name
+  case "$uninstall_prefix" in '~') uninstall_prefix="$HOME" ;; '~/'*) uninstall_prefix="$HOME/${uninstall_prefix#\~/}" ;; esac
+  case "$uninstall_base" in '~') uninstall_base="$HOME" ;; '~/'*) uninstall_base="$HOME/${uninstall_base#\~/}" ;; esac
   case "$uninstall_prefix" in /*) ;; *) uninstall_prefix="$PWD/$uninstall_prefix" ;; esac
   if [ -e "$uninstall_prefix/.masc-install-transaction" ] || [ -L "$uninstall_prefix/.masc-install-transaction" ]; then
     die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
@@ -1063,7 +1065,7 @@ if [ "$DRY_RUN" -eq 1 ] && ! macos_formula_ready "" python; then
   exit 0
 fi
 require python3
-PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$PREFIX")"
+PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
 BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
 log "workspace: $BASE_PATH"
 log "configuration and data: $BASE_PATH/.masc"

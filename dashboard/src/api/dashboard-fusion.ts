@@ -39,7 +39,7 @@ export interface FusionRunRecord {
   // that survives delivery (the obligation record carrying it is removed once
   // the result lands), so a completed run's topology is readable only here.
   // The decoder requires the topology emitted by the current registry.
-  topology: FusionTopologyLabel | null
+  topology: FusionTopologyLabel
   startedAt: number // unix seconds
   status: FusionRunStatusLabel
   // Failure attribution, present only on `failed` rows. The backend emits both
@@ -53,8 +53,8 @@ export interface FusionRunRecord {
 export interface DashboardFusionRunsResponse {
   runs: FusionRunRecord[]
   count: number
-  generatedAt: string | null
-  replay: FusionReplay | null
+  generatedAt: string
+  replay: FusionReplay
   historicalEvidence: FusionHistoricalEvidence[]
 }
 
@@ -75,7 +75,7 @@ function nonnegativeNumber(value: unknown, field: string, integer = false): numb
   return value
 }
 
-function parseFusionReplay(raw: unknown): FusionReplay | null {
+function parseFusionReplay(raw: unknown): FusionReplay {
   if (!isRecord(raw)) throw new Error('Invalid Fusion replay observation')
   switch (raw.status) {
     case 'not_replayed': case 'absent': return { status: raw.status }

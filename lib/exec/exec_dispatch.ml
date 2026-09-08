@@ -292,14 +292,20 @@ let pipeline_status current stage_status =
 
 (* --- arg resolution --- *)
 
+let unsupported_expansion_result () =
+  { status = Unix.WEXITED 2
+  ; stdout = ""
+  ; stderr = "Parameter expansion requires an execution-target environment; use literal arguments or run an explicit script inside the target."
+  ; output_files = None
+  }
+
 let rec resolve_arg = function
   | Shell_ir.Lit (s, _) -> s
   | Concat parts ->
       let buf = Buffer.create 64 in
       List.iter (fun a -> Buffer.add_string buf (resolve_arg a)) parts;
       Buffer.contents buf
-  | Var (name, _) ->
-      (match Sys.getenv_opt name with Some v -> v | None -> "")
+  | Var _ -> invalid_arg "Exec_dispatch.resolve_arg: unresolved target environment"
 
 let resolve_env env_bindings =
   List.map
@@ -352,6 +358,9 @@ let process_spec_of_simple (s : Shell_ir.simple) =
 
 let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
     (s : Shell_ir.simple) =
+  if Shell_ir.has_variable_expansion (Shell_ir.Simple s) then
+    unsupported_expansion_result ()
+  else
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
   let result =
@@ -607,6 +616,9 @@ let sandbox_pipeline_specs stages =
    record action-level telemetry directly. *)
 let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
     ?on_output_chunk stages =
+  if List.exists Shell_ir.has_variable_expansion stages then
+    unsupported_expansion_result ()
+  else
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let decomposed_stage_callback ~is_final (simple : Shell_ir.simple) on_output_chunk =
     match on_output_chunk with
@@ -823,6 +835,8 @@ and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail (
   step (run head) tail
 
 and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
+  if Shell_ir.has_variable_expansion ir then unsupported_expansion_result ()
+  else
   match ir with
   | Shell_ir.Simple s ->
     dispatch_simple ?base_host_env ?timeout_sec ?on_output_chunk s

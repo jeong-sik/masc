@@ -1,7 +1,9 @@
 name = "masc_msx_load"
 description = """
-Power on the workspace MSX machine (MSX2, C-BIOS) and load one image: a \
-cartridge into the slot, or a .dsk floppy into drive A:. Replaces any \
+Power on the workspace MSX machine and load one image.
+
+MSX2, C-BIOS. A cartridge into the slot, or a .dsk floppy into drive A:. \
+Replaces any \
 machine already loaded and starts a new input ledger. Without cart it \
 boots the BIOS alone and lists carts_available, the images in the \
 workspace inventory (.masc/msx/carts/); pass one of those names as cart. Runs the boot ahead 45 frames so the first \

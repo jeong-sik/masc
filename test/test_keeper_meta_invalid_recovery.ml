@@ -60,7 +60,7 @@ let write_keeper_toml config name =
   mkdir_p keepers_dir;
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"local\"\n"
+    "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n"
 ;;
 
 let keeper_meta_path config name =

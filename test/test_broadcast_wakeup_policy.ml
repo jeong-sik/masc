@@ -89,7 +89,7 @@ let configure_mention_targets config name mention_targets =
   write_file
     path
     (Printf.sprintf
-       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"local\"\nmention_targets = [%s]\n"
+       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\nmention_targets = [%s]\n"
        rendered_targets)
 ;;
 

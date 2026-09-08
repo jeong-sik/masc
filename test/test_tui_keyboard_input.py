@@ -6758,13 +6758,31 @@ def context_inspector_interaction() -> Interaction:
             b"Tool schemas",
             b"User messages",
             b"Tool results",
-            b"Conversation history  7 / 9 atoms",
+            # The section is headed in plain words now, and the count reads
+            # "of" rather than a fraction. Both are pinned: the heading says
+            # which section this is, the count says what it carried.
+            b"how far back this turn looked",
+            b"7 of 9 atoms",
         ):
             if needle not in composition_plain:
                 raise AssertionError(
                     f"Context composition omitted {needle!r}: {composition!r}"
                 )
 
+        # The item list and its detail are a split layout, and the split
+        # needs Masc_tui_roster_pane.threshold_cols (110). The runner opens
+        # at 100, where this view draws as one column with no "SELECTED
+        # INPUT" heading at all, so the wait starved on a pane that was
+        # rendering correctly for the width it had.
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=120,
+            needle=b"Tool schemas",
+            controls=(FULL_REDRAW,),
+        )
         exact_input = send_and_wait(
             process, master_fd, output, b"2", b"SELECTED INPUT"
         )

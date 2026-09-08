@@ -6685,7 +6685,9 @@ def context_inspector_fixtures() -> HttpFixtures:
             "runtime_profile": "anthropic.claude-opus-5",
             "captured_at": 1787600000.0,
             "wire": {
-                "phase": "Pre_dispatch_serialization",
+                # A nullary variant is a one-element list in
+                # ppx_deriving_yojson's encoding, not a bare string.
+                "phase": ["Pre_dispatch_serialization"],
                 "capture_id": "capture-context",
                 "provider": "anthropic",
                 "model": "claude-opus-5",
@@ -6731,7 +6733,7 @@ def context_inspector_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         resize_and_wait(
-            process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview"
+            process, master_fd, output, rows=50, columns=140, needle=b"MASC Overview"
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -6769,20 +6771,6 @@ def context_inspector_interaction() -> Interaction:
                     f"Context composition omitted {needle!r}: {composition!r}"
                 )
 
-        # The item list and its detail are a split layout, and the split
-        # needs Masc_tui_roster_pane.threshold_cols (110). The runner opens
-        # at 100, where this view draws as one column with no "SELECTED
-        # INPUT" heading at all, so the wait starved on a pane that was
-        # rendering correctly for the width it had.
-        resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=120,
-            needle=b"Tool schemas",
-            controls=(FULL_REDRAW,),
-        )
         exact_input = send_and_wait(
             process, master_fd, output, b"2", b"SELECTED INPUT"
         )
@@ -6844,7 +6832,10 @@ def context_inspector_interaction() -> Interaction:
             columns=109,
             needle=b"SELECTED BLOCK",
         )
-        narrow_map_plain = CSI_RE.sub(b"", narrow_map)
+        # The whole screen, not the frame the resize returned. A frame holds
+        # the rows that changed, and the evidence rows below the selection do
+        # not change when the width does.
+        narrow_map_plain = screen_text(bytes(output))
         for forbidden in (b"reached the provider", b"provider accepted", b"ON WIRE"):
             if forbidden in narrow_map_plain:
                 raise AssertionError(
@@ -6903,9 +6894,15 @@ def context_inspector_interaction() -> Interaction:
             b"\x1b",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
-        help_frame = send_and_wait(process, master_fd, output, b"?", b"Slash commands")
-        if b"/context" not in CSI_RE.sub(b"", help_frame):
-            raise AssertionError(f"Help did not disclose /context: {help_frame!r}")
+        # The overlay is headed "MASC Cheat Sheet" now; "Slash commands" was a
+        # section title it no longer carries.
+        send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        # The /context disclosure this step used to assert is not here any
+        # more: the cheat sheet lists keys, and the slash commands announce
+        # themselves in the composer's hint line as the word is typed
+        # (Masc_tui_command.hint_spans, drawn at masc_tui_render.ml). That
+        # surface has no coverage yet and wants its own scenario rather than
+        # a tail on this one.
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")

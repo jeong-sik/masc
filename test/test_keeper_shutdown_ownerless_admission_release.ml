@@ -864,17 +864,22 @@ let test_absence_acknowledgement_retains_evidence_and_recovery () =
   with_workspace (fun ~config ->
     let operation = retained_absent_operation "absent-ack" in
     persist_exn ~config operation;
-    (match recover_fence ~config operation with
-     | Error _ -> () | Ok _ -> fail "unacknowledged retained owner must still fail");
+    (* Boot recovery gets there first and records the absence on the record;
+       the operator acknowledgement then starts from that record, not from
+       [Finalized]. *)
+    let observed = match recover_fence ~config operation with
+      | Ok ({ phase = Owner_absent _; _ } as observed) -> observed
+      | Ok _ -> fail "recovery did not record the owner absence"
+      | Error detail -> failf "recovery failed: %s" detail in
     ignore (Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path
       ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id);
-    let acknowledged = acknowledged_exn (acknowledge ~config operation) in
+    let acknowledged = acknowledged_exn (acknowledge ~config observed) in
     check bool "matching reservation released after commit" true
       (Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path:config.base_path
         ~keeper_name:operation.keeper_name = None);
     ignore (Keeper_shutdown_intake_fence.restore_shutdown ~base_path:config.base_path
       ~keeper_name:operation.keeper_name ~operation_id:operation.operation_id);
-    let crash_replay = acknowledged_exn (acknowledge ~config operation) in
+    let crash_replay = acknowledged_exn (acknowledge ~config observed) in
     check bool "post-CAS pre-release crash replay preserves evidence" true (crash_replay = acknowledged);
     check bool "crash replay releases only the old reservation" true
       (Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path:config.base_path
@@ -884,9 +889,9 @@ let test_absence_acknowledgement_retains_evidence_and_recovery () =
        check bool "original finalization retained" true (ack.finalization = original);
        check bool "no fabricated removal" false ack.finalization.meta_removed;
        check string "authenticated caller attribution" "operator" ack.actor;
-       check int "exact prior revision" operation.revision ack.prior_revision
+       check int "exact prior revision" observed.revision ack.prior_revision
      | _ -> fail "expected retained acknowledgement");
-    check int "one CAS increment" (operation.revision + 1) acknowledged.revision;
+    check int "one CAS increment" (observed.revision + 1) acknowledged.revision;
     let reread = load_operation_exn ~config operation in
     check bool "durable codec round trip" true (reread = acknowledged);
     (match Keeper_shutdown_runtime.recover_at_boot ~config with
@@ -896,7 +901,7 @@ let test_absence_acknowledgement_retains_evidence_and_recovery () =
              ~operation_id:operation.operation_id with
      | Ok Keeper_shutdown_store.Terminal_retained -> ()
      | _ -> fail "audit acknowledgement was erased");
-    let repeated = acknowledged_exn (acknowledge ~config operation) in
+    let repeated = acknowledged_exn (acknowledge ~config observed) in
     check bool "retry does not change revision or evidence" true (repeated = acknowledged);
     (match acknowledged.phase with
      | Operator_absence_acknowledged ack ->
@@ -1099,11 +1104,104 @@ let test_absence_acknowledgement_requires_authoritative_backlog_and_no_declarati
         (load_operation_exn ~config operation = operation)))
 ;;
 
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.seq
+  | [] -> 0
+;;
+
+let keeper_log_entries_naming ~since_seq operation =
+  Log.Ring.recent ~limit:200 ~module_filter:"Keeper" ~since_seq ~order:`Oldest_first ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+       String_util.contains_substring
+         entry.message
+         (Operation_id.to_string operation.operation_id))
+;;
+
+(* The [new-keeper] shape of #33635: a finalized [Operator_stop_retain_meta]
+   record whose owner and metadata are both gone. [Owner_not_found] does not
+   change on re-read, so the first recovery records the absence on the record
+   once, at WARN, and the next recovery has nothing to say. The record itself
+   is retained: it is the evidence that the retain contract did not hold, and
+   the operator acknowledgement can still follow it. Before this, every boot
+   re-ran the release and logged the same ERROR. *)
+let test_ownerless_operator_retain_records_absence_once () =
+  with_workspace (fun ~config ->
+    let operation = retained_absent_operation "ownerless-retain-recorded" in
+    persist_exn ~config operation;
+    let before_first = latest_ring_seq () in
+    let observed =
+      match recover_fence ~config operation with
+      | Ok observed -> observed
+      | Error detail -> failf "first recovery still fails: %s" detail
+    in
+    (match observed.phase, operation.phase with
+     | Owner_absent absence, Finalized original ->
+       check bool "original finalization retained" true (absence.finalization = original);
+       check string "observation time is the record's update time"
+         observed.updated_at absence.observed_at
+     | _ -> fail "first recovery did not record the owner absence");
+    check int "one revision for the observation" (operation.revision + 1) observed.revision;
+    check bool "recorded absence does not fence admission" false
+      (requires_admission_fence observed);
+    (match keeper_log_entries_naming ~since_seq:before_first operation with
+     | [ (entry : Log.Ring.entry) ] ->
+       check bool "the one line is a warning, not an error" true
+         (match entry.level with Log.Warn -> true | Log.Debug | Log.Info | Log.Error -> false)
+     | entries ->
+       failf "first recovery logged %d lines naming the operation" (List.length entries));
+    let reread = load_operation_exn ~config operation in
+    check bool "durable codec round trip" true (reread = observed);
+    (match Keeper_shutdown_store.delete_terminal ~config ~keeper_name:operation.keeper_name
+             ~operation_id:operation.operation_id with
+     | Ok Keeper_shutdown_store.Terminal_retained -> ()
+     | Ok Keeper_shutdown_store.Terminal_deleted -> fail "recorded owner absence was reclaimed"
+     | Error error -> fail (Keeper_shutdown_store.error_to_string error));
+    let before_second = latest_ring_seq () in
+    (match recover_fence ~config reread with
+     | Ok again -> check bool "second recovery leaves the record as it is" true (again = observed)
+     | Error detail -> failf "second recovery fails: %s" detail);
+    check int "second recovery logs nothing about the operation" 0
+      (List.length (keeper_log_entries_naming ~since_seq:before_second operation));
+    (match Keeper_shutdown_runtime.recover_at_boot ~config with
+     | [ Ok recovered ] -> check bool "boot keeps the recorded absence" true (recovered = observed)
+     | [ Error detail ] -> failf "boot recovery fails: %s" detail
+     | outcomes -> failf "unexpected boot outcome count: %d" (List.length outcomes));
+    check bool "no intake reservation is left behind" true
+      (Option.is_none
+         (Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path:config.base_path ~keeper_name:operation.keeper_name)))
+;;
+
+(* Owner absence alone is not the signal. A retain-meta record whose metadata
+   still exists names an owner that should have been installed, and recovery
+   keeps failing closed there until someone looks. *)
+let test_ownerless_retain_with_meta_present_still_fails () =
+  with_workspace (fun ~config ->
+    let name = "ownerless-retain-with-meta" in
+    (match Keeper_meta_store.replace_snapshot config (fixture_meta_exn name) with
+     | Ok () -> ()
+     | Error detail -> failf "replace_snapshot failed: %s" detail);
+    let operation = retained_absent_operation name in
+    persist_exn ~config operation;
+    (match recover_fence ~config operation with
+     | Ok _ -> fail "recovery recorded an owner absence while metadata exists"
+     | Error detail ->
+       check bool "failure names the admission release" true
+         (String_util.contains_substring detail "Keeper shutdown admission release failed"));
+    check bool "the record is left as it was" true
+      (load_operation_exn ~config operation = operation))
+;;
+
 let () =
   Alcotest.run
     "keeper_shutdown_ownerless_admission_release"
     [ ( "recovery"
-      , [ Alcotest.test_case "absence acknowledgement checks durable queued and running chat" `Quick
+      , [ Alcotest.test_case "ownerless operator-retain records its absence once" `Quick
+            test_ownerless_operator_retain_records_absence_once
+        ; Alcotest.test_case "ownerless operator-retain with metadata present still fails" `Quick
+            test_ownerless_retain_with_meta_present_still_fails
+        ; Alcotest.test_case "absence acknowledgement checks durable queued and running chat" `Quick
             test_absence_acknowledgement_checks_durable_chat_operations
         ; Alcotest.test_case "absence acknowledgement refuses corrupt chat evidence" `Quick
             test_absence_acknowledgement_rejects_corrupt_chat_store

@@ -351,6 +351,12 @@ let phase_to_json = function
       ; "acknowledged_at", `String ack.acknowledged_at
       ; "backlog_version", `Int ack.backlog_version
       ]
+  | Owner_absent absence ->
+    `Assoc
+      [ "kind", `String "owner_absent"
+      ; "finalization", finalization_evidence_to_json absence.finalization
+      ; "observed_at", `String absence.observed_at
+      ]
   | Finalized evidence ->
     `Assoc
       [ "kind", `String "finalized"
@@ -495,11 +501,24 @@ let validate_operation operation =
     |> Result.map_error (fun error -> Invalid_operation error) in
   match operation.phase with
   | Operator_absence_acknowledged ack ->
-    let original = { operation with revision = ack.prior_revision
-      ; updated_at = ack.prior_updated_at; phase = Finalized ack.finalization } in
-    let digest = Digestif.SHA256.(to_hex (digest_string
-      (Yojson.Safe.to_string (to_json original)))) in
-    if String.equal digest ack.prior_operation_sha256 then Ok () else
+    (* The digest names the record the acknowledgement replaced: the original
+       [Finalized] observation, or boot recovery's [Owner_absent] observation
+       of the same finalization. An [Owner_absent] record's [observed_at] is
+       its [updated_at], so both are rebuilt from the retained fields alone. *)
+    let replaced phase =
+      { operation with revision = ack.prior_revision
+      ; updated_at = ack.prior_updated_at; phase } in
+    let digest_of record =
+      Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (to_json record)))) in
+    let candidates =
+      [ replaced (Finalized ack.finalization)
+      ; replaced (Owner_absent
+          { finalization = ack.finalization; observed_at = ack.prior_updated_at }) ] in
+    if List.exists
+         (fun record -> String.equal (digest_of record) ack.prior_operation_sha256)
+         candidates
+    then Ok ()
+    else
       Error (Invalid_operation (Invalid_absence_acknowledgement
         "retained original shutdown observation digest differs"))
   | _ -> Ok ()
@@ -665,6 +684,11 @@ let phase_of_json json =
     Ok (Operator_absence_acknowledged
       { finalization; prior_revision; prior_updated_at; prior_operation_sha256; actor; reason;
         acknowledged_at; backlog_version })
+  | "owner_absent" ->
+    let* finalization_json = assoc "finalization" json in
+    let* finalization = finalization_evidence_of_json finalization_json in
+    let* observed_at = string "observed_at" json in
+    Ok (Owner_absent { finalization; observed_at })
   | "finalized" ->
     let* evidence_json = assoc "evidence" json in
     let* evidence = finalization_evidence_of_json evidence_json in
@@ -891,6 +915,7 @@ type terminal_delete_outcome =
    independently. *)
 let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   match operation.phase with
+  | Keeper_shutdown_types.Owner_absent _
   | Keeper_shutdown_types.Operator_absence_acknowledged _ -> false
   | Keeper_shutdown_types.Superseded _ -> true
   | Keeper_shutdown_types.Finalized
@@ -1194,7 +1219,7 @@ let persist_blocked_latest ~config ~identity ~failure ~now =
          | Ok existing ->
            (match existing.phase with
             | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _
-            | Operator_absence_acknowledged _ ->
+            | Owner_absent _ | Operator_absence_acknowledged _ ->
               Ok (State_preserved existing)
             | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
             | Cleanup_ready _ ->
@@ -1356,6 +1381,8 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
           let* () =
             match current.phase with
             | Finalized evidence when evidence = acknowledgement.finalization -> Ok ()
+            | Owner_absent { finalization; _ }
+              when finalization = acknowledgement.finalization -> Ok ()
             | _ -> Error (Invalid_operation
                 (Invalid_absence_acknowledgement "acknowledgement must retain original Finalized evidence"))
           in

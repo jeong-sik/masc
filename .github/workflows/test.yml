@@ -44,11 +44,16 @@ on:
     inputs:
       suite:
         description: >-
-          Comma-separated test executables under test/ to build and run on
-          their own instead of the full runner, for example
-          test_heartbeat_integration,test_hitl_summary_worker. A name with
-          a test/<name>.py script runs its dune alias runtest-<name>
-          instead (test_tui_keyboard_input). Empty runs the full suite.
+          Comma-separated test suites to build and run on their own instead of
+          the full runner. Empty runs the full suite. A bare name is resolved
+          under test/, for example test_heartbeat_integration. A suite outside
+          test/ is named by its path from the repository root, for example
+          packages/agent_core/test/test_capabilities -- the 43 suites under
+          packages/ and tools/ have no other spelling here, and a bare name
+          fails with "no test/<name>.ml and no <name>.ml". A name with a
+          test/<name>.py script, or one a test/ dune file declares as
+          (alias runtest-<name>), runs that alias instead
+          (test_tui_keyboard_input).
         type: string
         default: ""
       eio_backend:

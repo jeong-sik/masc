@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { parseExactLaneRunResponse, parseExactLaneRunsResponse } from './dashboard-exact-lane-runs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fetchExactLaneRuns, parseExactLaneRunResponse, parseExactLaneRunsResponse } from './dashboard-exact-lane-runs'
+import { clearStoredToken, setStoredToken } from './core'
+
+afterEach(() => {
+  clearStoredToken()
+  vi.unstubAllGlobals()
+})
 
 function detailFixture(overrides: Record<string, unknown> = {}) {
   return {
@@ -15,6 +21,39 @@ function detailFixture(overrides: Record<string, unknown> = {}) {
     },
   }
 }
+
+describe('fetchExactLaneRuns', () => {
+  it('requests native filtering on both the initial and cursor page', async () => {
+    const requests: URL[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      requests.push(new URL(input, 'http://fixture.invalid'))
+      const before = requests.at(-1)!.searchParams.get('before_run_id')
+      return new Response(JSON.stringify({
+        generated_at: '2026-09-08T00:00:00Z', count: 1, total: 2, has_more: before === null,
+        runs: [{
+          run_kind: 'exact_output', run_id: before === null ? 'native-b' : 'native-a',
+          lane: 'librarian_exact', subject_id: null, actor: 'keeper-fixture',
+          started_at: 100, status: 'running',
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    setStoredToken('native-kind-fixture', { source: 'manual' })
+    const first = await fetchExactLaneRuns({ limit: 1 })
+    const last = first.runs[0]!
+    const second = await fetchExactLaneRuns({ limit: 1, before: { startedAt: last.startedAt, runId: last.runId } })
+    expect(requests).toHaveLength(2)
+    for (const request of requests) {
+      expect(request.pathname).toBe('/api/v1/dashboard/exact-lane-runs')
+      expect(request.searchParams.get('run_kind')).toBe('exact_output')
+      expect(request.searchParams.get('limit')).toBe('1')
+    }
+    expect(requests[0]!.searchParams.has('before_run_id')).toBe(false)
+    expect(requests[1]!.searchParams.get('before_run_id')).toBe('native-b')
+    expect(requests[1]!.searchParams.get('before_started_at')).toBe('100')
+    expect(first.total).toBe(2)
+    expect(second).toMatchObject({ total: 2, hasMore: false, runs: [{ runId: 'native-a' }] })
+  })
+})
 
 describe('parseExactLaneRunsResponse', () => {
   it('decodes one completed Auto Judge exact lane record', () => {

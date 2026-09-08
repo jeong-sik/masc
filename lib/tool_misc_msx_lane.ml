@@ -227,3 +227,32 @@ let handle_press ~tool_name ~start_time ~who args =
          ~hold_frames:(get_int args "hold_frames" 5)
          ~step_frames:(get_int args "frames" 30))
 ;;
+
+(* Checkpoints use names within saves/, never caller-provided host paths. *)
+let checkpoint_slot args =
+  let slot = match args with
+    | `Assoc fields when List.for_all (fun (name, _) -> name = "slot") fields -> (
+      match List.filter (fun (name, _) -> name = "slot") fields with
+      | [] -> Ok "quick"
+      | [(_, `String value)] -> Ok value
+      | _ -> Error "slot must be one string")
+    | _ -> Error "checkpoint arguments must be an object" in
+  match slot with
+  | Error _ as e -> e
+  | Ok slot ->
+    if String.length slot < 1 || String.length slot > 64
+       || not (String.for_all (function
+          | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true | _ -> false) slot)
+    then Error "slot must be 1..64 letters, digits, underscores or hyphens"
+    else Ok slot
+;;
+
+let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
+  match checkpoint_slot args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok slot ->
+    let ledger_dir = msx_dir ~base_path in
+    let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
+    let result = if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path in
+    of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
+;;

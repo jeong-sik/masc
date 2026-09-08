@@ -78,8 +78,13 @@ let title_of ~(connection : Masc_tui_types.connection_status)
         | Some c, _ | None, Some c -> " · " ^ c
         | None, None -> ""
       in
-      Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode media
-        f.msx_number
+      let playing =
+        match f.msx_players with
+        | [] -> ""
+        | who -> "   조작: " ^ String.concat ", " who
+      in
+      Printf.sprintf " MSX — %s%s   frame %d%s   (spectating the server)" f.msx_mode
+        media f.msx_number playing
 
 (* How much of the terminal the picture takes: 1.0 fills the screen, and
    the size keys step it in eighths between a quarter and full. A local
@@ -98,14 +103,14 @@ let step_fraction d =
 let adjust_size d = step_fraction d
 
 let footer () =
-  Printf.sprintf " esc: back   +/-: size %d%%   (keeper plays; this is a live view)"
+  Printf.sprintf " esc: back   +/-: size %d%%   F6: save quick   F7: restore quick"
     (int_of_float (!screen_fraction *. 100.0))
 
 let render ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status)
+    ~(connection : Masc_tui_types.connection_status) ?notice
     (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  let screen_rows = max 4 (rows - 2) in
+  let screen_rows = max 4 (rows - (if Option.is_some notice then 3 else 2)) in
   let picture_rows =
     max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
   in
@@ -113,6 +118,7 @@ let render ~(write : string -> unit)
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (title_of ~connection frame));
   Buffer.add_string buf "\027[0K\r\n";
+  Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
    | Some f
@@ -201,7 +207,7 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   else begin
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
-    render ~write ~connection:state.Masc_tui_types.connection_status
+    render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
       state.msx_frame;
     true
   end

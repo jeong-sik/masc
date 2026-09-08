@@ -17,6 +17,7 @@ let a_frame ?(cartridge = Some "xspelunker") ?(disk = None) () :
   ; msx_mode = "GRAPHIC2"
   ; msx_cartridge = cartridge
   ; msx_disk = disk
+  ; msx_players = []
   }
 
 let a_state () =

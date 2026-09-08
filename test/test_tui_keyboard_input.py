@@ -2637,7 +2637,11 @@ def keeper_message_unreliable_roster_interaction(
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError("unreliable Keeper roster allowed a message POST")
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        # One Escape, and it lands on the Keepers list rather than on a
+        # keeper's detail: a detail is drawn from the roster, and the roster
+        # read is the thing this walk broke. Walking to alpha's detail first
+        # spent all four presses looking for a title the pane was never going
+        # to draw and left the TUI out on Overview.
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 

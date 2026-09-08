@@ -344,12 +344,18 @@ let action_json ?actor_hint (ctx : _ context) args :
 let confirm_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* actor = resolved_actor_for_args ?actor_hint ctx args in
-  let decision =
+  let* decision =
     match get_string_opt args "decision" with
-    | Some raw ->
+    | None -> Ok "confirm"
+    | Some raw -> (
         let normalized = String.lowercase_ascii (String.trim raw) in
-        if normalized = "" then "confirm" else normalized
-    | None -> "confirm"
+        match normalized with
+        | "" | "confirm" -> Ok "confirm"
+        | "deny" -> Ok "deny"
+        | _ ->
+            Error
+              (Printf.sprintf
+                 "decision must be \"confirm\" or \"deny\" (got: %S)" raw))
   in
   match get_string_opt args "confirm_token" with
   | None -> Error "confirm_token is required"

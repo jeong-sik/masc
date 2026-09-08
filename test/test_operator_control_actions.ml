@@ -525,6 +525,10 @@ let () =
             "expired token is rejected"
             `Quick
             Test_operator_control_confirm.test_confirm_rejects_expired_token
+        ; Alcotest.test_case
+            "unknown decision value is rejected"
+            `Quick
+            Test_operator_control_confirm.test_confirm_rejects_unknown_decision
         ] )
     ]
 ;;

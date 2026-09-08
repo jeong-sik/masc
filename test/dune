@@ -4690,6 +4690,11 @@
  (libraries alcotest masc_agent_observation))
 
 (test
+ (name test_remote_url_syntax)
+ (modules test_remote_url_syntax)
+ (libraries alcotest masc_agent_observation))
+
+(test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
  (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))

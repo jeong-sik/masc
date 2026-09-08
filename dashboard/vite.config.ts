@@ -1,6 +1,7 @@
 import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
 import tailwindcss from '@tailwindcss/vite'
+import { sourceContextPlugin } from './dev/source-context-plugin'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 const dashboardBasePath = '/dashboard/'
@@ -137,6 +138,7 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [
+      sourceContextPlugin(),
       tailwindcss(),
       preact(),
       ...reportPlugins,

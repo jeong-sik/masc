@@ -56,6 +56,12 @@ let runtime = {js|function browserScene(args) {
     Number.isFinite(r.x) && Number.isFinite(r.y) && r.width > 0 && r.height > 0
     && r.right > 0 && r.bottom > 0 && r.x < innerWidth && r.y < innerHeight)
     .map(r => ({x:r.x,y:r.y,width:r.width,height:r.height}));
+  const sourceContext = element => {
+    const raw = element.getAttribute('data-masc-source');
+    if (raw === null) return null;
+    try { return JSON.parse(raw); }
+    catch { return {schema:'invalid'}; }
+  };
   const describe = (kind, element, rawText, rects, extra={}) => {
     if (!rects.length) return;
     if (nodes.length >= nodeLimit || chars >= maxChars) { truncated=true; return; }
@@ -63,7 +69,7 @@ let runtime = {js|function browserScene(args) {
     const text=points.slice(0,maxChars-chars).join('');
     if (text.length !== rawText.length) truncated=true;
     chars+=Array.from(text).length;
-    nodes.push({kind,nodeId:nodeId(element),tag:element.localName,text,rects,
+    nodes.push({kind,nodeId:nodeId(element),tag:element.localName,text,rects,sourceContext:sourceContext(element),
       color:style.color,fontSize:Number.parseFloat(style.fontSize),
       fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra});
   };

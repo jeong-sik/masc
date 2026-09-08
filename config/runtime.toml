@@ -58,44 +58,17 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # exact-output lane below (RFC-0361 D7(a)) — [runtime] carries no scalar
 # binding for it.
 
-# Existing workspaces are not overwritten by this seed. Copy the required lane
-# declarations into the live runtime.toml before enabling their consumers.
-# Providers and individual provider.model bindings default to `enabled = true`.
-# Set `enabled = false` in either table to keep the catalog example while
-# excluding it from the executable runtime inventory. A disabled runtime cannot
-# remain referenced by [runtime].default, lanes, assignments, or failover lists.
-# 2026-08-30: every lane leads with glm-coding.glm-5.3 (z.ai) and falls over to
-# ollama_cloud.deepseek-v4-flash-0731 (ollama.com). The two slots are on
-# different providers with independent quotas, so one provider's weekly limit
-# does not stall a whole lane -- the failure the kimi coding plan hit on
-# 2026-08-30. Both were probed live: glm-5.3 answers a json_object request on
-# the z.ai coding wire, deepseek-0731 answers one (no fence) on ollama.com.
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 
-# Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
-# calls resolve only this lane and fail over in declared slot order, the same
-# frozen-order contract as the other exact-output lanes. Same glm-5.3 primary
-# as the lanes above, but the fallback differs: the completion-authority
-# evaluator walks slots through Runtime.resolve_assignment
-# (keeper_turn_driver), which knows configured runtimes and lanes only — the
-# exact-output catalog id ollama_cloud.deepseek-v4-flash-0731 resolves to
-# nothing there ("not found among configured runtimes", measured repeatedly
-# 2026-08-29 and 2026-09-02 whenever the glm head flapped), so this lane
-# names the configured runtime id instead. No [runtime.lanes] entry shadows
-# that id, so resolution lands on the runtime itself. Admission still runs
-# through the exact-output registry, which knows overlay [[targets]] ids
-# only, so agent-core-models-overlay.toml carries a target row under this
-# same id; without it boot ignores the slot as "absent from the frozen
-# catalog" and the lane runs on its head alone (2026-09-03).
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
@@ -497,24 +470,6 @@ max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
-# "none" here does not mean "no reasoning". With supports-reasoning it declares
-# an inherent-thinking contract: the model reasons on its own and the wire has
-# no toggle, which is what lets a keeper turn carrying enable_thinking=true
-# through admission at all.
-#
-# 2026-08-25: changing it to "reasoning-effort" rejected every turn on this
-# lane. thinking-support = true makes the runtime seed request
-# enable_thinking=true (runtime_inference.ml), and under that dialect an
-# explicit enable is only encodable when a concrete effort accompanies it, so
-# each request died as AcceptRejected(Enable_not_encodable) before dispatch.
-# Measured live: 10 api_error_invalid_request and 0 successes on
-# ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 within one keeper cycle.
-#
-# The endpoint does honour reasoning_effort -- it names its own ladder when it
-# rejects an unknown value ("high", "medium", "low", "max", or "none") -- so
-# the dialect can move here, but only together with a declared effort. "none"
-# additionally needs thinking-support = false, or the enable and the effort
-# contradict each other.
 thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
@@ -742,35 +697,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-deepseek-v4-flash]
-
-# Ollama Cloud's 2026-07-31 DeepSeek-V4-Flash build. It is a DIFFERENT model
-# from the untagged `deepseek-v4-flash` above, not a newer alias of it:
-# /api/show reports parameter_size 304180418494 for `:0731` against
-# 158000000000 for the untagged tag, both FP8 and both reporting
-# deepseek4.context_length 1048576 with capabilities [completion tools thinking].
-#
-# It gets its own entry instead of retagging an existing block because
-# [models.deepseek-v4-flash] is bound to BOTH providers
-# ([ollama_cloud.deepseek-v4-flash] and [deepseek.deepseek-v4-flash]) and the
-# `:0731` suffix is an Ollama tag convention — api.deepseek.com/models serves
-# only `deepseek-v4-flash` and `deepseek-v4-pro`, so an in-place retag would
-# 404 the direct lane.
-[models.ollama-cloud-deepseek-v4-flash-0731]
-api-name = "deepseek-v4-flash:0731"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v4-flash-0731.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
 # response axis resolves to reading no field and the reasoning is discarded.
@@ -779,7 +705,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 # No wizard-default: this binding is selectable without changing the fleet default.
-[ollama_cloud.ollama-cloud-deepseek-v4-flash-0731]
+[ollama_cloud.ollama-cloud-deepseek-v4-flash]
 # 2026-08-25: this model collapses into single-token repetition and, with no
 # declared budget, runs the collapse to ollama.com's own 65536-token cap. Wire
 # capture for 2026-08-24..25 caught 11 such generations verbatim -- ~228,000

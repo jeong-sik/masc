@@ -37,7 +37,12 @@ nerdctl volume inspect "$volume"
 # Root creates the keeper-owned directory once; no SYS_ADMIN or writable rootfs.
 nerdctl run --rm --runtime io.containerd.kata.v2 --network none \
   --read-only --cap-drop ALL --tmpfs /tmp --pull never \
-  -v "$volume:/masc-work" "$image" mkdir -m 0777 /masc-work/keeper
+  -v "$volume:/masc-work" "$image" sh -ec '
+    stat -c "before: %a %u:%g %n" /masc-work
+    chmod a+x /masc-work
+    mkdir -m 0777 /masc-work/keeper
+    stat -c "prepared: %a %u:%g %n" /masc-work /masc-work/keeper
+  '
 for phase in write read; do
   nerdctl run -d --name "$proof_name" --runtime io.containerd.kata.v2 \
     --network none --read-only --cap-drop ALL --tmpfs /tmp --pull never \
@@ -57,6 +62,7 @@ print(json.dumps(rows, indent=2))
     if touch /masc-rootfs-proof 2>/dev/null; then exit 1; fi
   '
   nerdctl exec --user 60123:60123 "$proof_name" sh -ec '
+    stat -c "guest: %a %u:%g %n" /masc-work /masc-work/keeper
     grep -qF " /masc-work " /proc/mounts
     test "$(id -u)" = 60123
     grep -q "^CapEff:[[:space:]]*0000000000000000$" /proc/self/status

@@ -1174,13 +1174,17 @@ let test_json_terminal_and_id_boundaries () =
     Llm_provider.Types.ToolUse
       { id = "provider-invalid"; name = "invalid"; input = invalid_payload }
   in
+  (* The invalid value has to sit where the durable form carries it. [json] is
+     a parse of [content] that is never serialized, so a non-finite float
+     there never reaches the encoder; [content_blocks] is written out as the
+     result's content and does. *)
   let invalid_tool_result =
     Llm_provider.Types.ToolResult
       { tool_use_id = "provider-invalid"
       ; content = "valid"
       ; outcome = Llm_provider.Types.Tool_succeeded
-      ; json = Some invalid_payload
-      ; content_blocks = None
+      ; json = None
+      ; content_blocks = Some [ invalid_tool_input ]
       }
   in
   let invalid_updates =

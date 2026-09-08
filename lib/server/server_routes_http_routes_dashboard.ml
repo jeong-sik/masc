@@ -388,7 +388,7 @@ let runtime_config_raw_json
     ; ( "source_revision"
       , `String (Runtime.config_source_revision_to_string source_revision) )
     ; ("path", `String path)
-    ; ("file_name", `String "runtime.toml")
+    ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
     ; ("source_text", `String source_text)
     ; ( "application"
       , runtime_config_application_json

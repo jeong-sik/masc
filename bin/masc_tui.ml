@@ -6713,7 +6713,9 @@ let draw_image state ?(caption = []) ~refuse ~title data =
         | Masc_tui_graphics.ITerm2_protocol ->
             Masc_tui_graphics.iterm2_place ~data box
         | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
-            Masc_tui_graphics.place ~data box
+            (* Kitty derives the width from the row count, so the image keeps
+               its shape instead of being stretched into the box. *)
+            Masc_tui_graphics.place ~data ~rows:box.Masc_tui_graphics.rows
       in
       let header =
         String.concat ""
@@ -6752,7 +6754,7 @@ let download_remote_image url =
     | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
         Ok target_file
     | _ ->
-        (try Sys.remove target_file with _ -> ());
+        (try Sys.remove target_file with _ -> ())  (* @observe-allowed: removing a partial download on the failure path; the caller's error is the download failure, not this *);
         Error "could not download remote image"
 
 let convert_to_png input_path =
@@ -6778,7 +6780,7 @@ let convert_to_png input_path =
           | Unix.WEXITED 0 when Sys.file_exists target_png && (Unix.stat target_png).st_size > 0 ->
               Ok target_png
           | _ ->
-              (try Sys.remove target_png with _ -> ());
+              (try Sys.remove target_png with _ -> ())  (* @observe-allowed: this converter failed and the next is tried; the discard says nothing about that attempt *);
               try_cmd rest
     in
     try_cmd commands
@@ -7214,6 +7216,23 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
           | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
               ()))
+  | Masc_tui_acting_pane.Target_calls keeper_name -> (
+      (* A call row is the keeper's calls surface by another hand, the way
+         [t] opens it from the roster: the cursor lands on that keeper so the
+         surface names the right one, and the snapshot is asked for afresh. *)
+      match
+        List.find_index
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers
+      with
+      | None -> ()
+      | Some index ->
+          state.keeper_cursor <- index;
+          state.keeper_calls <- None;
+          state.keeper_calls_error <- None;
+          state.keeper_calls_scroll <- 0;
+          launch_keeper_calls_load state ~mailbox keeper_name;
+          state.view <- Keepers Keeper_calls)
   | Masc_tui_acting_pane.Target_keeper keeper_name -> (
       match
         List.find_index
@@ -13094,6 +13113,9 @@ let main
          | _ -> Masc_tui_graphics.Unsupported_protocol)
   in
   active_graphics_protocol := proto;
+  (* The spectator draws its own screen and cannot reach this ref, so it is
+     handed the same answer rather than probing again. *)
+  Masc_tui_msx.set_graphics_protocol proto;
   terminal_draws_images :=
     Some
       (match proto with

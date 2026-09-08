@@ -1,6 +1,29 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body. Reach for it when the work matches what a Skill below says it is for.\n\n Pass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded."
+description = "Read one frozen instruction Skill body. Every row in the Available list below is something this workspace wrote down about work that recurs here — a failure that repeats, a convention and the reason for it, a sequence whose order matters. Open the row whose one-line description names the work you are about to start, before starting it. The common error is not opening one that applied: a body that turns out not to apply costs a single call. A row that also appears as a `keeper_compose_<name>` tool performs its readings in one call — use that tool when the readings are all you need.\n\n Pass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded."
 additional_properties = false
+# 서술의 무게를 "어떻게 부르나" 에서 "언제 여나" 로 옮겼다.
+#
+# 이 서술은 스킬을 쓰라고 말하는 유일한 무조건 표면이다. 키퍼 프롬프트
+# (config/prompts/keeper.md, 144블록) 의 스킬 언급은 네 블록뿐이고 넷 다
+# current_task.skills / held_task.skills — task 가 스킬을 지명했을 때만 렌더된다.
+# 그런데 이 workspace 에 기록된 292개 task 중 스킬을 지명한 것은 0개였다
+# (RFC-0411 §1.5). 그래서 그 네 블록은 한 번도 렌더된 적이 없고, 평상시 프롬프트는
+# 스킬에 대해 아무 말도 하지 않는다.
+#
+# 실측 근거: 2026-09 tool_calls 108,185건에 스킬 읽기 250건 — 천 호출당 2.3회.
+# 런타임별로는 codex_subscription.gpt-5.6-luna 52.7 / openai-responses.gpt-6-astra
+# 29.7 / glm-coding.glm-5.3 1.8 / claude_code.claude-sonnet-5 0.2 이고, 가장 바쁜
+# antigravity_subscription.gemini-3-8-flash-high 는 24,041 호출에 0 이다. codex 는
+# 8번째로 바쁠 뿐이므로 "바빠서 많이 읽는다" 가 아니다. 산문을 스스로 여는 것은
+# 모델 계열의 성질이고, 안 여는 쪽에 닿는 문장은 이 도구 서술뿐이다.
+#
+# Anthropic 공식 지침도 같은 방향이다 — 모델은 Skill 을 과소발동(undertrigger)하며,
+# 교정 지점은 항상 프롬프트에 실리는 description 이다.
+#
+# 되돌릴 조건: 이 서술로 바꾼 뒤에도 천 호출당 읽기가 2.3 근처에 머물면, 원인은
+# 서술이 아니라 다른 데 있다는 뜻이므로 늘어난 바이트를 되돌리고 프롬프트 블록
+# 쪽(무조건 렌더되는 자리)을 대신 손본다.
+#
 # 이 도구는 조회를 겸한다. 그래서 지연하지 않는다.
 #
 # 같은 주석이 원래 반대로 끝났다 — 지연 판단은 필요했던 턴 수로 하고(masc #32062),

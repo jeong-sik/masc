@@ -10,6 +10,8 @@ never deletes posts with comments or votes unless filters are overridden."""
 # called once on 2026-08-29 or 2026-08-30 across the fleet.
 defer_loading = true
 
+identity_fields = []
+
 [[params]]
 name = "max_age_hours"
 type = "integer"

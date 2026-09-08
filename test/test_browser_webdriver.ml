@@ -206,7 +206,20 @@ webdriver_url = "http://example.org:4444"|}; {|[browser]
 webdriver_url = "http://127.0.0.1:4444"
 binary = "Zen.app"|}; {|[browser]
 webdriver_url = "http://127.0.0.1:4444"
-binary = false|}]
+binary = false|}];
+  (* The error message says "loopback HTTP origin" and the check used to list
+     three literals, which is narrower. Masc_network_defaults.is_loopback_host
+     decides it now: the whole of 127.0.0.0/8 -- a resolver stub on
+     127.0.0.53 is as unreachable from off-host as 127.0.0.1 -- and
+     "localhost" in any case. It still says no to a host that only looks like
+     an address, which a prefix match would have let through. *)
+  List.iter (fun text -> check bool "loopback origin is accepted" true (Result.is_ok (parse text)))
+    [{|[browser]
+webdriver_url = "http://127.0.0.53:4444/"|}; {|[browser]
+webdriver_url = "http://LOCALHOST:4444/"|}];
+  check bool "a host that merely starts with 127. is refused" true
+    (Result.is_error (parse {|[browser]
+webdriver_url = "http://127.invalid:4444/"|}))
 
 let () = run "native Firefox lane" ["behavior", [
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;

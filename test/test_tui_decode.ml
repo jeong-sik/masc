@@ -5532,7 +5532,8 @@ let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
     ]
 
 let runtime_probe_surface_json ?(first_status = "reachable")
-    ?(probe_status = "degraded") ?(first_reachable = `Bool true) () =
+    ?(probe_status = "degraded") ?(first_reachable = `Bool true)
+    ?(source = "runtime.toml") () =
   let providers =
     [ runtime_probe_provider ~status:first_status ~reachable:first_reachable
         "runtime-a"
@@ -5554,7 +5555,7 @@ let runtime_probe_surface_json ?(first_status = "reachable")
     ; "refresh_state", `String "served_stale"
     ; ( "probe"
       , `Assoc
-          [ "source", `String "runtime.toml"
+          [ "source", `String source
           ; "status", `String probe_status
           ; "probe_ok", `Bool false
           ; "checked_at", `String "2026-08-24T10:20:00Z"
@@ -5741,6 +5742,19 @@ let test_runtime_probe_rejects_status_reachability_disagreement () =
       (runtime_probe_surface_json ~first_reachable:(`Bool false) ())
   with
   | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
+  | Error _ -> ()
+
+(* The server names the file this snapshot was read from and the decoder
+   refuses any other name, so the two have to agree on one string. They now
+   share Config_dir_resolver.runtime_toml_filename; the literal above is the
+   wire value that name has to keep producing, and this is the other
+   direction. *)
+let test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~source:"keeper_runtime.toml" ())
+  with
+  | Ok _ -> Alcotest.fail "a probe naming another file decoded"
   | Error _ -> ()
 
 let test_runtime_catalog_probe_is_independent_of_dispatch () =
@@ -8195,6 +8209,8 @@ let () =
           test_runtime_probe_status_round_trips
       ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
           test_runtime_probe_rejects_status_reachability_disagreement
+      ; Alcotest.test_case "rejects a source that is not the runtime config"
+          `Quick test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config
       ; Alcotest.test_case "catalog probe is independent of dispatch" `Quick
           test_runtime_catalog_probe_is_independent_of_dispatch
       ; Alcotest.test_case "limits reject invalid values" `Quick

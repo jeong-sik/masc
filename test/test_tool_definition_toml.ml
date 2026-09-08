@@ -57,6 +57,53 @@ let check_rejects ~name ~contents needle =
       (contains ~needle message)
 ;;
 
+let test_identity_fields_round_trip () =
+  let contents =
+    {|name = "fixture_tool"
+description = "fixture"
+identity_fields = ["author", "tenant"]
+|}
+  in
+  match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
+  | Error message -> failf "expected identity_fields to load, got error: %s" message
+  | Ok { Tool_definition_toml.identity_fields; _ } ->
+    check
+      (option (list string))
+      "identity fields"
+      (Some [ "author"; "tenant" ])
+      identity_fields
+;;
+
+let test_identity_fields_absent_is_none () =
+  let contents =
+    {|name = "fixture_tool"
+description = "fixture"
+|}
+  in
+  match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
+  | Error message ->
+    failf "expected a file without identity_fields to load, got error: %s" message
+  | Ok { Tool_definition_toml.identity_fields; _ } ->
+    check (option (list string)) "absent identity_fields" None identity_fields
+;;
+
+let test_identity_fields_are_fail_closed () =
+  let wrong_shape =
+    {|name = "fixture_tool"
+description = "fixture"
+identity_fields = "author"
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents:wrong_shape "identity_fields";
+  let wrong_element =
+    {|name = "fixture_tool"
+description = "fixture"
+identity_fields = ["author", 1]
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents:wrong_element "identity_fields[1]"
+;;
+
 (* ── Round trips ──────────────────────────────────────────────────────── *)
 
 (* Every JSON Schema element the board tool literals use today: enum,
@@ -481,8 +528,6 @@ let test_rejections () =
   check_rejects ~name:"t" ~contents:(minimal "other") "file name";
   check_rejects ~name:"t" ~contents:"name = \"t\"\ndescription = \"\"\n" "empty";
   check_rejects ~name:"t" ~contents:(minimal "t" ^ "surprise = 1\n") "unknown key \"surprise\"";
-  check_rejects ~name:"t" ~contents:"name = \"t\"\ndescription = \"d.\"\ntitle = \"T\"\n"
-    "unknown key \"title\"";
   check_rejects ~name:"t" ~contents:(minimal "t" ^ "[[params]]\ntype = \"string\"\n")
     "missing the required key \"name\"";
   check_rejects ~name:"t" ~contents:(minimal "t" ^ "[[params]]\nname = \"p\"\n")
@@ -1101,6 +1146,12 @@ let () =
         ; test_case "help table round-trips" `Quick test_help_table_round_trips
         ; test_case "help decode is fail-closed" `Quick
             test_help_table_is_fail_closed
+        ; test_case "identity_fields round-trip" `Quick
+            test_identity_fields_round_trip
+        ; test_case "identity_fields decode is fail-closed" `Quick
+            test_identity_fields_are_fail_closed
+        ; test_case "absent identity_fields is None, not an empty list" `Quick
+            test_identity_fields_absent_is_none
         ; test_case "no params yields empty properties" `Quick
             test_no_params_yields_empty_properties
         ; test_case "published JSON preserves the author's key order" `Quick

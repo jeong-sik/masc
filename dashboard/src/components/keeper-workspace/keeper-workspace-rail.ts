@@ -17,6 +17,7 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
+import { Meter } from '../v2/primitives-v2'
 import { tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
@@ -529,14 +530,10 @@ function ContextSection({
           ? html`
               ${usageHeader}
               <div class="meter-wrap">
-                <div
-                  class="meter"
-                  role="meter"
-                  aria-label="마지막 완료 요청의 컨텍스트 윈도우 사용률"
-                  aria-valuenow=${pct ?? 0}
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                ><span style=${{ width: `${pct ?? 0}%` }}></span></div>
+                <${Meter}
+                  pct=${pct ?? 0}
+                  label="마지막 완료 요청의 컨텍스트 윈도우 사용률"
+                />
               </div>
             `
           : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailableReason

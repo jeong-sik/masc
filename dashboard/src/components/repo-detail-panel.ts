@@ -91,12 +91,6 @@ export async function loadRepoBranches(id: string): Promise<void> {
   })
 }
 
-export function resetRepoDetail(): void {
-  repoDetailResource.reset()
-  branchesResource.reset()
-  syncing.value = false
-}
-
 // ── Helpers ──────────────────────────────────────────────
 
 const REPO_STATUS_LABEL: Record<RepoStatus, string> = {

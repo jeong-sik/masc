@@ -192,6 +192,11 @@ blocking_lints() {
   # guard's: keeper meta carries the fields, and keeper_meta_store reads them.
   run_lint "Exact-field decoders have a preflight" \
     python3 scripts/ci/check_exact_field_decoder_preflight.py
+  # Named only by a comment in the root dune until now, and red the whole
+  # time: half of it asserted a nine-job lane #32511 deleted. That half is
+  # gone; what runs here is the half the root dune's comment claims.
+  run_lint "Root dune warning mask" \
+    bash scripts/ci/check-ocaml-compile-authority.sh
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
   # The two ratchets that survived #33313, which deleted eighteen nobody ran.
@@ -220,6 +225,21 @@ blocking_pr_lints() {
     python3 scripts/ci/test_check_stale_base_revert.py
   run_lint "Stale-base revert guard (RFC-0235)" \
     python3 scripts/ci/check-stale-base-revert.py --base "${base}" --head HEAD
+  # Both do nothing without a base ref, which is why they belong here rather
+  # than beside the always-on lints. check-release-train-guard refuses a
+  # version downgrade -- 0.33.0 to 0.31.0 in dune-project reports it -- and
+  # check-pr-hygiene refuses an empty commit and a Request_priority erasure
+  # (#4186), which a planted `~priority:()` reports.
+  run_lint "Release train guard" \
+    bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
+  run_lint "PR hygiene" bash scripts/check-pr-hygiene.sh --base "${base}"
+  # The companion to the boundary guard wired above: a new .mli whose paired
+  # .ml is already in that guard's allow-list has to be added alongside it,
+  # or every later PR fails on docstrings this one exposed. That is PR #11248
+  # -> blocked #11272 -> fix-forward #11280/#11283. Adding a keeper .mli whose
+  # .ml is allow-listed, without the .mli, reports PAIR-GATE FAIL.
+  run_lint "Boundary-guard .mli pairing" \
+    env BASE_REF="${base}" bash scripts/check-boundary-guard-mli-pairs.sh
   # A wildcard catch that swallows Eio.Cancel.Cancelled is the bug this repo
   # modelled in TLA+ (CancelledAbsorbed / CancelledNeverAbsorbed) and hit at
   # runtime as an Assert_failure. The lint existed but no workflow ran it, so
@@ -253,10 +273,149 @@ blocking_pr_lints() {
     scripts/ci/check-committed-secrets.py \
     python3 scripts/ci/test_check_committed_secrets.py
   run_lint "No committed credentials" python3 scripts/ci/check-committed-secrets.py
+  # Six of the guards #34018 listed as unwired, each one measured twice: run
+  # on untouched main (passes) and then run again with a violation planted
+  # (fails). A guard that only does the first is a guard that passes, which
+  # is not the same thing.
+  #
+  #   check-eio-conventions       Eio_unix.sleep under lib/
+  #   audit-ocaml-phase-count     "12-phase" in a keeper comment, SSOT is 8
+  #   audit-tla-phase-count       the same drift on the spec side
+  #   audit-route-tool-catalog    a route demanding a tool the catalog lacks
+  #   audit-shell-ir-consumption  a retired authorization symbol back in lib/
+  #   base-policy-audit           `open Base` in an .mli
+  #
+  # The last two take an argument to enforce anything. Bare, one prints
+  # metrics and the other prints a summary, both exiting 0 -- so the name
+  # alone would have wired a guard that cannot fail. Three more from that
+  # list are staying out for the same reason and the baseline says why.
+  run_lint "Eio conventions" bash scripts/check-eio-conventions.sh
+  run_lint "OCaml phase-count drift" bash scripts/audit-ocaml-phase-count.sh
+  run_lint "TLA phase-count drift" bash scripts/audit-tla-phase-count.sh
+  run_lint "Route tool catalog" bash scripts/audit-route-tool-catalog.sh
+  run_lint "Shell IR structural boundary" \
+    bash scripts/audit-shell-ir-consumption.sh \
+    --baseline scripts/shell-ir-consumption-baseline.json
+  run_lint "Base policy" bash scripts/base-policy-audit.sh --fail-on-regression
+  # The gate itself needs `dune describe` and runs in the build job. This is
+  # its self-test, which feeds synthetic graphs and asserts both directions --
+  # a clean graph passes, a cycle and a dangling UID are refused -- and needs
+  # no switch. Same split as the env-read floor check above.
+  run_lint "Sublib leaf boundary self-test" \
+    python3 scripts/audit-sublib-cycle.py --self-test
+  # Thirteen SSOT rules, each a pattern with a baseline, five of them carrying
+  # their own pattern self-tests. It was the last red one on #34018's list and
+  # is green now: R2 and R10 were fixed (#34199, #34198), R4 was pointed at
+  # three filenames that no longer exist (#34201), and R6 counted 69 prose
+  # mentions alongside the one root a program used. 2.7s.
+  run_lint "SSOT rules" bash scripts/check-ssot.sh
+  # A second pass over #34018's list, this time the entries nobody had ever
+  # run. Same method as the six above: run clean, then run again with a
+  # violation planted. All seven failed on the planted one.
+  #
+  #   check-toml-syntax                        an unclosed array in config/
+  #   check-yaml-syntax                        the same in a workflow
+  #   check-sandbox-dune-version               dune-project asking for more
+  #                                            than the sandbox image installs
+  #   check-checkpoint-installation-legacy-purge  a retired symbol back in lib/
+  #   check-dashboard-nav-event-parity         a section the OCaml allowlist
+  #                                            does not carry
+  #   check-tla-harness-coverage               a .cfg-backed spec in neither
+  #                                            tla-check.sh nor the debt list
+  #   check-opam-lock-covers-deps              this one was already failing:
+  #                                            ocaml-msx was declared and
+  #                                            unlocked, so --locked skipped it
+  run_lint "TOML syntax" bash scripts/check-toml-syntax.sh
+  run_lint "YAML syntax" python3 scripts/ci/check-yaml-syntax.py
+  run_lint "Sandbox dune version" bash scripts/check-sandbox-dune-version.sh
+  run_lint "Checkpoint legacy purge" \
+    bash scripts/check-checkpoint-installation-legacy-purge.sh
+  run_lint "Dashboard nav-event parity" \
+    bash scripts/check-dashboard-nav-event-parity.sh
+  # This one also takes scripts/tla-check.sh off the not-wired list, which
+  # reads stronger than it is: TLC still runs nowhere. What the gate holds is
+  # tla-check.sh's spec list -- a new .cfg-backed spec has to be added to it
+  # or written down as debt, rather than appearing checked because no one
+  # looked.
+  run_lint "TLA harness coverage" bash scripts/ci/check-tla-harness-coverage.sh
+  run_lint "Opam lock covers declared deps" \
+    bash scripts/check-opam-lock-covers-deps.sh
+  # Two more from the same list, both annotated red on 2026-09-07 and both
+  # green now -- the annotations go stale, which is its own reason to run
+  # them from CI rather than by hand once.
+  #
+  #   check-keeper-runtime-setting-registry  MASC_KEEPER_PROBE_UNREGISTERED
+  #                                          added to env_config_keeper.ml
+  #   check-env-snapshot-default-drift       the snapshot's stated 1000 for
+  #                                          MASC_CACHE_MAX_ENTRIES against a
+  #                                          reader that applies 1000
+  run_lint "Keeper runtime setting registry" \
+    bash scripts/check-keeper-runtime-setting-registry.sh
+  run_lint "Env snapshot default drift" \
+    python3 scripts/ci/check-env-snapshot-default-drift.py
+  # 30 checks over retired concepts and ownership boundaries, each with its
+  # own baseline or forbidden-match list, and no workflow had ever run any of
+  # them. Planting "self_correction_required" in lib/ reports
+  # V7j-retired-consecutive-tool-failure-guard.
+  #
+  # 48s, which is most of what this suite costs on its own. Everything else
+  # here together is about 60s. Worth it while the alternative is a retired
+  # concept walking back in unnoticed, but it is the first place to look if
+  # the lint job gets slow.
+  run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
+  # Promoted out of the advisory lane. It already ran there with --strict, and
+  # --strict is the mode that fails, so the only thing "advisory" bought was
+  # that nobody had to look: the count sits exactly at its baseline of 15, and
+  # a 16th knob would have been reported and merged. Adding a get_int to the
+  # Dashboard module reports it.
+  run_lint "Dashboard env knob count" \
+    bash scripts/lint-timeout-env-count.sh --strict
+  # Green for the first time. It read 11 sites, of which two were the
+  # docstring of the module written to replace this anti-pattern -- its
+  # exclusion glob said lib/telemetry_observe and the file is at
+  # lib/workspace/ -- and one was a comment saying a bare `try ... with _ ->
+  # ()` would swallow cancellation. The remaining eight are teardown paths
+  # and each now carries its reason on the line.
+  run_lint "Silent failure" bash scripts/check_silent_failure.sh --strict
+  # A per-pattern ratchet over dashboard/src for Tailwind spellings whose
+  # replacement already exists. It was reporting one unit of slack --
+  # text-px-literal measured 50 against a baseline of 51 -- which is one free
+  # regression, so the baseline moves to 50 in this commit. Planting
+  # `text-[13px] bg-zinc-800` reports two patterns over baseline.
+  run_lint "Dashboard styling drift" bash scripts/dashboard-drift-check.sh
+  # Was listed as a report on the strength of a grep for `exit 1`. It exits 2,
+  # and that 2 is the verdict, not a usage error: a dashboard line that names
+  # a prompt key config/prompts and prompt_names.ml do not carry decodes to an
+  # empty block. Planting 'fusion.judge.probe_absent' on a promptKeys line
+  # reports it.
+  run_lint "Dashboard prompt keys" bash scripts/audit-dashboard-prompt-keys.sh
+  # Two line-reference validators with nothing to validate: no spec preamble
+  # and no keeper docstring currently cites a line number. They were written
+  # after four citations in a retired queue model drifted 245 to 413 lines
+  # while every behavioural claim around them stayed true, so the failure they
+  # exist for arrives the moment someone writes the next citation. Wiring them
+  # at zero subjects costs a second each and means the first one is checked.
+  run_lint "TLA spec line-refs" bash scripts/audit-tla-ml-line-refs.sh
+  run_lint "OCaml spec-nav line-refs" \
+    bash scripts/audit-ocaml-spec-nav-line-refs.sh
 }
 
 advisory_lints() {
-  run_lint "Dashboard env knob count (advisory)" bash scripts/lint-timeout-env-count.sh --strict
+  # The two that stay here, with the number that keeps them here. Both have an
+  # enforcing mode and both are red in it, so "advisory" is not a policy choice
+  # about their subject -- it is where they sit until the count comes down.
+  #
+  #   lint-magic-number --strict     10 (file, literal) pairs at >= 5 repeats,
+  #                                  all ms<->s and KiB conversions. It read 80
+  #                                  until #34236 stopped it counting the RFC
+  #                                  numbers in its own comments and log lines.
+  #   exhaustive-guard BLOCKING=1    826 fragile matches -- checked against
+  #                                  comment-stripping, and it is 826 either
+  #                                  way; the script's own
+  #                                  header says Phase 5 flips this "once the
+  #                                  codemod has closed the bulk of inventory
+  #                                  and allowlist is narrowed", and 826 is not
+  #                                  that
   run_lint "Magic number repetition (advisory)" bash scripts/lint-magic-number.sh
   run_lint "Fragile-match (advisory, RFC-0071 Phase 1)" bash scripts/lint/exhaustive-guard.sh
 }

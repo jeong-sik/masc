@@ -86,6 +86,8 @@ let test_phase_token_total_and_lowercase () =
     Tools_compute;
     Telemetry_query; Telemetry_filter;
     Telemetry_summary_per_keeper; Telemetry_summary_aggregate;
+    Health_build_identity; Health_paths; Health_internal_auth;
+    Health_dashboard_surface; Health_response;
     Json_serialize; Mcp_http_auth; Mcp_identity; Mcp_dispatch;
   ] in
   List.iter (fun p ->
@@ -104,6 +106,18 @@ let test_phase_token_total_and_lowercase () =
         true ok
     ) tok
   ) all_phases
+;;
+
+let test_health_phase_header_contract () =
+  let timing = Server_timing.create () in
+  List.iter (fun (phase, ms) -> Server_timing.record_ms timing phase ms)
+    [ Server_timing.Health_build_identity, 1.; Health_paths, 2.;
+      Health_internal_auth, 3.; Health_dashboard_surface, 4.;
+      Health_response, 11.; Json_serialize, 0.5 ];
+  Alcotest.(check (list (pair string string))) "health phases retain distinct wire tokens"
+    [ "server-timing",
+      "health_build_identity;dur=1.000, health_paths;dur=2.000, health_internal_auth;dur=3.000, health_dashboard_surface;dur=4.000, health_response;dur=11.000, json_serialize;dur=0.500" ]
+    (Server_timing.extra_header timing)
 ;;
 
 let test_custom_phase_sanitized () =
@@ -156,6 +170,7 @@ let () =
           Alcotest.test_case "Custom sanitised" `Quick test_custom_phase_sanitized;
         ] );
       ( "wrap",
-        [ Alcotest.test_case "extra_header" `Quick test_extra_header_wrap ] );
+        [ Alcotest.test_case "extra_header" `Quick test_extra_header_wrap;
+          Alcotest.test_case "health phase wire contract" `Quick test_health_phase_header_contract ] );
     ]
 ;;

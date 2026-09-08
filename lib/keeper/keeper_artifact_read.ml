@@ -284,9 +284,9 @@ let page (request : request) bytes =
   page_of_slice_within_output_budget request ~total_bytes requested_bytes
 ;;
 
-let handle ~base_path ~args =
+let handle_with_page ~base_path ~args =
   match request_of_json args with
-  | Error invalid -> invalid_input (invalid_request_to_string invalid)
+  | Error invalid -> invalid_input (invalid_request_to_string invalid), None
   | Ok request ->
     let store = Tool_blob_store.create ~base_path in
     (match
@@ -297,12 +297,15 @@ let handle ~base_path ~args =
          ~max_bytes:request.max_bytes
      with
      | Error error ->
-       storage_failure (Tool_blob_store.fetch_error_to_string error)
-     | Ok None -> invalid_input "artifact does not exist"
+       storage_failure (Tool_blob_store.fetch_error_to_string error), None
+     | Ok None -> invalid_input "artifact does not exist", None
      | Ok (Some { content; total_bytes }) ->
        (match page_of_slice_within_output_budget request ~total_bytes content with
-        | Error message -> invalid_input message
-        | Ok page -> Keeper_tool_execution.success_data (page_to_json page)))
+        | Error message -> invalid_input message, None
+        | Ok page -> Keeper_tool_execution.success_data (page_to_json page), Some page))
+;;
+
+let handle ~base_path ~args = fst (handle_with_page ~base_path ~args)
 ;;
 
 module For_testing = struct

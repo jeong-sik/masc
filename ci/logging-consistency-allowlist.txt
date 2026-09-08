@@ -45,6 +45,9 @@ bin/masc_cost.ml
 # regenerated; its two eprintf are TOML load failures the operator must see
 # on the terminal before committing baselines — not server records.
 bin/tool_parity_generator.ml
+# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
+# malformed or incomplete Board TOML declaration to the build operator.
+bin/gen_board_tool_registry.ml
 
 # --- RFC-0079 legacy raw-stderr bridge (embedded [LEVEL] prefix) ---
 # Log.legacy_stderr / Log.legacy_traceln deliberately emit a raw, unprefixed

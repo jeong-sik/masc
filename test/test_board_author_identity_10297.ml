@@ -216,6 +216,49 @@ let test_empty_ctx_preserves_legacy_canonicalisation () =
     (Some "xi-hammer")
     (json_string_field "author" result)
 
+(* --- 6. dispatch binds what the generated registry declares ------ *)
+
+let test_bind_covers_every_declared_field () =
+  (* The MCP path used to carry its own copy of the field list as a match
+     on tool-name strings ending in [_ -> arguments] (#34157). Now it reads
+     the same generated registry the Keeper path reads, so every declared
+     field of every board tool is bound, and a tool that declares none is
+     left byte-identical. *)
+  List.iter
+    (fun board ->
+      let name = Tool_name.Board_name.to_string board in
+      let fields = Board_tool_registry.identity_fields_for_board_name board in
+      let spoofed =
+        assoc
+          (("body", `String "hi")
+          :: List.map (fun field -> (field, `String "delta")) fields)
+      in
+      let bound =
+        D.bind_caller_identity ~name ~agent_name:"xi-hammer" spoofed
+      in
+      List.iter
+        (fun field ->
+          check (option string)
+            (Printf.sprintf "%s.%s bound to the caller" name field)
+            (Some "xi-hammer")
+            (json_string_field field bound))
+        fields;
+      if fields = [] then
+        check string
+          (Printf.sprintf "%s declares no identity field and is untouched" name)
+          (Yojson.Safe.to_string spoofed)
+          (Yojson.Safe.to_string bound))
+    Tool_name.Board_name.all
+
+let test_bind_leaves_non_board_tools_alone () =
+  let args = assoc [ ("author", `String "delta") ] in
+  let bound =
+    D.bind_caller_identity ~name:"masc_status" ~agent_name:"xi-hammer" args
+  in
+  check string "non-board tool arguments unchanged"
+    (Yojson.Safe.to_string args)
+    (Yojson.Safe.to_string bound)
+
 let () =
   run "board_author_identity_10297"
     [
@@ -249,5 +292,12 @@ let () =
         [
           test_case "empty ctx preserves legacy canonical" `Quick
             test_empty_ctx_preserves_legacy_canonicalisation;
+        ] );
+      ( "registry-driven-binding",
+        [
+          test_case "every declared field of every board tool is bound" `Quick
+            test_bind_covers_every_declared_field;
+          test_case "a non-board tool is left alone" `Quick
+            test_bind_leaves_non_board_tools_alone;
         ] );
     ]

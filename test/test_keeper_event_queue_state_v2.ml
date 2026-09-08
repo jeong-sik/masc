@@ -73,10 +73,8 @@ let test_exact_ack_removes_only_selected_identity () =
     (post_ids (State.pending acked))
 ;;
 
-(* 2026-09-05 sangsu incident: a checkpoint-yield turn retains a
-   Connector_attention entry instead of acking it, and that retention is a
-   durable, countable fact — the count is what bounds the retention (see
-   [Keeper_heartbeat_loop.connector_attention_retention_bound]). *)
+(* Retention updates the exact durable selection. Its count is observation
+   and source-binding metadata, never authority to acknowledge a request. *)
 let test_checkpoint_retention_spends_the_caller_snapshot () =
   let state = State.with_pending (queue [ stimulus "discord-a" 1.0 ]) State.empty in
   let selected = select state in

@@ -224,15 +224,6 @@ export function updateQueuedMessage(
   return item
 }
 
-/** Remove a specific queued message. */
-export function removeQueuedMessage(keeperName: string, id: string): boolean {
-  const q = _queues.get(keeperName)
-  if (!q) return false
-  const before = q.items.length
-  q.items = q.items.filter(i => i.id !== id)
-  return q.items.length < before
-}
-
 /** Pop the front queued message. Returns null if empty or already sending. */
 export function dequeueInput(keeperName: string): QueuedMessage | null {
   const q = _queues.get(keeperName)

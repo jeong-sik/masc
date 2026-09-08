@@ -14017,6 +14017,128 @@ def run_theme_scheme_regression(executable: str) -> None:
     )
 
 
+# What the MSX screen draws when it opens. RFC-0439 3.7 has it open the load
+# menu first, so this is the title an arrival is proved by; the spectator's own
+# "no machine loaded" line belongs to the screen behind the menu.
+MSX_MENU_TITLE = "MSX \u2014 pick a game".encode()
+
+# The machine's frame, as the server sends it (server_routes_http_routes_msx:
+# 256x192x3 raw RGB, base64 in the JSON).
+MSX_FRAME_WIDTH = 256
+MSX_FRAME_HEIGHT = 192
+MSX_HALF_BLOCK = "\u2580".encode()
+MSX_LEFT_HALF = b"38;2;255;0;0"
+MSX_RIGHT_HALF = b"38;2;0;0;255"
+# What fit_grid picks for this frame in the harness's 30-row, 100-column
+# window: the height binds (2*(30-2) = 56 rows), so the width follows the
+# frame's ratio at 56*256/192 = 74. Filling the window instead would draw 100,
+# which is the frame a third wider than itself.
+MSX_EXPECTED_CELLS = 74
+
+
+def msx_loaded_frame_fixture() -> HttpResponse:
+    """A frame split down the middle: red left, blue right.
+
+    Two flat halves rather than a picture, because what the drawn rows have to
+    say is geometric -- how many cells the picture is wide, and that the halves
+    stayed halves. A photograph would say it too and could not be checked by
+    reading the bytes.
+    """
+    row = (
+        bytes([255, 0, 0]) * (MSX_FRAME_WIDTH // 2)
+        + bytes([0, 0, 255]) * (MSX_FRAME_WIDTH - MSX_FRAME_WIDTH // 2)
+    )
+    return (
+        200,
+        {
+            "loaded": True,
+            "number": 1,
+            "width": MSX_FRAME_WIDTH,
+            "height": MSX_FRAME_HEIGHT,
+            "mode": "SCREEN2",
+            "cartridge": "split.rom",
+            "rgb_base64": base64.b64encode(row * MSX_FRAME_HEIGHT).decode("ascii"),
+        },
+    )
+
+
+def msx_spectator_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Watch a loaded machine, and read the shape of what was drawn.
+
+    The screen paints the whole terminal itself, outside the frame presenter,
+    so there is no frame-end marker to wait on -- the raw output carries the
+    title, as the palette scenario already relies on.
+    """
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b":go msx\r")
+    # A loaded machine puts a watch row at the top of the menu (RFC-0439 3.7).
+    wait_for_output(process, master_fd, output, b"watch split.rom", start=start,
+                    timeout=5.0)
+    # Entering the spectator paints past the frame presenter too, so the wait
+    # is on raw output; send_and_wait would starve on a frame-end marker that
+    # this screen never writes.
+    watched_from = len(output)
+    os.write(master_fd, b"\r")
+    # The footer is the last line the screen writes, so waiting on it is
+    # waiting for every mosaic row to have been written. Waiting on the title
+    # instead read rows that were still going out, and a half-written row is
+    # narrower than the picture.
+    wait_for_output(process, master_fd, output, b"esc: back",
+                    start=watched_from, timeout=5.0)
+    watching = bytes(output)[watched_from:]
+    if b"spectating the server" not in watching:
+        raise AssertionError(f"the spectator title is missing: {watching[:200]!r}")
+
+    drawn = [
+        line
+        for line in CSI_RE.sub(b"", watching).split(b"\n")
+        if MSX_HALF_BLOCK in line
+    ]
+    if not drawn:
+        raise AssertionError(f"the spectator drew no picture: {watching!r}")
+
+    odd = [line for line in drawn if line.count(MSX_HALF_BLOCK) != MSX_EXPECTED_CELLS]
+    if odd:
+        raise AssertionError(
+            "the picture is not the frame's shape: this frame asks for "
+            f"{MSX_EXPECTED_CELLS} cells a row and "
+            f"{[(line.count(MSX_HALF_BLOCK), line[:60]) for line in odd[:3]]!r}"
+        )
+    # Pillarboxed, not stretched: the leftover columns stay blank, and the
+    # picture sits between them.
+    if not all(line.startswith(b" ") for line in drawn):
+        raise AssertionError(f"the picture was not centred: {drawn[0]!r}")
+
+    # The halves stayed halves. Both colours are on every row, and the row's
+    # own bytes say which came first.
+    if MSX_LEFT_HALF not in watching or MSX_RIGHT_HALF not in watching:
+        raise AssertionError(
+            "a flat red half and a flat blue half did not both reach the "
+            f"terminal: {watching[:400]!r}"
+        )
+    if watching.find(MSX_LEFT_HALF) > watching.find(MSX_RIGHT_HALF):
+        raise AssertionError("the halves were drawn in the wrong order")
+
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    os.write(master_fd, b"q")
+
+
+def run_msx_spectator_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="the spectator draws the machine's frame in its own shape",
+        interact=msx_spectator_interaction,
+        http_fixtures={"/api/v1/msx/frame": msx_loaded_frame_fixture()},
+    )
+
+
 def run_msx_palette_regression(executable: str) -> None:
     """The command palette opens the MSX screen by name.
 
@@ -14025,9 +14147,10 @@ def run_msx_palette_regression(executable: str) -> None:
     name. This drives the typed path end to end: `:` then `go msx` must take
     the terminal over with the MSX screen, and Esc must hand it back.
 
-    The harness serves no machine, so the screen opens on its "no machine
-    loaded" line. That line is the proof the palette reached the screen at
-    all; the Overview header afterwards is the proof Esc left it.
+    The harness serves no machine and no cartridges, so the screen opens on
+    the load menu's own title (RFC-0439 3.7: the screen opens the menu
+    first). That line is the proof the palette reached the screen at all; the
+    Overview header afterwards is the proof Esc left it.
     """
 
     def interact(
@@ -14048,7 +14171,7 @@ def run_msx_palette_regression(executable: str) -> None:
             process,
             master_fd,
             output,
-            b"no machine loaded",
+            MSX_MENU_TITLE,
             start=start,
             timeout=3.0,
         )
@@ -14279,6 +14402,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "msx-palette":
         run_msx_palette_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX palette regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-spectator":
+        run_msx_spectator_regression(os.path.abspath(sys.argv[1]))
+        print("tui MSX spectator regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
         run_changes_newline_regression(os.path.abspath(sys.argv[1]))

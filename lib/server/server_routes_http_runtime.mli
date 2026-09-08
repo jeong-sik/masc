@@ -216,6 +216,7 @@ val make_health_json :
     must touch this. *)
 
 val make_health_response_json :
+  ?timing:Server_timing.t ->
   ?listener:string ->
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
@@ -226,7 +227,22 @@ val make_health_response_json :
     full-health snapshot plus cheap request-local fields and marks the snapshot
     for refresh when it is missing or stale.  The HTTP handler must not
     synchronously run durable keeper scans; the Eio refresh loop started by
-    {!start_full_health_snapshot_refresh_loop} performs those scans. *)
+    {!start_full_health_snapshot_refresh_loop} performs those scans. Optional
+    [timing] records only this request's work, never background refresh work. *)
+
+val make_health_response_body :
+  ?listener:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  string * (string * string) list
+(** Shared H1/H2 health JSON body and request-local Server-Timing headers.
+    Builds through {!make_health_response_json}, then serializes before emitting
+    the header. [health_response] is the total JSON-builder duration and overlaps
+    [health_build_identity], [health_paths], [health_internal_auth], and
+    [health_dashboard_surface]; [json_serialize] follows it. These monotonic wall
+    durations include suspension/rescheduling, and exclude work before the helper,
+    compression, validators, and response writing. No timing enters the cached
+    full-health snapshot or its background worker. *)
 
 val invalidate_full_health_snapshot : unit -> unit
 (** Drop the cached full-health fields and request a background refresh after a

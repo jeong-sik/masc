@@ -2982,6 +2982,49 @@ let rec check_unique_object_keys path = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> ()
 ;;
 
+let check_health_request_timing value =
+  let phases = String.split_on_char ',' value |> List.map (fun entry ->
+    match String.split_on_char ';' (String.trim entry) with
+    | [name; duration] when String.starts_with ~prefix:"dur=" duration ->
+      let ms = String.sub duration 4 (String.length duration - 4) |> float_of_string in
+      Alcotest.(check bool) (name ^ " is finite nonnegative elapsed time") true
+        (Float.is_finite ms && ms >= 0.);
+      name
+    | _ -> Alcotest.failf "malformed health timing entry: %s" entry) in
+  Alcotest.(check (list string)) "each request phase appears exactly once"
+    (List.sort String.compare ["health_build_identity"; "health_paths";
+      "health_internal_auth"; "health_dashboard_surface"; "health_response";
+      "json_serialize"])
+    (List.sort String.compare phases)
+
+let timed_health_body ~listener request =
+  let body, headers = Runtime_under_test.make_health_response_body ~listener
+    ~request_authority:(test_request_authority ()) request in
+  let timings = List.filter (fun (name, _) -> name = "server-timing") headers in
+  Alcotest.(check int) "one lowercase timing header" 1 (List.length timings);
+  check_health_request_timing (snd (List.hd timings));
+  let json = Yojson.Safe.from_string body in
+  check_unique_object_keys "$" json;
+  Alcotest.(check string) "listener identity survives timed serialization" listener
+    Yojson.Safe.Util.(json |> member "protocol" |> member "listener" |> to_string);
+  json
+
+let test_health_request_timing_keeps_probe_shape () =
+  List.iter (fun listener ->
+    let request = Httpun.Request.create `GET "/health" in
+    List.iter (fun () ->
+      let json = timed_health_body ~listener request in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "timed default response remains a probe" "probe"
+        (json |> member "health_detail" |> to_string);
+      Alcotest.(check string) "full-health pointer remains unchanged" "/health?full=1"
+        (json |> member "full_health_url" |> to_string);
+      Alcotest.(check bool) "timings stay outside the JSON body" true
+        (json |> member "server_timing" = `Null);
+      Alcotest.(check bool) "probe does not gain full scans" true
+        (json |> member "keeper_reaction_ledger" = `Null)) [(); ()])
+    ["http/1.1"; "h2"]
+
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_response_json request in
@@ -3058,6 +3101,17 @@ let test_health_response_full_query_uses_snapshot_cache () =
             Server_routes_http_runtime.make_health_response_json request
           in
           check_unique_object_keys "$" refreshed;
+          List.iter (fun listener ->
+            let timed = timed_health_body ~listener request in
+            Alcotest.(check string) "timed full response retains full detail" "full"
+              (timed |> member "health_detail" |> to_string);
+            List.iter (fun key ->
+              Alcotest.(check string) ("request timing preserves cached " ^ key)
+                (refreshed |> member "full_health_snapshot" |> member key |> Yojson.Safe.to_string)
+                (timed |> member "full_health_snapshot" |> member key |> Yojson.Safe.to_string))
+              ["computed_at_unix"; "duration_ms"; "section_timings";
+               "refresh_worker_submissions_total"; "refresh_worker_joins_total"])
+            ["http/1.1"; "h2"];
           Alcotest.(check string) "refreshed snapshot is ready" "ready"
             (refreshed |> member "full_health_snapshot" |> member "status"
            |> to_string);
@@ -3975,7 +4029,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             curl_request_capture ~output_dir:dir ~name:"health" ~method_:"GET"
               ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
           in
-          ignore health_headers;
+          check_health_request_timing (require_header_value health_headers "Server-Timing");
           let health_json = parse_json_response_file health_body in
           let startup =
             Yojson.Safe.Util.member "startup" health_json
@@ -4899,6 +4953,8 @@ let () =
             test_health_json_surfaces_internal_mcp_auth_diagnostics;
           Alcotest.test_case "default health response is light probe" `Quick
             test_health_response_default_is_light_probe;
+          Alcotest.test_case "request timings retain probe shape" `Quick
+            test_health_request_timing_keeps_probe_shape;
           Alcotest.test_case "full health query uses snapshot cache" `Quick
             test_health_response_full_query_uses_snapshot_cache;
           Alcotest.test_case "full health refresh timeout is independent"

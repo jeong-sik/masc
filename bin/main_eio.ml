@@ -2237,7 +2237,7 @@ let sandbox_image_build_exit ~tag =
     (try
        output_string oc Keeper_sandbox_image.dockerfile;
        close_out oc
-     with Sys_error _ -> (try close_out_noerr oc with _ -> ()));
+     with Sys_error _ -> (try close_out_noerr oc with _ -> ()));  (* @observe-allowed: the write already failed; close_out_noerr is the no-raise form and there is no second failure to report *)
     let _, status = Unix.waitpid [] pid in
     Sys.set_signal Sys.sigpipe previous_sigpipe;
     (match status with

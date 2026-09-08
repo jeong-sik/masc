@@ -311,18 +311,25 @@ type batch_disposition =
   | Batch_ack_attention_only
   | Batch_no_action
 
-(* A Connector_attention wake retained across a checkpoint-yield turn stays
-   pending until a completing turn settles it with an exact reply or ignore
-   (#32114, #32602). A keeper whose every cycle checkpoint-yields — the
-   repeated tool-call loop guard — never reaches that settlement: four
-   Discord wakes were re-admitted 1,179 times over 14 hours on 2026-09-05,
-   each re-admission spending a full rate-limited turn. Retention is
-   therefore counted on the queue entry and bounded: after this many
-   checkpoint retentions the wake is retired by a plain ack. Normal
-   settlement completes within one or two cycles; eight consecutive
-   checkpoint yields is the degenerate signature. Remeasure after deploy
-   (parity C2 discipline). *)
-let connector_attention_retention_bound = 8
+(* Retention is durable source bookkeeping. It does not prove a reply,
+   ignore, or other terminal effect and cannot authorize acknowledging input. *)
+let retain_connector_attention_sources ~base_path ~keeper_name selections =
+  List.iter
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       match selection.source.payload with
+       | Keeper_event_queue.Connector_attention _ ->
+         (match
+            Keeper_registry_event_queue.note_checkpoint_retention_result
+              ~base_path keeper_name ~selection ()
+          with
+          | Ok _ -> ()
+          | Error detail ->
+            Log.Keeper.error
+              "turn exit: connector attention retention failed event_id=%s keeper=%s: %s"
+              selection.source.post_id keeper_name detail)
+       | _ -> ())
+    selections
+;;
 
 let batch_disposition_of_cycle_outcome
       (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
@@ -935,63 +942,13 @@ let run_keepalive_unified_turn
            | Batch_ack_completed ->
              remove_completed_selections ~should_ack:(fun _ -> true)
            | Batch_ack_attention_only ->
-             (* Retention is counted, not unbounded. Each Connector_attention
-                entry this checkpoint-yield keeps takes one durable retention
-                here; at [connector_attention_retention_bound] the wake is
-                retired by a plain ack instead of being re-admitted next
-                cycle. The bump spends the caller's selection snapshot
-                (validation is structural), so the retirement acks with the
-                selection the bump returned. *)
-             let attention_selections =
-               List.filter
-                 (fun selection ->
-                    match selection.Keeper_event_queue_state.source.payload with
-                    | Keeper_event_queue.Connector_attention _ -> true
-                    | _ -> false)
-                 selections
-             in
-             List.iter
-               (fun selection ->
-                  match
-                    Keeper_registry_event_queue
-                    .note_checkpoint_retention_result
-                      ~base_path:ctx.config.base_path
-                      meta_after_triage.name
-                      ~selection
-                      ()
-                  with
-                  | Error detail ->
-                    Log.Keeper.error
-                      "turn exit: checkpoint retention count failed for                        connector attention event_id=%s keeper=%s: %s"
-                      selection.source.Keeper_event_queue.post_id
-                      meta_after_triage.name
-                      detail
-                  | Ok (updated, retentions) ->
-                    if retentions < connector_attention_retention_bound
-                    then
-                      (match
-                         Keeper_registry_event_queue.ack_pending_result
-                           ~base_path:ctx.config.base_path
-                           meta_after_triage.name
-                           ~selection:updated
-                       with
-                       | Ok () ->
-                         Log.Keeper.warn
-                           "turn exit: retired connector attention wake after                             %d checkpoint retentions without a settling turn                             event_id=%s keeper=%s"
-                           retentions
-                           updated.source.Keeper_event_queue.post_id
-                           meta_after_triage.name
-                       | Error detail ->
-                         Log.Keeper.error
-                           "turn exit: retiring retained connector attention                             failed event_id=%s keeper=%s: %s"
-                           updated.source.Keeper_event_queue.post_id
-                           meta_after_triage.name
-                           detail))
-               attention_selections;
-             (* The original attention-only predicate still applies: entries
-                retained below the bound stay pending, and entries retired at
-                the bound were already acked by the pass above, so the
-                terminalize path must not see them. *)
+             retain_connector_attention_sources
+               ~base_path:ctx.config.base_path
+               ~keeper_name:meta_after_triage.name
+               selections;
+             (* Connector sources remain pending until the terminal-receipt
+                path settles them. Already projected non-connector attention
+                still advances through its existing completion path. *)
              remove_completed_selections
                ~should_ack:(fun selection ->
                  match selection.Keeper_event_queue_state.source.payload with
@@ -1499,6 +1456,7 @@ let run_heartbeat_loop
 ;;
 
 module For_testing = struct
+  let retain_connector_attention_sources = retain_connector_attention_sources
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation

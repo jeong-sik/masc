@@ -94,6 +94,11 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active };
 
+  { env_name = "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED";
+    description = "RFC-0363 aged-tool-result demotion to external markers";
+    default = true; category = "keeper";
+    lifecycle = Active };
+
   { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
     description = "Count successful workspace heartbeat after a turn as presence proof";
     default = true; category = "keeper";

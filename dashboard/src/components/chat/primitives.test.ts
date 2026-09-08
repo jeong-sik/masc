@@ -3934,18 +3934,27 @@ describe('fusion chat card', () => {
     fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
     await flushUi()
 
-    // Judge synthesis renders to real markdown elements immediately (not collapsed).
-    const judge = container.querySelector('[data-fusion-judge]')
-    expect(judge?.querySelector('strong')?.textContent).toBe('Consensus')
+    // Judge synthesis renders to real markdown elements, not a collapsed dump.
+    // AsyncMarkdownDiv reaches those elements through a dynamic import of the
+    // markdown renderer, so this waits on the elements rather than on a fixed
+    // 30ms: that sleep passed on an idle machine and, under a full-suite run,
+    // delivered fewer scheduler turns than the import needed.
+    const judge = await waitFor(() => {
+      const el = container.querySelector('[data-fusion-judge]')
+      expect(el?.querySelector('strong')?.textContent).toBe('Consensus')
+      return el
+    })
     // synthesis takes precedence over resolved_answer when both present.
     expect(judge?.textContent).toContain('agreed point')
     expect(judge?.textContent).not.toContain('PLAIN RESOLVED')
     // Panel answer markdown renders to real elements once its row is opened.
     // Scope to the panel — the judge synthesis above also contains an <li>.
     fireEvent.click(container.querySelector('[data-fusion-panel] button') as HTMLButtonElement)
-    await flushUi()
-    const panel = container.querySelector('[data-fusion-panel]')
-    expect(panel?.querySelector('h2')?.textContent).toBe('Heading One')
+    const panel = await waitFor(() => {
+      const el = container.querySelector('[data-fusion-panel]')
+      expect(el?.querySelector('h2')?.textContent).toBe('Heading One')
+      return el
+    })
     expect(panel?.querySelector('li')?.textContent).toContain('bullet item')
   })
 

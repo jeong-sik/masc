@@ -304,7 +304,7 @@ let default_host = Masc_network_defaults.masc_http_default_host
 
 (** Centralized MASC_HOST reader.
     Reads MASC_HOST env var.
-    Default: {!default_host} ("127.0.0.1"). *)
+    Default: {!default_host}. *)
 let masc_host () =
   match masc_host_opt () with
   | Some host -> host

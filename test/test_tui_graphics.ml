@@ -54,7 +54,7 @@ let keys_and_payload body =
 let test_the_payload_is_the_file () =
   let data = String.init 9000 (fun index -> Char.chr (index mod 256)) in
   let escapes =
-    Masc_tui_graphics.place ~data { Masc_tui_graphics.columns = 40; rows = 20 }
+    Masc_tui_graphics.place ~data ~rows:20
   in
   let payload =
     bodies escapes |> List.map (fun body -> snd (keys_and_payload body))
@@ -71,7 +71,7 @@ let test_the_payload_is_the_file () =
 let test_every_chunk_but_the_last_says_more () =
   let data = String.make 20_000 'z' in
   let bodies =
-    Masc_tui_graphics.place ~data { Masc_tui_graphics.columns = 4; rows = 2 }
+    Masc_tui_graphics.place ~data ~rows:2
     |> bodies
   in
   if List.length bodies < 2 then
@@ -92,7 +92,7 @@ let test_every_chunk_but_the_last_says_more () =
 let test_only_the_first_escape_describes_the_image () =
   let data = String.make 12_000 'q' in
   match
-    Masc_tui_graphics.place ~data { Masc_tui_graphics.columns = 9; rows = 3 }
+    Masc_tui_graphics.place ~data ~rows:3
     |> bodies
   with
   | [] -> failf "no escapes"
@@ -104,7 +104,7 @@ let test_only_the_first_escape_describes_the_image () =
             failf "the first escape does not say %s: %S" expected first)
         (* q=2 keeps the terminal from answering a placement. Its reply
            would arrive on stdin and be typed into the composer. *)
-        [ "f=100"; "a=T"; "c=9"; "r=3"; "q=2" ];
+        [ "f=100"; "a=T"; "r=3"; "q=2" ];
       List.iteri
         (fun index body ->
           let keys, _ = keys_and_payload body in
@@ -127,7 +127,7 @@ let test_the_named_format_is_the_one_the_escape_asks_for () =
     Masc_tui_graphics.payload_media_type;
   match
     Masc_tui_graphics.place ~data:"bytes"
-      { Masc_tui_graphics.columns = 4; rows = 2 }
+      ~rows:2
     |> bodies
   with
   | [] -> failf "no escapes"
@@ -138,7 +138,7 @@ let test_the_named_format_is_the_one_the_escape_asks_for () =
 
 let test_an_empty_image_places_nothing () =
   check string "no escape at all" ""
-    (Masc_tui_graphics.place ~data:"" { Masc_tui_graphics.columns = 1; rows = 1 })
+    (Masc_tui_graphics.place ~data:"" ~rows:1)
 ;;
 
 let test_the_query_asks_without_drawing () =
@@ -218,6 +218,48 @@ let test_iterm2_places_inline_image () =
   check string "empty data produces empty escape" "" empty
 ;;
 
+
+(* A caller holding a frame sends pixels, not a file. The format carries no
+   header, so the escape has to state the dimensions the terminal would
+   otherwise read from one. Checked as keys rather than as a substring: the
+   protocol is what these have to match. *)
+let test_raw_rgb_states_its_pixel_dimensions () =
+  let w = 4 and h = 2 in
+  let data = String.init (w * h * 3) (fun index -> Char.chr (index mod 256)) in
+  let keys =
+    match
+      Masc_tui_graphics.place_rgb ~data ~pixel_width:w ~pixel_height:h ~rows:5
+      |> bodies
+    with
+    | first :: _ -> fst (keys_and_payload first)
+    | [] -> failf "raw RGB placement produced no escape"
+  in
+  let says key = List.exists (String.equal key) keys in
+  check bool "the payload is raw RGB" true (says "f=24");
+  check bool "and says how wide it is" true (says "s=4");
+  check bool "and how tall" true (says "v=2");
+  check bool "the row count is the caller's" true (says "r=5");
+  (* No c=. Kitty derives the width from the row count only when one of the
+     two is absent; with both it scales into that exact rectangle, which is
+     how a 4:3 frame arrived stretched across a wider terminal. *)
+  check bool "and the width is left to the terminal" false (says "c=10");
+  check bool "the terminal is asked not to answer" true (says "q=2");
+  (* A file's key would have the terminal read three-byte pixels as a header,
+     decode nothing, and say nothing about it. *)
+  check bool "and it is not announced as a file" false (says "f=100")
+;;
+
+(* Dimensions the payload cannot support would be drawn as whatever the
+   terminal makes of the mismatch. Refusing gives the caller something to
+   test; drawing gives it a wrong picture and no way to know. *)
+let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
+  check string "three bytes are not a 4x2 frame" ""
+    (Masc_tui_graphics.place_rgb ~data:"xyz" ~pixel_width:4 ~pixel_height:2 ~rows:5);
+  check string "and neither is nothing" ""
+    (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
+;;
+
+
 let () =
   run
     "tui_graphics"
@@ -240,6 +282,12 @@ let () =
             test_the_query_asks_without_drawing
         ; test_case "a reply is read for what it answers" `Quick
             test_a_reply_is_read_for_what_it_answers
+        ] )
+    ; ( "raw pixels"
+      , [ test_case "raw RGB states its pixel dimensions" `Quick
+            test_raw_rgb_states_its_pixel_dimensions
+        ; test_case "a frame that contradicts itself is refused" `Quick
+            test_raw_rgb_refuses_a_frame_that_contradicts_itself
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

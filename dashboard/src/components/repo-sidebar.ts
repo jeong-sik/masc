@@ -91,11 +91,6 @@ function selectRepo(id: string | null): void {
   selectedRepoId.value = id
 }
 
-export function resetRepoSelection(): void {
-  selectedRepoId.value = null
-  reposResource.reset()
-}
-
 // ── Helpers ──────────────────────────────────────────────
 
 function StatusIcon({ status }: { status: RepoStatus }) {

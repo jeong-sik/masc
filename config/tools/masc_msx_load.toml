@@ -16,7 +16,7 @@ defer_loading = true
 [[params]]
 name = "cart"
 type = "string"
-description = "A name from carts_available (with or without .rom) or a path to a 16KB/32KB cartridge image. Omit to boot the BIOS alone and see the inventory."
+description = "A name from carts_available (with or without .rom) or a path to a cartridge image: a 16/32KB plain cart, or a MegaROM (the mapper is guessed from the image, e.g. KOEI 256KB titles). Omit to boot the BIOS alone and see the inventory."
 
 [[params]]
 name = "roms_dir"

@@ -71,6 +71,19 @@ jobs:
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
 
+      # Runs before the lints because it answers whether this run is about the
+      # current head at all. The payload carries the sha the run was created
+      # for; a push that lands afterwards leaves that sha behind, and every
+      # verdict below then describes a commit nobody is looking at. It cannot
+      # live in run-lint-suite.sh -- that takes a base sha and knows nothing
+      # about the head branch or the payload.
+      - name: PR run is not stale
+        run: |
+          bash scripts/check-pr-sync.sh \
+            --head-branch "${{ github.event.pull_request.head.ref }}" \
+            --expected-head-sha "${{ github.event.pull_request.head.sha }}" \
+            --pr-number "${{ github.event.pull_request.number }}"
+
       - name: Blocking lints
         run: |
           bash scripts/ci/run-lint-suite.sh blocking-pr \
@@ -175,6 +188,17 @@ jobs:
       - name: Env reads below the config floor
         run: python3 scripts/ci/check_env_reads_below_config.py
 
+      # Two guards #34018 found unwired that the lint job cannot run: this one
+      # compiles a Parsetree checker with ocamlc -I +compiler-libs, and the
+      # sublib gate below reads dune's own dependency graph. Wired here, where
+      # the switch is, rather than into the lint suite, where they would fail
+      # on a missing binary instead of on what they check.
+      - name: Keeper event-queue projection boundary
+        run: bash scripts/check-keeper-event-queue-projection-boundary.sh
+
+      - name: Sublibrary leaf boundary (RFC-0056 G1)
+        run: python3 scripts/audit-sublib-cycle.py
+
       - name: OCaml boundary ratchet
         env:
           OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}
@@ -210,35 +234,6 @@ jobs:
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}"
 
-      # RFC-0428 step two. The step above runs what a pull request edits; this
-      # runs a fixed set regardless, because the five defects found on
-      # 2026-09-06 to 09-07 were not in a file their pull request touched.
-      # Every one was a suite that had gone red days earlier and stayed red:
-      # test_tui_row_wiring since 09-03, test_tool_name_prefix_boundary since
-      # 09-03, test_pr_open_script since 09-01, and two in
-      # test_tui_keeper_chat_history. Nothing was watching, because the
-      # nightly that would have has not finished inside its deadline since at
-      # least 09-04.
-      #
-      # A suite whose dune stanza names only unwrapped libraries under bin/,
-      # test_lib/ or lib/ needs no masc, and therefore no build: the runner
-      # compiles the modules it reaches with ocamlfind. 111 of the 1201
-      # suites qualify; measured at 119-199 s locally depending on load, and
-      # the other 1090 are named and skipped with the library that blocks
-      # them. No dune, no _build, so this neither uses nor spoils the cache
-      # the step above just filled.
-      #
-      # continue-on-error for one reason, which will expire: one of the 111 is
-      # red on purpose. test_tool_name_prefix_boundary reports that
-      # report_review_verdict sits outside the closed tool-name vocabulary
-      # (#33778), and every way to settle that costs a deploy, so it is a
-      # decision rather than a repair. Gating before it is made would block
-      # pull requests that have nothing to do with it. When #33778 lands, this
-      # becomes a gate by deleting one line.
-      - name: Run the suites that need no build
-        continue-on-error: true
-        timeout-minutes: 15
-        run: python3 scripts/run-standalone-suites.py --all-matching '*'
 
   # dashboard/ ships a `typecheck` script and no lane calls it.
   #

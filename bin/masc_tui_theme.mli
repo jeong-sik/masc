@@ -101,6 +101,14 @@ module Sgr : sig
   (** Terminal-native bright slots. These remain palette-relative instead of
       forcing a dark-theme RGB value onto an unknown terminal background. *)
 
+  val truecolor_foreground : r:int -> g:int -> b:int -> string
+  val truecolor_background : r:int -> g:int -> b:int -> string
+  (** Colour that came from a picture rather than from the theme: an image
+      mosaic's pixels, a link preview's swatch. There is no palette to project
+      through, so these take the channels directly -- but they are still
+      serialized here, and still silenced when colour is off. Everything else
+      passes a projected colour to {!background}. *)
+
   val background : Masc_tui_terminal_palette.projected_color option -> string
   (** Serialize a projected background as SGR [48;2] or [48;5]. [None] and
       disabled colours produce the empty string. This is the only raw

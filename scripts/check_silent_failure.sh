@@ -58,16 +58,27 @@ scan_pattern() {
 
   # rg --vimgrep gives file:line:col:line_text — easy to filter and report.
   # -g excludes glob patterns the lint should ignore.
+  #
+  # The telemetry_observe glob was written as lib/telemetry_observe.{ml,mli}
+  # and the file is at lib/workspace/. The exclusion stopped matching when it
+  # moved, and the module whose whole subject is this anti-pattern -- its
+  # docstring spells the pattern out twice -- came back as two findings.
+  #
+  # A comment line is dropped for the same reason: keeper_turn_fsm.ml explains
+  # in prose that a bare [try ... with _ -> ()] would swallow cancellation, and
+  # a lint that reads that sentence as an instance of what it describes cannot
+  # be believed about the ones that are real.
   while IFS= read -r line; do
     [ -n "$line" ] && FINDINGS+=("[${label}] ${line}")
   done < <(
     rg --vimgrep -e "$pattern" \
-       -g '!lib/telemetry_observe.{ml,mli}' \
+       -g '!**/telemetry_observe.{ml,mli}' \
        -g '!**/test/**' \
        -g '!**/_test_*.ml' \
        -g '!**/test_*.ml' \
        "${SEARCH_PATHS[@]}" 2>/dev/null \
-    | rg -v '@observe-allowed' || true
+    | rg -v '@observe-allowed' \
+    | rg -v ':[0-9]+:[0-9]+:\s*\(\*' || true
   )
 }
 

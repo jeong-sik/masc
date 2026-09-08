@@ -6,6 +6,15 @@
     next key belongs to this screen. The frame to draw is [state.msx_frame],
     refreshed by the loop's poll; this module only renders it. *)
 
+val set_graphics_protocol : Masc_tui_graphics.graphics_protocol -> unit
+(** Tell this screen what the boot probe found. A terminal that draws images
+    gets the frame's own pixels; every other one gets the block mosaic, which
+    is also what an unset protocol means.
+
+    Set once at startup from the same value the other image surfaces read, so
+    the spectator and the image overlay cannot disagree about what the
+    terminal can do. *)
+
 val render : write:(string -> unit) -> Masc_tui_types.msx_frame option -> unit
 (** Draw the frame as a truecolor mosaic, or a "no machine" line when it is
     [None] or too short. Writes the whole terminal. *)

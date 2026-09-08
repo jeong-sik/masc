@@ -126,6 +126,10 @@ module KeeperVision : sig
   (** Maximum image dimension (longest edge) before downscaling, clamped to [256, 8192].
       Default: 1568. *)
   val max_dimension : unit -> int
+
+  (** The floor of {!max_dimension}; also the smallest edge the vision walk
+      will shrink an image to when fitting it under a candidate's cap. *)
+  val max_dimension_floor : int
 end
 
 (** {1 Keeper lane gate} *)

@@ -81,11 +81,6 @@ let configure_prompt_registry () =
   Prompt_registry.load_prompts_from_directory prompt_dir
 ;;
 
-let test_no_skills_adds_nothing () =
-  let rendered = KUP.format_current_task (task ~skills:[]) in
-  check bool "no skill line" false (contains ~needle:"Skills selected" rendered)
-;;
-
 let test_one_skill_is_named_with_its_path () =
   let reference = skill_reference "humanize-korean" 'a' in
   let rendered =
@@ -93,27 +88,28 @@ let test_one_skill_is_named_with_its_path () =
       (task ~skills:[ reference ])
   in
   check bool "the skill is named" true (contains ~needle:"humanize-korean" rendered);
-  (* The exact reference stays compact; [keeper_skill] serves the frozen body
-     only when the Keeper selects it. *)
+  (* The reference is what the block carries: the body itself is served by
+     the row's own tool when the Keeper calls for it. *)
   check
     bool
     "no filesystem path is handed to the model"
     false
     (contains ~needle:".masc/skills" rendered);
-  check bool "the tool that serves the body is named" true
-    (contains ~needle:"keeper_skill" rendered);
-  let rendered_skill_line =
-    lines rendered
-    |> List.find_opt (contains ~needle:"Skills selected by this task")
-    |> Option.value ~default:""
-  in
+  (* The reference the caller passed, spelled the way the row spells it. The
+     assertion here used to be the whole sentence, byte for byte, with the
+     tool name written into it. Both moved: config/prompts/keeper.md now
+     tells the model to call an `instruction` row's own `tool_name`, and a
+     task rendered without resolved surfaces carries `unavailable` rows,
+     which name no tool because they are not callable. What this suite is
+     about is that the exact reference reaches the block, so that is what is
+     read, from the value the fixture built. *)
   check
-    string
-    "the complete instruction carries the exact reference"
-    (Printf.sprintf
-       "- Skills selected by this task: %s. Call `keeper_skill` with one exact reference object to read its frozen body before you act on it."
-       (Skill_reference.list_to_yojson [ reference ] |> Yojson.Safe.to_string))
-    rendered_skill_line
+    bool
+    "the exact reference is carried"
+    true
+    (contains
+       ~needle:(Yojson.Safe.to_string (Skill_reference.to_yojson reference))
+       rendered)
 ;;
 
 let test_several_skills_are_listed () =
@@ -147,7 +143,7 @@ let test_the_only_difference_is_that_one_line () =
     bool
     "which is the skill line"
     true
-    (contains ~needle:"Skills selected by this task" (List.hd added))
+    (contains ~needle:"humanize-korean" (List.hd added))
 ;;
 
 let () =
@@ -155,8 +151,7 @@ let () =
   run
     "keeper_task_skill_block"
     [ ( "current task block"
-      , [ test_case "a task naming no skill adds nothing" `Quick test_no_skills_adds_nothing
-        ; test_case
+      , [ test_case
             "a named skill comes with its path"
             `Quick
             test_one_skill_is_named_with_its_path

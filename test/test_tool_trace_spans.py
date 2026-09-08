@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +14,7 @@ spec.loader.exec_module(probe)
 
 def event(kind, call, ts, **extra):
     return {**dict(record_type='tool_execution_' + kind, worker_run_id='worker',
-                   tool_use_id=call, tool_name='capture', ts=ts), **extra}
+                   tool_use_id=call, tool_name='capture', tool_turn=1, tool_planned_index=0, ts=ts), **extra}
 
 
 class TraceSpans(unittest.TestCase):
@@ -54,6 +56,63 @@ class TraceSpans(unittest.TestCase):
         path = self.write([event('started', 'a', 1), event('finished', 'a', 2)])
         with self.assertRaises(ValueError):
             probe.report([path, path])
+
+    def test_reused_call_id_in_different_invocations_is_distinct(self):
+        paths = []
+        for turn, planned in [(1, 0), (2, 0), (2, 1)]:
+            coords = dict(tool_turn=turn, tool_planned_index=planned)
+            paths.append(self.write([event('started', 'same', 1, **coords),
+                                     event('finished', 'same', 2, **coords)],
+                                    name=f'{turn}-{planned}.jsonl'))
+        report = probe.report(paths)
+        self.assertEqual(report['summary'][0]['paired'], 3)
+        self.assertEqual([(source['rows'][0]['tool_turn'], source['rows'][0]['tool_planned_index'])
+                          for source in report['sources']], [(1, 0), (2, 0), (2, 1)])
+        combined = self.write([event('started', 'same', 1), event('finished', 'same', 2),
+                              event('started', 'same', 3, tool_turn=2),
+                              event('finished', 'same', 4, tool_turn=2)])
+        self.assertEqual(probe.report([combined])['summary'][0]['paired'], 2)
+
+    def test_mismatched_invocation_is_incomplete_not_paired(self):
+        for changed in [dict(tool_turn=2), dict(tool_planned_index=1)]:
+            with self.subTest(changed=changed):
+                source = probe.collect(self.write([event('started', 'same', 1),
+                    event('finished', 'same', 2, **changed)]))
+                self.assertEqual(source['rows'], [])
+                self.assertEqual(source['pending_starts'], 1)
+                self.assertEqual(source['orphan_finishes'], 1)
+
+    def test_invocation_coordinates_are_required_nonnegative_integers(self):
+        for field in ['tool_turn', 'tool_planned_index']:
+            for value in [None, True, -1, 1.0, '1']:
+                with self.subTest(field=field, value=value):
+                    with self.assertRaisesRegex(ValueError, 'invocation coordinates'):
+                        probe.collect(self.write([event('started', 'a', 1, **{field: value})]))
+            missing = event('started', 'a', 1)
+            del missing[field]
+            with self.assertRaisesRegex(ValueError, 'invocation coordinates'):
+                probe.collect(self.write([missing]))
+
+    def test_output_cannot_overwrite_input_or_symlink_or_hardlink(self):
+        source = self.write([event('started', 'a', 1), event('finished', 'a', 2)])
+        original = source.read_bytes()
+        symlink = source.with_name('alias-symlink.json')
+        symlink.symlink_to(source)
+        hardlink = source.with_name('alias-hardlink.json')
+        hardlink.hardlink_to(source)
+        for destination in [source, symlink, hardlink]:
+            with self.subTest(destination=destination):
+                result = subprocess.run([sys.executable, str(SCRIPT), str(source),
+                                         '--output', str(destination)],
+                                        capture_output=True, text=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('must not overwrite', result.stderr)
+                self.assertEqual(source.read_bytes(), original)
+
+    def test_nonfinite_derived_span_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'nonfinite derived span'):
+            probe.collect(self.write([event('started', 'a', -1e308),
+                                      event('finished', 'a', 1e308)]))
 
     def test_nonfinite_timestamp_rejected(self):
         with self.assertRaises(ValueError):

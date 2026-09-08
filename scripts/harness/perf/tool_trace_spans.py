@@ -25,10 +25,13 @@ def collect(path):
                               ("worker_run_id", "tool_use_id", "tool_name"))
         if not all(isinstance(v, str) and v for v in (worker, call, tool)):
             raise ValueError(f"{path}:{line_number}: missing tool identity")
+        invocation = tuple(event.get(k) for k in ("tool_turn", "tool_planned_index"))
+        if not all(type(value) is int and value >= 0 for value in invocation):
+            raise ValueError(f"{path}:{line_number}: invalid invocation coordinates")
         ts = event.get("ts")
         if isinstance(ts, bool) or not isinstance(ts, (int, float)) or not math.isfinite(ts):
             raise ValueError(f"{path}:{line_number}: invalid timestamp")
-        key = worker, call
+        key = worker, call, *invocation
         if kind == "tool_execution_started":
             if key in starts or key in finishes:
                 raise ValueError(f"{path}:{line_number}: duplicate or late start")
@@ -46,7 +49,10 @@ def collect(path):
         error = event.get("tool_error")
         outcome = "failed" if error is True else "succeeded" if error is False else "unknown"
         elapsed = (ts - start[1]) * 1000
+        if not math.isfinite(elapsed):
+            raise ValueError(f"{path}:{line_number}: nonfinite derived span")
         rows.append({"worker_run_id": worker, "tool_use_id": call,
+                     "tool_turn": invocation[0], "tool_planned_index": invocation[1],
                      "tool": tool, "outcome": outcome,
                      "wall_span_ms": elapsed if elapsed >= 0 else None,
                      "clock_regression": elapsed < 0})
@@ -61,7 +67,8 @@ def report(paths):
     groups = {}
     for source in sources:
         for row in source["rows"]:
-            identity = row["worker_run_id"], row["tool_use_id"]
+            identity = tuple(row[field] for field in
+                             ("worker_run_id", "tool_use_id", "tool_turn", "tool_planned_index"))
             if identity in identities:
                 raise ValueError("overlapping trace inputs contain the same tool call")
             identities.add(identity)
@@ -83,8 +90,12 @@ def main():
     parser.add_argument("traces", type=Path, nargs="+")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    for trace in args.traces:
+        if (args.output.resolve() == trace.resolve()
+                or (args.output.exists() and trace.exists() and args.output.samefile(trace))):
+            parser.error("output must not overwrite an input trace or its file alias")
     result = report(args.traces)
-    args.output.write_text(json.dumps(result, indent=2) + "\n")
+    args.output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
 
 
 if __name__ == "__main__":

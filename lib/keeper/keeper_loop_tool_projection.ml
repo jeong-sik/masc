@@ -61,10 +61,12 @@ let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_f
     then Keeper_stream_tool_accum.to_tool_calls_for_failure t.accum
     else Keeper_stream_tool_accum.to_tool_calls t.accum
   in
-  match tool_calls, !(t.rejection) with
-  | [], _ -> Nothing_to_project
-  | _ :: _, Some detail -> Projection_dropped (Mapping_rejected detail)
-  | _ :: _, None ->
+  (* The rejection is read before the rows: a refused seal finalizes nothing,
+     so an empty row list under a rejection is the drop, not an idle turn. *)
+  match !(t.rejection), tool_calls with
+  | Some detail, _ -> Projection_dropped (Mapping_rejected detail)
+  | None, [] -> Nothing_to_project
+  | None, _ :: _ ->
     (match Keeper_chat_delivery_identity.Request_id.of_string approval_id with
      | Error detail -> Projection_dropped (Invalid_approval_id detail)
      | Ok request_id ->

@@ -68,5 +68,7 @@ val persist_continuation :
 (** Append the turn's finalized tool rows once under the delivery identity
     of the approval whose replay this turn continues. With [turn_failed] the
     snapshot is the failure-safe one: an unsealed provider scope is
-    invalidated and only sealed evidence is kept. A turn with no finalized
-    tool call is {!Nothing_to_project} before the approval id is even read. *)
+    invalidated and only sealed evidence is kept. A rejected mapping is
+    {!Projection_dropped} whatever the rows, since a refused seal finalizes
+    nothing; otherwise a turn with no finalized tool call is
+    {!Nothing_to_project} before the approval id is even read. *)

@@ -16,3 +16,11 @@
     lookup on PATH and its [Eio.Io] error stay with [Eio_unix.Process]. *)
 
 val mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
+
+val foreground_mgr :
+  clock:_ Eio.Time.clock -> grace_seconds:float ->
+  Eio_unix.Process.mgr_ty Eio.Resource.t
+(** Owns each foreground process group until cleanup, then promptly reaps
+    its leader. TERM grants the supplied grace even if the leader exits first.
+    Ordinary completion cleans up remaining group members without that delay.
+    Children that deliberately leave the group are outside this contract. *)

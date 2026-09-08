@@ -273,11 +273,38 @@ let test_lru_evict_skips_active_writer () =
   check int "active writer kept both records" 2 (List.length lines)
 ;;
 
+let test_deleted_path_reopens () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_deleted" in
+  let path = Filename.concat dir "out.jsonl" in
+  Fs_compat.append_jsonl path (`Int 1);
+  Sys.remove path;
+  Fs_compat.append_jsonl path (`Int 2);
+  check (list string) "new append is visible after unlink" [ "2" ] (read_lines path)
+;;
+
+let test_replaced_path_reopens () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_replaced" in
+  let path = Filename.concat dir "out.jsonl" in
+  let old = Filename.concat dir "old.jsonl" in
+  let replacement = Filename.concat dir "replacement.jsonl" in
+  Fs_compat.append_jsonl path (`Int 1);
+  Unix.link path old;
+  Out_channel.with_open_bin replacement (fun oc -> output_string oc "2\n");
+  Unix.rename replacement path;
+  Fs_compat.append_jsonl path (`Int 3);
+  check (list string) "append follows replacement" [ "2"; "3" ] (read_lines path);
+  check (list string) "retired inode receives no new record" [ "1" ] (read_lines old)
+;;
+
 let () =
   Alcotest.run
     "fs_compat_fd_cache"
     [ ( "fd_cache"
-      , [ test_case
+      , [ test_case "deleted path reopens" `Quick test_deleted_path_reopens
+        ; test_case "replaced path reopens" `Quick test_replaced_path_reopens
+        ; test_case
             "16 threads × 100 multibyte records (RFC-0108 §5.1 reproduction)"
             `Quick
             test_concurrent_multibyte_records

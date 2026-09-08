@@ -882,7 +882,37 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
      two -- a legitimate retry, not a loop. *)
   check (option (pair string int))
     "single retry after restart stays silent" None
-    (detect [ live_call (); List.hd run_2_starts_from ])
+    (detect [ live_call (); List.hd run_2_starts_from ]);
+  (* The native production boundary is also installed for autonomous runs
+     without a Direct execution scope. Exercise that exact boundary with the
+     transcript seed, not merely the detector with a test-only threshold. *)
+  let native ?(requested = fun () -> Ok None) calls =
+    Masc.Keeper_agent_run.For_testing.native_tool_boundary
+      ~keeper_name:"native-autonomous-repetition-fixture"
+      ~repetition_execution:None
+      ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
+      ~tool_calls:calls
+      ~assistant_turn_texts:[]
+      ~autonomous_yield_requested:(Some requested)
+  in
+  (match native (live_call () :: run_2_starts_from) with
+   | Ok (Runtime_agent.Yield
+       (Runtime_agent.Repeated_tool_call
+          { tool_name = "keeper_tasks_list"; repeated_count = 3 })) -> ()
+   | _ -> fail "native autonomous boundary lost transcript-seeded repetition");
+  (match native [ live_call (); List.hd run_2_starts_from ] with
+   | Ok Runtime_agent.Continue -> ()
+   | _ -> fail "ordinary retry was not allowed to continue");
+  (match native
+      ~requested:(fun () -> Ok (Some
+        { Masc.Keeper_agent_run.reason = Masc.Keeper_agent_run.Operation_queued }))
+      (live_call () :: run_2_starts_from) with
+   | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
+   | _ -> fail "new durable work lost priority to repetition");
+  (match native ~requested:(fun () -> Error "queue fixture unreadable")
+      (live_call () :: run_2_starts_from) with
+   | Error (Agent_core.Error.Internal _) -> ()
+   | _ -> fail "unreadable durable queue was hidden by repetition")
 
 let test_repeated_assistant_text_boundary () =
   let detect =

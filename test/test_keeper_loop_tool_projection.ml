@@ -74,7 +74,7 @@ let attempt_started ~lane_attempt_index =
   H.Runtime_attempt_started
     { runtime_id = "fixture.runtime"
     ; lane_attempt_index
-    ; checkpoint_owner = Masc.Runtime_execution.Masc_agent_core
+    ; checkpoint_owner = Runtime_execution.Masc_agent_core
     }
 ;;
 

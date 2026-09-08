@@ -1906,6 +1906,7 @@
   masc.masc_types
   masc.agent_core
   masc.keeper_chat_delivery_identity
+  masc.runtime
   unix))
 
 (test

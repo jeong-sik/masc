@@ -24,12 +24,13 @@ operator_surface: primary
 확인:
 1. 이 metric의 측정값이 존재하는가? metric에 대한 서술형 주장은 측정값이
    아닙니다.
-2. 그 측정값이 선언된 target 값에 도달하는가?
+2. 측정 대상, 단위, 범위, 시점과 비교 방향이 선언된 metric·target과 일치하는가? 다른 리비전이나 분모의 수치를 섞지 마세요.
+3. 그 조건에서 측정값이 target에 도달하는가? "이상", "이하" 등 비교 방향이 불명확하면 임의로 정하지 말고 확인할 수 없는 조건을 적으세요.
 
 `report_review_verdict`를 정확히 한 번 호출합니다:
 - verdict: APPROVE — 선언된 metric의 측정값이 선언된 target 값에 도달했을
   때만.
-- verdict: REJECT — 측정값이 없거나, 측정값이 target에 도달하지 못했을 때.
+- verdict: REJECT — 측정값이 없거나, 비교 조건을 확인할 수 없거나, 측정값이 target에 도달하지 못했을 때. 조회 도구 실패는 측정값 부재와 구분해 reason에 적으세요.
 - reason: APPROVE든 REJECT든 항상 필수 — 측정값이 무엇이었고 target과 어떻게
   비교됐는지 한두 문장으로. reason은 goal 검증 원장에 영속되는 증거입니다.
   reason 없는 verdict는 판정이 아니며 기록되지 않습니다.

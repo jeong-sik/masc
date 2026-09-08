@@ -310,22 +310,46 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 
 ## 초기 프롬프트·skills·Keeper
 
-공통 Keeper 지침은 [`config/prompts/keeper.md`](../config/prompts/keeper.md)이며
-설치된 `.masc/config/prompts/keeper.md`에서 관리됩니다. 기본 내용은 작업 범위,
-결과와 증거 보고, 독립 도구 호출 묶기, 과거 실패의 재확인, 브라우저 결과 검증,
-조건부 GitHub 인증, 예약·사람에게 질문하는 흐름, Keeper 정체성과 sandbox 경계입니다.
-그 위에 각 Keeper TOML의 `[keeper].instructions`를 조합합니다.
-실제 시스템 문맥에는 runtime의 tool guidance와 현재 상태·시간·기억도 들어가므로
-이 파일 하나가 전체 요청을 대신하지 않습니다. 개발 계약인 `constitution.xml`은
-Keeper runtime 시스템 프롬프트가 아닙니다.
+기본 설치는 **자동 시작하지 않는 Keeper `imp` 1명**과 내장 스킬
+`browser-lanes`를 준비합니다. 모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
 
-0.35.0의 기본 설치는 **비활성 Keeper `imp` 1명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
-`browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
-지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
-0.34.0의 Gecko scene 기능은 새 native host와 브라우저 확장 0.3.0을 함께 사용합니다.
-기존 브라우저 확장은 별도로 갱신해야 합니다. 기존 `browser-lanes` 패키지도
-사용자 변경 보존 정책에 따라 덮어쓰지 않으므로, scene 안내가 필요하면 변경 내용을
-검토해 해당 패키지에 반영하세요.
+프롬프트는 다음 세 곳만 구분하면 됩니다.
+
+| 바꾸려는 내용 | 편집 위치 |
+|---|---|
+| 모든 Keeper의 작업·검증·글쓰기 방식 | 프롬프트 편집기의 `keeper` |
+| 특정 Keeper의 역할 | `.masc/config/keepers/<name>.toml`의 `instructions` |
+| 도구별 상세 절차 | 해당 스킬 |
+
+공통 본문은 [한국어](../config/prompts/keeper.md)와
+[영어](../config/prompts/keeper.en.md)로 제공합니다. 프롬프트 편집기에서
+`keeper`를 열고 **한국어 / English**를 선택하면 초안이 바뀝니다.
+내용을 확인한 뒤 **오버라이드 적용**을 누르세요. 저장하지 않은 초안이 있으면
+먼저 저장하거나 초기화해야 다른 언어를 고를 수 있습니다.
+언어 선택은 공통 행동 지침만 바꿉니다. 상황별 슬롯·도구 스키마는 공용이며,
+개별 Keeper의 역할 지침과 답변 언어를 강제로 바꾸지 않습니다.
+
+`config/prompts/keeper.md`의 `###` 아래는 런타임이 필요한 때에 렌더링하는
+슬롯입니다. 두 언어 본문을 동시에 보내거나 이 슬롯 전체를 매 턴 넣지 않습니다.
+공통 행동 규칙은 본문에 한 번만 쓰고 역할 지침에는 담당 업무만 적으세요.
+
+설치된 `.masc/config/prompts/`는 배포본입니다. 서버가 시작할 때 내장본으로
+맞추므로 직접 편집하지 마세요. 편집기에서 저장한 내용은
+`.masc/prompt_overrides.json`에 보관되며, 이후 구성하는 프롬프트에 적용됩니다.
+업그레이드해도 유효한 override가 있으면 배포본보다 우선하므로, 새 기본 지침을
+쓰려면 편집기에서 해당 언어를 다시 선택해 저장하거나 override를 해제하세요.
+`keeper.identity` 같은 슬롯 override도 별도 항목입니다.
+
+언어만 바꾸려고 전체 프리셋을 복원할 필요는 없습니다. 프리셋은 여러 Keeper의
+역할·프롬프트·모델 배정을 함께 저장하고 되돌릴 때 사용하세요.
+`constitution.xml`은 개발 계약이며 Keeper의 시스템 프롬프트가 아닙니다.
+
+`browser-lanes`는 브라우저 연결·탐색·조작·검증 절차를 담습니다.
+브라우저나 확장, 인증을 설치하지는 않습니다. 기존 스킬 패키지는 덮어쓰지 않으므로
+업그레이드할 때 사용자 변경과 새 안내를 비교해 반영하세요.
+Gecko scene 기능에는 native host와 브라우저 확장 0.3.0 이상이 함께 필요합니다.
+기존 브라우저 확장은 별도로 갱신하세요.
+
 `--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
 
 | Keeper | 개별 지침의 역할 |

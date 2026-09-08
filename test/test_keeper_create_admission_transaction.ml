@@ -167,7 +167,7 @@ let test_shutdown_rejection_precedes_all_creation_writes () =
            (`Assoc
              [ "name", `String keeper_name
              ; "instructions", `String "must not be persisted"
-             ; "sandbox_profile", `String "local"
+             ; "sandbox_profile", `String "docker"
              ; "runtime_id", `String "test_provider.test_model"
              ; "proactive_enabled", `Bool false
              ; "autoboot_enabled", `Bool false
@@ -235,7 +235,7 @@ let test_create_wins_intake_fence_overlap_through_production_handoff () =
         (`Assoc
           [ "name", `String keeper_name
           ; "instructions", `String "create must retain its admission epoch"
-          ; "sandbox_profile", `String "local"
+          ; "sandbox_profile", `String "docker"
           ; "proactive_enabled", `Bool false
           ; "autoboot_enabled", `Bool false
           ])

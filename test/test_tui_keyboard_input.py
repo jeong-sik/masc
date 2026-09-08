@@ -13929,6 +13929,138 @@ def run_schedule_delivery_regression(executable: str) -> None:
     )
 
 
+def run_schedule_source_status_regression(executable: str) -> None:
+    binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+    for initial_error in (True, False):
+        fixtures = schedule_detail_http_fixtures()
+        good = fixtures[SCHEDULES_PATH]
+        assert isinstance(good, tuple)
+        recovered = json.loads(json.dumps(good[1]))
+        recovered["requests"][0]["status"] = "scheduled"
+        recovered["requests"][0]["payload_target"] = "recovered-keeper"
+        recovered["requests"][0]["payload"]["body"]["keeper_name"] = "recovered-keeper"
+        fail_reads = threading.Event()
+        recovered_reads = threading.Event()
+        if initial_error:
+            fail_reads.set()
+        fixtures[SCHEDULES_PATH] = lambda: (
+            (503, {"error": "unavailable"}) if fail_reads.is_set()
+            else (200, recovered) if recovered_reads.is_set()
+            else good
+        )
+        fixtures[SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = (
+            200, {"status": "found", "schedule_id": "schedule-proof-701",
+                  "wakes": [], "wake_retention_per_schedule": 1},
+        )
+
+        def interact(process, master_fd, _slave_fd, output, _base_path):
+            def require(*labels: str) -> bytes:
+                screen = screen_text(bytes(output))
+                for label in labels:
+                    if label.encode() not in screen:
+                        raise AssertionError(f"Schedules omitted {label!r}: {screen!r}")
+                return screen
+
+            def evidence(phase: str) -> None:
+                captured = bytes(output)
+                end = captured.rfind(FRAME_END)
+                if end < 0:
+                    raise AssertionError("Schedules evidence has no completed terminal frame")
+                end += len(FRAME_END)
+                redraw = captured.rfind(FULL_REDRAW, 0, end)
+                start = captured.rfind(FRAME_START, 0, redraw) if redraw >= 0 else -1
+                if start < 0:
+                    raise AssertionError("Schedules evidence has no complete redraw origin")
+                # Preserve exact ANSI, including all complete deltas since
+                # the last full redraw. Compression keeps all four measured
+                # screens within Dune's output allowance for browser replay.
+                print("SCHEDULE_SOURCE_PTY_EVIDENCE " + json.dumps({
+                    "phase": phase, "initial_error": initial_error,
+                    "fixture": "isolated HTTP source status", "rows": 30, "columns": 100,
+                    "binary_sha256": binary_sha256, "encoding": "zlib+base64",
+                    "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
+                }), flush=True)
+
+            palette_go(process, master_fd, output, b"go schedules",
+                       b"503" if initial_error else b"status:running")
+            if initial_error:
+                screen = require("조회 실패:", "503")
+                for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
+                    if absent in screen:
+                        raise AssertionError(f"Failed initial source invented data: {screen!r}")
+                evidence("initial-read-failed")
+            else:
+                require("schedule-proof-701", "status:running", "Requests: 1")
+                fail_reads.set()
+                send_and_wait(process, master_fd, output, b"r", b"503")
+                require("이전 조회 유지 · 갱신 실패:", "503", "schedule-proof-701",
+                        "status:running", "Requests: 1")
+                evidence("retained-list-refresh-failed")
+                send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
+                require("이전 조회 유지 · 갱신 실패:", "503", "instance-proof-701")
+                # The warning belongs to the source, so it remains visible
+                # while the retained detail body is scrolled.
+                send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
+                require("이전 조회 유지 · 갱신 실패:", "503")
+                send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
+
+            recovered_reads.set()
+            fail_reads.clear()
+            send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
+            screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
+            for absent in ("조회 실패:", "갱신 실패:", "503", "status:running"):
+                if absent.encode() in screen:
+                    raise AssertionError(f"Recovered source retained old status: {screen!r}")
+            evidence("source-recovered")
+            os.write(master_fd, b"q")
+
+        run_terminal_scenario(
+            executable,
+            description=f"Schedules source status: {'initial' if initial_error else 'refresh'}",
+            interact=interact, http_fixtures=fixtures,
+        )
+
+
+# The Board draft is written in the default keyboard lane, which stops at an
+# earlier scenario's exit step (#34125). This lane runs the one thing: the
+# footer's offer and what the key it offered actually does.
+def run_board_compose_footer_regression(executable: str) -> None:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        palette_go(process, master_fd, output, b"go board", b"MASC Board")
+        writing = send_and_wait(process, master_fd, output, b"w", b"type to write")
+        if b"q:quit" in CSI_RE.sub(b"", writing):
+            raise AssertionError(
+                "the writing footer offers q:quit, and q types a q: "
+                f"{CSI_RE.sub(b'', writing)!r}"
+            )
+        # The other half of the same fact. The footer may not name a key as
+        # quit while the draft takes it as a letter, so the letter has to be
+        # seen landing.
+        try:
+            send_and_wait(process, master_fd, output, b"quit-goes-in", b"quit-goes-in")
+        except AssertionError as timed_out:
+            raise AssertionError(
+                "the draft did not take 'quit-goes-in' as text, so whether the "
+                f"footer may name q as quit is unmeasured here: {timed_out}"
+            ) from timed_out
+        # Out the way the armed footer names, not the way the old one did.
+        send_and_wait(process, master_fd, output, b"\x1b", b"d:discard")
+        send_and_wait(process, master_fd, output, b"d", b"MASC Board")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="The Board writing footer offers no key that types",
+        interact=interact,
+    )
+
+
 def run_chat_clarity_regression(executable: str) -> None:
     fixtures = chat_clarity_http_fixtures()
     tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
@@ -14674,6 +14806,11 @@ def run_fusion_history_regression(executable: str) -> None:
     run = fusion_run("history-701", keeper="not-a-proven-caller")
     post = fusion_detail_response(run, "historical-judge-synthesis-701")[1]["evidence"]["post"]
     post.update(author="board-author-701", body="original-board-body-701")
+    # A recorded zero remains a chart observation; a failed panel has no usage.
+    post["meta"]["panel"].append({
+        "model": "panel-zero-701", "status": "answered",
+        "answer": "zero-usage-answer-701", "input_tokens": 0, "output_tokens": 0,
+    })
     post["meta"]["observed_usage"] = {"input_tokens": 101, "output_tokens": 202}
     refreshed = json.loads(json.dumps(post))
     refreshed["meta"]["observed_usage"]["input_tokens"] = 303
@@ -14691,6 +14828,7 @@ def run_fusion_history_regression(executable: str) -> None:
     second_post = json.loads(json.dumps(post))
     second_post.update(id="post-history-702", title="Second historical Fusion", author="board-author-702")
     second_post["origin"]["fusion_run_id"] = "history-702"
+    second_post["meta"]["panel"] = [second_post["meta"]["panel"][1]]
     response[1]["historical_evidence"].append({
         "run_id": "history-702", "post_id": second_post["id"],
         "title": second_post["title"], "created_at": 1787557600.0,
@@ -14704,10 +14842,19 @@ def run_fusion_history_regression(executable: str) -> None:
     def interact(process, master_fd, slave_fd, output, base_path):
         palette_go(process, master_fd, output, b"go fusion", b"MASC Fusion")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
-        frame = resize_and_wait(
+        read_available(master_fd, output)
+        before_resize = len(output)
+        resize_and_wait(
             process, master_fd, output, rows=110, columns=170,
             needle=b"BOARD ORIGINAL", controls=(FULL_REDRAW,),
         )
+        redraw = output.find(FULL_REDRAW, before_resize)
+        if redraw < 0:
+            raise AssertionError("historical inspector resize did not fully redraw")
+        wait_for_output(process, master_fd, output, FRAME_END, start=redraw, timeout=3.0)
+        end = output.find(FRAME_END, redraw) + len(FRAME_END)
+        start = output.rfind(FRAME_START, before_resize, redraw)
+        frame = bytes(output[redraw if start < 0 else start:end])
         visible = CSI_RE.sub(b"", frame)
         for marker in (
             b"This Board evidence does not provide execution status or finish time",
@@ -14716,14 +14863,27 @@ def run_fusion_history_regression(executable: str) -> None:
             b"question-proof-501", b"panel-answer-first-501",
             b"historical-judge-synthesis-701", b"TOOL EXECUTIONS",
             b"original-board-body-701",
+            b"measured 2/3 panels: 10 input / 20 output tokens",
+            b"Panel 3 [answered] panel-zero-701  (0 in / 0 out)",
         ):
             if marker not in visible:
                 raise AssertionError(f"historical inspector missing {marker!r}: {visible!r}")
         if b"not-a-proven-caller" in visible:
             raise AssertionError("historical evidence invented a retained run caller")
+        chart = visible.split(b"Model token distribution (measured 2/3 panels):", 1)[1]
+        chart = chart.split(b"Panel 1 [answered]", 1)[0]
+        for model in (b"panel-first-501", b"panel-zero-701"):
+            if model not in chart:
+                raise AssertionError(f"recorded panel usage missing from chart: {chart!r}")
+        if b"panel-second-501" in chart:
+            raise AssertionError(f"unobserved failed-panel usage was charted: {chart!r}")
+        failed_card = visible.split(b"Panel 2 [failed]", 1)[1].split(b"Panel 3 [answered]", 1)[0]
+        if b"Token usage: not recorded" not in failed_card:
+            raise AssertionError(f"failed-panel usage must remain unknown: {failed_card!r}")
         print("FUSION_HISTORY_PTY_FRAME=" + json.dumps({
             "rows": 110, "columns": 170,
-            "ansi_base64": base64.b64encode(frame).decode("ascii"),
+            "ansi_zlib_base64": base64.b64encode(zlib.compress(frame)).decode("ascii"),
+            "ansi_bytes": len(frame),
         }), flush=True)
         send_and_wait(
             process, master_fd, output, b"r",
@@ -14740,7 +14900,12 @@ def run_fusion_history_regression(executable: str) -> None:
         if b"different-run-702" in CSI_RE.sub(b"", stale):
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
-        send_and_wait(process, master_fd, output, b"]", b"Board author: board-author-702")
+        all_failed = send_and_wait(
+            process, master_fd, output, b"]", b"panel token usage: not recorded",
+        )
+        all_failed = CSI_RE.sub(b"", frame_containing(all_failed, b"panel token usage: not recorded"))
+        if b"Board author: board-author-702" not in all_failed:
+            raise AssertionError(f"all-failed summary lost exact Board identity: {all_failed!r}")
         send_and_wait(process, master_fd, output, b"[", b"Board author: board-author-701")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
@@ -14809,9 +14974,17 @@ def main() -> None:
         run_msx_size_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX size regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "board-compose-footer":
+        run_board_compose_footer_regression(os.path.abspath(sys.argv[1]))
+        print("tui board compose footer regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "schedule-delivery":
         run_schedule_delivery_regression(os.path.abspath(sys.argv[1]))
         print("tui schedule delivery regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "schedule-source-status":
+        run_schedule_source_status_regression(os.path.abspath(sys.argv[1]))
+        print("tui schedule source status regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
         run_changes_newline_regression(os.path.abspath(sys.argv[1]))
@@ -14873,8 +15046,10 @@ def main() -> None:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|runtime|resources|keepers-lanes|"
-            "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose|tools-request-identity]"
+            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|"
+            "schedule-source-status|board-compose-footer|runtime|resources|"
+            "keepers-lanes|board-json|code-memo|memory-journal|"
+            "skill-usage-coverage|tools-purpose|tools-request-identity]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

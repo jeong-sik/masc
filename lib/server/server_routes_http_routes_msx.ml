@@ -157,6 +157,25 @@ let handle_load ~base_path request reqd =
         respond ~status (load_result_json ~ok ~message:(Tool_result.message result)))
 ;;
 
+(* "who is at the machine": each keeper's most-recent key within a window of the
+   current frame, newest first, projected from the shared ledger. The lane is one
+   machine anyone may press, so this reports presence -- it does not reserve the
+   slot. A turn in a turn-based game can run to minutes, so the window is wide. *)
+let players_window_frames = 3600
+
+let recent_players ~now =
+  let last : (string, int) Hashtbl.t = Hashtbl.create 8 in
+  List.iter
+    (fun (e : Msx_lane.entry) ->
+      Hashtbl.replace last e.Msx_lane.who e.Msx_lane.at_frame)
+    (Msx_lane.ledger ());
+  Hashtbl.fold
+    (fun who f acc ->
+      if now - f <= players_window_frames then (who, f) :: acc else acc)
+    last []
+  |> List.sort (fun (_, a) (_, b) -> compare b a)
+;;
+
 let frame_json () : Yojson.Safe.t =
   match Msx_lane.frame () with
   | None -> `Assoc [ ("loaded", `Bool false) ]
@@ -171,6 +190,16 @@ let frame_json () : Yojson.Safe.t =
         , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
       ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
       ; ("rgb_base64", `String (Base64.encode_string f.Msx_lane.rgb))
+      ; ( "players"
+        , `List
+            (List.map
+               (fun (who, last) ->
+                 `Assoc
+                   [ ("who", `String who)
+                   ; ("last_frame", `Int last)
+                   ; ("frames_ago", `Int (f.Msx_lane.number - last))
+                   ])
+               (recent_players ~now:f.Msx_lane.number)) )
       ]
 ;;
 

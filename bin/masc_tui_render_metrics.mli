@@ -10,8 +10,8 @@ type metrics_kpis = {
   unpaused_keepers : int;
   turns : turn_counts option;
   tasks : Masc_tui_task_flow.counts option;
-  gate_pending_count : int;
-  held_approvals_count : int;
+  gate_pending_count : int option;
+  held_approvals_count : int option;
 }
 
 val calculate_kpis : state -> metrics_kpis

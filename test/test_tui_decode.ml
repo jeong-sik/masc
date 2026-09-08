@@ -6467,7 +6467,8 @@ let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
 let test_decode_lane_run_page_filters_to_one_lane () =
   let listing =
     `Assoc
-      [ "has_more", `Bool true
+      [ "total", `Int 51
+      ; "has_more", `Bool true
       ; ( "runs"
         , `List
             [ lane_run_summary_json "lib-1"
@@ -6479,6 +6480,8 @@ let test_decode_lane_run_page_filters_to_one_lane () =
   match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
+      Alcotest.(check (option int)) "retained total comes from server"
+        (Some 51) page.Tui_decode.lrpg_total;
       Alcotest.(check (list string)) "only the requested lane"
         [ "lib-1"; "lib-2" ]
         (List.map (fun run -> run.Tui_decode.lrs_run_id) page.Tui_decode.lrpg_runs);

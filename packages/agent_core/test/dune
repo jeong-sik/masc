@@ -587,12 +587,6 @@
     --allow-callback-in
     http_client.mli
     "with_post_stream|?on_response_status|arrow(_,constr(int),constr(unit))"
-    --allow-callback-in
-    http_client.mli
-    "read_sse|~on_data|arrow(~event_type,constr(option,constr(string)),arrow(_,constr(string),constr(unit)))"
-    --allow-callback-in
-    http_client.mli
-    "read_ndjson|~on_line|arrow(_,constr(string),constr(unit))"
     %{dep:../lib/llm_provider/count_tokens_sync.mli}
     %{dep:../lib/llm_provider/http_client.mli})
    (run

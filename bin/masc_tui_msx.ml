@@ -98,7 +98,7 @@ let step_fraction d =
 let adjust_size d = step_fraction d
 
 let footer () =
-  Printf.sprintf " esc: back   +/-: size %d%%   F6: save quick   F7: restore quick"
+  Printf.sprintf " Esc: back  +/-: %d%%  F6: save quick  F7: restore quick  F8: disk"
     (int_of_float (!screen_fraction *. 100.0))
 
 let render ~(write : string -> unit)
@@ -218,13 +218,19 @@ type menu_action =
   | Stay              (* navigated or repainted; the menu is still up *)
   | Closed            (* esc: leave the menu *)
   | Watch             (* spectate the machine already loaded *)
+  | Swap_disk of string
   | Load of string    (* plug this cartridge in *)
 
 (* The rows in order: a "watch current" row first when a machine is loaded,
    then one row per cartridge. [msx_menu_index] indexes this list. *)
 let menu_entries (state : Masc_tui_types.state) : menu_action list =
   let watch = if Option.is_some state.msx_frame then [ Watch ] else [] in
-  watch @ List.map (fun c -> Load c) state.msx_carts
+  let media = match state.msx_menu_mode with
+    | Masc_tui_types.Boot_game -> List.map (fun c -> Load c) state.msx_carts
+    | Change_disk -> state.msx_carts
+        |> List.filter (fun c -> String.ends_with ~suffix:".dsk" (String.lowercase_ascii c))
+        |> List.map (fun c -> Swap_disk c) in
+  watch @ media
 
 let clamp_index (state : Masc_tui_types.state) =
   let n = List.length (menu_entries state) in
@@ -241,7 +247,7 @@ let entry_label (state : Masc_tui_types.state) = function
         | _ -> "current machine"
       in
       "> watch " ^ cart
-  | Load c -> "  " ^ c
+  | Load c | Swap_disk c -> "  " ^ c
   | Stay | Closed -> ""
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
@@ -250,7 +256,9 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   let entries = menu_entries state in
   let buf = Buffer.create 1024 in
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols menu_title);
+  Buffer.add_string buf (fit_line cols (match state.msx_menu_mode with
+    | Masc_tui_types.Boot_game -> menu_title
+    | Change_disk -> " MSX — change disk (no reboot); Enter selects, Esc cancels"));
   Buffer.add_string buf "\027[0K\r\n";
   let status_rows =
     match status with
@@ -285,7 +293,8 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   done;
   write (Buffer.contents buf)
 
-let open_menu ~(write : string -> unit) (state : Masc_tui_types.state) =
+let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (state : Masc_tui_types.state) =
+  state.msx_menu_mode <- mode;
   state.msx_open <- true;
   state.msx_menu_open <- true;
   state.msx_menu_index <- 0;
@@ -303,9 +312,9 @@ let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
       state.msx_menu_index <- state.msx_menu_index + 1;
       render_menu ~write state;
       Stay
-  | "\r" | "\n" | " " | "space" -> (
+  | "\r" | "\n" | "enter" | "return" | " " | "space" -> (
       match List.nth_opt (menu_entries state) state.msx_menu_index with
-      | Some ((Watch | Load _) as a) -> a
+      | Some ((Watch | Load _ | Swap_disk _) as a) -> a
       | Some (Stay | Closed) | None ->
           render_menu ~write state;
           Stay)

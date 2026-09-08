@@ -2563,6 +2563,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_eject" "masc_msx_eject" ~readonly:false
   ; masc_misc_descriptor "msx_save" "masc_msx_save" ~readonly:false
   ; masc_misc_descriptor "msx_restore" "masc_msx_restore" ~readonly:false
+  ; masc_misc_descriptor "msx_change_disk" "masc_msx_change_disk" ~readonly:false
   ; masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false

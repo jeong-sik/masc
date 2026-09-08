@@ -85,7 +85,8 @@ open Alcotest
 (* Explicit native client selection adds 1004 measured browser schema bytes. *)
 (* Named MSX checkpoints add 884 schema bytes (literal TOML/golden JSON);
    preserve existing headroom. CI verifies the production renderer. *)
-let ceiling_bytes = 94_101
+(* Disk replacement adds 501 literal schema bytes; CI checks the rendered surface. *)
+let ceiling_bytes = 94_602
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -228,6 +229,7 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_msx_change_disk"
   ; "masc_msx_eject"
   ; "masc_msx_load"
   ; "masc_msx_press"

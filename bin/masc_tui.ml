@@ -14460,13 +14460,16 @@ and is loaded on demand through keeper_skill.
               state.msx_last_poll_ns <- 0L;
               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
-          | Load cart -> (
+          | (Load cart | Swap_disk cart) as choice -> (
               state.msx_notice <- None;
               match
-                Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port
-                  ~cart
+                (match choice with
+                 | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
+                     ~host:server_peer_host ~port:state.port ~disk:cart
+                 | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
               with
               | Ok () ->
+                  (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
                   state.msx_frame <-
                     Masc_tui_http.fetch_msx_frame ~host:server_peer_host
@@ -14477,7 +14480,10 @@ and is loaded on demand through keeper_skill.
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
-                    ~status:("load failed: " ^ message) state))
+                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+      | Some "f8" ->
+          state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+          Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
           let restore = name = "f7" in
           let result = Masc_tui_http.post_msx_checkpoint

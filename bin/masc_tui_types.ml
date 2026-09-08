@@ -3150,6 +3150,8 @@ type runtime_config_reading = {
 
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
+type msx_menu_mode = Boot_game | Change_disk
+
 type msx_frame = {
   msx_number : int;
   msx_width : int;
@@ -3305,6 +3307,7 @@ type state = {
      the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
   mutable msx_menu_open: bool;
   mutable msx_notice: string option;
+  mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: string list;
   mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
@@ -4877,6 +4880,7 @@ let create_state
   msx_last_poll_ns = 0L;
   msx_menu_open = false;
   msx_notice = None;
+  msx_menu_mode = Boot_game;
   msx_carts = [];
   msx_menu_index = 0;
   palette_open = false;

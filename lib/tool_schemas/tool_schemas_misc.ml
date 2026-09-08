@@ -39,6 +39,7 @@ let msx_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.msx_eject
   ; Tool_schemas_misc_toml.msx_save
   ; Tool_schemas_misc_toml.msx_restore
+  ; Tool_schemas_misc_toml.msx_change_disk
   ; Tool_schemas_misc_toml.msx_screen
   ; Tool_schemas_misc_toml.msx_press
   ; Tool_schemas_misc_toml.msx_step
@@ -136,6 +137,7 @@ type misc_operation =
   | Misc_msx_eject
   | Misc_msx_save
   | Misc_msx_restore
+  | Misc_msx_change_disk
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step
@@ -165,6 +167,7 @@ let misc_tool_name = function
   | Misc_msx_eject -> "masc_msx_eject"
   | Misc_msx_save -> "masc_msx_save"
   | Misc_msx_restore -> "masc_msx_restore"
+  | Misc_msx_change_disk -> "masc_msx_change_disk"
   | Misc_msx_screen -> "masc_msx_screen"
   | Misc_msx_press -> "masc_msx_press"
   | Misc_msx_step -> "masc_msx_step"
@@ -193,6 +196,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_msx_eject
   | Misc_msx_save
   | Misc_msx_restore
+  | Misc_msx_change_disk
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step

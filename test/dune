@@ -5155,3 +5155,14 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_ask_alternative)))
+
+(rule
+ (alias runtest-test_runtime_default_catalog_cli)
+ (deps test_runtime_default_catalog_cli.py ../bin/main_eio.exe
+       (source_tree ../scripts/fixtures/release-evidence))
+ (action
+  (run python3 %{dep:test_runtime_default_catalog_cli.py} %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_runtime_default_catalog_cli)))

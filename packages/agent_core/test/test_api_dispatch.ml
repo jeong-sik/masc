@@ -87,11 +87,17 @@ let test_pricing_known_models () =
   check (float 0.01) "gpt4o input" 2.5 p_gpt4o.input_per_million;
   let p_mini = declared_pricing "gpt-mini" in
   check (float 0.01) "mini input" 0.15 p_mini.input_per_million;
+  (* The case needs a row priced at zero that declares no cache multipliers,
+     so that Some {0.;0.;None;None} is distinguishable from the None the
+     assertion below expects. "qwen3.5-35b" was that row and left the
+     catalog; kimi-k2 is one of the fifteen that carry the same shape today.
+     A row that gains multipliers moves out of this set, which is why the
+     name is spelled here rather than searched for. *)
   check
     bool
     "catalog zero remains declared despite absent cache multipliers"
     true
-    (match Llm_provider.Pricing.pricing_for_model_opt "qwen3.5-35b" with
+    (match Llm_provider.Pricing.pricing_for_model_opt "kimi-k2" with
      | Some
          { input_per_million = 0.0
          ; output_per_million = 0.0

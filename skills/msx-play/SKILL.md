@@ -49,6 +49,8 @@ At the province command prompt `(0–19)?`, Return with an empty entry reveals t
 
 Observed transitions: `1`, Return asks for a destination numbered 1–41; `9`, Return asks which officer should develop the province. Neither alone proves movement or improved land. `0`, Return, `y`, Return advanced the initial campaign from province 10 to 18.
 
+Development is a sequence of decisions: at the province command prompt enter `9`, Return; read the officer list and select an officer; capture the resulting amount prompt before entering a cost. A saved or reread officer-list image does not establish the amount prompt after selection. In one observed province 13 action, officer 5 followed by a cost of 50 changed gold from 500 to 450 and land from 20 to 27, returning to the command prompt with the month unchanged. This demonstrates a completed development action in that state, not a fixed exchange rate or a universally best officer. Compare the actual before/after resources and land, then preserve the result before planning another action.
+
 Game save: `1`, `9`, Return, then `5`, Return opens the save flow. Swap to the user's data disk only when D is requested; follow the slot/name prompts. Swap back to B when requested. Emulator checkpoints and the game's own save/load are distinct behaviors to verify.
 
 Keep local media filenames and the current campaign slot in session memory rather than treating one operator's inventory as universal. A long zero-human observer run ending in year 293 has been observed; it is not proof of a human unification victory. No full winning campaign is established by this Skill.

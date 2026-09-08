@@ -454,7 +454,7 @@ export function buildKeeperPromptAssemblyReport(
 
   const keeperPrompts = prompts.filter(prompt =>
     prompt.key === 'keeper'
-    || prompt.key.startsWith('keeper.')
+    || (prompt.key.startsWith('keeper.') && prompt.key !== 'keeper.en')
     || prompt.key.startsWith('behavior.'),
   )
   const warnings: KeeperPromptAssemblyWarning[] = []

@@ -7285,14 +7285,17 @@ let composable_output_probes =
            `Assoc [])
     }
   ; { tool_name = "masc_get_metrics"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
     }
   ; { tool_name = "masc_agent_fitness"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
     }
   ; { tool_name = "keeper_artifact_read"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            let store = Tool_blob_store.create ~base_path:config.Masc.Workspace.base_path in

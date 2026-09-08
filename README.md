@@ -30,7 +30,7 @@ Three things it does:
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
 > unsafe action. `main` moves faster than the published binaries; the latest
-> release is [v0.33.0](https://github.com/jeong-sik/masc/releases) (2026-09-06).
+> release is [v0.34.0](https://github.com/jeong-sik/masc/releases) (2026-09-08).
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -59,7 +59,7 @@ and run the installer from that same tag, so the script and the assets it
 verifies come from one release.
 
 ```bash
-TAG=v0.33.0
+TAG=v0.34.0
 curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh

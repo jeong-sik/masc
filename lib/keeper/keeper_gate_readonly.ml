@@ -149,6 +149,17 @@ let gh_api_flag_writes flag =
   List.mem flag
     [ "-X"; "--method"; "-f"; "--raw-field"; "-F"; "--field"; "--input" ]
   || String.starts_with ~prefix:"-X" flag
+  (* Attached as well as spaced. gh takes a short flag's value with no gap, so
+     [-fquery=mutation{...}] is the same request as [-f query=mutation{...}]
+     and was reaching the read table, where nothing else matched it: the exact
+     list wants "-f", and the prefix lines below only knew the long spellings.
+     Measured 2026-09-08: `gh api graphql -fquery=...` answered a live query,
+     so the shape works and the classifier was the only thing missing.
+
+     [-X] already had this line. [-f] and [-F] did not, and the asymmetry is
+     what the hole was. *)
+  || String.starts_with ~prefix:"-f" flag
+  || String.starts_with ~prefix:"-F" flag
   || String.starts_with ~prefix:"--method=" flag
   || String.starts_with ~prefix:"--field=" flag
   || String.starts_with ~prefix:"--raw-field=" flag

@@ -128,6 +128,13 @@ let test_gh_write_shapes_require_observation () =
   requires_observation "api with a field" [ "gh"; "api"; "repos/x/y/issues"; "-f"; "title=x" ];
   requires_observation "api with --field=" [ "gh"; "api"; "x"; "--field=a=b" ];
   requires_observation "api with an input file" [ "gh"; "api"; "x"; "--input"; "body.json" ];
+  (* gh takes a short flag's value attached, so these are the same requests as
+     the spaced ones above. The read table matched neither the exact "-f" nor
+     any long prefix, and a mutation posted without a judge turn. *)
+  requires_observation "api with an attached field"
+    [ "gh"; "api"; "graphql"; "-fquery=mutation{addStar(input:{starrableId:\"x\"}){clientMutationId}}" ];
+  requires_observation "api with an attached raw field"
+    [ "gh"; "api"; "x"; "-Ftitle=x" ];
   requires_observation "bare api" [ "gh"; "api" ]
 
 let test_write_shapes_require_observation () =

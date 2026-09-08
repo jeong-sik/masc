@@ -774,6 +774,18 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
     ; "generated_at", `String "2026-08-21T05:06:07Z"
     ]
 
+let test_goal_store_unavailable_preserves_source_detail () =
+  let detail = "goals.json: criterion_revision is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_store_unavailable";
+                      "error", `String detail ] in
+  (match Tui_decode.decode_planning_snapshot json with
+   | Error message -> Alcotest.(check string) "planning source failure" detail message
+   | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure" detail message
+  | _ -> Alcotest.fail "Goal detail source failure was not preserved"
+
 let test_decode_planning_snapshot_current_contract () =
   match Tui_decode.decode_planning_snapshot (planning_snapshot_json ()) with
   | Error err -> Alcotest.fail err
@@ -8648,6 +8660,8 @@ let () =
       [
         Alcotest.test_case "current contract" `Quick
           test_decode_planning_snapshot_current_contract;
+        Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
+          test_goal_store_unavailable_preserves_source_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
         Alcotest.test_case "goal carries the judge verdict" `Quick

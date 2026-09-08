@@ -570,7 +570,9 @@ let dashboard_schedule_prune_http_json
 ;;
 
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
-  let goals = Goal_store.list_goals config () in
+  match Goal_store.list_goals_result config () with
+  | Error detail -> Dashboard_goals.goal_store_unavailable_json detail
+  | Ok goals ->
   let rollup = Goal_store.compute_rollup goals in
   (* RFC-0387 (stage 1): the verification ledger joins each goal at the API
      boundary (goal_to_yojson is the persistence codec and stays untouched).

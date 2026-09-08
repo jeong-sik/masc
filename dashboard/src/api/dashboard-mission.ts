@@ -2,6 +2,7 @@
 // Extracted from dashboard.ts. Public symbols re-exported from dashboard.ts.
 
 import { get } from './core'
+import { goalStoreUnavailableDetail } from './dashboard-goals'
 import type {
   DashboardMissionResponse,
   DashboardMissionBriefingResponse,
@@ -24,6 +25,9 @@ export function fetchDashboardMissionBriefing(
   return get(`/api/v1/dashboard/briefing/sections${query}`, { signal: opts?.signal })
 }
 
-export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
-  return get('/api/v1/dashboard/planning')
+export async function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
+  const raw = await get<DashboardPlanningResponse>('/api/v1/dashboard/planning')
+  const unavailable = goalStoreUnavailableDetail(raw)
+  if (unavailable !== null) throw new Error(unavailable)
+  return raw
 }

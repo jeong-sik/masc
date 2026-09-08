@@ -135,9 +135,10 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-기본 Keeper 명단에는 `imp` 하나가 들어 있고 `browser-lanes` skill 지침이 설치됩니다.
-`imp`는 autoboot이 꺼진 채로 설치되므로, 아래 모델과 실행 환경을 준비하기 전까지는
-서버가 이 Keeper를 띄우려 하지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+공개된 **0.34.0 바이너리**는 기본 Keeper를 만들지 않고 `browser-lanes` skill을 설치합니다.
+동결 이후의 `main` 소스 빌드는 autoboot이 꺼진 `imp` 하나를 seed합니다.
+릴리스 설치기는 설정을 바이너리에서 가져오므로, 설치기만 갱신해도 0.34.0의 명단은
+바뀌지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
@@ -295,7 +296,7 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 이 파일 하나가 전체 요청을 대신하지 않습니다. 개발 계약인 `constitution.xml`은
 Keeper runtime 시스템 프롬프트가 아닙니다.
 
-기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
+공개 0.34.0의 기본 설치는 **Keeper 0명, 내장 skill 패키지 `browser-lanes` 1개**입니다.
 `browser-lanes`는 live/automation 브라우저 선택, 연결과 페이지 관측·조작·검증
 지침 및 reference 문서를 포함합니다. 브라우저나 확장 자체를 설치하거나 인증하지는 않습니다.
 0.34.0의 Gecko scene 기능은 새 native host와 브라우저 확장 0.3.0을 함께 사용합니다.

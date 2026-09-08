@@ -76,9 +76,15 @@ select_sources() {
   # and within a day five MSX tools were added over it -- change_disk at 278
   # bytes, press at 745. The guard was green on main the whole time because
   # nothing ran it.
+  # The ceiling on what every turn carries is the same shape again: #34409
+  # grew the model-visible schemas by 664 bytes and the ratchet failed that
+  # night, because the pull request edited config/tools and nothing else.
+  # The file says growth "has to be argued for in the PR that causes it",
+  # which needs the PR to be told.
   tools_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
-  tool_definition_guard="test/test_keeper_tool_definition_source.ml"
+  tool_definition_guards="test/test_keeper_tool_definition_source.ml
+test/test_keeper_tool_schema_bytes.ml"
 
   # A source edit runs the suites named after it. Before this, only editing a
   # test picked one, so a change under bin/ or lib/ that broke a suite ran
@@ -147,8 +153,9 @@ SOURCES
   fi
 
   if [ -n "${tools_changed}" ]; then
-    echo "this pull request changes tool definitions; adding ${tool_definition_guard}"
-    sources=$(printf '%s\n%s\n' "${sources}" "${tool_definition_guard}" \
+    echo "this pull request changes tool definitions; adding:"
+    printf '%s\n' "${tool_definition_guards}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${tool_definition_guards}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -197,8 +204,8 @@ self_test() {
     "docs/x.md"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
-  check "a tool definition reaches both guards" \
-    "test/test_keeper_tool_definition_source.ml test/test_managed_assets_sync_from_binary.ml" \
+  check "a tool definition reaches every guard over it" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
     "config/tools/foo.toml"
   # Only tool definitions reach the second one; a prompt asset has no first
   # line to fit.

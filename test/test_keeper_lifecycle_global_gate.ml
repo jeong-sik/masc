@@ -144,6 +144,12 @@ let with_flag name value f =
   Fun.protect ~finally:(fun () -> Config_boot_overrides.reset_for_tests ()) f
 ;;
 
+let test_startup_observes_late_toml_override () =
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" (fun () ->
+    check bool "startup sees resolved TOML off" false (Env_config.KeeperBootstrap.enabled ()));
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "true" (fun () ->
+    check bool "startup sees resolved TOML on" true (Env_config.KeeperBootstrap.enabled ()))
+
 let without_overrides f =
   Config_boot_overrides.reset_for_tests ();
   Fun.protect ~finally:(fun () -> Config_boot_overrides.reset_for_tests ()) f
@@ -514,7 +520,8 @@ let () =
             test_global_reactive_off_does_not_starve_scheduled_autonomous
         ] )
     ; ( "autonomous"
-      , [ test_case "default ready" `Quick test_default_autonomous_ready
+      , [ test_case "startup sees late override" `Quick test_startup_observes_late_toml_override
+        ; test_case "default ready" `Quick test_default_autonomous_ready
         ; test_case "global off blocks readiness" `Quick
             test_global_autonomous_off_blocks_readiness
         ; test_case "execution requires live fiber" `Quick

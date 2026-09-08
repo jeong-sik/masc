@@ -1760,7 +1760,7 @@ let keeper_cycle_decision
       (* RFC-0297 P0-1: when the reactive gate is disabled, a pending reactive
          trigger must not itself starve the scheduled-autonomous decision --
          otherwise a persistent trigger (e.g. a stuck mention) permanently
-         blocks proactive turns even when MASC_KEEPER_PROACTIVE_ENABLED=true.
+         blocks proactive turns even when MASC_KEEPER_AUTONOMOUS_ENABLED=true.
          This arm also covers the original no-reactive-trigger ([]) case.
          Only relabel the verdict as [Reactive_disabled] when
          scheduled-autonomous also declines to run, so the more specific,

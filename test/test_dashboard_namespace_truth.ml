@@ -158,8 +158,7 @@ let create_keeper env sw state name =
         (`Assoc
           [
             ("name", `String name);
-            ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+            ("activation_mode", `String "manual");
           ])
   with
   | Some result when Tool_result.is_success result -> ()

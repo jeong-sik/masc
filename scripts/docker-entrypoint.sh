@@ -48,8 +48,8 @@ fi
 # the operator explicitly overrides the global keeper bootstrap gate.
 if [ -z "${OLLAMA_CLOUD_API_KEY:-}" ]; then
   log "warning: OLLAMA_CLOUD_API_KEY is unset; the default flash model will not authenticate"
-  if [ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}" ]; then
-    export MASC_KEEPER_BOOTSTRAP_ENABLED=false
+  if [ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}" ]; then
+    export MASC_KEEPER_AUTONOMOUS_ENABLED=false
     log "classic keeper autoboot disabled until OLLAMA_CLOUD_API_KEY is set"
   fi
 fi

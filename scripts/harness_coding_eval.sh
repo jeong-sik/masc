@@ -221,7 +221,7 @@ start_live_server() {
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
-    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     if context_recovery_cases_selected; then
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
@@ -250,7 +250,7 @@ start_live_server() {
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
-    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     if context_recovery_cases_selected; then
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"

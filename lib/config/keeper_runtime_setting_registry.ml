@@ -74,14 +74,6 @@ let setting
    then an unknown key to boot/save validation, like any other. *)
 let all =
   [ setting
-      ~env_name:"MASC_KEEPER_BOOTSTRAP_ENABLED"
-      ~exposure:(Toml_and_env "bootstrap.enabled")
-      ~value_kind:Boolean
-      ~default:"true"
-      ~consumers:[ "Keeper_lifecycle_gate_env"; "server bootstrap" ]
-      ~category:"bootstrap"
-      "Enable startup keeper auto-bootstrap"
-  ; setting
       ~range:(int_range ~min:4096 ())
       ~env_name:"MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES"
       ~exposure:Env_only
@@ -138,21 +130,13 @@ let all =
       ~category:"lifecycle"
       "Global kill-switch for reactive keeper turns"
   ; setting
-      ~env_name:"MASC_KEEPER_PROACTIVE_ENABLED"
-      ~exposure:(Toml_and_env "proactive.enabled")
-      ~value_kind:Boolean
-      ~default:"true"
-      ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_world_observation" ]
-      ~category:"lifecycle"
-      "Global kill-switch for scheduled proactive keeper turns"
-  ; setting
       ~env_name:"MASC_KEEPER_AUTONOMOUS_ENABLED"
       ~exposure:(Toml_and_env "autonomous.enabled")
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_activation_readiness" ]
       ~category:"lifecycle"
-      "Global kill-switch for autonomous keeper activation"
+      "Global switch for automatic Keeper startup and spontaneous turns"
   ; setting
       ~env_name:"MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
       ~exposure:(Toml_and_env "autonomous.wake_prompt")

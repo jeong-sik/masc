@@ -57,14 +57,6 @@ module Sse_connect_guard = struct
   end
 end
 
-(** {1 Tempo (Polling Interval) Configuration} *)
-
-module Tempo = struct
-  (** Polling interval (seconds) published to operator surfaces *)
-  let default_interval_seconds =
-    get_float ~default:300.0 "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
-end
-
 (** {1 Cache Configuration} *)
 
 module Cache = struct

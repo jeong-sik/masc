@@ -69,10 +69,7 @@ let all_flags : flag list = [
     lifecycle = Active };
 
   (* ── Keeper ───────────────────────────────────────────────── *)
-  { env_name = "MASC_KEEPER_BOOTSTRAP_ENABLED";
-    description = "Startup keeper auto-bootstrap scan";
-    default = true; category = "keeper";
-    lifecycle = Active };
+
 
   (* RFC-0297 P0-1: global lifecycle kill-switches. Before these existed,
      [reactive]/[proactive]/[autonomous] enabled in runtime.toml were
@@ -84,13 +81,10 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active };
 
-  { env_name = "MASC_KEEPER_PROACTIVE_ENABLED";
-    description = "Global kill-switch for keeper proactive (scheduled) turns";
-    default = true; category = "keeper";
-    lifecycle = Active };
+
 
   { env_name = "MASC_KEEPER_AUTONOMOUS_ENABLED";
-    description = "Global kill-switch for keeper autonomous keepalive/PR fan-out";
+    description = "Global switch for automatic Keeper startup and spontaneous turns";
     default = true; category = "keeper";
     lifecycle = Active };
 

@@ -130,31 +130,17 @@ let test_applies_wire_capture_overrides () =
     (Some "536870912")
     (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" overrides)
 
-(* RFC-0297 P0-1: the three lifecycle kill-switches must map TOML ->
-   canonical env instead of being silently dropped. Before the key_to_env
-   mappings existed, [reactive]/[proactive]/[autonomous] enabled were never
-   visited by load_and_apply and vanished. *)
+(* Spontaneous activation has one global setting; requested reactive work
+   retains its independent switch. *)
 let test_applies_lifecycle_enabled_overrides () =
   let doc = parse_or_fail
-    "[reactive]\n\
-     enabled = false\n\
-     [proactive]\n\
-     enabled = false\n\
-     [autonomous]\n\
-     enabled = true\n"
-  in
+    "[reactive]\nenabled = false\n[autonomous]\nenabled = true\n" in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied three lifecycle enabled overrides" 3 count;
-  check (option string) "reactive enabled maps to canonical env"
-    (Some "false")
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc in
+  check int "two distinct lifecycle settings" 2 count;
+  check (option string) "reactive setting" (Some "false")
     (List.assoc_opt "MASC_KEEPER_REACTIVE_ENABLED" overrides);
-  check (option string) "proactive enabled maps to canonical env"
-    (Some "false")
-    (List.assoc_opt "MASC_KEEPER_PROACTIVE_ENABLED" overrides);
-  check (option string) "autonomous enabled maps to canonical env"
-    (Some "true")
+  check (option string) "single autonomy setting" (Some "true")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
 
 let test_parse_error_returns_error () =

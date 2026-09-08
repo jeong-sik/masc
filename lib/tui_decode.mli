@@ -79,6 +79,7 @@ type goal_proof =
           recorded without text, which is a different fact from an empty
           measurement and is drawn as such. *)
   | Proof_refuted of string option  (** Refused; [Some] is why. *)
+  | Proof_stale of string option
   | Proof_unreadable of string option
       (** The ledger did not decode, or named a state this build does not know.
           Distinct from {!Proof_idle}: an unreadable store is not the same fact

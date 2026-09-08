@@ -658,6 +658,13 @@ let test_planning_goal_carries_the_judge_verdict () =
     (match proof (decoded_proof ~verification:(verification_json "proof_pending") ()) with
      | Tui_decode.Proof_pending -> true
      | _ -> false);
+  Alcotest.check Alcotest.bool "old approval is historical after a criterion edit" true
+    (match proof (decoded_proof ~verification:(`Assoc [ "completion",
+        `Assoc [ "state", `String "stale_criterion";
+          "historical_completion", `Assoc [ "state", `String "proof_proven";
+            "verdict", proven_verdict "old target reached" ] ] ]) ()) with
+     | Tui_decode.Proof_stale (Some "old target reached") -> true
+     | _ -> false);
   Alcotest.check Alcotest.bool "an idle ledger is idle" true
     (match proof (decoded_proof ~verification:(verification_json "idle") ()) with
      | Tui_decode.Proof_idle -> true

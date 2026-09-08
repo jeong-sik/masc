@@ -3718,10 +3718,17 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
-    send_and_wait(process, master_fd, output, b"f", b"show:active")
-    empty = send_and_wait(
-        process, master_fd, output, b"f", b"no goals in this filter"
-    )
+    # One press, not two. The pane opens on Planning_filter_active, so the
+    # first press lands on completed, which these fixtures leave empty --
+    # the note this step is about is already on that screen. The old pair
+    # was written for a default of Planning_filter_all: it waited for
+    # "show:active", the filter the pane had just left, and then for a note
+    # that a second press had already carried past.
+    empty = send_and_wait(process, master_fd, output, b"f", b"show:completed")
+    if b"no goals in this filter" not in CSI_RE.sub(b"", empty):
+        raise AssertionError(
+            f"the empty filter drew no note: {empty!r}"
+        )
     if frame_row_of(empty, b"no goals in this filter") >= terminal_rows - 2:
         raise AssertionError(f"Planning empty note overflowed: {empty!r}")
     os.write(master_fd, b"q")
@@ -14730,6 +14737,75 @@ def msx_size_interaction(
     os.write(master_fd, b"q")
 
 
+def run_msx_retained_regression(executable: str) -> None:
+    """Exercise retained Kitty pixels through the real TUI and private HTTP."""
+    number = [1]
+    changed = threading.Event()
+    original = msx_loaded_frame_fixture()[1]
+
+    def tick():
+        number[0] += 1
+        body = dict(original, number=number[0])
+        if changed.is_set():
+            body["rgb_base64"] = base64.b64encode(
+                bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT
+            ).decode("ascii")
+        return 200, body
+
+    def interact(process, master, _slave, output, _base):
+        def footer_after(marker, start):
+            wait_for_output(process, master, output, marker, start=start, timeout=5.0)
+            marker_end = output.index(marker, start) + len(marker)
+            footer = b"F8: disk"
+            wait_for_output(process, master, output, footer,
+                            start=marker_end, timeout=5.0)
+            return output.index(footer, marker_end) + len(footer)
+
+        def key(value, needle):
+            start = len(output)
+            os.write(master, value)
+            wait_for_output(process, master, output, needle, start=start, timeout=5.0)
+            return bytes(output[start:])
+
+        key(b":go msx\r", b"watch split.rom")
+        first = key(b"\r", b"F6: save quick")
+        assert b"f=24" in first, "Kitty path was not negotiated"
+        start = len(output)
+        target = number[0] + 3
+        end = footer_after(f"frame {target} ".encode(), start)
+        steady = bytes(output[start:end])
+        assert b"f=24" not in steady, "unchanged pixels were retransmitted"
+        assert b"\x1b[2J" not in steady, "unchanged pixels erased the display"
+        assert b"a=d" not in steady, "unchanged pixels deleted the image"
+        start = len(output)
+        changed.set()
+        end = footer_after(b"i=32,p=1,C=1", start)
+        replacement = bytes(output[start:end])
+        assert b"f=24" in replacement, "changed pixels were not transmitted"
+        assert b"\x1b[2J" not in replacement, "replacement erased the display"
+        start = len(output)
+        os.write(master, b"-")
+        end = footer_after(b"+/-: 87%", start)
+        resized = bytes(output[start:end])
+        assert b"d=I,i=32" in resized, "resize retained the old placement"
+        assert b"f=24" in resized, "resize did not place pixels again"
+        exited = key(b"\x1b", b"MASC Overview")
+        assert b"d=I,i=32" in exited, "exit left the image behind"
+        key(b":go msx\r", b"watch split.rom")
+        reopened = key(b"\r", b"F6: save quick")
+        assert b"f=24" in reopened, "reopening reused a deleted image"
+        print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
+              f"replacement={len(replacement)} bytes", flush=True)
+        key(b"\x1b", b"MASC Overview")
+        os.write(master, b"q")
+
+    run_terminal_scenario(
+        executable, description="MSX retains Kitty pixels between live polls",
+        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
+        http_fixtures={"/api/v1/msx/frame": (200, original), "/api/v1/msx/tick": tick},
+    )
+
+
 def run_msx_size_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -15054,6 +15130,10 @@ def main() -> None:
         run_msx_spectator_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX spectator regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-retained":
+        run_msx_retained_regression(os.path.abspath(sys.argv[1]))
+        raise SystemExit(0)
+
     if len(sys.argv) == 3 and sys.argv[2] == "msx-size":
         run_msx_size_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX size regression: PASS")

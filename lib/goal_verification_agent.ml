@@ -32,6 +32,7 @@ type pending_work = { goal_id : string }
 
 type process_outcome =
   | Committed
+  | Superseded
   | Deferred of string
 
 let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
@@ -53,107 +54,27 @@ let group_pending_by_goal work =
 
 (* {1 Scan}
 
-   One ledger load per wake, joined in memory — never a decode per row. The
-   P0-2 cross-check runs here: a goal whose phase is [Verifying] but whose
-   ledger row lost the durable proof request is re-armed via
-   [mark_proof_pending] and joins the work set, the same recovery
-   [answer_verifying_repeat] performs on the MCP surface. A [Verifying] goal
-   with a committed proof verdict is the crash-between-writes case: the exact
-   stored verdict reconciles the missing phase/event effect without another
-   model call or ledger rewrite. *)
+   List candidate Goals, then revalidate every transition under the Goal lock
+   against the primary ledger. A display recovery snapshot cannot authorize
+   review or reconciliation. Recovery re-arms only still-Verifying Goals; an
+   ordinary criterion edit must not become an implicit completion request. *)
 
 let collect_pending config : (pending_work list, string) result =
-  match Goal_verification.load_records config with
-  | Error _ as error -> error
-  | Ok records ->
-    let from_rows =
-      List.concat_map
-        (fun (record : Goal_verification.record) ->
-           match record.completion with
-           | Goal_verification.Proof_pending _ ->
-             [ { goal_id = record.goal_id } ]
-           | Goal_verification.Completion_idle
-           | Goal_verification.Proof_proven _
-           | Goal_verification.Proof_refuted _ -> [])
-        records
-    in
-    let rec reconcile_verifying acc = function
-      | [] -> Ok (List.rev acc)
-      | (goal : Goal_store.goal) :: rest ->
-        if
-          List.exists
-            (fun work -> String.equal work.goal_id goal.id)
-            from_rows
-        then reconcile_verifying acc rest
-        else
-          match
-            List.find_opt
-              (fun (record : Goal_verification.record) ->
-                String.equal record.goal_id goal.id)
-              records
-          with
-          | Some
-              { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
-            reconcile_verifying acc rest
-          | Some
-              { Goal_verification.completion =
-                  (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _)
-              ; _
-              } ->
-            (match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
-             | Error detail ->
-               Error
-                 (Printf.sprintf
-                    "goal verifier could not reconcile committed proof goal_id=%s \
-                     detail=%s"
-                    goal.id
-                    detail)
-             | Ok Workspace_goals.No_committed_proof ->
-               Error
-                 (Printf.sprintf
-                    "goal verifier saw a committed proof but reconciliation \
-                     found none goal_id=%s"
-                    goal.id)
-             | Ok (Workspace_goals.Reconciled phase) ->
-               Log.Misc.info
-                 "goal verifier reconciled committed proof after restart \
-                  goal_id=%s phase=%s"
-                 goal.id
-                 (Goal_phase.to_string phase);
-               reconcile_verifying acc rest
-             | Ok (Workspace_goals.Reconciliation_not_needed phase) ->
-               Log.Misc.info
-                 "goal verifier skipped proof reconciliation after concurrent \
-                  phase change goal_id=%s phase=%s"
-                 goal.id
-                 (Goal_phase.to_string phase);
-               reconcile_verifying acc rest)
-          | Some
-              { Goal_verification.completion = Goal_verification.Completion_idle; _ }
-          | None ->
-            (match Goal_verification.mark_proof_pending config ~goal_id:goal.id with
-             | Ok _ ->
-               Log.Misc.info
-                 "goal verifier re-armed a missing proof request (P0-2) goal_id=%s"
-                 goal.id;
-               reconcile_verifying
-                 ({ goal_id = goal.id } :: acc)
-                 rest
-             | Error msg ->
-               Error
-                 (Printf.sprintf
-                    "goal verifier could not re-arm a missing proof request \
-                     goal_id=%s detail=%s"
-                    goal.id
-                    msg))
-    in
-    (match
-       reconcile_verifying
-         []
-         (Goal_store.list_goals config ~phase:Goal_phase.Verifying ())
-     with
-     | Error _ as error -> error
-     | Ok rearmed -> Ok (from_rows @ rearmed))
+  let goals = Goal_store.list_goals config ~phase:Goal_phase.Verifying () in
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | (goal : Goal_store.goal) :: rest ->
+      (match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
+       | Error _ as error -> error
+       | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
+         collect acc rest
+       | Ok Workspace_goals.No_committed_proof ->
+         (match Workspace_goals.recover_current_proof config ~goal_id:goal.id with
+          | Error _ as error -> error
+          | Ok true -> collect ({ goal_id = goal.id } :: acc) rest
+          | Ok false -> collect acc rest))
+  in
+  collect [] goals
 ;;
 
 (* {1 Proof prompt}
@@ -240,7 +161,7 @@ let goal_proof_lookup config =
    callers can request lifecycle changes but cannot name verifier verdicts or
    impersonate the fixed verifier authority. *)
 
-let commit_gate_verdict config ~goal_id ~verification_run_id ~decision ~evidence
+let commit_gate_verdict config ~goal_id ~request_id ~criterion ~verification_run_id ~decision ~evidence
   : (unit, string) result
   =
   let result =
@@ -249,6 +170,8 @@ let commit_gate_verdict config ~goal_id ~verification_run_id ~decision ~evidence
       ~start_time:(Time_compat.now ())
       config
       ~goal_id
+      ~request_id
+      ~criterion
       ~verification_run_id
       ~decision
       ~evidence
@@ -265,11 +188,27 @@ let defer ~goal_id ~reason =
   Deferred reason
 ;;
 
-(* Nothing stands between a pending proof request and the review. Whether the
-   goal reached its target is the verdict's answer to give; a branch here that
-   declined to run the review would be making that call without recording a
-   reason. A goal that declared no metric is not refused here either — it is
-   shown to the judge as undeclared and refused in a verdict that says so. *)
+(* Capture the Goal and its durable request under the Goal lock. The callback
+   performs no writes; the model runs only after this lock is released. *)
+let bind_review config ~goal_id =
+  Goal_store.transact_goal config ~goal_id (fun goal ->
+    match goal.Goal_store.phase with
+    | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
+      Error "goal is not awaiting verification"
+    | Goal_phase.Verifying ->
+      Result.bind (Goal_verification.get_record_authoritative config ~goal_id)
+        (function
+          | Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }
+            when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
+            Ok (goal, (pending.request_id, pending.criterion))
+          | Some _ | None -> Error "goal has no pending proof for its current criterion"))
+;;
+
+let newer_request_pending config ~goal_id ~request_id =
+  match bind_review config ~goal_id with
+  | Ok (_, (current_request_id, _)) -> not (String.equal request_id current_request_id)
+  | Error _ -> false
+;;
 
 let process_pending_work_inner
       ?(sw : Eio.Switch.t option = None)
@@ -281,16 +220,10 @@ let process_pending_work_inner
       (work : pending_work)
   : process_outcome
   =
-  match Goal_store.get_goal config ~goal_id:work.goal_id with
-  | None ->
-    (* The row stays durable — failure keeps evidence — but retrying cannot
-       conjure the goal back; the next wake rescan reports the same. *)
-    defer
-      ~goal_id:work.goal_id
-      ~reason:"pending verification row names a goal that does not exist"
-  | Some goal ->
-    (match goal.Goal_store.phase with
-     | Goal_phase.Verifying ->
+  match bind_review config ~goal_id:work.goal_id with
+  | Error detail -> defer ~goal_id:work.goal_id ~reason:detail
+  | Ok (goal, (request_id, criterion)) ->
+    let outcome =
        (match goal_proof_lookup config with
         | Error detail ->
           defer
@@ -356,6 +289,8 @@ let process_pending_work_inner
                  commit_gate_verdict
                    config
                    ~goal_id:work.goal_id
+                   ~request_id
+                   ~criterion
                    ~verification_run_id
                    ~decision
                    ~evidence
@@ -371,21 +306,12 @@ let process_pending_work_inner
                     under the review) consumes nothing: the pending row stays
                     durable and the next pulse re-reads it. *)
                  defer ~goal_id:work.goal_id ~reason:detail)))
-     | Goal_phase.Executing ->
-       (* The crash window of persist-before-model-call: the durable request
-          exists but the phase write never landed. Reviewing now would produce
-          a verdict the FSM must refuse ([Executing, Record_proof_*] is
-          invalid), so the lane waits — the keeper's repeated
-          [request_complete] re-converges the phase onto the pending row. *)
-       defer
-         ~goal_id:work.goal_id
-         ~reason:
-           "proof request is pending but the phase never entered verifying; \
-            waiting for the gate to re-converge"
-     | Goal_phase.Completed | Goal_phase.Dropped ->
-       defer
-         ~goal_id:work.goal_id
-         ~reason:"proof request pending on a terminal goal; left durable")
+    in
+    match outcome with
+    | Committed | Superseded -> outcome
+    | Deferred _ when newer_request_pending config ~goal_id:work.goal_id ~request_id ->
+      Superseded
+    | Deferred _ -> outcome
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
@@ -427,6 +353,8 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
     let registry_outcome =
       match outcome with
       | Committed -> Goal_verification_run_registry.Committed
+      | Superseded -> Goal_verification_run_registry.Deferred
+          { detail = "review superseded by a newer pending proof request" }
       | Deferred reason -> Goal_verification_run_registry.Deferred { detail = reason }
     in
     persist registry_outcome
@@ -494,7 +422,7 @@ type runtime =
   ; sw : Eio.Switch.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
-  ; in_flight : pending_work list Atomic.t
+  ; in_flight : (pending_work * bool) list Atomic.t
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
@@ -503,28 +431,36 @@ let max_concurrent_reviews = 4
 let claim_review (runtime : runtime) work =
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
-    if List.exists (pending_work_same_goal work) current
+    if List.exists (fun (candidate, _) -> pending_work_same_goal work candidate) current
     then false
-    else if Atomic.compare_and_set runtime.in_flight current (work :: current)
+    else if Atomic.compare_and_set runtime.in_flight current ((work, false) :: current)
     then true
     else loop ()
   in
   loop ()
 ;;
 
+(* Mark an active claim in the same atomic state that releases it. A wake
+   racing with release is either retained here or sees an already free Goal
+   and is handled by the ordinary scan. No interval exists where both miss it. *)
+let retain_active_wake (runtime : runtime) ~goal_id =
+  let rec loop () =
+    let current = Atomic.get runtime.in_flight in
+    let next = List.map (fun (work, requested) ->
+      work, (requested || String.equal work.goal_id goal_id)) current in
+    if Atomic.compare_and_set runtime.in_flight current next then () else loop ()
+  in loop ()
+;;
+
 let release_review (runtime : runtime) work =
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
-    let next =
-      List.filter (fun candidate -> not (pending_work_same_goal candidate work)) current
-    in
-    if List.length next = List.length current
-    then ()
-    else if Atomic.compare_and_set runtime.in_flight current next
-    then ()
-    else loop ()
-  in
-  loop ()
+    let retained = List.exists (fun (candidate, requested) ->
+      pending_work_same_goal candidate work && requested) current in
+    let next = List.filter (fun (candidate, _) ->
+      not (pending_work_same_goal candidate work)) current in
+    if Atomic.compare_and_set runtime.in_flight current next then retained else loop ()
+  in loop ()
 ;;
 
 let request_scan (runtime : runtime) =
@@ -545,7 +481,7 @@ let process_goal_work (runtime : runtime) work =
     let committed_any =
       Eio.Switch.run (fun work_sw ->
         Eio.Switch.on_release work_sw (fun () ->
-          release_review runtime representative);
+          if release_review runtime representative then request_scan runtime);
         Cancel_safe.protect
           ~on_exn:(fun exn ->
             Log.Misc.error
@@ -563,7 +499,7 @@ let process_goal_work (runtime : runtime) work =
                       runtime.config
                       item
                   with
-                  | Committed -> loop true rest
+                  | Committed | Superseded -> loop true rest
                   | Deferred _ -> committed)
              in
              loop false work))
@@ -594,7 +530,7 @@ let process_pending (runtime : runtime) =
       |> List.filter (function
         | [] -> false
         | representative :: _ ->
-          not (List.exists (pending_work_same_goal representative) active))
+          not (List.exists (fun (candidate, _) -> pending_work_same_goal representative candidate) active))
     in
     let selected = take_items available eligible in
     List.iter
@@ -633,6 +569,7 @@ let install_callback (runtime : runtime) =
        else if String.equal (String.trim goal_id) ""
        then Log.Misc.error "goal verifier rejected an empty goal id"
        else (
+         retain_active_wake runtime ~goal_id;
          request_scan runtime;
          Log.Misc.info "goal verifier scheduled goal_id=%s" goal_id))
 ;;
@@ -680,6 +617,14 @@ let start ~sw ~(config : Workspace_utils_backend_setup.config) =
 ;;
 
 module For_testing = struct
+  let scan_active_once () =
+    match Atomic.get active_runtime with
+    | None -> false
+    | Some runtime ->
+      Atomic.set runtime.pending false;
+      process_pending runtime;
+      true
+
   let collect_pending = collect_pending
   let process_pending_work = process_pending_work
   let drain_once = drain_once
@@ -688,6 +633,7 @@ module For_testing = struct
 
   type nonrec process_outcome = process_outcome =
     | Committed
+    | Superseded
     | Deferred of string
 
 end

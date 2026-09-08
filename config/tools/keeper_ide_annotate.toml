@@ -1,6 +1,8 @@
 name = "keeper_ide_annotate"
 description = """
-Leave a memo above a line of a file, as a comment in the file's own syntax. The memo reads masc(<your name>): <text>, or masc(<your name>) <kind>: <text> with kind decision, question or bookmark; the TUI lists these and marks their lines, and they travel with the file into diffs and reviews. This edits the file: the comment is inserted above line, indented like it, through the same write path as Edit. file_path, line and text are required. The file's extension picks the comment syntax; a file no language here owns, or one with no comment syntax (JSON), is refused."""
+Leave a memo above a line of a file, as a comment in the file's own syntax.
+
+The memo reads masc(<your name>): <text>, or masc(<your name>) <kind>: <text> with kind decision, question or bookmark; the TUI lists these and marks their lines, and they travel with the file into diffs and reviews. This edits the file: the comment is inserted above line, indented like it, through the same write path as Edit. file_path, line and text are required. The file's extension picks the comment syntax; a file no language here owns, or one with no comment syntax (JSON), is refused."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.

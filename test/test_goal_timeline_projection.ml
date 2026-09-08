@@ -130,6 +130,7 @@ let test_unknown_event_type_keeps_its_token () =
 
 let goal : Goal_store.goal =
   { id = "goal-1"
+  ; criterion_revision = "fixture-goal-1"
   ; title = "Goal One"
   ; metric = None
   ; target_value = None

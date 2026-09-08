@@ -275,6 +275,27 @@ let test_no_goal_is_offered_as_work_to_pick_up () =
 
 let test_unreadable_goals_preserve_context_and_independent_turn () =
   with_workspace @@ fun config ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) @@ fun () ->
+  let runtime_path = Filename.concat config.base_path "runtime.toml" in
+  Fs_compat.save_file runtime_path {|
+[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
   seed_all_phases config;
   Workspace_goal_index.write_goal_task_links config
     [ "goal-executing", [ "task-linked" ] ];

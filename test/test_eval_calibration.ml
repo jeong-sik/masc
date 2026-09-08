@@ -17,16 +17,6 @@ let () =
 
 let test_counter = ref 0
 
-let contains ~sub s =
-  let ls = String.length sub and l = String.length s in
-  if ls > l then false
-  else
-    let rec scan i =
-      if i > l - ls then false
-      else if String.sub s i ls = sub then true
-      else scan (i + 1)
-    in scan 0
-
 let tmpdir () =
   incr test_counter;
   let dir = Filename.concat
@@ -321,17 +311,33 @@ let test_format_few_shot_block_empty () =
   let block = Cal.format_few_shot_block [] in
   check string "empty list -> empty string" "" block
 
+let index_of ~sub s =
+  let ls = String.length sub and l = String.length s in
+  let rec scan i =
+    if i > l - ls then None
+    else if String.sub s i ls = sub then Some i
+    else scan (i + 1)
+  in
+  if ls > l then None else scan 0
+
 let test_format_few_shot_block_nonempty () =
   let examples = [
     { Cal.task_title = "Fix auth";
       notes_excerpt = "done";
       correct_verdict = "REJECT: evaluator incorrectly approved" };
+    { Cal.task_title = "Ship report";
+      notes_excerpt = "attached";
+      correct_verdict = "APPROVE" };
   ] in
   let block = Cal.format_few_shot_block examples in
-  check bool "contains calibration header" true
-    (contains ~sub:"calibration" block);
-  check bool "contains task title" true
-    (contains ~sub:"Fix auth" block)
+  (* Every example reaches the block, in the order it was given. The framing
+     around them is prose the prompt asset owns and rewrites, so pinning a
+     word out of it says nothing about this function. *)
+  match index_of ~sub:"Fix auth" block, index_of ~sub:"Ship report" block with
+  | Some first, Some second ->
+    check bool "the examples keep the order they were given" true (first < second)
+  | None, _ -> fail "the first example is missing from the block"
+  | _, None -> fail "the second example is missing from the block"
 
 (* ================================================================ *)
 (* Statistics tests                                                  *)

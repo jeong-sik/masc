@@ -110,7 +110,8 @@ let render ~(write : string -> unit)
     ~(connection : Masc_tui_types.connection_status) ?notice
     (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  let screen_rows = max 4 (rows - (if Option.is_some notice then 3 else 2)) in
+  let header_rows = if Option.is_some notice then 2 else 1 in
+  let screen_rows = max 4 (rows - header_rows - 1) in
   let picture_rows =
     max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
   in
@@ -154,7 +155,7 @@ let render ~(write : string -> unit)
           starts mid-screen: park the cursor on its first row, centred, and
           the footer still lands on the screen's last row. *)
        Buffer.add_string buf
-         (Printf.sprintf "\027[%d;1H" (2 + ((screen_rows - drawn_rows) / 2)));
+         (Printf.sprintf "\027[%d;1H" (header_rows + 1 + ((screen_rows - drawn_rows) / 2)));
        let escape =
          Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
            ~pixel_height:f.msx_height ~rows:drawn_rows
@@ -164,7 +165,7 @@ let render ~(write : string -> unit)
          Buffer.add_string buf escape;
          (* The image is drawn at the cursor and the terminal does not move it,
             so the footer needs the rows stepped over by hand. *)
-         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
        end
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the

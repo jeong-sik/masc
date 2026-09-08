@@ -16,11 +16,10 @@
     feedback memory [mcp-dispatcher-ctx-agent-name-ssot]:
 
     1. Empty / "anonymous" caller field → fill from ctx canonical.
-    2. Caller's canonical equals ctx canonical → preserve canonical
-       form, optionally stash raw surface in
-       [meta.<field>_raw_agent_name] when the caller passed a
-       different surface form (e.g. [keeper-xi-hammer-agent]
-       vs [xi-hammer]).
+    2. Caller's field equals ctx → keep it as it stands.  RFC-0393
+       retired the decorated [keeper-<name>-agent] spelling, so a
+       keeper has one name and there is no second surface form to
+       fold into it.
     3. Caller's canonical disagrees with ctx canonical → REWRITE to
        ctx canonical, preserve the caller's claim under
        [meta.<field>_caller_claim] for forensics, and increment
@@ -65,7 +64,7 @@ let assoc fields = `Assoc fields
 let test_blank_field_fills_from_ctx () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-xi-hammer-agent"
+      ~agent_name:"xi-hammer"
       (assoc [ ("body", `String "hi") ])
   in
   check (option string)
@@ -80,7 +79,7 @@ let test_blank_field_fills_from_ctx () =
 let test_anonymous_field_fills_from_ctx () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-xi-hammer-agent"
+      ~agent_name:"xi-hammer"
       (assoc [ ("author", `String "anonymous"); ("body", `String "hi") ])
   in
   check (option string)
@@ -97,7 +96,7 @@ let test_anonymous_field_fills_from_ctx () =
 let test_caller_short_name_matches_ctx () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-xi-hammer-agent"
+      ~agent_name:"xi-hammer"
       (assoc [ ("author", `String "xi-hammer") ])
   in
   check (option string)
@@ -109,28 +108,23 @@ let test_caller_short_name_matches_ctx () =
     None
     (meta_string_field "author_caller_claim" result)
 
-let test_caller_passes_full_agent_name_form () =
-  (* Caller passed a different surface form (full agent_name) that
-     resolves to the same keeper.  Canonical form ends up in [author]
-     and the original surface ends up in
-     [meta.author_raw_agent_name] — legacy semantic preserved. *)
+let test_matching_caller_gets_no_second_spelling () =
+  (* RFC-0393 removed the decorated [keeper-<name>-agent] form, so a
+     matching caller has nothing to fold: the field keeps the name it
+     came with and no raw-surface note is attached beside it. *)
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
       ~agent_name:"xi-hammer"
-      (assoc [ ("author", `String "keeper-xi-hammer-agent") ])
+      (assoc [ ("author", `String "xi-hammer") ])
   in
   check (option string)
-    "canonical short-name in author"
+    "author is the name the keeper has"
     (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
-    "raw surface preserved in meta.author_raw_agent_name"
-    (Some "keeper-xi-hammer-agent")
-    (meta_string_field "author_raw_agent_name" result);
-  check (option string)
-    "no caller_claim because canonicals match"
+    "no second surface recorded beside it"
     None
-    (meta_string_field "author_caller_claim" result)
+    (meta_string_field "author_raw_agent_name" result)
 
 (* --- 3. caller canonical disagrees with ctx canonical ----------- *)
 
@@ -142,7 +136,7 @@ let test_velvet_hammer_cannot_post_as_delta () =
   let before = counter_for ~tool:"masc_board_post" ~field:"author" in
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-xi-hammer-agent"
+      ~agent_name:"xi-hammer"
       (assoc
          [ ("author", `String "delta"); ("body", `String "spoof attempt") ])
   in
@@ -166,7 +160,7 @@ let test_voter_field_spoof_also_rewritten () =
   let before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
   let result =
     D.enforce_caller_identity ~tool:"masc_board_vote" ~field:"voter"
-      ~agent_name:"keeper-xi-hammer-agent"
+      ~agent_name:"xi-hammer"
       (assoc [ ("voter", `String "delta"); ("post_id", `String "p1") ])
   in
   check (option string)
@@ -190,7 +184,7 @@ let test_counter_separates_by_tool_and_field () =
   let other_before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
   let _ =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-xi-hammer-agent"
+      ~agent_name:"xi-hammer"
       (assoc [ ("author", `String "delta") ])
   in
   check (float 0.0001)
@@ -200,21 +194,30 @@ let test_counter_separates_by_tool_and_field () =
 
 (* --- 5. empty ctx is a no-op (defensive) ------------------------ *)
 
-let test_empty_ctx_preserves_legacy_canonicalisation () =
+let test_empty_ctx_reaches_no_verdict () =
   (* If [agent_name] is somehow empty (HTTP path with no auth, test
-     fixture without ctx), the helper should not invent a value but
-     should still canonicalise the caller's surface form.  This
-     keeps the empty-ctx compatibility semantics for callers that
-     cannot provide a trusted runtime identity. *)
+     fixture without ctx), there is no trusted identity to compare
+     against.  The same [author] that would be rewritten and counted
+     as a spoof under a ctx must instead be left exactly as it came,
+     and must not move the counter: no ctx, no verdict. *)
+  let before = counter_for ~tool:"masc_board_post" ~field:"author" in
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
       ~agent_name:""
-      (assoc [ ("author", `String "keeper-xi-hammer-agent") ])
+      (assoc [ ("author", `String "delta") ])
   in
   check (option string)
-    "canonical short-name even without ctx"
-    (Some "xi-hammer")
-    (json_string_field "author" result)
+    "caller's author survives an absent ctx"
+    (Some "delta")
+    (json_string_field "author" result);
+  check (option string)
+    "nothing is claimed on the caller's behalf"
+    None
+    (meta_string_field "author_caller_claim" result);
+  check (float 0.0001)
+    "an absent ctx cannot call anything a spoof"
+    before
+    (counter_for ~tool:"masc_board_post" ~field:"author")
 
 (* --- 6. dispatch binds what the generated registry declares ------ *)
 
@@ -273,8 +276,8 @@ let () =
         [
           test_case "short-name matches ctx" `Quick
             test_caller_short_name_matches_ctx;
-          test_case "full agent_name form preserves raw in meta" `Quick
-            test_caller_passes_full_agent_name_form;
+          test_case "a matching caller gets no second spelling" `Quick
+            test_matching_caller_gets_no_second_spelling;
         ] );
       ( "spoof-rewrite",
         [
@@ -290,8 +293,8 @@ let () =
         ] );
       ( "empty-ctx",
         [
-          test_case "empty ctx preserves legacy canonical" `Quick
-            test_empty_ctx_preserves_legacy_canonicalisation;
+          test_case "empty ctx reaches no verdict" `Quick
+            test_empty_ctx_reaches_no_verdict;
         ] );
       ( "registry-driven-binding",
         [

@@ -4,7 +4,30 @@
     with the typed Sessions domain.
 
     @stability Internal
-    @since 0.93.1 *)
+    @since 0.93.1
+
+    {2 Readers with no caller}
+
+    Several readers below have no caller anywhere in the tree, and
+    [scripts/audit-dead-surface.py --exports] reports them every run. Six are
+    accounted for: their artifact writers were removed in v0.217.x and the
+    readers were kept on purpose, recorded as frozen surfaces in
+    [docs/schema-surfaces/runtime-output-surfaces.v1.json].
+
+    - [get_report] — agent_core.runtime_report.v1
+    - [get_proof] — agent_core.runtime_proof.v1
+    - [get_telemetry], [get_telemetry_structured] — agent_core.runtime_telemetry_report.v1
+    - [get_evidence] — agent_core.runtime_evidence_bundle.v1
+    - [get_raw_trace_manifest] — agent_core.raw_trace_manifest.v1
+
+    The rest have no caller and no such entry: [get_artifact_text],
+    [get_hook_summary], [get_named_artifact], [get_optional_named_artifact],
+    [get_raw_trace_dir], [get_raw_trace_files], [get_session_events],
+    [get_tool_catalog], [latest_named_artifact], [list_artifacts],
+    [rename_session], [tag_session], [validate_runs]. Whether those are a
+    surface waiting for a consumer or weight to drop is not recorded anywhere,
+    which is why they are named here rather than left for the next sweep to
+    rediscover. *)
 
 open Sessions_types
 

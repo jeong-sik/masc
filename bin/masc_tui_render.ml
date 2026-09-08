@@ -13691,14 +13691,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Read_ok -> Theme.ok ()
     | Read_failed -> Theme.bad ()
     | Reading | Operating -> Theme.info ()
-    | Unread -> Theme.recede ()
+    | Unread | Browser_missing -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
       (screen_title " MASC Browser Lane") (source_name view.source ^ " · " ^ browser_label view)
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  Esc:back"
+      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane)
@@ -13711,6 +13711,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
@@ -13731,8 +13732,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 (if Some client = view.selected_client then " (selected)" else "") (Terminal_text.single_line client.client_id) in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
-          if view.clients = [] then c.push_styled ~style:(Theme.recede ())
-            (if busy view then "  Waiting for active connections…" else "  No active native browser connections")
+          if view.clients = [] then (
+            c.push_styled ~style:(Theme.recede ())
+              (if busy view then "  Waiting for active connections…" else "  No active native browser connections");
+            if awaiting_browser view then (
+              c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
+              c.push_styled ~style:(Theme.recede ()) "  Setup: connectors/browser/host/README.md";
+              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
       | None ->
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
@@ -13764,7 +13770,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some page -> Printf.sprintf "  %s • %d chars%s%s"
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
-             (match view.load with Idle -> "" | Loading _ | Failed _ -> " • previous read"));
+             (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
       c.push_divider ();
       let lines = browser_lane_page_lines ~cols view in
       let room = max 0 (budget - 6) in

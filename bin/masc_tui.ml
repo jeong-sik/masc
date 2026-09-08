@@ -11988,7 +11988,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      state.browser_lane <- Some
                        { view with reading = None; selected_tab = None; scroll = 0; load = Idle };
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
-            | Loading _ | Idle | Failed _ -> ())
+            | Loading _ | Idle | No_browser | Failed _ -> ())
        | None -> ())
   | Connectors_loaded result -> (
       match result with
@@ -15807,6 +15807,9 @@ and is loaded on demand through keeper_skill.
                        load = (match view.load with Loading (_, Discover _) -> Idle | other -> other) }
                  | "r" when not (busy view) ->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                 | "a" when not (busy view) ->
+                     state.browser_lane <- Some (switch_source Automation view);
+                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some

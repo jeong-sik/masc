@@ -2769,7 +2769,7 @@ module Browser_lane_view = struct
     data : string; elapsed_ms : float;
   }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
-  type load = Idle | Loading of int * operation | Failed of string
+  type load = Idle | No_browser | Loading of int * operation | Failed of string
   type t = {
     clients : client list; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
@@ -2796,12 +2796,16 @@ module Browser_lane_view = struct
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url
-      | Loading _ | Idle | Failed _ -> t.url_draft
+      | Loading _ | Idle | No_browser | Failed _ -> t.url_draft
     in
     { t with load = Failed detail; url_draft }
-  type read_status = Unread | Reading | Operating | Read_ok | Read_failed
+  let awaiting_browser t = match t.load with
+    | No_browser -> true
+    | Idle | Loading _ | Failed _ -> false
+  type read_status = Unread | Reading | Operating | Read_ok | Read_failed | Browser_missing
   let read_status t =
     match t.load, t.reading with
+    | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
@@ -2812,8 +2816,9 @@ module Browser_lane_view = struct
     | Reading -> "HTTP reading"
     | Operating -> "HTTP action"
     | Read_ok -> "HTTP read ok"
-    | Read_failed -> "HTTP failed"
-  let busy t = match t.load with Loading _ -> true | Idle | Failed _ -> false
+    | Read_failed -> "Read/action failed"
+    | Browser_missing -> "Browser not connected"
+  let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -2840,13 +2845,13 @@ module Browser_lane_view = struct
                  purpose = Read_after_discovery
              | _, _, _ ->
                  let load = match t.selected_client, clients with
+                   | _, [] -> No_browser
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
-                   | None, [] -> Failed "No connected browser; r:refresh connections"
                    | None, _ -> Idle
                  in
                  { next with selected_tab = None; reading = None; scroll = 0;
                    client_picker = Some 0; load }, false)
-    | Loading _ | Idle | Failed _ -> t, false
+    | Loading _ | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function
     | `Assoc fields -> (match List.assoc_opt name fields with
@@ -2959,7 +2964,7 @@ module Browser_lane_view = struct
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client or tab mismatch" }, None
          | Error detail -> { t with load = Failed detail }, None)
-    | Loading _ | Idle | Failed _ -> t, None
+    | Loading _ | Idle | No_browser | Failed _ -> t, None
 
   let accept ~generation (result : (reading, string) result) t =
     match t.load with
@@ -2970,7 +2975,7 @@ module Browser_lane_view = struct
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
-    | Loading _ | Idle | Failed _ -> t
+    | Loading _ | Idle | No_browser | Failed _ -> t
   let select_tab direction t =
     match t.reading with
     | None -> t

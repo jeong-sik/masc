@@ -3,9 +3,8 @@
     One line carried copies and deletions together and cut the shared sample
     at ten names. That is fine until a version bump, which copies enough
     assets to fill the sample by itself — and then the deleted paths are a
-    count with no names. For the [Tools] domain that count is the only signal
-    an operator gets that a definition they put in the runtime directory is
-    gone, because tool definitions have no runtime edit layer.
+    count with no names. A deletion is a distribution asset retiring, and
+    the name is the only way the operator learns which one.
 
     The first case below is that regression, written so it fails if the two
     budgets are ever merged again. *)
@@ -49,11 +48,10 @@ let test_deletion_line_says_why () =
   let r = result ~removed:[ "tools/operator_own.toml" ] () in
   let removed = line_exn (MAS.removed_line ~label:"tool" r) in
   (* A path name alone reads as a distribution detail. The reason is what
-     tells the operator their file is not coming back. The word is the one
-     removed_line uses: #31283 retired the hand-written manifest, and the line
-     has said "embedded set" since. *)
+     tells the operator the file was the distribution's and has retired,
+     so it is not coming back. *)
   check bool "the reason is stated" true
-    (contains ~needle:"not in the embedded set" removed)
+    (contains ~needle:"no longer embedded" removed)
 ;;
 
 let test_nothing_removed_is_no_line () =

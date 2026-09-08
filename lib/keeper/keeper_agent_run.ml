@@ -573,7 +573,98 @@ let tool_boundary_before_repetition ~repetition_execution state =
     | None -> Ok Runtime_agent.Continue
 ;;
 
+(* Native AGENT_CORE installs this boundary for both Direct and Autonomous.
+   An absent explicit execution scope selects transcript-seeded observations;
+   it does not disable repetition detection. *)
+let native_tool_boundary
+      ~keeper_name
+      ~repetition_execution
+      ~terminal_effect_state
+      ~tool_calls
+      ~assistant_turn_texts
+      ~autonomous_yield_requested
+  =
+  (match
+     tool_boundary_before_repetition ~repetition_execution
+       terminal_effect_state
+   with
+   | Error _ as error -> error
+   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+   | Ok Runtime_agent.Continue ->
+     (* Tool axis first: its input+output fingerprints are the
+        stronger no-progress proof and carry the tool name.
+        The text axis runs only when tool fingerprints still
+        move — the observed loop shape, where every turn's tool
+        batch differed but the plan sentence never did. *)
+     let repeated_loop_decision () =
+           (match
+              repeated_exact_tool_call
+                ~threshold:repeated_tool_call_yield_threshold
+                tool_calls
+            with
+            | Some (tool_name, repeated_count) ->
+              Log.Keeper.warn
+                ~keeper_name
+                "yielding repeated exact tool loop tool=%s \
+                 count=%d"
+                tool_name
+                repeated_count;
+              Ok
+                (Runtime_agent.Yield
+                   (Runtime_agent.Repeated_tool_call
+                      { tool_name; repeated_count }))
+            | None ->
+              (match
+                 repeated_tool_call_input
+                   ~threshold:
+                     repeated_tool_call_input_yield_threshold
+                   tool_calls
+               with
+               | Some (tool_name, repeated_count) ->
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "yielding repeated tool input loop tool=%s \
+                    count=%d"
+                   tool_name
+                   repeated_count;
+                 Ok
+                   (Runtime_agent.Yield
+                      (Runtime_agent.Repeated_tool_call
+                         { tool_name; repeated_count }))
+               | None ->
+              (match
+                 repeated_assistant_text
+                   ~threshold:
+                     repeated_assistant_text_yield_threshold
+                   assistant_turn_texts
+               with
+               | None -> Ok Runtime_agent.Continue
+               | Some repeated_count ->
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "yielding repeated assistant text count=%d"
+                   repeated_count;
+                 Ok
+                   (Runtime_agent.Yield
+                      (Runtime_agent.Repeated_assistant_text
+                         { repeated_count })))))
+     in
+     (match autonomous_yield_requested with
+      | None -> repeated_loop_decision ()
+      | Some requested ->
+        (match requested () with
+         | Ok (Some request) ->
+           Ok (Runtime_agent.Yield (runtime_yield_reason request))
+         | Ok None -> repeated_loop_decision ()
+         | Error detail ->
+           Error
+             (Agent_core.Error.Internal
+                ("keeper cooperative-yield snapshot failed: "
+                 ^ detail)))))
+;;
+
 module For_testing = struct
+  let native_tool_boundary = native_tool_boundary
   let tool_boundary_before_repetition = tool_boundary_before_repetition
   let direct_repetition_boundary = direct_repetition_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
@@ -1161,83 +1252,13 @@ let run_turn
                      checkpoint have persisted. A descriptor-typed terminal
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
-                  (match
-                     tool_boundary_before_repetition ~repetition_execution
-                       (s.terminal_effect_state ())
-                   with
-                   | Error _ as error -> error
-                   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
-                   | Ok Runtime_agent.Continue ->
-                     (* Tool axis first: its input+output fingerprints are the
-                        stronger no-progress proof and carry the tool name.
-                        The text axis runs only when tool fingerprints still
-                        move — the observed loop shape, where every turn's tool
-                        batch differed but the plan sentence never did. *)
-                     let repeated_loop_decision () =
-                           (match
-                              repeated_exact_tool_call
-                                ~threshold:repeated_tool_call_yield_threshold
-                                (Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
-                            with
-                            | Some (tool_name, repeated_count) ->
-                              Log.Keeper.warn
-                                ~keeper_name:meta.name
-                                "yielding repeated exact tool loop tool=%s \
-                                 count=%d"
-                                tool_name
-                                repeated_count;
-                              Ok
-                                (Runtime_agent.Yield
-                                   (Runtime_agent.Repeated_tool_call
-                                      { tool_name; repeated_count }))
-                            | None ->
-                              (match
-                                 repeated_tool_call_input
-                                   ~threshold:
-                                     repeated_tool_call_input_yield_threshold
-                                   (Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
-                               with
-                               | Some (tool_name, repeated_count) ->
-                                 Log.Keeper.warn
-                                   ~keeper_name:meta.name
-                                   "yielding repeated tool input loop tool=%s \
-                                    count=%d"
-                                   tool_name
-                                   repeated_count;
-                                 Ok
-                                   (Runtime_agent.Yield
-                                      (Runtime_agent.Repeated_tool_call
-                                         { tool_name; repeated_count }))
-                               | None ->
-                              (match
-                                 repeated_assistant_text
-                                   ~threshold:
-                                     repeated_assistant_text_yield_threshold
-                                   s.acc.assistant_turn_texts
-                               with
-                               | None -> Ok Runtime_agent.Continue
-                               | Some repeated_count ->
-                                 Log.Keeper.warn
-                                   ~keeper_name:meta.name
-                                   "yielding repeated assistant text count=%d"
-                                   repeated_count;
-                                 Ok
-                                   (Runtime_agent.Yield
-                                      (Runtime_agent.Repeated_assistant_text
-                                         { repeated_count })))))
-                     in
-                     (match autonomous_yield_requested with
-                      | None -> repeated_loop_decision ()
-                      | Some requested ->
-                        (match requested () with
-                         | Ok (Some request) ->
-                           Ok (Runtime_agent.Yield (runtime_yield_reason request))
-                         | Ok None -> repeated_loop_decision ()
-                         | Error detail ->
-                           Error
-                             (Agent_core.Error.Internal
-                                ("keeper cooperative-yield snapshot failed: "
-                                 ^ detail)))))
+                  native_tool_boundary
+                    ~keeper_name:meta.name
+                    ~repetition_execution
+                    ~terminal_effect_state:(s.terminal_effect_state ())
+                    ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+                    ~assistant_turn_texts:s.acc.assistant_turn_texts
+                    ~autonomous_yield_requested
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->

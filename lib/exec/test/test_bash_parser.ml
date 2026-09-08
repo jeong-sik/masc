@@ -255,63 +255,31 @@ let test_env_prefix_dispatch_overlay () =
     assert (String.trim result.stdout = "ok")
   | _ -> assert false
 
-(* Simple parameter expansion — [$NAME] and [${NAME}] (RFC
-   shell-ir-simple-param-expansion).  These lock the assembled shapes
-   and the forms that stay excluded. *)
-let test_param_expansion_arg_is_var () =
+(* Without an execution-target environment, variable expansion is outside
+   the executable subset. Quoted literal dollars remain ordinary data. *)
+let test_param_expansion_arg_requires_target_env () =
   match Bash.parse_string "echo $HOME" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert (Exec_program.to_string s.bin = "echo");
-    assert (s.args = [ Shell_ir.Var ("HOME", Shell_ir.default_meta) ])
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
-let test_braced_param_expansion_is_var () =
+let test_braced_param_expansion_requires_target_env () =
   match Bash.parse_string "echo ${HOME}" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert (Exec_program.to_string s.bin = "echo");
-    assert (s.args = [ Shell_ir.Var ("HOME", Shell_ir.default_meta) ])
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_env_assignment_param_value () =
-  (* The measured pattern this opened for: an env prefix whose value is
-     an expansion.  The word [DUNE_CACHE_ROOT=$PWD] assembles to a
-     Concat and reads back as a binding with a [Var] value. *)
   match Bash.parse_string "DUNE_CACHE_ROOT=$PWD dune build ." with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert (Exec_program.to_string s.bin = "dune");
-    assert
-      (s.env
-       = [ ( "DUNE_CACHE_ROOT"
-           , Shell_ir.Var ("PWD", Shell_ir.default_meta) ) ]);
-    (* [arg_meta] is not part of what this case pins, so the shape is matched
-       rather than compared: a wildcard is a pattern, not an expression. *)
-    (match s.args with
-     | [ Shell_ir.Lit ("build", _); Shell_ir.Lit (".", _) ] -> ()
-     | _ -> assert false)
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_env_assignment_mixed_literal_and_param () =
   match Bash.parse_string "FOO=a$BAR printf x" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert (Exec_program.to_string s.bin = "printf");
-    (match s.env with
-     | [ ("FOO", Shell_ir.Concat parts) ] ->
-       (match parts with
-        | [ Shell_ir.Lit ("a", _); Shell_ir.Var ("BAR", _) ] -> ()
-        | _ -> assert false)
-     | _ -> assert false)
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_param_as_word_suffix_concatenates () =
   match Bash.parse_string "ls --root=$PWD" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert (Exec_program.to_string s.bin = "ls");
-    (match s.args with
-     | [ Shell_ir.Concat parts ] ->
-       (match parts with
-        | [ Shell_ir.Lit ("--root=", _); Shell_ir.Var ("PWD", _) ] -> ()
-        | _ -> assert false)
-     | _ -> assert false)
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_param_in_bin_position_outside_subset () =
@@ -523,48 +491,19 @@ let test_word_with_double_quoted_suffix () =
      | _ -> assert false)
   | _ -> assert false
 
-let quoted_meta = { Shell_ir.quoted = true; glob = false; escaped = false }
-
-let test_double_quote_with_dollar_expands () =
-  (* A simple expansion inside "..." is the same Var the bare form
-     mints, marked quoted so the value stays one argv element.  The
-     surrounding text arrives as the pieces bash itself would keep. *)
+let test_double_quote_with_dollar_requires_target_env () =
   match Bash.parse_string "echo \"value $FOO here\"" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert
-      (s.args
-       = [ Shell_ir.Concat
-             [ Shell_ir.Lit ("value ", quoted_meta)
-             ; Shell_ir.Var ("FOO", quoted_meta)
-             ; Shell_ir.Lit (" here", quoted_meta)
-             ]
-         ])
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_double_quote_two_vars_and_brace () =
   match Bash.parse_string "echo \"$A:${B}\"" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert
-      (s.args
-       = [ Shell_ir.Concat
-             [ Shell_ir.Var ("A", quoted_meta)
-             ; Shell_ir.Lit (":", quoted_meta)
-             ; Shell_ir.Var ("B", quoted_meta)
-             ]
-         ])
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_double_quote_var_word_continues () =
-  (* The word does not end at the closing quote. *)
   match Bash.parse_string "ls \"$DIR\"/sub" with
-  | Parsed.Parsed (Shell_ir.Simple s) ->
-    assert
-      (s.args
-       = [ Shell_ir.Concat
-             [ Shell_ir.Var ("DIR", quoted_meta)
-             ; Shell_ir.Lit ("/sub", Shell_ir.default_meta)
-             ]
-         ])
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_double_quote_cmd_subst_named () =
@@ -714,8 +653,8 @@ let () =
   test_env_only_rejected ();
   test_pipeline_env_prefixes_preserved_per_stage ();
   test_env_prefix_dispatch_overlay ();
-  test_param_expansion_arg_is_var ();
-  test_braced_param_expansion_is_var ();
+  test_param_expansion_arg_requires_target_env ();
+  test_braced_param_expansion_requires_target_env ();
   test_env_assignment_param_value ();
   test_env_assignment_mixed_literal_and_param ();
   test_param_as_word_suffix_concatenates ();
@@ -743,7 +682,7 @@ let () =
   test_double_quote_rg_pattern ();
   test_double_quote_with_escaped_regex_pipe ();
   test_word_with_double_quoted_suffix ();
-  test_double_quote_with_dollar_expands ();
+  test_double_quote_with_dollar_requires_target_env ();
   test_double_quote_two_vars_and_brace ();
   test_double_quote_var_word_continues ();
   test_double_quote_cmd_subst_named ();

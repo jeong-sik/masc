@@ -13,6 +13,7 @@ open Masc
 module Maintenance = Server_bootstrap_maintenance
 module Persistence = Keeper_event_queue_persistence
 module Queue = Keeper_event_queue
+module Queue_state = Keeper_event_queue_state
 
 let temp_base_path () =
   let path = Filename.temp_file "durable-demand-owner-" "" in
@@ -192,10 +193,89 @@ let test_a_disabled_owner_retains_its_durable_demand () =
   | _ -> fail "a disabled owner did not retain its durable demand"
 ;;
 
+(* The sweep runs once a minute and exists to replace a wake hint that a
+   restart dropped. Reading demand as "the queue is not empty" made an entry a
+   turn had already received and kept look the same as work no turn has seen,
+   so the same entry re-woke its owner every minute: one Discord attention
+   entry reached 336 retentions in 5.7 hours against a 600 s cadence. *)
+(* Any payload carries the point: the sweep reads delivery bookkeeping, not the
+   kind of work. Connector attention is only where the loop showed up, because
+   its turn disposition keeps the entry pending by design (#32114). *)
+let pending_stimulus_named post_id : Queue.stimulus =
+  let base = pending_stimulus () in
+  { base with post_id }
+;;
+
+let state_holding sources =
+  Queue_state.with_pending
+    (List.fold_left Queue.enqueue Queue.empty sources)
+    Queue_state.empty
+;;
+
+let retain_first state =
+  match Queue_state.pending_selections state with
+  | [] -> fail "the seeded state holds no pending entry to retain"
+  | selection :: _ ->
+    (match Queue_state.note_checkpoint_retention ~selection state with
+     | Ok (state, (_, count)) ->
+       check int "the retention was counted" 1 count;
+       state
+     | Error detail -> failf "the retention could not be recorded: %s" detail)
+;;
+
+let test_unhandled_pending_work_is_demand () =
+  let state = state_holding [ pending_stimulus_named "attention-fresh" ] in
+  check
+    bool
+    "an entry no turn has received wakes its owner"
+    true
+    (Maintenance.Recovery_for_testing.owner_has_undelivered_durable_demand state)
+;;
+
+let test_a_retained_entry_stops_waking_its_owner () =
+  let state =
+    state_holding [ pending_stimulus_named "attention-retained" ]
+    |> retain_first
+  in
+  check
+    bool
+    "an entry a turn kept does not wake its owner again"
+    false
+    (Maintenance.Recovery_for_testing.owner_has_undelivered_durable_demand state)
+;;
+
+let test_new_work_behind_a_retained_entry_still_wakes () =
+  let retained =
+    state_holding [ pending_stimulus_named "attention-retained" ]
+    |> retain_first
+  in
+  let state =
+    Queue_state.with_pending
+      (List.fold_left
+         Queue.enqueue
+         (Queue_state.pending retained)
+         [ pending_stimulus_named "attention-arrived" ])
+      retained
+  in
+  check
+    bool
+    "work arriving behind a retained entry still wakes its owner"
+    true
+    (Maintenance.Recovery_for_testing.owner_has_undelivered_durable_demand state)
+;;
+
 let () =
   run
     "server_bootstrap_durable_demand_owner"
-    [ ( "owner_classification"
+    [ ( "undelivered_demand"
+      , [ test_case "unhandled pending work is demand" `Quick
+            test_unhandled_pending_work_is_demand
+        ; test_case "a retained entry stops waking its owner" `Quick
+            test_a_retained_entry_stops_waking_its_owner
+        ; test_case "new work behind a retained entry still wakes" `Quick
+            test_new_work_behind_a_retained_entry_still_wakes
+        ] )
+    ; ( "owner_classification"
       , [ test_case "durable work under an unknown name is absent, not unknown" `Quick
             test_durable_work_under_an_unknown_name_is_absent_not_unknown
         ; test_case "a name with no durable work carries no demand" `Quick

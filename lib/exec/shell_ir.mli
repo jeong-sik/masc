@@ -16,7 +16,9 @@ val default_meta : arg_meta
 type arg =
   | Lit of string * arg_meta      (** single- or double-quoted literal *)
   | Concat of arg list            (** adjacent arg pieces: [foo"bar"$X] *)
-  | Var of string * arg_meta      (** [$HOME], [${VAR}], [${VAR:-default}] *)
+  | Var of string * arg_meta
+      (** Unresolved variable syntax. Parsing and execution refuse it until
+          an execution-target environment can own its interpretation. *)
 
 type simple = {
   bin : Exec_program.t;
@@ -55,5 +57,9 @@ val with_sandbox : Sandbox_target.t -> t -> t
     reads the target from the IR ({!Exec_dispatch.dispatch} takes none), so
     a caller re-running a command under a different target must pass a
     rewritten IR — the observation stage (RFC-0422) does exactly this. *)
+
+val has_variable_expansion : t -> bool
+(** Includes argument concatenations, environment prefixes and every stage.
+    A variable has no execution-target environment authority in this IR. *)
 
 val pp : Format.formatter -> t -> unit

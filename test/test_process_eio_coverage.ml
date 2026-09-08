@@ -176,18 +176,16 @@ let test_or_refusal_carries_the_spawn_errno () =
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
-(* Eio path, same file: PATH resolution finds it, the forked child's execve
-   fails, and eio hands the parent that failure as text over its error pipe
-   (fork_action.c, low_level.ml). The text arrives as a value, unparsed. *)
-let test_or_refusal_carries_the_child_setup_text_eio () =
+(* Native foreground execution owns a posix_spawn group. A failed exec
+   therefore reports libc's errno, rather than a fork error-pipe string. *)
+let test_or_refusal_carries_the_native_spawn_errno () =
   with_runtime_reset @@ fun () ->
   with_noexec_file @@ fun path ->
   match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
-  | Error (Process_eio.Child_setup_failed { executable; detail }) ->
-    check string "the refusal names the file" path executable;
-    check bool "eio's text is carried" true (String.length detail > 0)
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.EACCES }) ->
+    check string "the refusal names the file" path executable
   | Error refusal ->
-    failf "expected Child_setup_failed, got %s" (Process_eio.spawn_refusal_to_string refusal)
+    failf "expected Spawn_failed EACCES, got %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
@@ -263,6 +261,112 @@ let test_run_argv_with_status_fallback_enforces_timeout () =
   in
   let code = match status with Unix.WEXITED c -> c | _ -> -1 in
   check int "fallback timeout exit code" 124 code
+
+(* A socket owned by the grandchild proves descriptor release even when
+   Linux init has not reaped its zombie yet. A PID existence probe cannot. *)
+let with_fallback_descendant mode run =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_file "fallback-group-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let socket_path = Filename.concat root "witness.sock" in
+  let started = Filename.concat root "started" in
+  let listener = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  let script = {|
+import os, socket, subprocess, sys, time
+child_script = """
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+s.sendall(b'ready')
+if sys.argv[3] == 'closed':
+    os.close(0); os.close(1); os.close(2)
+open(sys.argv[2], 'w').close()
+time.sleep(60)
+"""
+subprocess.Popen([sys.executable, '-c', child_script, *sys.argv[1:]])
+while not os.path.exists(sys.argv[2]): time.sleep(0.01)
+if sys.argv[3] == 'normal':
+    print('leader-output', flush=True)
+    sys.exit(7)
+while True: time.sleep(60)
+|} in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close listener;
+      List.iter (fun path -> if Sys.file_exists path then Sys.remove path)
+        [ socket_path; started ];
+      Unix.rmdir root)
+    (fun () ->
+      Unix.bind listener (Unix.ADDR_UNIX socket_path);
+      Unix.listen listener 1;
+      let outcome = run started [ "python3"; "-c"; script; socket_path; started; mode ] in
+      let ready, _, _ = Unix.select [ listener ] [] [] 5. in
+      check bool "grandchild reached its witness socket" true (ready <> []);
+      let witness, _ = Unix.accept listener in
+      Fun.protect ~finally:(fun () -> Unix.close witness) (fun () ->
+        let bytes = Bytes.create 32 in
+        let received = Buffer.create 5 in
+        let rec drain () =
+          let ready, _, _ = Unix.select [ witness ] [] [] 5. in
+          check bool "owned grandchild releases its socket" true (ready <> []);
+          match Unix.read witness bytes 0 (Bytes.length bytes) with
+          | 0 -> ()
+          | n -> Buffer.add_subbytes received bytes 0 n; drain ()
+        in
+        drain ();
+        check string "witness came from the started grandchild" "ready"
+          (Buffer.contents received));
+      outcome)
+
+let test_fallback_normal_exit_cleans_descendant_and_preserves_sibling () =
+  let sibling = Unix.create_process "/bin/sleep" [| "sleep"; "60" |]
+      Unix.stdin Unix.stdout Unix.stderr in
+  let sibling_reaped = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !sibling_reaped then (
+        Unix.kill sibling Sys.sigkill;
+        ignore (Unix.waitpid [] sibling)))
+    (fun () ->
+      let status, stdout, _ = with_fallback_descendant "normal" (fun _ argv ->
+        (* The fixture ceiling makes the broken EOF-first runner return a
+           timeout instead of hanging the suite. A healthy exit preserves 7. *)
+        Process_eio.run_argv_with_status_split ~timeout_sec:5. argv) in
+      check bool "leader status preserved" true (status = Unix.WEXITED 7);
+      check string "buffered leader output preserved" "leader-output\n" stdout;
+      let reaped, _ = Unix.waitpid [ Unix.WNOHANG ] sibling in
+      sibling_reaped := reaped <> 0;
+      check int "unrelated sibling is still running" 0 reaped)
+
+let test_fallback_timeout_cleans_descendant_with_closed_stdio () =
+  let status, _, _ = with_fallback_descendant "closed" (fun _ argv ->
+    Process_eio.run_argv_with_status_split ~timeout_sec:1. argv) in
+  check bool "explicit timeout preserved" true
+    (Process_eio.exit_reason_of_status status = Process_eio.Timed_out)
+
+exception Fallback_owner_fixture_failure
+
+let test_fallback_owner_exception_cleanup () =
+  with_fallback_descendant "closed" (fun started argv ->
+    let owner = Unix_foreground_process.create () in
+    let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+      match Fun.protect
+        ~finally:(fun () -> Unix_foreground_process.close owner)
+        (fun () ->
+          Unix_foreground_process.spawn owner "python3" argv (Unix.environment ())
+            dev_null dev_null dev_null;
+          let deadline = Monotonic_deadline.after ~seconds:5. in
+          while not (Sys.file_exists started) do
+            if Monotonic_deadline.passed deadline then
+              fail "grandchild did not start";
+            ignore (Unix.select [] [] [] 0.01)
+          done;
+          raise Fallback_owner_fixture_failure)
+      with
+      | () -> fail "fixture must raise"
+      | exception Fallback_owner_fixture_failure -> ()))
 
 let with_timeout_observer f =
   let previous = Atomic.get Process_eio.process_timeout_observer_fn in
@@ -801,9 +905,8 @@ let test_exit_reason_classifies_the_timeout_status () =
 (* Cancelling a running child used to send SIGTERM and SIGKILL back to back:
    the switch release hook fired before the child could act on the first.
    Measured on the voice recorder, that cost the last quarter second of every
-   stopped capture. The cancellation path now waits, up to
-   [child_exit_grace_seconds], for the child to close the pipes this side
-   holds. Two children prove the two halves: one that traps SIGTERM and writes
+   stopped capture. The cancellation path preserves [child_exit_grace_seconds] even if
+   the child closes its pipes before finishing cleanup. Two children prove the two halves: one that traps SIGTERM and writes
    a marker on its way out shows the wait happened; one that ignores SIGTERM
    shows the wait is bounded.
 
@@ -811,7 +914,10 @@ let test_exit_reason_classifies_the_timeout_status () =
    watcher that returns as soon as the child says it is running. *)
 let with_process_runtime f =
   Eio_main.run @@ fun env ->
-  let proc_mgr = Eio.Stdenv.process_mgr env in
+  (* Match server_runtime_bootstrap's manager. eio_linux v1.3 immediately
+     KILLs from its cancelled reap daemon, before this finalizer can grant
+     grace; that foreign owner's policy is not the installed runtime's. *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
   let clock = Eio.Stdenv.clock env in
   let cwd_default = Eio.Stdenv.fs env in
   Process_eio.init ~cwd_default ~proc_mgr ~clock;
@@ -871,6 +977,42 @@ let test_cancel_waits_for_the_child_to_act_on_sigterm () =
          (outcome = `Stopped_by_the_watcher);
        check bool "the child ran its SIGTERM handler before the kill" true
          (Sys.file_exists finished))
+;;
+
+(* Exercise the installed manager, including Linux's SIGCHLD bridge. A
+   TERM handler closes output before doing work; EOF must not shorten grace. *)
+let cancel_closed_output_child ~redirected () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock;
+  let started = fresh_marker ".started" in
+  let finished = fresh_marker ".finished" in
+  let output = fresh_marker ".output" in
+  Fun.protect
+    ~finally:(fun () -> List.iter remove_if_present [ started; finished; output ])
+    (fun () ->
+      let script = Printf.sprintf
+        "trap 'sleep 0.2; : > %s; exit 0' TERM; exec 1>&- 2>&-; : > %s; while :; do sleep 0.05; done"
+        (Filename.quote finished) (Filename.quote started) in
+      let destination =
+        if redirected then Process_eio.Written_to { path = output; append = true }
+        else Process_eio.Captured in
+      let outcome = Eio.Fiber.first
+        (fun () ->
+          ignore (Process_eio.run_argv_with_redirects
+            ~stdin:Process_eio.Inherited ~stdout:destination ~stderr:destination
+            [ "/bin/sh"; "-c"; script ]);
+          `Exited)
+        (fun () ->
+          let rec wait () =
+            if Sys.file_exists started then ()
+            else (Eio.Time.sleep clock 0.01; wait ()) in
+          wait ();
+          `Cancelled) in
+      check bool "watcher cancelled the owning switch" true (outcome = `Cancelled);
+      check bool "closed outputs do not truncate TERM handler" true
+        (Sys.file_exists finished))
 ;;
 
 let test_cancel_grace_is_waited_out_when_the_child_ignores_sigterm () =
@@ -934,7 +1076,7 @@ let timeout_with_a_grandchild_holding_stdout run =
          (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
        check string "nothing printed after the budget comes back" "" stdout;
        check bool
-         "the call came back while the grandchild still held stdout"
+         "timed-out group did not produce its late completion marker"
          false
          (Sys.file_exists released))
 ;;
@@ -1135,7 +1277,7 @@ let () =
             test_or_refusal_carries_the_spawn_errno;
           test_case "argv-with-status-split-or-refusal-carries-child-setup-text-eio"
             `Quick
-            test_or_refusal_carries_the_child_setup_text_eio;
+            test_or_refusal_carries_the_native_spawn_errno;
           test_case "argv-with-status-split-or-refusal-refuses-empty-argv-both-paths"
             `Quick
             test_or_refusal_refuses_empty_argv_on_both_paths;
@@ -1144,6 +1286,12 @@ let () =
             test_or_refusal_names_the_missing_cwd_eio;
           test_case "argv-with-status-fallback-enforces-timeout" `Quick
             test_run_argv_with_status_fallback_enforces_timeout;
+          test_case "fallback-normal-exit-cleans-descendant-preserves-sibling" `Quick
+            test_fallback_normal_exit_cleans_descendant_and_preserves_sibling;
+          test_case "fallback-timeout-cleans-closed-stdio-descendant" `Quick
+            test_fallback_timeout_cleans_descendant_with_closed_stdio;
+          test_case "fallback-owner-exception-cleanup" `Quick
+            test_fallback_owner_exception_cleanup;
           test_case "argv-with-status-fallback-observes-timeout" `Quick
             test_run_argv_with_status_fallback_observes_timeout;
           test_case "timeout-log-keeps-subsecond-precision" `Quick
@@ -1218,6 +1366,11 @@ let () =
          ] );
       ( "cancellation-grace",
         [
+          test_case "cancel-file-redirects-preserves-term-handler" `Quick
+            (cancel_closed_output_child ~redirected:true);
+          test_case "cancel-early-pipe-eof-preserves-term-handler" `Quick
+            (cancel_closed_output_child ~redirected:false);
+
           test_case "cancel-waits-for-the-child-to-act-on-sigterm" `Quick
             test_cancel_waits_for_the_child_to_act_on_sigterm;
           test_case "cancel-grace-is-bounded-when-the-child-ignores-sigterm" `Quick

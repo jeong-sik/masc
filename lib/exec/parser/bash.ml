@@ -157,6 +157,7 @@ let to_shell_ir
     | _ :: _ -> Ok (Shell_ir.Sequence { head = head_ir; tail = tail_irs })
   in
   match parsed with
+  | Ok ir when Shell_ir.has_variable_expansion ir -> Parsed.Too_complex `Param_expansion
   | Ok ir -> Parsed.Parsed ir
   | Error (Stage_parse_error e) -> Parsed.Parse_error e
   | Error (Stage_outside_subset reason) -> Parsed.Too_complex reason

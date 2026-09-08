@@ -65,6 +65,13 @@ module Recovery_for_testing : sig
     recover_owner:('a -> unit) ->
     'a list ->
     unit
+
+  val owner_has_undelivered_durable_demand :
+    Keeper_event_queue_state.t -> bool
+  (** Whether the sweep has a wake hint to replace. A pending entry that a turn
+      already received and kept ([checkpoint_retentions] above zero) is not a
+      reason to wake the owner again; the transition outbox and entries no turn
+      has been handed are. *)
 end
 
 val retention_becomes_warning : int -> bool

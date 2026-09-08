@@ -1072,7 +1072,7 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     if ! publish_runtime_candidate "$SELECTED_EXE" "$HOST" "$PORT"; then
         exit 78
     fi
-    launch_from_base_path "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
+    launch_from_base_path "$SELECTED_EXE" start --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2

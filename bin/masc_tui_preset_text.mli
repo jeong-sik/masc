@@ -9,6 +9,12 @@ val saved_line : Masc.Tui_decode.preset_manifest -> string
 val pane_row : Masc.Tui_decode.preset_manifest -> string
 (** One row of the Config pane list: name, counts, saved-at. *)
 
+val contents_lines : Masc.Tui_decode.preset_detail -> string list
+(** What a preset holds, grouped by kind: its directory, whether the saved
+    workspace settings still match, then one line per prompt, per override,
+    per keeper instruction file, the keeper-to-runtime assignments and the
+    lanes. The manifest says how many; this says which and how big. *)
+
 val detail_lines :
   selected:Masc.Tui_decode.preset_manifest option ->
   detail:Masc.Tui_decode.preset_detail Masc_tui_fetched.view ->

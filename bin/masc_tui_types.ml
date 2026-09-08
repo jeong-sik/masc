@@ -3783,6 +3783,7 @@ type state = {
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
   mutable tools_inventory: Tui_decode.tool_snapshot option;
+  mutable tools_request_generation: int;
   mutable tools_error: string option;
   mutable skills_catalog: Tui_decode.skills_catalog option;
   mutable skills_catalog_error: string option;
@@ -5097,6 +5098,7 @@ let create_state
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
+  tools_request_generation = 0;
   tools_error = None;
   skills_catalog = None;
   skills_catalog_error = None;

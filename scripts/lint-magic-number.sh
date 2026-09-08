@@ -64,17 +64,26 @@ if [[ -n "$EXPLAIN" ]]; then
   exit 0
 fi
 
-# Build a per-file literal histogram over code, not over comments.
+# Build a per-file literal histogram over code, not over prose.
 #
 # The comment above this used to say lines that are comments were stripped,
 # and nothing stripped them. A digit run of four or more matches an RFC
 # number, so `RFC-0233` cited ten times in one .mli read as a literal
-# repeated ten times. 67 of the 80 pairs this reported were prose; the count
-# below is 13.
+# repeated ten times, and `RFC-0317` written into seven log messages in
+# server_slack_in_process_gateway.ml read as seven more.
+#
+# Comments and string bodies both come out. A number inside a string is text
+# -- the rule is about a value that appears in five places without a name,
+# and "RFC-0317: Slack auth.test ok" is not one. Where a repeated string does
+# carry a value that wants naming -- a loopback host, a config filename --
+# check-ssot's R2 and R4 own that, and they name the SSOT to route it
+# through, which this lint cannot.
 #
 # (* ... *) spans are removed whole rather than line by line, because that is
-# where the citations live -- a multi-line comment block is one span and a
+# where the citations live: a multi-line comment block is one span and a
 # line-scoped filter sees only its middle lines.
+#
+# 80 pairs before, 10 after. Every one of the 10 is a numeric literal.
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
@@ -88,13 +97,16 @@ import sys
 target, min_digits = sys.argv[1], int(sys.argv[2])
 literal = re.compile(rb"\b[0-9]{%d,}\b" % min_digits)
 comment = re.compile(rb"\(\*.*?\*\)", re.S)
+# A double-quoted body, honouring backslash escapes so an embedded \" does
+# not end it early.
+string = re.compile(rb'"(?:[^"\\]|\\.)*"', re.S)
 
 root = pathlib.Path(target)
 paths = [root] if root.is_file() else sorted(root.rglob("*"))
 for path in paths:
     if path.suffix not in (".ml", ".mli") or not path.is_file():
         continue
-    code = comment.sub(b" ", path.read_bytes())
+    code = string.sub(b' "" ', comment.sub(b" ", path.read_bytes()))
     for match in literal.findall(code):
         print(f"{path}\t{match.decode()}")
 HISTOGRAM

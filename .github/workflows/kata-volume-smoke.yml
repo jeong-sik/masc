@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_run:
-        description: 'Optional completed successful Release run ID for installed Kata first-turn acceptance'
+        description: 'Optional Release run ID with a successful linux-x64 job for installed Kata acceptance'
         type: string
         default: ''
   pull_request:
@@ -126,7 +126,7 @@ jobs:
             bash scripts/smoke-nerdctl-kata-volume.sh "$PROOF_IMAGE" \
             2>&1 | tee kata-evidence/volume-smoke.log
 
-      - name: Fetch a completed release for installed Keeper acceptance
+      - name: Fetch a verified Linux release artifact for installed Keeper acceptance
         if: github.event_name == 'workflow_dispatch' && inputs.release_run != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,10 +136,16 @@ jobs:
           [[ "$RELEASE_RUN" =~ ^[0-9]+$ ]]
           mkdir -p "$RUNNER_TEMP/kata-release-dist"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN" > kata-evidence/installed-release-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN/jobs?per_page=100" > kata-evidence/installed-release-jobs.json
           release_sha="$(python3 - <<'PY'
           import json
           run = json.load(open('kata-evidence/installed-release-run.json'))
-          assert run['name'] == 'Release' and run['status'] == 'completed' and run['conclusion'] == 'success', run
+          assert run['name'] == 'Release', run
+          jobs = json.load(open('kata-evidence/installed-release-jobs.json'))['jobs']
+          linux = [job for job in jobs if job['name'] == 'build (ubuntu-24.04, linux-x64, amd64)']
+          assert len(linux) == 1 and linux[0]['status'] == 'completed' and linux[0]['conclusion'] == 'success', linux
+          # Other architectures are independent acceptance work. Publication
+          # still requires the full Release matrix; this proves Linux only.
           print(run['head_sha'])
           PY
           )"

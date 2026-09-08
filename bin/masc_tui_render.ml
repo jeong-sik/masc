@@ -2577,8 +2577,7 @@ let box_wrapped_field buf cols ~head ~style body =
 
 (* The question the ask cursor is on, or none when nothing is waiting. The
    footer asks for it to decide which keys it can honestly name: a question
-   with no choices makes [1-9] a promise the surface cannot keep, and one that
-   refuses free text makes [t] the same. *)
+   with no choices makes [1-9] a promise the surface cannot keep. *)
 let selected_ask_question (state : state) =
   match state.asks_snapshot with
   | None -> None
@@ -2691,9 +2690,9 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  match question.Masc.Tui_decode.aq_free_text with
-  | Masc.Tui_decode.Ask_choices_only -> ()
-  | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } -> (
+  let slot = Ask_projection.free_text_slot question in
+  let aft_hint = Ask_projection.free_text_hint slot in
+  (
       (* The editor belongs to one question, and the slot it holds names
          which. Matching on that rather than on the cursor means a snapshot
          arriving mid-sentence cannot move the typing onto another row. *)
@@ -2713,18 +2712,20 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
       | Some entry ->
           draw_ask_text_entry buf cols ~draft ~question entry
       | None -> (
-          (* The key that opens the editor is named by the footer, which knows
-             whether the question under the cursor takes text; naming it on
-             every row that welcomes free text would offer [t] on rows it does
-             nothing to. *)
-          match aft_hint with
-          | None ->
-              box_line buf cols
-                (Printf.sprintf "      %sfree text welcome%s" Ansi.dim Ansi.reset)
-          | Some hint ->
-              box_wrapped_field buf cols
-                ~head:(Printf.sprintf "      %sfree text welcome -- " Ansi.dim)
-                ~style:Ansi.dim hint))
+          let key =
+            if not (answering && selected_question) then ""
+            else match Ask_projection.alternative_position question with
+              | Some position -> Printf.sprintf "[%d/t] " position
+              | None -> "[t] "
+          in
+          let label =
+            if question.Masc.Tui_decode.aq_choices = [] then "Write your answer"
+            else "Other: write your own answer"
+          in
+          box_line buf cols
+            (Printf.sprintf "      %s%s%s%s" (Theme.info ()) key label Ansi.reset);
+          Option.iter (fun hint ->
+            box_wrapped_field buf cols ~head:"      " ~style:Ansi.dim hint) aft_hint))
 
 (* The reason is what separates a decision that matters from one that does
    not, so it is drawn, not hidden behind a detail view. *)
@@ -3011,7 +3012,7 @@ let question_hints (state : state) =
                  in
                  let takes_text =
                    match question with
-                   | Some q -> Option.is_some (Ask_projection.free_text_slot q)
+                   | Some _ -> true
                    | None -> false
                  in
                  Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \

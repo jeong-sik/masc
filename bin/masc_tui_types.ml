@@ -4263,6 +4263,7 @@ let settle_voice_transcript (state : state) ~keeper =
 
 type text_input_target =
   | Text_browser_url
+  | Text_ask_answer
   | Text_preset_name
   | Text_runtime_param
   | Text_palette
@@ -4287,6 +4288,9 @@ let text_input_target (state : state) ~compact_viewport =
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  else if state.view = Approvals && not compact_viewport
+          && not state.context_inspector_open && Option.is_some state.ask_text_entry
+  then Some Text_ask_answer
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
   else if state.view = Connectors && not compact_viewport

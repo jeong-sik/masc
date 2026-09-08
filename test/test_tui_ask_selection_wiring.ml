@@ -147,10 +147,8 @@ let test_typing_outranks_the_choice_digits () =
   | Some _, None -> Alcotest.fail "no arm picks a choice by position"
 ;;
 
-(* The footer names [t] only where it works. A question with no choices makes
-   [1-9] a promise the surface cannot keep, and one that refuses free text
-   makes [t] the same, so both labels are conditional on the question under the
-   cursor. *)
+(* The footer names the text key for the selected question; digit choice keys
+   are only offered when that question has choices. *)
 let test_the_footer_names_the_editor_key () =
   Alcotest.(check int) "the write key is named once" 1
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render

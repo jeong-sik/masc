@@ -80,14 +80,12 @@ export type FreeTextSlot = {
   readonly [freeTextSlotBrand]: true
 }
 
-/** `null` when the question offers choices only. A slot is the only way to
-    reach `setText`, so an editor cannot open on a question whose answer the
-    server would refuse. */
-export function freeTextSlot(question: AskQuestion): FreeTextSlot | null {
-  if (!question.freeText.allowed) return null
+/** Every question accepts an operator-written alternative. The author's
+    freeText flag supplies an optional invitation/hint, not a submission gate. */
+export function freeTextSlot(question: AskQuestion): FreeTextSlot {
   return {
     questionId: question.questionId,
-    hint: question.freeText.hint,
+    hint: question.freeText.allowed ? question.freeText.hint : null,
   } as FreeTextSlot
 }
 

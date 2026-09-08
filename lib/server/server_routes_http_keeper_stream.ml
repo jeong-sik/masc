@@ -3537,8 +3537,10 @@ let ask_question_json (question : Keeper_ask.question) =
       ( "mode",
         `String (match question.mode with Keeper_ask.Single -> "single" | Keeper_ask.Multi -> "multi") );
       ( "free_text",
+        (* This is the operator's answer capability; the stored author form
+           remains Choices_only when only choices were originally offered. *)
         match question.free_text with
-        | Keeper_ask.Choices_only -> `Assoc [ ("allowed", `Bool false) ]
+        | Keeper_ask.Choices_only -> `Assoc [ ("allowed", `Bool true) ]
         | Keeper_ask.Free_text_allowed { hint } ->
             `Assoc
               [

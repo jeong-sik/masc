@@ -631,7 +631,7 @@ let test_uncapped_vision_fallback_reaches_provider () =
     in
     assert (!provider_calls = 1);
     match outcome with
-    | Vt.Vo_ok "uncapped vision reached provider" -> ()
+    | Vt.Vo_ok { text = "uncapped vision reached provider"; _ } -> ()
     | _ -> failwith "uncapped vision fallback should reach provider")
 
 let image_capable_vision_runtime_toml =
@@ -773,6 +773,9 @@ let test_retryable_provider_error_tries_next_runtime () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
       assert_metric_increment
         "vision_candidate transient_provider_error"
         before_transient
@@ -840,6 +843,9 @@ let test_candidate_policy_error_tries_next_runtime () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
       assert_metric_increment
         "vision_candidate candidate_policy_error"
         before_policy
@@ -959,7 +965,13 @@ let test_capacity_failover_preserves_image_and_declared_caps () =
                 ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
         in
         assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
-        assert (outcome = Vt.Vo_ok "image read on the next runtime")))
+        (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "image read on the next runtime");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading")))
     errors
 
 let test_capacity_exhaustion_retains_size_failure () =
@@ -1060,6 +1072,9 @@ let test_credential_error_tries_next_runtime () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
       assert_metric_increment
         "vision_candidate candidate_policy_error (401)"
         before_policy
@@ -1179,6 +1194,9 @@ let test_image_over_a_candidates_cap_skips_to_the_next_without_a_call () =
         assert (!calls = 1);
         assert (!models = [ "vision-b" ]);
         assert (String.equal (assoc_string "text" json) "second runtime answered");
+        assert (assoc_string "runtime_id" json = "p2.vision-b");
+        assert (assoc_string "requested_model" json = "vision-b");
+        assert (assoc_string "response_model" json = "vision-test-model");
         assert_metric_increment
           "vision_candidate skipped image_exceeds_cap"
           before_skip
@@ -1243,7 +1261,7 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
 
 let test_eager_eviction_reason_preserves_typed_outcome () =
   let reason = Vi.eager_read_eviction_reason_of_outcome in
-  assert (reason (Vt.Vo_ok "text") = None);
+  assert (reason (Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test" (ok_response "text")) = None);
   assert (reason Vt.Vo_empty = Some "eager_empty");
   assert (reason Vt.Vo_truncated = Some "eager_truncated");
   assert (reason Vt.Vo_timeout = Some "eager_timeout");
@@ -1775,7 +1793,13 @@ let test_max_tokens_failover_preserves_image_and_candidate_wire_limits () =
         assert_metric_increment "one output limit despite duplicate configured candidate"
           before_limit
           (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels);
-        assert (outcome = Vt.Vo_ok "complete screenshot reading")))
+        (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "complete screenshot reading");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading")))
     [ truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens; well_formed_cut ]
 
 let test_max_tokens_exhaustion_remains_visible_tool_failure () =
@@ -1842,7 +1866,13 @@ let test_length_failover_preserves_candidate_http_recovery () =
                   ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
           in
           assert (!calls = 2);
-          assert (outcome = Vt.Vo_ok "candidate HTTP fallback"))))
+          (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "candidate HTTP fallback");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading"))))
     [ 400; 422; 429 ]
 
 let test_vision_output_tokens_default_and_env () =
@@ -1860,14 +1890,14 @@ let test_truncated_structured_response_reads_as_truncation () =
      not a malformed model. Report the real cause so the remedy (a larger
      budget) is legible instead of a misleading parser fault. *)
   (match
-     Vt.outcome_of_response
+     Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
        (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
    with
    | Vt.Vo_truncated -> ()
    | _ -> failwith "MaxTokens-cut mid-JSON must classify as Vo_truncated");
   (* The same broken text with a clean stop is a genuine structured failure. *)
   (match
-     Vt.outcome_of_response
+     Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
        (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
    with
    | Vt.Vo_invalid_structured_response _ -> ()
@@ -1876,8 +1906,8 @@ let test_truncated_structured_response_reads_as_truncation () =
        "mid-JSON parse failure with a clean stop must stay \
         Vo_invalid_structured_response");
   (* A well-formed reply is unaffected by the reclassification. *)
-  match Vt.outcome_of_response (ok_response "a red circle") with
-  | Vt.Vo_ok text -> assert (text = "a red circle")
+  match Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test" (ok_response "a red circle") with
+  | Vt.Vo_ok reading -> assert (reading.text = "a red circle")
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
 let test_browser_screenshot_reaches_vision_reader () =

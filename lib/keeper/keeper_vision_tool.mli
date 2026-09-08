@@ -93,11 +93,22 @@ val store_artifact
 (** Store image bytes in the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 
+(** Candidate identity and requested model come from the call configuration.
+    [response_model] is the provider-reported label, not an independently
+    verified model identity. It may be empty when the response supplies no model
+    label. None of these fields attest transcription accuracy. *)
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
 (** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
     JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
     placeholder). *)
 type vision_outcome =
-  | Vo_ok of string
+  | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
@@ -106,7 +117,9 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
-val outcome_of_response : Agent_core.Types.api_response -> vision_outcome
+val outcome_of_response :
+  runtime_id:string -> requested_model:string ->
+  Agent_core.Types.api_response -> vision_outcome
 (** Classify a provider response into a {!vision_outcome}. A reply the model
     truncated mid-JSON fails the structured parse before its text can be read;
     when the stop reason is a MaxTokens cut this is reported as [Vo_truncated]

@@ -984,8 +984,11 @@ let run_turn
       | None, _ -> None
     in
     let admission =
-      match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence with
-      | Some _, Some evidence ->
+      (* Explicit block inputs may carry new user media or instructions beyond
+         the stored resolution. Preserve their existing input path until those
+         blocks have their own durable admission identity. *)
+      match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence, user_blocks with
+      | Some _, Some evidence, None ->
         (match Keeper_gate_replay.approval_input evidence with
          | Error error -> Error (Keeper_approval_input_admission.error_to_string error)
          | Ok (identity, message) ->

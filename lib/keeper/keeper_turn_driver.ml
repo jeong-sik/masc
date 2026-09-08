@@ -1154,6 +1154,13 @@ let run_named
          Error failure, None,
          Keeper_provider_attempt_effect.No_effect_observed
        | Ok () ->
+      (* Native continuation already owns its input in the checkpoint. Official
+         clients still need the explicit goal, including any media blocks. *)
+      let goal_blocks =
+        match continue_from_checkpoint, runtime.Runtime.execution with
+        | true, Runtime_execution.Agent_core _ -> None
+        | _ -> goal_blocks
+      in
       (* Shadows the caller's inputs with this candidate's dispatch view; the
          originals stay bound above for the next candidate's own projection. *)
       let { attempt_goal_blocks = goal_blocks

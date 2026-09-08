@@ -89,6 +89,7 @@ let test_an_inline_setting_claims_over_the_palette () =
       ; rpe_draft = "12"
       ; rpe_replace_on_type = true
       ; rpe_mode = Tui_types.Friendly_value
+      ; rpe_choices = []
       };
   state.Tui_types.palette_open <- true;
   check target "runtime param first" (Some Tui_types.Text_runtime_param)

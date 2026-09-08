@@ -29,16 +29,35 @@ module Gw = Slack_gateway_state
      read once at start for [auth.test] (the outbound REST path re-reads it at
      send time, so a rotation does not require a restart). *)
 
-(* Default trigger policy when none is configured: the quiet,
-   mention-triggered baseline, same stance as the Discord gateway. *)
+(* Default trigger policy when none is configured (empty/unset). The
+   "quiet, mention-triggered bot" baseline per RFC-0203. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
-type trigger_policy_toml_load =
+(* The env > TOML walk moved to [Connector_trigger_policy]: this module and the
+   Discord sibling each carried a byte-for-byte copy of it. A missing file or
+   missing key is "unset" (default applies); an unreadable file, malformed
+   TOML, wrong field type, or a value the strict grammar rejects is an explicit
+   load error and the gateway does not start — never a silent fallback onto a
+   policy the operator did not write (masc#25123 / PR #25126 recut).
+
+   Both types are re-exported by type equation rather than aliased, so this
+   module still publishes the constructor names its suite reads. *)
+
+module Policy_load = Connector_trigger_policy.Make (struct
+  type policy = Gw.trigger_policy
+
+  let table = "slack"
+  let parse = Gw.parse_trigger_policy
+  let env = Env_config_slack.trigger_policy_opt
+  let default = default_trigger_policy
+end)
+
+type trigger_policy_toml_load = Policy_load.load =
   | Runtime_toml_missing
   | Trigger_policy_missing
   | Trigger_policy_loaded of Gw.trigger_policy
 
-type trigger_policy_load_error =
+type trigger_policy_load_error = Connector_trigger_policy.load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
@@ -55,64 +74,19 @@ let trigger_policy_load_error_to_string = function
     Printf.sprintf "invalid MASC_SLACK_TRIGGER_POLICY: %s" detail
 ;;
 
-let load_trigger_policy_from_toml ~path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Runtime_toml_missing
-  | exception Unix.Unix_error (code, _, _) ->
-    Error
-      (Runtime_toml_unreadable
-         { path; detail = Unix.error_message code })
-  | _ ->
-    (match Safe_ops.read_file_safe path with
-     | Error detail -> Error (Runtime_toml_unreadable { path; detail })
-     | Ok content ->
-       (match Otoml.Parser.from_string_result content with
-        | Error detail -> Error (Runtime_toml_invalid { path; detail })
-        | Ok toml ->
-          (match
-             Field_resolution.resolve_string toml [ "slack"; "trigger_policy" ]
-           with
-           | Field_resolution.Missing -> Ok Trigger_policy_missing
-           | Field_resolution.Type_mismatch { expected; message; _ } ->
-             Error
-               (Trigger_policy_invalid
-                  { path
-                  ; detail =
-                      Printf.sprintf "expected %s: %s" expected message
-                  })
-           | Field_resolution.Present raw ->
-             let raw = String.trim raw in
-             if String.equal raw ""
-             then Ok Trigger_policy_missing
-             else
-               (match Gw.parse_trigger_policy raw with
-                | Ok policy -> Ok (Trigger_policy_loaded policy)
-                | Error detail ->
-                  Error (Trigger_policy_invalid { path; detail })))))
-;;
+let load_trigger_policy_from_toml ~path = Policy_load.load_from_toml ~path
 
 (* Env > TOML > default — the precedence config/runtime.toml documents for this
-   key, and the one the Discord sibling already applies. An invalid env value is
-   a load error like an invalid TOML value; a blank/unset env falls through to
-   the TOML plane. [Env_config_slack.trigger_policy_opt] already reports blank
-   as unset, so there is no empty-string case to absorb here. *)
-let resolved_trigger_policy () =
-  match Env_config_slack.trigger_policy_opt () with
-  | Some raw ->
-    (match Gw.parse_trigger_policy raw with
-     | Ok policy -> Ok policy
-     | Error detail -> Error (Trigger_policy_env_invalid { detail }))
-  | None ->
-    let resolution = Config_dir_resolver.resolve () in
-    let toml_path =
-      Filename.concat resolution.Config_dir_resolver.config_root.path
-        Config_dir_resolver.runtime_toml_filename
-    in
-    (match load_trigger_policy_from_toml ~path:toml_path with
-     | Error _ as error -> error
-     | Ok (Trigger_policy_loaded policy) -> Ok policy
-     | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
-       Ok default_trigger_policy)
+   key. [Env_config_slack.trigger_policy_opt] reports a blank value as unset, so
+   a blank environment variable falls through to the TOML plane. *)
+let resolved_trigger_policy () = Policy_load.resolve ()
+
+(* What the gateway judges by right now: the operator's override when the
+   params surface holds one, otherwise what env and runtime.toml said at boot.
+   Read per step by the client, so a change lands on the next message. *)
+let current_trigger_policy () =
+  Runtime_params.get Runtime_settings.slack_trigger_policy
+;;
 ;;
 
 (* ---------------------------------------------------------------- *)
@@ -755,8 +729,14 @@ let start ~sw ~env ~state =
          "RFC-0317: Slack trigger-policy configuration rejected; gateway not \
           started (%s)"
          detail
-     | Ok policy ->
+     | Ok configured ->
        State.clear_startup_error ();
+       (* What env and runtime.toml said, published so the params surface can
+          offer it as the value a cleared override returns to. *)
+       Runtime_settings.set_slack_trigger_policy_configured configured;
+       (* An override left on the params surface outlives a restart, so what
+          this gateway judges by is the param, not [configured] alone. *)
+       let policy = current_trigger_policy () in
        (* One clock for the whole gateway: bounds [auth.test], durable accept,
           and outbound ACK sends. *)
        let clock = Eio.Stdenv.clock env in
@@ -822,7 +802,7 @@ let start ~sw ~env ~state =
        Eio.Fiber.fork ~sw (fun () ->
          try
            Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
-             ~trigger_policy:policy
+             ~trigger_policy:current_trigger_policy
              ~on_event:(fun ev ->
                let config = Mcp_server.workspace_config state in
                submit_event

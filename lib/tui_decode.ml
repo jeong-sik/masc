@@ -6725,6 +6725,10 @@ type runtime_param_row =
   ; rpr_value_type : string
   ; rpr_min_json : string option
   ; rpr_max_json : string option
+  ; rpr_choices : string list
+    (** The closed set of values this param accepts, when it has one. Empty
+        for a param whose value the reader types. A partly closed domain
+        lists its named values here and still accepts the rest. *)
   }
 
 let decode_runtime_params json =
@@ -6762,6 +6766,16 @@ let decode_runtime_params json =
         ; rpr_value_type = meta_string "value_type"
         ; rpr_min_json = meta_json "min_value"
         ; rpr_max_json = meta_json "max_value"
+        ; rpr_choices =
+            (* Absent and empty mean the same thing here — no closed set — so a
+               non-list, or a list holding anything but strings, reads as no
+               choices rather than as a partial set the picker would offer. *)
+            (match meta_field "choices" with
+             | Some (`List items) ->
+               List.filter_map
+                 (function `String c -> Some c | _ -> None)
+                 items
+             | Some _ | None -> [])
         }
       in
       loop (row :: acc) rest

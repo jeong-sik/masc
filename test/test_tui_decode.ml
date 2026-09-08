@@ -7523,6 +7523,66 @@ let test_decode_runtime_params_reads_current_and_default () =
        Alcotest.(check (option string)) "max" (Some "20") first.rpr_max_json
      | [] -> Alcotest.fail "expected runtime param rows")
 
+(* A param whose values are named carries them, so the editor can offer a
+   picker instead of asking the reader to type one of three spellings. Absent
+   and empty read alike — no closed set — and a malformed entry does not
+   produce a partial set the picker would walk. *)
+let runtime_params_choices_json =
+  `Assoc
+    [ ( "parameters"
+      , `List
+          [ `Assoc
+              [ ("key", `String "discord.trigger_policy")
+              ; ("current", `String "mention_or_thread")
+              ; ("default", `String "mention_or_thread")
+              ; ("has_override", `Bool false)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "when the bot answers")
+                    ; ("value_type", `String "enum")
+                    ; ( "choices"
+                      , `List
+                          [ `String "mention_only"
+                          ; `String "mention_or_thread"
+                          ; `String "all"
+                          ] )
+                    ] )
+              ]
+          ; `Assoc
+              [ ("key", `String "keeper.snapshot_sec")
+              ; ("current", `Int 30)
+              ; ("default", `Int 30)
+              ; ("has_override", `Bool false)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "snapshot cadence")
+                    ; ("value_type", `String "int")
+                    ] )
+              ]
+          ; `Assoc
+              [ ("key", `String "malformed.choices")
+              ; ("current", `String "x")
+              ; ("default", `String "x")
+              ; ("has_override", `Bool false)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "not a list")
+                    ; ("value_type", `String "enum")
+                    ; ("choices", `String "mention_only")
+                    ] )
+              ]
+          ] )
+    ]
+
+let test_decode_runtime_params_reads_choices () =
+  match Tui_decode.decode_runtime_params runtime_params_choices_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    Alcotest.(check (list (list string)))
+      "a closed set travels; absent and malformed read as no set"
+      [ [ "mention_only"; "mention_or_thread"; "all" ]; []; [] ]
+      (List.map (fun row -> row.Tui_decode.rpr_choices) rows)
+
 let test_decode_runtime_params_takes_an_empty_registry () =
   match
     Tui_decode.decode_runtime_params (`Assoc [ ("parameters", `List []) ])
@@ -8683,6 +8743,8 @@ let () =
           test_decode_runtime_params_takes_an_empty_registry;
         Alcotest.test_case "rejects a row without a key" `Quick
           test_decode_runtime_params_rejects_a_row_without_a_key;
+        Alcotest.test_case "reads a closed set of choices" `Quick
+          test_decode_runtime_params_reads_choices;
       ] );
     ( "keeper_gate_settings",
       [

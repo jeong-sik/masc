@@ -144,13 +144,25 @@ let reader_should_continue_after_input = function
   | Discord_gateway_state.Backoff_elapsed
   | Discord_gateway_state.Status_change _ -> true
 
+(* Named so a test can hold the one thing the step loop must not forget: the
+   policy is re-read here, not at connect. Inlining this back into [step_now]
+   would leave the injection unguarded — a stale policy decides quietly and
+   looks exactly like a correct one. *)
+let step_with_current_policy state ~trigger_policy ~now_mono input =
+  Discord_gateway_state.step
+    (Discord_gateway_state.with_trigger_policy state (trigger_policy ()))
+    ~now_mono
+    input
+;;
+
 module For_testing = struct
   let reader_should_continue_after_input = reader_should_continue_after_input
+  let step_with_current_policy = step_with_current_policy
 end
 
 let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let config : Discord_gateway_state.config = {
-    token; intents; bot_user_id = None; trigger_policy;
+    token; intents; bot_user_id = None; trigger_policy = trigger_policy ();
   } in
   let state = ref (Discord_gateway_state.create ~config) in
   let conn_ref : Discord_wss_connection.conn option ref = ref None in
@@ -418,7 +430,13 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
      | Discord_gateway_state.Heartbeat_tick
      | Discord_gateway_state.Heartbeat_ack_timeout
      | Discord_gateway_state.Status_change _ -> ());
-    let (s', effects) = Discord_gateway_state.step !state ~now_mono:now input in
+    (* The policy is read on every step, not captured at connect: an operator
+       who changes it mid-connection must not have to reconnect for the next
+       message to be judged by it. Applying it here — the one step site —
+       keeps [Discord_gateway_state] pure. *)
+    let (s', effects) =
+      step_with_current_policy !state ~trigger_policy ~now_mono:now input
+    in
     state := s';
     Atomic.set published_connection_state (Discord_gateway_state.state s');
     List.iter run_effect effects

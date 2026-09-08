@@ -16213,15 +16213,21 @@ let render_runtime_params (state : state) =
        && List.mem (runtime_param_type_name edit.rpe_value_type)
             [ "bool"; "boolean" ]
      in
+     (* A param with a closed set is walked the way a bool is toggled — the
+        reader is choosing, not typing — so both draw as a choice. *)
+     let friendly_choice =
+       edit.rpe_mode = Friendly_value && edit.rpe_choices <> []
+     in
+     let picking = friendly_bool || friendly_choice in
      let field_label =
        match edit.rpe_mode with
        | Advanced_json -> "JSON>"
-       | Friendly_value when friendly_bool -> "choice>"
+       | Friendly_value when picking -> "choice>"
        | Friendly_value -> "value>"
      in
      let draft = Terminal_text.single_line edit.rpe_draft in
      let draft =
-       if edit.rpe_replace_on_type && not friendly_bool
+       if edit.rpe_replace_on_type && not picking
        then Theme.selection ^ draft ^ Ansi.reset
        else draft
      in
@@ -16236,6 +16242,13 @@ let render_runtime_params (state : state) =
            | Advanced_json -> "advanced JSON · Enter apply · Esc cancel"
            | Friendly_value when friendly_bool ->
              "Left/Right/Space toggle · Enter apply · Esc cancel"
+           | Friendly_value when friendly_choice ->
+             (* The set is spelled out: a reader walking it one key at a time
+                cannot otherwise see how many values there are, or that a form
+                they can type by hand exists beside them. *)
+             Printf.sprintf
+               "Left/Right/Space cycle (%s) · Enter apply · Esc cancel"
+               (String.concat " · " edit.rpe_choices)
            | Friendly_value ->
              "type to replace · Enter apply · Esc cancel")));
   box_bottom buf cols;
@@ -16248,6 +16261,9 @@ let render_runtime_params (state : state) =
                  && List.mem (runtime_param_type_name edit.rpe_value_type)
                       [ "bool"; "boolean" ] ->
             "Left/Right/Space:toggle  Enter:apply  Esc:cancel"
+          | Some edit
+            when edit.rpe_mode = Friendly_value && edit.rpe_choices <> [] ->
+            "Left/Right/Space:cycle  Enter:apply  Esc:cancel"
           | Some { rpe_mode = Friendly_value; _ } ->
             "type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | Some { rpe_mode = Advanced_json; _ } ->

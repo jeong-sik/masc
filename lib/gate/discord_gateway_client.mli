@@ -93,7 +93,7 @@ val run :
   env:Eio_unix.Stdenv.base ->
   token:string ->
   intents:intent list ->
-  trigger_policy:trigger_policy ->
+  trigger_policy:(unit -> trigger_policy) ->
   on_event:(gateway_event -> unit) ->
   on_ambient:(gateway_event -> unit) ->
   unit ->
@@ -108,7 +108,9 @@ val run :
     keeper's lane history and must not start a turn.
 
     Internally:
-    1. Create {!Discord_gateway_state.t} with [trigger_policy].
+    1. Create {!Discord_gateway_state.t} with [trigger_policy]. [trigger_policy] is read
+       again before every step, so an operator changing it takes effect on the
+       next inbound message rather than at the next reconnect.
     2. Open WSS, fork heartbeat fiber, read loop.
     3. For each frame: parse → [Frame_received] → [step] → run
        returned effects (one of which is [Emit_event _] when the
@@ -141,4 +143,14 @@ val set_presence : Discord_gateway_state.presence_status -> unit
 module For_testing : sig
   val reader_should_continue_after_input :
     Discord_gateway_state.input -> bool
+
+  val step_with_current_policy :
+    Discord_gateway_state.t ->
+    trigger_policy:(unit -> Discord_gateway_state.trigger_policy) ->
+    now_mono:float ->
+    Discord_gateway_state.input ->
+    Discord_gateway_state.t * Discord_gateway_state.gateway_effect list
+  (** The step the run loop takes: the current policy is applied to the state
+      immediately before the transition. Held by a test so the re-read cannot
+      be dropped without something going red. *)
 end

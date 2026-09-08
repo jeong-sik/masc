@@ -1543,6 +1543,10 @@ type runtime_param_row =
   ; rpr_value_type : string
   ; rpr_min_json : string option
   ; rpr_max_json : string option
+  ; rpr_choices : string list
+    (** The closed set of values this param accepts, when it has one. Empty
+        for a param whose value the reader types. A partly closed domain
+        lists its named values here and still accepts the rest. *)
   }
 
 val decode_runtime_params :

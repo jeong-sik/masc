@@ -321,11 +321,23 @@ let make_keeper_meta name =
 ;;
 
 (* Regression for the 2026-06-10 voice repeat incident: the speak tool is
-   synchronous again. With no TTS endpoint configured in the sandbox, the
-   failure must surface to the caller as status=error — never as a
-   fire-and-forget "queued" pseudo-success the model would mistake for
-   completed playback. *)
-let test_keeper_voice_speak_surfaces_tts_failure () =
+   synchronous, so with no TTS endpoint configured in the sandbox the call
+   ends as status=error — never as a fire-and-forget "queued" pseudo-success
+   the model would mistake for completed playback.
+
+   Since #34449 the Gate allows a speak at once, so a review of a speak that
+   no endpoint can carry approves nothing and the bridge then fails it as a
+   runtime fault (tool matrix case 048, nightly 2026-09-08). No voice config
+   is therefore refused before the Gate, as a missing dependency, with the
+   model told to say it in text. *)
+let contains_substring ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n = 0 || at 0
+;;
+
+let test_keeper_voice_speak_refuses_before_the_gate_when_unconfigured () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -336,15 +348,13 @@ let test_keeper_voice_speak_surfaces_tts_failure () =
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
     let config = test_config () in
     let meta = make_keeper_meta "voice-sync-keeper" in
-    (* No config at all is not a config that failed to load: the Gate still
-       reviews this speak, and the bridge refuses it afterwards. *)
     let reviewed = ref false in
     let review_then_continue ~operation:_ ~input:_ ~call_summary:_ ~continue =
       reviewed := true;
       continue ()
     in
-    let raw =
-      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+    let outcome =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool_with_outcome
         ~config
         ~meta
         ~authorize_external_effect:review_then_continue
@@ -352,12 +362,21 @@ let test_keeper_voice_speak_surfaces_tts_failure () =
         ~args:(`Assoc [ "message", `String "hello from sync voice test" ])
         ()
     in
-    let json = Yojson.Safe.from_string raw in
-    check bool "the Gate was asked" true !reviewed;
+    let json = Yojson.Safe.from_string outcome.Masc.Keeper_tool_execution.raw_output in
+    check bool "the Gate was not asked" false !reviewed;
     check string "error status" "error"
       Yojson.Safe.Util.(member "status" json |> to_string);
-    check string "failure reason surfaced" "no configured TTS endpoint"
-      Yojson.Safe.Util.(member "message" json |> to_string))
+    (match outcome.Masc.Keeper_tool_execution.disposition with
+     | Masc.Tool_result.Failed Masc.Tool_result.Dependency_unavailable -> ()
+     | Masc.Tool_result.Failed other ->
+       fail
+         ("an unconfigured voice refused as "
+          ^ Masc.Tool_result.tool_failure_class_to_string other)
+     | Masc.Tool_result.Completed () | Masc.Tool_result.Deferred () ->
+       fail "an unconfigured voice did not refuse");
+    let message = Yojson.Safe.Util.(member "message" json |> to_string) in
+    check bool "the model is told voice is not configured" true
+      (contains_substring ~needle:"voice is not configured" message))
 ;;
 
 (* The legacy memory bank is gone (RFC keeper-memory-consolidation Stage 4):
@@ -1191,7 +1210,7 @@ let () =
       , [ test_case
             "keeper_voice_speak surfaces TTS failure"
             `Quick
-            test_keeper_voice_speak_surfaces_tts_failure
+            test_keeper_voice_speak_refuses_before_the_gate_when_unconfigured
         ; test_case
             "keeper_voice_speak under an invalid config is refused without a Gate review"
             `Quick

@@ -21,6 +21,7 @@ val msx_load : Masc_domain.tool_schema
 val msx_eject : Masc_domain.tool_schema
 val msx_save : Masc_domain.tool_schema
 val msx_restore : Masc_domain.tool_schema
+val msx_change_disk : Masc_domain.tool_schema
 val msx_screen : Masc_domain.tool_schema
 val msx_press : Masc_domain.tool_schema
 val msx_step : Masc_domain.tool_schema

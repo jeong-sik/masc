@@ -22,10 +22,17 @@ let test_the_split_over_the_real_catalogue () =
     Descriptor.public_names ()
     |> List.partition (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
   in
-  check (slist string String.compare) "only the tools that change something"
-    [ "Edit"; "Execute"; "Write" ] asked;
-  check (slist string String.compare) "everything else runs unasked"
-    [ "Grep"; "Read"; "WebFetch"; "WebSearch" ] ran
+  check (slist string String.compare) "public tools requiring this chat approval hook"
+    [ "Edit"; "Write" ] asked;
+  (* This is the chat hook's split, not a proof that every Run is a read or
+     already authorized by its executor. BrowserTabs/Read declare readonly;
+     the other Browser descriptors declare ordered mutations without
+     leaves_masc. Their handlers still validate lane, client and action
+     context. Execute delegates its permission decision to the execution Gate. *)
+  check (slist string String.compare) "public tools with no additional chat approval"
+    [ "Execute"; "Grep"; "Read"; "WebFetch"; "WebSearch"
+    ; "BrowserTabs"; "BrowserRead"; "BrowserSession"; "BrowserGoto"
+    ; "BrowserAct"; "BrowserInteract" ] ran
 
 let test_reading_is_never_asked_about () =
   (* Reading to answer a question is the bulk of what a keeper does. *)
@@ -34,13 +41,27 @@ let test_reading_is_never_asked_about () =
   check string "and the reason says why" "this call only reads"
     (because ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
 
-let test_writing_and_running_are_asked_about () =
+let test_writes_ask_and_execute_delegates () =
   check bool "editing a file" true
     (asks ~composition_plan_index:None ~tool_name:"Edit" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
   check bool "writing a file" true
     (asks ~composition_plan_index:None ~tool_name:"Write" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
-  check bool "running a program" true
+  check bool "running a program delegates to its execution Gate" false
     (asks ~composition_plan_index:None ~tool_name:"Execute" ~input:(`Assoc [ "argv", `List [ `String "rm" ] ]))
+
+let test_execute_delegation_does_not_claim_readonly () =
+  let cases =
+    [ `Assoc [ "argv", `List [ `String "ls" ]; "cwd", `String "." ]
+    ; `Assoc [ "argv", `List [ `String "rg"; `String "--pre=program"; `String "needle" ] ]
+    ; `Assoc [ "script", `String "ls > listing.txt" ] ] in
+  List.iter (fun input ->
+      List.iter (fun tool_name ->
+          check bool "one execution permission authority" false
+            (asks ~composition_plan_index:None ~tool_name ~input);
+          check string "reason names the authority, not a fabricated read proof"
+            "the execution Gate decides this call with its resolved context"
+            (because ~composition_plan_index:None ~tool_name ~input))
+        [ "Execute"; "tool_execute" ]) cases
 
 let test_an_unclassifiable_tool_is_asked_about () =
   (* An unknown tool is not a safe tool. If it ran unasked, "no descriptor"
@@ -99,6 +120,13 @@ let test_a_plan_of_reads_runs_unasked () =
        > 0))
 ;;
 
+let test_execute_composition_delegates_to_its_node_gate () =
+  with_index [ "keeper_compose_inspect", [ "Execute"; "Grep" ] ] (fun index ->
+      check bool "composition uses the same execution authority as direct Execute" false
+        (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_inspect"
+           ~input:no_input))
+;;
+
 let test_one_writing_node_asks_and_names_itself () =
   with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun index ->
     check bool "one node that changes something asks for the whole plan" true
@@ -149,7 +177,7 @@ let test_no_direct_call_became_asked () =
       |> List.filter (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
     in
     check (slist string String.compare) "the asked set is unchanged"
-      [ "Edit"; "Execute"; "Write" ] asked_now)
+      [ "Edit"; "Write" ] asked_now)
 ;;
 
 
@@ -217,8 +245,10 @@ let () =
             test_the_split_over_the_real_catalogue
         ; test_case "reading is never asked about" `Quick
             test_reading_is_never_asked_about
-        ; test_case "writing and running are asked about" `Quick
-            test_writing_and_running_are_asked_about
+        ; test_case "writes ask and Execute delegates" `Quick
+            test_writes_ask_and_execute_delegates
+        ; test_case "Execute delegates rather than claiming read-only" `Quick
+            test_execute_delegation_does_not_claim_readonly
         ] )
     ; ( "unknowns"
       , [ test_case "an unclassifiable tool is asked about" `Quick
@@ -233,6 +263,8 @@ let () =
     ; ( "compositions"
       , [ test_case "a plan of reads runs unasked" `Quick
             test_a_plan_of_reads_runs_unasked
+        ; test_case "Execute composition delegates to node Gate" `Quick
+            test_execute_composition_delegates_to_its_node_gate
         ; test_case "one writing node asks and names itself" `Quick
             test_one_writing_node_asks_and_names_itself
         ; test_case "same name is isolated between turn indexes" `Quick

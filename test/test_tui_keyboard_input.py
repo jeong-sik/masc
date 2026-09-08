@@ -5650,12 +5650,23 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             input_text=expected_text,
             cursor_column=13,
         )
+        # The narrowest terminal the chat pane draws in. #33096 gated the pane
+        # on Masc_tui_message_layout.chat_min_terminal_cols; below it the pane
+        # draws "Keeper chat needs a larger terminal" and has no composer at
+        # all, so this step waited on a composer that was never going to
+        # arrive and stalled the whole lane (#34125).
+        #
+        # 41, not the 38 that commit's subject named: the constant is derived
+        # (4 + 2 + turn_rail_cells + chat_role_label_column + 20) and the
+        # derivation has grown by three since. Pinned at the floor rather than
+        # comfortably above it -- at 60 this would still pass while the floor
+        # moved underneath, which is how it got to 41 unnoticed.
         narrow_frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=30,
-            columns=16,
+            columns=41,
             needle=composer_showing(b"A"),
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
@@ -5663,7 +5674,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         assert_message_input_frame(
             narrow_frame,
             row=28,
-            columns=16,
+            columns=41,
             input_text=expected_text,
             cursor_column=13,
         )
@@ -6151,14 +6162,35 @@ def autonomous_turn_history_interaction() -> Interaction:
             start=pane_start,
             timeout=5.0,
         )
+        # Two calls, each with its own detail rows, do not fit the runner's
+        # default 30 rows: the block reaches the first call's identity line
+        # and the second is below the fold, so this read used to miss it and
+        # report a name that was on screen a few rows further down.
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=60,
+            columns=100,
+            needle=b"masc_task_history",
+            controls=(FULL_REDRAW,),
+        )
         pane = bytes(output[pane_start:])
         plain_pane = CSI_RE.sub(b"", pane)
         for needle, what in (
-            (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
+            # Not "content withheld" any more. That wording read as someone
+            # holding the text back and sent readers looking for a way to see
+            # it; there is none, and the count is the whole fact. The renderer
+            # says so in its own words at masc_tui_keeper_chat_history.ml.
+            ("2 reasoning steps \u00b7 text not recorded".encode(),
+             "the unrecorded reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
             ("\u00b7 THINKING".encode(), "the thinking lane"),
-            ("TOOLS\u2502".encode(), "the nested tool block"),
+            # The label is padded to its column now, so "TOOLS" no longer sits
+            # against the rule. The block marker in front of it is what tells
+            # this row from the word appearing anywhere else.
+            ("\u25a0 TOOLS".encode(), "the tool block header"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(
@@ -6251,7 +6283,13 @@ def memory_journal_timeline_interaction(
         )
         # This scenario verifies the complete timestamp axis. Chat itself now
         # rests in the clock-free reading layout, so opt into full metadata.
-        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
+        #
+        # One press, not two. The header names only the two densities away
+        # from the resting one: Origin_bare draws "metadata:off", Origin_row
+        # draws "metadata:full", and Origin_inline -- the default this pane
+        # opens in -- draws nothing, because a label saying you are where you
+        # started is not news. So "metadata:inline" is not a string this
+        # header can produce, and waiting for it starved.
         send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
         # At rest the journal draws only its one-line summary: the header
         # with source, revision, and counts. The change fence under it is a
@@ -6647,7 +6685,9 @@ def context_inspector_fixtures() -> HttpFixtures:
             "runtime_profile": "anthropic.claude-opus-5",
             "captured_at": 1787600000.0,
             "wire": {
-                "phase": "Pre_dispatch_serialization",
+                # A nullary variant is a one-element list in
+                # ppx_deriving_yojson's encoding, not a bare string.
+                "phase": ["Pre_dispatch_serialization"],
                 "capture_id": "capture-context",
                 "provider": "anthropic",
                 "model": "claude-opus-5",
@@ -6693,7 +6733,7 @@ def context_inspector_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         resize_and_wait(
-            process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview"
+            process, master_fd, output, rows=50, columns=140, needle=b"MASC Overview"
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -6720,7 +6760,11 @@ def context_inspector_interaction() -> Interaction:
             b"Tool schemas",
             b"User messages",
             b"Tool results",
-            b"Conversation history  7 / 9 atoms",
+            # The section is headed in plain words now, and the count reads
+            # "of" rather than a fraction. Both are pinned: the heading says
+            # which section this is, the count says what it carried.
+            b"how far back this turn looked",
+            b"7 of 9 atoms",
         ):
             if needle not in composition_plain:
                 raise AssertionError(
@@ -6788,7 +6832,10 @@ def context_inspector_interaction() -> Interaction:
             columns=109,
             needle=b"SELECTED BLOCK",
         )
-        narrow_map_plain = CSI_RE.sub(b"", narrow_map)
+        # The whole screen, not the frame the resize returned. A frame holds
+        # the rows that changed, and the evidence rows below the selection do
+        # not change when the width does.
+        narrow_map_plain = screen_text(bytes(output))
         for forbidden in (b"reached the provider", b"provider accepted", b"ON WIRE"):
             if forbidden in narrow_map_plain:
                 raise AssertionError(
@@ -6847,9 +6894,15 @@ def context_inspector_interaction() -> Interaction:
             b"\x1b",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
-        help_frame = send_and_wait(process, master_fd, output, b"?", b"Slash commands")
-        if b"/context" not in CSI_RE.sub(b"", help_frame):
-            raise AssertionError(f"Help did not disclose /context: {help_frame!r}")
+        # The overlay is headed "MASC Cheat Sheet" now; "Slash commands" was a
+        # section title it no longer carries.
+        send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        # The /context disclosure this step used to assert is not here any
+        # more: the cheat sheet lists keys, and the slash commands announce
+        # themselves in the composer's hint line as the word is typed
+        # (Masc_tui_command.hint_spans, drawn at masc_tui_render.ml). That
+        # surface has no coverage yet and wants its own scenario rather than
+        # a tail on this one.
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
@@ -9026,6 +9079,10 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
+                "payload_availability": {
+                    "input": {"state": "available"},
+                    "output": {"state": "available"},
+                },
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -9099,6 +9156,10 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
+                "payload_availability": {
+                    "input": {"state": "available"},
+                    "output": {"state": "available"},
+                },
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},

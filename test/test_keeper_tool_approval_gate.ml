@@ -80,6 +80,18 @@ let test_a_read_runs_without_asking () =
               (pre_tool_use_event ~tool_name:"Read"
                  ~input:(`Assoc [ "file_path", `String "a.ml" ])))))
 
+let test_execute_hook_delegates_without_interactive_wait () =
+  with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry ~events ~gate ->
+      List.iter (fun argv ->
+          let input = `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv)
+                            ; "cwd", `String "." ] in
+          check string "Execute reaches its runtime permission owner" "continue"
+            (decision_to_string (gate.Gate.pre_tool_use
+               (pre_tool_use_event ~tool_name:"Execute" ~input))))
+        [ [ "ls" ]; [ "rg"; "needle"; "." ]; [ "rm"; "fixture-only" ] ];
+      check int "no duplicate interactive wait" 0 (List.length (Registry.pending registry));
+      check (list string) "no duplicate approval event" [] (event_labels events))
+
 let test_an_edit_asks () =
   with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
       let edit_event () =
@@ -225,6 +237,8 @@ let () =
     [ ( "deciding whether to ask"
       , [ test_case "a read runs without asking" `Quick
             test_a_read_runs_without_asking
+        ; test_case "Execute delegates without duplicate interactive wait" `Quick
+            test_execute_hook_delegates_without_interactive_wait
         ; test_case "an edit asks" `Quick test_an_edit_asks
         ; test_case "a synthetic composition asks with its node name" `Quick
             test_a_synthetic_composition_asks_with_its_node_name

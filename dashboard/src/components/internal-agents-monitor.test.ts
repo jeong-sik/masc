@@ -33,6 +33,7 @@ import {
 } from './internal-agents-monitor'
 import { keepers, shellRuntimeResolution } from '../store'
 import { ApiRequestError } from '../api/core'
+import { parseExactLaneRunResponse } from '../api/dashboard-exact-lane-runs'
 
 const journalFact = (claim: string, category: 'fact' | 'blocker', firstSeen: number) => ({
   claim,
@@ -315,6 +316,7 @@ describe('InternalAgentsMonitor', () => {
       status: 'succeeded',
       elapsedSeconds: 2,
       selectedSlot: 'librarian-primary',
+      payloadAvailability: { input: { state: 'available' }, output: { state: 'available' } },
       input: {
         kind: 'exact',
         payload: {
@@ -429,6 +431,7 @@ describe('InternalAgentsMonitor', () => {
       actor: 'full-cycle-probe',
       startedAt: 1786200000,
       status: 'running',
+      payloadAvailability: { input: { state: 'available' }, output: null },
       input: { kind: 'exact', payload: { current_fact_count: 2 } },
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
@@ -460,6 +463,71 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('revision 617')
     expect(container.textContent).toContain('실제 도구 체인 성공')
   })
+
+  it.each(['available-null', 'unavailable', 'not_loaded', 'running', 'partial'] as const)(
+    'opens native payload evidence without inventing missing values: %s', async scenario => {
+      const available = { state: 'available' }
+      const unavailable = { state: 'unavailable', error: { code: 'source_unavailable', message: 'original-file-missing' } }
+      const absent = scenario === 'not_loaded' ? { state: 'not_loaded' } : unavailable
+      const raw: Record<string, unknown> = {
+        run_id: 'payload-native', run_kind: 'exact_output', lane: 'librarian_exact',
+        subject_id: null, actor: 'keeper-fixture', started_at: 1, status: 'succeeded',
+        elapsed_s: 0.4, selected_slot: null, skill_evidence: { state: 'no_keeper_skills' },
+        input: { kind: 'exact', payload: {
+          request: 'input-original',
+          actual_input: {
+            prompt: { key: 'librarian', source: 'file', effective_template: 'concealed-template', rendered_bytes: 18, rendered_sha256: 'a'.repeat(64) },
+            rendered_prompt_variables: {},
+          },
+        } },
+        output: null,
+        payload_availability: { input: available, output: available },
+      }
+      if (scenario === 'unavailable' || scenario === 'not_loaded' || scenario === 'partial') {
+        raw.payload_availability = { input: scenario === 'partial' ? available : absent, output: absent }
+        raw.output = { before: { present: true, fact_count: 1 }, after: { revision: 42, fact_count: 2 } }
+      } else if (scenario === 'running') {
+        raw.status = 'running'
+        raw.payload_availability = { input: available, output: null }
+        delete raw.output
+        delete raw.elapsed_s
+        delete raw.selected_slot
+      }
+      const run = parseExactLaneRunResponse({ generated_at: '2026-09-08T00:00:00Z', run: raw })
+      api.fetchExactLaneRun.mockResolvedValue(run)
+      api.fetchExactLaneRuns.mockResolvedValue({ runs: [{
+        runId: run.runId, runKind: run.runKind, lane: run.lane, actor: run.actor,
+        startedAt: run.startedAt, status: run.status, subjectId: run.subjectId,
+      }], count: 1, total: 1, hasMore: false, generatedAt: 'now' })
+      api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+      api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+      const { container } = render(html`<${InternalAgentsMonitor} />`)
+      fireEvent.click(await screen.findByRole('button', { name: /payload-native/i }))
+      await screen.findByText('Exact-output registry metadata', { exact: false })
+      const input = container.querySelector('[data-exact-payload="input"]')!
+      const output = container.querySelector('[data-exact-payload="output"]')!
+      expect(container.textContent).toContain(run.status)
+      if (scenario === 'available-null') {
+        expect(within(output as HTMLElement).getByText('null', { exact: true })).toBeTruthy()
+        expect(output.getAttribute('data-payload-state')).toBe('available')
+      } else if (scenario === 'running') {
+        expect(output.getAttribute('data-payload-state')).toBe('pending')
+        expect(output.textContent).toContain('실행 중 · 아직 출력이 기록되지 않았습니다')
+      } else {
+        expect(output.textContent).toContain(scenario === 'not_loaded' ? '원문을 불러오지 않았습니다' : '원문 사용 불가: original-file-missing')
+        expect(output.textContent).not.toContain('null')
+        expect(container.textContent).not.toContain('Memory before → after')
+      }
+      if (scenario === 'unavailable' || scenario === 'not_loaded') {
+        expect(input.textContent).not.toContain('input-original')
+        expect(container.querySelector('[data-librarian-input-evidence]')).toBeNull()
+        expect(container.textContent).not.toContain('concealed-template')
+      } else {
+        expect(input.textContent).toContain('input-original')
+      }
+      expect(memoryApi.fetchKeeperMemoryJournal).not.toHaveBeenCalled()
+    },
+  )
 
   it('states that exact lanes and RAW require an Admin bearer', async () => {
     api.fetchExactLaneRuns.mockRejectedValue(new ApiRequestError({

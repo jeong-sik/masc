@@ -625,9 +625,11 @@ let test_host_context_reads_repositories_from_remote_syntax_and_gh_repo_flag () 
   let cwd = Filename.concat base_path ".masc/playground/docker/fixture" in
   Fs_compat.mkdir_p cwd;
   let open Yojson.Safe.Util in
+  (* One queue entry per argv: the queue deduplicates an identical
+     submission and the fixture then fails to enter summary-pending twice. *)
   let references argv =
     let entry =
-      { (pending_entry ~base_path ()) with
+      { (pending_entry ~base_path ~input_tag:(String.concat " " argv) ()) with
         tool_name = "tool_execute"
       ; input = execute_gate_input ~cwd argv
       }
@@ -661,6 +663,16 @@ let test_host_context_reads_repositories_from_remote_syntax_and_gh_repo_flag () 
      |> to_string);
   check string "attached -Rowner/repo is the same flag" "github.com_jeong-sik_masc"
     (single [ "gh"; "issue"; "list"; "-Rjeong-sik/masc" ] |> member "canonical_id" |> to_string);
+  check string "an attached scp remote reports the value without its -R prefix"
+    "git@github.com:jeong-sik/masc.git"
+    (single [ "gh"; "pr"; "list"; "-Rgit@github.com:jeong-sik/masc.git" ]
+     |> member "raw"
+     |> to_string);
+  let repo_clone = single [ "gh"; "repo"; "clone"; "jeong-sik/masc"; "repos/masc" ] in
+  check string "gh repo clone names its repository positionally" "registered"
+    (repo_clone |> member "catalog_match" |> member "state" |> to_string);
+  check int "the positional is the token after the verb" 3
+    (repo_clone |> member "argument_index" |> to_int);
   check string "a full URL handed to --repo is one reference" "registered"
     (single [ "gh"; "pr"; "view"; "1"; "--repo"; "https://github.com/jeong-sik/masc" ]
      |> member "catalog_match"

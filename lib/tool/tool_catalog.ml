@@ -232,6 +232,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_eject", mutating_tool);
     ("masc_msx_save", mutating_tool);
     ("masc_msx_restore", mutating_tool);
+    ("masc_msx_change_disk", mutating_tool);
     ("masc_msx_press", mutating_tool);
     ("masc_msx_step", mutating_tool);
     ("masc_agent_card", read_state_tool);

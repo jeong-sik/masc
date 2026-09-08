@@ -123,6 +123,15 @@ let test_checkpoint_bindings_and_result_are_visible () =
       let out = drawn ~notice () in
       check bool "checkpoint outcome remains visible beside the frame" true
         (mentions ~needle:notice out);
+      (* In Kitty the explicit placement cursor used to jump back onto the
+         notice row; merely finding the notice bytes missed the overlap. *)
+      check bool "image begins below the notice" true
+        (mentions ~needle:"\027[3;1H" out);
+      check bool "image does not cover the notice row" false
+        (mentions ~needle:"\027[2;1H" out);
+      let rows, _ = Masc_tui_ansi.get_terminal_size () in
+      check bool "footer remains on the final terminal row" true
+        (mentions ~needle:(Printf.sprintf "\027[%d;1H" rows) out);
       check bool "notice keeps save control visible" true (mentions ~needle:"F6: save quick" out);
       check bool "notice keeps restore control visible" true (mentions ~needle:"F7: restore quick" out))
       [ "Saved quick checkpoint"; "Restored quick checkpoint"; "Restore failed: no checkpoint" ])

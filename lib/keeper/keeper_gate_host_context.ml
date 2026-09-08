@@ -90,9 +90,29 @@ let gh_repo_flag_values argv =
   walk 0 [] argv
 ;;
 
+(* gh's [repo] family names its repository positionally in the same shape
+   the flag takes: [gh repo clone OWNER/REPO [dest]], [gh repo view
+   OWNER/REPO]. The first token after the verb that is not a flag is that
+   argument. When it is something else (the value of a preceding flag, say)
+   it fails the spec shape and no reference is made; a later positional is
+   never read, because for [clone] that is the destination path. *)
+let gh_repo_positional argv =
+  match argv with
+  | "gh" :: "repo" :: _verb :: rest ->
+    let rec first index = function
+      | [] -> None
+      | token :: _ when not (String.starts_with ~prefix:"-" token) -> Some (index, token)
+      | _ :: rest -> first (index + 1) rest
+    in
+    first 3 rest
+  | _ -> None
+;;
+
 (* Repository references in argv order: tokens written as remotes anywhere,
-   plus gh's repo flag values. A full URL handed to the flag is already a
-   remote token, so rows are keyed by argument index to keep one per token. *)
+   plus what gh's repo flag and the [repo] family's positional name. A URL
+   handed to the flag is also a remote token at the same index; the flag
+   row wins there, so [raw] is the value as gh reads it and not the token
+   with its [-R] prefix still attached. *)
 let repository_reference_candidates argv =
   let remote_tokens =
     List.filter_mapi
@@ -104,17 +124,21 @@ let repository_reference_candidates argv =
   in
   match argv with
   | "gh" :: _ ->
-    let flagged =
+    let named =
       List.filter_map
         (fun (argument_index, value) ->
            Option.map
              (fun canonical_id -> argument_index, value, canonical_id)
              (gh_repo_flag_reference value))
-        (gh_repo_flag_values argv)
+        (gh_repo_flag_values argv @ Option.to_list (gh_repo_positional argv))
     in
-    List.sort_uniq
-      (fun (a, _, _) (b, _, _) -> Int.compare a b)
-      (remote_tokens @ flagged)
+    let named_indices = List.map (fun (argument_index, _, _) -> argument_index) named in
+    let unnamed =
+      List.filter
+        (fun (argument_index, _, _) -> not (List.mem argument_index named_indices))
+        remote_tokens
+    in
+    List.sort (fun (a, _, _) (b, _, _) -> Int.compare a b) (unnamed @ named)
   | _ -> remote_tokens
 ;;
 
@@ -197,7 +221,7 @@ let explicit_git_clone_destination ~cwd argv =
     let rec after_repository = function
       | [] -> None
       | argument :: rest ->
-        (match remote_reference_of_token argument with
+        (match canonical_repository_id argument with
          | None -> after_repository rest
          | Some _ ->
            (match rest with

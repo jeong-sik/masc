@@ -163,12 +163,20 @@ let test_get_origin_url_reports_missing_without_text_matching () =
         (Repo_git.origin_lookup_error_to_string error)
     | Ok url -> Alcotest.failf "missing origin returned URL %s" url)
 
+(* Long enough that returning before it proves the budget cut the git off,
+   rather than the fake exiting on its own. *)
+let stalled_git_sleep_sec = 30
+
+(* The elapsed reading and the budget are taken from two different clocks, so
+   a run that waited the whole budget can measure a hair under it. *)
+let timing_slack_sec = 1.0
+
 let test_get_origin_url_times_out_on_stalled_config () =
   with_temp_dir (fun tmp ->
       let fake_bin = Filename.concat tmp "bin" in
       Unix.mkdir fake_bin 0o755;
       let fake_git = Filename.concat fake_bin "git" in
-      write_file fake_git "#!/bin/sh\nsleep 30\n";
+      write_file fake_git (Printf.sprintf "#!/bin/sh\nsleep %d\n" stalled_git_sleep_sec);
       Unix.chmod fake_git 0o755;
       let old_path = Sys.getenv "PATH" in
       Fun.protect
@@ -178,16 +186,21 @@ let test_get_origin_url_times_out_on_stalled_config () =
           let started_at = Unix.gettimeofday () in
           match Repo_git.get_origin_url ~local_path:tmp () with
           | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
-          | Error (Repo_git.Origin_lookup_timed_out error) ->
+          | Error (Repo_git.Origin_lookup_timed_out _) ->
+              (* The constructor is the classification. Repo_git reads it off
+                 Process_eio.exit_reason_of_status and puts the exit status,
+                 not a duration, in the detail -- #28651 took the number out
+                 of here precisely so the two modules would stop agreeing by
+                 coincidence. What is left to measure is the timing. *)
               let elapsed = Unix.gettimeofday () -. started_at in
               Alcotest.(check bool)
-                "reports timeout"
+                "waited for the inspection budget"
                 true
-                (String_util.contains_substring error "timeout after 5s");
+                (elapsed >= Repo_git.inspection_timeout_sec -. timing_slack_sec);
               Alcotest.(check bool)
-                "returns within a bounded interval"
+                "returned without waiting the stalled git out"
                 true
-                (elapsed >= 4.0 && elapsed < 10.0)
+                (elapsed < float_of_int stalled_git_sleep_sec)
           | Error error ->
             Alcotest.failf
               "expected typed timeout, got %s"

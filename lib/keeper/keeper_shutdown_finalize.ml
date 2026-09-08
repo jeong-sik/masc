@@ -488,23 +488,95 @@ let remove_meta_file ~config operation cleanup =
      | Error error -> Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
-let admission_already_released_by_removal ~(config : Workspace.config) operation error =
-  match
-    meta_disposition_of_cleanup_reason operation.cleanup_intent.reason,
-    error
-  with
-  | ( Remove_meta
-    , Keeper_owner_registry.Command_lookup_failed
-        (Keeper_owner_registry.Owner_not_found _) ) ->
+(* What a failed owner-side admission release means once the owner registry
+   answers [Owner_not_found]. Only the keeper's metadata can say more: with
+   the metadata gone too, the Keeper was removed outright, and the cleanup
+   intent decides what that removal means for this operation. Leftover
+   metadata, an unreadable meta store, and every other registry answer keep
+   the release failed. *)
+type ownerless_release =
+  | Released_by_removal
+  | Retained_meta_lost
+  | Not_released
+
+let classify_ownerless_release ~(config : Workspace.config) operation error =
+  match error with
+  | Keeper_owner_registry.Command_lookup_failed
+      (Keeper_owner_registry.Owner_not_found _) ->
     (match Keeper_meta_store.read_meta config operation.keeper_name with
      | Ok None ->
-       Log.Keeper.info
-         "shutdown owner admission already released by Keeper removal: keeper=%s operation=%s"
-         operation.keeper_name
-         (Operation_id.to_string operation.operation_id);
-       true
-     | Ok (Some _) | Error _ -> false)
-  | Retain_operator_pause, _ | Remove_meta, _ -> false
+       (match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+        | Remove_meta ->
+          Log.Keeper.info
+            "shutdown owner admission already released by Keeper removal: keeper=%s operation=%s"
+            operation.keeper_name
+            (Operation_id.to_string operation.operation_id);
+          Released_by_removal
+        | Retain_operator_pause -> Retained_meta_lost)
+     | Ok (Some _) | Error _ -> Not_released)
+  | Keeper_owner_registry.Command_lookup_failed
+      ( Keeper_owner_registry.Inventory_not_installed _
+      | Keeper_owner_registry.Owner_unavailable _
+      | Keeper_owner_registry.Owner_initialization_failed _
+      | Keeper_owner_registry.Inventory_stopping )
+  | Keeper_owner_registry.Command_lifecycle_reserved _
+  | Keeper_owner_registry.Command_rejected _ -> Not_released
+;;
+
+let admission_already_released_by_removal ~config operation error =
+  match classify_ownerless_release ~config operation error with
+  | Released_by_removal -> true
+  | Retained_meta_lost | Not_released -> false
+;;
+
+(* A finalized retained-metadata stop whose owner and metadata are both gone
+   is not a release that can still succeed: the owner registry answers
+   [Owner_not_found] on every boot, and no retry changes that. The retain
+   contract did not hold either, so the operation is not settled and
+   reclaimed like a removal. Record the absence once, on the operation
+   itself, and stop walking it; the record stays as the evidence and the
+   operator acknowledgement can still follow. Before this, every boot
+   re-ran the release and logged the same failure (#33635). *)
+let record_owner_absence
+    ~(config : Workspace.config)
+    ?successor_operation_id
+    operation
+    evidence
+  =
+  let observed_at = Masc_domain.now_iso () in
+  let observed =
+    { operation with
+      phase = Owner_absent { finalization = evidence; observed_at }
+    ; updated_at = observed_at
+    }
+  in
+  match replace ~config observed with
+  | Error _ as error -> error
+  | Ok persisted ->
+    Log.Keeper.warn
+      "shutdown owner and retained metadata are both gone; recorded owner absence and stopped retrying: keeper=%s operation=%s"
+      persisted.keeper_name
+      (Operation_id.to_string persisted.operation_id);
+    (* Only this operation's own intake reservation is released. A later
+       owner's reservation is not ours to touch. *)
+    (match
+       Keeper_shutdown_intake_fence.shutdown_operation_id
+         ~base_path:config.base_path
+         ~keeper_name:operation.keeper_name
+     with
+     | Some existing when Operation_id.equal existing operation.operation_id ->
+       (match
+          Keeper_shutdown_intake_fence.transition_shutdown
+            ~base_path:config.base_path
+            ~keeper_name:operation.keeper_name
+            ~from_operation_id:operation.operation_id
+            ~to_operation_id:successor_operation_id
+        with
+        | Keeper_shutdown_intake_fence.Transition_applied
+        | Keeper_shutdown_intake_fence.Transition_already_applied
+        | Keeper_shutdown_intake_fence.Transition_reserved_by_other _ -> ())
+     | None | Some _ -> ());
+    Ok persisted
 ;;
 
 let remove_session_dir ~config operation =
@@ -586,6 +658,7 @@ let unregister_retired_exact ~base_path operation entry =
 let release_finalized_admission
     ~(config : Workspace.config)
     ?successor_operation_id
+    ~evidence
     operation
   =
   let release_result =
@@ -620,28 +693,30 @@ let release_finalized_admission
     (Operation_id.to_string operation_id);
     Ok operation
   | Error error ->
-    if admission_already_released_by_removal ~config operation error
-    then
-      (match
-         Keeper_shutdown_intake_fence.transition_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:operation.keeper_name
-           ~from_operation_id:operation.operation_id
-           ~to_operation_id:successor_operation_id
-       with
-       | Keeper_shutdown_intake_fence.Transition_applied
-       | Keeper_shutdown_intake_fence.Transition_already_applied -> Ok operation
-       | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
-         Error
-           (Admission_release_failed
-              ( operation
-              , Printf.sprintf
-                  "shutdown intake fence is reserved by another operation: existing=%s"
-                  (Operation_id.to_string existing) )))
-    else
-      Error
-        (Admission_release_failed
-           (operation, Keeper_owner_registry.command_error_to_string error))
+    (match classify_ownerless_release ~config operation error with
+     | Released_by_removal ->
+       (match
+          Keeper_shutdown_intake_fence.transition_shutdown
+            ~base_path:config.base_path
+            ~keeper_name:operation.keeper_name
+            ~from_operation_id:operation.operation_id
+            ~to_operation_id:successor_operation_id
+        with
+        | Keeper_shutdown_intake_fence.Transition_applied
+        | Keeper_shutdown_intake_fence.Transition_already_applied -> Ok operation
+        | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
+          Error
+            (Admission_release_failed
+               ( operation
+               , Printf.sprintf
+                   "shutdown intake fence is reserved by another operation: existing=%s"
+                   (Operation_id.to_string existing) )))
+     | Retained_meta_lost ->
+       record_owner_absence ~config ?successor_operation_id operation evidence
+     | Not_released ->
+       Error
+         (Admission_release_failed
+            (operation, Keeper_owner_registry.command_error_to_string error)))
 ;;
 
 let invoke_completion_handler ~config operation action =
@@ -652,18 +727,20 @@ let invoke_completion_handler ~config operation action =
 
 let deliver_finalized_completion ~config ?successor_operation_id operation =
   match operation.phase with
-  | Finalized { completion = Completion_not_requested; _ }
-  | Finalized { completion = Completion_delivered _; _ } ->
-    release_finalized_admission ~config ?successor_operation_id operation
+  | Finalized
+      ({ completion = (Completion_not_requested | Completion_delivered _); _ } as
+       evidence) ->
+    release_finalized_admission ~config ?successor_operation_id ~evidence operation
   | Finalized ({ completion = Completion_pending action; _ } as evidence) ->
     (match invoke_completion_handler ~config operation action with
      | Error detail -> Error (Completion_failed (operation, detail))
      | Ok () ->
+       let delivered_evidence =
+         { evidence with completion = Completion_delivered action }
+       in
        let delivered =
          { operation with
-           phase =
-             Finalized
-               { evidence with completion = Completion_delivered action }
+           phase = Finalized delivered_evidence
          ; updated_at = Masc_domain.now_iso ()
          }
        in
@@ -673,6 +750,7 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
           release_finalized_admission
             ~config
             ?successor_operation_id
+            ~evidence:delivered_evidence
             persisted))
   | Prepared
   | Joining_lanes
@@ -681,6 +759,7 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
   | Cleanup_ready _
   | Reconciliation_required _
   | Blocked _
+  | Owner_absent _
   | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
 ;;
@@ -894,6 +973,7 @@ let run ~config ~entry ?successor_operation_id operation =
   | Joining_lanes
   | Reconciliation_required _
   | Blocked _
+  | Owner_absent _
   | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
 ;;

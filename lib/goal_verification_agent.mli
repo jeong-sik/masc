@@ -21,20 +21,23 @@ val start :
   unit
 
 module For_testing : sig
+  val scan_active_once : unit -> bool
+  (** Consume one pending scan on the real active runtime for deterministic
+      wake/ownership race tests. False means no runtime is active. *)
   type pending_work = { goal_id : string }
 
   (** How one review ended. [Deferred] carries the reason no verdict was
       committed; the pending row it names is still durable. *)
   type process_outcome =
     | Committed
+    | Superseded
     | Deferred of string
 
   val collect_pending :
     Workspace_utils_backend_setup.config ->
     (pending_work list, string) result
-  (** One ledger load per call, joined in memory; includes the P0-2
-      cross-check that re-arms [mark_proof_pending] for a [Verifying] goal
-      whose ledger row lost the durable proof request. *)
+  (** Reconciles or re-arms only currently-Verifying Goals through
+      authoritative, locked reads. *)
 
   val process_pending_work :
     ?sw:Eio.Switch.t option ->

@@ -1,12 +1,6 @@
 name = "masc_msx_screen"
 description = """
-Read the workspace MSX machine without moving time.
-
-Returns frame count, display \
-mode, program counter, halted flag, the name table as text (meaningful \
-when the game uses a font), the 24x32 tile grid as hex pairs (GRAPHIC1/2/3 \
-and MULTICOLOR; '..' is tile 0), and the sprite table. Tile numbers mean \
-what the game says they mean; learn them by playing."""
+Read the current MSX frame without advancing time: mode, PC, screen_text, screen_view, tiles and sprites. screen_view is a 64x24 ASCII picture of the screen, readable in any mode, so a keeper with no vision runtime can recognise the layout (a title, a menu, a map). screen_text only reads text-mode text and is noise in bitmap modes; tile numbers are game-specific. Keeper calls also return a PNG artifact and dimensions; a keeper with a vision runtime can use keeper_analyze_image on it."""
 additional_properties = false
 
 defer_loading = true

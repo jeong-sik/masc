@@ -36,6 +36,7 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 type goal = {
   id : string;
+  criterion_revision : string;
   title : string;
   metric : string option;
   target_value : string option;
@@ -49,6 +50,18 @@ type goal = {
 }
 (** A single goal entry. [priority] is clamped to [1..5] on every
     write. *)
+
+type criterion = Criterion of {
+  revision : string;
+  title : string;
+  metric : string option;
+  target_value : string option;
+}
+
+val criterion_of_goal : goal -> criterion
+val criterion_equal : criterion -> criterion -> bool
+val criterion_to_yojson : criterion -> Yojson.Safe.t
+val criterion_of_yojson : Yojson.Safe.t -> (criterion, string) result
 
 val goal_to_yojson : goal -> Yojson.Safe.t
 
@@ -119,6 +132,18 @@ val update_state :
 (** {1 Single-goal operations} *)
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
+
+val get_goal_result :
+  Workspace_utils.config -> goal_id:string -> (goal option, string) result
+(** Authoritative primary-only read; recovery does not mask missing or corrupt data. *)
+
+val transact_goal :
+  Workspace_utils.config -> goal_id:string ->
+  (goal -> (goal * 'a, string) result) -> (goal * 'a, string) result
+(** Holds the Goal file lock across an authoritative primary read, callback and
+    conditional write. A callback may acquire the verification ledger lock;
+    it must not acquire this Goal lock again. Errors and unchanged Goals do not
+    write. Recovery snapshots never authorize the callback. *)
 
 type conditional_update =
   | Goal_updated of goal

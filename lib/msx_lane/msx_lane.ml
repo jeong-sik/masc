@@ -10,6 +10,7 @@ type observation = {
   pc : int;
   halted : bool;
   screen_text : string;
+  screen_view : string;
   tiles : string list;
   sprites : sprite list;
   cartridge : string option;
@@ -87,6 +88,8 @@ type machine = {
   mutable frame : int;
   cart : string option;
   disk : string option;
+  disk_id : string option;
+  media : (string * string) list;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
 }
@@ -148,6 +151,47 @@ let sprites_of m (mode : Msx.display_mode) =
     go 0 []
 ;;
 
+(* A coarse text picture of the frame, so a keeper with no vision runtime can
+   still recognise the screen (a title, a menu, a map) in any mode. Each cell is
+   the average luminance of the pixels under it, mapped to a ramp. Not a
+   replacement for [screen_text] -- that reads a text-mode name table and is
+   exact when the pattern set is a font; [screen_view] works in every mode,
+   including the bitmap modes where the name table is not characters. *)
+let screen_view_cols = 64
+let screen_view_rows = 24
+let screen_view_ramp = " .:-=+*#%@"
+
+let ascii_view rgb ~w ~h =
+  if w <= 0 || h <= 0 || String.length rgb < w * h * 3 then ""
+  else begin
+    let ramp = screen_view_ramp in
+    let levels = String.length ramp in
+    let cols = screen_view_cols and rows = screen_view_rows in
+    let buf = Buffer.create (rows * (cols + 1)) in
+    for ry = 0 to rows - 1 do
+      let y0 = ry * h / rows and y1 = (ry + 1) * h / rows in
+      for cx = 0 to cols - 1 do
+        let x0 = cx * w / cols and x1 = (cx + 1) * w / cols in
+        let sum = ref 0 and n = ref 0 in
+        for y = y0 to max y0 (y1 - 1) do
+          for x = x0 to max x0 (x1 - 1) do
+            let i = ((y * w) + x) * 3 in
+            let r = Char.code rgb.[i]
+            and g = Char.code rgb.[i + 1]
+            and b = Char.code rgb.[i + 2] in
+            sum := !sum + (((r * 30) + (g * 59) + (b * 11)) / 100);
+            incr n
+          done
+        done;
+        let lum = if !n = 0 then 0 else !sum / !n in
+        Buffer.add_char buf ramp.[lum * (levels - 1) / 255]
+      done;
+      Buffer.add_char buf '\n'
+    done;
+    Buffer.contents buf
+  end
+;;
+
 let observe st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
@@ -159,6 +203,9 @@ let observe st =
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
   ; disk = st.disk
+  ; screen_view =
+      (let w, h = Msx.frame_dims st.m in
+       ascii_view (Msx.frame_rgb st.m) ~w ~h)
   }
 ;;
 
@@ -221,6 +268,14 @@ let load_disk = function
     else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
 ;;
 
+let media_id bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+
+let media_json media =
+  `List (List.map (fun (id, bytes) -> `Assoc
+    ["id", `String id; "sha256", `String (media_id bytes);
+     "bytes", `String (Base64.encode_string bytes)]) media)
+;;
+
 let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
   locked (fun () ->
     match load_roms roms_dir, load_cart cart_path, load_disk disk_path with
@@ -257,6 +312,8 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
               (if Option.is_some disk then None
                else Option.map (fun (path, _) -> Filename.basename path) cart)
           ; disk = Option.map (fun (path, _) -> Filename.basename path) disk
+          ; disk_id = Option.map (fun (_, bytes) -> media_id bytes) disk
+          ; media = []
           ; ledger_path
           ; entries = []
           }
@@ -316,7 +373,19 @@ let press_all st keys =
   go [] keys
 ;;
 
-let press ~who ~keys ~hold_frames ~step_frames =
+let tap_one st ~who ~hold_frames ~step_frames k =
+  (* Tap [k] in its own frame window: down, hold, up, then the rest idle. *)
+  (* See Msx.set_key: press_all checked [k]'s matrix place, so this edge cannot miss. *)
+  ignore (Msx.set_key st.m k ~pressed:true : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = true };
+  advance st hold_frames;
+  (* See Msx.set_key: the key just went down, so its release cannot miss. *)
+  ignore (Msx.set_key st.m k ~pressed:false : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = false };
+  advance st (step_frames - hold_frames)
+;;
+
+let press ~who ~keys ~hold_frames ~step_frames ~sequence =
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else
@@ -327,8 +396,18 @@ let press ~who ~keys ~hold_frames ~step_frames =
           (Invalid_request
              (Printf.sprintf "hold_frames (%d) cannot exceed frames (%d)" hold_frames step_frames))
       | Ok (), Ok () -> (
+        (* [press_all] validates every key against the matrix up front, so a
+           bad key in a sequence is refused before any tap advances time. *)
         match press_all st keys with
         | Error e -> Error e
+        | Ok () when sequence ->
+          (* [press_all] left the keys down with no frame advanced; release them
+             and tap each in turn, so ["down"; "return"] is a menu sequence, not
+             a chord held together. *)
+          (* See Msx.set_key: press_all just checked every key, so these cannot miss. *)
+          List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
+          List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+          Ok (observe st)
         | Ok () ->
           List.iter
             (fun k ->
@@ -364,13 +443,8 @@ type frame = {
   disk : string option;
 }
 
-let frame () =
-  locked (fun () ->
-    match !state with
-    | None -> None
-    | Some st ->
+let frame_of (st : machine) =
       let width, height = Msx.frame_dims st.m in
-      Some
         { number = st.frame
         ; width
         ; height
@@ -378,5 +452,137 @@ let frame () =
         ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
         ; cartridge = st.cart
         ; disk = st.disk
-        })
+        }
+;;
+
+let frame () = locked (fun () -> Option.map frame_of !state)
+;;
+
+let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
+;;
+
+let atomic_write path contents =
+  mkdir_p (Filename.dirname path);
+  let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
+    (fun () -> output_string oc contents; close_out oc; Sys.rename tmp path)
+;;
+
+let checkpoint_json (st : machine) =
+  let named = function None -> `Null | Some name -> `String name in
+  `Assoc
+    [ "version", `Int 1
+    ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
+    ; "cartridge", named st.cart
+    ; "disk", named st.disk
+    ; "disk_id", named st.disk_id
+    ; "media", media_json st.media
+    ; "ledger", `List (List.map entry_json (List.rev st.entries))
+    ]
+;;
+
+let save ~path =
+  locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      try
+        atomic_write path (Yojson.Safe.to_string (checkpoint_json st));
+        Ok (observe st)
+      with Sys_error message -> Error (Unreadable message))
+;;
+
+let decode_checkpoint json =
+  let open Yojson.Safe.Util in
+  let invalid message = Error (Invalid_request ("invalid MSX checkpoint: " ^ message)) in
+  let named = function `Null -> None | `String s -> Some s
+    | value -> raise (Type_error ("expected media name or null", value)) in
+  try
+    if member "version" json <> `Int 1 then invalid "unsupported version"
+    else
+      match Base64.decode (member "machine" json |> to_string) with
+      | Error (`Msg message) -> invalid message
+      | Ok bytes -> (
+        match Msx.restore ~state:bytes with
+        | Error message -> invalid message
+        | Ok m ->
+          let cart = named (member "cartridge" json) and disk = named (member "disk" json) in
+          let disk_id = named (member "disk_id" json) in
+          let valid_id id = String.length id = 64 && String.for_all (function
+            | '0'..'9' | 'a'..'f' -> true | _ -> false) id in
+          let media = member "media" json |> to_list |> List.map (fun item ->
+            let id = member "id" item |> to_string in
+            let hash = member "sha256" item |> to_string in
+            let encoded = member "bytes" item |> to_string in
+            match Base64.decode encoded with
+            | Error (`Msg message) -> raise (Type_error (message, item))
+            | Ok bytes ->
+              if not (valid_id id) || media_id bytes <> hash then
+                raise (Type_error ("invalid saved disk identity or checksum", item));
+              id, bytes) in
+          if List.length (List.sort_uniq String.compare (List.map fst media)) <> List.length media then
+            raise (Type_error ("duplicate saved disk identity", json));
+          if (Option.is_some disk <> Option.is_some disk_id)
+             || not (Option.fold ~none:true ~some:valid_id disk_id) then
+            raise (Type_error ("saved disk has no valid original identity", json));
+          let frame = Msx.frame_number m in
+          let entries = member "ledger" json |> to_list |> List.map (fun e ->
+            let at_frame = member "frame" e |> to_int in
+            let who = member "who" e |> to_string in
+            let key_name = member "key" e |> to_string in
+            let down = match member "edge" e with
+              | `String "down" -> true | `String "up" -> false
+              | value -> raise (Type_error ("expected down or up edge", value)) in
+            {at_frame; who; key_name; down}) in
+          let rec valid_edges previous = function
+            | [] -> true
+            | e :: rest -> e.at_frame >= previous && e.at_frame <= frame
+                && Result.is_ok (key_of_string e.key_name) && valid_edges e.at_frame rest in
+          if not (valid_edges 0 entries) then invalid "ledger does not match saved frame"
+          else Ok (m, frame, cart, disk, disk_id, media, entries))
+  with Type_error (message, _) -> invalid message
+;;
+
+let restore ~path ~ledger_dir =
+  let decoded =
+    try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
+    | Sys_error message -> Error (Unreadable message)
+    | Yojson.Json_error message -> Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+  match decoded with
+  | Error e -> Error e
+  | Ok (m, frame, cart, disk, disk_id, media, entries) ->
+    locked (fun () ->
+      let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+      try
+        let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
+        atomic_write ledger_path ledger_bytes;
+        let st = {m; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
+        state := Some st;
+        Ok (observe st)
+      with Sys_error message -> Error (Unreadable message))
+;;
+
+let change_disk ~path ~backup_path =
+  try
+    let original = read_file path in
+    let target_id = media_id original in
+    with_machine (fun st ->
+      match st.disk_id, Msx.disk_image st.m with
+      | Some current_id, Some current_bytes -> (
+        let media = (current_id, current_bytes) :: List.remove_assoc current_id st.media in
+        let target_bytes = match List.assoc_opt target_id media with
+          | Some retained -> retained | None -> original in
+        match Msx.restore ~state:(Msx.serialize st.m) with
+        | Error message -> Error (Unreadable ("cannot checkpoint current machine: " ^ message))
+        | Ok m -> (
+          match Msx.change_disk m target_bytes with
+          | Error message -> Error (Invalid_request message)
+          | Ok () ->
+            atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
+            let next = {st with m; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
+            state := Some next;
+            Ok (observe next)))
+      | _ -> Error (Invalid_request "load a disk game before changing disks"))
+  with Sys_error message -> Error (Unreadable message)
 ;;

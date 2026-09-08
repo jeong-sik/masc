@@ -698,6 +698,25 @@ let emit_n config n =
 
 (* Strips the wall-clock [generated_at_iso] field so two [json_response]
    calls made moments apart can be compared for structural equality. *)
+(* An empty swimlane reports [time_range] as now..now
+   (activity_graph.ml:1280), so two calls over the same events differ by
+   however long apart they ran -- 3 ms in the run that sent this here.
+
+   Only the case whose fixture opens no span needs this. The case above it
+   emits task.claimed and task.done, so its range is derived from those
+   events and comparing it is worth something; it keeps comparing it. Here
+   the range carries nothing but the clock, and [spans] and [window] stay
+   compared either way. *)
+let strip_swimlane_time_range json =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (k, v) -> if String.equal k "time_range" then (k, `Null) else (k, v))
+         fields)
+  | other -> other
+;;
+
 let strip_generated_at_iso json =
   match json with
   | `Assoc fields ->
@@ -1066,8 +1085,8 @@ let test_default_projections_single_pass_slices_tail_when_exceeding_500 () =
         (Yojson.Safe.to_string (strip_generated_at_iso expected_graph))
         (Yojson.Safe.to_string (strip_generated_at_iso single.graph_default));
       check string "swimlane_default matches structurally"
-        (Yojson.Safe.to_string expected_swimlane)
-        (Yojson.Safe.to_string single.swimlane_default);
+        (Yojson.Safe.to_string (strip_swimlane_time_range expected_swimlane))
+        (Yojson.Safe.to_string (strip_swimlane_time_range single.swimlane_default));
       let count_from json =
         Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int
       in

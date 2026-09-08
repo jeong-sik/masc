@@ -78,8 +78,13 @@ let title_of ~(connection : Masc_tui_types.connection_status)
         | Some c, _ | None, Some c -> " · " ^ c
         | None, None -> ""
       in
-      Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode media
-        f.msx_number
+      let playing =
+        match f.msx_players with
+        | [] -> ""
+        | who -> "   조작: " ^ String.concat ", " who
+      in
+      Printf.sprintf " MSX — %s%s   frame %d%s   (spectating the server)" f.msx_mode
+        media f.msx_number playing
 
 (* How much of the terminal the picture takes: 1.0 fills the screen, and
    the size keys step it in eighths between a quarter and full. A local
@@ -98,14 +103,15 @@ let step_fraction d =
 let adjust_size d = step_fraction d
 
 let footer () =
-  Printf.sprintf " esc: back   +/-: size %d%%   (keeper plays; this is a live view)"
+  Printf.sprintf " Esc: back  +/-: %d%%  F6: save quick  F7: restore quick  F8: disk"
     (int_of_float (!screen_fraction *. 100.0))
 
 let render ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status)
+    ~(connection : Masc_tui_types.connection_status) ?notice
     (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  let screen_rows = max 4 (rows - 2) in
+  let header_rows = if Option.is_some notice then 2 else 1 in
+  let screen_rows = max 4 (rows - header_rows - 1) in
   let picture_rows =
     max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
   in
@@ -113,6 +119,7 @@ let render ~(write : string -> unit)
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (title_of ~connection frame));
   Buffer.add_string buf "\027[0K\r\n";
+  Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
    | Some f
@@ -148,7 +155,7 @@ let render ~(write : string -> unit)
           starts mid-screen: park the cursor on its first row, centred, and
           the footer still lands on the screen's last row. *)
        Buffer.add_string buf
-         (Printf.sprintf "\027[%d;1H" (2 + ((screen_rows - drawn_rows) / 2)));
+         (Printf.sprintf "\027[%d;1H" (header_rows + 1 + ((screen_rows - drawn_rows) / 2)));
        let escape =
          Masc_tui_graphics.place_rgb ~data:f.msx_rgb ~pixel_width:f.msx_width
            ~pixel_height:f.msx_height ~rows:drawn_rows
@@ -158,7 +165,7 @@ let render ~(write : string -> unit)
          Buffer.add_string buf escape;
          (* The image is drawn at the cursor and the terminal does not move it,
             so the footer needs the rows stepped over by hand. *)
-         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (screen_rows + 2))
+         Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
        end
    | Some f when String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
@@ -201,7 +208,7 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   else begin
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
-    render ~write ~connection:state.Masc_tui_types.connection_status
+    render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
       state.msx_frame;
     true
   end
@@ -217,13 +224,19 @@ type menu_action =
   | Stay              (* navigated or repainted; the menu is still up *)
   | Closed            (* esc: leave the menu *)
   | Watch             (* spectate the machine already loaded *)
+  | Swap_disk of string
   | Load of string    (* plug this cartridge in *)
 
 (* The rows in order: a "watch current" row first when a machine is loaded,
    then one row per cartridge. [msx_menu_index] indexes this list. *)
 let menu_entries (state : Masc_tui_types.state) : menu_action list =
   let watch = if Option.is_some state.msx_frame then [ Watch ] else [] in
-  watch @ List.map (fun c -> Load c) state.msx_carts
+  let media = match state.msx_menu_mode with
+    | Masc_tui_types.Boot_game -> List.map (fun c -> Load c) state.msx_carts
+    | Change_disk -> state.msx_carts
+        |> List.filter (fun c -> String.ends_with ~suffix:".dsk" (String.lowercase_ascii c))
+        |> List.map (fun c -> Swap_disk c) in
+  watch @ media
 
 let clamp_index (state : Masc_tui_types.state) =
   let n = List.length (menu_entries state) in
@@ -240,7 +253,7 @@ let entry_label (state : Masc_tui_types.state) = function
         | _ -> "current machine"
       in
       "> watch " ^ cart
-  | Load c -> "  " ^ c
+  | Load c | Swap_disk c -> "  " ^ c
   | Stay | Closed -> ""
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
@@ -249,7 +262,9 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   let entries = menu_entries state in
   let buf = Buffer.create 1024 in
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols menu_title);
+  Buffer.add_string buf (fit_line cols (match state.msx_menu_mode with
+    | Masc_tui_types.Boot_game -> menu_title
+    | Change_disk -> " MSX — change disk (no reboot); Enter selects, Esc cancels"));
   Buffer.add_string buf "\027[0K\r\n";
   let status_rows =
     match status with
@@ -284,7 +299,8 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   done;
   write (Buffer.contents buf)
 
-let open_menu ~(write : string -> unit) (state : Masc_tui_types.state) =
+let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (state : Masc_tui_types.state) =
+  state.msx_menu_mode <- mode;
   state.msx_open <- true;
   state.msx_menu_open <- true;
   state.msx_menu_index <- 0;
@@ -302,9 +318,9 @@ let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
       state.msx_menu_index <- state.msx_menu_index + 1;
       render_menu ~write state;
       Stay
-  | "\r" | "\n" | " " | "space" -> (
+  | "\r" | "\n" | "enter" | "return" | " " | "space" -> (
       match List.nth_opt (menu_entries state) state.msx_menu_index with
-      | Some ((Watch | Load _) as a) -> a
+      | Some ((Watch | Load _ | Swap_disk _) as a) -> a
       | Some (Stay | Closed) | None ->
           render_menu ~write state;
           Stay)

@@ -66,9 +66,37 @@ let test_tick_worker_advances_and_returns_frame () =
             ; {|{"frames":0}|}, 1
             ; {|{"frames":999999}|}, Lane.max_frames_per_call ]))))
 
+let test_checkpoint_route () =
+  with_tick_machine (fun () ->
+    let base_path = Filename.temp_dir "msx-checkpoint-route-" "" in
+    let before = frame_number (Route.frame_json ()) in
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      List.iter (fun body ->
+        let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body in
+        check bool "checkpoint validates before requesting worker" true (status = `Bad_request))
+        ["[]"; {|{"slot":3}|}; {|{"slot":"../escape"}|}; {|{"slot":"x","slot":"y"}|}; {|{"extra":true}|}];
+      let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
+      check bool "checkpoint never runs inline without a worker" true (status = `Service_unavailable));
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
+        check bool "save through executor succeeds" true (status = `OK);
+        ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
+        let status, _ = Route.checkpoint_response ~base_path ~restore:true ~body:"{}" in
+        check bool "restore through executor succeeds" true (status = `OK);
+        check int "saved clock restored" before (frame_number (Route.frame_json ()));
+        let destination = Filename.concat base_path ".masc/msx/saves/quick.json" in
+        Sys.remove destination; Sys.mkdir destination 0o700;
+        let status, response = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
+        check bool "storage failure is server error" true (status = `Internal_server_error);
+        check bool "storage error carries failure" true (member "ok" response = Some (`Bool false));
+        check int "storage failure preserves machine" before (frame_number (Route.frame_json ()))))))
+
 let () =
   run "msx frame route"
-    [ ( "frame_json"
+    [ ( "checkpoint", [test_case "validation, worker, restore and storage failure" `Quick test_checkpoint_route])
+    ; ( "frame_json"
       , [ test_case "no machine is loaded:false" `Quick (fun () ->
             ignore (Lane.eject () : (unit, Lane.error) result);
             let j = Route.frame_json () in
@@ -102,7 +130,7 @@ let () =
             (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
              | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
             (match Lane.press ~who:"operator" ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
-                     ~hold_frames:2 ~step_frames:6 with
+                     ~hold_frames:2 ~step_frames:6 ~sequence:false with
              | Ok obs ->
                let j = Route.press_result_json ~ok:true (Some obs) in
                check (option bool) "ok true" (Some true)

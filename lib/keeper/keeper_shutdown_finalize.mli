@@ -47,7 +47,9 @@ val run :
     caller remains responsible for releasing the exact process-local intake
     fence after any pending completion receipt is durably settled. Logs one
     info line when true. Retain-meta intents and leftover metadata keep the
-    error. *)
+    error here; [run] itself records a finalized retain-meta operation whose
+    owner and metadata are both gone as [Owner_absent] once, instead of
+    failing the release again on every boot. *)
 val admission_already_released_by_removal :
      config:Workspace.config
   -> Keeper_shutdown_types.t

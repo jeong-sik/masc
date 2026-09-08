@@ -31,6 +31,22 @@ let turn_failed =
   {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture provider rejection"}}}}|}
 ;;
 
+(* The app-server's per-turn count frame: [total] is the thread's running
+   sum, [last] is this turn. *)
+let token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
+(* The same frame for a turn this call is not awaiting. *)
+let other_turn_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-9","tokenUsage":{"total":{"inputTokens":5,"cachedInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10},"last":{"inputTokens":5,"cachedInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10}}}}|}
+;;
+
+(* Ours, with the breakdown missing two required counts. *)
+let truncated_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
+;;
+
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -570,6 +586,95 @@ let test_chatgpt_subscription_turn () =
         check string "model" "gpt-fixture" result.model;
         check string "plan" "pro" result.subscription.plan_type;
         check bool "new thread" false result.resumed)
+;;
+
+let token_usage =
+  testable
+    (fun fmt (usage : Runtime_codex_app_server.token_usage) ->
+       Format.fprintf
+         fmt
+         "input=%d cached=%d cache_write=%d output=%d reasoning=%d total=%d"
+         usage.input_tokens
+         usage.cached_input_tokens
+         usage.cache_write_input_tokens
+         usage.output_tokens
+         usage.reasoning_output_tokens
+         usage.total_tokens)
+    ( = )
+;;
+
+let fixture_last_usage : Runtime_codex_app_server.token_usage =
+  { input_tokens = 1200
+  ; cached_input_tokens = 1000
+  ; cache_write_input_tokens = 0
+  ; output_tokens = 80
+  ; reasoning_output_tokens = 30
+  ; total_tokens = 1280
+  }
+;;
+
+(* #33018 #33065: the Codex lane reported every turn as zero tokens because
+   nothing read the app-server's thread/tokenUsage/updated. The turn result
+   now carries that frame's [last] breakdown for the turn it names. *)
+let test_token_usage_of_this_turn_reaches_the_result () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; item_completed
+    ; token_usage_updated
+    ; turn_completed
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result ->
+        check (option token_usage) "last breakdown" (Some fixture_last_usage) result.usage;
+        check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
+;;
+
+let test_token_usage_of_another_turn_is_not_ours () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; other_turn_token_usage_updated
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result -> check (option token_usage) "foreign frame ignored" None result.usage)
+;;
+
+let test_turn_without_token_usage_reports_none () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result -> check (option token_usage) "no frame, no count" None result.usage)
+;;
+
+let test_truncated_token_usage_of_this_turn_fails_closed () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; item_completed
+    ; truncated_token_usage_updated
+    ; turn_completed
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error { stage; _ }) ->
+        check string "stage" "thread/tokenUsage/updated" stage
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "a half-read breakdown was admitted")
 ;;
 
 let test_prompt_transmission_boundary () =
@@ -3292,6 +3397,49 @@ let test_production_keeper_dispatches_codex_runtime () =
             | Ok result -> assert_production_keeper_result result))
 ;;
 
+(* The host reads the runtime's count into the turn's usage: reported, per
+   request, with the app-server's numbers rather than zero. *)
+let test_production_keeper_reports_codex_token_usage () =
+  let base_path = temp_workspace "masc-codex-production-usage-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; token_usage_updated
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-usage-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result ->
+              check bool "usage reported" true result.Keeper_agent_run.usage_reported;
+              check int "input tokens" 1200 result.usage.input_tokens;
+              check int "output tokens" 80 result.usage.output_tokens;
+              check int "cache read tokens" 1000 result.usage.cache_read_input_tokens;
+              check bool "per-request scope" true
+                (result.usage_scope = Runtime_usage_scope.Per_request);
+              (match result.runtime_observation with
+               | Some observation ->
+                 check bool "observation scope" true
+                   (observation.Runtime_observation.usage_scope
+                    = Runtime_usage_scope.Per_request)
+               | None -> fail "production turn recorded no runtime observation")))
+;;
+
 let test_production_keeper_resumes_across_trace_rotation () =
   let base_path = temp_workspace "masc-codex-production-resume-" in
   Fun.protect
@@ -4148,6 +4296,22 @@ let () =
             test_dispatch_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
         ; test_case
+            "token usage of this turn reaches the result"
+            `Quick
+            test_token_usage_of_this_turn_reaches_the_result
+        ; test_case
+            "token usage of another turn is not ours"
+            `Quick
+            test_token_usage_of_another_turn_is_not_ours
+        ; test_case
+            "a turn without token usage reports none"
+            `Quick
+            test_turn_without_token_usage_reports_none
+        ; test_case
+            "a truncated token usage of this turn fails closed"
+            `Quick
+            test_truncated_token_usage_of_this_turn_fails_closed
+        ; test_case
             "native command stays distinct from dynamic tools"
             `Quick
             test_native_command_events_stay_distinct_from_dynamic_tools
@@ -4242,6 +4406,10 @@ let () =
             "production Keeper dispatches Codex runtime"
             `Quick
             test_production_keeper_dispatches_codex_runtime
+        ; test_case
+            "production Keeper reports Codex token usage"
+            `Quick
+            test_production_keeper_reports_codex_token_usage
         ; test_case
             "production Keeper resumes across trace rotation"
             `Quick

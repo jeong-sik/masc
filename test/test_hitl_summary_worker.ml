@@ -613,6 +613,86 @@ let test_host_context_identifies_registered_clone_and_destination_state () =
      |> to_string)
 ;;
 
+(* #34401: the judge was told [jeong-sik/masc] was unregistered while the
+   catalog held [https://github.com/jeong-sik/masc.git], because every argv
+   token was canonicalised as a remote. Only tokens written as a remote and
+   gh's repo flag name a repository; paths, API endpoints and refspecs do
+   not. *)
+let test_host_context_reads_repositories_from_remote_syntax_and_gh_repo_flag () =
+  with_temp_dir "hitl-host-context-references" @@ fun base_path ->
+  install_queue base_path;
+  write_registered_masc_catalog base_path;
+  let cwd = Filename.concat base_path ".masc/playground/docker/fixture" in
+  Fs_compat.mkdir_p cwd;
+  let open Yojson.Safe.Util in
+  (* One queue entry per argv: the queue deduplicates an identical
+     submission and the fixture then fails to enter summary-pending twice. *)
+  let references argv =
+    let entry =
+      { (pending_entry ~base_path ~input_tag:(String.concat " " argv) ()) with
+        tool_name = "tool_execute"
+      ; input = execute_gate_input ~cwd argv
+      }
+    in
+    Worker.For_testing.build_context_bundle ~entry
+    |> member "host_context"
+    |> member "execution"
+    |> member "repository_references"
+  in
+  let state argv = references argv |> member "state" |> to_string in
+  let single argv =
+    match references argv |> member "items" |> to_list with
+    | [ item ] -> item
+    | items -> Alcotest.failf "expected one reference, got %d" (List.length items)
+  in
+  let gh_edit =
+    single
+      [ "gh"; "pr"; "edit"; "34378"; "-R"; "jeong-sik/masc"; "--add-assignee"; "jeong-sik" ]
+  in
+  check string "gh -R shorthand canonicalises on github.com" "github.com_jeong-sik_masc"
+    (gh_edit |> member "canonical_id" |> to_string);
+  check string "gh -R shorthand matches the catalog" "registered"
+    (gh_edit |> member "catalog_match" |> member "state" |> to_string);
+  check string "the reference is the flag value as written" "jeong-sik/masc"
+    (gh_edit |> member "raw" |> to_string);
+  check int "the reference indexes the flag value" 5
+    (gh_edit |> member "argument_index" |> to_int);
+  check string "gh --repo=HOST/OWNER/REPO keeps its host" "ghe.example.com_team_repo"
+    (single [ "gh"; "pr"; "view"; "1"; "--repo=ghe.example.com/team/repo" ]
+     |> member "canonical_id"
+     |> to_string);
+  check string "attached -Rowner/repo is the same flag" "github.com_jeong-sik_masc"
+    (single [ "gh"; "issue"; "list"; "-Rjeong-sik/masc" ] |> member "canonical_id" |> to_string);
+  check string "an attached scp remote reports the value without its -R prefix"
+    "git@github.com:jeong-sik/masc.git"
+    (single [ "gh"; "pr"; "list"; "-Rgit@github.com:jeong-sik/masc.git" ]
+     |> member "raw"
+     |> to_string);
+  let repo_clone = single [ "gh"; "repo"; "clone"; "jeong-sik/masc"; "repos/masc" ] in
+  check string "gh repo clone names its repository positionally" "registered"
+    (repo_clone |> member "catalog_match" |> member "state" |> to_string);
+  check int "the positional is the token after the verb" 3
+    (repo_clone |> member "argument_index" |> to_int);
+  check string "a full URL handed to --repo is one reference" "registered"
+    (single [ "gh"; "pr"; "view"; "1"; "--repo"; "https://github.com/jeong-sik/masc" ]
+     |> member "catalog_match"
+     |> member "state"
+     |> to_string);
+  check string "an scp remote is a reference" "registered"
+    (single [ "git"; "remote"; "add"; "origin"; "git@github.com:jeong-sik/masc.git" ]
+     |> member "catalog_match"
+     |> member "state"
+     |> to_string);
+  check string "an API endpoint path is not a repository" "no_references"
+    (state [ "gh"; "api"; "-X"; "PUT"; "repos/jeong-sik/masc/pulls/34356/update-branch" ]);
+  check string "a -C path and a refspec are not repositories" "no_references"
+    (state
+       [ "git"; "-C"; "tmp/pr34356"; "-c"; "credential.helper=!gh auth git-credential"
+       ; "push"; "origin"; "work34378:fix/the-compose-footer" ]);
+  check string "owner/repo outside gh's repo flag is not a repository" "no_references"
+    (state [ "echo"; "jeong-sik/masc" ])
+;;
+
 let test_host_context_reports_a_missing_durable_task_link () =
   run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_dir "hitl-host-task-link" @@ fun base_path ->
@@ -2915,6 +2995,8 @@ let () =
         ; test_case "exact context bundle" `Quick test_context_bundle_is_exact
         ; test_case "host context identifies registered clone" `Quick
             test_host_context_identifies_registered_clone_and_destination_state
+        ; test_case "host context reads repositories from remote syntax and gh --repo" `Quick
+            test_host_context_reads_repositories_from_remote_syntax_and_gh_repo_flag
         ; test_case "host context reports missing task link" `Quick
             test_host_context_reports_a_missing_durable_task_link
         ; test_case "the judge is not shown the Keeper's reasoning" `Quick

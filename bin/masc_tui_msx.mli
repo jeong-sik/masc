@@ -24,6 +24,7 @@ val set_cell_pixels : (int * int) option -> unit
 val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
+  -> ?notice:string
   -> Masc_tui_types.msx_frame option
   -> unit
 (** Draw the frame as a truecolor mosaic. Writes the whole terminal.
@@ -58,9 +59,10 @@ type menu_action =
   | Stay  (** navigated or repainted; the menu is still up *)
   | Closed  (** the human pressed [esc] *)
   | Watch  (** spectate the machine that is already loaded *)
+  | Swap_disk of string
   | Load of string  (** plug this cartridge in *)
 
-val open_menu : write:(string -> unit) -> Masc_tui_types.state -> unit
+val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> Masc_tui_types.state -> unit
 (** Take the terminal over and draw the picker over the cartridge inventory
     [state.msx_carts]. The caller fetches the inventory first. Selection starts
     at the top row. *)

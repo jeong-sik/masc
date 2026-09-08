@@ -35,6 +35,24 @@ let test_legacy_tilde_keys () =
   check_name "end via 4" "end" "4" '~'
 ;;
 
+let test_msx_checkpoint_keys () =
+  List.iter (fun (parameters, final, expected) ->
+    check_name "checkpoint key reaches binding" expected parameters final)
+    [ "17", '~', "f6"; "18", '~', "f7"; "19", '~', "f8"
+    ; "57371;1", 'u', "f8"
+    ; "17;1", '~', "f6"; "18;1", '~', "f7"
+    ; "57369;1", 'u', "f6"; "57370;1", 'u', "f7"
+    ; "17;2", '~', "shift-f6"; "57370;5", 'u', "ctrl-f7"
+    ; "17;1:1", '~', "f6"; "18;1:2", '~', "f7"
+    ; "57369;2:1", 'u', "shift-f6"; "57370;5:2", 'u', "ctrl-f7"
+    ];
+  List.iter (fun (parameters, final) ->
+    check (option string) "checkpoint release cannot invoke binding" None
+      (named ~parameters ~final))
+    [ "17;1:3", '~'; "18;1:3", '~'; "19;1:3", '~'; "57371;1:3", 'u'
+    ; "57369;1:3", 'u'; "57370;5:3", 'u' ]
+;;
+
 (* [ESC \[ 1;2 A] is Shift+Up. This is the shape that used to fall through to
    "unknown-esc": the parameters were no longer empty, and nothing read them. *)
 let test_modified_arrows () =
@@ -161,6 +179,7 @@ let () =
     [ ( "legacy"
       , [ test_case "arrows keep bare names" `Quick test_legacy_arrows_keep_bare_names
         ; test_case "tilde keys" `Quick test_legacy_tilde_keys
+        ; test_case "Ghostty MSX checkpoint keys" `Quick test_msx_checkpoint_keys
         ; test_case "backtab is not double named" `Quick test_backtab_is_not_double_named
         ] )
     ; ( "modifiers"

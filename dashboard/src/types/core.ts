@@ -565,7 +565,27 @@ export type KeeperLifecycleState =
   | 'crashed'
   | 'unknown'
 
+export interface GoalProofCriterion {
+  revision: string
+  title: string
+  metric: string | null
+  target_value: string | null
+}
+
+export type GoalProofCompletion =
+  | { state: 'idle' }
+  | { state: 'pending'; criterion: GoalProofCriterion; requestId: string; requestedAt: string }
+  | ({ criterion: GoalProofCriterion; requestId: string; runId: string;
+       evidence: string; recordedAt: string; actor: string } &
+       ({ state: 'proven' } | { state: 'refuted'; reason: string }))
+
+export type GoalProof =
+  | { state: 'current'; completion: GoalProofCompletion }
+  | { state: 'stale'; historical: Exclude<GoalProofCompletion, { state: 'idle' }> }
+  | { state: 'unreadable'; detail: string }
+
 export interface Goal {
+  verification?: GoalProof
   id: string
   title: string
   metric?: string | null

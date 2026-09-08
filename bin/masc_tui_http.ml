@@ -282,6 +282,14 @@ let frame_of_json json : Masc_tui_types.msx_frame option =
         ; msx_cartridge = member "cartridge" json |> to_string_option
         ; msx_disk = member "disk" json |> to_string_option
         ; msx_rgb = member "rgb_base64" json |> to_string |> Base64.decode_exn
+        ; msx_players =
+            (match member "players" json with
+             | `List items ->
+               List.filter_map
+                 (fun it ->
+                   match member "who" it with `String w -> Some w | _ -> None)
+                 items
+             | _ -> [])
         }
     with _ -> None)
   | _ -> None
@@ -353,6 +361,31 @@ let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
     | `Bool true -> Ok ()
     | _ -> (
       match member "message" json with `String m -> Error m | _ -> Error "load refused"))
+;;
+
+let post_msx_change_disk ~host ~port ~disk =
+  let body = Yojson.Safe.to_string (`Assoc ["disk", `String disk]) in
+  match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
+  | Error e -> Error e
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (match member "message" json with
+      | `String message -> Error message | _ -> Error "disk change refused")
+;;
+
+let post_msx_checkpoint ~host ~port ~restore ~slot =
+  let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
+  let body = Yojson.Safe.to_string (`Assoc ["slot", `String slot]) in
+  match post_json ~host ~port ~path ~body with
+  | Error e -> Error e
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (match member "message" json with
+      | `String message -> Error message | _ -> Error "checkpoint refused")
 ;;
 
 (* Advance the shared machine one poll-cadence step and read back the frame it

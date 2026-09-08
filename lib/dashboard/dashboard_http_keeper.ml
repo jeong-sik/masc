@@ -764,6 +764,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                           ("nodes", `Null);
                         ]
                   | Ok pending_approvals ->
+                      let verification_for_goal = Dashboard_goals.verification_projection ~config in
                       let forest =
                         Dashboard_goals.build_forest ~config ~goals:linked
                           ~tasks ~pending_approvals
@@ -777,7 +778,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                           ( "nodes",
                             `List
                               (List.map
-                                 Dashboard_goals.tree_node_to_json
+                                 (Dashboard_goals.tree_node_to_json ~verification_for_goal)
                                  forest) );
                         ])
                 else

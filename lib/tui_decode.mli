@@ -79,6 +79,7 @@ type goal_proof =
           recorded without text, which is a different fact from an empty
           measurement and is drawn as such. *)
   | Proof_refuted of string option  (** Refused; [Some] is why. *)
+  | Proof_stale of string option
   | Proof_unreadable of string option
       (** The ledger did not decode, or named a state this build does not know.
           Distinct from {!Proof_idle}: an unreadable store is not the same fact
@@ -2047,6 +2048,7 @@ type lane_run_gate_judgment =
   | Lane_run_not_gate_judgment
   | Lane_run_gate_judgment_pending
   | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_judgment_unavailable
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
@@ -2079,6 +2081,8 @@ type lane_run_detail =
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_input_availability : Exact_lane_run_registry.payload_availability
+  ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence

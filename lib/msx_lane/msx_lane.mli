@@ -36,6 +36,9 @@ type observation = {
   halted : bool;
   screen_text : string;
       (** name table as characters — meaningful when the pattern set is a font *)
+  screen_view : string;
+      (** a 64x24 luminance ASCII picture of the frame — readable in any mode,
+          for a keeper with no vision runtime. Rows are newline-separated. *)
   tiles : string list;
       (** GRAPHIC1/2/3 and MULTICOLOR: 24 rows of 32 name bytes as hex pairs,
           [..] for name 0. Other modes: empty. *)
@@ -99,10 +102,15 @@ val press :
   keys:key list ->
   hold_frames:int ->
   step_frames:int ->
+  sequence:bool ->
   (observation, error) result
-(** Holds [keys] for [hold_frames], then runs the rest of [step_frames]
-    released. [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key
-    the matrix has no place for is refused before anything is pressed. *)
+(** With [sequence] false, holds every key in [keys] together for
+    [hold_frames], then runs the rest of [step_frames] released -- a chord.
+    With [sequence] true, taps each key in turn (down [hold_frames], up, then
+    the rest of [step_frames] idle) so [keys] is a menu sequence, not a chord;
+    the call advances [List.length keys * step_frames] frames.
+    [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key the matrix
+    has no place for is refused before anything is pressed. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
@@ -120,3 +128,19 @@ type frame = {
 val frame : unit -> frame option
 (** The current native-resolution frame, or [None] when no machine is loaded.
     A spectator renders this; the pixels are the client's to downsample. *)
+
+val capture : unit -> (observation * frame, error) result
+(** Copy observation and pixels under the same machine lock. Does not advance
+    the machine. Consumers encode/persist the immutable copy outside the lock. *)
+
+val save : path:string -> (observation, error) result
+(** Atomically replace a named checkpoint with the complete machine and ledger.
+    Does not advance or eject the machine. *)
+
+val restore : path:string -> ledger_dir:string -> (observation, error) result
+(** Restore an independently decoded checkpoint. Invalid files leave the current
+    machine and ledger intact; ROM/media bytes come from the checkpoint. *)
+
+val change_disk : path:string -> backup_path:string -> (observation, error) result
+(** Decode a replacement in a private machine copy, checkpoint the outgoing
+    machine, then publish the swap. Never reboots or advances game time. *)

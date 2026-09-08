@@ -237,7 +237,8 @@ let handle_speak_with_outcome
    no timeout waits [Voice_bridge.default_capture_timeout_seconds] for
    speech), and a post-approval replay would open the microphone after the
    user has stopped talking. Inbound speech is input collection, not an
-   outbound effect; speak is the voice leaf the Gate still reviews. *)
+   outbound effect; speak is the voice leaf that still goes to the Gate,
+   where Auto_judge allows it as a local output and Manual parks it. *)
 let handle_listen_with_outcome ~(meta : keeper_meta) ~(args : Yojson.Safe.t) ()
   =
   (* No timeout named is the bridge's default, which is the number the tool

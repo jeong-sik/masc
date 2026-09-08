@@ -4368,6 +4368,7 @@ let planning_proof_mark = function
   | Tui_decode.Proof_pending -> (Theme.warn ()) ^ "\xe2\x80\xa6" ^ Ansi.reset
   | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ "\xe2\x9c\x93" ^ Ansi.reset
   | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ "\xe2\x9c\x97" ^ Ansi.reset
+  | Tui_decode.Proof_stale _ -> (Theme.warn ()) ^ "~" ^ Ansi.reset
   | Tui_decode.Proof_unreadable _ -> (Theme.warn ()) ^ "!" ^ Ansi.reset
 ;;
 
@@ -4381,6 +4382,8 @@ let planning_proof_detail (goal : planning_goal) =
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
   | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
+  | Tui_decode.Proof_stale _ ->
+      Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
@@ -6980,6 +6983,8 @@ let lane_run_gate_judgment_summary = function
       , Printf.sprintf
           "%sJUDGMENT%s  %spending%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
           Ansi.bold Ansi.reset (Theme.info ()) Ansi.reset )
+  | Tui_decode.Lane_run_gate_judgment_unavailable ->
+    Some (Theme.warn (), "JUDGMENT  원문 사용 불가 · 판정 여부를 확인할 수 없습니다")
   | Tui_decode.Lane_run_gate_judgment_not_reached ->
     Some
       ( Ansi.reset
@@ -7069,17 +7074,33 @@ let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
     "INPUT · VERIFICATION REQUEST", "OUTPUT · VERDICT + TOOL EVIDENCE"
   | Tui_decode.Lane_run_kind_other _, _ -> "INPUT", "OUTPUT"
 
+let lane_run_payload_availability_lines ~width availability payload =
+  match availability with
+  | Masc.Exact_lane_run_registry.Available ->
+    (match payload with
+     | Some value -> lane_run_payload_lines ~width value
+     | None -> [ Theme.warn (), "원문 상태 불일치: 사용 가능한 원문 필드가 없습니다" ])
+  | Masc.Exact_lane_run_registry.Not_loaded ->
+    [ Theme.muted (), "원문을 불러오지 않았습니다" ]
+  | Masc.Exact_lane_run_registry.Unavailable error ->
+    let text = "원문 사용 불가: " ^ Masc.Exact_lane_run_registry.payload_read_error_to_string error in
+    Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
+    |> List.map (fun line -> Theme.warn (), line)
+
+let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
+  lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
+
 let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
-  match detail.lrd_output with
-  | None ->
-    [ Theme.muted (), "(run has not completed; no output recorded)" ]
-  | Some output -> lane_run_payload_lines ~width output
+  match detail.lrd_output_availability, detail.lrd_output with
+  | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
+  | Some availability, output ->
+    lane_run_payload_availability_lines ~width availability output
 
 let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
   let input_title, output_title = lane_run_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
-  @ indent (lane_run_payload_lines ~width detail.lrd_input_payload)
+  @ indent (lane_run_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
   @ indent (lane_run_output_lines ~width detail)
 
@@ -7158,7 +7179,7 @@ let render_lane_run_detail (state : state) ~run_id =
         let left_width = max 1 ((inner - divider_width) / 2) in
         let right_width = max 1 (inner - left_width - divider_width) in
         let input_lines =
-          lane_run_payload_lines ~width:left_width detail.lrd_input_payload
+          lane_run_input_lines ~width:left_width detail
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
         let payload_rows =

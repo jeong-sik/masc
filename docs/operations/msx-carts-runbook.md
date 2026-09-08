@@ -92,5 +92,64 @@ Campaign acceptance still requires readable interactive menus, starting a
 scenario, taking turns, completing a battle, saving progress, restarting and
 restoring that progress, and an observed ending. Record source/binary identity,
 image and BIOS hashes, frame-numbered inputs and screenshots at these stages.
-The current in-memory machine and input ledger are not a persistent save:
-reloading/ejecting replaces it, and the core's save-state API is unimplemented.
+Use named checkpoints for persistence; the input ledger alone is not a save.
+
+## Checkpoints
+
+In the TUI game view, **F6** saves the `quick` checkpoint and **F7** restores
+it. The result remains visible above the game image. Keepers can use
+`masc_msx_save {"slot":"campaign"}` and
+`masc_msx_restore {"slot":"campaign"}` for named checkpoints. Names contain
+1–64 letters, digits, underscores or hyphens; the default is `quick`.
+
+Checkpoints live in `<base-path>/.masc/msx/saves/`. They include CPU, RAM,
+VRAM, mounted media, cartridge SRAM, open disk-file positions and input
+history. Saving does not advance the game. Restore resumes the saved frame
+without rebooting, including after server restart. Invalid checkpoints leave
+the current machine intact. Saving again replaces that named checkpoint.
+
+These are emulator checkpoints, separate from a game's own disk-save menu.
+The presence of a checkpoint does not establish that every game command or
+ending is supported. Keep a checkpoint before experimenting with later stages.
+
+## Multi-disk games
+
+When the game requests another disk, press **F8** in the TUI, select the
+requested `.dsk`, then press Return in the game if requested. Keepers use
+`masc_msx_change_disk {"disk":"game-b.dsk"}`. This preserves CPU, RAM and
+frame count; it does not reload or reboot the game.
+
+The outgoing machine is checkpointed as `before-disk-change` before replacement.
+Modified media remain in the session, indexed by the original image content:
+A → B → A reinserts the modified A, rather than rereading its original bytes.
+Named checkpoints retain all those disk versions, so restoring the campaign
+restores its off-drive media too. Original files in the inventory are unchanged.
+
+The operator-provided Sangokushi II A and B images were verified through
+scenario and ruler selection into the first game turn (January 220). The B
+image was present in an operator-owned download archive and was inserted
+without rebooting. Full campaign/ending verification remains separate; a
+successful disk prompt or first turn is not a completed playthrough.
+
+## Game-created data disks
+
+The core supports MSX-DOS FCB file creation (16h) and random block writes
+(26h) on valid formatted FAT12 media. The Sangokushi II D-disk creation menu
+was verified with the core CI runner: it created `SANGOKU2.SAV` (257,040 bytes)
+through 91 block writes and then requested A media, instead of entering its
+`DISK I/O ERROR` loop. This proves data-disk creation, not a campaign save or
+load later in the game.
+
+A zero-filled unformatted image is not a formatted DOS disk. Supply formatted
+blank media when the game requests a new data disk. Guest file writes remain
+in the emulated disk; save a named checkpoint or switch disks (which saves
+`before-disk-change`) to persist them. Inventory source images stay unchanged.
+
+## Disk BIOS versus game RAM
+
+Disk calls at addresses such as `0x4016` apply only when the disk interface
+slot is selected. A game's code in RAM at the same address must execute
+normally. Sangokushi II uses that address while converting HEXDATA; an
+unconditional disk trap returned early, skipped its file close and eventually
+exhausted the game's file handles. The slot-aware core retains ordinary RAM
+execution and direct/inter-slot disk calls.

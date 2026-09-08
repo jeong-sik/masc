@@ -93,6 +93,35 @@ let test_api_auth_rotates_invalid_request_judges () =
     Alcotest.failf "invalid request should exhaust, got %s"
       (KFR.route_kind_label other)
 
+(* #33057: the driver already moves a lane to its next candidate when masc's
+   own pre-wire policy refuses the attempt, but the route labelled that
+   failure a deterministic terminal one. The label now says rotate; the
+   provider-side reasons keep their terminal label. *)
+let test_api_attempt_rejected_routes_as_rotation () =
+  check_route
+    "pre-wire policy refusal rotates"
+    (KFR.Rotate_now { rotate = KFR.Attempt_rejected })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.InvalidRequest
+          { message = "reasoning effort 'xhigh' is outside the ladder for this model"
+          ; reason = Llm_provider.Retry.Attempt_rejected
+          }));
+  List.iter
+    (fun (label, reason) ->
+      match
+        route_of_agent_core_error
+          (Agent_core.Error.Api
+             (Llm_provider.Retry.InvalidRequest { message = label; reason }))
+      with
+      | KFR.Exhausted_visible_alive { terminal = KFR.Deterministic_request; _ } -> ()
+      | other ->
+        Alcotest.failf "%s should stay terminal, got %s:%s" label
+          (KFR.route_kind_label other) (KFR.route_class_label other))
+    [ "json parse error", Llm_provider.Retry.Json_parse_error
+    ; "body too large", Llm_provider.Retry.Request_body_too_large { actual_bytes = 1; limit_bytes = 0 }
+    ; "unknown 400", Llm_provider.Retry.Unknown_invalid_request
+    ]
+
 let test_api_input_capacity_is_terminal_judgment () =
   let constraint_ =
     Llm_provider.Serving_constraint.make
@@ -289,6 +318,10 @@ let () =
             `Quick
             test_api_server_error_uses_typed_variant
         ; Alcotest.test_case "auth rotates, invalid exhausts" `Quick test_api_auth_rotates_invalid_request_judges
+        ; Alcotest.test_case
+            "attempt rejected routes as rotation"
+            `Quick
+            test_api_attempt_rejected_routes_as_rotation
         ; Alcotest.test_case
             "input capacity is terminal observation"
             `Quick

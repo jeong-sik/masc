@@ -347,6 +347,7 @@ let bootstrap_base_path_config_root ~base_path =
              and no embedded assets: %s"
             config_root);
     if mode = `Auto then
+      (* See seed_missing_builtin_skills: startup uses files; init reports the count. *)
       ignore (seed_missing_builtin_skills ~base_path : int);
     Config_dir_resolver.reset ())
 ;;

@@ -31,6 +31,29 @@ Identity declarations are not connected accounts. Existing user skill roots are
 not copied by this seed but can be discovered later by runtime configuration.
 
 Remaining acceptance: final combined release binaries, new Linux image/tool smoke,
-model credentials, first Keeper turn and sustained recovery/continuity. Linux microVM
-is currently blocked by `microvm_work_volume_unsupported` in the nerdctl/Kata path;
-it requires implementation work, not merely another smoke run.
+model credentials, first Keeper turn and sustained recovery/continuity. In this
+measured `6b07cc4c38` binary, Linux microVM was blocked by
+`microvm_work_volume_unsupported` in the nerdctl/Kata path.
+Later volume implementation and real guest measurements are recorded separately in
+[Kata volume evidence](kata-volume.md).
+
+## Later installed first-turn proof
+
+Binary `585db68fd9253fd36a89066ddf1f92fddf361f92` from
+[Release run 34185036819](https://github.com/jeong-sik/masc/actions/runs/34185036819),
+macOS ARM artifact `10040419569`, passed actual installation and first-turn execution.
+[Receipt](first-keeper-turn-macos.json) binds its binary SHA and freshly built image;
+[tool proof](first-keeper-tool-proof.json) records the actual guest hostname/UID/path.
+
+The installer seeded the complete browser-lanes package and no Keepers, then served
+the installed dashboard. The test created a Keeper through the installed CLI,
+sent a chat request, received a real Docker Execute result, checked the host-mounted
+file, and matched the tool call/result/final answer in a durable checkpoint.
+The model was a loopback scripted fixture. Both approval mechanisms were explicitly
+allowed in the disposable workspace. No live workspace or provider credentials were used.
+
+On this Colima host, the scratch workspace had to live under the shared home directory:
+the macOS system temporary directory was not visible to Docker. The old local general
+image also lacked Python, so the binary's embedded recipe was built into a separate
+tag before acceptance. This is not a clean macOS VM measurement or a proof of real
+model quality, Linux first-turn operation, or long-running Keeper continuity.

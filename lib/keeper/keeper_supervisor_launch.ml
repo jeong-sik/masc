@@ -85,20 +85,19 @@ let launch_supervised_fiber_body
       Atomic.set lifecycle_result (Some result);
       result
     in
-    (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
-     and break the initial proactive deadlock. *)
-    let bootstrap_signal : Keeper_event_queue.stimulus =
-      { post_id = "bootstrap"
-      ; urgency = Keeper_event_queue.Normal
-      ; arrived_at = Unix.gettimeofday ()
-      ; payload = Keeper_event_queue.Bootstrap
-      }
-    in
-    Keeper_registry_event_queue.enqueue
-      ?intake_token
-      ~base_path
-      meta.name
-      bootstrap_signal;
+    (* Owner restoration does not itself request a model turn. Only an
+       autonomous Keeper gets an unsolicited warm-up; on-demand/manual owners
+       retain their existing explicitly queued work without a synthetic wake. *)
+    if Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta then (
+      let bootstrap_signal : Keeper_event_queue.stimulus =
+        { post_id = "bootstrap"
+        ; urgency = Keeper_event_queue.Normal
+        ; arrived_at = Unix.gettimeofday ()
+        ; payload = Keeper_event_queue.Bootstrap
+        }
+      in
+      Keeper_registry_event_queue.enqueue
+        ?intake_token ~base_path meta.name bootstrap_signal);
     let fork_body body =
       match
         Keeper_lane.fork

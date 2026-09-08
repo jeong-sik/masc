@@ -10,6 +10,7 @@ type observation = {
   pc : int;
   halted : bool;
   screen_text : string;
+  screen_view : string;
   tiles : string list;
   sprites : sprite list;
   cartridge : string option;

@@ -31,6 +31,13 @@ class UpgradeConfigTest(unittest.TestCase):
             skill.write_text('operator skill\n')
             binary = base / 'masc'
             binary.write_text('''#!/usr/bin/env bash
+# Stands in for `masc init`, reading its flags the way the binary does:
+# --base-path <dir>, --force, and --skills-only (an upgrade seeds Skills
+# alone and leaves the config tree as it is). The subcommand and the base
+# path are asserted rather than read by position: the upgrade path inserts
+# --skills-only ahead of --base-path, and a positional read turned the flag
+# itself into a path. optional.toml stands for a config file the operator
+# deleted -- an ordinary upgrade must not put it back.
 set -eu
 test "$1" = init
 shift
@@ -42,7 +49,7 @@ while [ "$#" -gt 0 ]; do
     --base-path) seed_base="$2"; shift 2 ;;
     --skills-only) skills_only=1; shift ;;
     --force) force_seed=1; shift ;;
-    *) exit 2 ;;
+    *) echo "unexpected init argument: $1" >&2; exit 2 ;;
   esac
 done
 test -n "$seed_base"

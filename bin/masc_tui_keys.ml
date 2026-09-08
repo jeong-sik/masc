@@ -76,12 +76,15 @@ let for_surface = function
       [ b Navigate "1 / 2" "Events / Logs"
       ; b Navigate "j/k" "select / scroll"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
-      ; b Act "Esc" "back" ~help:"close event evidence"
+      (* One key, one row. Esc closes the evidence pane when one is open
+         (masc_tui.ml guards the close on acting_detail) and otherwise
+         leaves the surface, so two rows read as two bindings. *)
+      ; b Act "Esc" "back"
+          ~help:"close event evidence; from the list, back to Overview"
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
       ; b Act "f" "filter" ~help:"cycle the filter"
-      ; b Act "Esc" "overview"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]

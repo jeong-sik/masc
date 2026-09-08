@@ -227,6 +227,18 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${TARGET_SUITES}" ]; then
+            # Four suites read a file through a Keeper's sandbox, and on this
+            # runner the read answers "image_not_found: keeper sandbox image
+            # masc-sandbox:general is not available" -- 14 assertions counted
+            # as red for an image nothing here builds. The recipe lives in the
+            # binary (Keeper_sandbox_image.dockerfile) so that `masc
+            # sandbox-image` works on a host with no checkout; --print is how
+            # it is read without a checkout's copy going stale. Debian slim
+            # plus bash, ripgrep and git, so this is a short build, and it is
+            # done only on the full lane -- the one whose verdict is main's.
+            opam exec -- dune build --root . bin/main_eio.exe
+            ./_build/default/bin/main_eio.exe sandbox-image --print \
+              | docker build -t masc-sandbox:general -
             scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
             exit 0
           fi

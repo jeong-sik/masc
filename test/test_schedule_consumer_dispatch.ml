@@ -2374,11 +2374,18 @@ let replay_result_ref () =
   | Error detail -> fail (Tool_output.make_error_to_string detail)
 ;;
 
+(* Labels, not a count. These assertions used to compare [List.length], and a
+   count says nothing about which step it is missing: #32869 added a
+   [requested] row so the parked call is visible before its answer, and both
+   callers went off by one with no hint of what the extra row was. A label
+   list names the drift in the failure message. *)
 let approval_lifecycle_phases ~base_path ~keeper_name =
   Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name
   |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
     Option.map
-      (fun lifecycle -> lifecycle.Keeper_chat_store.phase)
+      (fun lifecycle ->
+         Keeper_chat_store.approval_lifecycle_phase_to_label
+           lifecycle.Keeper_chat_store.phase)
       message.approval_lifecycle)
 ;;
 
@@ -2517,8 +2524,10 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
   check int "spent grant replay left the queue" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
-  check int "drain committed resolution, replay, and continuation receipts" 3
-    (approval_lifecycle_phases ~base_path ~keeper_name |> List.length)
+  check (list string)
+    "drain committed request, resolution, replay, and continuation receipts"
+    [ "requested"; "resolved_approved"; "replay_applied"; "continuation_recorded" ]
+    (approval_lifecycle_phases ~base_path ~keeper_name)
 ;;
 
 let test_projection_failure_keeps_spent_replay_queued () =
@@ -2611,8 +2620,9 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
      failf "a resolution with a durable record was retired as absent: %s" approval_id
    | Error detail -> fail detail);
-  check int "rejection owns one visible resolution receipt" 1
-    (approval_lifecycle_phases ~base_path ~keeper_name |> List.length);
+  check (list string) "rejection owns one visible resolution receipt"
+    [ "requested"; "resolved_rejected" ]
+    (approval_lifecycle_phases ~base_path ~keeper_name);
   (match
      match selection.Keeper_event_queue_state.source.payload with
      | Keeper_event_queue.Hitl_resolved resolution ->
@@ -2626,8 +2636,9 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
    | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
      fail "rejection incorrectly waited for a replay outcome"
    | Error detail -> fail detail);
-  check int "completed rejection turn owns a continuation receipt" 2
-    (approval_lifecycle_phases ~base_path ~keeper_name |> List.length);
+  check (list string) "completed rejection turn owns a continuation receipt"
+    [ "requested"; "resolved_rejected"; "continuation_recorded" ]
+    (approval_lifecycle_phases ~base_path ~keeper_name);
   check int "rejection stays queued for the continuation turn" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);

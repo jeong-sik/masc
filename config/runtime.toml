@@ -168,7 +168,7 @@ path = "/models"
 
 [providers.glm-coding.credentials]
 type = "env"
-key = "ZAI_API_KEY_SB"
+key = "ZAI_API_KEY"
 
 [providers.kimi_coding]
 display-name = "Kimi For Coding Subscription"
@@ -588,7 +588,6 @@ supports-audio-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
-wizard-default = true
 
 [deepseek.deepseek-v4-pro]
 
@@ -916,6 +915,10 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-glm-5-3-flash]
+# The wizard preselects this provider, so pressing Enter has to land on the
+# same model [runtime].default already names. It sat on deepseek-v4-flash,
+# and accepting the preselection quietly changed the default.
+wizard-default = true
 
 [models.ollama-cloud-gpt-oss-20b]
 api-name = "gpt-oss:20b"

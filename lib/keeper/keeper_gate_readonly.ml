@@ -145,21 +145,65 @@ let gh_flag_leaves_the_guest flag = String.equal flag "--web" || String.equal fl
    open language and exactly what this table refuses to become. A field flag
    therefore stays a write-shaped request and keeps its judge turn, whatever
    the query says. *)
-let gh_api_flag_writes flag =
-  List.mem flag
-    [ "-X"; "--method"; "-f"; "--raw-field"; "-F"; "--field"; "--input" ]
-  || String.starts_with ~prefix:"-X" flag
-  || String.starts_with ~prefix:"--method=" flag
-  || String.starts_with ~prefix:"--field=" flag
-  || String.starts_with ~prefix:"--raw-field=" flag
-  || String.starts_with ~prefix:"--input=" flag
+(* Parse only the API options whose semantics are known to be reads. Short
+   options may cluster ([-ifquery=...] means [-i -f query=...]); a value-taking
+   option consumes the rest of its token, not more option letters. *)
+type gh_api_option = Api_switch | Api_value | Api_unclassified
+
+let gh_api_long_option = function
+  | "--include" | "--paginate" | "--silent" | "--slurp" | "--verbose"
+  | "--help" -> Api_switch
+  | "--cache" | "--hostname" | "--header" | "--jq" | "--preview"
+  | "--template" -> Api_value
+  | _ -> Api_unclassified
+;;
+
+let gh_api_short_option = function
+  | 'i' -> Api_switch
+  | 'H' | 'q' | 'p' | 't' -> Api_value
+  | _ -> Api_unclassified
+;;
+
+let gh_api_argv_is_read argv =
+  let rec parse ~endpoint = function
+    | [] -> endpoint
+    | "--" :: [ _ ] -> not endpoint
+    | "--" :: _ -> false
+    | token :: rest when String.starts_with ~prefix:"--" token ->
+      let name, attached =
+        match String.index_opt token '=' with
+        | None -> token, false
+        | Some index -> String.sub token 0 index, true
+      in
+      (match gh_api_long_option name with
+       | Api_switch -> parse ~endpoint rest
+       | Api_value when attached -> parse ~endpoint rest
+       | Api_value -> consume_value ~endpoint rest
+       | Api_unclassified -> false)
+    | token :: rest when String.length token > 1 && token.[0] = '-' ->
+      short ~endpoint token 1 rest
+    | _ :: rest -> not endpoint && parse ~endpoint:true rest
+  and consume_value ~endpoint = function
+    | [] -> false
+    | _ :: rest -> parse ~endpoint rest
+  and short ~endpoint token index rest =
+    if index = String.length token then parse ~endpoint rest
+    else
+      match gh_api_short_option token.[index] with
+      | Api_switch -> short ~endpoint token (index + 1) rest
+      | Api_value ->
+        if index + 1 < String.length token then parse ~endpoint rest
+        else consume_value ~endpoint rest
+      | Api_unclassified -> false
+  in
+  parse ~endpoint:false argv
+;;
 
 let gh_argv_is_read argv =
   match argv with
   | [] -> false
   | "api" :: rest ->
-    rest <> []
-    && not (List.exists (fun flag -> gh_api_flag_writes flag || gh_flag_leaves_the_guest flag) rest)
+    gh_api_argv_is_read rest
   | family :: verb :: rest -> (
     match List.assoc_opt family gh_read_verbs_by_family with
     | None -> false

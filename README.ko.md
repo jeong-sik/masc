@@ -477,4 +477,5 @@ Releases입니다. 현재 릴리스 계열은 **0.34.0**입니다.
 
 ## 라이선스
 
-MIT. [`LICENSE`](LICENSE)를 보세요.
+MIT. [`LICENSE`](LICENSE)를 보세요. 포함된 폰트의 라이선스는
+[외부 저작물 고지](THIRD-PARTY-LICENSES.md)에 있습니다.

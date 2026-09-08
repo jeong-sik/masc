@@ -496,6 +496,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                 (* The foreground leader is already gone and its group has
                    been signalled. Preserve bytes it left buffered, then stop
                    waiting for a descendant's inherited descriptor. *)
+                (* See group cleanup above: EOF and a remaining inherited pipe both end this drain. *)
                 ignore (read_available () : [ `Eof | `Would_block ]);
                 stdout_eof := true
               end else if deadline_reached () then begin

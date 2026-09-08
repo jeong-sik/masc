@@ -39,6 +39,7 @@ let rec wait pid =
 let finish t pid =
   (* [observe] both retains the leader anchor and detects loss of wait
      authority. No other code may reap a child owned by this module. *)
+  (* See [observe]: running and exited children both retain our wait authority. *)
   ignore (observe t pid : bool);
   (try Unix.kill (-pid) Sys.sigkill with
    | Unix.Unix_error (Unix.ESRCH, _, _) -> ());
@@ -65,4 +66,6 @@ let terminate t = locked t (fun () ->
 let close t = locked t (fun () ->
   match t.state with
   | Unstarted | Reaped _ | Lost -> ()
-  | Owned -> ignore (finish t t.pid : Unix.process_status))
+  | Owned ->
+    (* See [finish]: the exit status is recorded in [t] before it is returned. *)
+    ignore (finish t t.pid : Unix.process_status))

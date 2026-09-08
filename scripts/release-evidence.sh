@@ -47,33 +47,45 @@ for smoke_fixture in runtime.toml agent-core-models-overlay.toml; do
 done
 
 mkdir -p "$(dirname "$OUTFILE")"
-out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
+
+# The report is the only thing that belongs beside the binaries. Everything
+# below is scratch the run produces on the way there -- a server log, four
+# captured HTTP exchanges, the dev token the probe minted -- and it used to be
+# written next to $OUTFILE. release.yml uploads dist/* wholesale, so all of it
+# became public release assets: v0.33.0 carried 21 of them and v0.34.0 carried
+# 28, including dashboard-dev-token.json with a 64-character admin token in
+# plain text. Scratch goes in the temp directory that already exists for it.
 
 tmp="$(mktemp -d -t masc-release-evidence.XXXXXX)"
+# Everything the run writes except the report itself, kept off $OUTFILE's
+# directory so a new capture cannot land beside the binaries by default --
+# which is how these became release assets in the first place.
+scratch_dir="$tmp/scratch"
+mkdir -p "$scratch_dir"
 base_path="$tmp/base"
 prefix_dir="$tmp/prefix"
 installed_bin="$prefix_dir/masc"
-server_log="$out_dir/server.log"
-health_json="$out_dir/health.json"
-initialize_headers="$out_dir/initialize.headers"
-initialize_body="$out_dir/initialize.body"
-initialize_json="$out_dir/initialize.json"
-tools_headers="$out_dir/tools-list.headers"
-tools_body="$out_dir/tools-list.body"
-tools_json="$out_dir/tools-list.json"
-status_headers="$out_dir/masc-status.headers"
-status_body="$out_dir/masc-status.body"
-status_json="$out_dir/masc-status.json"
-briefing_headers="$out_dir/dashboard-briefing.headers"
-briefing_body="$out_dir/dashboard-briefing.body"
-briefing_json="$out_dir/dashboard-briefing.json"
-project_snapshot_headers="$out_dir/project-snapshot.headers"
-project_snapshot_body="$out_dir/project-snapshot.body"
-project_snapshot_json="$out_dir/project-snapshot.json"
-dev_token_json="$out_dir/dashboard-dev-token.json"
-install_version_stdout="$out_dir/install-version.stdout"
-install_version_stderr="$out_dir/install-version.stderr"
-lifecycle_dir="$out_dir/keeper-full-lifecycle"
+server_log="$scratch_dir/server.log"
+health_json="$scratch_dir/health.json"
+initialize_headers="$scratch_dir/initialize.headers"
+initialize_body="$scratch_dir/initialize.body"
+initialize_json="$scratch_dir/initialize.json"
+tools_headers="$scratch_dir/tools-list.headers"
+tools_body="$scratch_dir/tools-list.body"
+tools_json="$scratch_dir/tools-list.json"
+status_headers="$scratch_dir/masc-status.headers"
+status_body="$scratch_dir/masc-status.body"
+status_json="$scratch_dir/masc-status.json"
+briefing_headers="$scratch_dir/dashboard-briefing.headers"
+briefing_body="$scratch_dir/dashboard-briefing.body"
+briefing_json="$scratch_dir/dashboard-briefing.json"
+project_snapshot_headers="$scratch_dir/project-snapshot.headers"
+project_snapshot_body="$scratch_dir/project-snapshot.body"
+project_snapshot_json="$scratch_dir/project-snapshot.json"
+dev_token_json="$scratch_dir/dashboard-dev-token.json"
+install_version_stdout="$scratch_dir/install-version.stdout"
+install_version_stderr="$scratch_dir/install-version.stderr"
+lifecycle_dir="$scratch_dir/keeper-full-lifecycle"
 lifecycle_bundle_json="$lifecycle_dir/bundle.json"
 lifecycle_bundle_md="$lifecycle_dir/bundle.md"
 

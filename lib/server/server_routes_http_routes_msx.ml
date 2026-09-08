@@ -257,6 +257,62 @@ let handle_tick request reqd =
       respond_json_value_with_cors ~status request reqd json)
 ;;
 
+let checkpoint_response ~base_path ~restore ~body =
+  let error status message = status, load_result_json ~ok:false ~message in
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message -> error `Bad_request message
+  | args ->
+    (match Tool_misc_msx_lane.checkpoint_slot args with
+     | Error message -> error `Bad_request message
+     | Ok _ ->
+       match Executor_pool_ref.submit_strict (fun () ->
+         let tool_name = if restore then "masc_msx_restore" else "masc_msx_save" in
+         let result = Tool_misc_msx_lane.handle_checkpoint ~restore ~tool_name
+             ~start_time:(Time_compat.now ()) ~base_path args in
+         let ok = Tool_result.is_success result in
+         let status = match Tool_result.failure_class result with
+           | None -> `OK
+           | Some Tool_result.Workflow_rejection -> `Bad_request
+           | Some _ -> `Internal_server_error in
+         status,
+         load_result_json ~ok ~message:(Tool_result.message result)) with
+       | Ok response -> response
+       | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
+         error `Service_unavailable "MSX checkpoint worker is unavailable"
+       | Error failure ->
+         Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+         error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
+;;
+
+let handle_change_disk ~base_path request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let error status message = status, load_result_json ~ok:false ~message in
+    let status, json = match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error message -> error `Bad_request message
+      | args -> (
+        match Executor_pool_ref.submit_strict (fun () ->
+          let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
+              ~start_time:(Time_compat.now ()) ~base_path args in
+          let ok = Tool_result.is_success result in
+          let status = match Tool_result.failure_class result with
+            | None -> `OK | Some Tool_result.Workflow_rejection -> `Bad_request
+            | Some _ -> `Internal_server_error in
+          status, load_result_json ~ok ~message:(Tool_result.message result)) with
+        | Ok response -> response
+        | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
+          error `Service_unavailable "MSX disk worker is unavailable"
+        | Error failure ->
+          Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying") in
+    respond_json_value_with_cors ~status request reqd json)
+;;
+
+let handle_checkpoint ~base_path ~restore request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let status, json = checkpoint_response ~base_path ~restore ~body in
+    respond_json_value_with_cors ~status request reqd json)
+;;
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
@@ -280,6 +336,24 @@ let add_routes router =
          (fun state _req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            handle_load ~base_path request reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_msx_save"
+         (fun state _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           handle_checkpoint ~base_path ~restore:false request reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_msx_restore"
+         (fun state _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           handle_checkpoint ~base_path ~restore:true request reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_msx_change_disk"
+         (fun state _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           handle_change_disk ~base_path request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"

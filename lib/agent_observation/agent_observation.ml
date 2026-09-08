@@ -106,6 +106,17 @@ let canonical_url_of_remote raw =
            | Some segs -> Some (String.concat "_" (host_slug :: segs)))
 ;;
 
+(* A token is written as a remote when it carries a scheme [strip_scheme]
+   strips or the scp-like [user@host:path] form [normalize_scp_like]
+   rewrites. [canonical_url_of_remote] alone also accepts host-less input:
+   [owner/repo] canonicalises with [owner] in the host slot. A caller
+   scanning free argv needs this predicate to tell a remote from a relative
+   path, an API endpoint path or a refspec (#34401). *)
+let remote_url_syntax raw =
+  let s = String.lowercase_ascii (String.trim raw) in
+  s <> "" && (strip_scheme s <> s || normalize_scp_like s <> s)
+;;
+
 (* RFC-0378 §5.1: a code fact's address, minted once where the write is
    attributed and carried as a parsed value from then on. Consumers never
    re-derive either half from tool input or store layout — [v] is the only

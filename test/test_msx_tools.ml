@@ -258,6 +258,156 @@ let test_disk_boot_smoke () =
   | _ -> Printf.printf "not run: MSX_ROMS and MSX_DISK are unset on this host\n%!"
 ;;
 
+let test_checkpoint_roundtrip () =
+  with_workspace @@ fun base_path ->
+  let call name args = dispatch ~base_path name args in
+  let load = call "masc_msx_load" ["roms_dir", `String ""] in
+  check bool "initial machine loaded" true (is_completed load);
+  let press = call "masc_msx_press" ["keys", `List [`String "space"]; "frames", `Int 7] in
+  check bool "input recorded" true (is_completed press);
+  let before = frame_of press and ledger_before = Msx_lane.ledger () in
+  let save = call "masc_msx_save" ["slot", `String "campaign"] in
+  check bool "checkpoint saved" true (is_completed save);
+  check int "saving does not advance" before (frame_of save);
+  let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
+  let path = Filename.concat (Filename.concat dir "saves") "campaign.json" in
+  check bool "checkpoint is durable bytes" true (String.length (In_channel.with_open_bin path In_channel.input_all) > 0);
+  ignore (call "masc_msx_step" ["frames", `Int 13] : Tool_result.result);
+  ignore (call "masc_msx_eject" [] : Tool_result.result);
+  let restore = call "masc_msx_restore" ["slot", `String "campaign"] in
+  check bool "checkpoint restored after eject" true (is_completed restore);
+  check int "restored original frame" before (frame_of restore);
+  check bool "input history restored" true (Msx_lane.ledger () = ledger_before);
+  List.iter (fun slot ->
+    check bool "unsafe slot refused" true (rejected (call "masc_msx_save" ["slot", `String slot]));
+    check int "bad slot preserves machine" before (frame_of (call "masc_msx_screen" []))
+  ) [""; ".."; "../escape"; "with/slash"; "with space"];
+  Out_channel.with_open_bin path (fun oc -> output_string oc "{broken");
+  check bool "corrupt checkpoint refused" true (rejected (call "masc_msx_restore" ["slot", `String "campaign"]));
+  check int "corrupt checkpoint preserves machine" before (frame_of (call "masc_msx_screen" []));
+  check bool "corrupt checkpoint preserves ledger" true (Msx_lane.ledger () = ledger_before)
+;;
+
+let lane_observation label = function
+  | Ok observation -> observation
+  | Error error -> fail (label ^ ": " ^ Msx_lane.error_to_string error)
+;;
+
+(* Synthetic firmware and guest code exercise the disk BIOS through CPU
+   execution. SPACE reads sector 1 onto the screen; RETURN writes '!' to it.
+   Disk A's boot code first writes '~', so reinserting the original image
+   instead of the guest-modified image is observable. No commercial ROMs. *)
+let disk_swap_fixture base_path =
+  let roms = Filename.concat base_path "synthetic-bios" in
+  Sys.mkdir roms 0o755;
+  let main = Bytes.make 32768 '\000' in
+  List.iteri (fun i n -> Bytes.set main i (Char.chr n))
+    [0x3e;0xc0;0xd3;0xa8;0x18;0xfe];
+  List.iter (fun (name, bytes) ->
+    Out_channel.with_open_bin (Filename.concat roms name) (fun oc -> output_bytes oc bytes))
+    [ "cbios_main_msx2.rom", main
+    ; "cbios_logo_msx2.rom", Bytes.make 16384 '\000'
+    ; "cbios_sub.rom", Bytes.make 16384 '\000' ];
+  let disk = Bytes.make 1024 '\000' in
+  let code offset bytes =
+    List.iteri (fun i n -> Bytes.set disk (offset + i) (Char.chr n)) bytes in
+  code 0x1e [0x3e;0x7e;0xcd;0x00;0xc1;0xc3;0x50;0xc0];
+  code 0x50 [
+    0x3e;0x07;0xd3;0xaa;0xdb;0xa9;0xe6;0x80; (* RETURN at row 7, bit 7 *)
+    0x20;0x05;0x3e;0x21;0xcd;0x00;0xc1;
+    0x3e;0x08;0xd3;0xaa;0xdb;0xa9;0xe6;0x01; (* SPACE at row 8, bit 0 *)
+    0xc2;0x50;0xc0;0xcd;0x40;0xc1;0xc3;0x50;0xc0 ];
+  code 0x100 [
+    0x32;0x00;0xc2; (* LD (C200),A *)
+    0xaf;0x01;0x00;0x01;0x11;0x01;0x00;0x21;0x00;0xc2;
+    0x37;0xcd;0x10;0x40;0xc9 ]; (* SCF; CALL DSKIO; RET *)
+  code 0x140 [
+    0xaf;0x01;0x00;0x01;0x11;0x01;0x00;0x21;0x00;0xc4;
+    0xcd;0x10;0x40;
+    0x3e;0x00;0xd3;0x99;0x3e;0x40;0xd3;0x99;
+    0x3a;0x00;0xc4;0xd3;0x98;0xc9 ];
+  let a = Filename.concat base_path "A.dsk" and b = Filename.concat base_path "B.dsk" in
+  Out_channel.with_open_bin a (fun oc -> output_bytes oc disk);
+  Bytes.fill disk 512 512 'B';
+  Out_channel.with_open_bin b (fun oc -> output_bytes oc disk);
+  let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
+  let loaded = Msx_lane.load ~ledger_dir ~roms_dir:roms ~cart_path:None ~disk_path:(Some a)
+    |> lane_observation "synthetic disk boot" in
+  check (option string) "disk A is mounted" (Some "A.dsk") loaded.disk;
+  ledger_dir, a, b
+;;
+
+let read_guest_disk expected =
+  let result = Msx_lane.press ~who:"disk-test" ~keys:[Msx_lane.key_of_string "space" |> Result.get_ok]
+    ~hold_frames:1 ~step_frames:2 |> lane_observation "guest disk read" in
+  check char "guest reads retained disk bytes" expected result.screen_text.[0]
+;;
+
+let test_disk_swap_retains_guest_writes_and_checkpoint () =
+  with_workspace @@ fun base_path ->
+  let _, a, b = disk_swap_fixture base_path in
+  let call name args = dispatch ~base_path name args in
+  let swap path =
+    let before = Msx_lane.screen () |> lane_observation "before swap" in
+    let result = call "masc_msx_change_disk" ["disk", `String path] in
+    check bool "disk swap succeeds" true (is_completed result);
+    check int "disk swap preserves execution frame" before.frame (frame_of result)
+  in
+  read_guest_disk '~';
+  swap b;
+  read_guest_disk 'B';
+  let write = call "masc_msx_press"
+    ["keys", `List [`String "return"]; "hold_frames", `Int 1; "frames", `Int 2] in
+  check bool "guest modifies disk B" true (is_completed write);
+  read_guest_disk '!';
+  swap a;
+  read_guest_disk '~';
+  let saved = call "masc_msx_save" ["slot", `String "two-disks"] in
+  check bool "checkpoint includes both modified media" true (is_completed saved);
+  check bool "eject succeeds" true (is_completed (call "masc_msx_eject" []));
+  let restored = call "masc_msx_restore" ["slot", `String "two-disks"] in
+  check bool "two-disk checkpoint restores" true (is_completed restored);
+  check int "checkpoint restores saved frame" (frame_of saved) (frame_of restored);
+  swap b;
+  read_guest_disk '!';
+  swap a;
+  read_guest_disk '~';
+  check char "source A image remains unchanged" '\000'
+    (In_channel.with_open_bin a In_channel.input_all).[512];
+  check char "source B image remains unchanged" 'B'
+    (In_channel.with_open_bin b In_channel.input_all).[512]
+;;
+
+let test_disk_backup_failure_preserves_machine () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir, _, b = disk_swap_fixture base_path in
+  read_guest_disk '~';
+  let snapshot = Filename.concat base_path "before.json" in
+  ignore (Msx_lane.save ~path:snapshot |> lane_observation "save baseline");
+  let before = In_channel.with_open_bin snapshot In_channel.input_all in
+  let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+  let ledger_before = In_channel.with_open_bin ledger_path In_channel.input_all in
+  check bool "baseline input ledger is nonempty" true (ledger_before <> "");
+  let blocked_parent = Filename.concat base_path "not-a-directory" in
+  Out_channel.with_open_bin blocked_parent (fun oc -> output_string oc "keep me");
+  let blocked_destination = Filename.concat base_path "destination-directory" in
+  Sys.mkdir blocked_destination 0o755;
+  List.iter (fun backup_path ->
+    (match Msx_lane.change_disk ~path:b ~backup_path with
+     | Error (Msx_lane.Unreadable _) -> ()
+     | Error e -> fail ("wrong backup failure: " ^ Msx_lane.error_to_string e)
+     | Ok _ -> fail "swap must not publish when its backup fails");
+    ignore (Msx_lane.save ~path:snapshot |> lane_observation "save after rejected swap");
+    check string "failed backup preserves disk, media, CPU, frame and input" before
+      (In_channel.with_open_bin snapshot In_channel.input_all);
+    check string "failed backup preserves on-disk ledger" ledger_before
+      (In_channel.with_open_bin ledger_path In_channel.input_all)
+  ) [Filename.concat blocked_parent "before.json"; blocked_destination];
+  check string "existing filesystem obstruction is unchanged" "keep me"
+    (In_channel.with_open_bin blocked_parent In_channel.input_all);
+  read_guest_disk '~'
+;;
+
 let test_key_vocabulary () =
   let named =
     [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
@@ -293,6 +443,9 @@ let test_registration () =
       | [] -> fail ("missing descriptor for " ^ name)
       | _ -> fail ("duplicate descriptor for " ^ name))
     [ (Tool_schemas_misc.Misc_msx_load, "masc_msx_load", false)
+    ; (Tool_schemas_misc.Misc_msx_change_disk, "masc_msx_change_disk", false)
+    ; (Tool_schemas_misc.Misc_msx_save, "masc_msx_save", false)
+    ; (Tool_schemas_misc.Misc_msx_restore, "masc_msx_restore", false)
     ; (Tool_schemas_misc.Misc_msx_eject, "masc_msx_eject", false)
     ; (Tool_schemas_misc.Misc_msx_screen, "masc_msx_screen", true)
     ; (Tool_schemas_misc.Misc_msx_press, "masc_msx_press", false)
@@ -389,6 +542,9 @@ let () =
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "disk image loads into the drive" `Quick test_disk_load
+        ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
+        ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
+        ; test_case "failed disk backup preserves machine and ledger" `Quick test_disk_backup_failure_preserves_machine
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary

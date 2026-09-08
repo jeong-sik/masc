@@ -42,7 +42,7 @@ template_variables: [task_title, task_description, agent_name, completion_notes,
 
 텍스트로 verdict를 대신하지 마세요. 보고 도구 호출이 없으면 Task는 종결되지 않습니다.
 
-### evidence_posture.note_only (vars: none)
+### evidence_posture.note_only
 
 <evidence_posture>
 제출 스냅샷에는 읽을 수 있는 온전한 artifact가 없습니다. 노트나 참조만으로 승인하지 마세요. 조회 도구가 제공됐다면 해당 참조를 직접 열어 요구 항목을 확인할 수 있습니다. 조회로 확인한 증거와 원래 스냅샷을 구분하세요. 필요한 증거를 끝내 확인하지 못하면 REJECT하고, 자료 누락인지 조회 실패인지 밝히세요.

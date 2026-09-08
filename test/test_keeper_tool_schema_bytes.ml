@@ -83,7 +83,13 @@ open Alcotest
    or 1,388 with its public name, plus one list separator. BrowserGoto
    guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
 (* Explicit native client selection adds 1004 measured browser schema bytes. *)
-let ceiling_bytes = 93_217
+(* Named MSX checkpoints add 884 schema bytes (literal TOML/golden JSON);
+   preserve existing headroom. CI verifies the production renderer. *)
+(* CI 34231934273 at 4f109263 measured 95,902 bytes across 108 tools,
+   1,801 above the inherited ceiling after adding checkpoints. Account for
+   that already-shipped surface explicitly, without adding headroom.
+   Disk replacement adds 501 literal schema bytes; CI checks the renderer. *)
+let ceiling_bytes = 96_403
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -226,9 +232,12 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_msx_change_disk"
   ; "masc_msx_eject"
   ; "masc_msx_load"
   ; "masc_msx_press"
+  ; "masc_msx_restore"
+  ; "masc_msx_save"
   ; "masc_msx_screen"
   ; "masc_msx_step"
   ; "masc_plan_clear_task"

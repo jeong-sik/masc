@@ -947,6 +947,34 @@ let test_auto_judge_still_defers_writes_to_the_judge () =
   | Keeper_gate.Unavailable _ -> fail "write command made the queue unavailable"
 ;;
 
+let test_interactive_execute_keeps_durable_mode_authority () =
+  with_auto_judge @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let invoke argv =
+    let input = `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv) ] in
+    (match Keeper_tool_approval_policy.verdict_for
+       ~composition_plan_index:None ~tool_name:"Execute" ~input with
+     | Keeper_tool_approval_policy.Run _ -> ()
+     | Keeper_tool_approval_policy.Ask _ -> fail "duplicate interactive authority held Execute");
+    Keeper_gate.decide ~keeper_always_allow:false
+      (gate_request ~sandbox_profile:docker base_path argv)
+  in
+  (match invoke [ "ls" ] with
+   | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+   | _ -> fail "observational Execute did not reach its execution Gate");
+  (match invoke [ "rm"; "fixture-only" ] with
+   | Keeper_gate.Deferred { reason = Judge_requested | Auto_judge_unavailable _; _ } -> ()
+   | _ -> fail "effectful Execute lost its Judge decision");
+  select_workspace config Keeper_gate_mode.Manual;
+  (match invoke [ "ls" ] with
+   | Keeper_gate.Deferred { reason = Human_requested; _ } -> ()
+   | _ -> fail "Manual execution mode lost its human decision");
+  select_workspace config Keeper_gate_mode.Always_allow;
+  (match invoke [ "rm"; "explicit-permission-fixture" ] with
+   | Keeper_gate.Allow { source = Workspace_always_allow; _ } -> ()
+   | _ -> fail "explicit execution permission was not the owning authority")
+;;
+
 let test_manual_mode_still_asks_the_human () =
   with_auto_judge @@ fun base_path ->
   let config = Workspace.default_config base_path in
@@ -1039,6 +1067,8 @@ let () =
             "auto_judge still defers writes to the judge"
             `Quick
             test_auto_judge_still_defers_writes_to_the_judge
+        ; test_case "interactive Execute preserves durable mode authority" `Quick
+            test_interactive_execute_keeps_durable_mode_authority
         ; test_case "manual mode still asks the human" `Quick test_manual_mode_still_asks_the_human
         ] )
     ]

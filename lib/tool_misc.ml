@@ -191,6 +191,14 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some
         (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
            ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_msx_change_disk ->
+      Some (Tool_misc_msx_lane.handle_change_disk ~tool_name:name ~start_time:start
+        ~base_path:ctx.config.base_path args)
+  | Some (Tool_schemas_misc.Misc_msx_save as operation)
+  | Some (Tool_schemas_misc.Misc_msx_restore as operation) ->
+      Some (Tool_misc_msx_lane.handle_checkpoint
+        ~restore:(operation = Tool_schemas_misc.Misc_msx_restore)
+        ~tool_name:name ~start_time:start ~base_path:ctx.config.base_path args)
   | Some Tool_schemas_misc.Misc_msx_eject ->
       Some
         (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start
@@ -225,6 +233,9 @@ let is_read_only = function
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_save
+  | Tool_schemas_misc.Misc_msx_restore
+  | Tool_schemas_misc.Misc_msx_change_disk
   | Tool_schemas_misc.Misc_msx_press
   | Tool_schemas_misc.Misc_msx_step
   (* Starting and stopping the automation browser changes its lifecycle. *)

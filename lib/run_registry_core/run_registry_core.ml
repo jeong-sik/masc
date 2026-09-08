@@ -370,14 +370,13 @@ module Make (Payload : Payload) = struct
   ;;
 
   let register t ~id ~started_at ~registration =
-    (* The event carries the whole registration to disk; the entry keeps the
-       shed copy, as replay's does. Two paths build entries -- this one and
-       [apply_event] -- and both shed, or the store's weight depends on
-       whether a row was written by this process or read back by it. *)
+    (* A disk-backed store keeps the shed copy, as replay does. An in-memory
+       store has no other source from which to recover a dropped payload. *)
     let entry =
       { id
       ; started_at
-      ; registration = Payload.shed_registration registration
+      ; registration =
+          (match t.path with None -> registration | Some _ -> Payload.shed_registration registration)
       ; status = Running
       }
     in
@@ -419,7 +418,8 @@ module Make (Payload : Payload) = struct
           current
           |> List.map (fun entry ->
             if String.equal entry.id id
-            then { entry with status = Completed (Payload.shed_completion completion) }
+            then { entry with status = Completed
+                (match t.path with None -> completion | Some _ -> Payload.shed_completion completion) }
             else entry)
           |> prune
         in
@@ -637,9 +637,12 @@ module Make (Payload : Payload) = struct
           shed)
   ;;
 
-  let get t ~id =
+  let get_metadata t ~id =
     List.find_opt (fun entry -> String.equal entry.id id) (Atomic.get t.entries)
-    |> Option.map (full_entry_from_disk t)
+  ;;
+
+  let get t ~id =
+    get_metadata t ~id |> Option.map (full_entry_from_disk t)
   ;;
 
   let fold_replay_entries path =

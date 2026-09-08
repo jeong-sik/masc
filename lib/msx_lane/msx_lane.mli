@@ -120,3 +120,15 @@ type frame = {
 val frame : unit -> frame option
 (** The current native-resolution frame, or [None] when no machine is loaded.
     A spectator renders this; the pixels are the client's to downsample. *)
+
+val save : path:string -> (observation, error) result
+(** Atomically replace a named checkpoint with the complete machine and ledger.
+    Does not advance or eject the machine. *)
+
+val restore : path:string -> ledger_dir:string -> (observation, error) result
+(** Restore an independently decoded checkpoint. Invalid files leave the current
+    machine and ledger intact; ROM/media bytes come from the checkpoint. *)
+
+val change_disk : path:string -> backup_path:string -> (observation, error) result
+(** Decode a replacement in a private machine copy, checkpoint the outgoing
+    machine, then publish the swap. Never reboots or advances game time. *)

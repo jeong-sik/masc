@@ -36,6 +36,112 @@ let execute_envelope input =
 
 let canonical_repository_id = Agent_observation.canonical_url_of_remote
 
+(* A free argv token names a remote only when it is written as one. The
+   canonicaliser alone accepts [owner/repo] with [owner] in the host slot, so
+   canonicalising every token reported API endpoint paths
+   ([repos/o/r/pulls/1/update-branch]), [-C] paths ([tmp/pr34356]) and gh's
+   [OWNER/REPO] shorthand to the judge as unregistered repositories: 250 of
+   the 480 require_human rationales in 2026-09 cite that (#34401). *)
+let remote_reference_of_token token =
+  if Agent_observation.remote_url_syntax token
+  then canonical_repository_id token
+  else None
+;;
+
+(* gh documents its [-R]/[--repo] value as [[HOST/]OWNER/REPO]
+   (gh 2.87 [--help]) with the host defaulting to github.com, and also
+   accepts a full URL there. A value in none of those shapes names no
+   repository; the judge then sees no reference rather than a wrong one. *)
+let gh_default_host = "github.com"
+
+let gh_repo_flag_reference value =
+  match remote_reference_of_token value with
+  | Some canonical_id -> Some canonical_id
+  | None ->
+    (match String.split_on_char '/' value with
+     | [ owner; repo ] when owner <> "" && repo <> "" ->
+       canonical_repository_id
+         (Printf.sprintf "https://%s/%s/%s" gh_default_host owner repo)
+     | [ host; owner; repo ] when host <> "" && owner <> "" && repo <> "" ->
+       canonical_repository_id (Printf.sprintf "https://%s/%s/%s" host owner repo)
+     | _ -> None)
+;;
+
+(* Every spelling pflag accepts for gh's repo flag: [-R v], [-Rv],
+   [--repo v], [--repo=v]. Each hit is the index of the token that carries
+   the value, and the value as written. *)
+let gh_repo_flag_values argv =
+  let attached_long = "--repo=" in
+  let attached_short = "-R" in
+  let rec walk index acc = function
+    | [] -> List.rev acc
+    | ("-R" | "--repo") :: value :: rest ->
+      walk (index + 2) ((index + 1, value) :: acc) rest
+    | token :: rest when String.starts_with ~prefix:attached_long token ->
+      let n = String.length attached_long in
+      walk (index + 1) ((index, String.sub token n (String.length token - n)) :: acc) rest
+    | token :: rest
+      when String.length token > String.length attached_short
+           && String.starts_with ~prefix:attached_short token ->
+      let n = String.length attached_short in
+      walk (index + 1) ((index, String.sub token n (String.length token - n)) :: acc) rest
+    | _ :: rest -> walk (index + 1) acc rest
+  in
+  walk 0 [] argv
+;;
+
+(* gh's [repo] family names its repository positionally in the same shape
+   the flag takes: [gh repo clone OWNER/REPO [dest]], [gh repo view
+   OWNER/REPO]. The first token after the verb that is not a flag is that
+   argument. When it is something else (the value of a preceding flag, say)
+   it fails the spec shape and no reference is made; a later positional is
+   never read, because for [clone] that is the destination path. *)
+let gh_repo_positional argv =
+  match argv with
+  | "gh" :: "repo" :: _verb :: rest ->
+    let rec first index = function
+      | [] -> None
+      | token :: _ when not (String.starts_with ~prefix:"-" token) -> Some (index, token)
+      | _ :: rest -> first (index + 1) rest
+    in
+    first 3 rest
+  | _ -> None
+;;
+
+(* Repository references in argv order: tokens written as remotes anywhere,
+   plus what gh's repo flag and the [repo] family's positional name. A URL
+   handed to the flag is also a remote token at the same index; the flag
+   row wins there, so [raw] is the value as gh reads it and not the token
+   with its [-R] prefix still attached. *)
+let repository_reference_candidates argv =
+  let remote_tokens =
+    List.filter_mapi
+      (fun argument_index argument ->
+         Option.map
+           (fun canonical_id -> argument_index, argument, canonical_id)
+           (remote_reference_of_token argument))
+      argv
+  in
+  match argv with
+  | "gh" :: _ ->
+    let named =
+      List.filter_map
+        (fun (argument_index, value) ->
+           Option.map
+             (fun canonical_id -> argument_index, value, canonical_id)
+             (gh_repo_flag_reference value))
+        (gh_repo_flag_values argv @ Option.to_list (gh_repo_positional argv))
+    in
+    let named_indices = List.map (fun (argument_index, _, _) -> argument_index) named in
+    let unnamed =
+      List.filter
+        (fun (argument_index, _, _) -> not (List.mem argument_index named_indices))
+        remote_tokens
+    in
+    List.sort (fun (a, _, _) (b, _, _) -> Int.compare a b) (unnamed @ named)
+  | _ -> remote_tokens
+;;
+
 let repository_catalog_match repositories canonical_id =
   List.filter
     (fun (repository : Repo_manager_types.repository) ->
@@ -81,15 +187,7 @@ let repository_reference_json ~catalog ~argument_index ~raw ~canonical_id =
 ;;
 
 let repository_references_json ~base_path argv =
-  let candidates =
-    List.filter_mapi
-      (fun argument_index argument ->
-         Option.map
-           (fun canonical_id -> argument_index, argument, canonical_id)
-           (canonical_repository_id argument))
-      argv
-  in
-  match candidates with
+  match repository_reference_candidates argv with
   | [] ->
     `Assoc
       [ "state", `String "no_references"

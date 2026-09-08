@@ -94,6 +94,26 @@ let outcome_notice = function
            agent_name
            (self_mint_expiry_hours / 24))
   | Unavailable detail ->
+      (* Not the last word, and the sentence must not read like one. On a
+         first install this is the ordinary case -- the workspace is made by
+         the server this client is about to start -- so the operator is told
+         what is missing and that it is taken again, with the manual remedy
+         behind that rather than in front of it. Sending them to masc login
+         for a state that clears itself in the next second or two is what
+         made this line worth rewriting. *)
       Some
-        (Printf.sprintf "no operator token, and none could be made: %s — %s"
+        (Printf.sprintf
+           "no operator token, and none could be made yet: %s — this is taken \
+            again when a server answers at this base path; if none does, %s"
            detail remedy)
+
+(* A boot that could not obtain a bearer is not the last word. Minting is
+   gated on a workspace that already exists, and only a server creates one --
+   so on a first install this client runs before anything has made the
+   directory its own gate looks for, and the gate is right to refuse: at that
+   moment the base path really does hold no workspace. What was missing is a
+   second look once one is there. Only [Unavailable] is worth retrying; the
+   other three are answers a later workspace would not change. *)
+let outcome_needs_retry = function
+  | Unavailable _ -> true
+  | Held | Minted | Not_required -> false

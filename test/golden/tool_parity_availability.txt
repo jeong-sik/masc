@@ -113,9 +113,12 @@ masc_library_list	deferrable
 masc_library_read	always_loaded
 masc_library_search	always_loaded
 masc_messages	always_loaded
+masc_msx_change_disk	deferrable
 masc_msx_eject	deferrable
 masc_msx_load	deferrable
 masc_msx_press	deferrable
+masc_msx_restore	deferrable
+masc_msx_save	deferrable
 masc_msx_screen	deferrable
 masc_msx_step	deferrable
 masc_operator_action	always_loaded

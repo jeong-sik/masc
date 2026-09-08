@@ -166,6 +166,20 @@ let nonrecoverable_write_exceptions () =
   ]
 ;;
 
+(* Propagation may append Eio re-raise frames. Every injected frame, including
+   its origin, must still survive unchanged and in order at the start. *)
+let check_preserved_backtrace ~label expected observed =
+  let length = Printexc.raw_backtrace_length expected in
+  check bool (label ^ " injected trace has an origin") true (length > 0);
+  check bool (label ^ " preserves original trace length") true
+    (Printexc.raw_backtrace_length observed >= length);
+  for index = 0 to length - 1 do
+    check bool (Printf.sprintf "%s preserves original frame %d" label index) true
+      (Printexc.get_raw_backtrace_slot expected index
+       = Printexc.get_raw_backtrace_slot observed index)
+  done
+;;
+
 let check_same_exception_and_backtrace
       ~label
       ~expected_exception
@@ -185,9 +199,7 @@ let check_same_exception_and_backtrace
   | Some (exception_, backtrace) ->
     check bool (label ^ " preserves exception identity") true
       (exception_ == expected_exception);
-    check string (label ^ " preserves raw backtrace")
-      (Printexc.raw_backtrace_to_string expected_backtrace)
-      (Printexc.raw_backtrace_to_string backtrace)
+    check_preserved_backtrace ~label expected_backtrace backtrace
 ;;
 
 let test_replace_nonrecoverable_exceptions_preserve_backtrace ~fs () =
@@ -319,9 +331,7 @@ let check_direct_cleanup_cancellation
   in
   check bool (label ^ " preserves reason identity") true
     (observed_reason == reason);
-  check string (label ^ " preserves raw backtrace")
-    (Printexc.raw_backtrace_to_string backtrace)
-    (Printexc.raw_backtrace_to_string observed_backtrace);
+  check_preserved_backtrace ~label backtrace observed_backtrace;
   check bool (label ^ " preserves operation") true
     (cancellation.operation = expected_operation);
   check bool (label ^ " preserves target effect") true
@@ -461,9 +471,8 @@ let test_recovery_cancellation_preserves_authority_and_backtrace ~fs () =
   in
   check bool "recovery cancellation preserves reason identity" true
     (observed_reason == reason);
-  check string "recovery cancellation preserves raw backtrace"
-    (Printexc.raw_backtrace_to_string backtrace)
-    (Printexc.raw_backtrace_to_string observed_backtrace);
+  check_preserved_backtrace ~label:"recovery cancellation"
+    backtrace observed_backtrace;
   check bool "recovery cancellation preserves replacement effect" true
     (cancellation.target_effect = Fs_compat.Target_replaced);
   check bool "recovery cancellation has no write primary" true

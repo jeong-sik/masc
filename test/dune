@@ -7,6 +7,12 @@
 ; Test Environment Configuration
 
 (test
+ (name test_msx_vision)
+ (modules test_msx_vision)
+ (libraries alcotest unix base64 yojson fs_compat masc masc_test_deps
+   masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
+
+(test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc_test_deps eio))

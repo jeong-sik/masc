@@ -204,6 +204,29 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
 
 let handle_screen ~tool_name ~start_time _args =
   of_lane ~tool_name ~start_time (Msx_lane.screen ())
+
+(* Only the Keeper boundary supplies this identity, from its owned meta.name.
+   Neither tool arguments nor a generic MCP caller can name a vision store. *)
+let handle_keeper_screen ~keeper_name ~tool_name ~start_time _args =
+  match Msx_lane.capture () with
+  | Error e -> of_lane ~tool_name ~start_time (Error e)
+  | Ok (observation, frame) ->
+    let encoded = Eio_guard.run_in_systhread ~label:"msx-png" (fun () ->
+      Rgb_png.encode ~width:frame.width ~height:frame.height ~rgb:frame.rgb) in
+    let result = Result.bind encoded (fun bytes ->
+      Result.map (fun handle -> bytes, handle)
+        (Keeper_vision_tool.store_artifact
+          ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name) bytes)) in
+    match result with
+    | Error message ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure
+        ~start_time ("MSX image capture failed: " ^ message)
+    | Ok (bytes, handle) ->
+      of_lane ~tool_name ~start_time (Ok observation)
+        ~extra:[ "artifact", `String (Multimodal.Vision_artifact_store.to_string handle)
+               ; "media_type", `String "image/png"
+               ; "width", `Int frame.width; "height", `Int frame.height
+               ; "bytes", `Int (String.length bytes) ]
 ;;
 
 let handle_step ~tool_name ~start_time args =

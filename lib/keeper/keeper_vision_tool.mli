@@ -98,7 +98,8 @@ val store_artifact
     placeholder). *)
 (** Candidate identity and requested model come from the call configuration.
     [response_model] is the provider-reported label, not an independently
-    verified model identity. None of these fields attest transcription accuracy. *)
+    verified model identity. It may be empty when the response supplies no model
+    label. None of these fields attest transcription accuracy. *)
 type vision_reading =
   { text : string
   ; runtime_id : string

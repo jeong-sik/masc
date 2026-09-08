@@ -116,6 +116,24 @@ let format_fleet_messages
    no argument is cut mid-string. A keeper that needs the arguments of a call
    that succeeded is asking what it did, which is what the board, the task and
    the goal sections answer. *)
+(* The rejected-call digest is rendered ahead of the rows and outside the row
+   budget, so nothing below can trim it. A refused call replays its argument
+   object, and an argument object has no size of its own: five refusals
+   carrying a 4 KB body put 20 KB into the one part of the briefing the budget
+   cannot reach. That is #29676 again -- a briefing past the runtime's whole
+   request cap, and a turn that cannot be assembled at all.
+
+   The digest exists to name the call so it is not repeated, which the tool
+   name and the head of the arguments do. With at most eight digests
+   (Keeper_own_recent_actions.digest_failures), bounding each one is what
+   makes the section's worst case a number: about 2 KB. *)
+let rejected_digest_input_bytes = 240
+
+let rejected_digest_input input =
+  String_util.utf8_safe ~max_bytes:rejected_digest_input_bytes ~suffix:"…" input
+  |> String_util.to_string
+;;
+
 let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : string =
   let turn_id = string_of_int turn.turn_id in
   turn.calls
@@ -1377,11 +1395,12 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                in
                let count = string_of_int digest.failure_count in
                let last_turn = string_of_int digest.failure_last_turn in
+               let input = rejected_digest_input digest.failure_input in
                let row =
                  render
                    Prompt_names.keeper_observation_rejected_digest_row
                    [ "tool", digest.failure_tool
-                   ; "input", digest.failure_input
+                   ; "input", input
                    ; "count", count
                    ; "last_turn", last_turn
                    ; "detail_suffix", detail_suffix
@@ -1391,7 +1410,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                         " "
                         [ "-"
                         ; digest.failure_tool
-                        ; digest.failure_input
+                        ; input
                         ; "×" ^ count
                         ; "@" ^ last_turn ^ detail_suffix
                         ])

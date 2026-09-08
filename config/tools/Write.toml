@@ -14,4 +14,4 @@ description = "Absolute or sandbox-relative file path. Parent directories are cr
 name = "content"
 type = "string"
 required = true
-description = "Full file content. Overwrites the existing file."
+description = "Exact full file content; overwrites the existing file. Preserve requested whitespace, including a final newline when requested. Do not strip or add whitespace. Compare bytes_written with the expected UTF-8 byte count; verify file content or hash before claiming exact content."

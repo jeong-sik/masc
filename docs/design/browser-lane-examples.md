@@ -25,8 +25,11 @@ Automation은 geckodriver를 실행하고, resolved configuration directory의
 `runtime.toml`에 endpoint를 설정한 뒤 MASC를 재시작한다.
 
 ```sh
-geckodriver --host 127.0.0.1 --port 4444
+geckodriver --host 127.0.0.1 --port 4444 --websocket-port 0
 ```
+
+BiDi 포트는 OS가 빈 포트를 배정하도록 `0`을 사용한다. HTTP 포트만 바꾸면
+다른 브라우저가 사용하는 기본 BiDi 포트 9222와 충돌할 수 있다.
 
 ```toml
 [browser]

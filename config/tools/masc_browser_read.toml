@@ -35,7 +35,7 @@ description = "downloads lists authoritative pending/completed/canceled/interrup
 name = "framePath"
 type = "array"
 items = { type = "string" }
-description = "Automation only: outer-to-inner iframe/frame selectors for text/elements/frames. Requires tabId. Omit for top-level."
+description = "Automation only: outer-to-inner iframe/frame selectors observed with mode=frames. Reuse each decoded selector exactly, preserving CSS escapes. Supports text/elements/frames; requires the observed tabId. Omit for top-level."
 
 [[params]]
 name = "clientId"

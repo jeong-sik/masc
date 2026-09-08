@@ -13,12 +13,18 @@ Set the existing workspace `runtime.toml`:
 webdriver_url = "http://127.0.0.1:4444"
 ```
 
-Run `geckodriver --host 127.0.0.1 --port 4444`, then restart MASC. Session
+Run `geckodriver --host 127.0.0.1 --port 4444 --websocket-port 0`, then restart MASC. Session
 open/close, navigation, tab listing and page reading use the native executor.
 The configured endpoint must be a loopback HTTP origin. This setting is
 required for automation: without an installed native executor, automation
 commands return `Lane_absent`. The external poll/result endpoints accept
 only `live`; they cannot register or answer for automation.
+
+The HTTP port and BiDi WebSocket port are separate. `--websocket-port 0`
+lets the OS allocate a free BiDi port instead of sharing the default 9222
+with another browser or driver. A collision there can make session setup
+fail at the WebSocket handshake even while the HTTP driver reports ready.
+See Mozilla's [geckodriver flags](https://firefox-source-docs.mozilla.org/testing/geckodriver/Flags.html).
 
 The OCaml client serializes commands for its owned session, retains stable
 integer tab IDs, reports WebDriver failures, and forgets invalid sessions so

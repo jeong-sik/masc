@@ -152,6 +152,12 @@ let run (ctx : ctx)
       failure before any stage may fall back, while every typed stage blocks a
       same-run fallback. *)
    let checkpoint_stage_observed = Atomic.make false in
+   (* The tool rows of this turn, collected from the same stream the chat
+      lane persists from and appended once the turn settles. One collector
+      for the whole turn: the run's attempt boundaries reach it through the
+      observation hook, so a failed candidate's rows are quarantined the way
+      the chat lane quarantines them (#33127). *)
+   let tool_projection = Keeper_loop_tool_projection.create () in
    let deferred_runtime_lane_ref = ref None in
   let do_run
         ~(execution : runtime_execution)
@@ -242,6 +248,12 @@ let run (ctx : ctx)
                  ~is_retry
                  ?shared_context
                  ?event_bus
+                 ~on_event:(Keeper_loop_tool_projection.on_event tool_projection)
+                 ~on_tool_stream_observation:
+                   (Keeper_loop_tool_projection.on_tool_stream_observation
+                      tool_projection)
+                 ~on_tool_result_ready:
+                   (Keeper_loop_tool_projection.on_tool_result_ready tool_projection)
                  ?trace_link:(trace_link ())
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
@@ -465,6 +477,53 @@ let run (ctx : ctx)
       }
       turn_state
   in
+  (* A continuation turn follows an approval replay, so its tool rows are
+     delivered under that approval's identity, beside the lifecycle rows the
+     queue already wrote for it. Any other autonomous turn has no delivery
+     identity of its own yet and stays unprojected, as before. *)
+  (match hitl_resolution with
+   | None -> ()
+   | Some resolution ->
+     let approval_id = resolution.Keeper_event_queue.approval_id in
+     (match Keeper_chat_delivery_identity.Request_id.of_string approval_id with
+      | Error detail ->
+        Log.Keeper.warn
+          ~keeper_name:meta.name
+          "%s: continuation turn tool rows were not projected: approval id %S \
+           is not a delivery identity: %s"
+          meta.name
+          approval_id
+          detail
+      | Ok request_id ->
+        let turn_ref =
+          Ids.Turn_ref.make
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~absolute_turn:keeper_turn_id
+        in
+        (match
+           Keeper_loop_tool_projection.persist
+             tool_projection
+             ~base_dir:config.base_path
+             ~keeper_name:meta.name
+             ~delivery_key:
+               (Keeper_chat_delivery_identity.Approval_lifecycle request_id)
+             ~turn_ref
+             ~turn_failed:(Result.is_error result)
+         with
+         | Keeper_loop_tool_projection.Nothing_to_project -> ()
+         | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Appended _) ->
+           Keeper_chat_broadcast.chat_appended
+             ~keeper_name:meta.name
+             ~source:"continuation_tool_calls"
+             ()
+         | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Already_present _) ->
+           ()
+         | Keeper_loop_tool_projection.Projection_dropped detail ->
+           Log.Keeper.warn
+             ~keeper_name:meta.name
+             "%s: continuation turn tool rows were not projected: %s"
+             meta.name
+             detail)));
   result, turn_state
 )
 

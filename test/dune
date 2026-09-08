@@ -250,6 +250,7 @@
   test_keeper_timing
   test_keeper_noop_backoff
   test_keeper_chat_store
+  test_keeper_loop_tool_projection
   test_keeper_chat_blocks
   test_keeper_chat_event_log
   test_keeper_chat_journal_audit
@@ -598,6 +599,7 @@
   test_keeper_timing
   test_keeper_noop_backoff
   test_keeper_chat_store
+  test_keeper_loop_tool_projection
   test_keeper_chat_blocks
   test_keeper_chat_event_log
   test_keeper_chat_journal_audit

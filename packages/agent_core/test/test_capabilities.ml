@@ -1661,8 +1661,11 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
     ; ( "Ollama Cloud Gemma4"
       , Provider_qualified "ollama_cloud"
       , "gemma4:31b"
+      (* JSON mode came off this row in #31798 with the rest of the fencing
+         evidence, so the frontier contract is No_structured_output: neither
+         a schema guarantee nor a parseable json_object reply. *)
       , Extended_thinking
-      , Response_format_json
+      , No_structured_output
       , Replay_not_required
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud Kimi K2.7 Code"

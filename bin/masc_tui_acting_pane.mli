@@ -21,6 +21,12 @@
 val pane_cols : int
 (** The columns the pane takes when it shows. *)
 
+val reading_cells : int
+(** The cells a fleet row's reading gets, after the mark, the name and the gap.
+    Every reading fills it exactly -- the state, tool, calls and token columns
+    add up to this and blank columns are spaces -- so the figures line up down
+    the list. Exported so a test can hold that sum without restating it. *)
+
 val threshold_cols : int
 (** The width from which a surface can afford the pane beside it. The pane
     plus what the roster pane leaves a surface, so the two panes sharing one

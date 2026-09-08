@@ -9,7 +9,9 @@ type dispatch_result = {
     files returns [None], never a file belonging to only one input stream. *)
 
 val resolve_arg : Shell_ir.arg -> string
-(** Resolve a Shell_ir.arg to a concrete string value. *)
+(** Resolve literal pieces without reading the server environment.
+    Raises [Invalid_argument] for unresolved variables. Public dispatch rejects
+    such IR before executing any command or opening a redirect. *)
 
 
 val dispatch_simple :

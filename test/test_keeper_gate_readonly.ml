@@ -128,13 +128,20 @@ let test_gh_write_shapes_require_observation () =
   requires_observation "api with a field" [ "gh"; "api"; "repos/x/y/issues"; "-f"; "title=x" ];
   requires_observation "api with --field=" [ "gh"; "api"; "x"; "--field=a=b" ];
   requires_observation "api with an input file" [ "gh"; "api"; "x"; "--input"; "body.json" ];
-  (* gh takes a short flag's value attached, so these are the same requests as
-     the spaced ones above. The read table matched neither the exact "-f" nor
-     any long prefix, and a mutation posted without a judge turn. *)
-  requires_observation "api with an attached field"
-    [ "gh"; "api"; "graphql"; "-fquery=mutation{addStar(input:{starrableId:\"x\"}){clientMutationId}}" ];
-  requires_observation "api with an attached raw field"
-    [ "gh"; "api"; "x"; "-Ftitle=x" ];
+  List.iter
+    (fun flag -> requires_observation ("api attached or clustered " ^ flag)
+      [ "gh"; "api"; "graphql"; flag ])
+    [ "-fquery=mutation{fixture}"; "-Fquery=mutation{fixture}"
+    ; "-ifquery=mutation{fixture}"; "-iFquery=mutation{fixture}"
+    ; "-iXPOST"; "--unknown-future-option=value" ];
+  requires_observation "clustered field with separate value"
+    [ "gh"; "api"; "graphql"; "-if"; "query=mutation{fixture}" ];
+  passes "clustered read options" [ "gh"; "api"; "user"; "-iq.login" ];
+  passes "field-looking jq value stays a value"
+    [ "gh"; "api"; "user"; "--jq"; "-f" ];
+  passes "attached header remains read"
+    [ "gh"; "api"; "user"; "-HAccept:application/json" ];
+  passes "long attached read option" [ "gh"; "api"; "user"; "--jq=.login" ];
   requires_observation "bare api" [ "gh"; "api" ]
 
 let test_write_shapes_require_observation () =

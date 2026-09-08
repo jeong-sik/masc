@@ -1324,9 +1324,23 @@ let runtime_default_id =
 
 let runtime_default_set_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
-  match
-    Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
-  with
+  let result =
+    try
+      (* Validate against the same catalog sources as server startup, before
+         the config writer checks deployment-local provider/model bindings.
+         This command edits the resolved runtime file, so its sibling overlay
+         must come from that same config root. No server services are started. *)
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      in
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+          ~config_root:(Filename.dirname runtime_config_path) ()
+      in
+      Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+    with Env_config_core.Config_error message -> Error message
+  in
+  match result with
   | Ok _receipt ->
       Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
         runtime_config_path;

@@ -1248,6 +1248,14 @@ let post_keeper_directive ~(host : string) ~(port : int)
   in
   http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
 
+(** POST the keeper purge the web dashboard uses. Not under [/api/v1/keepers/]:
+    the route is a dashboard action and reads the keeper from the body. *)
+let post_keeper_purge ~(host : string) ~(port : int) ~(keeper_name : string)
+    : (int * string, string) result =
+  http_post ~headers:(auth_headers ()) ~host ~port
+    ~path:"/api/v1/dashboard/agents/purge"
+    ~body:(Masc_tui_keeper_control.purge_body keeper_name)
+
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/briefing"

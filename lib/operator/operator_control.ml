@@ -341,15 +341,29 @@ let action_json ?actor_hint (ctx : _ context) args :
        | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
        | ActionError -> Tool_args.error_assoc fields)
 
+(** The closed decision type of the operator confirm gate. Parsing an
+    incoming "decision" field yields exactly one of these; unknown values
+    are rejected at the parse site instead of falling through to a string
+    comparison downstream (#27512). *)
+type confirm_decision =
+  | Confirm
+  | Deny
+
 let confirm_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* actor = resolved_actor_for_args ?actor_hint ctx args in
-  let decision =
+  let* decision =
     match get_string_opt args "decision" with
-    | Some raw ->
+    | None -> Ok Confirm
+    | Some raw -> (
         let normalized = String.lowercase_ascii (String.trim raw) in
-        if normalized = "" then "confirm" else normalized
-    | None -> "confirm"
+        match normalized with
+        | "" | "confirm" -> Ok Confirm
+        | "deny" -> Ok Deny
+        | _ ->
+            Error
+              (Printf.sprintf
+                 "decision must be \"confirm\" or \"deny\" (got: %S)" raw))
   in
   match get_string_opt args "confirm_token" with
   | None -> Error "confirm_token is required"
@@ -404,8 +418,9 @@ let confirm_json ?actor_hint (ctx : _ context) args :
             ~decision:Audit_log.Gate_unauthorized ~action_type:entry.action_type
             ~confirmation_state:(confirmation_state_to_string Denied) ();
           Error "actor is not allowed to confirm this action"
-      | Some entry ->
-          if String.equal decision "deny" then (
+      | Some entry -> (
+          match decision with
+          | Deny -> (
             let* () = remove_pending_confirm ctx.config confirm_token in
             let () = invalidate_operator_snapshot_views ctx.config in
             append_action_log ctx.config
@@ -435,7 +450,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                  ; "result_status", `String "not_executed"
                  ; "executed_action", pending_confirm_to_yojson entry
                  ]))
-          else
+          | Confirm ->
             let started_at = Unix.gettimeofday () in
             let request =
               {
@@ -482,4 +497,4 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               (match result_status with
                | ActionOk -> Tool_args.ok_assoc fields
                | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
-               | ActionError -> Tool_args.error_assoc fields))
+               | ActionError -> Tool_args.error_assoc fields)))

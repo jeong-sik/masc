@@ -5092,3 +5092,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_shim_builder_bootstrap)))
+
+(include stanzas/test_keeper_nerdctl_image_admission.inc)

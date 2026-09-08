@@ -38,6 +38,7 @@ nerdctl volume inspect "$volume"
 nerdctl run --rm --runtime io.containerd.kata.v2 --network none \
   --read-only --cap-drop ALL --tmpfs /tmp --pull never \
   -v "$volume:/masc-work" "$image" sh -ec '
+    grep -qF " /masc-work " /proc/mounts
     stat -c "before: %a %u:%g %n" /masc-work
     chmod a+x /masc-work
     mkdir -m 0777 /masc-work/keeper

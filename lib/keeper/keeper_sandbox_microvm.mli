@@ -126,7 +126,7 @@ type json_shape =
   | Json_array
       (** One array of records: [container image list --format json],
           [container image inspect], [msb image list --format json],
-          [nerdctl image inspect --mode dockercompat]. *)
+          [nerdctl image inspect --mode native]. *)
   | Json_object
       (** One bare object: [msb image inspect --format json], which answers a
           record rather than the array of one Docker's grammar returns. *)
@@ -167,6 +167,17 @@ val classify_image_probe :
     only when a subsequent image listing also succeeds in [listing_shape],
     proving that the runtime and its image store were readable. Every
     unavailable or malformed observation fails closed. *)
+
+val classify_image_probe_for :
+  Keeper_microvm_backend.t ->
+  image:string ->
+  inspect:Unix.process_status * string * string ->
+  listing:(Unix.process_status * string * string) option ->
+  image_probe_outcome
+(** Backend-aware image admission. Nerdctl native records must contain a
+    nonempty Image.Name and Target.digest. An immutable requested digest must
+    match the returned target; alternate names for the same content are valid.
+    Empty native inspection is not evidence that an image is present. *)
 
 val image_probe_for :
   Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
@@ -366,12 +377,18 @@ val ensure_work_volume_for
   -> timeout_sec:float
   -> ([ `Created | `Already_present | `Ensured ], string) result
 
+val work_volume_search_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list option
+(** For nerdctl, add search permission on the root-owned work volume before
+    using its keeper directory. Run only after confirming the guest mount.
+    Other backends need no permission change. *)
+
 val keeper_work_root_mkdir_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> keeper_name:string -> string list
 (** Create {!keeper_work_root} inside the guest, in one exec. The host
     does not access the working tree directly. Apple uses an ext4 disk and
     nerdctl a runtime-managed directory. The volume
-    root is initially root-owned and the user namespace refuses a later
+    root is initially root-owned and Apple's user namespace refuses a later
     chmod, so creation runs as root with an explicit writable mode that
     applies only to a new directory. Idempotent. *)
 

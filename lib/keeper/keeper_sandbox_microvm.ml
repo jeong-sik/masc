@@ -465,10 +465,12 @@ let image_listing_shape_for backend =
 
 (* [container image inspect] answers JSON with no flag; [msb image inspect]
    answers a human table unless [--format json] is asked for, and then answers
-   a bare object rather than an array. [nerdctl image inspect] documents
-   [--mode=(dockercompat|native)] with no stated default, so the mode is named
-   rather than assumed -- dockercompat, which is Docker's array-of-one shape
-   this module already reads. *)
+   a bare object rather than an array. Nerdctl 2.3.5 dockercompat rejects
+   digest-only image references after normalizing an empty tag to latest.
+   Native mode avoids that conversion and returns containerd image records.
+   Its successful empty array and unfiltered digest aliases require the typed
+   content check below, not merely an array-shape check.
+   Source: nerdctl v2.3.5 pkg/cmd/image/inspect.go, native/image.go. *)
 let image_inspect_argv_for backend ~image =
   match (backend : Backend.t) with
   | Backend.Apple_container -> command_argv_for backend @ [ "image"; "inspect"; image ]
@@ -476,13 +478,80 @@ let image_inspect_argv_for backend ~image =
     command_argv_for backend @ [ "image"; "inspect"; "--format"; "json"; image ]
   | Backend.Nerdctl_kata ->
     command_argv_for backend
-    @ [ "image"; "inspect"; "--mode"; "dockercompat"; image ]
+    @ [ "image"; "inspect"; "--mode"; "native"; image ]
 ;;
 
 let image_inspect_shape_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container | Backend.Nerdctl_kata -> Json_array
   | Backend.Microsandbox -> Json_object
+;;
+
+type nerdctl_native_image =
+  { image_name : string
+  ; target_digest : string
+  }
+
+let parse_nerdctl_native_images raw =
+  let ( let* ) = Result.bind in
+  let field key = function
+    | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name key) fields with
+       | [ (_, value) ] -> Ok value
+       | _ -> Error ("native image requires exactly one " ^ key ^ " field"))
+    | _ -> Error ("native image " ^ key ^ " parent must be an object")
+  in
+  let nonempty = function
+    | `String value when String.trim value <> "" -> Ok value
+    | _ -> Error "native image name and target digest must be nonempty strings"
+  in
+  let row value =
+    let* image = field "Image" value in
+    let* name = field "Name" image in
+    let* image_name = nonempty name in
+    let* target = field "Target" image in
+    let* digest = field "digest" target in
+    let* target_digest = nonempty digest in
+    Ok { image_name; target_digest }
+  in
+  match Yojson.Safe.from_string raw with
+  | `List rows ->
+    List.fold_right
+      (fun value acc ->
+         let* image = row value in
+         let* rest = acc in
+         Ok (image :: rest))
+      rows (Ok [])
+  | _ -> Error "native image inspection must be an array"
+  | exception Yojson.Json_error detail -> Error ("invalid native image JSON: " ^ detail)
+;;
+
+let classify_image_probe_for backend ~image ~inspect ~listing =
+  match backend, inspect with
+  | Backend.Nerdctl_kata, (Unix.WEXITED 0 as status, stdout, stderr) ->
+    let invalid reason = probe_failure ~phase:Image_inspect ~status ~stdout ~stderr ~reason in
+    (match parse_nerdctl_native_images stdout with
+     | Error reason -> invalid reason
+     | Ok [] -> Image_missing
+     | Ok rows ->
+       (* OCI reference syntax uses @ to separate a name from immutable content.
+          Native inspect may return other repository aliases for that digest;
+          digest equality, not a guessed repository/tag normalization, binds it. *)
+       (match String.split_on_char '@' image with
+        | [ _name ] -> Image_present
+        | [ name; digest ] when name <> "" && digest <> "" ->
+          (match List.find_opt (fun row -> not (String.equal row.target_digest digest)) rows with
+           | None -> Image_present
+           | Some row ->
+             invalid (Printf.sprintf
+               "native image %s target digest %s differs from requested reference %s"
+               row.image_name row.target_digest digest))
+        | _ -> invalid "invalid digest-qualified image reference"))
+  | _ ->
+    classify_image_probe
+      ~inspect_shape:(image_inspect_shape_for backend)
+      ~listing_shape:(image_listing_shape_for backend)
+      ~inspect ~listing
 ;;
 
 let image_probe_for backend ~image ~timeout_sec =
@@ -500,11 +569,7 @@ let image_probe_for backend ~image ~timeout_sec =
            (image_listing_argv_for backend))
     | _ -> None
   in
-  classify_image_probe
-    ~inspect_shape:(image_inspect_shape_for backend)
-    ~listing_shape:(image_listing_shape_for backend)
-    ~inspect
-    ~listing
+  classify_image_probe_for backend ~image ~inspect ~listing
 ;;
 
 (* Build the image this binary carries the recipe for, into the store the
@@ -1317,6 +1382,21 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
     to a newly created directory; an existing keeper-owned root is untouched.
     Idempotent. *)
 let work_root_dir_mode = "0777"
+
+(* nerdctl creates the volume data directory with mode 0700 (v2.3.5:
+   pkg/mountutil/volumestore/volumestore.go and pkg/store/filestore.go).
+   The keeper's writable child is unreachable without search permission on
+   that root. Change only search bits, inside the mounted guest; do not grant
+   write/list access or alter existing child permissions. *)
+let work_volume_search_argv_for backend ~container_name =
+  match (backend : Backend.t) with
+  | Backend.Apple_container | Backend.Microsandbox -> None
+  | Backend.Nerdctl_kata ->
+    Some
+      (exec_argv_for backend ~container_name ~uid:0 ~gid:0
+         ~container_cwd:work_volume_guest_root ~stdin:false
+         ~command_argv:[ "chmod"; "a+x"; work_volume_guest_root ])
+;;
 
 let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
   exec_argv_for

@@ -350,8 +350,8 @@ let test_the_command_separator_is_per_runtime () =
        ~command_argv:[ "sh" ]);
   check
     (Alcotest.list Alcotest.string)
-    "msb needs the separator and spells stdin --stream"
-    [ "msb"; "exec"; "--stream"; "--user"; "1:2"; "-w"; "/w"; "g"; "--"; "sh" ]
+    "msb uses --stream and separator without a numeric --user"
+    [ "msb"; "exec"; "--stream"; "-w"; "/w"; "g"; "--"; "sh" ]
     (Microvm.exec_argv_for
        Backend.Microsandbox
        ~container_name:"g"
@@ -603,8 +603,8 @@ let test_the_image_inspect_argv_and_shape_agree () =
     (Microvm.image_inspect_argv_for Backend.Microsandbox ~image);
   check
     (Alcotest.list Alcotest.string)
-    "nerdctl names the mode rather than assuming a default"
-    [ "nerdctl"; "image"; "inspect"; "--mode"; "dockercompat"; image ]
+    "nerdctl requests native image identity"
+    [ "nerdctl"; "image"; "inspect"; "--mode"; "native"; image ]
     (Microvm.image_inspect_argv_for Backend.Nerdctl_kata ~image);
   let shape_label backend =
     match Microvm.image_inspect_shape_for backend with

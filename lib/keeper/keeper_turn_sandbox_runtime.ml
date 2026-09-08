@@ -969,7 +969,21 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
     while {!Keeper_sandbox_microvm.work_volume_guest_root} itself may be a
     rootfs directory. *)
 let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_name =
-  match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+  let prepare_volume =
+    match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+    | Error _ as err -> err
+    | Ok () ->
+      (match Keeper_sandbox_microvm.work_volume_search_argv_for backend ~container_name with
+       | None -> Ok ()
+       | Some argv ->
+         match run_argv_with_status ?timeout_sec argv with
+         | Unix.WEXITED 0, _ -> Ok ()
+         | _, out ->
+           Error
+             ("microvm_work_volume_search_failed: "
+              ^ Keeper_sandbox_runtime.docker_failure_output_for_log out))
+  in
+  match prepare_volume with
   | Error _ as err -> err
   | Ok () ->
   let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in

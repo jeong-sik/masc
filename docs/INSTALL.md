@@ -152,6 +152,25 @@ Keeper를 실행하려면 모델 출처와 도구 실행 환경을 모두 준비
    미리 구성된 팀이 필요하면 설치 시 `--team classic --sandbox docker`를 사용합니다.
    팀 파일은 다음 서버 시작 시 Keeper를 자동 부팅하므로 모델·sandbox를 먼저 준비합니다.
 
+서버가 실행 중이고 Docker 이미지와 모델을 준비했다면, 별도 터미널에서 첫 Keeper를
+명시적으로 만들 수 있습니다. `login`과 `keeper-create`는 같은 base path, agent,
+host/port를 사용합니다.
+
+```bash
+masc login --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
+  --agent local-admin --role admin --no-expiry --json
+masc keeper-create --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
+  --agent local-admin --name scout --sandbox-profile docker --network-mode none \
+  --no-skills --no-autoboot --no-proactive \
+  --instructions '주어진 작업을 수행하고 실제 도구 결과를 근거로 보고한다.'
+```
+
+생성 요청은 Keeper를 즉시 부팅합니다. `--no-autoboot`는 이후 서버 재시작 때의
+자동 부팅을 끄며, `--no-proactive`는 자발적 활동을 끕니다. TUI나 대시보드에서
+`scout`에게 작업을 보내세요. 이 예제의 `none`은 guest 외부 네트워크를 막으므로
+웹·Git 원격 작업에는 `inherit` 등 작업에 맞는 네트워크 설정이 필요합니다.
+같은 이름으로 다시 실행하면 기존 Keeper를 재설정합니다.
+
 Keeper는 설정된 모델로 턴을 수행하고, sandbox에서 도구를 실행하며, 작업·보드·채팅을
 통해 협업합니다. 일정 실행, 승인 판단, 외부 connector와 브라우저 조작은 해당
 runtime/credential/backend 설정이 있어야 합니다. 브라우저는 별도

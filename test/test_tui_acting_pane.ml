@@ -784,7 +784,7 @@ let test_reused_chunks_keep_presentation_inputs_live () =
     (contains "! " (row_for "sangsu" later));
   let later_text = List.map text later.Pane.rows in
   check bool "new selection changes focus keeper" true
-    (contains "settled" (List.nth later_text (last_index_of_in later_text "rondo")));
+    (contains "turn 41" (List.nth later_text (last_index_of_in later_text "rondo")));
   let pending = { changed with approvals =
     [ { Pane.approval_keeper = "sangsu"; approval_tool = "Write" } ] } in
   let approved_view = Pane.lines ~rows:6 ~cols ~scroll:0 pending in
@@ -956,16 +956,25 @@ let test_earlier_turn_row_gives_up_its_cost_before_its_parts () =
    pane then draws the selected keeper's record alone: no fleet rows, no
    rule, no keeper count in the header; the header's clock and the call
    rows' targets are as under the whole fleet. *)
+let rule_glyphs = "\xe2\x94\x80\xe2\x94\x80"
+
+let keeper_targets view =
+  List.filter_map
+    (function Pane.Target_keeper name -> Some name | _ -> None)
+    view.Pane.targets
+
 let test_beside_the_roster_only_the_selected_keepers_record_draws () =
-  let view = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.scope = Pane.Selected_only } in
+  let view =
+    Pane.lines ~rows ~cols ~scroll:0
+      { fixture with Pane.scope = Pane.Selected_only; approvals = [] }
+  in
   let texts = List.map text view.Pane.rows in
   check bool "the header names the tabs" true (contains "[Recent]" (List.nth texts 0));
   check bool "the header states the feed" true (contains "feed live" (List.nth texts 0));
   check bool "the header does not count the fleet" false (contains "keepers" (List.nth texts 0));
   check bool "the legend stays" true (contains Pane.legend (List.nth texts 1));
-  check bool "no fleet row" false
-    (List.exists (function Pane.Target_keeper _ -> true | _ -> false) view.Pane.targets);
-  check bool "no rule" false (List.exists (fun row -> contains "\xe2\x94\x80\xe2\x94\x80" row) texts);
+  check (list string) "no fleet row" [] (keeper_targets view);
+  check bool "no rule" false (List.exists (fun row -> contains rule_glyphs row) texts);
   check bool "the selected keeper's header is first under the legend" true
     (contains "sangsu" (List.nth texts 2) && contains "last event 10.0s" (List.nth texts 2));
   check string "its call rows open its calls" "calls:sangsu" (target_text (List.nth view.Pane.targets 3));
@@ -973,6 +982,42 @@ let test_beside_the_roster_only_the_selected_keepers_record_draws () =
   List.iteri
     (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
     view.Pane.rows
+
+(* The roster does not say who is waiting on an approval, so beside it the
+   pane keeps those rows and nothing else of the fleet. *)
+let test_beside_the_roster_keepers_waiting_on_approval_still_draw () =
+  let view = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.scope = Pane.Selected_only } in
+  let texts = List.map text view.Pane.rows in
+  check (list string) "only the waiting keeper keeps a fleet row" [ "polisher" ] (keeper_targets view);
+  check bool "and the row says what it waits on" true
+    (contains "approval" (List.nth texts 2) && contains "tool_execute" (List.nth texts 2));
+  check bool "a rule separates it from the record" true (contains rule_glyphs (List.nth texts 3));
+  check bool "the selected keeper's header follows" true (contains "sangsu" (List.nth texts 4));
+  check string "its call rows still open its calls" "calls:sangsu"
+    (target_text (List.nth view.Pane.targets 5))
+
+(* A sixteen-cell name, a four-digit settled turn and the clock share one
+   row: the number already says the turn settled, so no word is drawn and
+   the clock stays whole. *)
+let test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn () =
+  let name = "sixteen-charname" in
+  let event =
+    match settled ~at:990. name with
+    | Observer.Keeper_turn_complete value ->
+      Observer.Keeper_turn_complete { value with tc_turn = Some 3141 }
+    | _ -> fail "settled fixture must carry a turn completion"
+  in
+  let input =
+    { fixture with
+      Pane.keepers = [ keeper name ]; selected = Some name; approvals = []
+    ; chunks = chunks [ name ] @@ entries [ 990., event ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let header = List.nth texts (last_index_of_in texts name) in
+  check bool "the turn is named" true (contains "turn 3141" header);
+  check bool "the clock is whole" true (contains "last event 10.0s" header);
+  check bool "no state word doubles the number" false (contains "settled" header)
 
 let test_beside_the_roster_a_long_record_folds_and_scrolls () =
   let events =
@@ -1113,5 +1158,9 @@ let () =
             test_beside_the_roster_only_the_selected_keepers_record_draws
         ; test_case "a long record folds and scrolls" `Quick
             test_beside_the_roster_a_long_record_folds_and_scrolls
+        ; test_case "keepers waiting on approval still draw" `Quick
+            test_beside_the_roster_keepers_waiting_on_approval_still_draw
+        ; test_case "focus header keeps its clock behind a wide name and a named turn" `Quick
+            test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn
         ] )
     ]

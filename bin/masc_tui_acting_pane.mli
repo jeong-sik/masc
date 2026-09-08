@@ -115,8 +115,9 @@ type changes =
 
 (** How much of the fleet the Recent tab draws. Beside the Keepers roster
     every fleet row would be a roster row said twice, so there only the
-    selected keeper's record draws; beside any other surface the whole
-    fleet does. *)
+    selected keeper's record draws, under the rows of keepers waiting on an
+    approval, which the roster does not name; beside any other surface the
+    whole fleet does. *)
 type scope =
   | Whole_fleet
   | Selected_only
@@ -180,8 +181,10 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     its cost, then the token parts; the focus header gives up the long form
     of its state word.
 
-    Recent tab under [Selected_only]: the selected keeper's focus block
-    alone, windowed like the Changes tab. Under [Whole_fleet], two layouts.
+    Recent tab under [Selected_only]: the fleet rows of keepers waiting on
+    an approval, then the selected keeper's focus block, windowed like the
+    Changes tab. The focus header names a settled turn by its number alone;
+    an unsettled record spells its state. Under [Whole_fleet], two layouts.
     At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes

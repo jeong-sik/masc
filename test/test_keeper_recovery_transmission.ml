@@ -368,14 +368,8 @@ let test_actual_transmission_cap_metrics_checkpoint_and_reader () =
          Ok messages
        in
        let sink (s : Agent_core.Agent.checkpoint_snapshot) =
-         (* The AGENT_CORE mutation callback carries no persistence session.
-            Match the production Keeper sink: bind the snapshot to the exact
-            source session before saving, without changing its messages. *)
-         let checkpoint =
-           { s.checkpoint with session_id = cp.Agent_core.Checkpoint.session_id }
-         in
-         snapshots := checkpoint :: !snapshots;
-         Checkpoint.save_agent_core_classified ~session_dir checkpoint
+         snapshots := s.checkpoint :: !snapshots;
+         Checkpoint.save_agent_core_classified ~session_dir s.checkpoint
          |> Result.map (fun _ -> ())
        in
        (match

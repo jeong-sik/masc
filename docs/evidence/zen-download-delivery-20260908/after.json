@@ -1,0 +1,707 @@
+{
+  "keeper": "zen-download-33a142c9",
+  "source": "6219ea13c477518d95ba35c4d320aa86d850b5c3",
+  "server_sha256": "5a4e2595f90c0563e0854e17b52e29452f76dfc286061c63d8e5333b9257b18c",
+  "runtime_instance_id": "01a07f2c-ae5d-7000-a002-ac0a437bfc54",
+  "instructions_sha256": "b2353c567b5ba59e2bbbfae5ce59ea268c3ca237e670d770e6190e228eac1515",
+  "binary_seed_measured": true,
+  "skill_installed_by_operator_fixture": false,
+  "calls": [
+    {
+      "id": "call_wtzwrmnm",
+      "tool": "keeper_skill",
+      "ok": true,
+      "input": {
+        "identity": {
+          "name": "browser-lanes",
+          "package_id": "browser-lanes",
+          "source_id": "project-masc"
+        }
+      }
+    },
+    {
+      "id": "call_g8vbs1mp",
+      "tool": "BrowserSession",
+      "ok": true,
+      "input": {
+        "action": "open",
+        "headless": true
+      }
+    },
+    {
+      "id": "call_lgrsgwjg",
+      "tool": "keeper_skill",
+      "ok": true,
+      "input": {
+        "file": "references/advanced.md",
+        "identity": {
+          "name": "browser-lanes",
+          "package_id": "browser-lanes",
+          "source_id": "project-masc"
+        }
+      }
+    },
+    {
+      "id": "call_7tp1elsn",
+      "tool": "BrowserGoto",
+      "ok": true,
+      "input": {
+        "url": "http://127.0.0.1:58823"
+      }
+    },
+    {
+      "id": "call_twguv8ac",
+      "tool": "BrowserRead",
+      "ok": false,
+      "input": {
+        "lane": "automation",
+        "mode": "frames"
+      }
+    },
+    {
+      "id": "call_90ll9ak3",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "maxChars": 20000,
+        "mode": "text"
+      }
+    },
+    {
+      "id": "call_g4lchg82",
+      "tool": "BrowserTabs",
+      "ok": true,
+      "input": {
+        "lane": "automation"
+      }
+    },
+    {
+      "id": "call_dhiama25",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "frames",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_7lhfujqq",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "maxChars": 20000,
+        "mode": "elements",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_lgn40yrz",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "framePath": [
+          "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)"
+        ],
+        "lane": "automation",
+        "maxChars": 20000,
+        "mode": "text",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_pockzn0r",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "framePath": [
+          "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)"
+        ],
+        "lane": "automation",
+        "maxChars": 20000,
+        "mode": "elements",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_zv8sm5nd",
+      "tool": "BrowserAct",
+      "ok": false,
+      "input": {
+        "action": "click",
+        "lane": "automation",
+        "selector": "html:nth-of-type(1) \\u003e body:nth-of-type(1) \\u003e a:nth-of-type(1)",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_nhroigdf",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "maxChars": 20000,
+        "mode": "elements",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_ngjxhyft",
+      "tool": "BrowserAct",
+      "ok": false,
+      "input": {
+        "action": "click",
+        "lane": "automation",
+        "selector": "a[href=\"http://127.0.0.1:58823/a\"]",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_rahmbrlo",
+      "tool": "BrowserInteract",
+      "ok": false,
+      "input": {
+        "action": "click",
+        "expectedUrl": "http://127.0.0.1:58823/",
+        "lane": "automation",
+        "selector": "html:nth-of-type(1) \\u003e body:nth-of-type(1) \\u003e a:nth-of-type(1)",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_w14x4m1d",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "maxChars": 5000,
+        "mode": "text",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_p91ps17g",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "dialog",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_r0ho8qta",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "downloads",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_au3vmf6k",
+      "tool": "BrowserAct",
+      "ok": true,
+      "input": {
+        "action": "click",
+        "lane": "automation",
+        "selector": "a[href=\"/a\"]",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_9mf8nwx5",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "downloads",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_336y4jdw",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "sha256": "d7831491cc006d7dcbade63bae71b69e0ebc2fb74814f19da820a28c8ead1d06"
+      }
+    },
+    {
+      "id": "call_8kwwpmlp",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 461,
+        "sha256": "d7831491cc006d7dcbade63bae71b69e0ebc2fb74814f19da820a28c8ead1d06"
+      }
+    },
+    {
+      "id": "call_m1wm012q",
+      "tool": "BrowserAct",
+      "ok": true,
+      "input": {
+        "action": "click",
+        "lane": "automation",
+        "selector": "a[href=\"/b\"]",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_wmjrwt8d",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "downloads",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_0wo9d0ti",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "max_bytes": 4096,
+        "sha256": "66565c143ad4e4dd121a912268ed28773c7fd23d023afef0c34dfe9e087cc688"
+      }
+    },
+    {
+      "id": "call_176a7q1z",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 461,
+        "sha256": "66565c143ad4e4dd121a912268ed28773c7fd23d023afef0c34dfe9e087cc688"
+      }
+    },
+    {
+      "id": "call_wssodrfr",
+      "tool": "BrowserAct",
+      "ok": true,
+      "input": {
+        "action": "click",
+        "framePath": [
+          "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)"
+        ],
+        "lane": "automation",
+        "selector": "a[href=\"/c\"]",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_5ho52qcd",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "downloads",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_vzjzuxfh",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "max_bytes": 4096,
+        "sha256": "de2aa5996268bde6e1c3062dc43d775159cf26ca6d239f7b8163626f43c92f04"
+      }
+    },
+    {
+      "id": "call_tvgxqizj",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 461,
+        "sha256": "de2aa5996268bde6e1c3062dc43d775159cf26ca6d239f7b8163626f43c92f04"
+      }
+    },
+    {
+      "id": "call_rvxtn21w",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+      }
+    },
+    {
+      "id": "call_cy1lre3w",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b"
+      }
+    },
+    {
+      "id": "call_pw1hemqa",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "sha256": "d95f0978e89dbaf395e4b5f3dd75cb35cecf1e7b0cab65eca7bf2ac579cfa73b"
+      }
+    },
+    {
+      "id": "call_kmzzenee",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 128,
+        "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+      }
+    },
+    {
+      "id": "call_ymdmcj6f",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 12150,
+        "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b"
+      }
+    },
+    {
+      "id": "call_2z2wsl74",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 12275,
+        "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+      }
+    },
+    {
+      "id": "call_s0lzytnp",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 24297,
+        "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b"
+      }
+    },
+    {
+      "id": "call_sz92jg49",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 24422,
+        "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+      }
+    },
+    {
+      "id": "call_bifglc1q",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 24320,
+        "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b"
+      }
+    },
+    {
+      "id": "call_oapbdtt5",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 24448,
+        "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+      }
+    },
+    {
+      "id": "call_pgicispp",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 36467,
+        "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b"
+      }
+    },
+    {
+      "id": "call_462xw69y",
+      "tool": "keeper_artifact_read",
+      "ok": true,
+      "input": {
+        "offset": 36595,
+        "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d"
+      }
+    },
+    {
+      "id": "call_gw5dhf95",
+      "tool": "BrowserRead",
+      "ok": true,
+      "input": {
+        "lane": "automation",
+        "mode": "screenshot",
+        "tabId": 1
+      }
+    },
+    {
+      "id": "call_thli2oc7",
+      "tool": "keeper_analyze_image",
+      "ok": true,
+      "input": {
+        "artifact": "941c3efd004e1c97b13d380d24ba68a6c6ad95dacdd0565bb706243000cb6173",
+        "query": "이 화면에 보이는 페이지 제목과 링크 텍스트를 그대로 읽어 주세요. iframe 영역이 보이면 그 안의 텍스트도 읽어 주세요."
+      }
+    },
+    {
+      "id": "call_or7fj9q9",
+      "tool": "BrowserSession",
+      "ok": true,
+      "input": {
+        "action": "close"
+      }
+    }
+  ],
+  "counts": {
+    "total": 45,
+    "success": 41,
+    "failure": 4
+  },
+  "artifacts": [
+    {
+      "sha256": "d7831491cc006d7dcbade63bae71b69e0ebc2fb74814f19da820a28c8ead1d06",
+      "bytes": 2110,
+      "pages": [
+        {
+          "offset": 0,
+          "next_offset": 461,
+          "encoding": "utf-8",
+          "eof": false
+        },
+        {
+          "offset": 461,
+          "next_offset": 2110,
+          "encoding": "base64",
+          "eof": true
+        }
+      ],
+      "contiguous_exact_hash": true,
+      "valid_utf8_json": false,
+      "manifest_schema": "masc.tool-result-artifact-manifest.v1",
+      "downloads": [
+        {
+          "downloadId": "9adbb864-5657-4f60-8c41-e04527f19ef5",
+          "context": "f66542d9-de06-4380-aa9f-bc12befd5692",
+          "url": "http://127.0.0.1:58823/a",
+          "status": "completed",
+          "suggestedFilename": "same.bin",
+          "file": "available",
+          "path": "/private/tmp/masc-zen-full-20260908/fixed-run/runtime/.masc/browser-downloads/db42f627c2bbdf75f000101bde6bc2cc/same.bin",
+          "bytes": 40960
+        }
+      ]
+    },
+    {
+      "sha256": "66565c143ad4e4dd121a912268ed28773c7fd23d023afef0c34dfe9e087cc688",
+      "bytes": 3919,
+      "pages": [
+        {
+          "offset": 0,
+          "next_offset": 461,
+          "encoding": "utf-8",
+          "eof": false
+        },
+        {
+          "offset": 461,
+          "next_offset": 3919,
+          "encoding": "base64",
+          "eof": true
+        }
+      ],
+      "contiguous_exact_hash": true,
+      "valid_utf8_json": false,
+      "manifest_schema": "masc.tool-result-artifact-manifest.v1",
+      "downloads": [
+        {
+          "downloadId": "9adbb864-5657-4f60-8c41-e04527f19ef5",
+          "context": "f66542d9-de06-4380-aa9f-bc12befd5692",
+          "url": "http://127.0.0.1:58823/a",
+          "status": "completed",
+          "suggestedFilename": "same.bin",
+          "file": "available",
+          "path": "/private/tmp/masc-zen-full-20260908/fixed-run/runtime/.masc/browser-downloads/db42f627c2bbdf75f000101bde6bc2cc/same.bin",
+          "bytes": 40960
+        },
+        {
+          "downloadId": "58d40633-1e3e-495a-80e1-b5393133b4cf",
+          "context": "f66542d9-de06-4380-aa9f-bc12befd5692",
+          "url": "http://127.0.0.1:58823/b",
+          "status": "completed",
+          "suggestedFilename": "same(1).bin",
+          "file": "available",
+          "path": "/private/tmp/masc-zen-full-20260908/fixed-run/runtime/.masc/browser-downloads/db42f627c2bbdf75f000101bde6bc2cc/same(1).bin",
+          "bytes": 41216
+        }
+      ]
+    },
+    {
+      "sha256": "de2aa5996268bde6e1c3062dc43d775159cf26ca6d239f7b8163626f43c92f04",
+      "bytes": 5347,
+      "pages": [
+        {
+          "offset": 0,
+          "next_offset": 461,
+          "encoding": "utf-8",
+          "eof": false
+        },
+        {
+          "offset": 461,
+          "next_offset": 5347,
+          "encoding": "base64",
+          "eof": true
+        }
+      ],
+      "contiguous_exact_hash": true,
+      "valid_utf8_json": false,
+      "manifest_schema": "masc.tool-result-artifact-manifest.v1",
+      "downloads": [
+        {
+          "downloadId": "9adbb864-5657-4f60-8c41-e04527f19ef5",
+          "context": "f66542d9-de06-4380-aa9f-bc12befd5692",
+          "url": "http://127.0.0.1:58823/a",
+          "status": "completed",
+          "suggestedFilename": "same.bin",
+          "file": "available",
+          "path": "/private/tmp/masc-zen-full-20260908/fixed-run/runtime/.masc/browser-downloads/db42f627c2bbdf75f000101bde6bc2cc/same.bin",
+          "bytes": 40960
+        },
+        {
+          "downloadId": "58d40633-1e3e-495a-80e1-b5393133b4cf",
+          "context": "f66542d9-de06-4380-aa9f-bc12befd5692",
+          "url": "http://127.0.0.1:58823/b",
+          "status": "completed",
+          "suggestedFilename": "same(1).bin",
+          "file": "available",
+          "path": "/private/tmp/masc-zen-full-20260908/fixed-run/runtime/.masc/browser-downloads/db42f627c2bbdf75f000101bde6bc2cc/same(1).bin",
+          "bytes": 41216
+        },
+        {
+          "downloadId": "3b12dad3-e0e5-4f9c-983c-5a8ba6a4ec1e",
+          "context": "15032385537",
+          "url": "http://127.0.0.1:58823/c",
+          "status": "completed",
+          "suggestedFilename": "unicode.txt",
+          "file": "available",
+          "path": "/private/tmp/masc-zen-full-20260908/fixed-run/runtime/.masc/browser-downloads/db42f627c2bbdf75f000101bde6bc2cc/unicode.txt",
+          "bytes": 51
+        }
+      ]
+    },
+    {
+      "sha256": "90b3b375e4565eb5cf64f68b23809e221918ee6a0b78fac98debf002ffaf2c4d",
+      "bytes": 40960,
+      "pages": [
+        {
+          "offset": 0,
+          "next_offset": 128,
+          "encoding": "utf-8",
+          "eof": false
+        },
+        {
+          "offset": 128,
+          "next_offset": 12275,
+          "encoding": "base64",
+          "eof": false
+        },
+        {
+          "offset": 12275,
+          "next_offset": 24422,
+          "encoding": "base64",
+          "eof": false
+        },
+        {
+          "offset": 24422,
+          "next_offset": 24448,
+          "encoding": "utf-8",
+          "eof": false
+        },
+        {
+          "offset": 24448,
+          "next_offset": 36595,
+          "encoding": "base64",
+          "eof": false
+        },
+        {
+          "offset": 36595,
+          "next_offset": 40960,
+          "encoding": "base64",
+          "eof": true
+        }
+      ],
+      "contiguous_exact_hash": true,
+      "fixture": "a-expected.bin",
+      "download_filename": "same.bin",
+      "fixture_and_disk_exact": true
+    },
+    {
+      "sha256": "ece31018d687e8fedf3823ac61fdd7af765bbc5b4a4b221a86b1a118e640d14b",
+      "bytes": 41216,
+      "pages": [
+        {
+          "offset": 0,
+          "next_offset": 12150,
+          "encoding": "base64",
+          "eof": false
+        },
+        {
+          "offset": 12150,
+          "next_offset": 24297,
+          "encoding": "base64",
+          "eof": false
+        },
+        {
+          "offset": 24297,
+          "next_offset": 24320,
+          "encoding": "utf-8",
+          "eof": false
+        },
+        {
+          "offset": 24320,
+          "next_offset": 36467,
+          "encoding": "base64",
+          "eof": false
+        },
+        {
+          "offset": 36467,
+          "next_offset": 41216,
+          "encoding": "base64",
+          "eof": true
+        }
+      ],
+      "contiguous_exact_hash": true,
+      "fixture": "b-expected.bin",
+      "download_filename": "same(1).bin",
+      "fixture_and_disk_exact": true
+    },
+    {
+      "sha256": "d95f0978e89dbaf395e4b5f3dd75cb35cecf1e7b0cab65eca7bf2ac579cfa73b",
+      "bytes": 51,
+      "pages": [
+        {
+          "offset": 0,
+          "next_offset": 51,
+          "encoding": "utf-8",
+          "eof": true
+        }
+      ],
+      "contiguous_exact_hash": true,
+      "fixture": "c-expected.bin",
+      "download_filename": "unicode.txt",
+      "fixture_and_disk_exact": true
+    }
+  ],
+  "image": {
+    "sha256": "941c3efd004e1c97b13d380d24ba68a6c6ad95dacdd0565bb706243000cb6173",
+    "bytes": 28604,
+    "analysis_input": {
+      "artifact": "941c3efd004e1c97b13d380d24ba68a6c6ad95dacdd0565bb706243000cb6173",
+      "query": "이 화면에 보이는 페이지 제목과 링크 텍스트를 그대로 읽어 주세요. iframe 영역이 보이면 그 안의 텍스트도 읽어 주세요."
+    },
+    "analysis_result": {
+      "ok": true,
+      "text": "Zen download fixture\nBinary A\nBinary B same filename\nFrame download\nUnicode with"
+    }
+  },
+  "session_close": true
+}

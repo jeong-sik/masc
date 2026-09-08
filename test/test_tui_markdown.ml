@@ -371,6 +371,18 @@ let test_mermaid_fence_of_another_kind_shows_its_source () =
        ])
     (render ~width:70 "```mermaid\nclassDiagram\nAnimal <|-- Duck\n```")
 
+(* A chain laid across the pane needs several times the columns it would need
+   rows, so "needs more than it has" leaves the reader nothing to do. The row
+   names the direction the same graph draws in, and only when it does. *)
+let test_mermaid_fence_too_wide_names_the_direction_that_fits () =
+  check_rows "too wide"
+    (tagged_fence ~width:100 "mermaid"
+       [ "<c>\xe2\x94\x82 mermaid: the drawing needs 103 cells and this pane has 98 (as TD it fits); the source follows</c>"
+       ; "<c>\xe2\x94\x82 graph LR</c>"
+       ; "<c>\xe2\x94\x82 A --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K --> L --> M --> N --> O</c>"
+       ])
+    (render ~width:100 "```mermaid\ngraph LR\nA --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K --> L --> M --> N --> O\n```")
+
 (* {1 Fenced-code highlighting} *)
 
 (* The tag decides: the same body, untagged, stays the single code span --
@@ -760,6 +772,8 @@ let () =
         ; Alcotest.test_case "a mermaid fence is drawn" `Quick test_mermaid_fence_is_drawn
         ; Alcotest.test_case "a mermaid fence of another kind shows its source" `Quick
             test_mermaid_fence_of_another_kind_shows_its_source
+        ; Alcotest.test_case "a mermaid fence too wide names the direction that fits"
+            `Quick test_mermaid_fence_too_wide_names_the_direction_that_fits
         ; Alcotest.test_case "the markers are not drawn" `Quick
             test_fence_markers_are_not_drawn
         ; Alcotest.test_case "an unclosed fence renders its body" `Quick

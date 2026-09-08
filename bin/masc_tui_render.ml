@@ -7,6 +7,7 @@ open Masc_tui_ansi
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
 module Ask_layout = Masc_tui_ask_layout
+module Board_read_layout = Masc_tui_board_read_layout
 module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
@@ -3835,6 +3836,10 @@ let render_board_list (state : state) =
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
 
+(* Owned by the single render loop, like the chat Markdown cache. Only the
+   currently read document is retained; input and live status are never cached. *)
+let board_read_layout = Board_read_layout.create ()
+
 (** Render the Board surface (read view). *)
 (* The read post alone -- borders, header, body, comments -- at [cols]
    wide, footer excluded, so a caller can lay it beside the post list.
@@ -3931,141 +3936,153 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.reset);
   box_divider buf cols;
 
-  (* Body lines *)
-  let text_width = cols - 8 in
-  (* Sanitised a line at a time. A newline is a control byte, so sanitising the
-     body whole escaped every break and the post arrived as one unbroken run
-     with "\x0A" printed through it. *)
-  (* Board posts are written in markdown -- headings, fences, rules -- and were
-     drawn as the source they were typed as. The chat pane has rendered them
-     for a while; this surface reads the same kind of document. *)
-  let body_lines =
-    Message_layout.wrap_body
-      ~markdown:board_document_markdown
-      ~max_cells:text_width
-      ~sanitize:Terminal_text.single_line
-      post.bp_body
+  let source : Board_read_layout.source =
+    { post; detail; related_posts = state.board_posts;
+      keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
+      columns = cols;
+      styles = [ Theme.info (); Theme.warn (); Theme.bad (); Theme.recede ();
+                 Masc_tui_theme.tone Masc_tui_theme.Accent ];
+      table_frame = !table_frame_enabled }
   in
-  (* What this post points at, and who else points at the same thing.
-     Read from the references the writer actually wrote -- [Link.scan] takes
-     only what [Link.reference] could have produced. An id spelled in prose is
-     not a link: a connection the writer did not make is one nobody checked,
-     and following it would go somewhere they never meant.
+  let document =
+    Board_read_layout.get board_read_layout ~source ~render:(fun () ->
+      (* Body lines *)
+      let text_width = cols - 8 in
+      (* Sanitised a line at a time. A newline is a control byte, so sanitising the
+         body whole escaped every break and the post arrived as one unbroken run
+         with "\x0A" printed through it. *)
+      (* Board posts are written in markdown -- headings, fences, rules -- and were
+         drawn as the source they were typed as. The chat pane has rendered them
+         for a while; this surface reads the same kind of document. *)
+      let body_lines =
+        Message_layout.wrap_body
+          ~markdown:board_document_markdown
+          ~max_cells:text_width
+          ~sanitize:Terminal_text.single_line
+          post.bp_body
+      in
+      (* What this post points at, and who else points at the same thing.
+         Read from the references the writer actually wrote -- [Link.scan] takes
+         only what [Link.reference] could have produced. An id spelled in prose is
+         not a link: a connection the writer did not make is one nobody checked,
+         and following it would go somewhere they never meant.
 
-     Appended to the body so the surface's own scroll carries them; this pane
-     measures its lines rather than reserving rows. *)
-  let referenced = Link.scan post.bp_body in
-  let related =
-    match referenced with
-    | [] -> []
-    | referenced ->
-      state.board_posts
-      |> List.filter (fun (other : board_post) ->
-        (not (String.equal other.bp_id post.bp_id))
-        && List.exists
-             (fun hit -> List.mem hit referenced)
-             (Link.scan other.bp_body))
+         Appended to the body so the surface's own scroll carries them; this pane
+         measures its lines rather than reserving rows. *)
+      let referenced = Link.scan post.bp_body in
+      let related =
+        match referenced with
+        | [] -> []
+        | referenced ->
+          state.board_posts
+          |> List.filter (fun (other : board_post) ->
+            (not (String.equal other.bp_id post.bp_id))
+            && List.exists
+                 (fun hit -> List.mem hit referenced)
+                 (Link.scan other.bp_body))
+      in
+      let reference_lines =
+        match referenced with
+        | [] -> []
+        | referenced ->
+          (Ansi.dim ^ "" ^ Ansi.reset)
+          :: (Ansi.bold ^ "  POINTS AT" ^ Ansi.reset)
+          :: List.map
+               (fun (kind, id) ->
+                 (* [Link.parse] percent-decodes the id segment, so a body that
+                    writes masc://board/%1b%5b2J hands this line real escape
+                    bytes. The kind is a closed variant and needs no sanitizer;
+                    the id is whatever the writer typed. *)
+                 Printf.sprintf "  %s%-10s %s%s" Ansi.reset
+                   (Link.kind_label kind)
+                   (fit_width (Terminal_text.single_line id) (max 8 (cols - 16)))
+                   Ansi.reset)
+               referenced
+      in
+      let related_lines =
+        match related with
+        | [] -> []
+        | related ->
+          (Ansi.dim ^ "" ^ Ansi.reset)
+          :: (Ansi.bold
+              ^ Printf.sprintf "  ALSO ABOUT THIS (%d)" (List.length related)
+              ^ Ansi.reset)
+          :: (related
+              |> List.filteri (fun index _ -> index < 5)
+              |> List.map (fun (other : board_post) ->
+                   Printf.sprintf "  %s  %s%s%s"
+                     (fit_width (Terminal_text.single_line other.bp_id) 12)
+                     Ansi.dim
+                     (fit_width (Terminal_text.single_line other.bp_title)
+                        (max 8 (cols - 26)))
+                     Ansi.reset))
+      in
+      let body_lines = body_lines @ reference_lines @ related_lines in
+      let detail_lines =
+        match detail with
+        | Board_detail.Absent ->
+            [Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset]
+        | Board_detail.Loading ->
+            [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
+        | Board_detail.Failed error ->
+            [ (Theme.bad ()) ^ "  Board detail unavailable: "
+              ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
+              ^ Ansi.reset
+            ]
+        | Board_detail.Ready (_, comments) ->
+            (* A reply and the thing it answers used to sit at one indent in clock
+               order, so a thread read as unrelated remarks. [parent_id] has been
+               on the wire since comments existed -- 152 of this workspace's 1364
+               comments carry one -- and the pane simply never decoded it. *)
+            Board_comment_thread.order comments
+            |> List.concat_map
+              (fun (depth, c) ->
+                 let rail =
+                   if depth <= 0 then ""
+                   else
+                     let bar = (Theme.recede ()) ^ "\xe2\x94\x82 " ^ Ansi.reset in
+                     let indent = String.make (2 * (min depth 4 - 1)) ' ' in
+                     indent ^ bar
+                 in
+                 let author = Terminal_text.single_line c.bc_author in
+                 let created_at = Terminal_text.single_line c.bc_created_at in
+                 let author_role =
+                   if String.equal author (Terminal_text.single_line post.bp_author) then
+                     " " ^ (Theme.info ()) ^ "[Author]" ^ Ansi.reset
+                   else if List.exists (fun (k : Tui_decode.keeper) -> String.equal k.k_name author) state.keepers then
+                     " " ^ (Theme.warn ()) ^ "[Keeper]" ^ Ansi.reset
+                   else ""
+                 in
+                 let heading =
+                   Printf.sprintf "  %s%s@%s%s%s  %s%s%s"
+                     rail
+                     (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                     author
+                     Ansi.reset
+                     author_role
+                     Ansi.dim
+                     created_at
+                     Ansi.reset
+                 in
+                 let body =
+                   Message_layout.wrap_body ~markdown:board_document_markdown
+                     ~max_cells:
+                       (max 1
+                          (cols - 10 - Message_layout.display_width rail))
+                     ~sanitize:Terminal_text.single_line c.bc_content
+                 in
+                 match body with
+                 | [ line ] -> [ heading ^ "  " ^ line ]
+                 | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
+                 | lines ->
+                     heading
+                     :: List.map
+                          (fun line -> "  " ^ rail ^ "  " ^ line) lines)
+      in
+      (body_lines, detail_lines))
   in
-  let reference_lines =
-    match referenced with
-    | [] -> []
-    | referenced ->
-      (Ansi.dim ^ "" ^ Ansi.reset)
-      :: (Ansi.bold ^ "  POINTS AT" ^ Ansi.reset)
-      :: List.map
-           (fun (kind, id) ->
-             (* [Link.parse] percent-decodes the id segment, so a body that
-                writes masc://board/%1b%5b2J hands this line real escape
-                bytes. The kind is a closed variant and needs no sanitizer;
-                the id is whatever the writer typed. *)
-             Printf.sprintf "  %s%-10s %s%s" Ansi.reset
-               (Link.kind_label kind)
-               (fit_width (Terminal_text.single_line id) (max 8 (cols - 16)))
-               Ansi.reset)
-           referenced
-  in
-  let related_lines =
-    match related with
-    | [] -> []
-    | related ->
-      (Ansi.dim ^ "" ^ Ansi.reset)
-      :: (Ansi.bold
-          ^ Printf.sprintf "  ALSO ABOUT THIS (%d)" (List.length related)
-          ^ Ansi.reset)
-      :: (related
-          |> List.filteri (fun index _ -> index < 5)
-          |> List.map (fun (other : board_post) ->
-               Printf.sprintf "  %s  %s%s%s"
-                 (fit_width (Terminal_text.single_line other.bp_id) 12)
-                 Ansi.dim
-                 (fit_width (Terminal_text.single_line other.bp_title)
-                    (max 8 (cols - 26)))
-                 Ansi.reset))
-  in
-  let body_lines = body_lines @ reference_lines @ related_lines in
-  let total_lines = List.length body_lines in
-  let detail_lines =
-    match detail with
-    | Board_detail.Absent ->
-        [Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset]
-    | Board_detail.Loading ->
-        [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
-    | Board_detail.Failed error ->
-        [ (Theme.bad ()) ^ "  Board detail unavailable: "
-          ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
-          ^ Ansi.reset
-        ]
-    | Board_detail.Ready (_, comments) ->
-        (* A reply and the thing it answers used to sit at one indent in clock
-           order, so a thread read as unrelated remarks. [parent_id] has been
-           on the wire since comments existed -- 152 of this workspace's 1364
-           comments carry one -- and the pane simply never decoded it. *)
-        Board_comment_thread.order comments
-        |> List.concat_map
-          (fun (depth, c) ->
-             let rail =
-               if depth <= 0 then ""
-               else
-                 let bar = (Theme.recede ()) ^ "\xe2\x94\x82 " ^ Ansi.reset in
-                 let indent = String.make (2 * (min depth 4 - 1)) ' ' in
-                 indent ^ bar
-             in
-             let author = Terminal_text.single_line c.bc_author in
-             let created_at = Terminal_text.single_line c.bc_created_at in
-             let author_role =
-               if String.equal author (Terminal_text.single_line post.bp_author) then
-                 " " ^ (Theme.info ()) ^ "[Author]" ^ Ansi.reset
-               else if List.exists (fun (k : Tui_decode.keeper) -> String.equal k.k_name author) state.keepers then
-                 " " ^ (Theme.warn ()) ^ "[Keeper]" ^ Ansi.reset
-               else ""
-             in
-             let heading =
-               Printf.sprintf "  %s%s@%s%s%s  %s%s%s"
-                 rail
-                 (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                 author
-                 Ansi.reset
-                 author_role
-                 Ansi.dim
-                 created_at
-                 Ansi.reset
-             in
-             let body =
-               Message_layout.wrap_body ~markdown:board_document_markdown
-                 ~max_cells:
-                   (max 1
-                      (cols - 10 - Message_layout.display_width rail))
-                 ~sanitize:Terminal_text.single_line c.bc_content
-             in
-             match body with
-             | [ line ] -> [ heading ^ "  " ^ line ]
-             | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
-             | lines ->
-                 heading
-                 :: List.map
-                      (fun line -> "  " ^ rail ^ "  " ^ line) lines)
-  in
-  let detail_line_count = List.length detail_lines in
+  let total_lines = Board_read_layout.body_count document in
+  let detail_line_count = Board_read_layout.comment_count document in
   let row_budget =
     Render_schedule.allocate_board_read ~terminal_rows:rows
       ~body_line_count:total_lines
@@ -4082,7 +4099,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   for i = 0 to content_height - 1 do
     let idx = i + scroll.body_offset in
     if idx < total_lines then
-      box_line buf cols ("  " ^ List.nth body_lines idx)
+      box_line buf cols ("  " ^ Board_read_layout.body_line document idx)
     else
       box_empty buf cols
   done;
@@ -4091,7 +4108,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     box_divider buf cols;
     box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
     for i = 0 to comment_height - 1 do
-      box_line buf cols (List.nth detail_lines (i + scroll.comment_offset))
+      box_line buf cols (Board_read_layout.comment_line document (i + scroll.comment_offset))
     done
   end;
 
@@ -13691,14 +13708,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Read_ok -> Theme.ok ()
     | Read_failed -> Theme.bad ()
     | Reading | Operating -> Theme.info ()
-    | Unread -> Theme.recede ()
+    | Unread | Browser_missing -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
       (screen_title " MASC Browser Lane") (source_name view.source ^ " · " ^ browser_label view)
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  Esc:back"
+      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane)
@@ -13711,6 +13728,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
             | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
@@ -13731,8 +13749,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 (if Some client = view.selected_client then " (selected)" else "") (Terminal_text.single_line client.client_id) in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
-          if view.clients = [] then c.push_styled ~style:(Theme.recede ())
-            (if busy view then "  Waiting for active connections…" else "  No active native browser connections")
+          if view.clients = [] then (
+            c.push_styled ~style:(Theme.recede ())
+              (if busy view then "  Waiting for active connections…" else "  No active native browser connections");
+            if awaiting_browser view then (
+              c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
+              c.push_styled ~style:(Theme.recede ()) "  Setup: connectors/browser/host/README.md";
+              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
       | None ->
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
@@ -13764,7 +13787,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some page -> Printf.sprintf "  %s • %d chars%s%s"
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
-             (match view.load with Idle -> "" | Loading _ | Failed _ -> " • previous read"));
+             (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
       c.push_divider ();
       let lines = browser_lane_page_lines ~cols view in
       let room = max 0 (budget - 6) in

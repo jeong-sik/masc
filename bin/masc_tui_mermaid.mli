@@ -114,8 +114,20 @@ type failure =
   | Too_wide of {
       cells : int;
       cols : int;
+      turning_it_fits : direction option;
     }
-      (** the drawing needs [cells] columns and the caller has [cols] *)
+      (** the drawing needs [cells] columns and the caller has [cols].
+
+          [turning_it_fits] is the direction the same graph does fit in, when
+          there is one. A chain drawn across the pane can need several times
+          the columns it needs rows drawn down it, and the reader can only act
+          on that if the refusal says so. [None] when the other axis is no
+          better, and always [None] for a sequence diagram, which has one
+          shape. Nothing is redrawn: which way a graph reads is the author's. *)
+
+val direction_word : direction -> string
+(** The header word for a direction, so a message can name one as the source
+    writes it. [TD] for {!Top_down}, which a header may also spell [TB]. *)
 
 val parse : string -> (diagram, failure) result
 (** The source of one fence, without the fence markers. Blank lines and

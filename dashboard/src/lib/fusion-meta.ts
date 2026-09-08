@@ -233,7 +233,8 @@ export function classifyFusionJudgeShape(nodes: readonly FusionJudgeNode[]): Fus
 
 export function normalizeFusionUsage(
   meta: Record<string, unknown>,
-  panel?: FusionPanelEntry[],
+  // Only the token counts are read, so the parameter asks for only those.
+  panel?: readonly Pick<FusionPanelEntry, 'inputTokens' | 'outputTokens'>[],
 ): FusionUsage {
   const observed = asRecord(meta.observed_usage) ?? {}
   const summedInput = (panel ?? []).reduce((sum, entry) => sum + (entry.inputTokens ?? 0), 0)

@@ -15,9 +15,25 @@ val set_graphics_protocol : Masc_tui_graphics.graphics_protocol -> unit
     the spectator and the image overlay cannot disagree about what the
     terminal can do. *)
 
-val render : write:(string -> unit) -> Masc_tui_types.msx_frame option -> unit
-(** Draw the frame as a truecolor mosaic, or a "no machine" line when it is
-    [None] or too short. Writes the whole terminal. *)
+val set_cell_pixels : (int * int) option -> unit
+(** Tell the spectator what one character cell measures, so an image placement
+    can be sized to stay inside the screen. [None] leaves it sizing in cells
+    alone. Set once at startup from the terminal probe, for the same reason
+    {!set_graphics_protocol} is: this screen cannot reach the reader's state. *)
+
+val render :
+  write:(string -> unit)
+  -> connection:Masc_tui_types.connection_status
+  -> Masc_tui_types.msx_frame option
+  -> unit
+(** Draw the frame as a truecolor mosaic. Writes the whole terminal.
+
+    [None] is drawn as an empty body under a line that says why it is empty,
+    and [connection] is what decides which reason. The cache is [None] both
+    when the server said no machine is loaded and when it could not be reached
+    to say anything -- {!Masc_tui_http.fetch_msx_frame} maps a transport
+    failure onto the same value -- and "no machine loaded" sends an operator to
+    load one when the server is the thing that is down. *)
 
 val adjust_size : float -> unit
 (** Step the picture's share of this terminal's screen by an eighth, clamped

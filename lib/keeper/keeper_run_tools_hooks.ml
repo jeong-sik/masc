@@ -797,6 +797,38 @@ let assemble_hooks
                 record_block
                   Prompt_block_id.Temporal_summary
                   (Masc_context_injector.render_temporal_summary shared_context);
+                (* Name this turn's composition Skills once. Nothing else did:
+                   the keeper prompt reached Skills only through
+                   [current_task.skills] / [held_task.skills], and both render
+                   only when a task names one — 0 of 292 recorded tasks ever
+                   did (RFC-0411 §1.5). A model that never reads a tool
+                   description therefore had no sentence telling it these
+                   exist, and 2026-09 measured 250 Skill reads across 108,185
+                   tool calls with the busiest runtime at 0 in 24,041.
+
+                   Selected through the catalog's own
+                   [skill_source_of_tool_name] rather than by matching a name
+                   prefix: that function answers [None] for a name that is not
+                   a composition tool, so the choice is a declared fact rather
+                   than a guess about spelling. *)
+                (match
+                   List.filter
+                     (fun tool_name ->
+                       Option.is_some
+                         (Keeper_tool_composition_catalog
+                          .skill_source_of_tool_name
+                            tool_name))
+                     all_tool_names
+                 with
+                 | [] -> ()
+                 | compositions ->
+                   record_block
+                     Prompt_block_id.Skill_compositions
+                     (Printf.sprintf
+                        "[Skills] %d composition tools on this turn — each is \
+                         one call whose reads run in parallel: %s"
+                        (List.length compositions)
+                        (String.concat ", " compositions)));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn

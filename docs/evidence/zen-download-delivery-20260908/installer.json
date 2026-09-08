@@ -1,0 +1,28 @@
+{
+  "source": "fe31fbcbd6ece858b957143bad64977c4678d9f7",
+  "binary_sha256": "b6f62f33fdd6e8df89a3540c13677411d7aea13ae051886cb1397c01d141c24c",
+  "installer_sha256": "eb34a462aa79bd1d687309fb9a59aefc83d92e939c501eca7cd04a7dcc24a3da",
+  "version": "0.33.0",
+  "checksum_verified_local_release_mirror": true,
+  "test_fixture_companion_binaries_and_dashboard": true,
+  "actual_TUI_or_release_publication_claimed": false,
+  "results": [
+    {
+      "case": "fresh",
+      "all_four_skill_files_match": true
+    },
+    {
+      "case": "upgrade",
+      "all_four_skill_files_match": true,
+      "runtime_bytes_preserved": true,
+      "omitted_prompt_preserved": true
+    },
+    {
+      "case": "reinstall",
+      "edited_skill_preserved": true,
+      "deleted_reference_preserved": true,
+      "runtime_bytes_preserved": true,
+      "omitted_prompt_preserved": true
+    }
+  ]
+}

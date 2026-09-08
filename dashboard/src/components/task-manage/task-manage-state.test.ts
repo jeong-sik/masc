@@ -1,4 +1,3 @@
-// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
@@ -15,7 +14,6 @@ vi.mock('../../store', () => ({
   refreshGoals: () => mockRefreshGoals(),
 }))
 
-const flushAsync = () => new Promise<void>((r) => setTimeout(() => r(), 10))
 
 describe('task-manage-state', () => {
   beforeEach(() => {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from 'vitest'
 import { render, h } from 'preact'
@@ -13,14 +12,14 @@ describe('ThemeSwitch', () => {
 
   it('renders DARK label when no theme attribute is set', () => {
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     expect(container.textContent).toContain('DARK')
   })
 
   it('renders SEED label when StyleSeed theme is active', () => {
     document.documentElement.dataset.theme = 'styleseed'
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     expect(container.textContent).toContain('SEED')
   })
 
@@ -28,7 +27,7 @@ describe('ThemeSwitch', () => {
     document.documentElement.dataset.theme = 'styleseed'
     window.history.replaceState(null, '', '/?theme=styleseed')
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     const btn = container.querySelector('button')
     expect(btn).not.toBeNull()
     btn!.click()
@@ -39,7 +38,7 @@ describe('ThemeSwitch', () => {
 
   it('toggles from dark to styleseed on click', () => {
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     const btn = container.querySelector('button')
     btn!.click()
     expect(document.documentElement.dataset.theme).toBe('styleseed')
@@ -50,7 +49,7 @@ describe('ThemeSwitch', () => {
   it('has correct aria-label for styleseed', () => {
     document.documentElement.dataset.theme = 'styleseed'
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     const btn = container.querySelector('button')
     expect(btn!.getAttribute('aria-label')).toContain('StyleSeed')
     expect(btn!.getAttribute('title')).toContain('StyleSeed')
@@ -58,7 +57,7 @@ describe('ThemeSwitch', () => {
 
   it('has correct aria-label for default', () => {
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     const btn = container.querySelector('button')
     expect(btn!.getAttribute('aria-label')).toContain('StyleSeed')
     expect(btn!.getAttribute('title')).toContain('StyleSeed')
@@ -66,7 +65,7 @@ describe('ThemeSwitch', () => {
 
   it('carries the v2 shell action marker', () => {
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     const btn = container.querySelector('button')
     expect(btn!.classList.contains('v2-shell-action')).toBe(true)
   })
@@ -75,7 +74,7 @@ describe('ThemeSwitch', () => {
     document.documentElement.dataset.theme = 'paper'
     window.history.replaceState(null, '', '/?theme=paper')
     const container = document.createElement('div')
-    render(h(ThemeSwitch), container)
+    render(h(ThemeSwitch, null), container)
     const btn = container.querySelector('button')
     btn!.click()
     expect(document.documentElement.dataset.theme).toBeUndefined()

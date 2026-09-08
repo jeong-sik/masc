@@ -1,0 +1,39 @@
+{
+  "at_unix": 1788840880.6901,
+  "keeper": "zen-download-33a142c9",
+  "source": "6219ea13c477518d95ba35c4d320aa86d850b5c3",
+  "runtime_instance_id": "01a07f2c-ae5d-7000-a002-ac0a437bfc54",
+  "original_operation_id": "shutdown-d41e835a-2c14-4810-9f39-36998c3ef79b",
+  "original_phase": "blocked",
+  "original_supersession": {
+    "kind": "superseded",
+    "supersession": {
+      "kind": "operator_metadata_update",
+      "actor": "two-browser-proof"
+    }
+  },
+  "new_operation_id": "shutdown-070717e6-c608-4899-96ef-11fa89e6f48c",
+  "final_phase": "finalized",
+  "join_evidence": {
+    "lane_outcome": {
+      "kind": "shutdown_requested"
+    },
+    "terminal": {
+      "kind": "stopped"
+    },
+    "cleanup_error": null
+  },
+  "registry_unregistered": true,
+  "accumulator_dropped": true,
+  "total_turns_before": 2,
+  "total_turns_after": 2,
+  "paused": true,
+  "keepalive_running": false,
+  "fence": false,
+  "queued_count": 0,
+  "runtime_sandbox_instructions_preserved": true,
+  "vm_inventory_available": true,
+  "exact_owned_vms": [],
+  "manual_durable_edit": false,
+  "manual_vm_action": false
+}

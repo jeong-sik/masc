@@ -6,9 +6,20 @@ through the Skill editor with an exact content-revision precondition and publish
 The three referenced resources are installed beside SKILL.md. This package is external
 skill data; it is not embedded into the MASC binary.
 
-Keeper request example:
+The release binary includes the repository `skills/` tree. `masc init` and normal
+server bootstrap install missing complete packages into the default declared
+`.masc/skills` source, including resources. Existing packages remain operator-owned
+and are preserved even with `init --force`; empty/skip bootstrap and explicit config
+root overrides preserve their existing bootstrap behavior. Skill bodies are still
+loaded on demand from the frozen catalog. A custom sources list must include the
+project source to discover these packages.
 
-> browser-lanes 스킬을 읽고 MDN WebDriver 문서를 열어 줘. 링크 이동과 뒤로/앞으로,
+The shared Keeper prompt asks the model to choose applicable descriptions without
+requiring the user to name a Skill. This is model selection, not keyword routing.
+
+Ordinary Keeper request example (the historical proof below explicitly named the Skill):
+
+> MDN WebDriver 문서를 열어 줘. 링크 이동과 뒤로/앞으로,
 > 새로고침, 스크롤을 확인하고 화면을 캡처해서 설명해 줘.
 
 ## Measured evidence
@@ -23,7 +34,8 @@ Keeper request example:
   The final Keeper artifact equals the independently retrieved HTTP [PNG](mdn.png).
 - [Two earlier guided MDN cases](mdn-guided.json): 44 calls, 42 successes and two initial
   closed-session guards. Both requested workflows completed. No `keeper_skill` read
-  occurred; detailed inline instructions were present. Keep these separate from skill use.
+  occurred; the fixture explicitly set `[keeper.skills] names = []`, which filters
+  every Skill out of the turn. Detailed inline instructions were present. Keep these separate from skill use.
 - [Owned advanced fixture](advanced-lab.json): 45 calls, 41 successes and four failures
   including the initial session setup failure. A driver launch with `--websocket-port 0`
   recovered BiDi connection without changing the server binary. Nested frames, dialogs,
@@ -51,3 +63,23 @@ in this run. Generic CSS unescaping and automatic newline insertion were not int
 Metadata retains failed attempts; no full page bodies, private browser data, provider
 reasoning, or credentials are included. Trace hashes identify retained local raw evidence;
 public JSON supplies the selected call metadata, not the full raw transcripts.
+
+## Implicit selection follow-up
+
+[Implicit selection receipt](implicit.json) retains the failed test setup as well as
+its correction: explicitly configuring `names = []` excludes every Skill; omitting
+that optional filter exposes the normal catalog. With the default filter and only
+a natural Korean request to open MDN, follow a related link, scroll and describe a
+capture, the Keeper read the exact browser Skill **before its first browser call**.
+16 tool calls succeeded including Skill loading, capture, image analysis and close.
+The final independently retrieved [viewport](implicit-mdn.png) equals the model's
+capture and was used by image analysis. Both trials initially guessed an incorrect
+BiDi URL and reached MDN's not-found page, then recovered by reading elements and
+using the observed link. These navigation mistakes remain visible in the receipt;
+16 successful tool returns do not mean every navigation was correct.
+
+This used the same pinned older binary and the candidate shared selection paragraph
+in `keeper.instructions`; the Skill fixture was installed manually. It measures
+implicit model selection, not execution of the new binary seeding code. The new
+seed's complete-package and operator-edit preservation checks are added to the
+existing CI test suite; local builds were not run.

@@ -1,0 +1,423 @@
+{
+  "schema": "masc.browser_implicit_skill.v1",
+  "experiments": [
+    {
+      "run": {
+        "keeper": "zen-natural-ef4031c2",
+        "source": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+        "server_sha256": "4e59e4bcb7cf86f1b8be51f4c8f870d6a0d6058950079b15ad161e614081dea6",
+        "runtime_instance_id": "01a07eeb-2f27-7000-94ea-dab0c6587a32",
+        "selection_prompt_sha256": "2ca472e72cb07c83ddfcfa7dfd2ed609b179f1f55a33cabc8cc2e9479aa9f7c8",
+        "selection_prompt_location": "keeper.instructions candidate paragraph",
+        "binary_seed_measured": false,
+        "skill_installed_by_operator_fixture": true
+      },
+      "explicit_skill_filter": [],
+      "user_request": "새로운 자동화 브라우저에서 https://developer.mozilla.org/en-US/docs/Web/WebDriver 문서를 열어 줘. 페이지에서 관측한 관련 문서 링크 하나로 이동하고, 화면을 아래로 스크롤한 뒤 캡처 이미지를 보고 설명해 줘. 마지막 화면은 내가 확인할 수 있도록 세션을 열어 둬.",
+      "request_does_not_name_skill": true,
+      "implicit_skill_before_browser": false,
+      "calls": [
+        {
+          "id": "call_8livzkk4",
+          "name": "BrowserSession",
+          "action": "open",
+          "mode": null,
+          "started_at": 1788835778.323256,
+          "success": true,
+          "input_sha256": "f5d82199ab3afd19c2908ede507bfc4a2314890f9f752c62eeeb8a1c7b41b107",
+          "result_sha256": "77bda481df4040931b655e96dd07ca3ac3e21290eb15b4067984e5962d0eedca"
+        },
+        {
+          "id": "call_c07e7fj6",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835781.425906,
+          "success": true,
+          "input_sha256": "7405edbac91a182d5a4f57b344adc53cc5df0a5c8481dbbe5e49b55a40cbb046",
+          "result_sha256": "9ca490a415c2e50aaba49eb575fd0e2fb25109eca15fc4075fdd1f8ca73c7ffc"
+        },
+        {
+          "id": "call_ovrbg5db",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835783.365959,
+          "success": true,
+          "input_sha256": "cc844145660933ef24a30363268aa464bde447bad0496ec92e99d889c2646314",
+          "result_sha256": "48a2abaa297f85b25f49db11b6a588252dc1e048fdf316c5d3da6f36021097c1"
+        },
+        {
+          "id": "call_d18njezk",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835784.961749,
+          "success": true,
+          "input_sha256": "9a6b091777e92d414cb2cdbf25af94eea296f0b4527cd3398ade8c7e39fe35c8",
+          "result_sha256": "6a898e20baf54fa264c99e8db6a29aabe1a9aae534ad4993c158b6b7510894ce"
+        },
+        {
+          "id": "call_tt83d1dc",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": "elements",
+          "started_at": 1788835787.048812,
+          "success": true,
+          "input_sha256": "68c62ffaa5c8ec74255fb34be809f6c02b9537a012f89f52707dbaa40a949d0b",
+          "result_sha256": "0c8df42a5fc48df53584fbf53986076123923b1caa05b498c9bd5fe8fba20548"
+        },
+        {
+          "id": "call_vpo8csoh",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835789.925069,
+          "success": true,
+          "input_sha256": "7405edbac91a182d5a4f57b344adc53cc5df0a5c8481dbbe5e49b55a40cbb046",
+          "result_sha256": "9ca490a415c2e50aaba49eb575fd0e2fb25109eca15fc4075fdd1f8ca73c7ffc"
+        },
+        {
+          "id": "call_39seyott",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": "elements",
+          "started_at": 1788835792.052776,
+          "success": true,
+          "input_sha256": "68c62ffaa5c8ec74255fb34be809f6c02b9537a012f89f52707dbaa40a949d0b",
+          "result_sha256": "e40239dc9b1bd9e152ef8e2969228f7850d4456b3bfde0794686707e2d8e6154"
+        },
+        {
+          "id": "call_u24m56p1",
+          "name": "keeper_artifact_read",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835794.703141,
+          "success": true,
+          "input_sha256": "fc105285f5dcb909b963c0c401ddb4ab6a8e807272bdfe427ef1663f9abf49ff",
+          "result_sha256": "2afa12a0a636b0d2d5de973a2fa52a9f45e3b8881843c7a9ad63b9c326a91e79"
+        },
+        {
+          "id": "call_e79ivmjk",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835798.408161,
+          "success": true,
+          "input_sha256": "1cec72b7eabf9a51ec21e83a28bdaaac192fe1bd937cf116d1243464682aab7e",
+          "result_sha256": "bf3b6bd23309513336a6d6f0fa64d3ac84d4d0aef2d3703d23e3b760bfd6d83c"
+        },
+        {
+          "id": "call_0zx2ypil",
+          "name": "BrowserAct",
+          "action": "scroll",
+          "mode": null,
+          "started_at": 1788835800.028103,
+          "success": true,
+          "input_sha256": "895c21e33134b48214bdbdd451e0052fe0c03abaae787f2c0864b96c1713a866",
+          "result_sha256": "90b2bc149cb43c961d6f5bde7301cf666c30b5cd97a82b163bcec5f15820bb98"
+        },
+        {
+          "id": "call_2iccvfc6",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": "screenshot",
+          "started_at": 1788835801.349739,
+          "success": true,
+          "input_sha256": "cbf4c36d4a1e04e6bb3658dcad861d55bd9636eba3470b3c8e6ab1bedc6dfffc",
+          "result_sha256": "aa8f059219b60782417f299f7ccf43050587b3e23b462a5df118598d11165c6e"
+        },
+        {
+          "id": "call_i2y728n1",
+          "name": "keeper_analyze_image",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835803.966797,
+          "success": true,
+          "input_sha256": "a1d8336dae88a0f4a6f5442d5d698ae38abe5a02d3a10f575183442f731d9d31",
+          "result_sha256": "1d1abf6c7de83fb10f290e88d310a709ed91797ee667101245486b40030b8f0e"
+        },
+        {
+          "id": "call_2nom5mjv",
+          "name": "BrowserTabs",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835809.916023,
+          "success": true,
+          "input_sha256": "e19151430a307564bfb50fc9d6b65b685c2d0b92c49d6afd2b84c256fd906ea5",
+          "result_sha256": "fc1c4fd91d88ce92a5b9f5282c4c786d4225ba3afcaa290f131ce9855b07f77e"
+        },
+        {
+          "id": "call_6loxqzrg",
+          "name": "BrowserSession",
+          "action": "close",
+          "mode": null,
+          "started_at": 1788835818.562789,
+          "success": true,
+          "input_sha256": "a4ddf188128a137b9c07638fdcffec9e72e96e3d1369095d7b529bf7c808036b",
+          "result_sha256": "fc77b5831e1795c8de5fcce3b8939de723c7abc50225584ea800a2c7355ed241"
+        }
+      ],
+      "counts": {
+        "calls": 14,
+        "success": 14,
+        "failure": 0,
+        "skill_reads": 0
+      },
+      "result": {
+        "operation_state": "Succeeded",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi",
+        "title": "WebDriver BiDi reference - WebDriver | MDN",
+        "png_sha256": "1e52813bf6f829c374352d3c5d23d3380026cc6f7046cc726fa3233dbb9cae2a",
+        "png_bytes": 172013
+      },
+      "trace_sha256": {
+        "turn-1788835776614-993e-000000.jsonl": "289aebbdc4dd632ff811179a3a3c7b4291f41acb4b2cf66387d1b0fa4a5fa754",
+        "turn-1788835816906-993e-000001.jsonl": "b98acc2504961c72beb9a62a3a321be8f0c288834766f3f672ab76b0072ed54c"
+      },
+      "navigation_results": [
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver",
+          "title": "WebDriver | MDN"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/BiDi",
+          "title": "Page not found | MDN"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver",
+          "title": "WebDriver | MDN"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi",
+          "title": "WebDriver BiDi reference - WebDriver | MDN"
+        }
+      ],
+      "page_not_found_observed": true,
+      "model_capture_equals_HTTP": true,
+      "vision_used_model_capture": true
+    },
+    {
+      "run": {
+        "keeper": "zen-default-440a696c",
+        "source": "9ab0f606e7161ff543bdf3f37b86a18acf1efd23",
+        "server_sha256": "4e59e4bcb7cf86f1b8be51f4c8f870d6a0d6058950079b15ad161e614081dea6",
+        "runtime_instance_id": "01a07eeb-2f27-7000-94ea-dab0c6587a32",
+        "selection_prompt_sha256": "2ca472e72cb07c83ddfcfa7dfd2ed609b179f1f55a33cabc8cc2e9479aa9f7c8",
+        "selection_prompt_location": "keeper.instructions candidate paragraph",
+        "binary_seed_measured": false,
+        "skill_installed_by_operator_fixture": true
+      },
+      "explicit_skill_filter": null,
+      "user_request": "새로운 자동화 브라우저에서 https://developer.mozilla.org/en-US/docs/Web/WebDriver 문서를 열어 줘. 페이지에서 관측한 관련 문서 링크 하나로 이동하고, 화면을 아래로 스크롤한 뒤 캡처 이미지를 보고 설명해 줘. 마지막 화면은 내가 확인할 수 있도록 세션을 열어 둬.",
+      "request_does_not_name_skill": true,
+      "implicit_skill_before_browser": true,
+      "calls": [
+        {
+          "id": "call_vp56r96c",
+          "name": "keeper_skill",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835857.483814,
+          "success": true,
+          "input_sha256": "6f07cd2d1802f22a7effa55a8a12dac9e05de33d97ee05585bd2b0dcc66ae11c",
+          "result_sha256": "63bf6f5f6ff1c4b22095c678f3188a765b1d27e3036864b3d81a12015693c9fb"
+        },
+        {
+          "id": "call_ygagvolj",
+          "name": "BrowserSession",
+          "action": "open",
+          "mode": null,
+          "started_at": 1788835859.593571,
+          "success": true,
+          "input_sha256": "2f2293fb19b575f60261f37d8ff3486ff1613cebcd43c6f1bee0466135ff840c",
+          "result_sha256": "77bda481df4040931b655e96dd07ca3ac3e21290eb15b4067984e5962d0eedca"
+        },
+        {
+          "id": "call_w753k4ep",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835862.875095,
+          "success": true,
+          "input_sha256": "7405edbac91a182d5a4f57b344adc53cc5df0a5c8481dbbe5e49b55a40cbb046",
+          "result_sha256": "9ca490a415c2e50aaba49eb575fd0e2fb25109eca15fc4075fdd1f8ca73c7ffc"
+        },
+        {
+          "id": "call_n7c7ng3j",
+          "name": "BrowserTabs",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835864.519669,
+          "success": true,
+          "input_sha256": "e19151430a307564bfb50fc9d6b65b685c2d0b92c49d6afd2b84c256fd906ea5",
+          "result_sha256": "e180d03604a6b7635c292eca6f3d5e3eccc97a78475ab7526c3e845956ff5332"
+        },
+        {
+          "id": "call_8r5b4hdi",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835865.596784,
+          "success": true,
+          "input_sha256": "82d849084b038afc65c2efa53d9c5a87629cc119aeb8f85e84f475b95d25752b",
+          "result_sha256": "48a2abaa297f85b25f49db11b6a588252dc1e048fdf316c5d3da6f36021097c1"
+        },
+        {
+          "id": "call_w6aitdbh",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835867.360281,
+          "success": true,
+          "input_sha256": "551767b472e891f184d3b6833ddd155a949cf521f1e31b3f1ce7a626d3d03afa",
+          "result_sha256": "6a898e20baf54fa264c99e8db6a29aabe1a9aae534ad4993c158b6b7510894ce"
+        },
+        {
+          "id": "call_0g18hgwj",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": "elements",
+          "started_at": 1788835870.477941,
+          "success": true,
+          "input_sha256": "d11c021441af1bf298feaf693868c9ffa82a89eef0d2c0ff384817620f6463a4",
+          "result_sha256": "7df5acf6144b4c7ad64df8b3111a5e1943b2688be9b679eb57f577d63b49a26e"
+        },
+        {
+          "id": "call_cf61v51h",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835874.108488,
+          "success": true,
+          "input_sha256": "22a3452fa37c69f312ff9d3821fc1e0e25270a4621302f13fb35b29b29d6d6b8",
+          "result_sha256": "9ca490a415c2e50aaba49eb575fd0e2fb25109eca15fc4075fdd1f8ca73c7ffc"
+        },
+        {
+          "id": "call_snm79ywz",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": "elements",
+          "started_at": 1788835875.528447,
+          "success": true,
+          "input_sha256": "4a9247e4b7aaf8e99c8a8bbaddc4a5f8ea6bb2b0efcbdee75233f7171aacebda",
+          "result_sha256": "bdcd1b0bef2c21e5d9d99429be66cd35c40d392fb927ab95d7662c8331ae4c46"
+        },
+        {
+          "id": "call_s3807jwg",
+          "name": "keeper_artifact_read",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835877.165802,
+          "success": true,
+          "input_sha256": "c9abc02d2c0a534a98b576a7e4151e7403ac5625eebc77131cf20ada05ba1519",
+          "result_sha256": "b149dd524b92d09bb904ca3a49478e38fa977f2c0a0fce70ac54bc9ee2774df0"
+        },
+        {
+          "id": "call_o0ko682t",
+          "name": "BrowserGoto",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835880.067393,
+          "success": true,
+          "input_sha256": "811c84cc471be5d198258f24b31ee6909f8e7c68e1752cd1b2dfd5ce2a072c99",
+          "result_sha256": "bf3b6bd23309513336a6d6f0fa64d3ac84d4d0aef2d3703d23e3b760bfd6d83c"
+        },
+        {
+          "id": "call_b9rx7099",
+          "name": "BrowserAct",
+          "action": "scroll",
+          "mode": null,
+          "started_at": 1788835881.842229,
+          "success": true,
+          "input_sha256": "20fe63e7a81b15f728cbfbc1fada13916e091e885da9427c4fd9cd0b7b0ed6bb",
+          "result_sha256": "7a2d65cbc4a24aff6ebcef32efe010bd4444cc83d6927087ce4767d3ed077925"
+        },
+        {
+          "id": "call_3jj2gout",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835883.133299,
+          "success": true,
+          "input_sha256": "50fddb65fb1151cbcf65e5d72a0443bb72b37e5c0dfbb37440adb3131a7cab97",
+          "result_sha256": "41e8c1ea4e9719f0bca0c1830cff27882f7ca7c94ce5c260bf38b3f408249227"
+        },
+        {
+          "id": "call_3qhcg10i",
+          "name": "BrowserRead",
+          "action": null,
+          "mode": "screenshot",
+          "started_at": 1788835884.760505,
+          "success": true,
+          "input_sha256": "685b05906d8489cd1ea2ad79110ff52aba99955a03afa3affd76fd412bbbac95",
+          "result_sha256": "9f5dd0fc5d98829196c374783d551a7371cb8a0d9c87e1ab4894b0c6d6b47033"
+        },
+        {
+          "id": "call_4a2ah1lu",
+          "name": "keeper_analyze_image",
+          "action": null,
+          "mode": null,
+          "started_at": 1788835886.455836,
+          "success": true,
+          "input_sha256": "05b4dd46d783c7ea6288dd4420bee269a1fe46f7b49a363789909b9c7fd13f35",
+          "result_sha256": "73511cd3f023a86b25ac0be01994df5760c6cbbd141f1fa6950f579e45da3cb1"
+        },
+        {
+          "id": "call_c38odqhu",
+          "name": "BrowserSession",
+          "action": "close",
+          "mode": null,
+          "started_at": 1788835904.851236,
+          "success": true,
+          "input_sha256": "a4ddf188128a137b9c07638fdcffec9e72e96e3d1369095d7b529bf7c808036b",
+          "result_sha256": "fc77b5831e1795c8de5fcce3b8939de723c7abc50225584ea800a2c7355ed241"
+        }
+      ],
+      "counts": {
+        "calls": 16,
+        "success": 16,
+        "failure": 0,
+        "skill_reads": 1
+      },
+      "result": {
+        "operation_state": "Succeeded",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi",
+        "title": "WebDriver BiDi reference - WebDriver | MDN",
+        "png_sha256": "1e52813bf6f829c374352d3c5d23d3380026cc6f7046cc726fa3233dbb9cae2a",
+        "png_bytes": 172013
+      },
+      "trace_sha256": {
+        "turn-1788835855930-993e-000002.jsonl": "e79e7870749df8e7599debb1dd280340c11b91a902dd55d5e0714427eafed777",
+        "turn-1788835902267-993e-000003.jsonl": "5c727073094205dbc4cc66cbccd6db6373c74bdd912fb40c459b3797b43ccc10"
+      },
+      "loaded_body_matches_installed": true,
+      "navigation_results": [
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver",
+          "title": "WebDriver | MDN"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/BiDi",
+          "title": "Page not found | MDN"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver",
+          "title": "WebDriver | MDN"
+        },
+        {
+          "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi",
+          "title": "WebDriver BiDi reference - WebDriver | MDN"
+        }
+      ],
+      "page_not_found_observed": true,
+      "model_capture_equals_HTTP": true,
+      "vision_used_model_capture": true
+    }
+  ],
+  "limits": [
+    "Older pinned runtime with candidate shared selection paragraph supplied in keeper.instructions; new binary package seeding is not measured here.",
+    "Public MDN only; no claim of all-model reliability or physical TUI rendering.",
+    "Both trials first guessed a /WebDriver/BiDi URL and reached Page not found, then recovered via the observed /Reference/BiDi URL. Tool transport success does not mean every navigation met the request."
+  ]
+}

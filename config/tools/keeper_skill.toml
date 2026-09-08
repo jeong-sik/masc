@@ -1,55 +1,9 @@
 name = "keeper_skill"
 description = "Read one frozen instruction Skill body. Every row in the Available list below is something this workspace wrote down about work that recurs here — a failure that repeats, a convention and the reason for it, a sequence whose order matters. Open the row whose one-line description names the work you are about to start, before starting it. The common error is not opening one that applied: a body that turns out not to apply costs a single call. A row that also appears as a `keeper_compose_<name>` tool performs its readings in one call — use that tool when the readings are all you need.\n\n Pass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded."
 additional_properties = false
-# 서술의 무게를 "어떻게 부르나" 에서 "언제 여나" 로 옮겼다.
-#
-# 이 서술은 스킬을 쓰라고 말하는 유일한 무조건 표면이다. 키퍼 프롬프트
-# (config/prompts/keeper.md, 144블록) 의 스킬 언급은 네 블록뿐이고 넷 다
-# current_task.skills / held_task.skills — task 가 스킬을 지명했을 때만 렌더된다.
-# 그런데 이 workspace 에 기록된 292개 task 중 스킬을 지명한 것은 0개였다
-# (RFC-0411 §1.5). 그래서 그 네 블록은 한 번도 렌더된 적이 없고, 평상시 프롬프트는
-# 스킬에 대해 아무 말도 하지 않는다.
-#
-# 실측 근거: 2026-09 tool_calls 108,185건에 스킬 읽기 250건 — 천 호출당 2.3회.
-# 런타임별로는 codex_subscription.gpt-5.6-luna 52.7 / openai-responses.gpt-6-astra
-# 29.7 / glm-coding.glm-5.3 1.8 / claude_code.claude-sonnet-5 0.2 이고, 가장 바쁜
-# antigravity_subscription.gemini-3-8-flash-high 는 24,041 호출에 0 이다. codex 는
-# 8번째로 바쁠 뿐이므로 "바빠서 많이 읽는다" 가 아니다. 산문을 스스로 여는 것은
-# 모델 계열의 성질이고, 안 여는 쪽에 닿는 문장은 이 도구 서술뿐이다.
-#
-# Anthropic 공식 지침도 같은 방향이다 — 모델은 Skill 을 과소발동(undertrigger)하며,
-# 교정 지점은 항상 프롬프트에 실리는 description 이다.
-#
-# 되돌릴 조건: 이 서술로 바꾼 뒤에도 천 호출당 읽기가 2.3 근처에 머물면, 원인은
-# 서술이 아니라 다른 데 있다는 뜻이므로 늘어난 바이트를 되돌리고 프롬프트 블록
-# 쪽(무조건 렌더되는 자리)을 대신 손본다.
-#
-# 이 도구는 조회를 겸한다. 그래서 지연하지 않는다.
-#
-# 같은 주석이 원래 반대로 끝났다 — 지연 판단은 필요했던 턴 수로 하고(masc #32062),
-# 이 도구는 3,695 B 를 매 요청에 싣고 11,164 도구-사용 턴 중 176 턴(1.6%)에서만
-# 필요했으니 3.5x 라고. 그리고 "조회 도구는 지연하지 않는다"고 적은 뒤 이 도구를
-# 예외로 뒀다.
-#
-# 그 예외가 성립하지 않는다. 이 도구의 스키마 안에 읽을 수 있는 스킬 목록이 들어
-# 있다(tool_schemas_skill.mli: "the list of instruction skills it can read is
-# whatever the catalog found"). 도구를 미루면 목록도 같이 미뤄지고, 키퍼는 대조할
-# 목록 없이 앉는다. 그게 바로 같은 주석이 keeper_tools_list 에 대해 "지연하면 찾는
-# 일 자체가 한 홉 멀어진다"고 적은 그 비용이다.
-#
-# 1.6% 는 지금 없어진 계약 아래서 잰 값이다. 그때 Available 줄마다 64hex
-# content_revision 이 붙어 있었고 서술은 "names alone are never accepted"였다.
-# 쓰려면 그 digest 를 옮겨 적어야 했고, polisher 는 실패 한 번을 써서 그걸 배운
-# 뒤 메모리에 적어 매 턴 싣고 있었다(RFC-0411 §1.3). 그 계약은 §4.1·§4.2 로
-# 사라졌으므로, 그 아래서 잰 회수는 지금 상태를 정당화하지 못한다.
-#
-# 크기로도 정당화되지 않는다. §4.1 적용 후 표면은 4,207 B 이고, 지연을 결정할
-# 때의 3,695 B 보다 크다 — 카탈로그가 10개에서 14개로 자랐다. 다만 Anthropic
-# 공식 모델은 스킬당 ~100토큰(≈400 B)을 상정하므로 14개면 ≈5,600 B 이고, 그
-# 비용을 상주로 받아들이는 쪽을 택한다. masc 는 그 예산 안쪽이다.
-#
-# 되돌릴 조건: RFC-0411 §6 의 keeper_skill 호출/턴이 며칠 뒤에도 안 오르면 다시
-# 지연시킨다. 안 오르는데 4,207 B 를 매 요청 싣는 것은 근거 없는 비용이다.
+# Keep discovery resident: this schema carries the Available Skill list.
+# The shared Keeper prompt also directs task-based selection without a user
+# naming a Skill; bodies and relevant resources are still read on demand.
 defer_loading = false
 
 [[params]]

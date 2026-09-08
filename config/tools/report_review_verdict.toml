@@ -11,4 +11,4 @@ description = "APPROVE or REJECT."
 [[params]]
 name = "reason"
 type = "string"
-description = "Why this verdict. Required for REJECT."
+description = "Explain the evidence checked and the result for APPROVE or REJECT. If verification failed, name the missing evidence or lookup error. Always provide a concise reason."

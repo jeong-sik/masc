@@ -14,6 +14,7 @@ type keepalive_scheduling_decision = {
 }
 
 let decide_keepalive_scheduling
+      ?wake
       ?(event_queue_triggers = [])
       ~stop
       ~meta
@@ -21,6 +22,7 @@ let decide_keepalive_scheduling
   =
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision
+      ?wake
       ~event_queue_triggers
       ~meta
       obs

@@ -490,6 +490,7 @@ let next_keepalive_sleep_duration_sec
 ;;
 
 let run_keepalive_unified_turn
+      ~wake
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
       ~pending_board_events
@@ -618,7 +619,7 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
       in
       let scheduling =
-        decide_keepalive_scheduling
+        decide_keepalive_scheduling ~wake
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~stop
           ~meta:meta_after_triage
@@ -1120,6 +1121,10 @@ let run_heartbeat_loop
      wake does not let the GLOBAL task backlog drive a turn on every keeper at
      once. Single-fiber owned, like the other loop-local refs above. *)
   let last_wake_source = ref Keeper_keepalive_signal.Timeout in
+  let cadence_clock = Monotonic_deadline.start () in
+  let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
+  let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
+      (float_of_int (max 0 proactive_warmup_sec))) in
   (* Why the last turn that ran ended before completing now lives in
      [Keeper_last_turn_stop], recorded by the cycle wrapper every lane
      shares — see the note at [run_fresh_cycle]. *)
@@ -1254,6 +1259,12 @@ let run_heartbeat_loop
         in
         let t_board_end = Time_compat.now () in
         let t_turn_start = t_board_end in
+        let periodic_due = Keeper_keepalive_signal.periodic_is_due
+            ~now:(cadence_now ())
+            ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+            !periodic_cadence in
+        let wake = if periodic_due then Keeper_world_observation.Periodic_tick
+          else Keeper_world_observation.Attention_wake in
         let turn_outcome =
           if not admitted_turn
           then
@@ -1288,7 +1299,7 @@ let run_heartbeat_loop
                 deferred_runtime_lane
             in
             let r =
-              run_keepalive_unified_turn
+              run_keepalive_unified_turn ~wake
                 ~ctx
                 ~meta_after_triage
                 ~pending_board_events
@@ -1406,6 +1417,8 @@ let run_heartbeat_loop
         let cadence_sec =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
         in
+        if periodic_due then periodic_cadence :=
+          Keeper_keepalive_signal.consume_periodic ~now:(cadence_now ());
         let cycle_sleep_sec =
           match turn_outcome.rate_limited_retry_after with
           | Some hint ->
@@ -1431,13 +1444,10 @@ let run_heartbeat_loop
           match cycle_sleep_sec with
           | Some backoff -> backoff
           | None ->
-            next_keepalive_sleep_duration_sec
-              ~proactive_warmup_sec
-              ~proactive_warmup_elapsed
-              ~keepalive_started_ts
-              ~now_ts:(Time_compat.now ())
-              ~cadence_sec
-              ~rate_limited_backoff_sec:cadence_sec
+            Keeper_keepalive_signal.periodic_remaining
+              ~now:(cadence_now ())
+              ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+              !periodic_cadence
         in
         last_wake_source :=
           (if turn_outcome.stimuli_acked

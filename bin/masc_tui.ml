@@ -1782,7 +1782,8 @@ type async_msg =
   (* Keyed by the lane / run they answer for: an answer that lands after the
      operator left the list or the run is not this view's answer. *)
   | Lane_runs_loaded of
-      string * (Masc.Tui_decode.lane_run_summary list, string) result
+      string * int * (float * string) option *
+      (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
       string * (Masc.Tui_decode.lane_run_detail, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
@@ -4918,16 +4919,19 @@ let launch_clients_load state ~mailbox =
       enqueue_async mailbox
         (Clients_loaded (generation, Error "Eio switch is unavailable"))
 
-let launch_lane_runs_load state ~mailbox ~lane_id =
+let launch_lane_runs_load ?before state ~mailbox ~lane_id =
+  state.lane_runs_generation <- state.lane_runs_generation + 1;
+  let generation = state.lane_runs_generation in
+  state.lane_runs_loading <- true;
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_http.fetch_lane_runs ~host ~port ~lane:lane_id with
+      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane:lane_id () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lane_runs_loaded (lane_id, result))
+    enqueue_async mailbox (Lane_runs_loaded (lane_id, generation, before, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4936,7 +4940,7 @@ let launch_lane_runs_load state ~mailbox ~lane_id =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Lane_runs_loaded (lane_id, Error "Eio switch is unavailable"))
+        (Lane_runs_loaded (lane_id, generation, before, Error "Eio switch is unavailable"))
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
   let host = server_peer_host in
@@ -4964,6 +4968,8 @@ let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
   state.lanes_mode <- Lanes_run_list lane.sl_lane_id;
   state.lane_runs <- None;
   state.lane_runs_error <- None;
+  state.lane_runs_next <- None;
+  state.lane_runs_total <- None;
   state.lane_runs_cursor <- 0;
   state.lane_runs_scroll <- 0;
   launch_lane_runs_load state ~mailbox ~lane_id:lane.sl_lane_id
@@ -5255,7 +5261,11 @@ let goto_surface state ~mailbox (destination : surface) =
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
-   | Metrics -> launch_memory_health_load state ~mailbox
+   | Metrics ->
+       launch_memory_health_load state ~mailbox;
+       launch_keeper_tool_approvals_load state ~mailbox;
+       launch_gate_snapshot_load state ~mailbox;
+       launch_keeper_tool_modes_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -11529,6 +11539,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok held ->
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
+           state.keeper_tool_approvals_observed <- true;
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
@@ -11590,6 +11601,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.gate_rules <- snapshot.Tui_decode.gs_rules;
            state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
            state.gate_error <- None;
+           state.gate_snapshot_observed <- true;
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
@@ -11664,15 +11676,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if Approval.Flow.is_current state.approval_flow generation then
         (match result with
          | Ok overrides ->
+             state.keeper_tool_modes_observed <- true;
+             state.keeper_tool_modes_error <- None;
              state.keeper_yolo_names <-
                List.filter_map
                  (fun (keeper, mode) ->
                    if String.equal mode "yolo" then Some keeper else None)
                  overrides
-         | Error _ ->
-             (* The stance listing is advisory colouring; a failed fetch keeps
-                the last known set rather than flashing every name back. *)
-             ())
+         | Error detail ->
+             state.keeper_tool_modes_error <- Some detail)
   | Keeper_tool_mode_set (keeper_name, mode, result, generation) ->
       let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
       state.approval_flow <- flow;
@@ -12337,19 +12349,32 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (min state.clients_surface_cursor
                    (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
         | Error detail -> state.clients_surface_error <- Some detail)
-  | Lane_runs_loaded (lane_id, result) ->
+  | Lane_runs_loaded (lane_id, generation, before, result) ->
       (match state.lanes_mode with
-       | Lanes_run_list open_lane when String.equal open_lane lane_id ->
+       | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
+         when String.equal open_lane lane_id
+           && generation = state.lane_runs_generation
+           && state.lane_runs_loading ->
+           state.lane_runs_loading <- false;
            (match result with
-            | Ok runs ->
+            | Ok page ->
+                let previous = Option.value state.lane_runs ~default:[] in
+                let runs = match before with
+                  | None -> page.Masc.Tui_decode.lrpg_runs
+                  | Some _ -> previous @ page.Masc.Tui_decode.lrpg_runs in
                 state.lane_runs <- Some runs;
+                state.lane_runs_next <- page.lrpg_next;
+                state.lane_runs_total <- page.lrpg_total;
                 state.lane_runs_error <- None;
-                state.lane_runs_cursor <-
-                  max 0 (min state.lane_runs_cursor (List.length runs - 1))
+                (match before, state.lanes_mode, page.lrpg_runs with
+                 | Some _, Lanes_run_list _, _ :: _ ->
+                   state.lane_runs_cursor <- List.length previous;
+                   state.lane_runs_scroll <- List.length previous
+                 | _ -> state.lane_runs_cursor <-
+                   max 0 (min state.lane_runs_cursor (List.length runs - 1)))
             | Error detail ->
-                (* Keep the previous rows visible; the error says they are
-                   stale, clearing them would turn a failed refresh into an
-                   empty reading. *)
+                (* A failed page retains both the rows and its retry cursor.
+                   Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
        | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
   | Lane_run_detail_loaded (run_id, result) ->
@@ -16436,6 +16461,11 @@ and is loaded on demand through keeper_skill.
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
                open_selected_resource state ~mailbox:async_messages)
+       | Some "]" when state.view = Lanes ->
+           (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
+            | Lanes_run_list lane_id, Some before, false ->
+              launch_lane_runs_load ~before state ~mailbox:async_messages ~lane_id
+            | _ -> ())
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -17621,7 +17651,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
             | Metrics ->
-                launch_memory_health_load state ~mailbox:async_messages
+                launch_memory_health_load state ~mailbox:async_messages;
+                launch_keeper_tool_modes_load state ~mailbox:async_messages
             | Overview | Acting | Approvals | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->

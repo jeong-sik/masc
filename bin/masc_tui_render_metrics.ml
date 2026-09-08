@@ -12,9 +12,46 @@ type metrics_kpis = {
   unpaused_keepers : int;
   turns : turn_counts option;
   tasks : Task_flow.counts option;
-  gate_pending_count : int;
-  held_approvals_count : int;
+  gate_pending_count : int option;
+  held_approvals_count : int option;
 }
+
+type 'a observation =
+  | Not_observed
+  | Current of 'a
+  | Unavailable of string
+  | Stale of string
+
+let observe_source ~observed ~error ?unavailable value =
+  match error, unavailable, observed with
+  | Some detail, _, true -> Stale detail
+  | Some detail, _, false | None, Some detail, _ -> Unavailable detail
+  | None, None, true -> Current value
+  | None, None, false -> Not_observed
+
+let current_value = function
+  | Current value -> Some value
+  | Not_observed | Unavailable _ | Stale _ -> None
+
+let gate_observation (state : state) =
+  observe_source ~observed:state.gate_snapshot_observed ~error:state.gate_error
+    ?unavailable:state.gate_queue_unavailable state.gate_pending
+
+let held_observation (state : state) =
+  observe_source ~observed:state.keeper_tool_approvals_observed
+    ~error:state.keeper_tool_approvals_error state.keeper_tool_approvals
+
+let observation_count = function
+  | Current rows -> string_of_int (List.length rows)
+  | Not_observed -> "unread"
+  | Unavailable _ -> "unavailable"
+  | Stale _ -> "stale"
+
+let observation_detail = function
+  | Current rows -> string_of_int (List.length rows)
+  | Not_observed -> "not observed"
+  | Unavailable detail -> "unavailable: " ^ Terminal_text.single_line detail
+  | Stale detail -> "previous reading; refresh failed: " ^ Terminal_text.single_line detail
 
 let calculate_kpis (state : state) =
   let turns =
@@ -35,8 +72,8 @@ let calculate_kpis (state : state) =
       0 state.keepers;
     turns;
     tasks = Option.map (fun flow -> flow.Task_flow.current) state.task_flow;
-    gate_pending_count = List.length state.gate_pending;
-    held_approvals_count = List.length state.keeper_tool_approvals }
+    gate_pending_count = Option.map List.length (current_value (gate_observation state));
+    held_approvals_count = Option.map List.length (current_value (held_observation state)) }
 
 let format_words words =
   Masc_tui_context_inspector.format_bytes (max 0 words * 8)
@@ -144,11 +181,11 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
        Printf.sprintf "%d done · %d cancelled" count.completed count.cancelled)
     | None -> "Task snapshot unavailable", "No outcome count inferred"
   in
-  let c4_l1 = Printf.sprintf "%d Gate · %d tool holds"
-      kpis.gate_pending_count kpis.held_approvals_count in
-  let c4_l2 = "Visible approval queues" in
-  let c4_tone = if kpis.gate_pending_count + kpis.held_approvals_count > 0
-      then Theme.warn () else Theme.recede () in
+  let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
+  let c4_l2 = "Tool holds " ^ observation_count (held_observation state) in
+  let c4_tone = match kpis.gate_pending_count, kpis.held_approvals_count with
+    | Some 0, Some 0 -> Theme.recede ()
+    | _ -> Theme.warn () in
 
   let combine (t1, lt1, l11, l21, b1)
               (t2, lt2, l12, l22, b2)
@@ -171,9 +208,10 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     [ Printf.sprintf "  %s[ENGINE]%s %s · %s[SCHED]%s %s"
         (Theme.info ()) Ansi.reset c1_l1
         c2_tone Ansi.reset c2_l1
-    ; Printf.sprintf "  %s[TASKS]%s %s · %s[HOLDS]%s %s"
+    ; Printf.sprintf "  %s[TASKS]%s %s"
         (Theme.info ()) Ansi.reset c3_l1
-        c4_tone Ansi.reset c4_l1
+    ; Printf.sprintf "  %s[HOLDS]%s %s · %s"
+        c4_tone Ansi.reset c4_l1 c4_l2
     ]
     |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
 
@@ -365,42 +403,47 @@ let render_section_tools ~cols (state : state) : string list =
     Printf.sprintf "  %s%sGate Governance & Security Stance%s"
       Ansi.bold (Theme.bad ()) Ansi.reset
   in
+  let gate = gate_observation state in
+  let held = held_observation state in
+  let rules =
+    observe_source ~observed:state.gate_snapshot_observed ~error:state.gate_error
+      ?unavailable:state.gate_rules_unavailable state.gate_rules in
+  let yolo =
+    observe_source ~observed:state.keeper_tool_modes_observed
+      ~error:state.keeper_tool_modes_error state.keeper_yolo_names in
   let counts = Hashtbl.create 16 in
-  List.iter
+  Option.iter (List.iter
     (fun (gp : Decode.gate_pending) ->
       let tool = gp.gp_display_tool in
       let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-      Hashtbl.replace counts tool (current + 1))
-    state.gate_pending;
-  List.iter
+      Hashtbl.replace counts tool (current + 1)))
+    (current_value gate);
+  Option.iter (List.iter
     (fun (kta : Decode.keeper_tool_approval) ->
       let tool = kta.kta_tool in
       let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-      Hashtbl.replace counts tool (current + 1))
-    state.keeper_tool_approvals;
-
-  let yolo_count = List.length state.keeper_yolo_names in
-  let rules_count = List.length state.gate_rules in
-  let pending_count = List.length state.gate_pending in
-  let held_count = List.length state.keeper_tool_approvals in
+      Hashtbl.replace counts tool (current + 1)))
+    (current_value held);
 
   let gate_summary =
-    Printf.sprintf "    %sPending Gate Calls:%s %d   %sHeld Tool Approvals:%s %d   %sYOLO Keepers:%s %d   %sStanding Rules:%s %d"
-      Ansi.bold Ansi.reset pending_count
-      Ansi.bold Ansi.reset held_count
-      Ansi.bold Ansi.reset yolo_count
-      Ansi.bold Ansi.reset rules_count
+    [ "    Pending Gate Calls: " ^ observation_detail gate
+    ; "    Held Tool Approvals: " ^ observation_detail held
+    ; "    Standing Rules: " ^ observation_detail rules
+    ; "    YOLO Keepers: " ^ observation_detail yolo ]
   in
   let yolo_line =
-    if state.keeper_yolo_names = [] then
-      "    YOLO enabled: no keepers in the current snapshot"
-    else
-      "    YOLO Execution: " ^ String.concat ", " state.keeper_yolo_names
+    match yolo with
+    | Current (_ :: _ as names) ->
+      [ "    YOLO Execution: " ^ String.concat ", " (List.map Terminal_text.single_line names) ]
+    | Current [] | Not_observed | Unavailable _ | Stale _ -> []
   in
 
   let tool_bars =
     if Hashtbl.length counts = 0 then
-      [ "    (no active pending gate operations or held approval requests)" ]
+      (match gate, held with
+       | Current [], Current [] ->
+         [ "    (no active pending gate operations or held approval requests)" ]
+       | _ -> [ "    Pending tool totals unavailable; no empty queue inferred" ])
     else
       let items =
         Hashtbl.fold
@@ -410,18 +453,20 @@ let render_section_tools ~cols (state : state) : string list =
         |> List.sort (fun (a : Chart.bar_item) (b : Chart.bar_item) ->
                Int.compare b.count a.count)
       in
-      Chart.distribution_bars ~width:bar_w items
-      |> List.map (fun l -> "    " ^ l)
+      let scope = match gate, held with
+        | Current _, Current _ -> []
+        | _ -> [ "    Tool distribution: observed queues only (partial coverage)" ] in
+      scope @ (Chart.distribution_bars ~width:bar_w items
+        |> List.map (fun l -> "    " ^ l))
   in
 
   [ clip title_mem ]
   @ List.map clip mem_lines
   @ [ ""
     ; clip title_gate
-    ; clip gate_summary
-    ; clip yolo_line
-    ; ""
     ]
+  @ List.map clip (gate_summary @ yolo_line)
+  @ [ "" ]
   @ List.map clip tool_bars
 
 let render_metrics_body ~cols ~budget (state : state)

@@ -5241,3 +5241,14 @@
  (deps (alias runtest-test_tui_lane_pagination)))
 
 (include stanzas/test_keeper_periodic_wake.inc)
+
+(rule
+ (alias runtest-test_tui_tools_poll_continuity)
+ (deps test_tui_tools_poll_continuity.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_tools_poll_continuity.py}
+   %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_tools_poll_continuity)))

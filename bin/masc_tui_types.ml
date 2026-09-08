@@ -2528,6 +2528,14 @@ type tools_pane =
   | Tools_usage
   | Tools_catalog
 
+type tools_read_part = Tools_inventory_read | Tools_catalog_read | Tools_async_read
+
+type tools_read_inflight =
+  { tri_generation : int
+  ; tri_keeper : string option
+  ; tri_pending : tools_read_part list
+  }
+
 type runtime_param_edit_mode = Friendly_value | Advanced_json
 
 type runtime_param_edit =
@@ -3796,6 +3804,7 @@ type state = {
      other surfaces read. *)
   mutable tools_inventory: Tui_decode.tool_snapshot option;
   mutable tools_request_generation: int;
+  mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable skills_catalog: Tui_decode.skills_catalog option;
   mutable skills_catalog_error: string option;
@@ -5120,6 +5129,7 @@ let create_state
   system_logs_error = None;
   tools_inventory = None;
   tools_request_generation = 0;
+  tools_read_inflight = None;
   tools_error = None;
   skills_catalog = None;
   skills_catalog_error = None;

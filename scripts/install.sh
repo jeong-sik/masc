@@ -871,7 +871,8 @@ macos_formula_ready() {
                [ -r "$brew_prefix/opt/openssl@3/lib/libcrypto.3.dylib" ] ;;
     gmp) [ -r "$brew_prefix/opt/gmp/lib/libgmp.10.dylib" ] ;;
     zstd) [ -r "$brew_prefix/opt/zstd/lib/libzstd.1.dylib" ] ;;
-    python) command -v python3 >/dev/null 2>&1 ;;
+    python) command -v python3 >/dev/null 2>&1 &&
+            python3 -c 'import json, tarfile, tomllib' >/dev/null 2>&1 ;;
     *) return 1 ;;
   esac
 }
@@ -957,7 +958,7 @@ require chmod
 require mkdir
 require mktemp
 ensure_macos_dependencies
-if [ "$DRY_RUN" -eq 1 ] && ! command -v python3 >/dev/null 2>&1; then
+if [ "$DRY_RUN" -eq 1 ] && ! macos_formula_ready "" python; then
   log "[dry-run] remaining installation checks require the planned Python dependency; no files changed"
   exit 0
 fi

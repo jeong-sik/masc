@@ -1353,11 +1353,109 @@ let test_repeated_evidence_reads_do_not_double_count () =
          other_evidence.matched_record_count))
 ;;
 
+let with_warm_evidence f =
+  with_temp_base (fun base_path ->
+    let keeper_name = "cursor-integrity-keeper" in
+    let stimulus = board_stimulus ~post_id:"cursor-source" () in
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    let store = reaction_ledger_store ~base_path ~keeper_name in
+    let paths =
+      match Dated_jsonl.range_day_file_paths_result store
+              ~since:"1970-01-01" ~until:"9999-12-31" with
+      | Ok paths -> paths
+      | Error error -> fail (Dated_jsonl.read_error_to_string error)
+    in
+    let path = match paths with [path] -> path | _ -> fail "expected one day file" in
+    let read () = Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path ~keeper_name ~stimulus_id in
+    let initial = require_complete_evidence "warm" (read ()) in
+    check int "initial source present" 1 initial.matched_record_count;
+    f ~base_path ~keeper_name ~stimulus ~path ~read)
+;;
+
+let test_evidence_prune_invalidates_and_readmission_survives () =
+  with_warm_evidence (fun ~base_path ~keeper_name ~stimulus ~path ~read ->
+    Sys.remove path;
+    let pruned = require_complete_evidence "pruned" (read ()) in
+    check int "deleted source is not retained as evidence" 0 pruned.matched_record_count;
+    check bool "deleted stimulus no longer observed" false pruned.stimulus_seen;
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    let restored = require_complete_evidence "readmitted" (read ()) in
+    check int "same source can be observed again" 1 restored.matched_record_count)
+;;
+
+let test_evidence_same_length_replacement_invalidates () =
+  with_warm_evidence (fun ~base_path:_ ~keeper_name:_ ~stimulus:_ ~path ~read ->
+    let original = Fs_compat.load_file path in
+    let replacement = path ^ ".replacement" in
+    let unrelated = "{}" ^ String.make (String.length original - 3) ' ' ^ "\n" in
+    Out_channel.with_open_bin replacement (fun channel -> output_string channel unrelated);
+    check int "replacement has the exact previous byte length"
+      (String.length original) (Unix.stat replacement).st_size;
+    Unix.rename replacement path;
+    let result = require_complete_evidence "replacement" (read ()) in
+    check int "old inode's source is not retained" 0 result.matched_record_count;
+    check string "reader never rewrites replacement evidence" unrelated
+      (Fs_compat.load_file path))
+;;
+
+let test_evidence_directory_fault_is_not_cached_success () =
+  with_warm_evidence (fun ~base_path ~keeper_name:_ ~stimulus:_ ~path ~read ->
+    let month = Filename.dirname path in
+    let saved = Filename.concat base_path "saved-month" in
+    Unix.rename month saved;
+    Out_channel.with_open_bin month (fun channel -> output_string channel "not a directory");
+    Fun.protect
+      ~finally:(fun () -> Sys.remove month; Unix.rename saved month)
+      (fun () ->
+        (match read () with
+         | Error (Keeper_reaction_ledger.Evidence_read_error
+                    (Dated_jsonl.Not_a_directory { path = actual })) ->
+           check string "typed failing month" month actual
+         | Error _ | Ok _ -> fail "directory fault was not returned as typed read failure");
+        check string "read preserves invalid directory bytes" "not a directory"
+          (Fs_compat.load_file month));
+    let recovered = require_complete_evidence "recovered" (read ()) in
+    check int "fresh read after repair counts each row once" 1 recovered.matched_record_count)
+;;
+
+let test_evidence_unreadable_file_is_not_cached_success () =
+  with_warm_evidence (fun ~base_path:_ ~keeper_name:_ ~stimulus:_ ~path ~read ->
+    Unix.chmod path 0o000;
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) (fun () ->
+      (* Root can read mode 000. Verify the actual capability instead of
+         manufacturing an EACCES expectation from permission bits alone. *)
+      let readable =
+        match Unix.access path [Unix.R_OK] with
+        | () -> true
+        | exception Unix.Unix_error (Unix.EACCES, _, _) -> false
+      in
+      if readable then
+        ignore (require_complete_evidence "privileged read remains allowed" (read ()))
+      else
+        match read () with
+        | Error (Keeper_reaction_ledger.Evidence_read_error
+                   (Dated_jsonl.Io_error { operation = Open_file; path = actual; _ })) ->
+          check string "read error names the unreadable file" path actual
+        | Error _ | Ok _ -> fail "unreadable file returned cached success");
+    let restored = require_complete_evidence "permissions restored" (read ()) in
+    check int "permission repair permits a fresh exact read" 1 restored.matched_record_count)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
     [ ( "ledger"
-      , [ test_case
+      , [ test_case "pruned evidence is invalidated and can return" `Quick
+            test_evidence_prune_invalidates_and_readmission_survives
+        ; test_case "same-length replacement invalidates evidence" `Quick
+            test_evidence_same_length_replacement_invalidates
+        ; test_case "directory fault is a typed read failure" `Quick
+            test_evidence_directory_fault_is_not_cached_success
+        ; test_case "unreadable evidence cannot reuse cached success" `Quick
+            test_evidence_unreadable_file_is_not_cached_success
+        ; test_case
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction

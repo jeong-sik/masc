@@ -1243,6 +1243,71 @@ let test_append_rotating_sequence_survives_restart () =
   check bool "first segment still present" true
     (Sys.file_exists (segment_path dir ~sequence:1))
 
+let test_strict_incremental_read_keeps_complete_line_boundaries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_strict_incremental" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  let path = Filename.concat dir "2026-01/01.jsonl" in
+  let folded = ref 0 in
+  let read cursor =
+    Dated_jsonl.fold_range_appended_result store ~since:"2026-01-01"
+      ~until:"2026-01-01" ~cursor ~init:[]
+      ~f:(fun values row -> incr folded; json_i row :: values)
+  in
+  let require = function
+    | Ok (Dated_jsonl.Appended (value, cursor)) -> value, cursor
+    | Ok Dated_jsonl.Cursor_invalidated -> fail "unexpected cursor invalidation"
+    | Error error -> fail (Dated_jsonl.read_error_to_string error)
+  in
+  let values, cursor = require (read None) in
+  check (list int) "first read" [1] values;
+  let repeated, cursor = require (read (Some cursor)) in
+  check (list int) "unchanged bytes are not decoded again" [] repeated;
+  check int "callback invoked only for original row" 1 !folded;
+  Fs_compat.append_file path {|{"i":2|};
+  let partial, cursor = require (read (Some cursor)) in
+  check (list int) "incomplete appended row waits" [] partial;
+  Fs_compat.append_file path "}\n";
+  let completed, cursor = require (read (Some cursor)) in
+  check (list int) "completed appended row is read once" [2] completed;
+  check int "no prefix replay after append" 2 !folded;
+  let replacement = path ^ ".replacement" in
+  Out_channel.with_open_bin replacement (fun output ->
+    output_string output "{\"i\":3}\n");
+  Unix.rename replacement path;
+  (match read (Some cursor) with
+   | Ok Dated_jsonl.Cursor_invalidated -> ()
+   | Ok (Dated_jsonl.Appended _) | Error _ -> fail "replaced file retained its cursor");
+  check int "invalidation happens before caller mutation" 2 !folded
+
+let test_strict_incremental_rejects_replacement_during_read () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_strict_replacement" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  let path = Filename.concat dir "2026-01/01.jsonl" in
+  let replacement = path ^ ".replacement" in
+  let replace () =
+    Out_channel.with_open_bin replacement (fun output ->
+      output_string output "{\"i\":2}\n");
+    Unix.rename replacement path
+  in
+  let observed = ref 0 in
+  (match Dated_jsonl.fold_range_appended_result store ~since:"2026-01-01"
+           ~until:"2026-01-01" ~cursor:None ~init:()
+           ~f:(fun () _ -> incr observed; replace ()) with
+   | Error (Dated_jsonl.Io_error { operation = Read_file; _ }) -> ()
+   | Error _ | Ok _ -> fail "replacement during fold returned a reusable cursor");
+  check int "mutation can precede the typed read error" 1 !observed;
+  let result = Dated_jsonl.fold_range_appended_result store ~since:"2026-01-01"
+      ~until:"2026-01-01" ~cursor:None ~init:[] ~f:(fun acc row -> json_i row :: acc) in
+  (match result with
+   | Ok (Dated_jsonl.Appended (rows, _)) -> check (list int) "new handle sees replacement" [2] rows
+   | Ok Dated_jsonl.Cursor_invalidated | Error _ -> fail "fresh read of replacement failed")
+
 let () =
   run "Dated_jsonl"
     [
@@ -1346,6 +1411,10 @@ let () =
         ] );
       ( "read_range",
         [
+          test_case "strict incremental reads keep complete-line boundaries" `Quick
+            test_strict_incremental_read_keeps_complete_line_boundaries;
+          test_case "strict incremental reads reject mid-read replacement" `Quick
+            test_strict_incremental_rejects_replacement_during_read;
           test_case "today range non-empty" `Quick test_read_range;
           test_case "fold_range_appended sees only new rows" `Quick
             test_fold_range_appended_sees_only_new_rows;

@@ -1674,6 +1674,142 @@ let fold_range_appended t ~since ~until ~cursors ~init ~f =
     paths
 ;;
 
+type append_cursor = (string * Unix.stats * int) list
+
+type 'a appended_read =
+  | Appended of 'a * append_cursor
+  | Cursor_invalidated
+
+let append_snapshot_result t ~since ~until =
+  let ( let* ) = Result.bind in
+  let* paths = range_day_file_paths_result t ~since ~until in
+  let rec inspect acc = function
+    | [] -> Ok (List.rev acc)
+    | path :: rest ->
+      let* stats = inspect_path_result path in
+      (match non_regular_file_kind_of_stats stats with
+       | Some kind -> Error (Non_regular_file { path; kind })
+       | None -> inspect ((path, stats) :: acc) rest)
+  in
+  inspect [] paths
+;;
+
+let append_only_successor previous current =
+  same_file_identity previous current
+  && current.Unix.st_size >= previous.Unix.st_size
+  && (current.Unix.st_size > previous.Unix.st_size
+      || (current.Unix.st_mtime = previous.Unix.st_mtime
+          && current.Unix.st_ctime = previous.Unix.st_ctime))
+;;
+
+let appended_read_changed path =
+  Io_error { operation = Read_file; path;
+             detail = "dated files changed during incremental read" }
+;;
+
+(* Consume only the captured extent of an already verified handle. Keep the
+   boundary before an incomplete last line, even if the writer appends while
+   this read is running. Callback errors are deliberately outside I/O catches. *)
+let fold_captured_lines_result channel ~path ~from ~until ~init ~f =
+  let rec drive acc boundary position fragment =
+    if position >= until then Ok (acc, boundary)
+    else
+      let chunk = Bytes.create (min 65536 (until - position)) in
+      let read =
+        match input channel chunk 0 (Bytes.length chunk) with
+        | 0 -> Error (appended_read_changed path)
+        | length -> Ok length
+        | exception Sys_error detail ->
+          Error (Io_error { operation = Read_file; path; detail })
+      in
+      match read with
+      | Error _ as error -> error
+      | Ok length ->
+        let value = ref acc in
+        let next_boundary = ref boundary in
+        for index = 0 to length - 1 do
+          match Bytes.get chunk index with
+          | '\n' ->
+            let line = Buffer.contents fragment in
+            Buffer.clear fragment;
+            next_boundary := position + index + 1;
+            (match recent_entry_of_line ~path line with
+             | Parsed row -> value := f !value row
+             | Malformed_json _ -> ())
+          | character -> Buffer.add_char fragment character
+        done;
+        drive !value !next_boundary (position + length) fragment
+  in
+  let seek =
+    match seek_in channel from with
+    | () -> Ok ()
+    | exception Sys_error detail ->
+      Error (Io_error { operation = Read_file; path; detail })
+  in
+  match seek with
+  | Error _ as error -> error
+  | Ok () -> drive init from from (Buffer.create 256)
+;;
+
+let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
+  let ( let* ) = Result.bind in
+  let* snapshot = append_snapshot_result t ~since ~until in
+  let previous = match cursor with Some cursor -> cursor | None -> [] in
+  let invalidated =
+    List.exists
+      (fun (path, prior, _) ->
+         match List.assoc_opt path snapshot with
+         | None -> true
+         | Some current -> not (append_only_successor prior current))
+      previous
+  in
+  if invalidated then Ok Cursor_invalidated
+  else
+    let read_file acc (path, captured) =
+      let* channel = open_regular_input_result path in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+        let* opened =
+          match Unix.fstat (Unix.descr_of_in_channel channel) with
+          | stats -> Ok stats
+          | exception Unix.Unix_error (error, _, _) ->
+            Error (Io_error { operation = Inspect; path;
+                              detail = Unix.error_message error })
+        in
+        if not (append_only_successor captured opened)
+        then Error (appended_read_changed path)
+        else
+          let from =
+            match List.find_opt (fun (name, _, _) -> String.equal name path) previous with
+            | Some (_, _, boundary) -> boundary
+            | None -> 0
+          in
+          let* value, boundary =
+            fold_captured_lines_result channel ~path ~from
+              ~until:captured.Unix.st_size ~init:acc ~f
+          in
+          Ok (value, (path, captured, boundary)))
+    in
+    let rec read_all acc cursors = function
+      | [] -> Ok (acc, List.rev cursors)
+      | file :: rest ->
+        let* acc, cursor = read_file acc file in
+        read_all acc (cursor :: cursors) rest
+    in
+    let* value, next = read_all init [] snapshot in
+    let* after = append_snapshot_result t ~since ~until in
+    let stable =
+      List.map fst snapshot = List.map fst after
+      && List.for_all
+           (fun (path, captured) ->
+              match List.assoc_opt path after with
+              | Some current -> append_only_successor captured current
+              | None -> false)
+           snapshot
+    in
+    if stable then Ok (Appended (value, next))
+    else Error (appended_read_changed t.base_dir)
+;;
+
 (* Like [read_range] but bounded to the [n] most recent entries within
    [since, until] (inclusive day range). Reads newest day-file first and
    only the tail of each file, parsing at most ~[n] entries instead of the

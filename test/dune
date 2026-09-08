@@ -1731,6 +1731,7 @@
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)
  (libraries
+  masc.keeper_runtime
   masc_test_deps
   masc_test_runtime
   ;; The wake-history and scoped-page tests drive Schedule_store to produce the
@@ -3155,7 +3156,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries alcotest fmt masc masc_tui_types))
+ (libraries alcotest fmt masc masc_tui_types masc_tui_ask_projection))
 
 (test
  (name test_tui_ask_selection_wiring)

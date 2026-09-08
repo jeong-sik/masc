@@ -1,4 +1,4 @@
-import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
+import type { GoalProof, Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
 import type {
   BoardMonitoring,
   KeeperApprovalQueueState,
@@ -657,6 +657,7 @@ export interface GoalTreeNode extends
   GoalTreeTimestamps {
   id: string
   title: string
+  verification?: GoalProof
   children: GoalTreeNode[]
   child_count: number
 }

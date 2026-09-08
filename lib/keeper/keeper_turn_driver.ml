@@ -869,6 +869,7 @@ let run_named
     ?enable_thinking
     ?cooperative_yield_probe
     ?agent_core_checkpoint
+    ?(continue_from_checkpoint = false)
     ?trace_link
     ?event_bus
     ?on_runtime_observation
@@ -890,6 +891,14 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "continuation_checkpoint"
+            ; detail = "An admitted-input continuation requires its persisted checkpoint"
+            }))
+  else
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_core_error e)
   | Ok (sw, net) ->
@@ -1145,6 +1154,13 @@ let run_named
          Error failure, None,
          Keeper_provider_attempt_effect.No_effect_observed
        | Ok () ->
+      (* Native continuation already owns its input in the checkpoint. Official
+         clients still need the explicit goal, including any media blocks. *)
+      let goal_blocks =
+        match continue_from_checkpoint, runtime.Runtime.execution with
+        | true, Runtime_execution.Agent_core _ -> None
+        | _ -> goal_blocks
+      in
       (* Shadows the caller's inputs with this candidate's dispatch view; the
          originals stay bound above for the next candidate's own projection. *)
       let { attempt_goal_blocks = goal_blocks
@@ -1694,6 +1710,8 @@ let run_named
           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider_with_truncation_recovery
+              ?continuation_checkpoint:
+                (if continue_from_checkpoint then agent_core_checkpoint else None)
               try_provider_ctx candidate
           in
           let outcomes =

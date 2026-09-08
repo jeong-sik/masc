@@ -1233,6 +1233,7 @@ let context_overflow_shrink_sequence
     keeper that has already discovered a working window does not
     rediscover it every turn. A successful attempt updates that memory. *)
 let run_try_provider_with_context_overflow_shrink
+      ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
@@ -1241,11 +1242,11 @@ let run_try_provider_with_context_overflow_shrink
     (* The validated semantic view owns retained source obligations. Retrying
        the same view with a smaller arbitrary byte window cannot recover it.
        Final serialized request admission still enforces the explicit cap. *)
-    run_try_provider ctx candidate
+    run_try_provider ?continuation_checkpoint ctx candidate
   | None, None ->
     (* No caller byte policy means no invented byte window or shrink seed.
        Provider context refusals keep their typed result for lane recovery. *)
-    run_try_provider ctx candidate
+    run_try_provider ?continuation_checkpoint ctx candidate
   | None, Some max_capacity_bytes ->
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
@@ -1284,6 +1285,7 @@ let run_try_provider_with_context_overflow_shrink
       ~attempt:(fun ~capacity_bytes ->
         let attempt_result, attempt_checkpoint_after, attempt_success_sample =
           run_try_provider
+            ?continuation_checkpoint
             { ctx with model_input_capacity_bytes = Some capacity_bytes }
             candidate
         in
@@ -1423,11 +1425,12 @@ let persist_dropped_response
 ;;
 
 let run_try_provider_with_truncation_recovery
+      ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_context_overflow_shrink ctx candidate
+    run_try_provider_with_context_overflow_shrink ?continuation_checkpoint ctx candidate
   in
   match
     truncation_recovery

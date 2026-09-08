@@ -5178,3 +5178,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_install_runtime_setup)))
+
+(include stanzas/test_keeper_approval_input_admission.inc)

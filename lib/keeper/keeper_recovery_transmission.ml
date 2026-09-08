@@ -18,11 +18,12 @@ type error =
   | Source_prefix_changed of { message_index : int }
   | Incomplete_transmission of Keeper_transcript_unit.provider_transcript_error
   | Client_projection_not_integrated of { runtime_id : string }
+  | After_projection_rejected of error
   | Source_reader_unavailable
 
 type Agent_core.Error.carrier += Recovery_transmission_failure of error
 
-let error_to_string = function
+let rec error_to_string = function
   | Projection_source_rejected e -> P.error_to_string e
   | Source_prefix_missing { expected_messages; actual_messages } ->
     Printf.sprintf
@@ -37,6 +38,8 @@ let error_to_string = function
       "recovery transmission for client-owned runtime %s is not integrated; this is not \
        a provider capability failure"
       runtime_id
+  | After_projection_rejected e ->
+    "subsequent projection violated recovery view: " ^ error_to_string e
   | Source_reader_unavailable ->
     "canonical workspace artifact reader is absent from the offered Tool surface"
 ;;
@@ -118,20 +121,23 @@ let validate messages =
   |> Result.map_error (fun e -> Incomplete_transmission e)
 ;;
 
-let project t incoming =
+let exact_suffix original incoming =
+  let expected_messages = List.length original in
   let rec suffix index original current =
     match original, current with
     | [], rest -> Ok rest
     | _ :: _, [] ->
-      Error
-        (Source_prefix_missing
-           { expected_messages = List.length t.original; actual_messages = index })
+      Error (Source_prefix_missing { expected_messages; actual_messages = index })
     | old :: olds, actual :: rest ->
       if old == actual || old = actual
       then suffix (index + 1) olds rest
       else Error (Source_prefix_changed { message_index = index })
   in
-  let* appended = suffix 0 t.original incoming in
+  suffix 0 original incoming
+;;
+
+let project t incoming =
+  let* appended = exact_suffix t.original incoming in
   let* () = validate incoming in
   let projected = t.transmitted @ appended in
   let* () = validate projected in
@@ -145,7 +151,15 @@ let model_input_projection t ?after messages =
   in
   match after with
   | None -> Ok projected
-  | Some project -> project projected
+  | Some project ->
+    let* final = project projected in
+    let* () =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let* _ = exact_suffix projected final in
+        validate final)
+      |> Result.map_error (fun e -> to_core_error (After_projection_rejected e))
+    in
+    Ok final
 ;;
 
 let require_reader tools =

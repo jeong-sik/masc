@@ -73,6 +73,7 @@ type config = {
   runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
+  recovery_view : Keeper_recovery_transmission.t option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;

@@ -107,6 +107,7 @@ type config =
   runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
+  recovery_view : Keeper_recovery_transmission.t option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
@@ -754,12 +755,27 @@ let validate_content_blocks_for_config
     ?agent_core_checkpoint
     ~(config : config)
     (goal_blocks : Agent_core.Types.content_block list) =
-  validate_content_blocks_for_run_against_capabilities_with_checkpoint
-    ~provider_label:(provider_label config.provider_cfg)
-    (input_capabilities_for_config config)
-    ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
-    ~initial_messages:config.initial_messages
-    ~goal_blocks
+  let validate ~checkpoint_messages ~initial_messages ~goal_blocks =
+    validate_content_blocks_for_run_against_capabilities_with_checkpoint
+      ~provider_label:(provider_label config.provider_cfg)
+      (input_capabilities_for_config config)
+      ~checkpoint_messages ~initial_messages ~goal_blocks in
+  match config.recovery_view with
+  | None -> validate ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
+      ~initial_messages:config.initial_messages ~goal_blocks
+  | Some view ->
+    let ( let* ) = Result.bind in
+    let canonical = match agent_core_checkpoint with
+      | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
+      | None -> config.initial_messages in
+    let incoming = match goal_blocks with
+      | [] -> canonical
+      | _ -> canonical @ [Agent_core.Types.{role=User;content=goal_blocks;
+          name=None;tool_call_id=None;metadata=[]}] in
+    let* projected = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Keeper_recovery_transmission.project view incoming)
+      |> Result.map_error Keeper_recovery_transmission.to_core_error in
+    validate ~checkpoint_messages:[] ~initial_messages:projected ~goal_blocks:[]
 
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
@@ -1142,6 +1158,10 @@ let run_blocks_internal
   with
   | Error _ as err -> err
   | Ok () ->
+  let config = match config.recovery_view with
+    | None -> config
+    | Some view -> {config with model_input_projection=Some
+        (Keeper_recovery_transmission.model_input_projection view ?after:config.model_input_projection)} in
   let boundary_response = ref None in
   let config =
     match cooperative_yield_probe with

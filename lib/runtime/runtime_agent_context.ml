@@ -84,6 +84,9 @@ type config =
   ; model_input_projection : Agent_core.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
         Agent state and checkpoints retain their canonical persisted form. *)
+  ; recovery_view : Keeper_recovery_transmission.t option
+    (** Optional source-bound view shared by capability preflight and actual
+        runtime transmission. The original checkpoint remains unchanged. *)
   ; serialization_executor : Agent_core.Agent.serialization_executor option
     (** Runs each provider request's body serialisation. MASC hands the domain
         pool so the keeper's fiber scheduler is not held for that walk. *)
@@ -163,6 +166,7 @@ let default_config
   ; runtime_id = None
   ; initial_messages = []
   ; model_input_projection = None
+  ; recovery_view = None
   ; pre_dispatch_serialization_observer = None
   ; serialization_executor = None
   ; raw_trace = None

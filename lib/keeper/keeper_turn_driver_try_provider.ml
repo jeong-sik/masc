@@ -932,10 +932,6 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
   in
   match config_result with
   | Error err -> Error err, None, None
-  | Ok _ when Option.is_some ctx.recovery_view
-      && Result.is_error (Keeper_recovery_transmission.require_reader ctx.tools) ->
-    Error (Keeper_recovery_transmission.to_core_error
-      Keeper_recovery_transmission.Source_reader_unavailable), None, None
   | Ok config ->
     (* Installed here rather than on the record above because the projection
        needs the provider config that record is still producing: it measures
@@ -943,10 +939,10 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
        that does not exist yet would mean measuring something else. *)
     let config =
       { config with
-        Runtime_agent.model_input_projection =
+        Runtime_agent.recovery_view = ctx.recovery_view;
+        model_input_projection =
           (match ctx.recovery_view, ctx.model_input_capacity_bytes with
-           | Some view, _ -> Some (Keeper_recovery_transmission.model_input_projection view
-               ?after:ctx.model_input_projection)
+           | Some _, _ -> ctx.model_input_projection
            | None, None -> ctx.model_input_projection
            | None, Some capacity_bytes ->
              Some (bounded_model_input_projection ctx ~capacity_bytes

@@ -2362,6 +2362,7 @@
 (include stanzas/test_keeper_owned_checkpoint.inc)
 (include stanzas/test_keeper_recovery_work.inc)
 (include stanzas/test_keeper_recovery_projection.inc)
+(include stanzas/test_keeper_recovery_transmission.inc)
 
 
 

@@ -11,6 +11,7 @@ type error =
   | Source_prefix_changed of { message_index : int }
   | Incomplete_transmission of Keeper_transcript_unit.provider_transcript_error
   | Client_projection_not_integrated of { runtime_id : string }
+  | After_projection_rejected of error
   | Source_reader_unavailable
   (** [Client_projection_not_integrated] is unfinished MASC integration, not a
     provider capability claim or a completed Not_supported acceptance cell. *)

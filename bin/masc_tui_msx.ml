@@ -52,9 +52,26 @@ let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
 
 let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
-let title_of (frame : Masc_tui_types.msx_frame option) =
+(* An empty cache has two causes and they are not the same news. The server
+   answered and said no machine is loaded, or it was not reachable to be asked
+   -- Masc_tui_http maps a transport failure to the same [None] a loaded:false
+   answer gives. Telling an operator "no machine loaded" while the server is
+   down sends them to load one, which is not the thing that is wrong.
+
+   The connection the refresh loop already keeps is what separates them; this
+   reads it rather than keeping a second account of the same fact. *)
+let title_of ~(connection : Masc_tui_types.connection_status)
+    (frame : Masc_tui_types.msx_frame option) =
   match frame with
-  | None -> " MSX — no machine loaded. A keeper loads one with masc_msx_load."
+  | None -> (
+    match connection with
+    | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
+      " MSX — no machine loaded. A keeper loads one with masc_msx_load."
+    | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
+      | Masc_tui_types.Booting | Masc_tui_types.Reconnecting) as status ->
+      Printf.sprintf
+        " MSX — no frame: the server is %s, so nothing could be asked for."
+        (Masc_tui_types.connection_status_label status))
   | Some f ->
       let cart = match f.msx_cartridge with Some c -> " · " ^ c | None -> "" in
       Printf.sprintf " MSX — %s%s   frame %d   (spectating the server)" f.msx_mode cart
@@ -80,7 +97,9 @@ let footer () =
   Printf.sprintf " esc: back   +/-: size %d%%   (keeper plays; this is a live view)"
     (int_of_float (!screen_fraction *. 100.0))
 
-let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
+let render ~(write : string -> unit)
+    ~(connection : Masc_tui_types.connection_status)
+    (frame : Masc_tui_types.msx_frame option) =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let screen_rows = max 4 (rows - 2) in
   let picture_rows =
@@ -88,7 +107,7 @@ let render ~(write : string -> unit) (frame : Masc_tui_types.msx_frame option) =
   in
   let buf = Buffer.create (cols * 24 * screen_rows) in
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols (title_of frame));
+  Buffer.add_string buf (fit_line cols (title_of ~connection frame));
   Buffer.add_string buf "\027[0K\r\n";
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match frame with
@@ -178,7 +197,8 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   else begin
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
-    render ~write state.msx_frame;
+    render ~write ~connection:state.Masc_tui_types.connection_status
+      state.msx_frame;
     true
   end
 

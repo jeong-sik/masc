@@ -1881,7 +1881,8 @@ let test_truncated_structured_response_reads_as_truncation () =
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
 let test_browser_screenshot_reaches_vision_reader () =
-  with_temp_base (fun _ ->
+  with_temp_base (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       let meta = make_meta "browser-screenshot" in
       let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
@@ -1903,7 +1904,7 @@ let test_browser_screenshot_reaches_vision_reader () =
             | _ -> failwith "unexpected screenshot command"));
           Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
-            ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+            ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
           assert (result.disposition = Tool_result.Completed ());
           let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
           assert (not (String_util.contains_substring result.raw_output encoded));
@@ -1926,7 +1927,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           let client_id = Browser_lane.client_id_to_string first.client_id in
           List.iter (fun mode ->
             let pending = Eio.Fiber.fork_promise ~sw (fun () ->
-              Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~meta
+              Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config ~meta
                 ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;
                   "mode",`String mode;"tabId",`Int 73])) in
             assert (Browser_lane.take_command ~client_info:second ~window_sec:0.001 = Ok None);

@@ -345,7 +345,7 @@ let test_actual_container_logs_report_no_instance () =
       |> String.concat "\n"
     in
     Alcotest.(check bool) "no instance is explicit" true
-      (contains rendered "run a sandbox command first")
+      (contains (flattened rendered) "run a sandbox command first")
 ;;
 
 (* A Keeper with no local stream is not a Keeper whose container has not

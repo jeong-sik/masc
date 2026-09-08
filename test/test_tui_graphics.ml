@@ -260,11 +260,22 @@ let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
 ;;
 
 
+let test_image_fits_terminal_geometry () =
+  let fit = Masc_tui_graphics.fit_rows ~cell_pixels:(Some (10, 20)) in
+  check int "wide viewport fits narrow terminal width" 10
+    (fit ~image_pixels:(Some (1600, 800)) ~columns:40 ~rows:30);
+  check int "tall viewport fits terminal height" 30
+    (fit ~image_pixels:(Some (400, 1600)) ~columns:40 ~rows:30);
+  check int "unknown cell metrics preserve existing placement" 30
+    (Masc_tui_graphics.fit_rows ~cell_pixels:None ~image_pixels:(Some (1600, 800)) ~columns:40 ~rows:30)
+;;
+
 let () =
   run
     "tui_graphics"
     [ ( "place"
-      , [ test_case "the payload is the file" `Quick
+      , [ test_case "viewport fits terminal geometry" `Quick test_image_fits_terminal_geometry
+        ; test_case "the payload is the file" `Quick
             test_the_payload_is_the_file
         ; test_case "every chunk but the last says more" `Quick
             test_every_chunk_but_the_last_says_more

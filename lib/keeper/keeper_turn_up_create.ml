@@ -69,6 +69,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
   let activation_mode =
     Dashboard_utils.first_some p.activation_mode_opt p.profile_defaults.activation_mode
+    (* DET-OK: fixed compile-time default, not random or clock-derived. *)
     |> Option.value ~default:Keeper_activation_mode.default
   in
   (* Two ways to have no usable profile, kept apart because they send the

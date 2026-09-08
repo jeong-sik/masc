@@ -34,17 +34,20 @@ let profile_defaults ?profile_snapshot config name =
 let effective_activation_mode ?profile_snapshot config name meta =
   match profile_defaults ?profile_snapshot config name with
   | Error _ -> meta.Keeper_meta_contract.activation_mode
+  (* DET-OK: falls back to the keeper's own stored meta, not a random or clock-derived value. *)
   | Ok defaults -> Option.value defaults.activation_mode ~default:meta.Keeper_meta_contract.activation_mode
 
 let effective_autoboot_enabled ?profile_snapshot config name meta =
   match profile_defaults ?profile_snapshot config name with
   | Error _ -> false
+  (* DET-OK: falls back to the keeper's own stored meta, not a random or clock-derived value. *)
   | Ok defaults -> Keeper_activation_mode.restore_owner
       (Option.value defaults.activation_mode ~default:meta.Keeper_meta_contract.activation_mode)
 
 let declarative_autoboot_enabled ?profile_snapshot config name =
   match profile_defaults ?profile_snapshot config name with
   | Error _ -> false
+  (* DET-OK: falls back to the fixed Autonomous default, not random or clock-derived. *)
   | Ok defaults -> Keeper_activation_mode.restore_owner
       (Option.value defaults.activation_mode ~default:Keeper_activation_mode.Autonomous)
 

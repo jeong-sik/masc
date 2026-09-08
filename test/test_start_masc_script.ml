@@ -346,6 +346,102 @@ echo "+[INFO] gRPC server on 127.0.0.1:9952" >&2
 echo "stderr-keep" >&2
 exit 0
 |}
+(* Exercise the actual shell launcher under a PTY. The selected executable
+   records its invocation instead of starting a server. A discoverable TUI
+   and default host reproduce the front-door conditions of issue #33600;
+   the script must explicitly select the existing [start] command. *)
+let test_http_terminal_selects_explicit_server () =
+  let fixture = {python|
+import errno
+import os
+from pathlib import Path
+import pty
+import shutil
+import subprocess
+import sys
+import tempfile
+
+with tempfile.TemporaryDirectory(prefix="masc-start-pty-") as tmp:
+    root = Path(tmp).resolve()
+    script = root / "start-masc.sh"
+    shutil.copyfile(sys.argv[1], script)
+    config = root / ".masc/config"
+    config.mkdir(parents=True)
+    (config / "runtime.toml").write_text("# isolated launch fixture\n")
+    commands = root / "commands"
+    commands.mkdir()
+    capture = root / "argv"
+    build = root / "build-attempt"
+    tui = root / "tui-attempt"
+
+    def executable(path, content):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(0o755)
+
+    # Avoid local opam, listener discovery, Git and all build execution.
+    for name in ("opam", "lsof", "git"):
+        executable(commands / name, "#!/bin/sh\nexit 1\n")
+    executable(commands / "dune",
+               '#!/bin/sh\ntouch "$BUILD_ATTEMPT"\nexit 99\n')
+    executable(commands / "masc-tui",
+               '#!/bin/sh\ntouch "$TUI_ATTEMPT"\nexit 98\n')
+    executable(root / "_build/default/bin/main_eio.exe", '''#!/bin/sh
+set -eu
+[ -t 0 ] && [ -t 1 ] || exit 97
+command -v masc-tui >/dev/null || exit 96
+printf '%s\n' "$@" > "$CAPTURE"
+''')
+    env = {
+        "PATH": str(commands) + os.pathsep + os.defpath,
+        "MASC_BASE_PATH": str(root),
+        "MASC_CONFIG_DIR": str(config),
+        "MASC_HOST": "127.0.0.1",
+        "MASC_SKIP_DASHBOARD_BUILD": "1",
+        "CAPTURE": str(capture),
+        "BUILD_ATTEMPT": str(build),
+        "TUI_ATTEMPT": str(tui),
+    }
+    master, slave = pty.openpty()
+    try:
+        # Redirect only stderr to a file; stdin and stdout must stay terminals.
+        with (root / "stderr").open("wb") as stderr:
+            with subprocess.Popen(
+                ["/bin/bash", str(script), "--http", "--port", "9951",
+                 "--base-path", str(root)],
+                cwd=root, env=env, stdin=slave, stdout=slave, stderr=stderr,
+            ) as process:
+                os.close(slave)
+                slave = None
+                while True:
+                    try:
+                        if not os.read(master, 65536):
+                            break
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        break
+                code = process.wait()
+        assert code == 0, (code, (root / "stderr").read_text())
+        assert not build.exists(), "the launch fixture attempted a build"
+        assert not tui.exists(), "the launch fixture opened the TUI"
+        assert capture.read_text().splitlines() == [
+            "start", "--host=127.0.0.1", "--port=9951", "--base-path=" + str(root)
+        ], "HTTP launch must explicitly select the server on a terminal"
+    finally:
+        if slave is not None:
+            os.close(slave)
+        os.close(master)
+print("PTY HTTP launch selected start; no server, TUI or build executed")
+|python} in
+  let code, stdout, stderr =
+    run_process ~cwd:(source_root ()) "/usr/bin/env"
+      [| "env"; "python3"; "-c"; fixture; script_path () |]
+  in
+  if code <> 0 then
+    failf "PTY launch fixture failed (%d)\nstdout:\n%s\nstderr:\n%s"
+      code stdout stderr
+
 let test_explicit_env_overrides_repo_env_files () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc.sh" in
@@ -1814,6 +1910,8 @@ let () =
     [
       ( "script",
         [
+          test_case "HTTP terminal selects the explicit server command" `Quick
+            test_http_terminal_selects_explicit_server;
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
           test_case

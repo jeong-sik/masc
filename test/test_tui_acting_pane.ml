@@ -299,14 +299,15 @@ let test_a_settled_row_counts_only_what_the_settle_confirmed () =
      number; before the fix it made the settled row count the running
      ledger total instead of the turn's confirmed calls. *)
   let row = find_row "rondo" in
-  check bool "the settle's count stands" true (contains "3 calls" row);
-  check bool "no running total took the count" false (contains "4 calls" row);
+  check bool "the settle's count stands" true (contains "    3" row);
+  check bool "no running total took the count" false (contains "    4" row);
   check bool "a fleet row carries no clock" false (contains "last event" row)
 
 let test_an_open_record_without_a_tool_does_not_claim_a_current_turn () =
   let row = find_row_in dead_texts "bare" in
-  check bool "a record with no call says so" true (contains "no calls yet" row);
-  check bool "and wears the unsettled glyph" true (contains "~ " row);
+  check bool "a record with no call shows a dash, not a zero" true
+    (contains "    -" row);
+  check bool "and says so in the state column" true (contains "unsettled" row);
   check bool "the fleet row never borrows the phase word" false
     (contains "running" row)
 
@@ -348,7 +349,7 @@ let test_event_age_uses_local_receipt_not_producer_time () =
   let row = find_row_in texts "sangsu" in
   let header = List.nth texts (last_index_of_in texts "sangsu") in
   check bool "local receipt is ten seconds old" true (contains "last event 10.0s" header);
-  check bool "no observed calls is explicit" true (contains "no calls yet" row);
+  check bool "no observed calls is explicit" true (contains "    -" row);
   check bool "producer's fifteen-minute age is not substituted" false
     (contains "15m" row || contains "15m" header)
 
@@ -367,8 +368,8 @@ let test_settled_unknown_call_total_stays_unknown () =
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let row = find_row_in texts "sangsu" in
-  check bool "unknown count is named" true (contains "calls ?" row);
-  check bool "unknown count is not zero" false (contains "0 calls" row)
+  check bool "unknown count is named" true (contains "    ?" row);
+  check bool "unknown count is not zero" false (contains "    0" row)
 
 let test_earlier_unclosed_record_is_not_presented_as_settled () =
   let input =
@@ -449,10 +450,12 @@ let test_fleet_rows_read_the_state () =
   check bool "waiting names the tool" true (contains "approval" (find_row "polisher"));
   check bool "waiting names which tool" true (contains "tool_execute" (find_row "polisher"));
   check bool "working names the call out" true (contains "Execute" (find_row "sangsu"));
-  check bool "working counts its calls as at least" true (contains "2+ calls" (find_row "sangsu"));
-  check bool "settled counts its calls" true (contains "3 calls" (find_row "rondo"));
-  check bool "settled shows both token parts" true
-    (contains "73.9k+358 tok" (find_row "rondo"));
+  check bool "working counts its calls as at least" true (contains "   2+" (find_row "sangsu"));
+  check bool "settled counts its calls" true (contains "    3" (find_row "rondo"));
+  (* The fleet column carries the sum. The two figures apart are the focus
+     block's job: nine cells cannot hold "in 73.9k · out 358". *)
+  check bool "settled shows the token total" true
+    (contains "    74.2k" (find_row "rondo"));
   check bool "quiet says so" true (contains "no events" (find_row "quiet-one"))
 
 let test_focus_block_names_the_latest_observed_record () =
@@ -625,10 +628,10 @@ let test_event_and_count_labels_fit_the_existing_width () =
   let value = Pane.lines ~rows ~cols ~scroll:0 input in
   let row = find_row_in (List.map text value.Pane.rows) "sixteen-charname" in
   check bool "tool name is whole" true (contains "network_read" row);
-  check bool "observed count is whole" true (contains "1+ calls" row);
+  check bool "observed count is whole" true (contains "   1+" row);
   check int "pane width remains unchanged" 56 Pane.pane_cols;
-  check bool "settled count and both token parts fit" true
-    (contains "3 calls" (find_row "rondo") && contains "73.9k+358 tok" (find_row "rondo"))
+  check bool "settled count and its token total fit" true
+    (contains "    3" (find_row "rondo") && contains "    74.2k" (find_row "rondo"))
 
 (* ── changes tab ────────────────────────────────────────────────────── *)
 
@@ -765,8 +768,15 @@ let test_state_text_reads_each_case () =
   check bool "approval outranks a running turn" true
     (contains "approval"
        (plain (Pane.keeper_state_text ~health:None ~approval:(Some "Write") None)));
-  check string "no chunk means no observed events" "  no events"
-    (plain (Pane.keeper_state_text ~health:None ~approval:None None))
+  (* Every reading fills the reading area exactly, blank columns included, so
+     a row cannot end early and let the next line's columns sit elsewhere. *)
+  let width spans = Masc_tui_message_layout.display_width (plain spans) in
+  check int "a reading with no record still spends every column" Pane.reading_cells
+    (width (Pane.keeper_state_text ~health:None ~approval:None None));
+  check int "and one waiting on an approval" Pane.reading_cells
+    (width (Pane.keeper_state_text ~health:None ~approval:(Some "Write") None));
+  check bool "the empty case names the reason" true
+    (contains "no events" (plain (Pane.keeper_state_text ~health:None ~approval:None None)))
 
 let test_reused_chunks_keep_presentation_inputs_live () =
   let traces = [ "sangsu", "trace-sangsu"; "rondo", "trace-rondo" ] in
@@ -794,8 +804,10 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
   check bool "age advances independently of chunks" true
     (contains "last event 1m55s" (header_of "rondo" later));
-  check bool "new health changes the unsettled record's glyph" true
-    (contains "! " (row_for "sangsu" later));
+  (* The state column, not a glyph: a record whose keeper is gone reads "gone"
+     where a live one reads "unsettled". *)
+  check bool "new health changes the state column" true
+    (contains "gone" (row_for "sangsu" later));
   let later_text = List.map text later.Pane.rows in
   check bool "new selection changes focus keeper" true
     (contains "turn 41" (List.nth later_text (last_index_of_in later_text "rondo")));
@@ -875,7 +887,7 @@ let test_hidden_rows_do_not_allocate_text_layout () =
     ["fleet", 5, fleet; "focus", 6, focus; "changes", 4, changes]
 
 let test_tokens_and_ages_are_compact () =
-  check string "both sides as parts" "73.9k+358 tok" (Pane.tokens_text (Some 73_877, Some 358));
+  check string "both sides as parts" "in 73.9k · out 358" (Pane.tokens_text (Some 73_877, Some 358));
   check string "both sides summed" "74.2k tok" (Pane.tokens_sum_text (Some 73_877, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
   check string "unknown is empty" "" (Pane.tokens_text (None, None));
@@ -910,8 +922,8 @@ let test_widest_settled_reading_fits_whole () =
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let row = find_row_in texts "sangsu" in
-  check bool "the count is whole" true (contains "123 calls" row);
-  check bool "both parts are whole" true (contains "999.9k+999.9k tok" row)
+  check bool "the count is whole" true (contains "  123" row);
+  check bool "the summed figure is whole" true (contains "     2.0M" row)
 
 (* sangsu's session turn 5 opened, settled as the keeper's turn 3141 twenty
    seconds ago, and session turn 6 has opened since: the earlier turn draws
@@ -950,7 +962,7 @@ let earlier_turn_row input =
 
 let test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock () =
   let row = earlier_turn_row (earlier_turn_input ()) in
-  check bool "both token parts" true (contains "73.9k+358 tok" row);
+  check bool "both token parts" true (contains "in 73.9k · out 358" row);
   check bool "the cost" true (contains "$0.0258" row);
   check bool "no receipt age" false (contains "last event" row);
   check bool "the count" true (contains "3 calls" row)
@@ -962,7 +974,7 @@ let test_earlier_turn_row_gives_up_its_cost_before_its_parts () =
     earlier_turn_row
       (earlier_turn_input ~calls:123 ~input:999_900 ~output:999_900 ~cost:123456.789 ())
   in
-  check bool "both token parts" true (contains "999.9k+999.9k tok" row);
+  check bool "both token parts" true (contains "in 999.9k · out 999.9k" row);
   check bool "the cost is what it gave up" false (contains "$" row);
   check bool "the count" true (contains "123 calls" row)
 

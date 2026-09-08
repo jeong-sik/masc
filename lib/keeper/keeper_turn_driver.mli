@@ -141,6 +141,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
+  ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->
   ?event_bus:Agent_core.Event_bus.t ->
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->

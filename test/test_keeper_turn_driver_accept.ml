@@ -140,6 +140,17 @@ let direct_no_progress_retry_decision err =
     ~attempted_runtimes:[ "runtime.direct-empty" ]
     err
 
+let test_admitted_continuation_requires_checkpoint () =
+  match
+    Masc.Keeper_turn_driver.run_named
+      ~runtime_id:"unused" ~base_path:"." ~goal:"continue"
+      ~system_prompt:"" ~agent_core_tools:[] ~continue_from_checkpoint:true ()
+  with
+  | Error (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "continuation_checkpoint"; _ })) -> ()
+  | Error error -> Alcotest.failf "wrong admission error: %s" (Agent_core.Error.to_string error)
+  | Ok _ -> Alcotest.fail "missing admitted checkpoint must not dispatch a new input"
+
 let test_dispatch_accepts_runtime_without_serialized_request_cap () =
   let snapshot = Runtime.For_testing.snapshot () in
   let path = Filename.temp_file "uncapped_keeper_runtime_" ".toml" in
@@ -2218,6 +2229,10 @@ let () =
             "session conflict preserves typed terminal exhaustion"
             `Quick
             test_session_conflict_exhaustion_preserves_typed_terminal_reason;
+          Alcotest.test_case
+            "admitted continuation requires its checkpoint before dispatch"
+            `Quick
+            test_admitted_continuation_requires_checkpoint;
           Alcotest.test_case
             "dispatch accepts runtime without serialized-request cap"
             `Quick

@@ -854,6 +854,7 @@ let with_checkpoint_cas_lock ~session_dir f =
     |> installation_of_lock_observation
 
 let save_agent_core_if_source_with
+    ?(require_absent = false)
     ~with_checkpoint_cas_lock
     ~write_checkpoint_bytes
     ~(on_checkpoint_commit_observer : Keeper_checkpoint_ref.t -> unit)
@@ -899,15 +900,20 @@ let save_agent_core_if_source_with
       try
         `Returned
           (with_checkpoint_cas_lock ~session_dir (fun session_dir ->
-         match load_ref_locked ~session_dir ~expected_session_id with
-         | Error error -> not_installed (Source_unavailable error)
-         | Ok snapshot
-           when not
-                  (Keeper_checkpoint_ref.equal
-                     expected_source_ref
-                     (exact_snapshot_reference snapshot)) ->
-           not_installed (Source_changed (exact_snapshot_reference snapshot))
-         | Ok _ ->
+         let source =
+           match load_ref_locked ~session_dir ~expected_session_id with
+           | Error Ref_not_found when require_absent -> Ok ()
+           | Error error -> Error (Source_unavailable error)
+           | Ok snapshot
+             when require_absent
+                  || not (Keeper_checkpoint_ref.equal expected_source_ref
+                            (exact_snapshot_reference snapshot)) ->
+             Error (Source_changed (exact_snapshot_reference snapshot))
+           | Ok _ -> Ok ()
+         in
+         match source with
+         | Error error -> not_installed error
+         | Ok () ->
            let canonical_path =
              agent_core_checkpoint_path
                ~session_dir
@@ -975,6 +981,18 @@ let save_agent_core_if_source ~session_dir ~expected_source_ref candidate =
     ~session_dir
     ~expected_source_ref
     candidate
+;;
+
+let save_agent_core_if_absent ~session_dir candidate =
+  let bytes = offload_checkpoint_cpu (fun () ->
+    Agent_core.Checkpoint.to_json candidate |> Yojson.Safe.to_string) in
+  match checkpoint_ref_of_canonical_bytes bytes candidate with
+  | Error error -> not_installed (Candidate_identity_invalid error)
+  | Ok candidate_ref ->
+    save_agent_core_if_source_with
+      ~require_absent:true ~with_checkpoint_cas_lock ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer:(fun _ -> ())
+      ~session_dir ~expected_source_ref:candidate_ref candidate
 ;;
 
 (* Accepted continuations are not observational rolling history. Their

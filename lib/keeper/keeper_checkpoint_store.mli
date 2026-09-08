@@ -246,6 +246,13 @@ val save_agent_core_if_source :
   Agent_core.Checkpoint.t ->
   checkpoint_installation
 
+(** Install only if no canonical checkpoint exists, under the same stable
+    session lock as source CAS. A concurrently created checkpoint produces
+    [Source_changed]; corrupt/unreadable existing bytes are never overwritten.
+    Installation and durability semantics match [save_agent_core_if_source]. *)
+val save_agent_core_if_absent : session_dir:string -> Agent_core.Checkpoint.t ->
+  checkpoint_installation
+
 (** Retain an accepted immutable checkpoint outside rolling history. The path
     is derived internally from its reference, under [session_dir]. Existing
     bytes must validate against that exact reference before any write; corrupt

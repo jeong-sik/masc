@@ -52,6 +52,71 @@ let test_no_machine () =
   check bool "press before load is a workflow rejection" true (rejected r)
 ;;
 
+let test_rendered_pixel_snapshot () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let require = function Ok value -> value | Error e -> fail (Msx_lane.error_to_string e) in
+  let read () = match Msx_lane.frame () with Some f -> f | None -> fail "no frame" in
+  (* Original synthetic firmware jumps into an original 16 KiB cartridge.
+     The guest enables text display and changes R7 between palette colors 2
+     and 3 once per VBlank. Thus advancing one frame changes actual pixels,
+     rather than merely allocating another all-black buffer. *)
+  let roms_dir = Filename.concat base_path "pixel-bios" in
+  Sys.mkdir roms_dir 0o755;
+  let write_code bytes offset code =
+    List.iteri (fun i n -> Bytes.set bytes (offset + i) (Char.chr n)) code in
+  let bios = Bytes.make 32768 '\000' in
+  write_code bios 0 [0xc3; 0x10; 0x40]; (* JP 4010; cartridge page is slot 2 *)
+  Out_channel.with_open_bin (Filename.concat roms_dir "cbios_main_msx2.rom")
+    (fun oc -> output_bytes oc bios);
+  let cart = Bytes.make 16384 '\000' in
+  write_code cart 0 [0x41; 0x42; 0x10; 0x40];
+  write_code cart 0x10 [
+    0xf3; 0x06; 0x02;                 (* DI; LD B,2 *)
+    0x3e; 0x50; 0xd3; 0x99;           (* text mode, display enabled *)
+    0x3e; 0x81; 0xd3; 0x99;           (* write VDP register 1 *)
+    0xdb; 0x99; 0xe6; 0x80; 0x28; 0xfa; (* 401B: wait for VBlank *)
+    0x78; 0xee; 0x01; 0x47;           (* toggle color 2 / 3 *)
+    0xd3; 0x99; 0x3e; 0x87; 0xd3; 0x99; (* write VDP register 7 *)
+    0xc3; 0x1b; 0x40 ];
+  let cart_path = Filename.concat base_path "pixel-toggle.rom" in
+  Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
+  ignore (require (Msx_lane.load ~ledger_dir ~roms_dir
+                     ~cart_path:(Some cart_path) ~disk_path:None));
+  let first = read () in
+  let bytes = String.sub first.rgb 0 (String.length first.rgb) in
+  let allocated = Gc.allocated_bytes () in
+  for _ = 1 to 100 do
+    let again = read () in
+    check bool "read reuses pixels" true (first.rgb == again.rgb)
+  done;
+  let read_allocations = Gc.allocated_bytes () -. allocated in
+  Printf.printf "MSX 100 unchanged frame reads allocate %.0f bytes (RGB=%d bytes)\n%!"
+    read_allocations (String.length first.rgb);
+  check bool "reads do not allocate 100 full RGB buffers" true
+    (read_allocations < float_of_int (100 * String.length first.rgb));
+  let observation, captured = require (Msx_lane.capture ()) in
+  check bool "capture shares observed pixels" true (first.rgb == captured.rgb);
+  check int "capture agrees with clock" first.number observation.frame;
+  let save_path = Filename.concat base_path "before.json" in
+  ignore (require (Msx_lane.save ~path:save_path));
+  ignore (require (Msx_lane.step ~frames:1));
+  let advanced = read () in
+  check int "step advances snapshot" (first.number + 1) advanced.number;
+  check bool "step invalidates rendered buffer" false (first.rgb == advanced.rgb);
+  check bool "guest VBlank changes actual RGB" false (String.equal bytes advanced.rgb);
+  check string "old snapshot remains immutable" bytes first.rgb;
+  ignore (require (Msx_lane.restore ~path:save_path ~ledger_dir));
+  let restored = read () in
+  check int "restore rewinds snapshot" first.number restored.number;
+  check string "restore reproduces pixels" bytes restored.rgb;
+  check bool "restore reverses the visible guest change" false
+    (String.equal advanced.rgb restored.rgb);
+  check bool "restore does not retain future buffer" false (advanced.rgb == restored.rgb);
+  ignore (require (Msx_lane.eject ()));
+  check bool "eject removes snapshot" true (Option.is_none (Msx_lane.frame ()))
+;;
+
 let test_load_and_clock () =
   with_workspace @@ fun base_path ->
   let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
@@ -560,6 +625,7 @@ let () =
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "press sequence taps keys in turn" `Quick test_press_sequence
         ; test_case "cartridge inventory" `Quick test_inventory
+        ; test_case "rendered snapshot reuse and invalidation" `Quick test_rendered_pixel_snapshot
         ; test_case "disk image loads into the drive" `Quick test_disk_load
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint

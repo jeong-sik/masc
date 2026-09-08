@@ -86,6 +86,8 @@ let key_to_string : key -> string = function
 type machine = {
   m : Msx.t;
   mutable frame : int;
+  mutable pixels : (int * int * string) option;
+  (* Immutable RGB snapshot for this machine state, guarded by [lock]. *)
   cart : string option;
   disk : string option;
   disk_id : string option;
@@ -192,6 +194,15 @@ let ascii_view rgb ~w ~h =
   end
 ;;
 
+let rendered_pixels st =
+  match st.pixels with
+  | Some pixels -> pixels
+  | None ->
+      let width, height = Msx.frame_dims st.m in
+      let pixels = width, height, Msx.frame_rgb st.m in
+      st.pixels <- Some pixels;
+      pixels
+
 let observe st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
@@ -204,8 +215,8 @@ let observe st =
   ; cartridge = st.cart
   ; disk = st.disk
   ; screen_view =
-      (let w, h = Msx.frame_dims st.m in
-       ascii_view (Msx.frame_rgb st.m) ~w ~h)
+      (let w, h, rgb = rendered_pixels st in
+       ascii_view rgb ~w ~h)
   }
 ;;
 
@@ -307,6 +318,7 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
         Out_channel.with_open_bin ledger_path (fun _ -> ());
         let st =
           { m
+          ; pixels = None
           ; frame = pre_frames
           ; cart =
               (if Option.is_some disk then None
@@ -342,6 +354,8 @@ let check_frames ~what n =
 ;;
 
 let advance st n =
+  (* Invalidate before mutating even if stepping raises after partial progress. *)
+  st.pixels <- None;
   Msx.step st.m ~frames:n;
   st.frame <- st.frame + n
 ;;
@@ -444,11 +458,11 @@ type frame = {
 }
 
 let frame_of (st : machine) =
-      let width, height = Msx.frame_dims st.m in
+      let width, height, rgb = rendered_pixels st in
         { number = st.frame
         ; width
         ; height
-        ; rgb = Msx.frame_rgb st.m
+        ; rgb
         ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
         ; cartridge = st.cart
         ; disk = st.disk
@@ -557,7 +571,7 @@ let restore ~path ~ledger_dir =
       try
         let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
         atomic_write ledger_path ledger_bytes;
-        let st = {m; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
+        let st = {m; pixels = None; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
         state := Some st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
@@ -580,7 +594,7 @@ let change_disk ~path ~backup_path =
           | Error message -> Error (Invalid_request message)
           | Ok () ->
             atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
-            let next = {st with m; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
+            let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
             state := Some next;
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))

@@ -127,7 +127,9 @@ type frame = {
 
 val frame : unit -> frame option
 (** The current native-resolution frame, or [None] when no machine is loaded.
-    A spectator renders this; the pixels are the client's to downsample. *)
+    A spectator renders this; the pixels are the client's to downsample.
+    Repeated reads of the same machine state reuse immutable rendered pixels.
+    Advancing, loading, restoring, or replacing media invalidates that snapshot. *)
 
 val capture : unit -> (observation * frame, error) result
 (** Copy observation and pixels under the same machine lock. Does not advance

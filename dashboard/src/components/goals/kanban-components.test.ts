@@ -8,10 +8,6 @@ import { resetTaskSearch, expandedTasks } from './goal-helpers'
 import type { Task } from '../../types'
 import * as actions from '../../api/actions'
 
-vi.mock('@formkit/auto-animate', () => ({
-  default: vi.fn(),
-}))
-
 function makeDoneTask(index: number): Task {
   const day = String(26 - index).padStart(2, '0')
   const timestamp = `2026-04-${day}T00:00:00Z`

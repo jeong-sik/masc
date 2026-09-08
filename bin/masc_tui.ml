@@ -5261,7 +5261,11 @@ let goto_surface state ~mailbox (destination : surface) =
            launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
-   | Metrics -> launch_memory_health_load state ~mailbox
+   | Metrics ->
+       launch_memory_health_load state ~mailbox;
+       launch_keeper_tool_approvals_load state ~mailbox;
+       launch_gate_snapshot_load state ~mailbox;
+       launch_keeper_tool_modes_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -11535,6 +11539,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok held ->
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
+           state.keeper_tool_approvals_observed <- true;
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
@@ -11596,6 +11601,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.gate_rules <- snapshot.Tui_decode.gs_rules;
            state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
            state.gate_error <- None;
+           state.gate_snapshot_observed <- true;
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
@@ -11670,15 +11676,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if Approval.Flow.is_current state.approval_flow generation then
         (match result with
          | Ok overrides ->
+             state.keeper_tool_modes_observed <- true;
+             state.keeper_tool_modes_error <- None;
              state.keeper_yolo_names <-
                List.filter_map
                  (fun (keeper, mode) ->
                    if String.equal mode "yolo" then Some keeper else None)
                  overrides
-         | Error _ ->
-             (* The stance listing is advisory colouring; a failed fetch keeps
-                the last known set rather than flashing every name back. *)
-             ())
+         | Error detail ->
+             state.keeper_tool_modes_error <- Some detail)
   | Keeper_tool_mode_set (keeper_name, mode, result, generation) ->
       let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
       state.approval_flow <- flow;
@@ -17627,7 +17633,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
             | Metrics ->
-                launch_memory_health_load state ~mailbox:async_messages
+                launch_memory_health_load state ~mailbox:async_messages;
+                launch_keeper_tool_modes_load state ~mailbox:async_messages
             | Overview | Acting | Approvals | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->

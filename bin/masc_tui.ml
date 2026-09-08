@@ -9135,6 +9135,8 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
     | Keeper_control.Directive directive_action ->
         Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
           ~action:directive_action ~operator_operation_id
+      | Keeper_control.Purge ->
+          Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name
   in
   let rec walk ~recovery_available last_outcome steps =
     match steps with
@@ -9818,7 +9820,15 @@ let handle_keeper_action state ~base_path ~mailbox action =
             add_event state "system"
               (Printf.sprintf "Press %s again to %s %s"
                  (Keeper_control.action_key action)
-                 (Keeper_control.action_label action) keeper.k_name)
+                 (Keeper_control.action_label action) keeper.k_name);
+
+            (* Shutdown is undone by a boot. Delete is not undone at all, so
+               the arm names what goes -- the same list the dashboard shows
+               before its own purge. *)
+            if action = Keeper_control.Delete then
+              add_event state "system"
+                ("Delete removes: "
+                 ^ String.concat ", " Keeper_control.purge_artifacts)
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
@@ -19124,6 +19134,16 @@ and is loaded on demand through keeper_skill.
                        open_repository_change_diff state
                          ~mailbox:async_messages ~scope change)
                | _ -> ()))
+       (* Delete is the one keeper action with no inverse, so it is dispatched
+          here rather than through the toggle key: [Keeper_control.available]
+          offers it only where the roster shows no fiber, and
+          [gate_transition] holds the first press as an arm. *)
+       | Some "x"
+         when (match state.view with
+               | Keepers (Keeper_list | Keeper_detail) -> true
+               | _ -> false) ->
+           handle_keeper_action state ~base_path ~mailbox:async_messages
+             Keeper_control.Delete
        | Some "d"
          when (match state.view with
                | Keepers (Keeper_list | Keeper_detail) -> true

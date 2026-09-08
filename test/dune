@@ -3833,6 +3833,27 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-changes-newline)))
 
+; #32469: the list row named the enqueue result and not what became of the
+; wake, so a wake the queue cancelled forty seconds later read succeeded.
+; Its own lane for the same reason as the one above -- the scenario sits
+; behind the stall in the default keyboard regression (#34125).
+
+(rule
+ (alias runtest-test_tui_keyboard_input-schedule-delivery)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   schedule-delivery)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-schedule-delivery)))
+
 ; The spectator draws the machine's frame outside the frame presenter, and
 ; nothing walked that path. It is what holds the frame's shape: revert the grid
 ; to the window's own size and this lane reports 100 cells where the frame asks

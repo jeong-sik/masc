@@ -190,6 +190,13 @@ val list_goals :
 (** Reads the state, applies optional filters, then sorts
     by [(priority, updated_at desc)]. *)
 
+val list_goals_result :
+  Workspace_utils.config -> ?phase:Goal_phase.t -> unit ->
+  (goal list, string) result
+(** Current primary observation. An unreadable primary or a missing primary
+    with an existing mirror is an error; a fresh store is [Ok []].
+    Does not repair the store or present recovery data as current. *)
+
 val upsert_goal :
   Workspace_utils.config ->
   ?id:string ->

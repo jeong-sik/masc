@@ -2103,6 +2103,56 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
+let test_goal_source_failure_is_not_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let open Yojson.Safe.Util in
+  let planning () = Server_dashboard_http.dashboard_planning_http_json ~config in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check int "fresh planning store is empty" 0
+    (planning () |> member "goals" |> to_list |> List.length);
+  check int "fresh tree store is empty" 0
+    (tree () |> member "tree" |> to_list |> List.length);
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
+      ~metric:"visible goals" ~target_value:"1" () with
+    | Ok goal -> goal | Error detail -> fail detail
+  in
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let original = Fs_compat.load_file primary in
+  check int "valid primary is visible" 1
+    (planning () |> member "goals" |> to_list |> List.length);
+  let check_unavailable label =
+    let detail = match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+      | Ok json -> json | Error error -> fail error
+    in
+    List.iter (fun (surface, json) ->
+      check bool (label ^ surface ^ " not successful") false
+        (json |> member "ok" |> to_bool);
+      check string (label ^ surface ^ " source classification")
+        "goal_store_unavailable" (json |> member "error_code" |> to_string);
+      check bool (label ^ surface ^ " preserves cause") true
+        (String.length (json |> member "error" |> to_string) > 0);
+      List.iter (fun field ->
+        check bool (label ^ surface ^ " no invented " ^ field) true
+          (member field json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
+      ["planning", planning (); "tree", tree (); "detail", detail]
+  in
+  Fs_compat.save_file primary "unreadable primary";
+  check_unavailable "valid mirror: ";
+  check string "read does not replace primary" "unreadable primary"
+    (Fs_compat.load_file primary);
+  check string "read does not alter mirror" original (Fs_compat.load_file mirror);
+  Fs_compat.save_file mirror "unreadable mirror";
+  check_unavailable "both invalid: ";
+  Sys.remove primary;
+  Fs_compat.save_file mirror original;
+  check_unavailable "primary missing: ";
+  check bool "read does not recreate missing primary" false (Sys.file_exists primary);
+  Sys.remove mirror;
+  check int "both absent is a fresh store" 0
+    (planning () |> member "goals" |> to_list |> List.length)
+
 let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
@@ -5415,6 +5465,8 @@ let () =
             test_dashboard_bootstrap_omits_eager_goal_tree;
           test_case "Goal proof surfaces share persisted criterion truth" `Quick
             test_goal_proof_surfaces_share_persisted_criterion_truth;
+          test_case "Goal source failure is not empty" `Quick
+            test_goal_source_failure_is_not_empty;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick

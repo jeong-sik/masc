@@ -159,10 +159,19 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
 
 
 
+let goal_store_unavailable_json detail =
+  `Assoc
+    [ "ok", `Bool false
+    ; "error_code", `String "goal_store_unavailable"
+    ; "error", `String detail
+    ]
+
 let goal_detail_json_ready ~(config : Workspace.config)
     ~(pending_approvals : Yojson.Safe.t list) ~goal_id :
     (Yojson.Safe.t, string) result =
-  let goals = Goal_store.list_goals config () in
+  match Goal_store.list_goals_result config () with
+  | Error detail -> Ok (goal_store_unavailable_json detail)
+  | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
@@ -249,7 +258,9 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id =
 
 let dashboard_goals_tree_json_ready ~(config : Workspace.config)
     ~(pending_approvals : Yojson.Safe.t list) : Yojson.Safe.t =
-  let goals = Goal_store.list_goals config () in
+  match Goal_store.list_goals_result config () with
+  | Error detail -> goal_store_unavailable_json detail
+  | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in

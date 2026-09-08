@@ -91,3 +91,6 @@ val goal_detail_json :
   (Yojson.Safe.t, string) result
 (** Returns the per-goal detail envelope for [goal_id].
     [Error msg] when the goal is not in the tree. *)
+
+val goal_store_unavailable_json : string -> Yojson.Safe.t
+(** Shared source failure envelope for Planning, Goal tree and detail. *)

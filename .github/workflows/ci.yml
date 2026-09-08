@@ -1,7 +1,6 @@
 name: CI
 
-# Manual-dispatch contract is unchanged: this workflow starts only when
-# dispatched. What changed on 2026-09-02 (owner decision) is the shape:
+# Runs on manual dispatch or as the compile component of candidate verification. What changed on 2026-09-02 (owner decision) is the shape:
 # the previous 9-job lane (changes / meta / health / build / lint /
 # dashboard / structure-ratchet / shell-ir-ratchet / ci-gate) is now a
 # single job that builds the tree.
@@ -23,6 +22,11 @@ name: CI
 # Lint, dashboard, ratchets, and the ci-gate no longer run anywhere.
 
 on:
+  workflow_call:
+    inputs:
+      candidate_verification:
+        type: boolean
+        default: false
   workflow_dispatch: {}
 
 permissions:
@@ -32,7 +36,7 @@ permissions:
 # One run at a time for the whole repo: a new dispatch cancels the run
 # in flight instead of stacking a second one.
 concurrency:
-  group: ci
+  group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || 'ci' }}
   cancel-in-progress: true
 
 jobs:

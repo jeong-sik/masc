@@ -45,8 +45,7 @@ val pause_kind_to_wire : pause_kind -> string
 
 type autonomous_activation =
   { ok : bool
-  ; autoboot_enabled : bool
-  ; proactive_enabled : bool
+  ; activation_mode : Keeper_activation_mode.t
   ; paused : bool
   ; lifecycle_state : Keeper_lifecycle_admission.state
   ; blocker : autonomous_blocker option
@@ -88,9 +87,9 @@ val classify_durable_demand_execution :
   owner_execution_truth
 (** Classify activation for an already-persisted explicit demand such as a due
     schedule or HITL continuation. Lifecycle and shutdown policy still apply.
-    [autoboot_enabled] controls recovery of an absent owner, but does not block
-    an owner that is already running. [proactive_enabled] does not apply: that
-    flag controls unsolicited scheduled-autonomous turns, not reactive durable
-    work. *)
+    Activation mode and global initiative settings do not gate explicit work.
+    A requested wake can recover an absent owner in Manual mode. Pause,
+    shutdown ownership, terminal runtime state, and unreadable state retain
+    their typed precedence. *)
 
 val to_yojson : t -> Yojson.Safe.t

@@ -31,7 +31,7 @@ let make_meta name =
         [
           ("name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("autoboot_enabled", `Bool false);
+          ("activation_mode", `String "manual");
         ])
   with
   | Ok m -> m
@@ -44,7 +44,7 @@ let make_goal_reconciler_meta () =
       (`Assoc
         [ "name", `String "goal-reconciler"
         ; "trace_id", `String "trace-goal-reconciler"
-        ; "autoboot_enabled", `Bool false
+        ; "activation_mode", `String "manual"
         ])
   with
   | Ok meta -> meta

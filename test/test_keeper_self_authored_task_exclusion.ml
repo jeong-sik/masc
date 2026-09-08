@@ -16,7 +16,7 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "autoboot_enabled", `Bool false
+        ; "activation_mode", `String "manual"
         ])
   with
   | Ok meta -> meta

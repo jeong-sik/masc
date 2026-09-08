@@ -194,7 +194,7 @@ let write_keeper_toml_with_instructions config_dir ~name ~instructions =
 [keeper]
 name = "%s"
 sandbox_profile = "docker"
-proactive_enabled = false
+activation_mode = "on_demand"
 instructions = "%s"
 |}
        name instructions);
@@ -209,7 +209,7 @@ let write_empty_keeper_toml config_dir ~name =
 name = "%s"
 instructions = "test keeper"
 sandbox_profile = "docker"
-proactive_enabled = false
+activation_mode = "on_demand"
 |}
        name);
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
@@ -1319,7 +1319,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
         {
           base with
           paused = true;
-          autoboot_enabled = true;
+          activation_mode = Masc.Keeper_activation_mode.Autonomous;
         }
       in
       (match Keeper_meta_store.replace_snapshot config meta with

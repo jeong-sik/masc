@@ -100,7 +100,7 @@ let with_source_terminal_lane f =
            (`Assoc
              [ "name", `String keeper_name
              ; "trace_id", `String "trace-paused-work-operator-terminal"
-             ; "autoboot_enabled", `Bool false
+             ; "activation_mode", `String "manual"
              ])
          |> require_ok "parse source-terminal metadata"
        in
@@ -336,7 +336,7 @@ let test_inventory_exposes_exact_durable_fences () =
           (`Assoc
             [ "name", `String keeper_name
             ; "trace_id", `String "trace-paused-work-inventory"
-            ; "autoboot_enabled", `Bool false
+            ; "activation_mode", `String "manual"
             ])
         |> require_ok "parse inventory metadata"
       in

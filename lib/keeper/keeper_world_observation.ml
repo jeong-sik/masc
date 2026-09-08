@@ -1695,7 +1695,11 @@ let keeper_cycle_decision
         else
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
-      if not proactive_gate_enabled
+      let requested_schedule_due =
+        scheduled_due_from_queue
+        || observation.scheduled_automation.due_ready_count > 0
+      in
+      if not proactive_gate_enabled && not requested_schedule_due
       then
         { should_run = false
         ; channel = Scheduled_autonomous

@@ -201,8 +201,7 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("meta", keeper_brief_meta_json meta);
           ("created_at", `String meta.created_at);
           ("updated_at", `String meta.updated_at);
-          ("autoboot_enabled", `Bool meta.autoboot_enabled);
-          ("proactive_enabled", `Bool meta.proactive.enabled);
+          ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
         ]
     | None ->
         [
@@ -282,7 +281,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("paused", `Bool meta.paused);
             ("next_action", next_action);
             ("keepalive_running", `Bool keepalive_running);
-            ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
+            ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))

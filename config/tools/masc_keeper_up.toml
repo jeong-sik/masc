@@ -104,10 +104,10 @@ Required with sandbox_profile = "remote_ssh"; pass null to clear it when \
 switching the keeper to another sandbox profile."""
 
 [[params]]
-name = "autoboot_enabled"
-type = "boolean"
-description = """
-If false, persist the keeper but skip auto-start on future server boots."""
+name = "activation_mode"
+type = "string"
+enum = ["manual", "on_demand", "autonomous"]
+description = "Owner activation and initiative: manual starts only on requested work; on_demand restores an owner without spontaneous cycles; autonomous restores an owner and permits spontaneous cycles. Pause and shutdown still apply."
 
 [[params]]
 name = "max_context_override"
@@ -115,12 +115,6 @@ type = "integer"
 description = """
 Optional: absolute context token limit override for this keeper. Use 0 to \
 clear the override."""
-
-[[params]]
-name = "proactive_enabled"
-type = "boolean"
-description = """
-If true, scheduled keeper cycles may produce proactive responses."""
 
 [[params]]
 name = "runtime_id"

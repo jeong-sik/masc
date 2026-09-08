@@ -20,14 +20,14 @@ open Keeper_turn_up_args
    operator learns which of the two happened. Without it a keeper whose
    instructions name a network service is created blocked, and the block first
    shows up as a credential error inside the guest. *)
-let create_response_json ~name ~trace_id ~instructions ~proactive_enabled
+let create_response_json ~name ~trace_id ~instructions ~activation_mode
     ~max_context_override ~sandbox_profile ~network_mode ~agent_core_env =
   `Assoc
     [ ("name", `String name)
     ; ("agent_name", `String name)
     ; ("trace_id", `String trace_id)
     ; ("instructions", `String instructions)
-    ; ("proactive_enabled", `Bool proactive_enabled)
+    ; ("activation_mode", Keeper_activation_mode.to_yojson activation_mode)
     ; ("max_context_override", Json_util.int_opt_to_json max_context_override)
     ; ("sandbox_profile", `String (sandbox_profile_to_string sandbox_profile))
     ; ("network_mode", `String (network_mode_to_string network_mode))
@@ -67,9 +67,9 @@ let create_keeper ~expected_config_revision (ctx : _ context)
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
-  let autoboot_enabled =
-    Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
-    |> Option.value ~default:true
+  let activation_mode =
+    Dashboard_utils.first_some p.activation_mode_opt p.profile_defaults.activation_mode
+    |> Option.value ~default:Keeper_activation_mode.default
   in
   (* Two ways to have no usable profile, kept apart because they send the
      operator to different places: nobody named one, or someone named [local]
@@ -120,13 +120,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                 ~fallback_targets:p.profile_defaults.mention_targets
                 ~name:p.name
             in
-            let proactive_enabled =
-                Option.value
-                  ~default:
-                    (Option.value ~default:default_proactive_enabled
-                       p.profile_defaults.proactive_enabled)
-                  p.proactive_enabled_opt
-            in
               let instructions = Option.value ~default:"" p.instructions_opt in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
@@ -156,15 +149,12 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         network_mode;
         microvm_backend = p.profile_defaults.microvm_backend;
         mention_targets;
-        proactive = {
-          enabled = proactive_enabled;
-        };
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
         paused = false;
         latched_reason = None;
-        autoboot_enabled;
+        activation_mode;
         current_task_id = None;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
@@ -389,7 +379,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             ~name:meta.name
             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
             ~instructions:meta.instructions
-            ~proactive_enabled:meta.proactive.enabled
+            ~activation_mode:meta.activation_mode
             ~max_context_override:meta.max_context_override
             ~sandbox_profile:meta.sandbox_profile
             ~network_mode:meta.network_mode

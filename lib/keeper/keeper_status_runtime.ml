@@ -262,7 +262,7 @@ let keeper_next_action_path_to_string = function
   | Direct_message -> "direct_message"
 
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts =
-  if not meta.proactive.enabled then
+  if not (Keeper_activation_mode.spontaneous meta.activation_mode) then
     Some Proactive_disabled
   else if not keepalive_running then
     Some Keepalive_not_running

@@ -54,8 +54,7 @@ let pause_kind_to_wire = function
 
 type autonomous_activation =
   { ok : bool
-  ; autoboot_enabled : bool
-  ; proactive_enabled : bool
+  ; activation_mode : Keeper_activation_mode.t
   ; paused : bool
   ; lifecycle_state : Keeper_lifecycle_admission.state
   ; blocker : autonomous_blocker option
@@ -71,7 +70,7 @@ type t =
 (* RFC-0297 P0-1: the autonomous and proactive gates are resolved through the
    single SSOT [Keeper_lifecycle_gate_env.enabled] (global kill-switch AND the
    per-keeper flag), rather than re-deriving the enabled state from
-   [meta.autoboot_enabled] / [meta.proactive.enabled] here. This is the same
+   [(Keeper_activation_mode.restore_owner meta.activation_mode)] / [(Keeper_activation_mode.spontaneous meta.activation_mode)] here. This is the same
    resolver [keeper_cycle_decision] uses, so the two sites cannot drift. *)
 let autonomous_blocker (meta : Keeper_meta_contract.keeper_meta) lifecycle_state =
   match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
@@ -101,23 +100,23 @@ let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
       (Lifecycle_denied (Keeper_lifecycle_admission.Autonomous_paused _)) ->
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"
   | Some Autoboot_disabled ->
-    if meta.autoboot_enabled
+    if (Keeper_activation_mode.restore_owner meta.activation_mode)
     then
       Some
         "set MASC_KEEPER_AUTONOMOUS_ENABLED=true (global kill-switch; \
-         per-keeper autoboot_enabled is already true) before expecting \
+         per-keeper automatic owner activation is enabled) before expecting \
          autonomous keepalive or PR fan-out"
     else
-      Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
+      Some "set activation_mode=on_demand or autonomous before expecting autonomous keepalive or PR fan-out"
   | Some Proactive_disabled ->
-    if meta.proactive.enabled
+    if (Keeper_activation_mode.spontaneous meta.activation_mode)
     then
       Some
-        "set MASC_KEEPER_PROACTIVE_ENABLED=true (global kill-switch; \
-         per-keeper proactive_enabled is already true) before expecting \
+        "set MASC_KEEPER_AUTONOMOUS_ENABLED=true (global kill-switch; \
+         per-keeper activation_mode is autonomous) before expecting \
          scheduled autonomous work"
     else
-      Some "set proactive_enabled=true before expecting scheduled autonomous work"
+      Some "set activation_mode=autonomous before expecting scheduled autonomous work"
 ;;
 
 let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
@@ -128,8 +127,7 @@ let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
   in
   let blocker = autonomous_blocker meta lifecycle_state in
   { ok = Option.is_none blocker
-  ; autoboot_enabled = meta.autoboot_enabled
-  ; proactive_enabled = meta.proactive.enabled
+  ; activation_mode = meta.activation_mode
   ; paused = meta.paused
   ; lifecycle_state
   ; blocker
@@ -172,6 +170,7 @@ let owner_execution_truth_to_wire = function
 
 let classify_owner_execution_with
       ~require_proactive
+      ~requested
       ~shutdown_operation_id
       ~runtime
       meta_result
@@ -186,10 +185,11 @@ let classify_owner_execution_with
        (match activation.blocker with
         | Some (Lifecycle_denied denial) ->
           Paused_dead (Persisted_lifecycle_denied denial)
-        | Some Autoboot_disabled ->
+        | Some Autoboot_disabled when not requested ->
           Retained_disabled Retained_autoboot_disabled
         | Some Proactive_disabled when require_proactive ->
           Retained_disabled Retained_proactive_disabled
+        | Some Autoboot_disabled
         | Some Proactive_disabled
         | None ->
           (match runtime with
@@ -209,34 +209,14 @@ let classify_owner_execution_with
 ;;
 
 let classify_owner_execution =
-  classify_owner_execution_with ~require_proactive:true
+  classify_owner_execution_with ~require_proactive:false ~requested:false
 ;;
 
-let classify_durable_demand_execution
-      ~shutdown_operation_id
-      ~runtime
-      meta_result
-  =
-  match
-    classify_owner_execution_with
-      ~require_proactive:false
-      ~shutdown_operation_id
-      ~runtime
-      meta_result,
-    runtime,
-    meta_result
-  with
-  | Retained_disabled Retained_autoboot_disabled,
-    Owner_registered
-      { phase = Keeper_state_machine.Running; live_fiber = true; _ },
-    Ok meta
-      when (not meta.autoboot_enabled)
-           && (Keeper_lifecycle_gate_env.global ()).autonomous ->
-    (* [autoboot_enabled] controls whether an absent owner may be started. It
-       must not suppress an explicit durable wake for an owner that is already
-       running. Lifecycle and shutdown fences were resolved before this arm. *)
-    Executable
-  | truth, _, _ -> truth
+(* Explicit messages, resolved approvals and due schedules are requested
+   work. Mode and global initiative settings control spontaneous work only;
+   persisted pause and shutdown ownership still take precedence. *)
+let classify_durable_demand_execution =
+  classify_owner_execution_with ~require_proactive:false ~requested:true
 ;;
 
 let of_meta meta =
@@ -250,8 +230,7 @@ let of_meta meta =
 let autonomous_activation_to_yojson (activation : autonomous_activation) =
   `Assoc
     [ "ok", `Bool activation.ok
-    ; "autoboot_enabled", `Bool activation.autoboot_enabled
-    ; "proactive_enabled", `Bool activation.proactive_enabled
+    ; "activation_mode", Keeper_activation_mode.to_yojson activation.activation_mode
     ; "paused", `Bool activation.paused
     ; ( "lifecycle_state"
       , `String

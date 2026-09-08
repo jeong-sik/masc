@@ -6,7 +6,7 @@
 # Turn it on, or start this one by hand, once docs/INSTALL.md's model and
 # sandbox steps are done.
 [keeper]
-autoboot_enabled = false
+activation_mode = "manual"
 sandbox_profile = "docker"
 network_mode = "inherit"
 

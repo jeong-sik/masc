@@ -1,26 +1,6 @@
-(* Goal_verification — per-goal success-condition verification ledger
-   (RFC-0387).
-
-   Lives beside [Goal_store] rather than inside it: the goal record is
-   constructed by literal in external callers (goal_store.mli), so the
-   completion verification state gets its own store, the same way
-   [Workspace_goal_index] keeps goal-task links out of goals.json.
-
-   RFC-0387 stage 1 shipped this as a RECORD-ONLY evidence store; stage 2
-   (the verifier gate) wires the writers: [mark_*_pending] durable requests
-   (creation hook, and before the phase enters [Verifying]) and verdict
-   commits from the verifier lane via [masc_goal_transition].
-
-   Invariants carried here:
-
-   - No wall-clock expiry: pending states remain durable until a verdict is
-     committed.
-   - Failure keeps its evidence: a refuted verdict stays on the record until
-     the next request supersedes it.
-   - Fail-closed mutations: a store that does not decode refuses every
-     mutation, mirroring [Goal_store.update_state].
-   - Fail-loud reads: a store that does not decode is an [Error] for every
-     reader, never a silent "not verified yet". *)
+(* Goal proof requests and verdicts are bound to one success-criterion revision.
+   Mutations use only the primary ledger. Recovery mirrors are read-only evidence.
+   The caller holds the Goal lock while binding or committing a current request. *)
 
 let ( let* ) = Result.bind
 
@@ -30,6 +10,8 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  request_id : string;
+  criterion : Goal_store.criterion;
   verification_run_id : string;
   authority : Masc_domain.completion_authority;
   evidence : string;
@@ -38,7 +20,7 @@ type verdict = {
 
 type completion_state =
   | Completion_idle
-  | Proof_pending of { requested_at : string }
+  | Proof_pending of { requested_at : string; request_id : string; criterion : Goal_store.criterion }
   | Proof_proven of verdict
   | Proof_refuted of verdict
 
@@ -60,156 +42,104 @@ let default_record ~goal_id =
   ; updated_at = Masc_domain.now_iso ()
   }
 
-(* {1 Codecs}
+(* Strict wire-boundary parsing: reject unknown and duplicate fields. *)
+let object_fields label allowed = function
+  | `Assoc fields ->
+      let names = List.map fst fields in
+      (match List.find_opt (fun name -> not (List.mem name allowed)) names with
+       | Some name -> Error (label ^ ": unknown field " ^ name)
+       | None ->
+         if List.length names <> List.length (List.sort_uniq String.compare names)
+         then Error (label ^ ": duplicate field")
+         else Ok (`Assoc fields))
+  | _ -> Error (label ^ ": expected object")
 
-   Strict, same discipline as [Goal_store.goal_of_yojson]: unknown fields and
-   unknown variant strings are decode errors, never a silent default. The only
-   lenient case is the absent record itself (a pre-RFC-0387 goal), which
-   [get_record] reports as [Ok None] and callers render through
-   {!default_record}. *)
+let required_string json key =
+  match Json_util.assoc_member_opt key json with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | _ -> Error ("goal_verification: missing or blank " ^ key)
 
 let authority_to_yojson authority =
   `Assoc
     [ "kind", `String (Masc_domain.completion_authority_kind authority)
-    ; "actor", `String (Masc_domain.completion_authority_actor authority)
-    ]
+    ; "actor", `String (Masc_domain.completion_authority_actor authority) ]
 
 let authority_of_yojson json =
-  match
-    Json_util.assoc_member_opt "kind" json, Json_util.assoc_member_opt "actor" json
-  with
-  | Some (`String "human_operator"), Some (`String actor) ->
-      Ok (Masc_domain.Human_operator { operator_id = actor })
-  | Some (`String "system_llm_agent"), Some (`String actor) ->
-      Ok (Masc_domain.System_llm_agent { agent_run_id = actor })
-  | _ ->
-      Error
-        ("goal_verification.authority_of_yojson: " ^ Yojson.Safe.to_string json)
+  let* json = object_fields "goal_verification.authority" [ "kind"; "actor" ] json in
+  let* actor = required_string json "actor" in
+  match Json_util.assoc_member_opt "kind" json with
+  | Some (`String "human_operator") -> Ok (Masc_domain.Human_operator { operator_id = actor })
+  | Some (`String "system_llm_agent") -> Ok (Masc_domain.System_llm_agent { agent_run_id = actor })
+  | _ -> Error "goal_verification: unknown authority kind"
 
 let verdict_to_yojson (v : verdict) =
-  let outcome_fields =
-    match v.outcome with
+  let outcome_fields = match v.outcome with
     | Proven -> [ "outcome", `String "proven"; "reason", `Null ]
-    | Refuted { reason } ->
-        [ "outcome", `String "refuted"; "reason", `String reason ]
+    | Refuted { reason } -> [ "outcome", `String "refuted"; "reason", `String reason ]
   in
-  `Assoc
-    (outcome_fields
-     @ [ "verification_run_id", `String v.verification_run_id
-       ; "authority", authority_to_yojson v.authority
-       ; "evidence", `String v.evidence
-       ; "recorded_at", `String v.recorded_at
-       ])
+  `Assoc (outcome_fields @
+    [ "request_id", `String v.request_id
+    ; "criterion", Goal_store.criterion_to_yojson v.criterion
+    ; "verification_run_id", `String v.verification_run_id
+    ; "authority", authority_to_yojson v.authority
+    ; "evidence", `String v.evidence
+    ; "recorded_at", `String v.recorded_at ])
 
-let verdict_of_yojson = function
-  | `Assoc fields -> (
-      let unknown =
-        List.find_map
-          (fun (field, _) ->
-            (* strict wire-boundary decoder: rejects unknown fields. STR-OK *)
-            if List.mem field
-                 [ "outcome"
-                 ; "reason"
-                 ; "verification_run_id"
-                 ; "authority"
-                 ; "evidence"
-                 ; "recorded_at"
-                 ]
-            then None
-            else Some field)
-          fields
-      in
-      match unknown with
-      | Some field ->
-          Error
-            (Printf.sprintf
-               "goal_verification.verdict_of_yojson: unknown field %S" field)
-      | None -> (
-          let json = `Assoc fields in
-          match
-            ( Json_util.assoc_member_opt "outcome" json
-            , Json_util.get_string json "verification_run_id"
-            , Json_util.get_string json "evidence"
-            , Json_util.assoc_member_opt "recorded_at" json )
-          with
-          | ( Some (`String outcome)
-            , Some verification_run_id
-            , Some evidence
-            , Some (`String recorded_at) ) -> (
-              if String.trim verification_run_id = ""
-              then
-                Error
-                  "goal_verification.verdict_of_yojson: verification_run_id is blank"
-              else
-              match authority_of_yojson (Yojson.Safe.Util.member "authority" json) with
-              | Error _ as error -> error
-              | Ok authority -> (
-                  match outcome with
-                  | "proven" ->
-                      Ok
-                        { outcome = Proven
-                        ; verification_run_id
-                        ; authority
-                        ; evidence
-                        ; recorded_at
-                        }
-                  | "refuted" -> (
-                      match Json_util.get_string json "reason" with
-                      | Some reason ->
-                          Ok
-                            { outcome = Refuted { reason }
-                            ; verification_run_id
-                            ; authority
-                            ; evidence
-                            ; recorded_at
-                            }
-                      | None ->
-                          Error
-                            "goal_verification.verdict_of_yojson: refuted verdict \
-                             has no reason")
-                  | other ->
-                      Error
-                        ("goal_verification.verdict_of_yojson: unknown outcome "
-                         ^ other)))
-          | _ ->
-              Error
-                "goal_verification.verdict_of_yojson: outcome, \
-                 verification_run_id, evidence and recorded_at are required"))
-  | json ->
-      Error ("goal_verification.verdict_of_yojson: " ^ Yojson.Safe.to_string json)
+let verdict_of_yojson json =
+  let* json = object_fields "goal_verification.verdict"
+    [ "outcome"; "reason"; "request_id"; "criterion"; "verification_run_id";
+      "authority"; "evidence"; "recorded_at" ] json in
+  let* request_id = required_string json "request_id" in
+  let* criterion = Goal_store.criterion_of_yojson (Yojson.Safe.Util.member "criterion" json) in
+  let* verification_run_id = required_string json "verification_run_id" in
+  let* evidence = required_string json "evidence" in
+  let* recorded_at = required_string json "recorded_at" in
+  let* authority = authority_of_yojson (Yojson.Safe.Util.member "authority" json) in
+  let* outcome = match Json_util.assoc_member_opt "outcome" json with
+    | Some (`String "proven") ->
+        (match Json_util.assoc_member_opt "reason" json with
+         | Some `Null -> Ok Proven
+         | _ -> Error "goal_verification: proven reason must be null")
+    | Some (`String "refuted") ->
+        let* reason = required_string json "reason" in Ok (Refuted { reason })
+    | _ -> Error "goal_verification: unknown verdict outcome"
+  in
+  Ok { outcome; request_id; criterion; verification_run_id; authority; evidence; recorded_at }
 
 let completion_state_to_yojson = function
   | Completion_idle -> `Assoc [ "state", `String "idle" ]
-  | Proof_pending { requested_at } ->
-      `Assoc
-        [ "state", `String "proof_pending"
-        ; "requested_at", `String requested_at
-        ]
+  | Proof_pending { requested_at; request_id; criterion } ->
+      `Assoc [ "state", `String "proof_pending"; "requested_at", `String requested_at;
+               "request_id", `String request_id; "criterion", Goal_store.criterion_to_yojson criterion ]
   | Proof_proven verdict ->
-      `Assoc
-        [ "state", `String "proof_proven"; "verdict", verdict_to_yojson verdict ]
+      `Assoc [ "state", `String "proof_proven"; "verdict", verdict_to_yojson verdict ]
   | Proof_refuted verdict ->
-      `Assoc
-        [ "state", `String "proof_refuted"; "verdict", verdict_to_yojson verdict ]
+      `Assoc [ "state", `String "proof_refuted"; "verdict", verdict_to_yojson verdict ]
 
 let completion_state_of_yojson json =
   match Json_util.assoc_member_opt "state" json with
-  | Some (`String "idle") -> Ok Completion_idle
-  | Some (`String "proof_pending") -> (
-      match Json_util.assoc_member_opt "requested_at" json with
-      | Some (`String requested_at) -> Ok (Proof_pending { requested_at })
-      | _ -> Error "goal_verification: proof_pending has no requested_at")
-  | Some (`String "proof_proven") -> (
-      match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
-      | Ok verdict -> Ok (Proof_proven verdict)
-      | Error _ as error -> error)
-  | Some (`String "proof_refuted") -> (
-      match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
-      | Ok verdict -> Ok (Proof_refuted verdict)
-      | Error _ as error -> error)
-  | Some (`String other) ->
-      Error ("goal_verification: unknown completion state " ^ other)
-  | _ -> Error "goal_verification: completion state missing"
+  | Some (`String "idle") ->
+      let* _ = object_fields "goal_verification.idle" [ "state" ] json in
+      Ok Completion_idle
+  | Some (`String "proof_pending") ->
+      let* json = object_fields "goal_verification.pending"
+        [ "state"; "requested_at"; "request_id"; "criterion" ] json in
+      let* requested_at = required_string json "requested_at" in
+      let* request_id = required_string json "request_id" in
+      let* criterion = Goal_store.criterion_of_yojson (Yojson.Safe.Util.member "criterion" json) in
+      Ok (Proof_pending { requested_at; request_id; criterion })
+  | Some (`String "proof_proven") ->
+      let* _ = object_fields "goal_verification.proven" [ "state"; "verdict" ] json in
+      let* verdict = verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) in
+      (match verdict.outcome with Proven -> Ok (Proof_proven verdict)
+       | Refuted _ -> Error "goal_verification: proven state has refuted verdict")
+  | Some (`String "proof_refuted") ->
+      let* _ = object_fields "goal_verification.refuted" [ "state"; "verdict" ] json in
+      let* verdict = verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) in
+      (match verdict.outcome with Refuted _ -> Ok (Proof_refuted verdict)
+       | Proven -> Error "goal_verification: refuted state has proven verdict")
+  | Some (`String state) -> Error ("goal_verification: unknown completion state " ^ state)
+  | _ -> Error "goal_verification: missing completion state"
 
 let record_to_yojson (record : record) =
   `Assoc
@@ -218,41 +148,37 @@ let record_to_yojson (record : record) =
     ; "updated_at", `String record.updated_at
     ]
 
-let record_of_yojson = function
-  | `Assoc fields -> (
-      let unknown =
-        List.find_map
-          (fun (field, _) ->
-            (* strict wire-boundary decoder: this membership test *rejects*
-               unknown record fields (constitution strict-parse). STR-OK *)
-            if List.mem field [ "goal_id"; "completion"; "updated_at" ]
-            then None
-            else Some field)
-          fields
-      in
-      match unknown with
-      | Some field ->
-          Error
-            (Printf.sprintf
-               "goal_verification.record_of_yojson: unknown field %S" field)
-      | None -> (
-          let json = `Assoc fields in
-          match
-            Json_util.assoc_member_opt "goal_id" json
-          , Json_util.assoc_member_opt "updated_at" json
-          with
-          | Some (`String goal_id), Some (`String updated_at) -> (
-              match
-                completion_state_of_yojson
-                  (Yojson.Safe.Util.member "completion" json)
-              with
-              | Ok completion -> Ok { goal_id; completion; updated_at }
-              | Error _ as error -> error)
-          | _ ->
-              Error "goal_verification.record_of_yojson: goal_id and updated_at \
-                     are required"))
-  | json ->
-      Error ("goal_verification.record_of_yojson: " ^ Yojson.Safe.to_string json)
+type criterion_relation = Current | Stale_criterion
+
+let relation_for_goal ~goal record =
+  let bound = match record.completion with
+    | Completion_idle -> None
+    | Proof_pending pending -> Some pending.criterion
+    | Proof_proven verdict | Proof_refuted verdict -> Some verdict.criterion
+  in
+  if not (String.equal record.goal_id goal.Goal_store.id) then Stale_criterion
+  else match bound with
+  | None -> Current
+  | Some criterion ->
+      if Goal_store.criterion_equal criterion (Goal_store.criterion_of_goal goal)
+      then Current else Stale_criterion
+
+let record_to_yojson_for_goal ~goal record =
+  match relation_for_goal ~goal record with
+  | Current -> record_to_yojson record
+  | Stale_criterion ->
+      `Assoc [ "goal_id", `String record.goal_id;
+               "completion", `Assoc [ "state", `String "stale_criterion";
+                 "historical_completion", completion_state_to_yojson record.completion ];
+               "updated_at", `String record.updated_at ]
+
+let record_of_yojson json =
+  let* json = object_fields "goal_verification.record"
+    [ "goal_id"; "completion"; "updated_at" ] json in
+  let* goal_id = required_string json "goal_id" in
+  let* updated_at = required_string json "updated_at" in
+  let* completion = completion_state_of_yojson (Yojson.Safe.Util.member "completion" json) in
+  Ok { goal_id; completion; updated_at }
 
 let state_to_yojson (state : state) =
   `Assoc
@@ -263,6 +189,7 @@ let state_to_yojson (state : state) =
 
 let state_of_yojson = function
   | `Assoc _ as json -> (
+      let* json = object_fields "goal_verification.state" [ "version"; "updated_at"; "records" ] json in
       match
         ( Json_util.assoc_member_opt "version" json
         , Json_util.assoc_member_opt "updated_at" json
@@ -278,7 +205,11 @@ let state_of_yojson = function
           in
           Result.map
             (fun records -> { version; updated_at; records })
-            (collect [] records_json)
+            (let* records = collect [] records_json in
+             let ids = List.map (fun record -> record.goal_id) records in
+             if List.length ids <> List.length (List.sort_uniq String.compare ids)
+             then Error "goal_verification: duplicate goal record"
+             else Ok records)
       | _ -> Error "goal_verification.state_of_yojson: invalid state")
   | json ->
       Error ("goal_verification.state_of_yojson: " ^ Yojson.Safe.to_string json)
@@ -305,55 +236,40 @@ type load_outcome =
 
 let load_state config : load_outcome =
   ensure_dirs config;
+  let read path =
+    let* json = Workspace_utils.read_json_result config path in
+    state_of_yojson json
+  in
+  let path = verifications_path config in
+  let recovery = verifications_recovery_path config in
+  let recover primary_detail =
+    if Workspace_utils.path_exists config recovery then
+      match read recovery with
+      | Ok state ->
+          Log.Misc.warn "goal_verification: historical recovery read (%s) from %s"
+            primary_detail recovery;
+          Loaded state
+      | Error detail -> Undecodable (primary_detail ^ "; recovery: " ^ detail)
+    else Undecodable primary_detail
+  in
+  if Workspace_utils.path_exists config path then
+    match read path with
+    | Ok state -> Loaded state
+    | Error detail -> recover detail
+  else if Workspace_utils.path_exists config recovery then
+    recover "primary ledger is missing"
+  else Loaded (default_state ())
+
+let load_primary_state config =
+  ensure_dirs config;
   let path = verifications_path config in
   if Workspace_utils.path_exists config path then
     match Workspace_utils.read_json_result config path with
-    | Ok json -> (
-        match state_of_yojson json with
-        | Ok state -> Loaded state
-        | Error primary_msg ->
-            let recovery = verifications_recovery_path config in
-            if Workspace_utils.path_exists config recovery then
-              match Workspace_utils.read_json_result config recovery with
-              | Ok recovery_json -> (
-                  match state_of_yojson recovery_json with
-                  | Ok state ->
-                      Log.Misc.warn
-                        "goal_verification: primary store corrupt (%s), recovered \
-                         from %s"
-                        primary_msg recovery;
-                      Loaded state
-                  | Error recovery_msg ->
-                      Undecodable
-                        (Printf.sprintf "primary: %s; recovery: %s"
-                           primary_msg recovery_msg))
-              | Error recovery_read_msg ->
-                  Undecodable
-                    (Printf.sprintf "primary: %s; recovery unreadable: %s"
-                       primary_msg recovery_read_msg)
-            else Undecodable primary_msg)
-    | Error primary_msg ->
-        let recovery = verifications_recovery_path config in
-        if Workspace_utils.path_exists config recovery then
-          match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json -> (
-              match state_of_yojson recovery_json with
-              | Ok state ->
-                  Log.Misc.warn
-                    "goal_verification: primary store unreadable (%s), recovered \
-                     from %s"
-                    primary_msg recovery;
-                  Loaded state
-              | Error recovery_msg ->
-                  Undecodable
-                    (Printf.sprintf "primary unreadable: %s; recovery: %s"
-                       primary_msg recovery_msg))
-          | Error recovery_msg ->
-              Undecodable
-                (Printf.sprintf
-                   "primary unreadable: %s; recovery unreadable: %s"
-                   primary_msg recovery_msg)
-        else Undecodable primary_msg
+    | Error detail -> Undecodable detail
+    | Ok json -> (match state_of_yojson json with
+        | Ok state -> Loaded state | Error detail -> Undecodable detail)
+  else if Workspace_utils.path_exists config (verifications_recovery_path config) then
+    Undecodable "primary ledger is missing while its recovery mirror exists"
   else Loaded (default_state ())
 
 let undecodable_store_error config detail =
@@ -405,7 +321,7 @@ let replace_record records updated =
 
 let update_record config ~goal_id f =
   Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
-      match load_state config with
+      match load_primary_state config with
       | Undecodable detail -> Error (undecodable_store_error config detail)
       | Loaded state ->
           let current =
@@ -414,7 +330,9 @@ let update_record config ~goal_id f =
             | None -> default_record ~goal_id
           in
           let now = Masc_domain.now_iso () in
-          let* updated = f { current with updated_at = now } in
+          let* updated = f current in
+          if updated = current then Ok current else
+          let updated = { updated with updated_at = now } in
           let next_state =
             { version = state.version + 1
             ; updated_at = now
@@ -439,6 +357,15 @@ let get_record config ~goal_id : (record option, string) result =
   | Error _ as error -> error
   | Ok records -> Ok (find_record records goal_id)
 
+let load_records_authoritative config =
+  match load_primary_state config with
+  | Loaded state -> Ok state.records
+  | Undecodable detail -> Error (undecodable_load_error config detail)
+
+let get_record_authoritative config ~goal_id =
+  let* records = load_records_authoritative config in
+  Ok (find_record records goal_id)
+
 let ledger_error_to_yojson detail =
   `Assoc [ "state", `String "ledger_error"; "detail", `String detail ]
 
@@ -446,7 +373,7 @@ type reopen_outcome =
   | Proof_unchanged of record option
   | Proof_reset of record
 
-let archive_reopened_proof config ~goal_id ~actor ~at verdict =
+let archive_reopened_proof config ~goal_id ~actor ~at completion =
   let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
   try
     Fs_compat.append_jsonl path
@@ -457,7 +384,7 @@ let archive_reopened_proof config ~goal_id ~actor ~at verdict =
         ; "payload", `Assoc
             [ "phase", Goal_phase.to_yojson Goal_phase.Executing
             ; "actor", `String actor
-            ; "previous_verdict", verdict_to_yojson verdict
+            ; "previous_completion", completion_state_to_yojson completion
             ]
         ]);
     Ok ()
@@ -467,113 +394,73 @@ let archive_reopened_proof config ~goal_id ~actor ~at verdict =
     Error (Printf.sprintf "could not preserve reopened Goal proof: %s" (Printexc.to_string exn))
 ;;
 
-let reset_reopened_proof config ~goal_id ~actor =
-  Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
-    let path = verifications_path config in
-    let* state =
-      if Workspace_utils.path_exists config path then
-        let* json = Workspace_utils.read_json_result config path in
-        state_of_yojson json
-      else if Workspace_utils.path_exists config (verifications_recovery_path config) then
-        Error "goal_verification: primary ledger is missing while its recovery mirror exists"
-      else Ok (default_state ())
-    in
-    let* goal = Goal_store.get_goal_result config ~goal_id in
-    let* goal = Option.to_result ~none:"goal not found during proof reset" goal in
-    let current = find_record state.records goal_id in
-    (* Creating a pending proof takes this same ledger lock. A request
-       that already published its pending proof is preserved even if its
-       subsequent phase write has not finished. This read takes no goals
-       lock, so the reset adds no reverse lock order. *)
-    match goal.Goal_store.phase, current with
-    | Goal_phase.Executing,
-      Some ({ completion = Proof_proven verdict | Proof_refuted verdict; _ } as record) ->
-      let now = Masc_domain.now_iso () in
-      let* () = archive_reopened_proof config ~goal_id ~actor ~at:now verdict in
-      let updated = { record with completion = Completion_idle; updated_at = now } in
-      let next =
-        { version = state.version + 1
-        ; updated_at = now
-        ; records = replace_record state.records updated
-        }
+let reopen_goal config ~goal_id ~actor ~note =
+  let* goal, (outcome, phase_changed) =
+    Goal_store.transact_goal config ~goal_id (fun goal ->
+      let* transition = Goal_phase.decide_transition ~phase:goal.Goal_store.phase
+          ~action:Goal_phase.Reopen in
+      let phase_changed, updated_goal = match transition with
+        | Goal_phase.Already _ -> false, goal
+        | Goal_phase.Move_to phase ->
+          let last_review_note, last_review_at = match note with
+            | None -> goal.last_review_note, goal.last_review_at
+            | Some text -> Some text, Some (Masc_domain.now_iso ()) in
+          true, { goal with phase; last_review_note; last_review_at }
       in
-      let* () = write_state_result config next in
-      Ok (goal, Proof_reset updated)
-    | Goal_phase.Executing, (None | Some { completion = Completion_idle | Proof_pending _; _ })
-    | (Goal_phase.Verifying | Goal_phase.Completed | Goal_phase.Dropped), _ ->
-      Ok (goal, Proof_unchanged current))
+      Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
+        let* state = match load_primary_state config with
+          | Loaded state -> Ok state
+          | Undecodable detail -> Error (undecodable_store_error config detail)
+        in
+        let current = find_record state.records goal_id in
+        let reset record =
+          let now = Masc_domain.now_iso () in
+          let* () = archive_reopened_proof config ~goal_id ~actor ~at:now record.completion in
+          let updated = { record with completion = Completion_idle; updated_at = now } in
+          let next = { version = state.version + 1; updated_at = now;
+            records = replace_record state.records updated } in
+          let* () = write_state_result config next in
+          Ok (updated_goal, (Proof_reset updated, phase_changed))
+        in
+        match current with
+        | Some ({ completion = Proof_proven _ | Proof_refuted _ | Proof_pending _; _ } as record)
+          when phase_changed -> reset record
+        | None | Some { completion = Completion_idle | Proof_pending _
+                       | Proof_proven _ | Proof_refuted _; _ } ->
+          Ok (updated_goal, (Proof_unchanged current, phase_changed))))
+  in
+  Ok (goal, outcome, phase_changed)
 ;;
 
-(* {1 Durable proof request (RFC-0387 §4.1)}
-
-   [mark_proof_pending] runs before the phase enters [Verifying], so the
-   request survives a crash between the ledger write and the phase write. It
-   is a locked read-modify-write via [update_record], idempotent on an
-   already-pending state (a repeated [request_complete] re-arms rather than
-   failing), and refuses to overwrite a committed [Proof_proven] verdict — a
-   new request does supersede a standing [Proof_refuted], per this module's
-   header: a refuted verdict stays on the record until the next request
-   supersedes it, and the refuted goal returns to [Executing] where
-   re-requesting completion is the way forward. *)
-
-let mark_proof_pending config ~goal_id =
+(* A repeated request for the same criterion keeps its exact durable identity. *)
+let mark_proof_pending config ~goal_id ~criterion =
   update_record config ~goal_id (fun current ->
-      match current.completion with
-      | Proof_pending _ -> Ok current
-      | Completion_idle ->
-          Ok
-            { current with
-              completion = Proof_pending { requested_at = current.updated_at }
-            }
-      | Proof_refuted _ ->
-          (* The next request supersedes the standing refutation; the verdict
-             itself remains readable in the state history until this write. *)
-          Ok
-            { current with
-              completion = Proof_pending { requested_at = current.updated_at }
-            }
-      | Proof_proven _ ->
-          Error
-            (Printf.sprintf
-               "goal_verification: proof for %s is already proven; refusing \
-                to overwrite the verdict with a pending request"
-               goal_id))
+    let fresh () =
+      Ok { current with completion = Proof_pending
+        { requested_at = Masc_domain.now_iso (); request_id = Random_id.hex ~bytes:16; criterion } }
+    in
+    match current.completion with
+    | Proof_pending pending when Goal_store.criterion_equal pending.criterion criterion -> Ok current
+    | Proof_proven verdict when Goal_store.criterion_equal verdict.criterion criterion ->
+        Error ("goal_verification: current criterion is already proven for " ^ goal_id)
+    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ -> fresh ())
 
-(* A proof verdict is only committable against a pending proof — or against
-   the same outcome already committed. The latter is the crash-between-writes
-   case: the ledger write landed but the phase write did not, and the retried
-   transition must be able to re-commit the identical outcome rather than
-   wedge the goal. A commit in the OPPOSITE direction of a standing verdict is
-   a stale verifier answer and stays an [Error]. The [Proof_pending] rows this
-   matches against are written by [mark_proof_pending]
-   (persist-before-model-call).
+let same_verdict_payload (stored : verdict) (incoming : verdict) =
+  (* A replay may be delivered later. Its observation time cannot rewrite the
+     original commit time; every item of proof and provenance must still match. *)
+  stored = { incoming with recorded_at = stored.recorded_at }
 
-   This is the only thing the commit refuses, and it is about the record's own
-   history: whether this verdict can follow the one already standing. It does
-   not read any other fact and decline on that basis. Whether the goal reached
-   its target is what the verdict says; nothing here decides that for it. *)
 let record_proof_verdict config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
-      let committable =
-        match current.completion, verdict.outcome with
-        | Proof_pending _, _ -> true
-        | Proof_proven _, Proven -> true
-        | Proof_refuted _, Refuted _ -> true
-        | ( Proof_proven _, Refuted _ )
-        | ( Proof_refuted _, Proven )
-        | Completion_idle, _ -> false
-      in
-      if not committable
-      then
-        Error
-          (Printf.sprintf
-             "goal_verification: proof verdict for %s has no pending proof \
-              request"
-             goal_id)
-      else
-        let completion =
-          match verdict.outcome with
-          | Proven -> Proof_proven verdict
-          | Refuted _ -> Proof_refuted verdict
-        in
-        Ok { current with completion })
+    match current.completion with
+    | Proof_proven stored | Proof_refuted stored when same_verdict_payload stored verdict -> Ok current
+    | Proof_pending pending
+      when String.equal pending.request_id verdict.request_id
+        && Goal_store.criterion_equal pending.criterion verdict.criterion ->
+        (* Validate the typed write against the same strict persistence codec. *)
+        let* _ = verdict_of_yojson (verdict_to_yojson verdict) in
+        let completion = match verdict.outcome with
+          | Proven -> Proof_proven verdict | Refuted _ -> Proof_refuted verdict
+        in Ok { current with completion }
+    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ ->
+        Error ("goal_verification: verdict does not match the pending request for " ^ goal_id))

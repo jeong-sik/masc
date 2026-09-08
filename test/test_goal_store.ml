@@ -43,7 +43,7 @@ let goals_recovery_path config =
 let make_goal id title =
   let ts = iso_now () in
   {
-    Goal_store.id; title;
+    Goal_store.id; criterion_revision = "fixture-criterion-" ^ id; title;
     metric = None; target_value = None; due_date = None;
     priority = 3; phase = Goal_phase.Executing;
     last_review_note = None; last_review_at = None;
@@ -166,6 +166,7 @@ let test_status_field_no_longer_decodes () =
     `Assoc
       [
         ("id", `String id);
+        ("criterion_revision", `String "fixture-revision");
         ("title", `String ("Goal " ^ id));
         ("metric", `Null);
         ("target_value", `Null);
@@ -287,6 +288,7 @@ let test_phaseless_row_no_longer_decodes () =
               `Assoc
                 [
                   ("id", `String "legacy-only");
+                  ("criterion_revision", `String "fixture-revision");
                   ("title", `String "Status-only row");
                   ("metric", `Null);
                   ("target_value", `Null);
@@ -320,6 +322,7 @@ let test_priorityless_row_no_longer_decodes () =
               `Assoc
                 [
                   ("id", `String "no-priority");
+                  ("criterion_revision", `String "fixture-revision");
                   ("title", `String "Priority-less row");
                   ("metric", `Null);
                   ("target_value", `Null);
@@ -467,9 +470,89 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
   | Some stored -> check string "primary has goal" goal.title stored.title
   | None -> fail "primary goal missing after recovery mirror failure"
 
+let upsert_exn config ?id ?title ?metric ?target_value ?due_date ?priority () =
+  match Goal_store.upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () with
+  | Ok (goal, _) -> goal
+  | Error message -> fail message
+
+let test_criterion_edits_invalidate_proof_phase () =
+  with_workspace @@ fun config ->
+  let original = upsert_exn config ~title:"Measured service" ~metric:"p99" ~target_value:"400ms" () in
+  check bool "creation has revision" true (original.criterion_revision <> "");
+  let completed = { original with phase = Goal_phase.Completed;
+    last_review_note = Some "proved"; last_review_at = Some (iso_now ()) } in
+  Goal_store.write_state config { version = 1; updated_at = iso_now (); goals = [completed] };
+  let same = upsert_exn config ~id:original.id ~title:original.title ~metric:"p99"
+      ~target_value:"400ms" ~priority:1 ~due_date:"tomorrow" () in
+  check string "priority, due date and no-op criterion preserve revision" original.criterion_revision same.criterion_revision;
+  check bool "unrelated edit preserves completion" true (same.phase = Goal_phase.Completed);
+  let changed = upsert_exn config ~id:original.id ~target_value:"200ms" () in
+  check bool "criterion edit reopens" true (changed.phase = Goal_phase.Executing);
+  check bool "criterion edit rotates revision" true (changed.criterion_revision <> original.criterion_revision);
+  check (option string) "old note no longer current" None changed.last_review_note;
+  check (option string) "old review time no longer current" None changed.last_review_at;
+  let restored = upsert_exn config ~id:original.id ~target_value:"400ms" () in
+  check bool "ABA cannot restore old proof identity" false
+    (Goal_store.criterion_equal (Goal_store.criterion_of_goal original) (Goal_store.criterion_of_goal restored));
+  let verifying = { restored with phase = Goal_phase.Verifying } in
+  Goal_store.write_state config { version = 4; updated_at = iso_now (); goals = [verifying] };
+  let renamed = upsert_exn config ~id:original.id ~title:"Another measurement" () in
+  check bool "title edit supersedes active review" true (renamed.phase = Goal_phase.Executing);
+  let dropped = { renamed with phase = Goal_phase.Dropped } in
+  Goal_store.write_state config { version = 6; updated_at = iso_now (); goals = [dropped] };
+  let updated = upsert_exn config ~id:original.id ~metric:"p95" () in
+  check bool "criterion edit does not reopen dropped Goal" true (updated.phase = Goal_phase.Dropped)
+
+let test_transact_goal_authoritative_and_noop () =
+  with_workspace @@ fun config ->
+  let goal = upsert_exn config ~title:"Atomic Goal" ~metric:"count" ~target_value:"10" () in
+  let path = Goal_store.goals_path config in
+  let bytes () = In_channel.with_open_bin path In_channel.input_all in
+  let before = bytes () in
+  (match Goal_store.transact_goal config ~goal_id:goal.id (fun current -> Ok (current, "observed")) with
+   | Ok (_, value) -> check string "callback result returned" "observed" value
+   | Error message -> fail message);
+  check string "no-op preserves exact bytes" before (bytes ());
+  (match Goal_store.transact_goal config ~goal_id:goal.id (fun _ -> Error "ledger refused") with
+   | Error message -> check string "callback error preserved" "ledger refused" message
+   | Ok _ -> fail "transaction accepted rejected ledger");
+  check string "refusal preserves exact bytes" before (bytes ());
+  (match Goal_store.transact_goal config ~goal_id:goal.id
+      (fun current -> Ok ({ current with phase = Goal_phase.Verifying }, current.criterion_revision)) with
+   | Ok (updated, revision) ->
+       check string "callback read authoritative revision" goal.criterion_revision revision;
+       check bool "phase persisted" true (updated.phase = Goal_phase.Verifying)
+   | Error message -> fail message);
+  let mirror = In_channel.with_open_bin (goals_recovery_path config) In_channel.input_all in
+  Out_channel.with_open_bin path (fun channel -> output_string channel "{broken");
+  let called = ref false in
+  (match Goal_store.transact_goal config ~goal_id:goal.id
+      (fun current -> called := true; Ok (current, ())) with
+   | Error _ -> () | Ok _ -> fail "recovery snapshot authorized proof mutation");
+  check bool "callback not entered on corrupt primary" false !called;
+  check string "primary untouched" "{broken" (bytes ());
+  check string "recovery evidence untouched" mirror
+    (In_channel.with_open_bin (goals_recovery_path config) In_channel.input_all)
+
+let test_missing_criterion_revision_refuses_bound_mutation () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "revision-required" "Old-looking goal" in
+  let row = match Goal_store.goal_to_yojson goal with
+    | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+    | _ -> fail "Goal serializer returned non-object" in
+  let json = `Assoc [ "version", `Int 1; "updated_at", `String (iso_now ()); "goals", `List [row] ] in
+  let path = Goal_store.goals_path config in
+  Out_channel.with_open_bin path (fun channel -> output_string channel (Yojson.Safe.to_string json));
+  match Goal_store.transact_goal config ~goal_id:goal.id (fun current -> Ok (current, ())) with
+  | Error _ -> () | Ok _ -> fail "missing revision was silently accepted"
+
 let () =
   run "Goal_store.delete_goal"
-    [ ( "regression-7690",
+    [ ( "proof identity",
+        [ test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
+          test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
+          test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );
+      ( "regression-7690",
         [ test_case "version bumps +1" `Quick test_delete_goal_bumps_version;
           test_case "three deletes = +3" `Quick
             test_multiple_deletes_each_bump;

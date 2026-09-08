@@ -1,24 +1,8 @@
-(** Goal_verification — per-goal success-condition verification ledger
-    (RFC-0387).
-
-    Persists under [<base>/.masc/goal_verifications.json], separate from
-    [goals.json] the way [Workspace_goal_index] keeps goal-task links separate:
-    the [Goal_store.goal] record is constructed by literal in external callers,
-    so verification state gets its own store.
-
-    The store answers one question: did this goal reach its target? A
-    [Completed] goal carries [Proof_proven verdict], so the verifier's exact
-    run, authority, evidence, and timestamp read back as one durable record.
-
-    Nothing here refuses a transition or a write because some other fact is
-    not in the state it wants. A goal's force comes from what its verdict
-    says, not from a branch that declines to record one.
-
-    Mutation discipline mirrors [Goal_store]: locked read-modify-write, strict
-    decode, and a store that does not decode refuses every mutation (the
-    [Undecodable] path), recovery mirror included. Pending states have no
-    wall-clock expiry; a refuted verdict stays on the record as preserved
-    evidence until the next request supersedes it. *)
+(** Durable Goal proof requests and verdicts bound to the exact success-criterion
+    revision. Pending requests never expire. Mutations require the primary
+    ledger; recovery mirrors may supply historical reads, never write authority.
+    Callers hold the Goal lock before acquiring this ledger's lock when they
+    bind or commit a request against the current Goal. *)
 
 type verdict_outcome =
   | Proven
@@ -26,6 +10,8 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  request_id : string;
+  criterion : Goal_store.criterion;
   verification_run_id : string;
       (** Exact Goal-verifier attempt whose durable run record contains the
           evaluator and tool observations supporting this verdict. *)
@@ -39,7 +25,7 @@ type verdict = {
 
 type completion_state =
   | Completion_idle
-  | Proof_pending of { requested_at : string }
+  | Proof_pending of { requested_at : string; request_id : string; criterion : Goal_store.criterion }
   | Proof_proven of verdict
   | Proof_refuted of verdict
 
@@ -56,6 +42,16 @@ val default_record : goal_id:string -> record
 (** {1 Codecs} *)
 
 val record_to_yojson : record -> Yojson.Safe.t
+(** Historical record without a current-Goal comparison. *)
+
+type criterion_relation = Current | Stale_criterion
+
+val relation_for_goal : goal:Goal_store.goal -> record -> criterion_relation
+
+val record_to_yojson_for_goal : goal:Goal_store.goal -> record -> Yojson.Safe.t
+(** Current-Goal projection. A mismatched criterion is [stale_criterion], with
+    its historical completion retained under [historical_completion]. It must
+    not be rendered as a current proven verdict. *)
 
 (** {1 Persistence} *)
 
@@ -81,54 +77,51 @@ val get_record :
 (** Single-row read: [Ok None] only when the store decoded and holds no row
     for [goal_id]. *)
 
+val load_records_authoritative :
+  Workspace_utils.config -> (record list, string) result
+(** Bulk primary-only read for current Goal projections and mutation decisions. *)
+
+val get_record_authoritative :
+  Workspace_utils.config -> goal_id:string -> (record option, string) result
+(** Primary-only read for transition and reconciliation decisions. A missing
+    primary with an existing mirror is an error, not an empty ledger. *)
+
 val ledger_error_to_yojson : string -> Yojson.Safe.t
 (** The explicit "ledger could not be read" marker consumers render in place
     of a verification record: [{"state": "ledger_error", "detail": …}]. *)
 
-(** {1 Mutations}
-
-    All are locked read-modify-writes that refuse an undecodable store.
-    Stage 2 wires them: [mark_*_pending] are the durable requests the gate
-    persists before any model call, and the verdict commits are what the
-    verifier lane (or a manual [masc_goal_transition] with evidence) writes. *)
-
-val mark_proof_pending :
-  Workspace_utils.config ->
-  goal_id:string ->
-  (record, string) result
-(** Records the durable completion-proof request (RFC-0387 §4.1, B3):
-    [Completion_idle -> Proof_pending], persisted BEFORE the phase enters
-    [Verifying] (persist-before-model-call). Idempotent when already pending —
-    a repeated [request_complete] re-arms the request. A standing
-    [Proof_refuted] is superseded by the new request; a committed
-    [Proof_proven] verdict is never overwritten. *)
+(** {1 Mutations} *)
 
 type reopen_outcome =
   | Proof_unchanged of record option
   | Proof_reset of record
 
-val reset_reopened_proof :
-  Workspace_utils.config -> goal_id:string -> actor:string ->
-  (Goal_store.goal * reopen_outcome, string) result
-(** After the phase entered Executing, archive the prior verdict in
-    [goal_events.jsonl] before resetting the active proof to idle. The current
-    phase is re-read under the verification lock; pending proofs and goals
-    that already advanced to another phase are retained. Repeating Reopen on
-    Executing repairs a failed reset without discarding a newer request.
-    Only primary stores authorize this reset. An unreadable source or failed
-    archive leaves the proof unchanged. The returned Goal is the phase snapshot
-    used for the decision. Archive append followed by a failed ledger write may
-    leave duplicate historical entries after retry; it is not an exactly-once
-    cross-file transaction. *)
+val reopen_goal :
+  Workspace_utils.config -> goal_id:string -> actor:string -> note:string option ->
+  (Goal_store.goal * reopen_outcome * bool, string) result
+(** Re-evaluates Reopen under the Goal lock, archives/resets proof under the
+    ledger lock, then writes the phase before releasing the Goal lock. The bool
+    reports an actual phase change. Archive failure leaves the prior phase.
+    Already-Executing preserves every existing proof and pending request. Call outside an existing Goal transaction. Archive
+    or ledger writes followed by later persistence failure may be retried; this
+    is serialized across the two stores, not a cross-file atomic filesystem write. *)
+
+val mark_proof_pending :
+  Workspace_utils.config ->
+  goal_id:string ->
+  criterion:Goal_store.criterion ->
+  (record, string) result
+(** Persist before invoking a reviewer. The same pending criterion returns the
+    identical request without writing. A different criterion or refutation
+    creates a new random request identity. A proven current criterion refuses
+    replacement; a historical proof for another criterion may be superseded. *)
 
 val record_proof_verdict :
   Workspace_utils.config ->
   goal_id:string ->
   verdict ->
   (record, string) result
-(** Commits the verifier's completion proof (B3). Requires [Proof_pending] —
-    the request persisted before the phase enters [Verifying] — or the same
-    proof outcome already committed (the crash-between-writes retry). A commit
-    in the opposite direction of a standing verdict is a stale verifier answer
-    and stays an [Error]: that guards what the record says about itself, which
-    is the only thing this commit refuses. *)
+(** Requires the exact pending request identity and criterion. A replay of the
+    identical proof/provenance payload returns the stored record without rewriting
+    its original timestamp, even if delivered with a later observation time. Same-outcome verdicts from another request, run, criterion, or
+    with changed evidence are conflicts. *)

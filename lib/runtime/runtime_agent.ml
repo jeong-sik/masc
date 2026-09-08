@@ -107,7 +107,7 @@ type config =
   runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
-  recovery_view : Keeper_recovery_transmission.t option;
+  recovery_view : Runtime_recovery_projection.t option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
@@ -772,9 +772,7 @@ let validate_content_blocks_for_config
       | [] -> canonical
       | _ -> canonical @ [Agent_core.Types.{role=User;content=goal_blocks;
           name=None;tool_call_id=None;metadata=[]}] in
-    let* projected = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      Keeper_recovery_transmission.project view incoming)
-      |> Result.map_error Keeper_recovery_transmission.to_core_error in
+    let* projected = view.Runtime_recovery_projection.project incoming in
     validate ~checkpoint_messages:[] ~initial_messages:projected ~goal_blocks:[]
 
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
@@ -1161,7 +1159,7 @@ let run_blocks_internal
   let config = match config.recovery_view with
     | None -> config
     | Some view -> {config with model_input_projection=Some
-        (Keeper_recovery_transmission.model_input_projection view ?after:config.model_input_projection)} in
+        (view.Runtime_recovery_projection.compose config.model_input_projection)} in
   let boundary_response = ref None in
   let config =
     match cooperative_yield_probe with

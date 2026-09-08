@@ -947,7 +947,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
        that does not exist yet would mean measuring something else. *)
     let config =
       { config with
-        Runtime_agent.recovery_view = ctx.recovery_view;
+        Runtime_agent.recovery_view =
+          Option.map Keeper_recovery_transmission.runtime_projection ctx.recovery_view;
         model_input_projection =
           (match ctx.recovery_view, ctx.model_input_capacity_bytes with
            | Some _, _ -> ctx.model_input_projection

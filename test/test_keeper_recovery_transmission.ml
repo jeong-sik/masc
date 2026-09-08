@@ -615,9 +615,13 @@ let test_real_result_completes_open_source_tail () =
       |> Result.get_ok
     in
     let view = View.create ~source ~validated |> get in
-    (match View.project view messages with
-     | Error (View.Incomplete_transmission _) -> ()
-     | _ -> fail "open Tool call was transmitted");
+    let runtime_view = View.runtime_projection view in
+    (match runtime_view.Runtime_recovery_projection.project messages with
+     | Error error ->
+       (match View.of_core_error error with
+        | Some (View.Incomplete_transmission _) -> ()
+        | _ -> fail "runtime boundary lost the typed open Tool refusal")
+     | Ok _ -> fail "open Tool call was transmitted");
     let completed =
       messages
       @ [ msg
@@ -636,7 +640,8 @@ let test_real_result_completes_open_source_tail () =
       bool
       "real appended result is retained without synthesized closer"
       true
-      (View.project view completed |> get = completed))
+      (runtime_view.Runtime_recovery_projection.project completed |> Result.get_ok
+       = completed))
 ;;
 
 let test_recovery_requires_actual_binding_tool_support () =

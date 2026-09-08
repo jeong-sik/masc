@@ -55,3 +55,7 @@ val model_input_projection
 (** Checks the actually offered canonical artifact-reader schema and execution
     descriptor. Does not inject a reader or bypass a Keeper Tool group. *)
 val require_reader : Agent_core.Tool.t list -> (unit, error) result
+
+(** Bind the runtime-facing callbacks to this validated source. The runtime
+    consumes this contract without depending on Keeper checkpoint internals. *)
+val runtime_projection : t -> Runtime_recovery_projection.t

@@ -188,3 +188,12 @@ let require_reader tools =
     then Ok ()
     else Error Source_reader_unavailable
 ;;
+
+let runtime_projection view : Runtime_recovery_projection.t =
+  { project =
+      (fun messages ->
+        Domain_pool_ref.submit_cpu_or_inline (fun () -> project view messages)
+        |> Result.map_error to_core_error)
+  ; compose = (fun after -> model_input_projection view ?after)
+  }
+;;

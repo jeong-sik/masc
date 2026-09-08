@@ -79,6 +79,17 @@ blocking_lints() {
   run_lint "Prompt source words agree" \
     bash scripts/lint/prompt-source-words-agree.sh
 
+  # Both gates read source text only, so they belong in the blocking suite.
+  # Until this change nothing ran either of them: the wiring checker's name
+  # pattern did not include the word "gate".
+  run_lint "Keeper host_cwd leak gate" \
+    bash scripts/keeper-cwd-leak-gate.sh
+  run_self_test_when_changed "Turn-path provider-agnostic self-test" \
+    scripts/turn-path-provider-agnostic-gate.sh \
+    bash scripts/turn-path-provider-agnostic-gate.sh --self-test
+  run_lint "Turn-path provider-agnostic gate" \
+    bash scripts/turn-path-provider-agnostic-gate.sh
+
   # A nocheck'd test file keeps compiling after the type its fixture builds has
   # changed shape, so the fixture drifts silently. One did: see the script.
   run_self_test_when_changed "Dashboard tests type-checked self-test" \

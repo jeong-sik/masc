@@ -64,3 +64,10 @@ scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-ollama-model-context.py  # tool: needs OLLAMA_CLOUD_API_KEY and network
 scripts/lib/worktree-cleanup-guards.sh  # not a check: a function library the name
 #   pattern picks up
+scripts/harness/perf/keeper_load_gate.sh  # tool: drives load against a running server
+scripts/harness/perf/request_cost_gate.sh  # tool: drives load against a running server
+scripts/harness/perf/scheduler_starvation_gate.sh  # tool: drives load against a running
+#   server
+scripts/keeper-runtime-truth-gate.sh  # tool: reads a persisted keeper turn from a live
+#   .masc tree
+

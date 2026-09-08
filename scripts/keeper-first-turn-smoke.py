@@ -209,6 +209,10 @@ def checkpoint_proof(base, fixture):
             continue
         if not isinstance(data, dict) or not data.get('session_id'):
             continue
+        # Archived snapshots also carry messages; only the session-named
+        # checkpoint is the authoritative input for the next resume.
+        if path.name != data['session_id'] + '.json':
+            continue
         messages = data.get('messages')
         if not isinstance(messages, list):
             continue

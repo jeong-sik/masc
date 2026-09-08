@@ -231,14 +231,10 @@ let record_state ~health (chunk : Acting.chunk) =
     | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_stale
            | Reading.Health_degraded) | None -> Record_open
 
-let record_label = function
-  | Record_open -> ("open/gap", Dim)
-  | Record_unfinished -> ("unfinished", Warn)
-  | Record_settled -> ("settled", Dim)
-
 (* The focus header has the room the fleet row lacks, so it says what the
    state word means: an unsettled record is a turn no settle has closed, and
-   [unfinished] adds that the process is gone, so none will. *)
+   [unfinished] adds that the process is gone, so none will. The fleet row
+   keeps the bare word in [keeper_state_text]. *)
 let record_explanation = function
   | Record_open -> ("open/gap: no settle yet", Dim)
   | Record_unfinished -> ("unfinished: process gone", Warn)

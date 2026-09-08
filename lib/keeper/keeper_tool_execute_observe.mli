@@ -18,7 +18,8 @@
 type t
 
 val create
-  :  route:(unit -> Keeper_sandbox_shell_ir_target.observe_route)
+  :  execution_evidence:(unit -> Keeper_sandbox_remote.execution_observation list)
+  -> route:(unit -> Keeper_sandbox_shell_ir_target.observe_route)
   -> dispatch:
        (Masc_exec.Sandbox_target.t
         -> ( Masc_exec.Exec_dispatch.dispatch_result
@@ -30,13 +31,11 @@ val create
     with the same target, output streaming aside. *)
 
 val observe : t -> unit -> Keeper_gate.observation
-(** The closure the gate receives. Resolves the route, runs the dispatch
-    against the boxed target, and reads the answer. [Guest_local] always
-    returns {!Keeper_gate.Observed_result}; [Observe] does so only on exit 0.
-    Any other [Observe] status is {!Keeper_gate.Observed_refused} with the
-    run's stderr. A route with no box, or a dispatch the typed gate refused before
-    anything ran, is {!Keeper_gate.Observation_unavailable} with the reason
-    or the refusal's closed tag. *)
+(** Return the payload's actual status/output only when every dispatched stage
+    acknowledged the requested enforced box. Nonzero exits are results, not
+    implicit permission requests. Missing/setup/refused receipts remain
+    unavailable. This does not prove that no syscall was denied, and never
+    authorizes replay outside the box. *)
 
 val dispatch_authorized
   :  source:Keeper_gate.authorization_source

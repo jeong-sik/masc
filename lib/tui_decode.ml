@@ -7652,6 +7652,7 @@ type lane_run_status =
   | Lane_run_approved
   | Lane_run_reviewed
   | Lane_run_committed
+  | Lane_run_superseded
   | Lane_run_rejected
   | Lane_run_deferred
   | Lane_run_review_cancelled
@@ -7672,6 +7673,7 @@ let lane_run_status_of_string = function
   | "approved" -> Lane_run_approved
   | "reviewed" -> Lane_run_reviewed
   | "committed" -> Lane_run_committed
+  | "superseded" -> Lane_run_superseded
   | "rejected" -> Lane_run_rejected
   | "deferred" -> Lane_run_deferred
   | "review_cancelled" -> Lane_run_review_cancelled
@@ -7692,6 +7694,7 @@ let lane_run_status_label = function
   | Lane_run_approved -> "approved"
   | Lane_run_reviewed -> "reviewed"
   | Lane_run_committed -> "committed"
+  | Lane_run_superseded -> "superseded"
   | Lane_run_rejected -> "rejected"
   | Lane_run_deferred -> "deferred"
   | Lane_run_review_cancelled -> "review_cancelled"
@@ -7725,6 +7728,7 @@ type lane_run_decision =
   | Lane_run_decision_rejected
   | Lane_run_decision_reviewed
   | Lane_run_decision_committed
+  | Lane_run_decision_superseded
   | Lane_run_decision_pending
   | Lane_run_decision_not_reached
   | Lane_run_not_a_decision
@@ -7739,6 +7743,7 @@ let lane_run_decision ~run_kind ~status =
      | Lane_run_rejected -> Lane_run_decision_rejected
      | Lane_run_reviewed -> Lane_run_decision_reviewed
      | Lane_run_committed -> Lane_run_decision_committed
+     | Lane_run_superseded -> Lane_run_decision_superseded
      | Lane_run_running -> Lane_run_decision_pending
      | Lane_run_deferred
      | Lane_run_review_cancelled
@@ -7868,6 +7873,7 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       | Lane_run_approved
       | Lane_run_reviewed
       | Lane_run_committed
+      | Lane_run_superseded
       | Lane_run_rejected
       | Lane_run_deferred
       | Lane_run_review_cancelled
@@ -7920,6 +7926,7 @@ type lane_run_detail =
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
+  ; lrd_decision : lane_run_decision
   }
 
 let decode_lane_run_summary json =
@@ -8010,6 +8017,20 @@ let decode_lane_run_detail json =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
   in
+  let* lrd_decision =
+    match summary.lrs_run_kind, summary.lrs_status, lrd_output with
+    | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending
+    | Lane_run_goal_verification, _, None -> Ok Lane_run_decision_unknown
+    | Lane_run_goal_verification, status, Some output ->
+      let* raw = required_member output "evaluated_verdict" in
+      let* verdict = Goal_verification_run_registry.evaluated_verdict_of_yojson raw in
+      (match verdict, status with
+       | Some (Goal_verification_run_registry.Approved _), _ -> Ok Lane_run_decision_approved
+       | Some (Goal_verification_run_registry.Rejected _), _ -> Ok Lane_run_decision_rejected
+       | None, (Lane_run_reviewed | Lane_run_committed) -> Error "judged Goal run has no evaluated verdict"
+       | None, _ -> Ok Lane_run_decision_not_reached)
+    | _, _, _ -> Ok (lane_run_decision ~run_kind:summary.lrs_run_kind ~status:summary.lrs_status)
+  in
   let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
     match lrd_output_availability with
@@ -8039,6 +8060,7 @@ let decode_lane_run_detail json =
     ; lrd_tool_evidence
     ; lrd_skill_evidence
     ; lrd_gate_judgment
+    ; lrd_decision
     }
 ;;
 

@@ -56,7 +56,7 @@ let test_writes_the_default_roster_with_autoboot_off () =
        | Error detail -> fail (name ^ " did not parse: " ^ detail)
        | Ok doc ->
          check (option bool) (name ^ " waits to be started") (Some false)
-           (Keeper_toml_loader.toml_bool_opt doc "autoboot_enabled"))
+           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled"))
     expected
 
 let test_writes_no_dune_file () =

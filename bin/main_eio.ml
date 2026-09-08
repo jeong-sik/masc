@@ -1236,6 +1236,10 @@ let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
 
+let init_skills_only =
+  let doc = "Install missing builtin Skills without changing runtime config files" in
+  Arg.(value & flag & info ["skills-only"] ~doc)
+
 type init_tally = { written : int; skipped : int; failed : int }
 
 let seed_one ~target_root ~force tally rel =
@@ -1258,7 +1262,7 @@ let seed_one ~target_root ~force tally rel =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force =
+let init_cmd_exit base_path force skills_only =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1267,22 +1271,19 @@ let init_cmd_exit base_path force =
       ~cwd:(Config_dir_resolver.current_working_dir ())
       base_path
   in
-  Fs_compat.mkdir_p target_root;
-  (* Same distribution/operator split the server's own config-root seed makes
-     ([Server_runtime_config_root_bootstrap.copy_missing_config_root_seed]), so
-     the two paths hand back the same workspace: keeper manifests are the
-     operator's to write, and [init] leaves the directory empty for them. *)
-  Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
   let result =
-    List.fold_left
-      (seed_one ~target_root ~force)
-      { written = 0; skipped = 0; failed = 0 }
-      (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list)
+    if skills_only then { written = 0; skipped = 0; failed = 0 }
+    else (
+      Fs_compat.mkdir_p target_root;
+      Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
+      List.fold_left
+        (seed_one ~target_root ~force)
+        { written = 0; skipped = 0; failed = 0 }
+        (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list))
   in
   let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
-  Printf.printf "init: %d builtin Skill package(s) installed\n" skills;
-  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
-    result.written result.skipped result.failed target_root;
+  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
+    result.written result.skipped result.failed skills target_root;
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
@@ -1295,7 +1296,7 @@ let init_cmd =
      existing Skill packages are always preserved."
   in
   let info = Cmd.info "init" ~doc in
-  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in

@@ -136,7 +136,11 @@ if [ -n "$(ls -A "$base/.masc/config/keepers" 2>/dev/null)" ]; then
   ls -A "$base/.masc/config/keepers" >&2
   exit 1
 fi
-echo "install-smoke: installer seeded config and left the keeper roster empty"
+for f in SKILL.md references/connection.md references/advanced.md references/verification.md; do
+  [ -f "$base/.masc/skills/browser-lanes/$f" ] || {
+    echo "install-smoke: missing builtin browser Skill file $f" >&2; exit 1; }
+done
+echo "install-smoke: installer seeded config and builtin Skills, and left the keeper roster empty"
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"

@@ -1192,7 +1192,15 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
 
   if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
     CONFIG_PREEXISTING=1
-    log "config already present at $CONFIG_DIR, skipping seed"
+    log "preserving existing config at $CONFIG_DIR; installing missing builtin Skills"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would install builtin Skills from the binary"
+    else
+      if ! init_summary="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1 | tail -1)"; then
+        die "builtin Skill seed failed: $init_summary"
+      fi
+      log "$init_summary"
+    fi
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else

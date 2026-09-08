@@ -14368,7 +14368,7 @@ def held_back_prompts_http_fixtures() -> HttpFixtures:
                 {
                     "key": "keeper",
                     "bytes": 1240,
-                    "contract_revision": "01e7760f",
+                    "reason": "Unknown template variables: facts_json",
                 }
             ],
         },

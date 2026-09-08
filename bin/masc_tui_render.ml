@@ -16423,7 +16423,16 @@ let render_prompt_registry (state : state) =
             (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
                (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
           box_line_styled buf cols ~style:(Theme.recede ())
-            "  이 프롬프트의 원본이 바뀌어 핀이 어긋났습니다 \xc2\xb7 같은 키를 다시 저장하면 현재 원본에 다시 물립니다");
+            (Printf.sprintf
+               "  지금 계약으로는 렌더링할 수 없습니다: %s \xc2\xb7 그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다"
+               (Terminal_text.single_line entry.Tui_decode.hbo_reason)));
+       (* The override applies. This line says only that the shipped text it
+          replaced has changed since it was written, so the reader knows to
+          compare the two once rather than discovering a new default months
+          later. *)
+       if row.Tui_decode.pr_override_default_moved then
+         box_line_styled buf cols ~style:(Theme.warn ())
+           "  \xe2\x96\xb3 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요";
        let input_contract =
          if String.equal row.pr_category "librarian" then
            "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"

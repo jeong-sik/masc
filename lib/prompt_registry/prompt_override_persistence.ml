@@ -1,7 +1,8 @@
 type entry = {
   key : string;
   value : string;
-  contract_revision : string;
+  authored_against : string;
+  template_variables : string list;
 }
 
 type error =
@@ -30,7 +31,11 @@ type error =
     }
   | Duplicate_override_key of string
 
-let schema_version = 1
+(* 2: [contract_revision] (one digest over body and variables, and a gate)
+   became [authored_against] (the body digest, informational) and
+   [template_variables] (the declared contract, informational). A version-1
+   file is refused whole; the operator re-saves each override once. *)
+let schema_version = 2
 
 let error_to_string = function
   | Invalid_json message -> "invalid JSON: " ^ message
@@ -89,11 +94,26 @@ let string_field ~location field values =
   | `String value -> Ok value
   | _ -> Error (Expected_string (location ^ "." ^ field))
 
+let string_list_field ~location field values =
+  let location = location ^ "." ^ field in
+  match List.assoc field values with
+  | `List items ->
+      let rec loop index acc = function
+        | [] -> Ok (List.rev acc)
+        | `String item :: rest -> loop (index + 1) (item :: acc) rest
+        | _ :: _ ->
+            Error (Expected_string (Printf.sprintf "%s[%d]" location index))
+      in
+      loop 0 [] items
+  | _ -> Error (Expected_list location)
+
+let sorted_variables variables = List.sort_uniq String.compare variables
+
 let decode_entry index json =
   let location = Printf.sprintf "overrides[%d]" index in
   match
     strict_object ~location
-      ~fields:[ "key"; "value"; "contract_revision" ]
+      ~fields:[ "key"; "value"; "authored_against"; "template_variables" ]
       json
   with
   | Error _ as error -> error
@@ -104,9 +124,19 @@ let decode_entry index json =
           match string_field ~location "value" fields with
           | Error _ as error -> error
           | Ok value -> (
-              match string_field ~location "contract_revision" fields with
+              match string_field ~location "authored_against" fields with
               | Error _ as error -> error
-              | Ok contract_revision -> Ok { key; value; contract_revision })))
+              | Ok authored_against -> (
+                  match string_list_field ~location "template_variables" fields with
+                  | Error _ as error -> error
+                  | Ok template_variables ->
+                      Ok
+                        {
+                          key;
+                          value;
+                          authored_against;
+                          template_variables = sorted_variables template_variables;
+                        }))))
 
 let decode json =
   match
@@ -141,26 +171,19 @@ let decode json =
           | _ -> Error (Expected_list "top-level.overrides"))
       | _ -> Error (Expected_integer "top-level.schema_version"))
 
-let contract_revision ~body ~template_variables =
-  let template_variables = List.sort String.compare template_variables in
-  let canonical =
-    `Assoc
-      [
-        ("body", `String body);
-        ( "template_variables",
-          `List (List.map (fun variable -> `String variable) template_variables)
-        );
-      ]
-    |> Yojson.Safe.to_string
-  in
-  Digestif.SHA256.(digest_string canonical |> to_hex)
+let default_revision ~body = Digestif.SHA256.(digest_string body |> to_hex)
 
 let entry_to_yojson entry =
   `Assoc
     [
       ("key", `String entry.key);
       ("value", `String entry.value);
-      ("contract_revision", `String entry.contract_revision);
+      ("authored_against", `String entry.authored_against);
+      ( "template_variables",
+        `List
+          (List.map
+             (fun variable -> `String variable)
+             (sorted_variables entry.template_variables)) );
     ]
 
 let encode entries =

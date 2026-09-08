@@ -293,27 +293,65 @@ let test_restore_puts_the_saved_state_back () =
       autosave.Preset.instructions)
 ;;
 
-let test_stale_override_revision_is_skipped () =
+(* A preset saved before a release changed the default is still the
+   operator's prompt. It restores, and it keeps the binding it was captured
+   with, so the catalog can say the default moved under it rather than
+   presenting it as written against today's text. *)
+let test_override_written_against_an_older_default_still_restores () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     set_override ~base_path "Morning override.";
     let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
-    let stale =
+    let older =
       { morning with
-        Preset.name = "stale"
+        Preset.name = "older"
       ; prompt_overrides =
           List.map
-            (fun (e : Override.entry) -> { e with Override.contract_revision = "0000" })
+            (fun (e : Override.entry) -> { e with Override.authored_against = "0000" })
             morning.Preset.prompt_overrides
       }
     in
-    or_fail (Preset.save ~base_path stale);
+    or_fail (Preset.save ~base_path older);
     set_override ~base_path "Afternoon override.";
-    let report = or_fail (Preset.restore ~base_path "stale") in
-    check (list string) "the stale override is not applied" []
+    let report = or_fail (Preset.restore ~base_path "older") in
+    check (list string) "the override is applied" [ prompt_key ]
       report.Preset.prompt_overrides_result.Preset.applied;
-    check (list string) "it is reported skipped under its key" [ prompt_key ]
+    check (list string) "nothing is skipped" []
       (List.map fst report.Preset.prompt_overrides_result.Preset.skipped);
+    check string "a turn gets the restored text" "Morning override."
+      (Prompt_registry.get_prompt prompt_key);
+    check (list string) "and it still says what it was written against" [ "0000" ]
+      (List.map
+         (fun (e : Override.entry) -> e.Override.authored_against)
+         (Prompt_registry.override_entries ())))
+;;
+
+(* What still refuses a preset entry: it names a variable the prompt does
+   not declare, so it could not render. *)
+let test_override_that_cannot_render_is_skipped_with_the_reason () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let unrenderable =
+      { morning with
+        Preset.name = "unrenderable"
+      ; prompt_overrides =
+          List.map
+            (fun (e : Override.entry) -> { e with Override.value = "Facts {{facts_json}}" })
+            morning.Preset.prompt_overrides
+      }
+    in
+    or_fail (Preset.save ~base_path unrenderable);
+    set_override ~base_path "Afternoon override.";
+    let report = or_fail (Preset.restore ~base_path "unrenderable") in
+    check (list string) "nothing is applied" []
+      report.Preset.prompt_overrides_result.Preset.applied;
+    (match report.Preset.prompt_overrides_result.Preset.skipped with
+     | [ (key, reason) ] ->
+       check string "skipped under its key" prompt_key key;
+       check bool "with the variable named" true (contains_substring reason "facts_json")
+     | skipped -> fail (Printf.sprintf "expected one skip, found %d" (List.length skipped)));
     check string "the live override is untouched" "Afternoon override."
       (Prompt_registry.get_prompt prompt_key))
 ;;
@@ -387,8 +425,10 @@ let () =
             test_restore_puts_the_saved_state_back
         ; Alcotest.test_case "the runtime.toml text transform keeps every other line" `Quick
             test_runtime_text_transform
-        ; Alcotest.test_case "a stale contract revision is skipped, not applied" `Quick
-            test_stale_override_revision_is_skipped
+        ; Alcotest.test_case "an override written against an older default still restores" `Quick
+            test_override_written_against_an_older_default_still_restores
+        ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick
+            test_override_that_cannot_render_is_skipped_with_the_reason
         ; Alcotest.test_case "two restores keep two autosaves" `Quick
             test_two_restores_keep_two_autosaves
         ] )

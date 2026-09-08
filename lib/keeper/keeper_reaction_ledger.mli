@@ -177,13 +177,14 @@ val event_queue_reaction_evidence_batch_result :
     gained is folded in. A stimulus identity asked about for the first time
     cannot be answered from a partial read, so it restarts every tracked
     accumulator from a complete read - the same full scan as before, once per
-    identity rather than once per call. A file shorter than its cursor was
-    rotated or rewritten, and the whole Keeper's answer is rebuilt from a
-    complete read rather than kept.
+    identity rather than once per call. Removed files, replaced identities,
+    shrinkage and same-size metadata changes rebuild the Keeper's answer
+    from a complete read. New files and appended bytes remain incremental.
 
     What is kept is one accumulator per identity the caller has asked about,
     never the ledger and never every identity in it. A read failure drops that
-    Keeper's cache and returns {!Evidence_read_error}. *)
+    Keeper's cache and returns {!Evidence_read_error}; callback exceptions
+    also discard the partially updated cache and propagate unchanged. *)
 
 val event_queue_turn_started_seen_for_source_result :
   base_path:string ->

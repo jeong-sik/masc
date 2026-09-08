@@ -144,9 +144,13 @@ let relay_to_board ~author content =
           ])
     in
     if not (Tool_result.is_success result) then
-      Printf.eprintf "msx relay: board post refused: %s\n%!" (Tool_result.message result)
+      Log.MsxLog.warn
+        "arcade relay: board post refused, the load itself is unaffected: %s"
+        (Tool_result.message result)
   with e ->
-    Printf.eprintf "msx relay: board post raised: %s\n%!" (Printexc.to_string e)
+    Log.MsxLog.warn
+      "arcade relay: board post raised, the load itself is unaffected: %s"
+      (Printexc.to_string e)
 ;;
 
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =

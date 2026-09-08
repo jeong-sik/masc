@@ -185,8 +185,9 @@ let test_boot_argv_is_each_runtimes_own () =
     ([ "nerdctl"; "run"; "-d"; "--name"; "g" ]
      @ [ "--label"; "masc.mcp.kind=keeper-vm" ]
      @ [ "--label"; "masc.mcp.microvm_backend=nerdctl_kata" ]
+     @ [ "--label"; "masc.mcp.microvm_dropped=remove_on_exit" ]
      @ [ "--user"; "501:20" ]
-     @ [ "--cap-drop"; "ALL"; "--read-only"; "--rm"; "--tmpfs"; "/tmp" ]
+     @ [ "--cap-drop"; "ALL"; "--read-only"; "--tmpfs"; "/tmp" ]
      @ [ "--memory"; "2g" ]
      @ [ "--runtime"; "io.containerd.kata.v2" ]
      @ [ "-v"; "h:c:ro" ]
@@ -264,6 +265,21 @@ let test_a_lifecycle_drop_is_recorded_on_the_guest () =
       (List.exists
          (String.equal "masc.mcp.microvm_dropped=remove_on_exit")
          argv)
+;;
+
+(* nerdctl rejects this flag combination before creating the guest. Exercise
+   the production boot builder with its complete default constraint set, not
+   just the individual flag translation. *)
+let test_kata_detached_boot_records_explicit_cleanup () =
+  let argv = booted "kata detached lifecycle" Backend.Nerdctl_kata in
+  check Alcotest.bool "Keeper stays detached" true (List.mem "-d" argv);
+  check Alcotest.bool "detached run does not request automatic removal" false
+    (List.mem "--rm" argv);
+  check Alcotest.bool "automatic removal drop is observable" true
+    (List.mem "masc.mcp.microvm_dropped=remove_on_exit" argv);
+  check (Alcotest.list Alcotest.string) "explicit teardown still removes the Kata guest"
+    [ "nerdctl"; "rm"; "--force"; "g" ]
+    (Microvm.delete_force_argv_for Backend.Nerdctl_kata ~container_name:"g")
 ;;
 
 (* The scratch is what the observe lane writes to. A runtime that cannot
@@ -808,6 +824,8 @@ let () =
             `Quick test_an_isolation_guarantee_is_never_silently_dropped
         ; Alcotest.test_case "a lifecycle drop is recorded on the guest" `Quick
             test_a_lifecycle_drop_is_recorded_on_the_guest
+        ; Alcotest.test_case "Kata detached boot records explicit cleanup" `Quick
+            test_kata_detached_boot_records_explicit_cleanup
         ; Alcotest.test_case "an observation drop is recorded on the guest" `Quick
             test_an_observation_drop_is_recorded_on_the_guest
         ; Alcotest.test_case

@@ -392,10 +392,10 @@ advisory_lints() {
   # enforcing mode and both are red in it, so "advisory" is not a policy choice
   # about their subject -- it is where they sit until the count comes down.
   #
-  #   lint-magic-number --strict     13 (file, literal) pairs at >= 5 repeats,
-  #                                  mostly ms<->s and KiB conversions. It read
-  #                                  80 until #34236 stopped it counting the
-  #                                  RFC numbers in its own comments.
+  #   lint-magic-number --strict     10 (file, literal) pairs at >= 5 repeats,
+  #                                  all ms<->s and KiB conversions. It read 80
+  #                                  until #34236 stopped it counting the RFC
+  #                                  numbers in its own comments and log lines.
   #   exhaustive-guard BLOCKING=1    826 fragile matches -- checked against
   #                                  comment-stripping, and it is 826 either
   #                                  way; the script's own

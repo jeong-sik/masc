@@ -224,3 +224,14 @@ val upsert_goal :
       the freshly decoded state, so an undecodable store hits
       the fail-closed persistence error, never this one.
       Updating an existing row is not gated. *)
+
+(** Run a dependent mutation while all referenced Goals exist in the primary
+    store. Lock order: Goal, backlog, goal-task links. The callback must not
+    acquire the Goal lock again. An empty list performs no Goal store access. *)
+type goal_reference_error =
+  | Goal_source_unavailable of string
+  | Goal_missing of string
+
+val with_existing_goals :
+  Workspace_utils.config -> goal_ids:string list -> (unit -> 'a) ->
+  ('a, goal_reference_error) result

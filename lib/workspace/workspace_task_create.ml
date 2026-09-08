@@ -21,6 +21,8 @@ type add_task_success =
   }
 
 type add_task_error =
+  | Goal_source_unavailable of string
+  | Unknown_goal of string
   | Backlog_read_failed of string
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
@@ -35,12 +37,16 @@ type batch_add_tasks_success =
   }
 
 type batch_add_tasks_error =
+  | Batch_goal_source_unavailable of string
+  | Batch_unknown_goal of string
   | Batch_backlog_read_failed of string
   | Batch_goal_link_write_failed of string
   | Batch_backlog_write_failed of string
   | Batch_unexpected_error of string
 
 let add_task_error_to_string = function
+  | Goal_source_unavailable message -> "Goal store unavailable: " ^ message
+  | Unknown_goal id -> Printf.sprintf "Unknown goal_id '%s'" id
   | Backlog_read_failed msg -> Printf.sprintf "Error: %s" msg
   | Goal_link_write_failed msg ->
     Printf.sprintf "Error linking task to goal: %s" msg
@@ -60,6 +66,8 @@ let add_task_error_to_string = function
 ;;
 
 let batch_add_tasks_error_to_string = function
+  | Batch_goal_source_unavailable message -> "Goal store unavailable: " ^ message
+  | Batch_unknown_goal id -> Printf.sprintf "Unknown goal_id '%s'" id
   | Batch_backlog_read_failed msg -> Printf.sprintf "Error adding batch tasks: %s" msg
   | Batch_goal_link_write_failed msg ->
     Printf.sprintf "Error linking batch tasks to goals: %s" msg

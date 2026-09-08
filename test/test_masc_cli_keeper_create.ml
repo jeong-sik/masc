@@ -216,7 +216,7 @@ let created_body =
               ~name:"scout"
               ~trace_id:"trace-fixture"
               ~instructions:"Search the web."
-              ~activation_mode:Keeper_activation_mode.On_demand
+              ~activation_mode:Masc.Keeper_activation_mode.On_demand
               ~max_context_override:None
               ~sandbox_profile:Keeper_types_profile_sandbox.Docker
               ~network_mode:Keeper_types_profile_sandbox.Network_inherit

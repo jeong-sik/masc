@@ -53,7 +53,7 @@ let test_live_inputs_replace_rows () =
       "comment edit", {source with detail = Detail.Ready (post,
         List.map (fun c -> if c.bc_id = "127" then {c with bc_content = "edited tail"} else c) comments)};
       "append", {source with detail = Detail.Ready (post,
-        comments @ [{List.hd comments with bc_id = "128"; bc_content = "new reply"}])};
+        comments @ [{(List.hd comments) with bc_id = "128"; bc_content = "new reply"}])};
       "reply parent", {source with detail = Detail.Ready (post,
         List.map (fun c -> if c.bc_id = "127" then {c with bc_parent_id = Some "0"} else c) comments)};
       "related posts", {source with related_posts = [{post with bp_body = "new reference"}]};

@@ -392,7 +392,12 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
       check bool "moving output keeps the turn below the input threshold"
         true (Option.is_none fourth.abort_turn);
       let fifth = tool.call ~call_id:"input-loop-call-5" (`Assoc []) in
-      (match fifth.abort_turn with
+      check bool "the fifth call still runs below the input threshold"
+        true (Option.is_none fifth.abort_turn);
+      (* The boundary counts recorded observations including the latest, so the
+         abort lands on the sixth call, whose boundary sees five recorded. *)
+      let sixth = tool.call ~call_id:"input-loop-call-6" (`Assoc []) in
+      (match sixth.abort_turn with
        | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 5 }) -> ()
        | _ -> fail (runtime_label ^ " missed the identical-input loop"));
       check (option string) "input-loop stop is not failure" None !terminal_error))

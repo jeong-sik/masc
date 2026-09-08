@@ -183,7 +183,6 @@ type world_observation = {
 
   active_goals : (string list, string) result;
   (** Primary Goal IDs or the source failure; [Error] never means zero Goals. *)
-  (** Goal IDs currently assigned to this keeper. *)
 
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)

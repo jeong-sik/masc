@@ -119,44 +119,81 @@ let resolve_cart ~base_path name =
 ;;
 
 (* Case-insensitive .dsk — the extension picks the drive over the slot. *)
+(* Case-insensitive .dsk — the extension picks the drive over the slot. *)
 let is_dsk_path path =
   let lower = String.lowercase_ascii path in
   String.length lower >= 4
   && String.sub lower (String.length lower - 4) 4 = ".dsk"
 ;;
 
-let handle_load ~tool_name ~start_time ~base_path args =
+(* --- 아케이드 중계 --------------------------------------------------------
+   누가 무슨 게임을 올리고 꺼내는지를 보드에 남긴다. ledger 에는 모든 엣지가
+   기록되지만 아무도 안 읽는다 — 보드가 방송의 채널 목록이다 (RFC-0439 의
+   관전 화면과 짝). 보드를 초기화하지 않은 프로세스(테스트, CI)에서는
+   포스트가 거부되는데, 그 거부가 게임 로드를 막아서는 안 된다: 진단만
+   찍고 간다. *)
+let relay_to_board ~author content =
+  try
+    let result =
+      Board_tool_dispatch.handle_tool "masc_board_post"
+        (`Assoc
+          [ ("title", `String "MSX 아케이드")
+          ; ("content", `String content)
+          ; ("author", `String author)
+          ; ("post_kind", `String "automation")
+          ])
+    in
+    if not (Tool_result.is_success result) then
+      Printf.eprintf "msx relay: board post refused: %s\n%!" (Tool_result.message result)
+  with e ->
+    Printf.eprintf "msx relay: board post raised: %s\n%!" (Printexc.to_string e)
+;;
+
+let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   let roms_dir = resolve_roms_dir ~base_path args in
   let media =
     match get_string_opt args "cart" with
     | Some n when String.trim n <> "" -> Some (resolve_cart ~base_path n)
     | Some _ | None -> None
   in
-  match media with
-  | Some (Error message) -> reject ~tool_name ~start_time message
-  | Some (Ok path) when is_dsk_path path ->
-    of_lane ~tool_name ~start_time
-      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-         ~cart_path:None ~disk_path:(Some path))
-  | Some (Ok path) ->
-    of_lane ~tool_name ~start_time
-      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-         ~cart_path:(Some path) ~disk_path:None)
-  | None ->
-    (* BIOS only, and the inventory so the next call can name a game. *)
-    of_lane ~tool_name ~start_time
-      ~extra:
-        [ ( "carts_available"
-          , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
-        ; ("bios", `Bool (roms_dir <> ""))
-        ]
-      (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-         ~cart_path:None ~disk_path:None)
+  let result =
+    match media with
+    | Some (Error message) -> reject ~tool_name ~start_time message
+    | Some (Ok path) when is_dsk_path path ->
+      of_lane ~tool_name ~start_time
+        (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+           ~cart_path:None ~disk_path:(Some path))
+    | Some (Ok path) ->
+      of_lane ~tool_name ~start_time
+        (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+           ~cart_path:(Some path) ~disk_path:None)
+    | None ->
+      (* BIOS only, and the inventory so the next call can name a game. *)
+      of_lane ~tool_name ~start_time
+        ~extra:
+          [ ( "carts_available"
+            , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
+          ; ("bios", `Bool (roms_dir <> ""))
+          ]
+        (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+           ~cart_path:None ~disk_path:None)
+  in
+  (match (media, Tool_result.is_success result) with
+   | Some (Ok path), true ->
+     let medium = if is_dsk_path path then "디스크" else "카트리지" in
+     relay_to_board ~author:agent_name
+       (Printf.sprintf
+          "%s 님이 %s (%s) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요"
+          agent_name (Filename.basename path) medium)
+   | _ -> ());
+  result
 ;;
 
-let handle_eject ~tool_name ~start_time _args =
+let handle_eject ~tool_name ~start_time ~agent_name _args =
   match Msx_lane.eject () with
   | Ok () ->
+    relay_to_board ~author:agent_name
+      (Printf.sprintf "%s 님이 게임을 꺼냈습니다" agent_name);
     Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
   | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
 ;;

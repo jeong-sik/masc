@@ -190,9 +190,11 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some Tool_schemas_misc.Misc_msx_load ->
       Some
         (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
+           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_msx_eject ->
-      Some (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start args)
+      Some
+        (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start
+           ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_msx_screen ->
       Some (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_msx_press ->

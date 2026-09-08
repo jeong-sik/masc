@@ -2073,7 +2073,7 @@
  (modules tool_call_quality_benchmark_cli)
  (libraries masc_test_deps))
 
-(executable
+(test
  (name test_masc_context_injector)
  (modules test_masc_context_injector)
  (libraries masc_test_deps))

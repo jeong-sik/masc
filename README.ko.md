@@ -474,4 +474,5 @@ Releases입니다. 1.0 전에는 API와 설정이 바뀔 수 있습니다.
 
 ## 라이선스
 
-MIT. [`LICENSE`](LICENSE)를 보세요.
+MIT. [`LICENSE`](LICENSE)를 보세요. 포함된 폰트의 라이선스는
+[외부 저작물 고지](THIRD-PARTY-LICENSES.md)에 있습니다.

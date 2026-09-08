@@ -36,6 +36,9 @@ type observation = {
   halted : bool;
   screen_text : string;
       (** name table as characters — meaningful when the pattern set is a font *)
+  screen_view : string;
+      (** a 64x24 luminance ASCII picture of the frame — readable in any mode,
+          for a keeper with no vision runtime. Rows are newline-separated. *)
   tiles : string list;
       (** GRAPHIC1/2/3 and MULTICOLOR: 24 rows of 32 name bytes as hex pairs,
           [..] for name 0. Other modes: empty. *)

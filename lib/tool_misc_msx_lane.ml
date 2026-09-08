@@ -32,6 +32,7 @@ let observation_fields (o : Msx_lane.observation) =
   ; ("cartridge", match o.cartridge with Some c -> `String c | None -> `Null)
   ; ("disk", match o.disk with Some d -> `String d | None -> `Null)
   ; ("screen_text", `String o.screen_text)
+  ; ("screen_view", `String o.screen_view)
   ; ("tiles", `List (List.map (fun row -> `String row) o.tiles))
   ; ("sprites", `List (List.map sprite o.sprites))
   ]

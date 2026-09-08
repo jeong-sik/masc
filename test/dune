@@ -3158,6 +3158,11 @@
  (libraries alcotest fmt masc masc_tui_types))
 
 (test
+ (name test_tui_runtime_param_picker)
+ (modules test_tui_runtime_param_picker)
+ (libraries alcotest yojson masc_tui_types))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)

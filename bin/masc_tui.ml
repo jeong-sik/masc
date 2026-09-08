@@ -14839,6 +14839,23 @@ and is loaded on demand through keeper_skill.
                            [ "bool"; "boolean" ] ->
                  set (Masc_tui_types.runtime_param_edit_toggle_bool edit);
                  state.runtime_params_notice <- None
+               (* A closed set walks under the same keys a bool toggles under:
+                  the reader is picking either way, and Left/Right reading as
+                  "the other value" for two choices and "the next value" for
+                  three is the same gesture. Ordered after the bool arm so a
+                  bool with choices — none today — keeps toggling. *)
+               | "left" | " "
+                 when edit.rpe_mode = Masc_tui_types.Friendly_value
+                      && edit.rpe_choices <> [] ->
+                 set
+                   (Masc_tui_types.runtime_param_edit_cycle_choice edit
+                      ~step:(if String.equal k "left" then -1 else 1));
+                 state.runtime_params_notice <- None
+               | "right"
+                 when edit.rpe_mode = Masc_tui_types.Friendly_value
+                      && edit.rpe_choices <> [] ->
+                 set (Masc_tui_types.runtime_param_edit_cycle_choice edit ~step:1);
+                 state.runtime_params_notice <- None
                | s
                  when (String.length s = 1 && Char.code s.[0] >= 32)
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->

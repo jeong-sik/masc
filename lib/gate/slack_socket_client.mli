@@ -19,7 +19,7 @@ val run :
   env:Eio_unix.Stdenv.base ->
   bot_user_id:string option ->
   app_token:string ->
-  trigger_policy:trigger_policy ->
+  trigger_policy:(unit -> trigger_policy) ->
   on_event:(slack_event -> unit) ->
   on_ambient:(slack_event -> unit) ->
   unit ->
@@ -41,7 +41,9 @@ val run :
       not start a turn.
 
     Internally:
-    1. Create {!Slack_gateway_state.t} with [trigger_policy].
+    1. Create {!Slack_gateway_state.t} with [trigger_policy]. [trigger_policy] is read
+       again before every step, so an operator changing it takes effect on the
+       next inbound message rather than at the next reconnect.
     2. [Apps_connections_open] effect → [Masc_http_client.get_sync] with the
        app token → fresh WSS URL → {!Discord_wss_connection.connect}.
     3. Reader fiber on the connection's session switch: [read] →
@@ -60,3 +62,15 @@ val connection_state : unit -> connection_state
     written only by [run], safe to read from any fiber. Feeds connector presence
     ([Channel_gate_slack_state]). *)
 
+
+module For_testing : sig
+  val step_with_current_policy :
+    Slack_gateway_state.t ->
+    trigger_policy:(unit -> Slack_gateway_state.trigger_policy) ->
+    now_mono:float ->
+    Slack_gateway_state.input ->
+    Slack_gateway_state.t * Slack_gateway_state.gateway_effect list
+  (** The step the run loop takes: the current policy is applied to the state
+      immediately before the transition. Held by a test so the re-read cannot
+      be dropped without something going red. *)
+end

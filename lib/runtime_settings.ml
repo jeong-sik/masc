@@ -98,6 +98,37 @@ let register_bool ~key ~default ?meta () =
     ?meta
     ()
 
+(** Register a parameter whose values carry names.  [to_string] / [of_string]
+    are the owning module's own spelling, so the wire form, the runtime.toml
+    form and the picker label are one vocabulary rather than three.
+
+    [choices] is what a picker may offer.  A domain that is only partly closed
+    lists its closed names there and still accepts the rest through
+    [of_string]: the picker walks the common values and the parameterized form
+    is typed. *)
+let register_enum ~key ~default ~to_string ~of_string ~choices ~description () =
+  Runtime_params.register
+    ~key
+    ~default
+    (* [of_string] is the judge.  A value that does not survive the round trip
+       is not one this param holds, whatever handed it over. *)
+    ~validate:(fun v ->
+      match of_string (to_string v) with
+      | Ok (_ : 'a) -> Ok ()
+      | Error detail -> Error (Printf.sprintf "%s: %s" key detail))
+    ~serialize:(fun v -> `String (to_string v))
+    ~deserialize:(fun json ->
+      match json with
+      | `String raw -> of_string raw
+      | other ->
+          Error
+            (Printf.sprintf
+               "deserialize_enum: expected JSON string, got %s"
+               (Json_util.kind_name other)))
+    ~meta:{ description; value_type = "enum";
+            min_value = None; max_value = None; choices }
+    ()
+
 (* ── dashboard surface (display-only) ────────────────────────── *)
 
 (** Maximum path length before truncation in dashboard output. *)
@@ -108,7 +139,7 @@ let dashboard_max_path_length =
     ~min:10 ~max:200
     ~meta:{ description = "대시보드 경로 출력 최대 길이 (문자)";
             value_type = "int";
-            min_value = Some (`Int 10); max_value = Some (`Int 200) }
+            min_value = Some (`Int 10); max_value = Some (`Int 200); choices = [] }
     ()
 
 (** Maximum message body length before truncation. *)
@@ -119,7 +150,7 @@ let dashboard_max_message_length =
     ~min:10 ~max:500
     ~meta:{ description = "대시보드 메시지 출력 최대 길이 (문자)";
             value_type = "int";
-            min_value = Some (`Int 10); max_value = Some (`Int 500) }
+            min_value = Some (`Int 10); max_value = Some (`Int 500); choices = [] }
     ()
 
 (** Maximum number of pending tasks to show in dashboard. *)
@@ -130,7 +161,7 @@ let dashboard_max_pending_tasks =
     ~min:1 ~max:50
     ~meta:{ description = "대시보드 pending task 표시 최대 개수";
             value_type = "int";
-            min_value = Some (`Int 1); max_value = Some (`Int 50) }
+            min_value = Some (`Int 1); max_value = Some (`Int 50); choices = [] }
     ()
 
 (** Maximum number of recent messages to show. *)
@@ -141,7 +172,7 @@ let dashboard_max_recent_messages =
     ~min:1 ~max:50
     ~meta:{ description = "대시보드 recent message 표시 최대 개수";
             value_type = "int";
-            min_value = Some (`Int 1); max_value = Some (`Int 50) }
+            min_value = Some (`Int 1); max_value = Some (`Int 50); choices = [] }
     ()
 
 (** Minimum section border length. *)
@@ -152,7 +183,7 @@ let dashboard_min_border_length =
     ~min:20 ~max:200
     ~meta:{ description = "대시보드 섹션 경계선 최소 길이";
             value_type = "int";
-            min_value = Some (`Int 20); max_value = Some (`Int 200) }
+            min_value = Some (`Int 20); max_value = Some (`Int 200); choices = [] }
     ()
 
 (** Threshold for surfacing a quiet-agent warning in dashboard labels. *)
@@ -165,8 +196,7 @@ let dashboard_agent_quiet_threshold_sec =
       description = "대시보드 quiet 상태 임계값(초)";
       value_type = "float";
       min_value = Some (`Float 30.0);
-      max_value = Some (`Float Masc_time_constants.day);
-    }
+      max_value = Some (`Float Masc_time_constants.day); choices = [] }
     ()
 
 (** Threshold for surfacing a stuck-agent warning in dashboard labels. *)
@@ -179,8 +209,7 @@ let dashboard_agent_stuck_threshold_sec =
       description = "대시보드 STUCK 상태 임계값(초)";
       value_type = "float";
       min_value = Some (`Float 60.0);
-      max_value = Some (`Float (7.0 *. Masc_time_constants.day));
-    }
+      max_value = Some (`Float (7.0 *. Masc_time_constants.day)); choices = [] }
     ()
 
 (* ── cost_policy surface ──────────────────────────────────────── *)
@@ -194,7 +223,7 @@ let keeper_supervisor_sweep_sec =
     ~min:10.0 ~max:120.0
     ~meta:{ description = "Supervisor sweep 주기(초)";
             value_type = "float";
-            min_value = Some (`Float 10.0); max_value = Some (`Float 120.0) }
+            min_value = Some (`Float 10.0); max_value = Some (`Float 120.0); choices = [] }
     ()
 
 let keeper_keepalive_interval_sec =
@@ -212,6 +241,7 @@ let keeper_keepalive_interval_sec =
       ; value_type = "int"
       ; min_value = Some (`Int 1)
       ; max_value = None
+      ; choices = []
       }
     ()
 
@@ -225,7 +255,7 @@ let keeper_snapshot_sec =
     ~meta:{ description = "Snapshot 캡처 주기(초)";
             value_type = "int";
             min_value = Some (`Int 15);
-            max_value = Some (`Int Masc_time_constants.hour_int) }
+            max_value = Some (`Int Masc_time_constants.hour_int); choices = [] }
     ()
 
 let keeper_work_as_hb_enabled =
@@ -234,7 +264,7 @@ let keeper_work_as_hb_enabled =
     ~default:(fun () -> Env_config_keeper.WorkAsHeartbeat.enabled)
     ~meta:{ description = "Work-as-heartbeat 활성화 여부";
             value_type = "bool";
-            min_value = None; max_value = None }
+            min_value = None; max_value = None; choices = [] }
     ()
 
 let keeper_stage_timing_ring_size =
@@ -244,7 +274,7 @@ let keeper_stage_timing_ring_size =
     ~min:10 ~max:1000
     ~meta:{ description = "Stage timing ring buffer 크기 (fiber restart 시 적용)";
             value_type = "int";
-            min_value = Some (`Int 10); max_value = Some (`Int 1000) }
+            min_value = Some (`Int 10); max_value = Some (`Int 1000); choices = [] }
     ()
 
 (* Whether identity scalars (a `user:` login in a GitHub hosts.yml) mined
@@ -258,7 +288,64 @@ let keeper_chat_redact_identity_scalars =
     ~default:(fun () -> true)
     ~meta:{ description = "secret 파일의 계정명(user 등) 값도 채팅·도구 출력에서 [REDACTED] 처리 (토큰류는 항상 처리)";
             value_type = "bool";
-            min_value = None; max_value = None }
+            min_value = None; max_value = None; choices = [] }
+    ()
+
+(* ── connector trigger surface ───────────────────────────────── *)
+
+(* What a connector's gateway resolved from [MASC_*_TRIGGER_POLICY] and
+   runtime.toml at startup.  The param default reads this rather than walking
+   those planes itself, because [Runtime_params.get] calls the default thunk on
+   every read and a policy check happens per inbound message: resolution is a
+   file read, and it belongs to boot.
+
+   A gateway that never starts (no bot token) leaves the hardcoded baseline
+   here.  The gateways therefore install this before checking their token, so
+   the params surface reports the configured policy even for a connector that
+   is switched off — otherwise the screen would say [mention_or_thread] while
+   runtime.toml said something else. *)
+let discord_trigger_policy_configured =
+  ref (Discord_gateway_state.Mention_or_thread : Discord_gateway_state.trigger_policy)
+
+let slack_trigger_policy_configured =
+  ref (Slack_gateway_state.Mention_or_thread : Slack_gateway_state.trigger_policy)
+
+let set_discord_trigger_policy_configured policy =
+  discord_trigger_policy_configured := policy
+
+let set_slack_trigger_policy_configured policy =
+  slack_trigger_policy_configured := policy
+
+(* [user_only:<id>] is left out of [choices] on purpose: it carries an id, so
+   it is not a value a picker can offer.  Both parsers still accept it, and the
+   operator types that form. *)
+let trigger_policy_choices = [ "mention_only"; "mention_or_thread"; "all" ]
+
+let trigger_policy_description =
+  "봇이 언제 응답하는가 — mention_only: 멘션된 글만. mention_or_thread: \
+   멘션 또는 스레드 안의 모든 글. all: 사람이 쓴 모든 글. \
+   user_only:<id> 로 한 사람만 받을 수도 있다"
+
+(** Which Discord messages start a turn. *)
+let discord_trigger_policy =
+  register_enum
+    ~key:"discord.trigger_policy"
+    ~default:(fun () -> !discord_trigger_policy_configured)
+    ~to_string:Discord_gateway_state.trigger_policy_to_string
+    ~of_string:Discord_gateway_state.parse_trigger_policy
+    ~choices:trigger_policy_choices
+    ~description:trigger_policy_description
+    ()
+
+(** Which Slack messages start a turn. *)
+let slack_trigger_policy =
+  register_enum
+    ~key:"slack.trigger_policy"
+    ~default:(fun () -> !slack_trigger_policy_configured)
+    ~to_string:Slack_gateway_state.trigger_policy_to_string
+    ~of_string:Slack_gateway_state.parse_trigger_policy
+    ~choices:trigger_policy_choices
+    ~description:trigger_policy_description
     ()
 
 (* ── surface catalog ─────────────────────────────────────────── *)
@@ -312,6 +399,14 @@ let surfaces =
       ];
     };
     {
+      id = "connector_trigger";
+      description = "Which inbound messages start a turn, per connector";
+      param_keys = [
+        "discord.trigger_policy";
+        "slack.trigger_policy";
+      ];
+    };
+    {
       id = "dashboard";
       description = "Dashboard rendering — truncation lengths, row limits, borders, status thresholds";
       param_keys = [
@@ -338,6 +433,8 @@ let ensure_init () =
   let (_ : _) = Runtime_params.get dashboard_min_border_length in
   let (_ : _) = Runtime_params.get dashboard_agent_quiet_threshold_sec in
   let (_ : _) = Runtime_params.get dashboard_agent_stuck_threshold_sec in
+  let (_ : _) = Runtime_params.get discord_trigger_policy in
+  let (_ : _) = Runtime_params.get slack_trigger_policy in
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

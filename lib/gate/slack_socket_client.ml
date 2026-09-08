@@ -138,13 +138,26 @@ let fetch_wss_url ?clock ?(timeout_sec = 10.0) ~app_token () =
 let ack_payload envelope_id =
   Yojson.Safe.to_string (`Assoc [ ("envelope_id", `String envelope_id) ])
 
+(* Named so a test can hold the one thing the step loop must not forget: the
+   policy is re-read here, not at connect. Inlining this back into [step_now]
+   would leave the injection unguarded — a stale policy decides quietly and
+   looks exactly like a correct one. *)
+let step_with_current_policy state ~trigger_policy ~now_mono input =
+  Slack_gateway_state.step
+    (Slack_gateway_state.with_trigger_policy state (trigger_policy ()))
+    ~now_mono
+    input
+;;
+
 let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
     () =
   if String.equal app_token "" then
     (* No-op: a server without Slack configured must be unaffected. *)
     Log.Slack.info "slack socket mode disabled (empty app token)"
   else
-    let config : Slack_gateway_state.config = { trigger_policy; bot_user_id } in
+    let config : Slack_gateway_state.config =
+      { trigger_policy = trigger_policy (); bot_user_id }
+    in
     let state = ref (Slack_gateway_state.create ~config) in
     let conn_ref : Discord_wss_connection.conn option ref = ref None in
     let input_mailbox = Eio.Stream.create 64 in
@@ -276,7 +289,9 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
 
     let step_now input =
       let now = now_mono env in
-      let (s', effects) = Slack_gateway_state.step !state ~now_mono:now input in
+      let (s', effects) =
+        step_with_current_policy !state ~trigger_policy ~now_mono:now input
+      in
       state := s';
       Atomic.set published_connection_state (Slack_gateway_state.state s');
       List.iter run_effect effects
@@ -291,3 +306,7 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
     in
     drive ()
 
+
+module For_testing = struct
+  let step_with_current_policy = step_with_current_policy
+end

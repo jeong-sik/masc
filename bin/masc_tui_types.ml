@@ -2536,6 +2536,10 @@ type runtime_param_edit =
   ; rpe_draft : string
   ; rpe_replace_on_type : bool
   ; rpe_mode : runtime_param_edit_mode
+  ; rpe_choices : string list
+    (* Carried on the edit so the key handler can ask what this param accepts
+       without holding the row it came from. Empty means the reader types the
+       value. *)
   }
 
 let runtime_param_type_name value_type =
@@ -2563,6 +2567,7 @@ let runtime_param_edit_of_row ~advanced (row : Tui_decode.runtime_param_row) =
       (if advanced then row.rpr_current_json else runtime_param_friendly_text row)
   ; rpe_replace_on_type = true
   ; rpe_mode = (if advanced then Advanced_json else Friendly_value)
+  ; rpe_choices = row.rpr_choices
   }
 
 let runtime_param_edit_append edit text =
@@ -2591,6 +2596,31 @@ let runtime_param_edit_toggle_bool edit =
   in
   { edit with rpe_draft = next; rpe_replace_on_type = false }
 
+(* Walk a closed set. [step] is +1 or -1; a draft that is not one of the
+   choices — a value typed by hand, or the parameterized form of a partly
+   closed domain — starts the walk at the first choice rather than being
+   silently kept, because the reader pressed a key asking for a different
+   value. *)
+let runtime_param_edit_cycle_choice edit ~step =
+  match edit.rpe_choices with
+  | [] -> edit
+  | choices ->
+    let count = List.length choices in
+    let current = String.trim edit.rpe_draft in
+    let index =
+      let rec find i = function
+        | [] -> None
+        | c :: rest -> if String.equal c current then Some i else find (i + 1) rest
+      in
+      find 0 choices
+    in
+    let next =
+      match index with
+      | None -> 0
+      | Some i -> ((i + step) mod count + count) mod count
+    in
+    { edit with rpe_draft = List.nth choices next; rpe_replace_on_type = false }
+
 let runtime_param_edit_value edit =
   let parse_json () =
     try Ok (Yojson.Safe.from_string edit.rpe_draft) with
@@ -2614,6 +2644,12 @@ let runtime_param_edit_value edit =
         | Some value when Float.is_finite value -> Ok (`Float value)
         | Some _ | None -> Error "Enter a number")
      | "string" -> Ok (`String edit.rpe_draft)
+     | "enum" ->
+       (* A named value is sent as-is: the registry owns the grammar, so a
+          form this picker does not list (a parameterized one, typed by hand)
+          must still reach it and be judged there rather than here. *)
+       let value = String.trim edit.rpe_draft in
+       if String.equal value "" then Error "Choose a value" else Ok (`String value)
      | _ -> parse_json ())
 
 type memory_sort_order =

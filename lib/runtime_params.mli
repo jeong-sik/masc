@@ -17,6 +17,12 @@ type param_meta = {
   value_type : string;
   min_value : Yojson.Safe.t option;
   max_value : Yojson.Safe.t option;
+  (* The closed set of values a picker may offer, spelled the way
+     [serialize] writes them. Empty means the value is not drawn from a
+     closed set and the reader types it. A param whose domain is partly
+     closed (a few names plus one parameterized form) lists the closed
+     names here and still accepts the rest through [deserialize]. *)
+  choices : string list;
 }
 
 (** {1 Parameter Handle} *)

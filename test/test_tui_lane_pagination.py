@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -19,10 +20,7 @@ def run(executable: str) -> None:
     detail_path = "/api/v1/dashboard/exact-lane-runs/run-001"
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
-    _, standalone = h.standalone_lanes_response()
-    standalone = copy.deepcopy(standalone)
-    standalone["lanes"] = [h.standalone_lane_fixture(lane, "Verifier")]
-    fixtures[h.STANDALONE_LANES_PATH] = (200, standalone)
+    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
     template = h.verifier_lane_runs_response()[1]["runs"][0]
 
     def row(index: int) -> dict:
@@ -59,6 +57,8 @@ def run(executable: str) -> None:
         h.resize_and_wait(process, master, output, rows=30, columns=150,
                           needle=b"MASC Overview")
         h.palette_go(process, master, output, b"go lanes", b"Verifier")
+        h.send_and_wait(process, master, output, b"jjj",
+                        re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier"))
         h.send_and_wait(process, master, output, b"\r", b"50 loaded / 51 retained")
         h.send_and_wait(process, master, output, b"]", b"older history temporarily unavailable")
         screen = h.screen_text(bytes(output))

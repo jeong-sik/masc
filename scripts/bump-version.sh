@@ -46,8 +46,8 @@ fi
 
 # 3) opam metadata (if tracked)
 if [ -f "$ROOT_DIR/masc.opam" ]; then
-  "$ROOT_DIR/scripts/dune-local.sh" build masc.opam
-  echo "  masc.opam updated (via scripts/dune-local.sh)"
+  sedi -E "s/^version: \"[^\"]*\"$/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc.opam"
+  echo "  masc.opam version synchronized (CI verifies generated metadata)"
 fi
 
 # 4) CHANGELOG stub (prepend if missing)
@@ -108,6 +108,7 @@ echo "  3) artifact schema: report/proof JSON schema_version"
 echo "  4) pre-1.0 lane: use 0.y.0 for promise trains, 0.y.z for stabilization"
 echo ""
 echo "Next:"
-echo "  dune build --root ."
+echo "  scripts/check-version-truth.sh"
+echo "  # Build and installed-release smoke run in CI."
 echo "  git add dune-project README.md CHANGELOG.md masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md"
 echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

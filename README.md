@@ -44,7 +44,7 @@ and the capture metadata are in the same directory.
 |---|---|---|
 | **TUI** | Watch and steer Keepers, answer the Gate, read tool calls, browse code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claims a task, posts to the board, records evidence | Any MCP client at `http://127.0.0.1:8935/mcp` with a bearer |
-| **Dashboard** | The same state in a browser | `/dashboard/` on the same server, when a built bundle is present. A source checkout has one; the published binary ships none |
+| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.34.0 installer includes a binary-matched bundle |
 
 All three read and write the same `.masc/`. New operator work lands in the
 TUI. The dashboard is kept building and truthful, but it is not where the
@@ -66,9 +66,8 @@ less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
 ```
 
-The installer verifies `SHA256SUMS` when the release carries one, puts `masc`
-and `masc-tui` side by side, and runs a one-time wizard (`--no-wizard` skips
-it). The wizard reports what the host has and writes exactly one thing,
+The installer requires and verifies `SHA256SUMS`, installs the release executables,
+and runs a one-time wizard (`--no-wizard` skips it). The wizard reports what the host has and writes exactly one thing,
 `[runtime].default` in `runtime.toml`. It never asks for an API key and never
 stores one; the server reads keys from the environment it is started in.
 
@@ -84,7 +83,11 @@ The wizard reports two axes:
   host can offer. The wizard reports and does not choose. The sandbox is set
   per Keeper, or by a `--team <preset>` that carries its own choice.
 
-Supported platforms are the assets attached to the release.
+The next release, **0.34.0**, adds Intel macOS, installs `masc-browser-host`
+and the matched dashboard, and preserves configuration during `--force`
+upgrades. Until it is published, the example above remains pinned to 0.33.0.
+See [installation and upgrade guide](docs/INSTALL.md) for the platform matrix,
+prerequisites, exact installed contents and optional integrations.
 
 ### From source
 
@@ -394,13 +397,12 @@ says which prompt file each reader gets.
 
 ## Dashboard
 
-The same process serves a TypeScript/Preact SPA at `/dashboard/` when it can
-find a built bundle. It looks for `assets/dashboard/` under `MASC_ASSETS_DIR`,
-then next to the executable the way a source checkout lays it out. The
-published binary ships no bundle: on a v0.33.0 install, `/dashboard/`
-answered `503 Dashboard unavailable` and `/health?full=1` reported
-`dashboard_surface.status: "missing"`. A bundle is built from `dashboard/`,
-as `.github/workflows/dashboard-artifact.yml` does.
+The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.34.0 release
+installer installs the matching dashboard beneath the binary prefix and verifies
+its source commit and file checksums. No Node.js, source checkout or frontend build
+is needed to use it. An already running server keeps its original bundle until
+restarted. See [installed distribution](docs/design/installed-dashboard-distribution.md)
+and [installation](docs/INSTALL.md). Older tags must be used with their own installer.
 
 The dashboard reads the state the TUI reads, and it holds two screens the TUI
 does not have: the experimental IDE shell and the Lab diagnostics. In the two
@@ -426,8 +428,7 @@ it. Admin operations and write access are in
 - Only `apple_container` is known to boot a microVM Keeper. `auto_judge` needs
   a model on its own lane, which an install with one provider key usually
   lacks; those calls wait for a person.
-- TUI surfaces and keys change on `main`. The published release lags it, and
-  it carries no dashboard bundle.
+- TUI surfaces and keys change on `main`; use documentation from the installed tag.
 
 ## Repository layout
 

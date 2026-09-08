@@ -36,6 +36,7 @@ INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 ASSETS=(
   "masc-$ARCH"
   "masc-tui-$ARCH"
+  "masc-browser-host-$ARCH"
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
   "masc-dashboard-$ARCH.tar.gz"
@@ -52,7 +53,7 @@ done
 # which is the flag a host without microvm keepers uses.
 case "$ARCH" in
   macos-arm64|linux-arm64) SHIM_ASSET="masc-exec-shim-linux-arm64" ;;
-  linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
+  macos-x64|linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
   *) SHIM_ASSET="" ;;
 esac
 SHIM_FLAG="--no-guest-shim"
@@ -86,7 +87,7 @@ prefix="$work/bin"
 base="$work/base"
 mkdir -p "$stage" "$prefix" "$base"
 
-# Stage the file:// release: the four assets plus a SHA256SUMS with exactly
+# Stage the file:// release: the release assets plus a SHA256SUMS with exactly
 # the format install.sh's verify_checksum parses ("<hash>  <name>").
 for a in "${ASSETS[@]}"; do
   cp "$BIN_DIR/$a" "$stage/$a"
@@ -103,10 +104,13 @@ MASC_RELEASE_BASE_URL="file://$work/release" \
     --base-path "$base" \
     --no-wizard $SHIM_FLAG
 
-for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
-echo "install-smoke: installer placed all four binaries"
+echo "install-smoke: installer placed all five executables"
+"$prefix/masc-tui" --help > "$work/tui-help.txt"
+"$prefix/masc-browser-host" --help > "$work/browser-host-help.txt"
+
 
 shim_dest="$base/.masc/microvm/shim/masc-exec-shim"
 if [ -z "$SHIM_FLAG" ]; then

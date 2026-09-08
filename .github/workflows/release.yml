@@ -21,22 +21,21 @@ jobs:
         include:
           - os: macos-14  # Apple Silicon
             arch: macos-arm64
-            may-fail: true   # upstream opam macOS arm64 binary missing (#7475)
             shim-arch: ''    # the exec shim is a Linux guest binary; none here
-          - os: ubuntu-latest
+          - os: macos-15-intel
+            arch: macos-x64
+            shim-arch: ''
+          - os: ubuntu-24.04
             arch: linux-x64
-            may-fail: false
             shim-arch: amd64
           # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
           # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
           # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
           - os: ubuntu-24.04-arm
             arch: linux-arm64
-            may-fail: false
             shim-arch: arm64
 
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.may-fail }}
     # The Linux jobs also build the exec shim in a container (an opam install
     # on the first run), on top of the server build.
     timeout-minutes: 60
@@ -52,6 +51,9 @@ jobs:
           else
             scripts/check-version-truth.sh
           fi
+
+      - name: Installer upgrade behavior
+        run: python3 test/test_installer_upgrade.py
 
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -246,6 +248,17 @@ jobs:
           chmod +x scripts/install-smoke.sh
           scripts/install-smoke.sh dist ${{ matrix.arch }}
 
+      # A build runner has development libraries that a fresh user host lacks.
+      - name: Fresh Ubuntu installation (no OCaml or checkout dependencies)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -euc '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends ca-certificates curl python3 libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+              bash scripts/install-smoke.sh dist "${{ matrix.arch }}"
+            '
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -270,10 +283,11 @@ jobs:
 
       - name: Verify advertised release assets
         run: |
-          for arch in macos-arm64 linux-x64 linux-arm64; do
+          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
               "masc-tui-$arch" \
+              "masc-browser-host-$arch" \
               "masc-deployment-preflight-helper-$arch" \
               "masc-check-runtime-deployment-preflight-$arch" \
               "masc-dashboard-$arch.tar.gz" \

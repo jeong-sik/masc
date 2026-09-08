@@ -395,6 +395,7 @@ let platform_release_asset () =
   in
   match uname "-s", uname "-m" with
   | "Darwin", "arm64" -> "masc-macos-arm64"
+  | "Darwin", "x86_64" -> "masc-macos-x64"
   | "Linux", "x86_64" -> "masc-linux-x64"
   | os, arch -> failf "unsupported test platform for release asset: %s/%s" os arch
 ;;
@@ -422,6 +423,9 @@ let stage_release_mirror base_path =
   let tui = Filename.concat dir ("masc-tui-" ^ suffix) in
   unlink_if_exists tui;
   Unix.symlink (Unix.realpath (real_masc_binary ())) tui;
+  let browser_host = Filename.concat dir ("masc-browser-host-" ^ suffix) in
+  unlink_if_exists browser_host;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) browser_host;
   let helper =
     Filename.concat
       dir
@@ -626,7 +630,7 @@ let test_release_requires_advertised_binary_assets () =
   assert_contains
     "release checks advertised asset list"
     workflow
-    "for arch in macos-arm64 linux-x64 linux-arm64; do";
+    "for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do";
   assert_contains
     "release builds the terminal UI"
     workflow

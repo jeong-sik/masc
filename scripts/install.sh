@@ -12,7 +12,8 @@
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
 #   --base-path DIR    .masc seed target (default: $PWD)
 #   --no-seed          Skip writing default config files
-#   --force            Overwrite existing binary / config
+#   --force            Refresh existing binaries; preserve workspace config
+#   --reset-config     Overwrite seeded config and selected team preset files
 #   --dry-run          Print what would happen, do not write
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
@@ -59,6 +60,7 @@ MASC_PORT="${MASC_PORT:-8935}"
 BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0
+RESET_CONFIG=0
 DRY_RUN=0
 GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
@@ -106,6 +108,7 @@ PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
 PARTIAL_FILES=()
+COMPANION_ARGS=()
 BUNDLE_HELPER=""
 BUNDLE_TRANSACTION_ACTIVE=0
 DASHBOARD_ASSETS_DIR=""
@@ -760,9 +763,9 @@ maybe_run_wizard() {
   fi
 
   # "First-time" means the config root was not already here. A workspace that was
-  # already configured keeps the [runtime].default it has; --wizard or --force
+  # already configured keeps the [runtime].default it has; --wizard or --reset-config
   # asks for the choice again.
-  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$FORCE" -eq 0 ] && [ "$WIZARD" != "1" ]; then
+  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$RESET_CONFIG" -eq 0 ] && [ "$WIZARD" != "1" ]; then
     log "config root was already here; skipping first-time setup wizard"
     log "run with --wizard to choose a provider again"
     return 0
@@ -799,6 +802,7 @@ while [ $# -gt 0 ]; do
     --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; shift 2 ;;
     --no-seed) SEED_CONFIG=0; shift ;;
     --force)   FORCE=1; shift ;;
+    --reset-config) RESET_CONFIG=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
@@ -892,7 +896,7 @@ detect_asset() {
   case "$os/$arch" in
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
-    Darwin/x86_64) die "macOS x86_64 release asset not built. Build from source per README." ;;
+    Darwin/x86_64) echo "masc-macos-x64" ;;
     Linux/aarch64) echo "masc-linux-arm64" ;;
     *) die "unsupported platform: $os/$arch" ;;
   esac
@@ -901,6 +905,7 @@ detect_asset() {
 ASSET=$(detect_asset)
 PLATFORM_SUFFIX="${ASSET#masc-}"
 TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
+BROWSER_HOST_ASSET="masc-browser-host-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
 DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
@@ -980,6 +985,7 @@ fetch_release_checksums() {
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
 TUI_DEST="$PREFIX/masc-tui"
+BROWSER_HOST_DEST="$PREFIX/masc-browser-host"
 PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
@@ -1071,12 +1077,12 @@ install_release_companion() {
     || die "download failed (asset missing for $VERSION?): $asset"
   verify_checksum "$tmp" "$asset"
   chmod +x "$tmp"
-  mv "$tmp" "$dest"
-  log "installed: $dest"
+  COMPANION_ARGS+=(--companion "${dest##*/}" "$tmp")
+  log "staged: $dest"
 }
 
-# Install and verify the companions before replacing the main binary.
-# A failed companion download must leave the currently installed runtime intact.
+# Stage and verify every companion before publishing any executable.
+# The bundle helper journals companions with the main binary for rollback.
 #
 # A missing asset stops the install rather than skipping the companion. That is
 # the same rule the two preflight companions already follow, and it is why the
@@ -1084,6 +1090,7 @@ install_release_companion() {
 # installer that quietly delivers less than it was built to deliver is worse
 # than one that stops and says which asset was absent.
 install_release_companion "$TUI_ASSET" "$TUI_DEST"
+install_release_companion "$BROWSER_HOST_ASSET" "$BROWSER_HOST_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 
@@ -1096,7 +1103,7 @@ install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 guest_shim_asset() {
   case "$PLATFORM_SUFFIX" in
     macos-arm64|linux-arm64) echo "masc-exec-shim-linux-arm64" ;;
-    linux-x64) echo "masc-exec-shim-linux-amd64" ;;
+    macos-x64|linux-x64) echo "masc-exec-shim-linux-amd64" ;;
     *) die "no guest exec shim asset for platform $PLATFORM_SUFFIX" ;;
   esac
 }
@@ -1178,19 +1185,21 @@ else
   fetch_bundle_asset "$DASHBOARD_ASSET" "$bundle_archive"
   DASHBOARD_ASSETS_DIR="$(python3 "$BUNDLE_HELPER" install \
     --binary "$binary_input" --archive "$bundle_archive" \
-    --prefix "$PREFIX" --binary-asset "$ASSET")" \
+    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"})" \
     || die "binary/dashboard installation rejected"
   BUNDLE_TRANSACTION_ACTIVE=1
   log "installed verified binary/dashboard: $DEST"
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
+# Record existing workspaces even when an overlay is missing or seeding is disabled.
+[ ! -d "$BASE_PATH/.masc/config" ] || CONFIG_PREEXISTING=1
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
-  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
     CONFIG_PREEXISTING=1
     log "config already present at $CONFIG_DIR, skipping seed"
   elif [ "$DRY_RUN" -eq 1 ]; then
@@ -1205,7 +1214,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
     init_args=(init --base-path "$BASE_PATH")
-    [ "$FORCE" -eq 1 ] && init_args+=(--force)
+    [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
     if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
       die "config seed failed ($DEST ${init_args[*]}): $init_summary"
     fi
@@ -1269,7 +1278,7 @@ seed_team() {
   while IFS= read -r rel || [ -n "$rel" ]; do
     case "$rel" in ''|'#'*) continue ;; esac
     dest="$cfg/$rel"
-    if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
+    if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"
       continue
     fi

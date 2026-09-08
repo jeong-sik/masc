@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## [0.34.0] - 2026-09-08
+
+### Installation and distribution
+
+- Ship the browser native host with the server, TUI, preflight tools and matched dashboard.
+- Add Intel macOS release assets and require every advertised platform build to pass.
+- Exercise Linux installation in a fresh Ubuntu 24.04 container as well as native runners.
+- Preserve operator configuration during `--force` upgrades; `--reset-config` explicitly resets seeded configuration.
+- Document prerequisites, installed files, first use, optional integrations and upgrades in `docs/INSTALL.md`.
+
+### Runtime changes since 0.33.0
 
 - **The embedded tree is the managed asset set; the hand-written manifest is
   gone.** `config/{tools,prompts,mcp}/managed-assets.json` listed the files

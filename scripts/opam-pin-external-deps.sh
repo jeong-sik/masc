@@ -93,7 +93,9 @@ readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
 # core development; SHA-pinned here for CI.
-readonly OCAML_MSX_SHA="e73c3cf4f6517f78ad07365314bdcd7809596054"
+# adc379c = #12 (package metadata) on top of #10 (Msx.boot_disk, the warm-up
+# replay the msx lane now drives).
+readonly OCAML_MSX_SHA="adc379cf2df51f8f86597281e2b893c174bc96ac"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

@@ -94,7 +94,8 @@ let test_builtin_skill_package () =
   check string "operator body survives" "operator's own skill" (read_file body);
   check bool "operator resource deletion survives" false (Sys.file_exists resource);
   check (list string) "all packages present without staging residue"
-    [ "browser-design"; "browser-lanes"; "frontend-implement"; "frontend-verify" ] (entries_of root)
+    [ "browser-design"; "browser-lanes"; "frontend-implement"; "frontend-verify" ]
+    (List.sort String.compare (entries_of root))
 
 let () =
   run "Config root embedded seed"

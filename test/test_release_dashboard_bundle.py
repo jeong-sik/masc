@@ -76,6 +76,24 @@ class Distribution(unittest.TestCase):
         self.assertEqual((binary.parent / "assets/dashboard/.build-stamp").stat().st_mtime, 1788739200)
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
+    def test_binary_startup_failure_exposes_loader_diagnostic(self):
+        for termination, expected in [("exit 127", "exit status 127"),
+                                      ("kill -ABRT $$", "signal SIGABRT")]:
+            with self.subTest(termination=termination):
+                self.binary.write_text(
+                    "#!/bin/sh\nulimit -c 0\n"
+                    "echo 'dyld: Library not loaded: /missing/libssl.3.dylib' >&2\n"
+                    + termination + "\n")
+                result = subprocess.run(
+                    ["python3", str(HELPER), "package", "--binary", str(self.binary),
+                     "--assets", str(self.assets), "--source-commit", COMMIT,
+                     "--binary-asset", self.asset, "--archive", str(self.archive)],
+                    text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+                self.assertIn("dyld: Library not loaded: /missing/libssl.3.dylib", result.stderr)
+                self.assertIn(str(self.binary), result.stderr)
+
     def test_rollback_restores_previous_regular_binary_or_symlink(self):
         for kind in ("regular", "symlink"):
             with self.subTest(kind=kind):

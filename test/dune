@@ -998,11 +998,11 @@
  (modules test_keeper_create_admission_transaction)
  (libraries masc_test_deps))
 
-; Extracted from the big (tests ...) group above: most fixtures declare
-; sandbox_profile = "local" (or carry no profile source, which resolves to the
-; persisted-meta placeholder Local) because the sandbox is incidental to the
-; overlay/status semantics under test — and config load now rejects Local
-; fail-closed without the hatch.
+; Extracted from the big (tests ...) group above: the sandbox is incidental to
+; the overlay and status semantics under test, so the fixtures declare a
+; loadable profile only because config load requires one. Two cases are about
+; the persisted-meta placeholder itself and read it from
+; Masc_test_deps.fixture_sandbox_profile rather than naming a value.
 (test
  (name test_keeper_effective_meta_overlay)
  (modules test_keeper_effective_meta_overlay)

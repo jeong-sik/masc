@@ -7423,6 +7423,22 @@ let test_composable_outputs_satisfy_declared_schema () =
           it exists to cover. One unavailable runtime is not a reason to stop
           asking the other producers whether they still match their declared
           schema. *)
+       (* keeper_spawn refuses outside a turn -- it needs the turn's spawn
+          registry to hand a handle to, and answers
+          {"error":"spawn is only available inside a keeper turn"} without
+          one. Installing it around the whole list costs the other probes
+          nothing: a tool that does not read the registry cannot see it. *)
+       let spawn_registry =
+         match
+           Spawn_registry.create
+             ~run:"composable-output-probe"
+             ~output_limit_bytes:(1 lsl 16)
+         with
+         | Some registry -> registry
+         | None -> fail "valid spawn registry was rejected"
+       in
+       Spawn_turn_registry.with_turn_registry (Some spawn_registry)
+       @@ fun () ->
        let failures =
          List.filter_map
            (fun { tool_name; prepare } ->

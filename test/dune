@@ -1,3 +1,9 @@
+; Run the actual generator comparison through targeted Test CI.
+(rule
+ (alias runtest-tool-parity-goldens)
+ (deps ../tool_parity_golden_check.stamp)
+ (action (echo "Tool parity goldens matched the generator")))
+
 ; Test Environment Configuration
 
 (test
@@ -5139,6 +5145,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_board_scroll)))
+
 
 (rule
  (alias runtest-test_tui_ask_alternative)

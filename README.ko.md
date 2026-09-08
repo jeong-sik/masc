@@ -29,7 +29,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 > 합니다. 운영 서비스가 아니고 보안 경계도 아닙니다. Gate와 샌드박스는 특정
 > 작업을 막지만, 사람이 보지 않는 사이 에이전트가 하는 위험한 일을 전부 막지는
 > 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 최신 릴리스는
-> [v0.33.0](https://github.com/jeong-sik/masc/releases)(2026-09-06)입니다.
+> [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)(2026-09-08)입니다.
 
 ![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -53,13 +53,12 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그를
-하나 고르고, 같은 태그의 설치 스크립트를 씁니다. 스크립트와 그 스크립트가
-검증하는 자산이 한 릴리스에서 나오게 하기 위해서입니다.
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)에
+첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
 ```bash
-TAG=v0.33.0
-curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+TAG=v0.34.0
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -81,10 +80,13 @@ bash /tmp/masc-install.sh --version "$TAG"
   있는 것. 마법사는 보고만 하고 고르지 않습니다. 샌드박스는 Keeper마다
   정하거나, 자기 선택을 들고 있는 `--team <preset>`이 정합니다.
 
-다음 릴리스 **0.34.0**은 Intel Mac, `masc-browser-host`, 대시보드 번들을
-포함하고 `--force` 업그레이드에서 기존 설정을 보존합니다. 게시 전까지 위
-예제는 공개된 0.33.0에 고정합니다. 플랫폼별 준비물, 설치 파일, 첫 실행,
-선택 기능과 업그레이드는 [설치 가이드](docs/INSTALL.md)에 정리했습니다.
+릴리스 **0.34.0**은 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
+대시보드 번들을 포함하고 `--force` 재설치에서 기존 설정을 보존합니다.
+설치 스크립트가 macOS 호환성을 확인하고 누락된 Homebrew 실행 의존성을
+자동 설치합니다. Homebrew가 없으면 대화형 터미널에서 공식 설치 절차를
+시작하며, 비대화형 설치는 Homebrew를 미리 준비해야 합니다. Apple Silicon은
+macOS 14 이상, Intel은 macOS 15 이상이 필요합니다. 플랫폼별 준비물, 설치 파일,
+첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.md)에 정리했습니다.
 
 ### 소스에서
 
@@ -470,7 +472,8 @@ masc/
 
 패키지 버전은 `dune-project`에 있고 `masc.opam`으로 생성됩니다.
 `CHANGELOG.md`가 소스 릴리스 이력을 적고, 바이너리의 정답은 GitHub
-Releases입니다. 1.0 전에는 API와 설정이 바뀔 수 있습니다.
+Releases입니다. 현재 릴리스 계열은 **0.34.0**입니다.
+1.0 전에는 API와 설정이 바뀔 수 있습니다.
 
 ## 라이선스
 

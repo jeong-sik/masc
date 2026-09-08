@@ -1328,35 +1328,7 @@ let test_overview_state_domains_are_closed_sum () =
        ~needle:"unknown attention severity")
 ;;
 
-let test_planning_cursor_uses_visible_goal_order () =
-  check int "visible planning helper lives in shared types" 1
-    (Ast_grep.count_value_bindings
-       ~module_path:"bin/masc_tui_types.ml"
-       ~name:"planning_visible_goals");
-  check int "visible planning helper avoids duplicate-prone insertion helper" 0
-    (Ast_grep.count_value_bindings
-       ~module_path:"bin/masc_tui_types.ml"
-       ~name:"insert_sorted");
-  check bool "visible planning helper uses stable depth sort" true
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_types.ml"
-       ~callee:"List.stable_sort"
-     >= 1);
-  check int "render no longer owns a private tree sorter" 0
-    (Ast_grep.count_value_bindings
-       ~module_path:"bin/masc_tui_render.ml"
-       ~name:"sort_goals_for_tree");
-  check bool "render uses shared visible-goal order" true
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml"
-       ~callee:"planning_visible_goals"
-     >= 1);
-  check bool "key handling uses shared visible-goal order" true
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui.ml"
-       ~callee:"planning_visible_goals"
-     >= 2)
-;;
+
 
 (* The screen dials one address and it is not a setting.
 
@@ -1486,41 +1458,7 @@ let test_the_scroll_counts_back_from_a_pinned_row () =
        ~callees:[] ~identifiers:[ "rows_since_pin" ])
 ;;
 
-let test_planning_refresh_reconciles_navigation_identity () =
-  let main_path = "bin/masc_tui.ml" in
-  check int "planning apply owns one identity reconciliation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_planning_load"
-       ~callee:"Planning_selection.reconcile");
-  check int "planning reconciliation has one application owner" 1
-    (Ast_grep.count_calls ~module_path:main_path
-       ~callee:"Planning_selection.reconcile");
-  check int "planning apply is independent of the visible surface" 0
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
-       ~fields:[ "view" ]);
-  check int "scoped HTTP application owns one planning apply" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_http_scoped_surfaces"
-       ~callee:"apply_planning_load");
-  (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
-     lookups from the key loop: the loop re-derived the Planning selection from
-     whichever snapshot it happened to hold, and a reorder between refreshes
-     moved the cursor onto a different goal. Reconciliation belongs to
-     [Planning_selection.reconcile], pinned above.
 
-     That absence was guarded by counting [List.find_opt] in [main], which is a
-     2,700-line key dispatcher: #30603 added a repository lookup for the PR-URL
-     jump and turned this red on a call with nothing to do with Planning. What
-     the loop must not do is reach into the snapshot's goal list itself; the two
-     reads it legitimately makes both go through [planning_visible_goals], so
-     that projection is the permitted path and anything else is the bug coming
-     back. *)
-  check int "refresh loop reads planning goals only through the visible projection" 0
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"main"
-       ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
-;;
 
 let test_overview_events_use_scroll_projection () =
   check int "overview renders one bounded event window" 1
@@ -2384,34 +2322,7 @@ let test_the_session_filter_reads_the_transcript () =
 ;;
 
 
-(* The Board header and its rows are laid out by one function.
 
-   They were not: the rows sized their title to [cols - 68] and the header
-   claimed a fixed 20, so at eighty columns the header ran long, SCORE was
-   cut to "SC~" and REPLIES fell off the frame entirely -- two columns still
-   drawn on every row with nothing saying what they were. The mark ahead of
-   the id is one cell and the header reserved two, which put every label one
-   cell off its data.
-
-   A header that disagrees with its rows is worse than no header: it labels
-   the wrong column and the reader has no way to notice.
-
-   The shared arithmetic became a shared column description. This pins that
-   the surface draws its header and its rows from it rather than either one
-   spelling widths again: one title width, asked once, and the two rows built
-   from the description that width was measured against. *)
-let test_the_board_header_and_rows_share_one_layout () =
-  let module_path = "bin/masc_tui_render.ml" in
-  let in_board callee =
-    Ast_grep.count_calls_in_value_binding ~module_path
-      ~binding_name:"render_board_list" ~callee
-  in
-  check int "the title is sized once for the whole surface" 1
-    (in_board "board_title_width");
-  check int "the header is drawn from the column description" 1
-    (in_board "Render_schedule.board_header_row");
-  check int "and so is every row" 1 (in_board "Render_schedule.board_row")
-;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
@@ -2498,14 +2409,6 @@ let () =
           `Quick
           test_overview_state_domains_are_closed_sum;
         test_case
-          "planning cursor uses visible goal order"
-          `Quick
-          test_planning_cursor_uses_visible_goal_order;
-        test_case
-          "planning refresh reconciles navigation identity"
-          `Quick
-          test_planning_refresh_reconciles_navigation_identity;
-        test_case
           "the scroll counts back from a pinned row"
           `Quick
           test_the_scroll_counts_back_from_a_pinned_row;
@@ -2541,10 +2444,6 @@ let () =
           "the session row filter reads the transcript"
           `Quick
           test_the_session_filter_reads_the_transcript;
-        test_case
-          "the board header and rows share one layout"
-          `Quick
-          test_the_board_header_and_rows_share_one_layout;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

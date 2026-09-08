@@ -1010,7 +1010,7 @@ let run_turn
            this goal. Official vendor sessions still require explicit current
            input; their resume API does not import this canonical history. *)
         , user_message
-        , None )
+        , user_blocks )
       | None ->
         let ctx_work =
           match hitl_resolution with

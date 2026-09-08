@@ -5339,3 +5339,8 @@
  (name test_dashboard_task_search_text)
  (modules test_dashboard_task_search_text)
  (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))
+
+(test
+ (name test_dashboard_task_preview)
+ (modules test_dashboard_task_preview)
+ (libraries alcotest masc.dashboard masc.masc_types yojson digestif))

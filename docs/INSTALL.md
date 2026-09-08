@@ -325,7 +325,7 @@ MASC에 자동 복사되는 것은 아닙니다.
 
 ## 업그레이드와 복구
 
-같은 태그의 스크립트를 새로 받은 뒤, 기존과 같은 prefix/base path로 실행합니다.
+릴리스에 첨부된 `install.sh`를 새로 받은 뒤, 기존과 같은 prefix/base path로 실행합니다.
 
 ```bash
 bash /tmp/masc-install.sh --version "$TAG" \

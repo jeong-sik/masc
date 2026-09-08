@@ -181,7 +181,8 @@ type world_observation = {
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
-  active_goals : string list;
+  active_goals : (string list, string) result;
+  (** Primary Goal IDs or the source failure; [Error] never means zero Goals. *)
   (** Goal IDs currently assigned to this keeper. *)
 
   unclaimed_task_count : int;

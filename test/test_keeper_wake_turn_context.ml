@@ -83,7 +83,7 @@ let base_observation : WO.world_observation =
     pending_messages = [];
     pending_board_events = [];
     idle_seconds = 0;
-    active_goals = [];
+    active_goals = Ok [];
     unclaimed_task_count = 0;
     claimable_tasks = [];
     held_task_skills = [];
@@ -876,15 +876,15 @@ let test_in_progress_task_heading_still_says_held () =
 (* --- 3. Goal titles --- *)
 
 let test_goal_summaries_render_titles () =
-  let observation = { base_observation with active_goals = [ "goal-x" ] } in
+  let observation = { base_observation with active_goals = Ok [ "goal-x" ] } in
   let with_titles =
     user_message
-      ~active_goal_summaries:
+      ~active_goal_summaries:(Ok
         [ { Prompt.summary_goal_id = "goal-x"
           ; summary_title = "Improve wake context"
           ; summary_phase = None
           }
-        ]
+        ])
       observation
   in
   check bool "id and title" true
@@ -896,7 +896,7 @@ let test_goal_summaries_render_titles () =
    prompt, arriving in the turn context instead. The observation below still
    carries an open goal, and the layer still has to be absent. *)
 let test_no_summaries_renders_no_goal_layer () =
-  let observation = { base_observation with active_goals = [ "goal-x" ] } in
+  let observation = { base_observation with active_goals = Ok [ "goal-x" ] } in
   let bare = user_message observation in
   check bool "no Active Goals heading" false
     (contains ~needle:"### Active Goals" bare);
@@ -907,16 +907,16 @@ let test_no_summaries_renders_no_goal_layer () =
    it holds goals the block does not name. *)
 let test_goal_heading_counts_what_the_block_lists () =
   let observation =
-    { base_observation with active_goals = [ "goal-a"; "goal-b" ] }
+    { base_observation with active_goals = Ok [ "goal-a"; "goal-b" ] }
   in
   let user =
     user_message
-      ~active_goal_summaries:
+      ~active_goal_summaries:(Ok
         [ { Prompt.summary_goal_id = "goal-a"
           ; summary_title = "Improve wake context"
           ; summary_phase = None
           }
-        ]
+        ])
       observation
   in
   check bool "heading counts the rendered goals" true

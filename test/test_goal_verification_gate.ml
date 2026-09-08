@@ -1003,7 +1003,8 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
     (list string)
     "the world observation keeps the verifying goal"
     [ goal_id ]
-    observation.Keeper_world_observation.active_goals;
+    (match observation.Keeper_world_observation.active_goals with
+     | Ok ids -> ids | Error detail -> fail detail);
   (* The subject here is how a [Verifying] goal renders, not which goals a
      turn is given: the summary is stated so the annotation is what the check
      depends on. *)
@@ -1020,7 +1021,7 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
       ~config
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Keeper_world_observation_inputs.No_current_task
-      ~active_goal_summaries:summaries
+      ~active_goal_summaries:(Ok summaries)
       ~observation
       ()
   in

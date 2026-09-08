@@ -274,7 +274,12 @@ let test_terminal_cell_width_and_fit () =
    cells. Summing the scalars gave one for a symbol made emoji by VS16, four
    for a thumb with a skin tone, and six for a family joined by ZWJ, so a chat
    row holding one ran past the border or lost its last cells. The scalars
-   are spelled out because the glyphs hide the selectors and joiners. *)
+   are spelled out because the glyphs hide the selectors and joiners.
+
+   The rule reads only a cluster that opens with an emoji scalar. A
+   Devanagari conjunct joined by ZWJ and a plain letter followed by VS16
+   keep the summed width, which the module measured at 2, 3, and 1 before
+   the rule existed. *)
 let test_emoji_cluster_is_two_cells () =
   let warning = "\u{26A0}\u{FE0F}" in
   let thumbs = "\u{1F44D}\u{1F3FD}" in
@@ -295,6 +300,11 @@ let test_emoji_cluster_is_two_cells () =
     ; "ascii letter", "a", 1
     ; "regional indicator pair", "\u{1F1F0}\u{1F1F7}", 2
     ; "styled heart + VS16", "\x1B[31m\u{2764}\u{FE0F}\x1B[0m", 2
+    ; "Devanagari conjunct joined by ZWJ", "\u{0915}\u{094D}\u{200D}\u{0937}", 2
+    ; "Devanagari conjunct of three consonants"
+      , "\u{0915}\u{094D}\u{200D}\u{0937}\u{094D}\u{200D}\u{092E}"
+      , 3
+    ; "plain letter + VS16", "a\u{FE0F}", 1
     ];
   (* A row folded inside its budget stays inside the border. The fold is
      pinned so a width that drifts back to the sum moves the break. *)

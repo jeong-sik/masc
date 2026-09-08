@@ -283,9 +283,11 @@ val drop_last_utf8_word : string -> string
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme
     clusters as indivisible layout pieces. Renderer-owned ANSI CSI and
-    combining marks have zero width. An emoji cluster holding VS16, a zero
-    width joiner, a skin tone, or a tag flag takes two cells whatever its
-    scalars add up to; one holding VS15 takes one. *)
+    combining marks have zero width. A cluster that opens with an emoji
+    scalar and holds VS16, a zero width joiner, a skin tone, or a tag flag
+    takes two cells whatever its scalars add up to; one holding VS15 takes
+    one. A cluster opening with any other scalar sums its parts, so a joiner
+    inside a Devanagari conjunct changes nothing. *)
 
 val split_at_cells : string -> int -> string * string
 (** The longest prefix fitting in the given cells without cutting a grapheme,

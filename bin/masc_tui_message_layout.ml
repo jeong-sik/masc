@@ -241,7 +241,10 @@ let scalar_cell_width scalar =
    (ZWJ), the skin tone modifiers, and the tags that spell a subregion flag.
    The text presentation selector (VS15) asks the other way, for one cell.
    Regional indicator pairs are not here: two of them already sum to the two
-   cells a flag takes. *)
+   cells a flag takes. Both readings apply only to a cluster that opens with
+   a scalar carrying the Emoji property, which the keycap digits have and
+   letters do not: a ZWJ joining the consonants of a Devanagari conjunct, or
+   a VS16 after a plain letter, keeps the summed width. *)
 let vs16 = Uchar.of_int 0xFE0F
 let vs15 = Uchar.of_int 0xFE0E
 let zwj = Uchar.of_int 0x200D
@@ -325,6 +328,7 @@ let grapheme_pieces text start_offset end_offset reversed =
     let widest = ref 0 in
     let hangul_l = ref false in
     let hangul_vt = ref false in
+    let emoji_base = ref false in
     let emoji_wide = ref false in
     let emoji_text = ref false in
     let close_cluster () =
@@ -333,8 +337,8 @@ let grapheme_pieces text start_offset end_offset reversed =
            wins because a cell left blank is harmless and a cell overflowed
            breaks the border. *)
         let cells =
-          if !emoji_wide then emoji_cluster_cells
-          else if !emoji_text then text_presentation_cells
+          if !emoji_base && !emoji_wide then emoji_cluster_cells
+          else if !emoji_base && !emoji_text then text_presentation_cells
           else if !hangul_l && !hangul_vt then !widest
           else !width
         in
@@ -350,11 +354,14 @@ let grapheme_pieces text start_offset end_offset reversed =
         widest := 0;
         hangul_l := false;
         hangul_vt := false;
+        emoji_base := false;
         emoji_wide := false;
         emoji_text := false
       end
     in
     let take_scalar scalar =
+      if !cluster_end = !cluster_start then
+        emoji_base := Uucp.Emoji.is_emoji scalar;
       cluster_end := !cluster_end + Uchar.utf_8_byte_length scalar;
       let scalar_width = scalar_cell_width scalar in
       width := !width + scalar_width;

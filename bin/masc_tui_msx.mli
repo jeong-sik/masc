@@ -24,6 +24,7 @@ val set_cell_pixels : (int * int) option -> unit
 val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
+  -> ?notice:string
   -> Masc_tui_types.msx_frame option
   -> unit
 (** Draw the frame as a truecolor mosaic. Writes the whole terminal.

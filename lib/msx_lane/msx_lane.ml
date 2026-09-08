@@ -380,3 +380,82 @@ let frame () =
         ; disk = st.disk
         })
 ;;
+
+let atomic_write path contents =
+  mkdir_p (Filename.dirname path);
+  let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
+    (fun () -> output_string oc contents; close_out oc; Sys.rename tmp path)
+;;
+
+let save ~path =
+  locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      let named = function None -> `Null | Some name -> `String name in
+      let json = `Assoc
+        [ "version", `Int 1
+        ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
+        ; "cartridge", named st.cart
+        ; "disk", named st.disk
+        ; "ledger", `List (List.map entry_json (List.rev st.entries))
+        ] in
+      try
+        atomic_write path (Yojson.Safe.to_string json);
+        Ok (observe st)
+      with Sys_error message -> Error (Unreadable message))
+;;
+
+let decode_checkpoint json =
+  let open Yojson.Safe.Util in
+  let invalid message = Error (Invalid_request ("invalid MSX checkpoint: " ^ message)) in
+  let named = function `Null -> None | `String s -> Some s
+    | value -> raise (Type_error ("expected media name or null", value)) in
+  try
+    if member "version" json <> `Int 1 then invalid "unsupported version"
+    else
+      match Base64.decode (member "machine" json |> to_string) with
+      | Error message -> invalid message
+      | Ok bytes -> (
+        match Msx.restore ~state:bytes with
+        | Error message -> invalid message
+        | Ok m ->
+          let cart = named (member "cartridge" json) and disk = named (member "disk" json) in
+          let frame = Msx.frame_number m in
+          let entries = member "ledger" json |> to_list |> List.map (fun e ->
+            let at_frame = member "frame" e |> to_int in
+            let who = member "who" e |> to_string in
+            let key_name = member "key" e |> to_string in
+            let down = match member "edge" e with
+              | `String "down" -> true | `String "up" -> false
+              | value -> raise (Type_error ("expected down or up edge", value)) in
+            {at_frame; who; key_name; down}) in
+          let rec valid_edges previous = function
+            | [] -> true
+            | e :: rest -> e.at_frame >= previous && e.at_frame <= frame
+                && Result.is_ok (key_of_string e.key_name) && valid_edges e.at_frame rest in
+          if not (valid_edges 0 entries) then invalid "ledger does not match saved frame"
+          else Ok (m, frame, cart, disk, entries))
+  with Type_error (message, _) -> invalid message
+;;
+
+let restore ~path ~ledger_dir =
+  let decoded =
+    try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
+    | Sys_error message -> Error (Unreadable message)
+    | Yojson.Json_error message -> Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+  match decoded with
+  | Error e -> Error e
+  | Ok (m, frame, cart, disk, entries) ->
+    locked (fun () ->
+      let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+      try
+        let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
+        atomic_write ledger_path ledger_bytes;
+        let st = {m; frame; cart; disk; ledger_path; entries = List.rev entries} in
+        state := Some st;
+        Ok (observe st)
+      with Sys_error message -> Error (Unreadable message))
+;;

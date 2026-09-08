@@ -92,5 +92,22 @@ Campaign acceptance still requires readable interactive menus, starting a
 scenario, taking turns, completing a battle, saving progress, restarting and
 restoring that progress, and an observed ending. Record source/binary identity,
 image and BIOS hashes, frame-numbered inputs and screenshots at these stages.
-The current in-memory machine and input ledger are not a persistent save:
-reloading/ejecting replaces it, and the core's save-state API is unimplemented.
+Use named checkpoints for persistence; the input ledger alone is not a save.
+
+## Checkpoints
+
+In the TUI game view, **F6** saves the `quick` checkpoint and **F7** restores
+it. The result remains visible in the footer. Keepers can use
+`masc_msx_save {"slot":"campaign"}` and
+`masc_msx_restore {"slot":"campaign"}` for named checkpoints. Names contain
+1–64 letters, digits, underscores or hyphens; the default is `quick`.
+
+Checkpoints live in `<base-path>/.masc/msx/saves/`. They include CPU, RAM,
+VRAM, mounted media, cartridge SRAM, open disk-file positions and input
+history. Saving does not advance the game. Restore resumes the saved frame
+without rebooting, including after server restart. Invalid checkpoints leave
+the current machine intact. Saving again replaces that named checkpoint.
+
+These are emulator checkpoints, separate from a game's own disk-save menu.
+The presence of a checkpoint does not establish that every game command or
+ending is supported. Keep a checkpoint before experimenting with later stages.

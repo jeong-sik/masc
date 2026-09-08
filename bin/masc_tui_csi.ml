@@ -43,9 +43,7 @@ let final_name = function
   | 'F' -> Some "end"
   | _ -> None
 
-(* [ESC \[ <n> ~] keys. The bare numbers are the ones this surface reads; the
-   function keys are left out because nothing binds them and a name nobody
-   uses is a name that goes stale. *)
+(* [ESC \[ <n> ~] keys, including the MSX checkpoint bindings. *)
 let tilde_name = function
   | "1" -> Some "home"
   | "2" -> Some "insert"
@@ -53,6 +51,8 @@ let tilde_name = function
   | "4" -> Some "end"
   | "5" -> Some "pageup"
   | "6" -> Some "pagedown"
+  | "17" -> Some "f6"
+  | "18" -> Some "f7"
   | _ -> None
 
 (* Unicode code points the Kitty protocol reports as themselves. Only the ones
@@ -67,6 +67,8 @@ let codepoint_name code =
     | 13 -> Some "enter"
     | 27 -> Some "esc"
     | 127 -> Some "backspace"
+    | 57369 -> Some "f6"
+    | 57370 -> Some "f7"
     | _ -> None
 
 (* With disambiguation enabled, iTerm reports Ctrl+letter as CSI-u instead of
@@ -82,7 +84,20 @@ let legacy_control_byte { shift; alt; ctrl } name =
 
 let name ~parameters ~final =
   let first, second = split_parameters parameters in
-  let modifiers = decode_modifiers second in
+  (* Kitty's optional event subfield is 1=press, 2=repeat, 3=release.
+     A release must not invoke the checkpoint binding a second time. *)
+  let modifiers =
+    match String.split_on_char ':' second with
+    | [mask] -> Some (decode_modifiers mask)
+    | [mask; event] -> (
+        match int_of_string_opt (String.trim event) with
+        | Some (1 | 2) -> Some (decode_modifiers mask)
+        | _ -> None)
+    | _ -> None
+  in
+  match modifiers with
+  | None -> None
+  | Some modifiers ->
   match final with
   (* [u] is the Kitty protocol's own final: the first parameter is the key's
      code point rather than a key number. *)

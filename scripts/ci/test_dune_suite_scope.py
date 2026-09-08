@@ -51,29 +51,32 @@ check(
     "run",
 )
 
-# Every shape where executing the binary is not what dune does.
+# Deps and a setenv action are stanza_env.py's to supply, and the caller
+# skips on what that reader refuses. Neither is a reason to answer skip here.
 check(
-    "deps belong to the runtest action",
+    "deps are supplied, not a reason to skip",
     "(test (name test_x) (deps ../bin/main_eio.exe))",
     "test_x",
-    "skip",
+    "run",
 )
 check(
     "a custom action carries the environment",
     '(test (name test_x) (action (setenv MASC_BASE_PATH "b" (run %{test}))))',
     "test_x",
-    "skip",
-)
-check(
-    "a conditionally disabled stanza has no executable",
-    '(test (name test_x) (enabled_if (= %{env:MASC_E2E_TESTS=false} true)))',
-    "test_x",
-    "skip",
+    "run",
 )
 check(
     "a group's deps reach every name in it",
     "(tests (names test_a test_b) (deps ../config/runtime.toml))",
     "test_a",
+    "run",
+)
+
+# The one shape that means there is no executable to run at all.
+check(
+    "a conditionally disabled stanza has no executable",
+    '(test (name test_x) (enabled_if (= %{env:MASC_E2E_TESTS=false} true)))',
+    "test_x",
     "skip",
 )
 
@@ -95,8 +98,12 @@ check(
 
 # The splitter has to find the end of a form whatever the form contains.
 check(
+    # The enabled_if sits after the string. A ")" read as a real paren ends
+    # the stanza at the string and the field never gets read, which answers
+    # run for a suite that has no executable.
     "a paren inside a string does not move the balance",
-    '(test (name test_x) (action (run %{test} "a ) b")))',
+    '(test (name test_x) (action (run %{test} "a ) b")) '
+    '(enabled_if (= %{env:MASC_E2E_TESTS=false} true)))',
     "test_x",
     "skip",
 )
@@ -117,11 +124,11 @@ check(
     inc="(test (name test_x) (libraries alcotest))",
 )
 check(
-    "an included stanza's deps are read too",
+    "an included stanza is read for its enabled_if too",
     "(include stanzas/test_x.inc)",
     "test_x",
     "skip",
-    inc="(test (name test_x) (deps ../config/runtime.toml))",
+    inc='(test (name test_x) (enabled_if (= %{env:MASC_E2E_TESTS=false} true)))',
 )
 
 with tempfile.TemporaryDirectory() as raw:

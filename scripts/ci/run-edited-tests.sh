@@ -28,6 +28,7 @@ if [ "${self_test_only}" = false ]; then
   repo="${MASC_TARGET_REPO:-${GITHUB_REPOSITORY}}"
 fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
+stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
 
 # A guess at a runaway list rather than a budget. Twelve suites is far past
 # what a pull request normally edits; past it the list is more likely wrong
@@ -223,8 +224,32 @@ while IFS= read -r source; do
       continue
       ;;
   esac
+  # What dune would supply and this does not: the files the stanza declares
+  # as deps, and the environment its (setenv ...) action sets. The reader is
+  # the one test.yml's targeted path already uses, so a suite run here and a
+  # suite run there are given the same things. It errors rather than
+  # guessing, and an error is this step's skip -- a suite run under the
+  # wrong environment reports verdicts that look real.
+  if ! stanza_deps=$(python3 "${stanza_reader}" --dir "${dir}" --deps "${name}" 2>&1); then
+    echo "-- ${dir}/${name}: ${stanza_deps}"
+    skipped=$((skipped + 1))
+    continue
+  fi
+  if ! stanza_env=$(python3 "${stanza_reader}" --dir "${dir}" "${name}" 2>&1); then
+    echo "-- ${dir}/${name}: ${stanza_env}"
+    skipped=$((skipped + 1))
+    continue
+  fi
+  deps=()
+  while IFS= read -r target; do
+    [ -n "${target}" ] && deps+=("${target}")
+  done <<< "${stanza_deps}"
+  stanza_setenv=()
+  while IFS= read -r assignment; do
+    [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
+  done <<< "${stanza_env}"
   echo "== ${dir}/${name}"
-  if ! dune build "${dir}/${name}.exe" < /dev/null; then
+  if ! dune build "${dir}/${name}.exe" ${deps+"${deps[@]}"} < /dev/null; then
     failed="${failed}${dir}/${name} (build)\n"
     continue
   fi
@@ -241,7 +266,8 @@ while IFS= read -r source; do
     continue
   fi
   if ! ( cd "${repo_root}/_build/default/${dir}" \
-         && DUNE_SOURCEROOT="${repo_root}" \
+         && env DUNE_SOURCEROOT="${repo_root}" \
+            ${stanza_setenv+"${stanza_setenv[@]}"} \
             timeout "${per_suite_timeout}" "./${name}.exe" < /dev/null ); then
     failed="${failed}${dir}/${name} (run)\n"
     continue

@@ -34,7 +34,7 @@ let test_age_label () =
 
 let test_fact_row_line () =
   let fact : Decode.memory_fact =
-    { mf_claim = "System uses Roger voice for Sangsu"
+    { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = "persona"
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
@@ -328,7 +328,7 @@ let test_render_memory_facts_body () =
 let test_rows_and_header_share_one_grid () =
   let cols = 120 in
   let fact : Decode.memory_fact =
-    { mf_claim = "System uses Roger voice for Sangsu"
+    { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = "persona"
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
@@ -392,9 +392,9 @@ let test_rows_and_header_share_one_grid () =
 
 let test_fleet_fact_row_line () =
   let fact : Decode.memory_fact =
-    { mf_claim = "System uses Roger voice for Sangsu"
+    { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = "persona"
-    ; mf_origin = "sangsu · manual"
+    ; mf_origin = "tester · manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
@@ -405,7 +405,7 @@ let test_fleet_fact_row_line () =
   let line = Render_memory.memory_fact_row_line ~is_fleet:true ~cols:120 row in
   check bool "fleet fact row line bounded" true (Layout.display_width line <= 120);
   let stripped = Masc_tui_theme.strip_sgr line in
-  check bool "fleet fact row has sangsu tag" true (contains "sangsu" stripped);
+  check bool "fleet fact row has tester tag" true (contains "tester" stripped);
   check bool "fleet fact row has IDENTITY badge" true (contains "IDENTITY" stripped)
 ;;
 

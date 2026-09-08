@@ -24,7 +24,10 @@
 # Modes:
 #   default      "file lit reps" tab-separated, sorted by reps desc
 #   --strict     exit 1 if any (file, lit, reps≥threshold) found
-#   --explain X  for literal X, show file:line:body for every site
+#   --explain X  for literal X, show file:line:body for every site.
+#                Unfiltered on purpose: the histogram above counts code
+#                only, and a reader chasing a literal wants to see the
+#                comment that explains it as well as the uses.
 
 set -euo pipefail
 
@@ -61,20 +64,40 @@ if [[ -n "$EXPLAIN" ]]; then
   exit 0
 fi
 
-# Build per-file literal histogram. Strip lines that are comments,
-# test fixtures, or generated artifacts (.mli signatures live with .ml).
-# We accept any digit run >= MIN_DIGITS, prefixed by a word boundary.
-LITERAL_RE="\\b[0-9]{${MIN_DIGITS},}\\b"
-
+# Build a per-file literal histogram over code, not over comments.
+#
+# The comment above this used to say lines that are comments were stripped,
+# and nothing stripped them. A digit run of four or more matches an RFC
+# number, so `RFC-0233` cited ten times in one .mli read as a literal
+# repeated ten times. 67 of the 80 pairs this reported were prose; the count
+# below is 13.
+#
+# (* ... *) spans are removed whole rather than line by line, because that is
+# where the citations live -- a multi-line comment block is one span and a
+# line-scoped filter sees only its middle lines.
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-# rg -o prints only the matched text; combined with file path produces
-# file:line:literal. We then group (file,literal).
-rg -onP --with-filename "$LITERAL_RE" "$TARGET" 2>/dev/null \
-  | awk -F: '{ printf "%s\t%s\n", $1, $3 }' \
+python3 - "$TARGET" "$MIN_DIGITS" <<'HISTOGRAM' \
   | sort | uniq -c | sort -rn \
-  | awk -v min="$MIN_REPS" '$1 >= min { print $1"\t"$2 }' > "$tmp"
+  | awk -v min="$MIN_REPS" '$1 >= min { print $1"\t"$2"\t"$3 }' > "$tmp"
+import pathlib
+import re
+import sys
+
+target, min_digits = sys.argv[1], int(sys.argv[2])
+literal = re.compile(rb"\b[0-9]{%d,}\b" % min_digits)
+comment = re.compile(rb"\(\*.*?\*\)", re.S)
+
+root = pathlib.Path(target)
+paths = [root] if root.is_file() else sorted(root.rglob("*"))
+for path in paths:
+    if path.suffix not in (".ml", ".mli") or not path.is_file():
+        continue
+    code = comment.sub(b" ", path.read_bytes())
+    for match in literal.findall(code):
+        print(f"{path}\t{match.decode()}")
+HISTOGRAM
 
 # Output: count<TAB>file<TAB>literal
 awk -F'\t' '{ printf "%5d  %-60s  %s\n", $1, $2, $3 }' "$tmp"

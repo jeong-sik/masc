@@ -13929,6 +13929,98 @@ def run_schedule_delivery_regression(executable: str) -> None:
     )
 
 
+def run_schedule_source_status_regression(executable: str) -> None:
+    binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+    for initial_error in (True, False):
+        fixtures = schedule_detail_http_fixtures()
+        good = fixtures[SCHEDULES_PATH]
+        assert isinstance(good, tuple)
+        recovered = json.loads(json.dumps(good[1]))
+        recovered["requests"][0]["status"] = "scheduled"
+        recovered["requests"][0]["payload_target"] = "recovered-keeper"
+        recovered["requests"][0]["payload"]["body"]["keeper_name"] = "recovered-keeper"
+        fail_reads = threading.Event()
+        recovered_reads = threading.Event()
+        if initial_error:
+            fail_reads.set()
+        fixtures[SCHEDULES_PATH] = lambda: (
+            (503, {"error": "unavailable"}) if fail_reads.is_set()
+            else (200, recovered) if recovered_reads.is_set()
+            else good
+        )
+        fixtures[SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = (
+            200, {"status": "found", "schedule_id": "schedule-proof-701",
+                  "wakes": [], "wake_retention_per_schedule": 1},
+        )
+
+        def interact(process, master_fd, _slave_fd, output, _base_path):
+            def require(*labels: str) -> bytes:
+                screen = screen_text(bytes(output))
+                for label in labels:
+                    if label.encode() not in screen:
+                        raise AssertionError(f"Schedules omitted {label!r}: {screen!r}")
+                return screen
+
+            def evidence(phase: str) -> None:
+                captured = bytes(output)
+                end = captured.rfind(FRAME_END)
+                if end < 0:
+                    raise AssertionError("Schedules evidence has no completed terminal frame")
+                end += len(FRAME_END)
+                redraw = captured.rfind(FULL_REDRAW, 0, end)
+                start = captured.rfind(FRAME_START, 0, redraw) if redraw >= 0 else -1
+                if start < 0:
+                    raise AssertionError("Schedules evidence has no complete redraw origin")
+                # Preserve exact ANSI, including all complete deltas since
+                # the last full redraw. Compression keeps all four measured
+                # screens within Dune's output allowance for browser replay.
+                print("SCHEDULE_SOURCE_PTY_EVIDENCE " + json.dumps({
+                    "phase": phase, "initial_error": initial_error,
+                    "fixture": "isolated HTTP source status", "rows": 30, "columns": 100,
+                    "binary_sha256": binary_sha256, "encoding": "zlib+base64",
+                    "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
+                }), flush=True)
+
+            palette_go(process, master_fd, output, b"go schedules",
+                       b"503" if initial_error else b"status:running")
+            if initial_error:
+                screen = require("조회 실패:", "503")
+                for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
+                    if absent in screen:
+                        raise AssertionError(f"Failed initial source invented data: {screen!r}")
+                evidence("initial-read-failed")
+            else:
+                require("schedule-proof-701", "status:running", "Requests: 1")
+                fail_reads.set()
+                send_and_wait(process, master_fd, output, b"r", b"503")
+                require("이전 조회 유지 · 갱신 실패:", "503", "schedule-proof-701",
+                        "status:running", "Requests: 1")
+                evidence("retained-list-refresh-failed")
+                send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
+                require("이전 조회 유지 · 갱신 실패:", "503", "instance-proof-701")
+                # The warning belongs to the source, so it remains visible
+                # while the retained detail body is scrolled.
+                send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
+                require("이전 조회 유지 · 갱신 실패:", "503")
+                send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
+
+            recovered_reads.set()
+            fail_reads.clear()
+            send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
+            screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
+            for absent in ("조회 실패:", "갱신 실패:", "503", "status:running"):
+                if absent.encode() in screen:
+                    raise AssertionError(f"Recovered source retained old status: {screen!r}")
+            evidence("source-recovered")
+            os.write(master_fd, b"q")
+
+        run_terminal_scenario(
+            executable,
+            description=f"Schedules source status: {'initial' if initial_error else 'refresh'}",
+            interact=interact, http_fixtures=fixtures,
+        )
+
+
 def run_chat_clarity_regression(executable: str) -> None:
     fixtures = chat_clarity_http_fixtures()
     tool_calls_path = "/api/v1/keepers/alpha/tool-calls?limit=100"
@@ -14813,6 +14905,10 @@ def main() -> None:
         run_schedule_delivery_regression(os.path.abspath(sys.argv[1]))
         print("tui schedule delivery regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "schedule-source-status":
+        run_schedule_source_status_regression(os.path.abspath(sys.argv[1]))
+        print("tui schedule source status regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
         run_changes_newline_regression(os.path.abspath(sys.argv[1]))
         print("tui Changes newline projection regression: PASS")
@@ -14873,7 +14969,7 @@ def main() -> None:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
             "[cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|runtime|resources|keepers-lanes|"
+            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|schedule-source-status|runtime|resources|keepers-lanes|"
             "board-json|code-memo|memory-journal|skill-usage-coverage|tools-purpose|tools-request-identity]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))

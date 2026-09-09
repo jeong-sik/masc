@@ -11,6 +11,10 @@
     reads no clock and no randomness — so a keeper session replays in the
     core's boot harness. *)
 
+module Screen_change : module type of Screen_change
+(** The pure settle/change judgement behind {!step_until_change}, re-exported
+    for its ROM-less tests. *)
+
 type key = Msx.key
 
 val key_of_string : string -> (key, string) result
@@ -109,6 +113,22 @@ val screen : unit -> (observation, error) result
 
 val step : frames:int -> (observation, error) result
 (** Advances [frames] (1..{!max_frames_per_call}) with no key held. *)
+
+type until_change = {
+  frames_run : int;
+      (** frames actually advanced — less than the budget when it settled early *)
+  changed : bool;
+      (** the screen ended up different from the start; false with a settled
+          screen is the "this scene waits for a key" signal *)
+  stable : bool;
+      (** stopped because the screen settled; false means the budget ran out *)
+}
+
+val step_until_change : max_frames:int -> (observation * until_change, error) result
+(** Advances in [Screen_change.default] intervals until the coarse screen view
+    settles (two near-equal fingerprints in a row — a blinking cursor alone is
+    not movement) or [max_frames] (1..{!max_frames_per_call}) runs out. The
+    judgement core is pure and machine-free: {!Screen_change}. *)
 
 val press :
   who:string ->

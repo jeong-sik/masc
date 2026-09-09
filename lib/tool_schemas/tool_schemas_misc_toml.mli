@@ -24,5 +24,6 @@ val msx_change_disk : Masc_domain.tool_schema
 val msx_screen : Masc_domain.tool_schema
 val msx_press : Masc_domain.tool_schema
 val msx_step : Masc_domain.tool_schema
+val msx_step_until_change : Masc_domain.tool_schema
 val msx_peek : Masc_domain.tool_schema
 val msx_ram_diff : Masc_domain.tool_schema

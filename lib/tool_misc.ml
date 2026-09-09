@@ -213,6 +213,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_msx_lane.handle_ram_diff ~tool_name:name ~start_time:start ())
   | Some Tool_schemas_misc.Misc_msx_step ->
       Some (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_msx_step_until_change ->
+      Some
+        (Tool_misc_msx_lane.handle_step_until_change ~tool_name:name
+           ~start_time:start args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -243,6 +247,7 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_msx_change_disk
   | Tool_schemas_misc.Misc_msx_press
   | Tool_schemas_misc.Misc_msx_step
+  | Tool_schemas_misc.Misc_msx_step_until_change
   (* Starting and stopping the automation browser changes its lifecycle. *)
   | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask

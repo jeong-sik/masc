@@ -4,7 +4,7 @@
     may answer it without a Judge. Unsupported syntax and runtime profiles
     retain their ordinary Gate path. No command is executed by this module. *)
 
-type git_command = Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
+type git_command = Status | Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
 
 type observation_reason =
   | Git_configuration_override

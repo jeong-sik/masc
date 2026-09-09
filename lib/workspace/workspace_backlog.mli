@@ -63,3 +63,8 @@ val write_backlog_result :
     rejected before either primary or recovery is written. Failures after a
     primary commit are returned in the corresponding [Ok] fields and logged
     explicitly. *)
+
+(** Repair primary mirrors and recovery copies with the current primary
+    snapshot without incrementing its revision. Caller holds the backlog lock. *)
+val repair_backlog_copies_result :
+  Workspace_utils_backend_setup.config -> Masc_domain.backlog -> (unit, string) result

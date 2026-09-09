@@ -146,9 +146,26 @@ export async function setBoardPostPinned(postId: string, pinned: boolean): Promi
   return resp.ok
 }
 
-export async function deleteTask(taskId: string): Promise<boolean> {
-  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/tasks/delete', { task_id: taskId })
-  return resp.ok
+export type TaskDeleteResult =
+  | { status: 'deleted' | 'already_absent'; taskId: string }
+  | { status: 'cleanup_failed'; taskId: string; errors: string[] }
+
+export async function deleteTask(taskId: string): Promise<TaskDeleteResult> {
+  const resp = await post<unknown>('/api/v1/dashboard/tasks/delete', { task_id: taskId })
+  if (!resp || typeof resp !== 'object') throw new Error('Invalid Task deletion result')
+  const value = resp as Record<string, unknown>
+  if (value.task_id !== taskId || value.task_deleted !== true || !Array.isArray(value.errors)
+      || !value.errors.every(error => typeof error === 'string')) {
+    throw new Error('Invalid Task deletion receipt')
+  }
+  if (value.status === 'cleanup_failed' && value.ok === false && value.errors.length > 0) {
+    return { status: 'cleanup_failed', taskId, errors: value.errors as string[] }
+  }
+  if ((value.status === 'deleted' || value.status === 'already_absent')
+      && value.ok === true && value.errors.length === 0) {
+    return { status: value.status, taskId }
+  }
+  throw new Error('Invalid Task deletion settlement')
 }
 
 // Route an operator claim through the shared FSM transition tool so it is

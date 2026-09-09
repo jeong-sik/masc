@@ -145,8 +145,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | fields ->
         Error
           (Printf.sprintf
-             "unknown keeper TOML keys: %s"
-             (String.concat ", " fields))
+             "unknown keeper TOML keys: %s; accepted keys: %s, %s<name>"
+             (String.concat ", " fields)
+             (String.concat ", " (List.map (fun key -> "keeper." ^ key)
+                                    canonical_keeper_toml_key_names))
+             agent_core_env_key_prefix)
   in
   (* Do not use [strs] alone here: it maps an absent array and an explicit []
      to the same value. The profile contract gives those opposite meanings. *)

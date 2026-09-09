@@ -300,6 +300,31 @@ let write_backlog_result ?after_commit config backlog =
       ; post_commit_error
       })
 
+(** Re-settle the current authoritative snapshot without creating a new
+    revision. Caller holds the backlog lock and obtained [backlog] from its
+    primary read. This repairs copies after a committed deletion's failed
+    settlement, including on an already-absent Task retry. *)
+let repair_backlog_copies_result config backlog =
+  let json = backlog_to_yojson backlog in
+  let primary_path = backlog_path config in
+  let recovery_path = backlog_recovery_path config in
+  let write path = match write_json_commit_result config path json with
+    | Error message -> Error message
+    | Ok {mirror_error=Some message} -> Error message
+    | Ok {mirror_error=None} -> Ok () in
+  match write primary_path with
+  | Error _ as error -> error
+  | Ok () ->
+    match write recovery_path with
+    | Error _ as error -> error
+    | Ok () ->
+      clear_backlog_cache_for primary_path;
+      clear_backlog_cache_for recovery_path;
+      try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
+      | Eio.Cancel.Cancelled _ as error -> raise error
+      | error -> Error (Printexc.to_string error)
+;;
+
 (** [write_backlog ?after_commit config backlog] persists the primary SSOT,
     then observes secondary recovery/mirror/projection failures without
     misreporting the committed mutation as a primary failure. *)

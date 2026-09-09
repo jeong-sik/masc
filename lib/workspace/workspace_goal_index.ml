@@ -369,6 +369,20 @@ let prune_links_for_goal_result config ~goal_id =
           new_links)
 ;;
 
+let prune_links_for_task_result config ~task_id =
+  match with_file_lock_r config (goal_task_links_lock_path config) (fun () ->
+    match read_goal_task_links_for_mutation config with
+    | Error _ as error -> error
+    | Ok links ->
+      let remaining = List.filter_map (fun (goal_id, task_ids) ->
+        let ids = List.filter (fun id -> not (String.equal id task_id)) task_ids in
+        if ids = [] then None else Some (goal_id, ids)) links in
+      write_goal_task_links_result config ~rollback_on_recovery_failure:false
+        ~previous_links:links remaining) with
+  | Ok result -> result
+  | Error error -> Error (Masc_domain.masc_error_to_string error)
+;;
+
 let link_task_to_goal_result config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
   let task_id = String.trim task_id in

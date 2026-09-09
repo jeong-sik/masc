@@ -25,7 +25,16 @@ let cleanup_dir dir =
   rm dir
 
 let get_field key = function
-  | `Assoc fields -> List.assoc key fields
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some value -> value
+    | None ->
+      (* List.assoc raised Not_found, and that is the whole failure the
+         runner printed: no key, no object. *)
+      failf
+        "no field %s in %s"
+        key
+        (Yojson.Safe.to_string (`Assoc fields)))
   | _ -> fail ("expected assoc for key " ^ key)
 
 let check_string_field json key expected =
@@ -187,7 +196,9 @@ let test_compact_keeper_json_normalizes_missing_fields () =
   in
   let compact = Briefing.compact_keeper_json json in
   check_null_field compact "status";
-  check_null_field compact "agent_name";
+  (* agent_name is not asked for here: #31279 purged the echo keys RFC-0393
+     left behind, and this compactor stopped emitting one. A keeper is named
+     by [name]. *)
   check_null_field compact "current_task";
   check_null_field compact "last_reply_status";
   check_null_field compact "last_reply_preview"

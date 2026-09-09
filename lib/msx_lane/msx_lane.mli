@@ -55,7 +55,10 @@ type entry = { at_frame : int; who : string; key_name : string; down : bool }
 type error =
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
-  | Unreadable of string  (** a ROM or cartridge path that cannot be read *)
+  | Unreadable of string
+      (** a file that is there and will not read: a ROM, a cartridge, a
+          checkpoint. A path that does not exist is [Invalid_request] --
+          the caller named it. *)
 
 val error_to_string : error -> string
 

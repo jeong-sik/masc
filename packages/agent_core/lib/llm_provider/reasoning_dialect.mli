@@ -149,17 +149,6 @@ val replay_capability_for_provider_config
 val with_preserve_thinking : preserve_thinking:bool option -> t -> t
 val thinking_enabled : enable_thinking:bool option -> bool
 
-val thinking_object_only_control
-  :  t
-  -> enable_thinking:bool option
-  -> preserve_thinking:bool option
-  -> thinking_object_only_control
-
-val chat_template_kwargs_preserve_field
-  :  t
-  -> preserve_thinking:bool option
-  -> bool option
-
 val ignores_sampling_param
   :  t
   -> enable_thinking:bool option

@@ -75,7 +75,6 @@ val is_alive : t -> bool
 
 val list_tools : t -> (mcp_tool list, Error.t) result
 val call_tool : t -> name:string -> arguments:Yojson.Safe.t -> Types.tool_result
-val to_tools : t -> mcp_tool list -> (Tool.t list, Error.t) result
 
 (** {1 Resource and prompt operations} *)
 

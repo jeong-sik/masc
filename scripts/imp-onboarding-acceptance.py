@@ -3,8 +3,8 @@
 
 Requires an installed release prefix and an already authenticated Codex auth.json.
 Fresh mode copies that credential into a disposable CLI home, never into evidence.
-Existing mode reuses an explicitly supplied workspace and authenticated home without
-reconfiguring their runtime or imp. No fixture model or approval bypass is used.
+Existing mode reuses an explicitly supplied fresh wizard workspace and authenticated
+home without reconfiguring their runtime or imp; prior imp history is rejected. No fixture model or approval bypass is used.
 """
 import argparse
 from contextlib import contextmanager
@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -165,6 +166,34 @@ def directory_execution(traces):
 PRESERVED_CONFIGURATION = ('runtime.toml', 'agent-core-models-overlay.toml', 'keepers/imp.toml')
 
 
+def require_unmeasured_workspace(base):
+    """Existing mode accepts a fresh wizard workspace, never prior chat proof."""
+    keeper = base / '.masc/keepers/imp'
+    for name in ('raw-traces', 'turn-records', 'execution-receipts'):
+        folder = keeper / name
+        if folder.exists() and any(path.is_file() and path.stat().st_size
+                                   for path in folder.rglob('*')):
+            raise RuntimeError('acceptance requires a workspace without prior imp history: ' + name)
+
+
+def persisted_ids(base):
+    board_path = base / '.masc/board_posts.jsonl'
+    board = ([json.loads(line) for line in board_path.read_text().splitlines() if line.strip()]
+             if board_path.exists() else [])
+    backlog_path = base / '.masc/tasks/backlog.json'
+    backlog = json.loads(backlog_path.read_text()) if backlog_path.exists() else {}
+    return ({row['id'] for row in board}, {row['id'] for row in backlog.get('tasks', [])})
+
+
+def observed_model(traces, prompts, expected):
+    starts = [row for row in traces if row.get('record_type') == 'run_started']
+    for prompt in prompts:
+        matches = [row for row in starts if row.get('prompt') == prompt]
+        if not matches or any(row.get('model') != expected for row in matches):
+            raise RuntimeError('acceptance model does not match the observed imp runtime')
+    return matches[0]['model']
+
+
 def configuration_hashes(base):
     base = base.resolve()
     config = base / '.masc/config'
@@ -194,6 +223,7 @@ def acceptance_workspace(args, output):
                 or not auth.resolve().is_relative_to(home)
                 or auth.stat().st_uid != os.getuid()):
             raise RuntimeError('existing home requires its already copied Codex authentication')
+        require_unmeasured_workspace(base)
         before = configuration_hashes(base)
         continuity = dict(existing_workspace=True, configuration_preserved=False,
                           workspace_base_path_sha256=hashlib.sha256(str(base).encode()).hexdigest())
@@ -244,6 +274,12 @@ def measure(args):
             spec_path.write_text(json.dumps(config_spec))
             run('python3', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', binary,
                 '--base-path', str(base), '--spec', str(spec_path))
+        require_unmeasured_workspace(base)
+        previous_board_ids, previous_task_ids = persisted_ids(base)
+        invocation_id = str(uuid.uuid4())
+        request_ids = [f'kmsg-acceptance-{invocation_id}-{index}' for index in range(4)]
+        (output / 'invocation.json').write_text(json.dumps(dict(
+            invocation_id=invocation_id, request_ids=request_ids), indent=2))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -285,7 +321,7 @@ def measure(args):
                     path = output / f'chat-{index}.sse'
                     with path.open('wb') as stream:
                         result = subprocess.run(['curl', '-sS', '--fail-with-body', '-N', '--config', '-',
-                            '--data-binary', json.dumps({'name': 'imp', 'message': prompt, 'request_id': f'kmsg-acceptance-{index}'}),
+                            '--data-binary', json.dumps({'name': 'imp', 'message': prompt, 'request_id': request_ids[index]}),
                             url + '/api/v1/keepers/chat/stream'], env=env,
                             input=('header = "Content-Type: application/json"\nheader = "Authorization: Bearer ' + token + '"\n').encode(),
                             stdout=stream, stderr=subprocess.PIPE, timeout=240)
@@ -310,6 +346,7 @@ def measure(args):
                         raise RuntimeError(f'chat {index} has no completed run')
                     print(f'chat {index} completed', flush=True)
                 traces = snapshot_evidence(base, output)
+                actual_model = observed_model(traces, prompts, args.model)
                 completed = [event for event in traces if event.get('record_type') == 'tool_execution_finished'
                              and event.get('tool_error') is False]
                 (output / 'tool-traces.json').write_text(json.dumps(traces, indent=2, ensure_ascii=False))
@@ -328,11 +365,13 @@ def measure(args):
                     raise RuntimeError('no successful real web fetch')
                 board = [json.loads(line) for line in (base / '.masc/board_posts.jsonl').read_text().splitlines()]
                 posted_ids = {value.get('id') for value in results.get('masc_board_post', [])}
-                if not any(row.get('id') in posted_ids and row.get('author') == 'imp' for row in board):
+                if not any(row.get('id') in posted_ids and row.get('id') not in previous_board_ids
+                           and row.get('author') == 'imp' for row in board):
                     raise RuntimeError('Board tool result has no persisted imp post')
                 (output / 'board-posts.json').write_text(json.dumps(board, indent=2, ensure_ascii=False))
                 backlog = json.loads((base / '.masc/tasks/backlog.json').read_text())
-                if not any(task.get('title') == 'Imp onboarding check' and task.get('created_by') == 'imp'
+                if not any(task.get('id') not in previous_task_ids
+                           and task.get('title') == 'Imp onboarding check' and task.get('created_by') == 'imp'
                            and task.get('status') == 'todo' for task in backlog.get('tasks', [])):
                     raise RuntimeError('no persisted open imp task')
                 required = {'masc_board_post', 'keeper_task_create', 'Execute', 'WebFetch'}
@@ -346,7 +385,8 @@ def measure(args):
                         str(base / '.masc/auth/local-admin.token'), str(output),
                         args.playwright_module, args.browser_executable)
                 receipt = dict(
-                    source=run(binary, 'build-commit').strip(), model=args.model,
+                    source=run(binary, 'build-commit').strip(), model=actual_model,
+                    invocation_id=invocation_id, request_ids=request_ids,
                     platform=run('uname', '-sm').strip(), fixture_model=False,
                     approval_overrides=False, keeper='imp', completed_chats=len(prompts),
                     successful_tools=sorted(required))

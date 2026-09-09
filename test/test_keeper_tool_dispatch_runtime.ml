@@ -2319,7 +2319,32 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       in
       check string "Execute ran in requested cwd"
         (Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
-        observed_cwd)
+        observed_cwd;
+      let execute_at cwd =
+        run "Execute"
+          (`Assoc [ "argv", `List [ `String "pwd" ]; "cwd", `String cwd ])
+      in
+      let roundtrip = execute_at observed_cwd |> check_success_result "Execute cwd roundtrip" in
+      check string "the returned cwd can be used verbatim on the next call"
+        observed_cwd
+        (json_string_field ~default:"" "output" roundtrip |> String.trim);
+      mkdir_p (Filename.concat playground "nested");
+      let nested = Filename.concat observed_cwd "nested" in
+      let nested_result = execute_at nested |> check_success_result "Execute nested visible cwd" in
+      check string "a directory below the returned cwd stays in the sandbox" nested
+        (json_string_field ~default:"" "output" nested_result |> String.trim);
+      let outside = Filename.concat config.base_path "outside-cwd" in
+      mkdir_p outside;
+      Unix.symlink outside (Filename.concat playground "escape-link");
+      List.iter
+        (fun cwd ->
+          let rejected = execute_at cwd in
+          check string "visible cwd projection does not widen the sandbox"
+            "cwd_outside_sandbox"
+            (json_string_field ~default:"" "code" (parse_json rejected.raw_output)))
+        [ Filename.concat (Filename.dirname observed_cwd) "outside-fixture-owner"
+        ; Filename.concat observed_cwd "escape-link"
+        ])
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"

@@ -2219,7 +2219,7 @@ let sandbox_image_build_in_a_directory_exit ~cli ~tag =
         Unix.create_process cli (Array.of_list argv) Unix.stdin Unix.stdout
           Unix.stderr
       in
-      let _, status = Unix.waitpid [] pid in
+      let status = Masc_cli_setup.wait_for_child pid in
       match status with
       | Unix.WEXITED 0 ->
         Printf.printf
@@ -2244,6 +2244,9 @@ let sandbox_image_build_exit ~command ~tag =
     (* The runtime exiting first would otherwise kill this process mid-write, and
        the exit status we want to report is the runtime's own. *)
     let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+    Fun.protect
+      ~finally:(fun () -> Sys.set_signal Sys.sigpipe previous_sigpipe)
+      (fun () ->
     let read_fd, write_fd = Unix.pipe () in
     Unix.set_close_on_exec write_fd;
     let pid =
@@ -2255,8 +2258,7 @@ let sandbox_image_build_exit ~command ~tag =
        output_string oc Keeper_sandbox_image.dockerfile;
        close_out oc
      with Sys_error _ -> (try close_out_noerr oc with _ -> ()));  (* @observe-allowed: the write already failed; close_out_noerr is the no-raise form and there is no second failure to report *)
-    let _, status = Unix.waitpid [] pid in
-    Sys.set_signal Sys.sigpipe previous_sigpipe;
+    let status = Masc_cli_setup.wait_for_child pid in
     (match status with
      | Unix.WEXITED 0 ->
        Printf.printf
@@ -2272,7 +2274,7 @@ let sandbox_image_build_exit ~command ~tag =
        Cmd.Exit.some_error
      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
        Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" bin n;
-       Cmd.Exit.some_error)
+       Cmd.Exit.some_error))
 
 (* Which store to build into. Docker stays the default because that is where
    [sandbox_profile = "docker"] keepers look and where this command has always

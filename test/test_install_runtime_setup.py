@@ -4,6 +4,9 @@ import io
 import importlib.util
 import json
 import os
+import pty
+import select
+import termios
 from pathlib import Path
 import subprocess
 import sys
@@ -24,7 +27,7 @@ MODULE.loader.exec_module(SETUP)
 
 def spec(choice='vllm'):
     result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp', 'openai_compatible'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
@@ -68,7 +71,7 @@ class ModelSelection(unittest.TestCase):
             with patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('99\n1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
                 selected=SETUP.select_model('/fixture/masc','codex')
             self.assertEqual(selected,dict(model='catalog-id',max_context=9876))
-            self.assertIn('account availability',terminal.getvalue())
+            self.assertIn('not yet verified',terminal.getvalue())
 
     def test_http_models_offer_actual_server_id_and_configured_limit(self):
         from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -112,7 +115,8 @@ class RuntimeSetup(unittest.TestCase):
         self.binary = self.base / 'fixture-masc'
 
     def validator(self, code):
-        self.binary.write_text('#!' + sys.executable + '\nimport sys\nfrom pathlib import Path\n' + code)
+        self.binary.write_text('#!' + sys.executable + '\nimport sys,json\nfrom pathlib import Path\n' + \
+            "if sys.argv[1] == 'runtime-wizard-catalog':\n print(json.dumps({'runtimes':[{'id':'original.model'}]})); sys.exit(0)\n" + code)
         self.binary.chmod(0o755)
 
     def test_selected_transport_uses_only_operator_model_and_capabilities(self):
@@ -122,8 +126,8 @@ class RuntimeSetup(unittest.TestCase):
                 self.assertIn('setup_' + choice, identity)
                 self.assertIn(b'operator/model-exact', runtime)
                 self.assertIn(b'"max-context" = 8192', runtime)
-                if choice in ('vllm', 'llama_cpp', 'openai_compatible'):
-                    self.assertIn(b'"provider_name" = "setup_' + choice.encode() + b'"', overlay)
+                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
+                    self.assertIn(('"provider_name" = ' + SETUP.toml(identity.split('.')[0])).encode(), overlay)
                     self.assertIn(b'"supports_tools" = true', overlay)
                     self.assertIn(b'"supports_reasoning" = false', overlay)
                     self.assertIn(b'"supports_native_streaming" = false', overlay)
@@ -195,6 +199,171 @@ runtime.write_text(runtime.read_text().replace('original.model', sys.argv[4]))
                 SETUP.configure(self.binary, self.base, spec())
         self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
 
+    def test_multiple_connections_keep_identity_default_and_fallback_order(self):
+        first, second = spec(), dict(spec(), model='another-owned-model')
+        first_id, second_id = SETUP.render(first)[0], SETUP.render(second)[0]
+        self.validator('''assert sys.argv[1] == 'runtime-default-set'
+assert sys.argv[4:] == ''' + repr([second_id, '--setup-lanes', '--setup-imp', '--fallback-runtime', 'original.model', '--fallback-runtime', first_id]) + '''
+runtime = Path(sys.argv[3]) / '.masc/config/runtime.toml'
+runtime.write_text(runtime.read_text().replace('default = "original.model"', 'default = ' + json.dumps(sys.argv[4])))
+''')
+        result = SETUP.configure_many(self.binary, self.base, [first, second],
+                                      ['original.model', first_id, second_id], default_id=second_id)
+        self.assertEqual(result['runtime_ids'], [second_id, 'original.model', first_id])
+        self.assertTrue(self.overlay.read_bytes().startswith(self.originals[1]))
+        self.assertIn(b'another-owned-model', self.runtime.read_bytes())
+        self.assertIn(b'operator/model-exact', self.runtime.read_bytes())
+        self.assertNotEqual(first_id, second_id)
+        self.assertNotEqual(first_id, SETUP.render(dict(first, endpoint='http://another.invalid/v1'))[0])
+
+    def test_any_failed_selected_model_preserves_all_connections(self):
+        self.validator('''if sys.argv[1] == 'runtime-verify':
+ print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':sys.argv[4],
+                   'status':'failed','checks':{'response':True,'tool_roundtrip':False}}))
+ sys.exit(1)
+''')
+        with self.assertRaises(SETUP.VerificationError):
+            SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
+        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
+
+    def test_real_verification_receipt_must_join_selected_identity(self):
+        self.validator('''if sys.argv[1] == 'runtime-verify':
+ print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':'another.runtime',
+                   'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
+''')
+        with self.assertRaises(SETUP.VerificationError):
+            SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
+        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
+
+    def test_successful_model_verification_is_required_before_publish(self):
+        self.validator('''if sys.argv[1] == 'runtime-verify':
+ assert Path(sys.argv[3]) != Path(''' + repr(str(self.base)) + ''')
+ print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':sys.argv[4],
+                   'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
+''')
+        result = SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
+        self.assertEqual(result['readiness'], 'verified')
+        self.assertEqual(len(result['verifications']), 1)
+
+
+class MultipleSelection(unittest.TestCase):
+    def test_terminal_arrows_space_and_enter_preserve_multiple_choices_and_restore_tty(self):
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        program = ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+                   repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                   '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
+                   'print(json.dumps(m.pick("Choose connections",["Codex","Claude","Ollama"],multiple=True)))')
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        try:
+            terminal = b''
+            while b'0 selected' not in terminal:
+                self.assertTrue(select.select([master], [], [], 5)[0], 'picker did not render')
+                terminal += os.read(master, 65536)
+            os.write(master, b' \x1b[B \r')
+            # macOS waits for terminal output to drain while restoring termios.
+            # Keep consuming the UI, just as a real terminal emulator does.
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            self.assertEqual(json.loads(output), [0, 1])
+            restored = termios.tcgetattr(slave)
+            # PENDIN is kernel-maintained pending-input state on macOS, not a
+            # terminal mode chosen by the picker.
+            restored[3] &= ~getattr(termios, 'PENDIN', 0)
+            original[3] &= ~getattr(termios, 'PENDIN', 0)
+            self.assertEqual(restored, original)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdout.close()
+            os.close(master)
+            os.close(slave)
+
+    def test_accessible_number_input_selects_several_without_model_typing(self):
+        with patch('sys.stdin', io.StringIO('1,3\n')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude', 'Ollama'], multiple=True), [0, 2])
+
+    def test_ollama_loads_only_selected_model_and_uses_effective_context(self):
+        responses = [{'capabilities':['completion','tools'], 'parameters':'',
+                      'model_info':{'qwen.context_length':999999}}, {},
+                     {'models':[{'name':'owned-qwen','context_length':16384}]}]
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+        with patch.object(SETUP, 'http_json', side_effect=responses) as requests:
+            identity, configured = SETUP.resolve_model_spec(source, {'id':'owned-qwen','context':999999}, 10)
+        self.assertEqual(configured['max_context'], 16384)
+        self.assertIs(configured['tools'], True)
+        self.assertEqual(requests.call_args_list[1].args[-1], {'model':'owned-qwen','stream':False})
+        self.assertIn(b'"num-ctx" = 16384', SETUP.render(configured)[1])
+        self.assertEqual(identity, SETUP.render(configured)[0])
+
+    def test_ollama_architecture_maximum_never_becomes_effective_context(self):
+        responses = [{'parameters':'', 'model_info':{'qwen.context_length':999999}}, {'models':[]}]
+        with patch.object(SETUP, 'http_json', side_effect=responses):
+            self.assertIsNone(SETUP.ollama_model_details('http://localhost:11434', 'owned-qwen')['context'])
+
+    def test_workspace_context_is_matched_to_same_connection_and_exact_model(self):
+        source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1', api_key_env='OWNED_KEY',
+                      rows=[dict(id='glm.model', model='glm-5.3', max_context=200000, tools=True)])
+        with patch.object(SETUP, 'discover_models', return_value=([
+                dict(id='glm-5.3',label='GLM',context=None), dict(id='different-model',label='Other',context=None)], 'server')):
+            rows, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual(rows[0]['context'], 200000)
+        self.assertIsNone(rows[1]['context'])
+        self.assertEqual(SETUP.resolve_model_spec(source, rows[0], 10), ('glm.model', None))
+
+    def test_model_labels_cannot_inject_terminal_escape_sequences(self):
+        self.assertNotIn('\x1b', SETUP.terminal_text('model\x1b[2J'))
+
+    def test_distinct_existing_bindings_for_same_model_remain_selectable(self):
+        source = dict(choice='openai_compatible', endpoint='http://localhost:8080/v1', api_key_env='', rows=[
+            dict(id='provider.small', model='same-model', max_context=8192, tools=True),
+            dict(id='provider.large', model='same-model', max_context=16384, tools=True)])
+        with patch.object(SETUP, 'discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
+            models, _ = SETUP.source_models('/fixture', source, 10)
+        self.assertEqual([row['existing']['id'] for row in models], ['provider.small','provider.large'])
+        self.assertEqual([row['context'] for row in models], [8192,16384])
+
+    def test_protected_credentials_are_not_silently_cloned_without_auth(self):
+        for kind in ('inline','file','unknown'):
+            source = dict(choice='openai_compatible', credential_kind=kind)
+            with self.subTest(kind=kind), self.assertRaisesRegex(SETUP.SetupError, 'protected credential'):
+                SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+            existing = dict(id='existing.id',tools=True)
+            self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('existing.id',None))
+
+    def test_unreachable_selected_server_returns_to_recovery_menu(self):
+        with patch.object(SETUP, 'configured_inventory', return_value={}), \
+             patch.object(SETUP, 'select_connections', side_effect=OSError('private endpoint diagnostics')), \
+             patch.object(SETUP, 'pick', return_value=[1]), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            result = SETUP.wizard('/fixture', '/workspace', 10)
+        self.assertEqual(result['readiness'], 'deferred')
+        self.assertNotIn('private endpoint diagnostics', terminal.getvalue())
+
+    def test_invalid_existing_workspace_can_choose_unused_sibling_without_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / 'workspace'
+            base.mkdir()
+            old = base / 'old-state'
+            old.write_bytes(b'preserve this state')
+            replies = [subprocess.CompletedProcess([],1,json.dumps(dict(status='needs_attention',issues=[
+                dict(path=str(old),detail='unsupported schema')]))),
+                subprocess.CompletedProcess([],0,json.dumps(dict(status='ready',read_only=True,scope='keeper_goal_state_schema')))]
+            with patch('subprocess.run',side_effect=replies), patch.object(SETUP,'pick',return_value=[0]), \
+                 patch('sys.stdin.isatty',return_value=True), contextlib.redirect_stderr(io.StringIO()):
+                result = SETUP.workspace_check('/fixture',base)
+            self.assertEqual(result['base_path'], str(base.resolve()) + '-new')
+            self.assertEqual(old.read_bytes(), b'preserve this state')
+            self.assertFalse(Path(result['base_path']).exists())
+
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class InstalledModelCatalog(unittest.TestCase):
@@ -228,7 +397,7 @@ class InstalledModelCatalog(unittest.TestCase):
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class CompiledRuntimeSetup(unittest.TestCase):
-    def test_real_validator_accepts_each_transport_and_refuses_duplicate_without_changes(self):
+    def test_real_validator_accepts_each_transport_and_reuses_identical_connection(self):
         fixture = ROOT / 'scripts/fixtures/release-evidence'
         for choice in SETUP.CHOICES:
             with self.subTest(choice=choice), tempfile.TemporaryDirectory(prefix='runtime-setup-cli-') as tmp:
@@ -248,8 +417,8 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     self.assertEqual(result['validation'], 'passed')
                     self.assertEqual(result['readiness'], 'not_probed')
                     before = [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')]
-                    with self.assertRaises(SETUP.SetupError):
-                        SETUP.configure(BINARY, base, selected)
+                    second = SETUP.configure(BINARY, base, selected)
+                    self.assertEqual(second['runtime_id'], result['runtime_id'])
                     self.assertEqual(before, [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')])
 
 

@@ -28,7 +28,6 @@ load_provider_catalog() { :; }
 compute_provider_availability() { :; }
 report_sandbox_backends() { :; }
 update_runtime_default() { printf 'selected=%s\\n' "$2"; }
-prompt_runtime_source() { echo configured; }
 DRY_RUN=1
 BASE_PATH=/fixture
 '''
@@ -80,35 +79,7 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
-    def test_claude_catalog_selection_needs_no_model_or_context_guess(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            binary = Path(temporary) / 'masc'
-            binary.write_text("#!/bin/sh\ncase \"$1\" in\nruntime-model-list) printf '%s\\n' '{\"models\":[{\"id\":\"claude-fixture-model\",\"label\":\"Claude fixture\",\"max_context\":123000}]}' ;;\nruntime-model-info) printf '%s\\n' '{\"model\":\"claude-fixture-model\",\"max_context\":123000}' ;;\nesac\n")
-            binary.chmod(0o755)
-            helper = shlex.quote(str(ROOT / 'scripts/install-runtime-setup.py'))
-            body = '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' + helper + ' "$2"; }\nconfigure_runtime_source /fixture claude_code\n'
-            result, terminal = run_shell(body, b'1\n')
-            self.assertEqual(result.returncode, 0, terminal)
-            self.assertIn('Installed MASC model catalog', terminal)
-            self.assertIn('1) Claude fixture', terminal)
-            self.assertIn('123,000 tokens', terminal)
-            self.assertIn('No number to enter', terminal)
-            self.assertIn('model claude-fixture-model', result.stdout)
-            self.assertNotIn('Documented/configured context limit', terminal)
 
-    def test_custom_unknown_model_has_explained_context_validation(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            binary = Path(temporary) / 'masc'
-            binary.write_text('#!/bin/sh\nexit 1\n')
-            binary.chmod(0o755)
-            helper = shlex.quote(str(ROOT / 'scripts/install-runtime-setup.py'))
-            body = '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' + helper + ' "$2"; }\nconfigure_runtime_source /fixture claude_code\n'
-            result, terminal = run_shell(body, b'custom-model\n000\n8k\n8192\n')
-            self.assertEqual(result.returncode, 0, terminal)
-            self.assertIn('amount of text', terminal)
-            self.assertIn('Do not guess', terminal)
-            self.assertIn('without commas or units', terminal)
-            self.assertIn('model custom-model', result.stdout)
 
     def test_local_authentication_challenge_is_not_reported_as_stopped(self):
         class AuthRequired(http.server.BaseHTTPRequestHandler):
@@ -132,18 +103,6 @@ class Wizard(unittest.TestCase):
                 server.shutdown()
                 thread.join()
 
-    def test_runtime_connection_choices_are_visible_without_installed_clients(self):
-        definition = 'prompt_runtime_source() {' + SCRIPT.split('prompt_runtime_source() {', 1)[1].split('\nruntime_setup_input()', 1)[0]
-        for choice, expected in [(b'2\n', 'llama_cpp'), (b'3\n', 'vllm'),
-                                 (b'4\n', 'claude_code'), (b'5\n', 'codex'),
-                                 (b'6\n', 'antigravity'), (b'7\n', 'openai_compatible'),
-                                 (b'8\n', 'later')]:
-            with self.subTest(expected=expected):
-                result, terminal = run_shell('\n' + definition + '\nprompt_runtime_source\n', choice)
-                self.assertEqual(result.returncode, 0, terminal)
-                self.assertEqual(result.stdout.strip(), expected)
-                for label in ('llama.cpp', 'vLLM', 'Claude Code', 'Codex', 'Antigravity'):
-                    self.assertIn(label, terminal)
 
     def test_new_workspace_prompts_and_defaults_to_home(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -177,25 +136,8 @@ class Wizard(unittest.TestCase):
         self.assertNotIn('Workspace directory', terminal)
         self.assertIn('workspace=/fixture', result.stdout)
 
-    def test_terminal_choice_survives_captured_stdout(self):
-        result, terminal = run_shell('\nrun_wizard "$BASE_PATH"\n', b'2\n')
-        self.assertEqual(result.returncode, 0, terminal)
-        self.assertIn('Choose your default provider', terminal)
-        self.assertIn('id: two', terminal)
-        self.assertIn('selected=two.model', result.stdout)
 
-    def test_invalid_numeric_input_can_be_corrected(self):
-        result, terminal = run_shell('\nrun_wizard "$BASE_PATH"\n', b'08\n999999999999999999999999999999\n2\n')
-        self.assertEqual(result.returncode, 0, terminal)
-        self.assertIn('invalid choice', terminal)
-        self.assertIn('selected=two.model', result.stdout)
-        self.assertNotIn('value too great for base', terminal)
 
-    def test_closed_terminal_does_not_select_a_default(self):
-        result, terminal = run_shell('\nrun_wizard "$BASE_PATH"\n', b'\x04')
-        self.assertNotEqual(result.returncode, 0, terminal)
-        self.assertIn('provider selection cancelled', terminal)
-        self.assertNotIn('selected=', result.stdout)
 
     def test_explicit_provider_applies_to_existing_config(self):
         with tempfile.TemporaryDirectory() as directory:

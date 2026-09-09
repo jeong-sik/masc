@@ -92,13 +92,13 @@ let run ~config_path ~scenario_path ~runtime_ids =
     | Sys_error detail | Yojson.Json_error detail -> Error detail
   in
   match scenario with
-  | Error detail -> prerr_endline detail; 1
+  | Error detail -> Log.Runtime.error "runtime-token-sample: %s" detail; 1
   | Ok scenario ->
       match Runtime.load_config_observation ~runtime_config_path:config_path () with
-      | Error detail -> prerr_endline detail; 1
+      | Error detail -> Log.Runtime.error "runtime-token-sample: %s" detail; 1
       | Ok observation ->
           match Runtime.init_default_degraded_observation observation with
-          | Error err -> prerr_endline (Runtime.strict_init_error_to_string err); 1
+          | Error err -> Log.Runtime.error "runtime-token-sample: %s" (Runtime.strict_init_error_to_string err); 1
           | Ok outcome ->
               let degradation = match outcome with
                 | Runtime.Initialized -> None

@@ -629,7 +629,12 @@ remote_endpoint = "fixture"
     let png = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC" in
     let endpoint_file = Filename.concat base "endpoint-render.bin" in
     write_file endpoint_file png;
-    let script = "#!/bin/sh\ncat " ^ Filename.quote endpoint_file ^ "\n" in
+    let trailer = Exec_ssh_protocol.render_trailer
+        { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
+        ; timed_out = false; shim_error = None } in
+    let script = "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat "
+        ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
+        ^ Filename.quote trailer ^ " >&2\nexit 0\n" in
     with_fake_ssh script @@ fun () ->
     let reader = match Masc.Keeper_tool_task_runtime.evidence_artifact_reader
         ~config ~meta () with

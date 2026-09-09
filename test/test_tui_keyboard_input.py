@@ -12288,7 +12288,7 @@ def fusion_list_detail_interaction(
     return interact
 
 
-def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse, SequencedHttpResponse]:
     """The feed initialize is held at the gate so the frame lands while the
     operator is already on the Fusion surface.
 
@@ -12320,17 +12320,18 @@ def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]
         ),
         content_type="text/event-stream",
     )
-    fixtures[FUSION_RUNS_PATH] = SequencedHttpResponse(
+    run_list = SequencedHttpResponse(
         [
             fusion_runs_response([alpha]),
             fusion_runs_response([alpha, target]),
         ]
     )
-    return fixtures, mcp_initialize
+    fixtures[FUSION_RUNS_PATH] = run_list
+    return fixtures, mcp_initialize, run_list
 
 
 def fusion_live_reload_interaction(
-    requests: HttpRequests, mcp_initialize: GatedHttpResponse
+    run_list: SequencedHttpResponse, mcp_initialize: GatedHttpResponse
 ) -> Interaction:
     """Tab lands on Fusion (the ring stop this scenario exists to prove), one
     status frame on the observer feed refetches the list, and the new run
@@ -12344,7 +12345,8 @@ def fusion_live_reload_interaction(
         _base_path: str,
     ) -> None:
         def list_loads() -> int:
-            return sum(1 for path, _ in requests if path == FUSION_RUNS_PATH)
+            # HttpRequests records POST bodies; this list is fetched by GET.
+            return run_list.served
 
         landed = tab_until(process, master_fd, output, b"fusion-alpha")
         if list_loads() != 1:
@@ -13269,14 +13271,12 @@ def run_keyboard_regression(executable: str) -> None:
         # verdict was aiming at, rather than naming a task and stopping.
         prepare_workspace=seed_goal_linked_task,
     )
-    fusion_live_requests: HttpRequests = []
-    fusion_live_fixtures, fusion_mcp_gate = fusion_live_reload_http_fixtures()
+    fusion_live_fixtures, fusion_mcp_gate, fusion_run_list = fusion_live_reload_http_fixtures()
     run_terminal_scenario(
         executable,
         description="Fusion live reload on an observer status push",
-        interact=fusion_live_reload_interaction(fusion_live_requests, fusion_mcp_gate),
+        interact=fusion_live_reload_interaction(fusion_run_list, fusion_mcp_gate),
         http_fixtures=fusion_live_fixtures,
-        http_requests=fusion_live_requests,
     )
     run_terminal_scenario(
         executable,

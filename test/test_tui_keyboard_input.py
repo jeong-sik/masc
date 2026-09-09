@@ -13968,7 +13968,9 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
             os.write(master, data)
             wait_for_output(process, master, output, b"a=T", start=start, timeout=3)
             image_end = end_of_needle(output, b"a=T", start)
-            footer = b"Esc: back"
+            # Include the wheel hint before checking pane/center fallback.
+            # Esc: back is only the beginning of the footer.
+            footer = b"j/k:center"
             wait_for_output(process, master, output, footer, start=image_end, timeout=3)
             return bytes(output[start:end_of_needle(output, footer, image_end)])
 

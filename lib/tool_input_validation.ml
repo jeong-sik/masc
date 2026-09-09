@@ -854,7 +854,7 @@ let validation_schema_of_json ~name json_schema : Agent_core.Types.tool_schema =
 (* [~schema] rather than [?schema]: every caller passes it, and the value is
    already an option, so an optional parameter here could not be erased and
    made the caller's [option] the wrong type. *)
-let reject_validation ~(schema : Yojson.Safe.t option) ~name ~reason ~message =
+let reject_validation ~class_ ~(schema : Yojson.Safe.t option) ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
   Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   let base_data =
@@ -863,8 +863,7 @@ let reject_validation ~(schema : Yojson.Safe.t option) ~name ~reason ~message =
     ; "reason", `String reason
     ; ( "failure_class"
       , `String
-          (Tool_result.tool_failure_class_to_string
-             Tool_result.Policy_rejection) )
+          (Tool_result.tool_failure_class_to_string class_) )
     ]
   in
   let data =
@@ -874,7 +873,7 @@ let reject_validation ~(schema : Yojson.Safe.t option) ~name ~reason ~message =
   in
   Tool_dispatch.Reject
     (Tool_result.Failed
-       { Tool_result.class_ = Tool_result.Policy_rejection
+       { Tool_result.class_ = class_
        ; message
        ; data
        ; metadata = None
@@ -920,6 +919,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
     match schema with
     | None ->
       reject_validation
+        ~class_:Tool_result.Policy_rejection
         ~schema
         ~name
         ~reason:"missing_schema"
@@ -932,6 +932,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       if required <> []
       then
         reject_validation
+          ~class_:Tool_result.Runtime_failure
           ~schema:(Some schema)
           ~name
           ~reason:"malformed_schema"
@@ -947,6 +948,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
         else Tool_dispatch.Proceed prepared_args)
       else
         reject_validation
+          ~class_:Tool_result.Policy_rejection
           ~schema:(Some schema)
           ~name
           ~reason:"empty_schema_args"
@@ -959,6 +961,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
        | alias :: aliases ->
          let aliases = String.concat ", " (alias :: aliases) in
          reject_validation
+           ~class_:Tool_result.Policy_rejection
            ~schema:(Some schema)
            ~name
            ~reason:"invalid_args"
@@ -972,6 +975,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       (match empty_args_rejection schema prepared_args with
        | Some message ->
          reject_validation
+           ~class_:Tool_result.Policy_rejection
            ~schema:(Some schema)
            ~name
            ~reason:"empty_args_required"
@@ -980,6 +984,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       (match schema_shape_error schema prepared_args with
        | Some message ->
          reject_validation
+           ~class_:Tool_result.Policy_rejection
            ~schema:(Some schema)
            ~name
            ~reason:"invalid_args"
@@ -1002,12 +1007,14 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       (match schema_constraint_failure schema prepared_args with
        | Some (Argument_out_of_range message) ->
          reject_validation
+           ~class_:Tool_result.Policy_rejection
            ~schema:(Some schema)
            ~name
            ~reason:"invalid_args"
            ~message:(Printf.sprintf "Tool '%s' %s" name message)
        | Some (Schema_bound_malformed message) ->
          reject_validation
+           ~class_:Tool_result.Runtime_failure
            ~schema:(Some schema)
            ~name
            ~reason:"malformed_schema"

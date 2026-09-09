@@ -1514,9 +1514,9 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
   let* () = ensure_open store in
   let readback () =
     let* operation = operation_or_unknown store.db operation_id in
-    let* execution = direct_execution_with_db store.db operation in
-    match operation.state, execution with
-    | Operation.Queued, Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_binding observed; _}; _}
+    let* observed_binding = direct_gate_binding store ~operation_id in
+    match operation.state, observed_binding with
+    | Operation.Queued, Some observed
         when observed = binding && operation.execution_digest = execution_digest -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _), _ ->
       Error (Integrity_error "Gate wait commit is not confirmed") in

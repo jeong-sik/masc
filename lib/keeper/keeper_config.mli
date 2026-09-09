@@ -122,7 +122,8 @@ val keeper_unified_temperature : unit -> float
 
 val keeper_status_fast_default : unit -> bool
 
-val keeper_enable_thinking : unit -> bool
+val keeper_enable_thinking : unit -> bool option
+(** Explicit fleet request override; absent configuration preserves provider defaults. *)
 
 (** Ceiling on tool-continuation rounds in one keeper turn. [None] leaves the
     AGENT_CORE run loop unbounded, which is what it was. Reaching the ceiling

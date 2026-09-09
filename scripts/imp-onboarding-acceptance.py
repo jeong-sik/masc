@@ -115,7 +115,8 @@ def directory_execution(traces):
             # wrapper. Never search arbitrary argv for text resembling ls.
             argv = tool_input.get('argv')
             if (isinstance(argv, list) and len(argv) == 3
-                    and argv[:2] == ['sh', '-lc']):
+                    and argv[0] in ('sh', 'bash', '/bin/sh', '/bin/bash')
+                    and argv[1] in ('-c', '-lc')):
                 script = argv[2]
         if not lists_working_directory(script):
             continue

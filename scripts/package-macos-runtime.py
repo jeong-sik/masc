@@ -127,11 +127,9 @@ def package(dist, stage, platform, commit, lock_path):
     stage.mkdir(parents=True)
     lock = json.loads(lock_path.read_text())
     pinned = lock['platforms'][platform]
-    metadata = json.loads(fetch('https://api.github.com/repos/' + lock['upstream'] + '/releases/tags/' + lock['release']))
-    actual = next(a for a in metadata['assets'] if a['name'] == pinned['name'])
-    for key in ('name', 'digest', 'size', 'browser_download_url'):
-        if actual[key] != pinned[key]:
-            raise ValueError('upstream Python release metadata differs from pin: ' + key)
+    # The checked-in lock records reviewed upstream metadata. Build from those
+    # exact bytes without adding an unauthenticated, rate-limited metadata API
+    # dependency; size and SHA-256 remain mandatory before extraction.
     python_bytes = fetch(pinned['browser_download_url'])
     if len(python_bytes) != pinned['size'] or 'sha256:' + hashlib.sha256(python_bytes).hexdigest() != pinned['digest']:
         raise ValueError('Python archive checksum differs from pin')

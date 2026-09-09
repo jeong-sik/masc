@@ -129,7 +129,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
@@ -163,6 +163,16 @@ let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_dela
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
   read_request ();
+  let remaining_lines =
+    if inject_items then (
+      (* Acknowledge thread/inject_items before reading/capturing turn/start.
+         Sending all replies up front lets the host finish before the fixture
+         has observed the request whose exact bytes the test asserts. *)
+      output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 3) ^ "\n");
+      read_request ();
+      drop 4 lines)
+    else drop 3 lines
+  in
   List.iteri
     (fun index line ->
        if index >= terminal_line_delay_start_index
@@ -172,7 +182,7 @@ let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_dela
               output_string output (Printf.sprintf "sleep %.3f\n" seconds))
            terminal_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
-    (drop 3 lines);
+    remaining_lines;
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     before_final_stdin_drain_s;
@@ -183,11 +193,12 @@ let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_dela
   path
 ;;
 
-let with_fixture ?close_before_turn ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?before_final_stdin_drain_s lines f =
   let path =
     fixture_script
       ?close_before_turn
+      ?inject_items
       ?capture_path
       ?initial_line_delay_s
       ?terminal_line_delay_s
@@ -479,7 +490,7 @@ let test_developer_context_preserves_authority_and_history () =
   List.iter (fun (thread_mode, expected_roles) ->
     let capture_path = Filename.temp_file "masc-codex-context-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
-      with_fixture ~capture_path
+      with_fixture ~capture_path ~inject_items:true
         [ init_result; account_chatgpt; thread_result
         ; {|{"id":4,"result":{}}|}
         ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}

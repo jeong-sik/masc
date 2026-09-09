@@ -181,11 +181,29 @@ wizard-default = true
       (List.map (fun row -> row |> member "model" |> to_string) rows)
 ;;
 
+let test_assigned_lane_selects_initial_target () =
+  let select assignments lanes =
+    Verify.initial_runtime_id ~default_runtime_id:"default.model"
+      ~assignments ~lanes ~keeper_name:"imp"
+  in
+  check (option string) "unassigned uses default" (Some "default.model") (select [] []);
+  check (option string) "explicit named lane selects its first target"
+    (Some "chosen.model")
+    (select [ "imp", "conversation" ]
+       [ Runtime_lane.make ~id:"conversation" [ "chosen.model"; "fallback.model" ] ]);
+  check (option string) "declared lane shadows even the default runtime ID"
+    (Some "chosen.model")
+    (select [] [ Runtime_lane.make ~id:"default.model" [ "chosen.model" ] ]);
+  check (option string) "empty lane cannot claim a target" None
+    (select [ "imp", "empty" ] [ Runtime_lane.make ~id:"empty" [] ])
+;;
+
 let () =
   run
     "runtime verification"
     [ ( "readiness"
-      , [ test_case "actual tool-result roundtrip" `Quick test_roundtrip
+      , [ test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
+        ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success
         ; test_case "tool result must be consumed" `Quick test_result_must_be_consumed
         ; test_case "missing observed model" `Quick test_missing_model_identity

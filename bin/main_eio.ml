@@ -2545,10 +2545,12 @@ let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path with
   | Error message -> prerr_endline message; 1
-  | Ok (runtimes, default, assignments, _, _) ->
-    let selected = match List.assoc_opt "imp" assignments with
-      | None -> Some default
-      | Some id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes in
+  | Ok (runtimes, default, assignments, _, lanes) ->
+    let selected =
+      Option.bind
+        (Runtime_verification.initial_runtime_id ~default_runtime_id:default.id
+          ~assignments ~lanes ~keeper_name:"imp")
+        (fun id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
     match selected with
     | None -> prerr_endline "imp's assigned runtime is unavailable. Choose a model in the installation wizard."; 1
     | Some runtime ->

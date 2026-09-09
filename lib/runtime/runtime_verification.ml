@@ -178,6 +178,18 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
   }
 ;;
 
+let initial_runtime_id ~default_runtime_id ~assignments ~lanes ~keeper_name =
+  let assigned_id =
+    Option.value (List.assoc_opt keeper_name assignments) ~default:default_runtime_id
+  in
+  match List.find_opt (fun (lane : Runtime_lane.t) -> lane.id = assigned_id) lanes with
+  | None -> Some assigned_id
+  | Some lane ->
+    (match Runtime_lane.ordered_candidates lane with
+     | [] -> None
+     | candidate :: _ -> Some candidate)
+;;
+
 let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) =
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
     if not runtime.model.tools_support

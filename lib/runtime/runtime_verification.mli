@@ -38,6 +38,16 @@ type result =
 val to_json : result -> Yojson.Safe.t
 val exit_code : result -> int
 
+val initial_runtime_id
+  : default_runtime_id:string
+  -> assignments:(string * string) list
+  -> lanes:Runtime_lane.t list
+  -> keeper_name:string
+  -> string option
+(** Select the first target of the assigned lane, preferring declared lanes over
+    bare runtime IDs exactly as initial routing does. This does not try fallbacks
+    or claim an empty lane has a usable target. Pass materialized lanes. *)
+
 val verify
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

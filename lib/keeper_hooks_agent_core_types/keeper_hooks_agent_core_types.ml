@@ -189,6 +189,85 @@ let summarize_thinking_blocks content =
   ; thinking_kind
   }
 
+(* The two highest-volume keeper lines are rendered here, away from the hook
+   closure, so a test can assert the assembled text: which fields a lane
+   without llama-server timings leaves out, when the thinking counters ride
+   along, and that a successful tool call carries no failure fields. A field
+   the lane did not report is absent rather than a placeholder (2026-09-09). *)
+type turn_log_fields =
+  { turn : int
+  ; total_turns : int
+  ; runtime_lane : string
+  ; tokens : int
+  ; context_window : int option
+  ; wall_tok_s : float option
+  ; prompt_tok_s : float option
+  ; decode_tok_s : float option
+  ; cache_n : int option
+  ; prompt_n : int option
+  ; latency_ms : int option
+  ; thinking : thinking_log_summary
+  }
+
+let turn_log_line (f : turn_log_fields) =
+  let tok_s = Printf.sprintf "%.1f" in
+  (* [thinking_kind=none] already says there were no blocks, so the counters
+     ride only on a turn that had some, and the redacted count only when it is
+     non-zero. *)
+  let thinking_fields =
+    if f.thinking.thinking_present then
+      [ Log.Kv.int "thinking_blocks" f.thinking.thinking_blocks
+      ; Log.Kv.int "thinking_chars" f.thinking.thinking_chars
+      ; Log.Kv.opt_map "redacted_thinking_blocks" string_of_int
+          (if f.thinking.redacted_thinking_blocks > 0
+           then Some f.thinking.redacted_thinking_blocks
+           else None)
+      ]
+    else []
+  in
+  Log.Kv.render
+    ([ Log.Kv.int "turn" f.turn
+     ; Log.Kv.int "total_turns" f.total_turns
+     ; Log.Kv.str "runtime_lane" f.runtime_lane
+     ; Log.Kv.int "tokens" f.tokens
+     ; Log.Kv.opt_map "context_window" string_of_int f.context_window
+     ; Log.Kv.opt_map "wall_tok_s" tok_s f.wall_tok_s
+     ; Log.Kv.opt_map "prompt_tok_s" tok_s f.prompt_tok_s
+     ; Log.Kv.opt_map "decode_tok_s" tok_s f.decode_tok_s
+     ; Log.Kv.opt_map "cache_n" string_of_int f.cache_n
+     ; Log.Kv.opt_map "prompt_n" string_of_int f.prompt_n
+     ; Log.Kv.opt_map "latency_ms" string_of_int f.latency_ms
+     ; Log.Kv.str "thinking_kind" f.thinking.thinking_kind
+     ]
+     @ thinking_fields)
+
+type tool_call_log_fields =
+  { tool : string
+  ; source : string option
+  ; params : string
+  ; input_shape : string
+  ; outcome : string
+  ; out_len : int
+  ; failed_params : string option
+  ; error_preview : string option
+  }
+
+(* [source] is the file the tool's definition was read from; a built-in ships
+   none, so the field is absent, which is itself the answer. [failed_params]
+   and [error_preview] exist only on the failure path. *)
+let tool_call_log_line ~keeper_name (f : tool_call_log_fields) =
+  Printf.sprintf "keeper:%s tool_call %s" keeper_name
+    (Log.Kv.render
+       [ Log.Kv.str "tool" f.tool
+       ; Log.Kv.opt "source" f.source
+       ; Log.Kv.str "params" ("[" ^ f.params ^ "]")
+       ; Log.Kv.str "input_shape" ("[" ^ f.input_shape ^ "]")
+       ; Log.Kv.str "outcome" f.outcome
+       ; Log.Kv.int "out_len" f.out_len
+       ; Log.Kv.opt "failed_params" f.failed_params
+       ; Log.Kv.opt "error_preview" f.error_preview
+       ])
+
 type tool_execution_summary =
   { tool_name : string
   ; provider : string

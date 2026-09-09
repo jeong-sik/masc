@@ -81,30 +81,26 @@ let thinking_level_of_effort ~accepted effort =
 ;;
 
 let thinking_config_of_config (config : Provider_config.t) =
-  match config.enable_thinking, config.thinking_budget, config.reasoning_effort with
-  | None, None, None -> None
+  match config.enable_thinking, config.reasoning_effort with
+  | None, None -> None
   | _ ->
     let accepted = accepted_efforts_for_config config in
-    (match config.enable_thinking, config.thinking_budget, config.reasoning_effort with
-     | _, Some _, _ ->
-       invalid_arg
-         "Backend_gemini.build_request: thinking_budget cannot target a Gemini \
-          thinkingLevel wire; pass reasoning_effort"
-     | Some false, None, _ ->
+    (match config.enable_thinking, config.reasoning_effort with
+     | Some false, _ ->
        invalid_arg
          "Backend_gemini.build_request: enable_thinking=false has no exact Gemini \
           thinkingLevel representation"
-     | Some true, None, Some effort ->
+     | Some true, Some effort ->
        Some
          (`Assoc
              [ "thinkingLevel", `String (thinking_level_of_effort ~accepted effort)
              ; "includeThoughts", `Bool true
              ])
-     | Some true, None, None -> Some (`Assoc [ "includeThoughts", `Bool true ])
-     | None, None, Some effort ->
+     | Some true, None -> Some (`Assoc [ "includeThoughts", `Bool true ])
+     | None, Some effort ->
        Some
          (`Assoc [ "thinkingLevel", `String (thinking_level_of_effort ~accepted effort) ])
-     | None, None, None -> None)
+     | None, None -> None)
 ;;
 
 let gemini_role_of_agent_core = function

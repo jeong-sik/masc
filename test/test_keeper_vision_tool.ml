@@ -260,8 +260,7 @@ let test_provider_for_vision_leaves_thinking_uncontrolled () =
   let configured = Vt.provider_for_vision base in
   assert (configured.enable_thinking = None);
   assert (configured.preserve_thinking = Some false);
-  assert (configured.clear_thinking = Some true);
-  assert (configured.thinking_budget = None)
+  assert (configured.clear_thinking = Some true)
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->

@@ -6,7 +6,6 @@ open Llm_provider
 let gemini_config
       ?(model_id = "gemini-3.7-flash")
       ?enable_thinking
-      ?thinking_budget
       ?reasoning_effort
       ?(tools = [])
       ?(response_format = Types.Off)
@@ -23,7 +22,6 @@ let gemini_config
     ~max_tokens:4096
     ~temperature:0.7
     ?enable_thinking
-    ?thinking_budget
     ?reasoning_effort
     ~response_format
     ?system_prompt:(if system = "" then None else Some system)
@@ -183,23 +181,6 @@ let test_system_from_messages () =
   check int "one content (no system)" 1 (List.length contents)
 ;;
 
-(* [thinkingBudget] was Gemini 2.5's wire. No catalog row asks for it and no
-   model serves it, so passing one is a caller error rather than a second
-   dialect to pick between. *)
-let test_thinking_budget_is_refused () =
-  let config = gemini_config ~enable_thinking:true ~thinking_budget:8000 () in
-  let messages = [ Types.user_msg "Think about this." ] in
-  match Backend_gemini.build_request ~config ~messages () with
-  | _ -> fail "expected a thinkingBudget rejection"
-  | exception Invalid_argument message ->
-    check
-      string
-      "rejection"
-      "Backend_gemini.build_request: thinking_budget cannot target a Gemini \
-       thinkingLevel wire; pass reasoning_effort"
-      message
-;;
-
 let test_thinking_disabled_has_no_representation () =
   let config = gemini_config ~enable_thinking:false () in
   let messages = [ Types.user_msg "Keep it short." ] in
@@ -227,7 +208,6 @@ let test_gemini3_uses_thinking_level () =
   in
   let tc = parse_body body |> member "generationConfig" |> member "thinkingConfig" in
   check string "thinkingLevel" "low" (tc |> member "thinkingLevel" |> to_string);
-  check bool "thinkingBudget absent" true (tc |> member "thinkingBudget" = `Null);
   check bool "includeThoughts true" true (tc |> member "includeThoughts" |> to_bool)
 ;;
 
@@ -1774,7 +1754,6 @@ let () =
             test_unsupported_explicit_seed_is_rejected
         ; test_case "system instruction from config" `Quick test_system_instruction
         ; test_case "system from messages" `Quick test_system_from_messages
-        ; test_case "thinking budget is refused" `Quick test_thinking_budget_is_refused
         ; test_case
             "thinking disabled requires exact numeric wire"
             `Quick

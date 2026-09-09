@@ -88,7 +88,6 @@ val set_turn_context :
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
-  ?thinking_budget:int ->
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
@@ -108,7 +107,7 @@ val set_turn_context :
 val get_turn_context :
   cell:turn_ctx_cell ->
   unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string option * string option
-(** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
+(** Returns [(lane, tool_choice, thinking_enabled, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id,
     sandbox_profile, network_mode)] for
     the run, or [None] values when no turn context has
@@ -200,7 +199,6 @@ val log_call :
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
-  ?thinking_budget:int ->
   ?prompt_fingerprint:string ->
   ?execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
@@ -269,7 +267,7 @@ val log_call :
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
-    [thinking_enabled], [thinking_budget]) capture the effective tool
+    [thinking_enabled]) capture the effective tool
     selection context. [result_bytes] is the original output size before
     any observation-only log preview truncation. [truncated_to] records the
     retained preview size when one exists; it never describes mutation of the

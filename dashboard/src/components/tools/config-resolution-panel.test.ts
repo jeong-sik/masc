@@ -90,7 +90,6 @@ function runtimeProvidersPayload() {
           request_path_targets_responses_api: false,
           enable_thinking: true,
           preserve_thinking: true,
-          thinking_budget: 32768,
           glm_replay_reasoning: true,
         },
         declared_spec: {

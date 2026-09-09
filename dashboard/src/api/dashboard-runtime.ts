@@ -41,7 +41,6 @@ export interface DashboardRuntimeRequestConfig {
   has_system_prompt?: boolean
   enable_thinking?: boolean | null
   preserve_thinking?: boolean | null
-  thinking_budget?: number | null
   clear_thinking?: boolean | null
   resolved_reasoning_effort?: string | null
   glm_clear_thinking?: boolean
@@ -487,7 +486,6 @@ function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig
     has_system_prompt: asBoolean(raw.has_system_prompt),
     enable_thinking: asBoolean(raw.enable_thinking) ?? null,
     preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
-    thinking_budget: asNumber(raw.thinking_budget) ?? null,
     clear_thinking: asBoolean(raw.clear_thinking) ?? null,
     resolved_reasoning_effort: asNullableString(raw.resolved_reasoning_effort),
     glm_clear_thinking: asBoolean(raw.glm_clear_thinking),

@@ -41,7 +41,6 @@ type sampling =
   { temperature : float option
   ; top_p : float option
   ; max_tokens : int option
-  ; thinking_budget : int option
   ; enable_thinking : bool option
   }
 

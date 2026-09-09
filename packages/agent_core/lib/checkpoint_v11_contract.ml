@@ -1,4 +1,8 @@
-(** Exact validator for the current checkpoint-v10 persistence schema. *)
+(** Exact validator for the current checkpoint-v11 persistence schema.
+
+    v11 drops [thinking_budget]. The key set is closed, so a v10 file carrying
+    that key is rejected rather than read with the field ignored: a checkpoint
+    is a fresh-state contract, not a format with converters. *)
 
 open Result_syntax
 
@@ -246,7 +250,6 @@ let current_checkpoint_fields =
   ; "enable_thinking"
   ; "preserve_thinking"
   ; "response_format"
-  ; "thinking_budget"
   ; "reasoning_effort"
   ; "disable_parallel_tool_use"
   ; "cache_system_prompt"
@@ -646,7 +649,6 @@ let validate_common_checkpoint_fields ~scope fields =
   let* enable_thinking = required_field ~scope "enable_thinking" fields in
   let* preserve_thinking = required_field ~scope "preserve_thinking" fields in
   let* response_format = required_field ~scope "response_format" fields in
-  let* thinking_budget = required_field ~scope "thinking_budget" fields in
   let* disable_parallel_tool_use =
     required_field ~scope "disable_parallel_tool_use" fields
   in
@@ -681,16 +683,13 @@ let validate_common_checkpoint_fields ~scope fields =
     validate_response_format ~scope:(scope ^ ".response_format") response_format
   in
   let* () =
-    validate_optional ~scope:(scope ^ ".thinking_budget") validate_int thinking_budget
-  in
-  let* () =
     validate_bool ~scope:(scope ^ ".disable_parallel_tool_use") disable_parallel_tool_use
   in
   let* () = validate_bool ~scope:(scope ^ ".cache_system_prompt") cache_system_prompt in
   validate_unique_object ~scope:(scope ^ ".context") context
 ;;
 
-let validate_v10_json json =
+let validate_v11_json json =
   let scope = checkpoint_scope in
   let* fields =
     validate_object_shape ~scope ~required:current_checkpoint_fields ~optional:[] json

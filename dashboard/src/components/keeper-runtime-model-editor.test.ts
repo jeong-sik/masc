@@ -191,7 +191,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
       has_system_prompt: true,
       enable_thinking: true,
       preserve_thinking: true,
-      thinking_budget: 4096,
       resolved_reasoning_effort: 'high',
       tool_stream: true,
       tool_choice: { kind: 'required', name: 'inspect' },

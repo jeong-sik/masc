@@ -18,7 +18,6 @@ type t =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; response_format : response_format
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; tool_choice : tool_choice option
   ; disable_parallel_tool_use : bool
@@ -72,7 +71,6 @@ let create ~net ~model =
   ; enable_thinking = defaults.enable_thinking
   ; preserve_thinking = defaults.preserve_thinking
   ; response_format = defaults.response_format
-  ; thinking_budget = defaults.thinking_budget
   ; reasoning_effort = defaults.reasoning_effort
   ; tool_choice = defaults.tool_choice
   ; disable_parallel_tool_use = defaults.disable_parallel_tool_use
@@ -178,7 +176,6 @@ let with_provider_config (pc : Llm_provider.Provider_config.t) b =
   ; enable_thinking = pc.enable_thinking
   ; preserve_thinking = pc.preserve_thinking
   ; response_format = pc.response_format
-  ; thinking_budget = pc.thinking_budget
   ; reasoning_effort = pc.reasoning_effort
   ; tool_choice = pc.tool_choice
   ; disable_parallel_tool_use = pc.disable_parallel_tool_use
@@ -210,7 +207,6 @@ let with_skills skills b = with_contract (Contract.with_skills skills Contract.e
 let with_tool_choice tc b = { b with tool_choice = Some tc }
 let with_response_format response_format b = { b with response_format }
 let with_disable_parallel_tool_use v b = { b with disable_parallel_tool_use = v }
-let with_thinking_budget n b = { b with thinking_budget = Some n }
 let with_reasoning_effort effort b = { b with reasoning_effort = Some effort }
 let with_initial_messages msgs b = { b with initial_messages = msgs }
 let with_cache_system_prompt v b = { b with cache_system_prompt = v }
@@ -262,7 +258,6 @@ let build b =
     ; enable_thinking = b.enable_thinking
     ; preserve_thinking = b.preserve_thinking
     ; response_format = b.response_format
-    ; thinking_budget = b.thinking_budget
     ; reasoning_effort = b.reasoning_effort
     ; tool_choice = b.tool_choice
     ; disable_parallel_tool_use = b.disable_parallel_tool_use

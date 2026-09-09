@@ -283,6 +283,8 @@ module Make (Payload : Payload) = struct
     | label -> Error (Printf.sprintf "unknown %s event %S" Payload.name label)
   ;;
 
+  let validate_event_json json = Result.map (fun _ -> ()) (event_of_yojson json)
+
   let append_event_result t event =
     match t.path with
     | None -> Ok ()

@@ -125,3 +125,6 @@ val record_proof_verdict :
     identical proof/provenance payload returns the stored record without rewriting
     its original timestamp, even if delivered with a later observation time. Same-outcome verdicts from another request, run, criterion, or
     with changed evidence are conflicts. *)
+
+val validate_state_json : Yojson.Safe.t -> (unit, string) result
+(** Pure current-schema validation. Does not read, repair or write a store. *)

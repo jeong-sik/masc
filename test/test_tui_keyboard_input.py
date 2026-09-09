@@ -15093,6 +15093,106 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         print(json.dumps({"msx_tick_pixels": pixel_responses}), flush=True)
 
 
+def run_msx_background_poll_regression(executable: str) -> None:
+    """A pending mutation must not own the terminal's input loop."""
+    original = msx_loaded_frame_fixture()[1]
+    late = dict(original, number=999, rgb_base64=base64.b64encode(
+        bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT).decode("ascii"))
+    pending = GatedHttpResponse((200, late), hold_seconds=20.0)
+    failed = GatedHttpResponse((503, {"error": "tick unavailable"}), hold_seconds=20.0)
+    calls = []
+    get_frames = []
+
+    def frame():
+        get_frames.append(len(get_frames) + 1)
+        return 200, dict(original, number=100 + len(get_frames))
+
+    def tick(body):
+        calls.append(json.loads(body))
+        if len(calls) == 1:
+            return pending()
+        if len(calls) == 2:
+            return failed()
+        return 503, {"error": "unexpected automatic mutation retry"}
+
+    def interact(process, master, slave, output, _base):
+        def await_marker(marker, start):
+            wait_for_output(process, master, output, marker, start=start, timeout=2.0)
+
+        def key(keys, marker):
+            start = len(output)
+            os.write(master, keys)
+            await_marker(marker, start)
+            return start
+
+        def observe_for(seconds):
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                read_available(master, output)
+                assert process.poll() is None, "TUI exited during observation"
+                select.select([master], [], [], min(0.05, max(0, deadline - time.monotonic())))
+            read_available(master, output)
+
+        try:
+            key(b":go msx\r", b"watch split.rom")
+            key(b"\r", b"F8: disk")
+            assert wait_for_fixture_event(process, master, output, pending.requested, timeout=5.0)
+            assert not pending.completed.is_set(), "fixture did not hold the tick"
+            # Scaling is a keyboard resize, and SIGWINCH is a physical resize.
+            start = key(b"-", b"+/-: 87%")
+            await_marker(b"F8: disk", start)
+            assert not pending.completed.is_set(), "resize waited for the HTTP response"
+            start = len(output)
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 110, 0, 0))
+            os.kill(process.pid, signal.SIGWINCH)
+            await_marker(b"F8: disk", start)
+            assert not pending.completed.is_set(), "terminal resize waited for the HTTP response"
+            key(b"\x1b", b"MASC Overview")
+            assert not pending.completed.is_set(), "Esc waited for the HTTP response"
+            observe_for(0.8)  # More than two 0.3-second spectator poll intervals.
+            assert len(calls) == 1, f"pending/closed view issued more ticks: {len(calls)}"
+            start = len(output)
+            pending.release.set()
+            assert wait_for_fixture_event(process, master, output, pending.completed, timeout=3.0)
+            observe_for(0.8)
+            stale = bytes(output[start:])
+            assert b"f=24" not in stale and b"i=32,p=1,C=1" not in stale, "late frame repainted a closed view"
+            assert b"frame 999 " not in stale, "late frame metadata escaped its view"
+            assert len(calls) == 1, "closed view resumed automatic ticks"
+            before_get = len(get_frames)
+            key(b":go msx\r", b"watch split.rom")
+            assert len(get_frames) > before_get, "reopening skipped fresh observation"
+            start = key(b"\r", b"F8: disk")
+            assert b"f=24" in bytes(output[start:]), "fresh reopen did not restore image"
+            assert wait_for_fixture_event(process, master, output, failed.requested, timeout=5.0)
+            start = len(output)
+            failed.release.set()
+            await_marker(b"Refresh failed; reopen", start)
+            observe_for(0.8)
+            failure_output = bytes(output[start:])
+            assert len(calls) == 2, f"failed mutation retried automatically: {len(calls)}"
+            assert b"d=I,i=32" not in failure_output and b"f=24" not in failure_output, "failure discarded/replaced cached image"
+            assert b"frame 999 " not in failure_output, "failure resurrected stale response"
+            key(b"\x1b", b"MASC Overview")
+            before_get = len(get_frames)
+            key(b":go msx\r", b"watch split.rom")
+            assert len(get_frames) > before_get, "failure recovery skipped fresh GET"
+            assert len(calls) == 2, "menu entry advanced the machine"
+            key(b"\x1b", b"MASC Overview")
+            os.write(master, b"q")
+            print(json.dumps({"result": "PASS", "tick_calls": len(calls),
+                "fresh_gets": len(get_frames), "pending_resize_and_escape": True,
+                "late_frame_discarded": True, "failure_retry_suppressed": True}), flush=True)
+        finally:
+            pending.release.set()
+            failed.release.set()
+
+    run_terminal_scenario(executable, description="MSX asynchronous poll preserves terminal input",
+        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
+        http_fixtures={"/api/v1/msx/frame": frame,
+                       "/api/v1/msx/tick": RequestHttpResponse(tick)})
+
+
 def run_msx_size_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -15422,6 +15522,10 @@ def main() -> None:
         raise SystemExit(0)
     if len(sys.argv) == 3 and sys.argv[2] == "msx-retained-tick":
         run_msx_retained_regression(os.path.abspath(sys.argv[1]), retained_tick=True)
+        raise SystemExit(0)
+
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-background-poll":
+        run_msx_background_poll_regression(os.path.abspath(sys.argv[1]))
         raise SystemExit(0)
 
     if len(sys.argv) == 3 and sys.argv[2] == "msx-size":

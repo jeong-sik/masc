@@ -1,12 +1,5 @@
-(** Byte-identity pins for the keeper tool declarations moving to
-    [config/tools/masc_keeper_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
-
-    The expected values were read off [Keeper_schema.schemas] before any file
-    moved, so this suite passing *before* the TOML replaces a literal is what
-    proves the file says the same thing. Written against the published list
-    rather than a loader module, so it holds across the whole migration: what a
-    Keeper receives must not move whether a declaration lives in OCaml or TOML.
+(** The publication order of [Masc.Keeper_schema.schemas], and the
+    masc_keeper_status bounds against their owner.
 
     One value moved rather than being pinned: masc_keeper_status declared an
     empty ["required"], which says nothing an absent one does not. Both readers
@@ -16,55 +9,13 @@
     nothing. The other four tools that emitted one were cleaned earlier; this
     was the last caller of [closed_object_schema] passing none.
 
-    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
-    not part of a JSON object's meaning, and TOML cannot place a sub-table
-    before its parent's scalar keys. Everything the order does not carry is
-    pinned exactly, and the name list below is pinned in order because the list
-    order is the order a model sees the tools in.
-
-    Three of the fifteen carry values an owner module owns: masc_keeper_status
-    from [Keeper_status_options_defaults], masc_keeper_sandbox_stop from
-    [Keeper_sandbox_control_contract], and the network-mode enum from
-    [Keeper_types_profile_sandbox]. All three already read from TOML, so the
-    literals in those files are copies and something has to compare them back.
-    Two are compared elsewhere -- the stop scopes in [test_enum_mirror_sync]
-    and both enums in [test_keeper_tool_descriptor_registry_integrity]. The
-    third is compared below. *)
+    The descriptions and schemas this suite also pinned were literals read off
+    the same published values before the declarations moved into
+    [config/tools/*.toml] -- one producer against a snapshot of itself. Those
+    cases are gone; what stays reads the published value. *)
 
 open Alcotest
 
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
-
-(* name, description, input_schema (keys sorted) *)
-let expected =
-    [ {|masc_keeper_sandbox_start|}, {|Start the managed sandbox container for a keeper.|}, {|{"additionalProperties":false,"properties":{"name":{"description":"Keeper handle whose managed sandbox should be started.","type":"string"},"network_mode":{"description":"Optional sandbox network mode. Defaults to the keeper's configured network mode.","enum":["none","inherit"],"type":"string"},"timeout_sec":{"description":"Explicit sandbox start timeout in seconds.","exclusiveMinimum":0.0,"type":"number"},"ttl_sec":{"description":"Managed sandbox lifetime in seconds; omit or use 0 for no automatic expiry.","minimum":0.0,"type":"number"}},"required":["name","timeout_sec"],"type":"object"}|}
-    ; {|masc_keeper_sandbox_stop|}, {|Stop the managed sandbox container(s) for a keeper or fleet.|}, {|{"additionalProperties":false,"properties":{"container_kind":{"default":"managed","description":"Container scope to stop: managed, turn, or all (default: managed).","enum":["managed","turn","all"],"type":"string"},"name":{"description":"Optional keeper handle. When omitted, stop matching containers across the active fleet.","type":"string"},"timeout_sec":{"description":"Explicit sandbox stop timeout in seconds.","exclusiveMinimum":0.0,"type":"number"}},"required":["timeout_sec"],"type":"object"}|}
-    ; {|masc_keeper_audit|}, {|Audit keeper config, prompt, live runtime metadata, registry presence, autoboot, and keepalive state.|}, {|{"additionalProperties":false,"properties":{"include_ok":{"default":true,"description":"If false, return only keepers with audit issues while keeping summary counts over all audited keepers.","type":"boolean"},"limit":{"default":100,"description":"Maximum number of keepers to audit when name/names are omitted. Clamped to 500.","type":"integer"},"name":{"description":"Optional keeper handle to audit. When omitted, all known keepers in the current base path/config root are audited.","type":"string"},"names":{"description":"Optional keeper handles to audit. Combined with name when both are provided.","items":{"type":"string"},"type":"array"}},"type":"object"}|}
-    ; {|masc_keeper_up|}, {|Create or update a durable keeper. Keepers auto-start on server boot and are reconciled back into live presence. Each call snapshots the keeper manifest and commits compare-and-swap: if another writer commits first, the call fails with keeper_manifest_revision_conflict and no side effects. Retry the same call — it re-snapshots the current manifest and applies only the fields you pass, so a retry cannot revert another writer's change.|}, {|{"additionalProperties":false,"properties":{"activation_mode":{"description":"Owner activation and initiative: manual starts only on requested work; on_demand restores an owner without spontaneous cycles; autonomous restores an owner and permits spontaneous cycles. Pause and shutdown still apply.","enum":["manual","on_demand","autonomous"],"type":"string"},"egress_allow":{"description":"What this keeper may reach when network_mode = \"policy\", as \"host\" or \"host:port\" entries. A bare host means port 443, so an ordinary web allowlist needs no \":443\" after each entry, and a service on another port says so: [\"api.github.com\", \"*.githubusercontent.com\", \"registry.internal:8443\"]. A leading \"*.\" admits subdomains and not the apex, so \"*.github.com\" answers for api.github.com and not for github.com. An address is matched as an address, so listing a name is not permission to open a socket to its IP.\n\nWrites [egress.keepers.<name>] in runtime.toml, which is where the lane reads it. Passing this without network_mode = \"policy\" is refused rather than stored: an allowlist on a keeper that is not in the lane does nothing, and silently keeping it is how an operator believes a keeper is restricted when it is not. Omit to leave an existing allowlist unchanged; pass an empty array to clear it, which leaves the keeper reaching nothing.","items":{"type":"string"},"type":"array"},"instructions":{"description":"Complete Keeper instructions, written to the keeper TOML declaration (kept across handoff).","type":"string"},"max_context_override":{"description":"Optional: absolute context token limit override for this keeper. Use 0 to clear the override.","type":"integer"},"mention_targets":{"description":"Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['alpha']).","items":{"type":"string"},"type":"array"},"microvm_backend":{"description":"MicroVM runtime: apple_container, microsandbox, or nerdctl_kata. Valid only with sandbox_profile = \"microvm\"; Linux requires an explicit backend. Omit to keep the existing choice; pass null to clear it when changing profiles.","type":"string"},"name":{"description":"Keeper handle (stable). Example: 'keeper-helper'","type":"string"},"network_mode":{"description":"Whether the sandbox guest reaches the network, and what of it. \"none\" gives it none: a web search, a git push, or any HTTP call inside the guest fails. \"inherit\" gives it the host's whole network. \"policy\" gives it one route -- a proxy this server owns -- and that proxy admits only the destinations named in egress_allow, refusing the rest and recording every request either way. Prefer \"policy\" over \"inherit\" for a keeper that needs a few known hosts: \"inherit\" is the whole internet because one host was needed. Omitted on create, the keeper takes its sandbox profile's default, and docker and microvm both default to \"none\". \"policy\" is carried today only by microvm on the apple_container backend; every other backend refuses it and names what has to be measured first. remote_ssh accepts only \"inherit\": an endpoint's network is its own host's policy.","enum":["none","inherit","policy"],"type":"string"},"remote_endpoint":{"description":"Endpoint registry name under [exec.ssh.endpoints.<name>] in runtime.toml. Required with sandbox_profile = \"remote_ssh\"; pass null to clear it when switching the keeper to another sandbox profile.","type":"string"},"runtime_id":{"description":"Optional opaque runtime id. Writes the keeper assignment to runtime.toml.","type":"string"},"sandbox_profile":{"description":"Sandbox isolation profile. Pass explicitly: \"docker\" for containerized execution. \"microvm\" runs each guest as a lightweight VM behind a hypervisor; select its runtime with microvm_backend (apple_container, microsandbox, or nerdctl_kata). The host needs that runtime's CLI and sandbox image already present. On a host with no assumed backend, pass microvm_backend explicitly; a missing backend is refused at boot rather than replaced with a different isolation. Network defaults to none like docker. \"remote_ssh\" targets the SSH remote execution lane (Phase 1; requires remote_endpoint in the keeper TOML, runner lands with the lane). There is no host profile: every keeper runs under one of these three. Creating a keeper without this field is rejected; updating one that already declares it may leave it out. That split is why the field is not marked required here, and why it carries no default: nothing fills it in for you.","enum":["docker","microvm","remote_ssh"],"type":"string"},"skills":{"additionalProperties":false,"description":"Profile-only exact Keeper Skill name selection. Omit to keep it unchanged; skills={} selects all; names=[] selects none.","properties":{"names":{"description":"Exact canonical Skill names. Unknown names remain observable and do not block known names.","items":{"type":"string"},"type":"array"}},"type":"object"}},"required":["name"],"type":"object"}|}
-    ; {|masc_keeper_status|}, {|Get keeper status (keepalive/live/reconcile state plus current context and monitoring tails).|}, {|{"additionalProperties":false,"properties":{"fast":{"description":"Enable fast mode (skip heavy sections unless explicitly enabled).","type":"boolean"},"include_context":{"description":"Include checkpoint-derived context stats (default: !fast).","type":"boolean"},"include_history_tail":{"description":"Include recent history tail + fragment counters (default: !fast).","type":"boolean"},"include_metrics_overview":{"description":"Include metrics overview + skill route scan (default: !fast).","type":"boolean"},"name":{"description":"Non-blank Keeper handle. Optional; defaults to the caller only when omitted.","minLength":1,"pattern":"^.*\\S.*$","type":"string"},"tail_bytes":{"description":"How many bytes from the end of files to scan for tails (default: 60000; range: 1000..65536).","maximum":65536,"minimum":1000,"type":"integer"},"tail_messages":{"description":"How many recent history messages to include (default: 5; maximum: 65536).","maximum":65536,"minimum":0,"type":"integer"},"tail_order":{"description":"Ordering for metrics/history tails and recent memory notes. Default: oldest_first.","enum":["oldest_first","newest_first"],"type":"string"},"tail_turns":{"description":"How many recent turns to include from keeper metrics (default: 3; maximum: 6553).","maximum":6553,"minimum":0,"type":"integer"}},"type":"object"}|}
-    ; {|masc_keeper_delegate|}, {|Submit one typed Keeper chat operation and get its operation_id back.
-
-The id is durable and returns without waiting for the turn. A Keeper that submits one is woken with the answer when that turn ends: the reply lands in its own queue, carrying the text, so there is nothing to poll for. Use masc_keeper_delegate_status only to read the operation's state before then.|}, {|{"additionalProperties":false,"properties":{"prompt":{"type":"string"},"target":{"additionalProperties":false,"properties":{"kind":{"enum":["keeper"],"type":"string"},"name":{"type":"string"}},"required":["kind","name"],"type":"object"}},"required":["target","prompt"],"type":"object"}|}
-    ; {|masc_keeper_delegate_status|}, {|Read one Keeper chat operation by exact target and operation_id.
-
-A Keeper that submitted the operation does not need this to receive the answer: that arrives on its own queue when the turn ends. Use this to see where an operation stands before then.|}, {|{"additionalProperties":false,"properties":{"operation_id":{"type":"string"},"target":{"additionalProperties":false,"properties":{"kind":{"enum":["keeper"],"type":"string"},"name":{"type":"string"}},"required":["kind","name"],"type":"object"}},"required":["target","operation_id"],"type":"object"}|}
-    ; {|masc_keeper_delegate_cancel|}, {|Cancel one queued Keeper chat operation by exact target and operation_id.|}, {|{"additionalProperties":false,"properties":{"operation_id":{"type":"string"},"target":{"additionalProperties":false,"properties":{"kind":{"enum":["keeper"],"type":"string"},"name":{"type":"string"}},"required":["kind","name"],"type":"object"}},"required":["target","operation_id"],"type":"object"}|}
-    ; {|masc_keeper_delegate_list|}, {|List queued Keeper chat operations owned by the caller for one exact Keeper target.|}, {|{"additionalProperties":false,"properties":{"target":{"additionalProperties":false,"properties":{"kind":{"enum":["keeper"],"type":"string"},"name":{"type":"string"}},"required":["kind","name"],"type":"object"}},"required":["target"],"type":"object"}|}
-    ; {|masc_keeper_down|}, {|Submit a durable, non-blocking Keeper shutdown. Returns an operation_id immediately after admission is fenced and the ownership snapshot is persisted. Repeating the call returns the existing operation state.|}, {|{"additionalProperties":false,"properties":{"name":{"description":"Keeper handle","type":"string"},"remove_meta":{"description":"Delete .masc/keepers/<name>.json (default: false). Set true only for permanent removal.","type":"boolean"},"remove_session":{"description":"Delete .masc/traces/<trace_id>/ directory (default: false).","type":"boolean"}},"required":["name"],"type":"object"}|}
-    ; {|masc_keeper_list|}, {|List known keepers from persisted keeper metadata. The response carries total (keepers known before limit), limit (the value applied) and truncated, so a short answer is distinguishable from a complete one.|}, {|{"additionalProperties":false,"properties":{"detailed":{"description":"Return keeper summaries (model/context/handoff) instead of names only.","type":"boolean"},"limit":{"description":"Max keepers to return (default: 50). Names are sorted and cut from the end, so a low limit hides whatever sorts last; check truncated in the response.","type":"integer"}},"type":"object"}|}
-    ; {|masc_keeper_reset|}, {|Clear a keeper's lifecycle latch: drops the pause bit and the latched reason in one durable write. This is the operator recovery path for a keeper the generic resume transform refuses to unpause — Keeper_meta_contract.mark_resumed deliberately leaves Transcript_corruption_reset_required unchanged, so resume alone cannot free it. Does not touch usage counters, token stats, configuration, goals, or Keeper instructions.|}, {|{"additionalProperties":false,"properties":{"name":{"description":"Keeper handle to reset","type":"string"}},"required":["name"],"type":"object"}|}
-    ; {|masc_keeper_msg|}, {|Send a direct message to a keeper. Submits the message as an async chat operation and returns operation_id immediately; poll masc_keeper_delegate_status with target {kind: "keeper", name} and this operation_id to observe the turn settle.|}, {|{"additionalProperties":false,"properties":{"message":{"description":"Message text to send to the keeper","type":"string"},"name":{"description":"Keeper handle to message","type":"string"}},"required":["name","message"],"type":"object"}|}
-    ; {|masc_keeper_clear|}, {|Last-resort context clear for a keeper. Wipes user/assistant/tool messages from the checkpoint; keeps the system prompt by default (preserve_system_prompt=true). Set preserve_system_prompt=false to drop the system prompt too. Dispatches Operator_clear_requested to the keeper FSM, which resets context_overflow. Use only when the conversation must be reset and the keeper cannot recover otherwise. Requires a reason for the audit trail.|}, {|{"additionalProperties":false,"properties":{"name":{"description":"Keeper handle","type":"string"},"preserve_system_prompt":{"description":"Keep the system prompt in the cleared context. Defaults to true.","type":"boolean"},"reason":{"description":"Required. Operator explanation for why the context is being cleared (audit trail).","type":"string"}},"required":["name","reason"],"type":"object"}|}
-    ];;
 
 let published = Masc.Keeper_schema.schemas
 
@@ -74,24 +25,6 @@ let find name =
   with
   | Some schema -> schema
   | None -> failwith (name ^ " is absent from Keeper_schema.schemas")
-;;
-
-let test_descriptions_are_byte_identical () =
-  List.iter
-    (fun (name, description, _) ->
-       check string (name ^ " description") description (find name).description)
-    expected
-;;
-
-let test_input_schemas_match_with_keys_sorted () =
-  List.iter
-    (fun (name, _, schema) ->
-       check
-         string
-         (name ^ " input_schema")
-         schema
-         (Yojson.Safe.to_string (sorted (find name).input_schema)))
-    expected
 ;;
 
 (* The order is what a model reads the tool list in, so a reordering is a
@@ -155,13 +88,8 @@ let test_status_bounds_match_their_owner () =
 let () =
   run
     "keeper_schema_toml_parity"
-    [ ( "byte_identity"
-      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
-        ; test_case
-            "input schemas, keys sorted"
-            `Quick
-            test_input_schemas_match_with_keys_sorted
-        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+    [ ( "order"
+      , [ test_case "published order" `Quick test_the_published_order_is_unchanged
         ] )
     ; ( "owner_derivation"
       , [ test_case

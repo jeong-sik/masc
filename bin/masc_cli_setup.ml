@@ -48,6 +48,7 @@ let prepare_server ~base_path ~port ~owned =
         in
         let initial = read () in
         (match initial with
+         (* See the readiness wait below: this first read validates ownership even while state is loading. *)
          | Ok (200, body) -> ignore (health_state ~base_path body)
          | Ok (status, _) -> fail (Printf.sprintf "Port %d returned HTTP %d; choose an unused --port." port status)
          | Error _ ->
@@ -99,9 +100,18 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
           and a Task, list its sandbox directory, and fetch https://example.com.\n\
           If a tool asks permission, answer in the chat.\n%!";
         if open_tui then (
-          let binary = Filename.concat (Filename.dirname Sys.executable_name) "masc-tui" in
-          require_ok "Terminal UI" (fun () -> run_process
-            [binary; "--base-path"; base_path; "--port"; string_of_int port]))
+          let is_executable path =
+            try Unix.access path [Unix.X_OK]; true
+            with Unix.Unix_error _ -> false
+          in
+          match Masc_front_door.decide ~interactive:true ~host:"127.0.0.1"
+            ~default_host:"127.0.0.1" ~deployment_flags_present:false ~port
+            ~base_path:(Some base_path) ~executable_name:Sys.argv.(0)
+            ~path_env:(Sys.getenv_opt "PATH") ~is_executable with
+          | Masc_front_door.Open_tui { argv; _ } ->
+            require_ok "Terminal UI" (fun () -> run_process argv)
+          | Masc_front_door.Serve ->
+            fail "masc-tui is missing beside masc and from PATH. Add the installation prefix to PATH and rerun setup.")
         else (
           (* Explicit headless setup keeps its server running for the caller. *)
           owned := None;
@@ -109,6 +119,6 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
             port (Filename.quote base_path) port);
         0
       with
-      | Setup_error message -> Printf.eprintf "setup: %s\n%!" message; 1
+      | Setup_error message -> Log.Misc.error "setup: %s" message; 1
       | Unix.Unix_error (error, operation, path) ->
-        Printf.eprintf "setup: %s %s: %s\n%!" operation path (Unix.error_message error); 1)
+        Log.Misc.error "setup: %s %s: %s" operation path (Unix.error_message error); 1)

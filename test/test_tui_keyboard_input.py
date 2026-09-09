@@ -323,6 +323,12 @@ def end_of_needle(
     return found.end()
 
 
+# The Planning goal table's column row, which Render_schedule.planning_header_row
+# writes and only the list pane draws. The widths between the names follow the
+# terminal, so the names are what the pattern pins.
+PLANNING_LIST_HEADER = re.compile(rb"PHASE\s+JUDGE\s+PRI\s+OPEN\s+TITLE")
+
+
 def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     """A screen header, matched across the emphasis that closes the title.
 
@@ -3827,11 +3833,14 @@ def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
         # What has to hold is that the surface fell back to the list rather
         # than drawing a detail for a goal the snapshot no longer carries.
         # The footer stopped answering that: it is built from the key table
-        # now and publishes "Left / Esc:back" in both modes. The goal link and
-        # the timeline heading are drawn by the detail pane alone, so their
-        # absence is the reading -- and a stricter one than a hint's spelling.
+        # now and publishes "Left / Esc:back" in both modes, and it never says
+        # "Enter:detail" -- the Planning row spells that key "Right / Enter"
+        # (Masc_tui_keys, Planning) and this width does not reach it anyway.
+        # The column header is the list pane's own line and the goal link and
+        # timeline heading are the detail pane's, so the two together say
+        # which mode drew the screen.
         if (
-            b"Enter:detail" not in recovered
+            not PLANNING_LIST_HEADER.search(recovered)
             or b"masc://planning/" in recovered
             or b"TIMELINE" in recovered
         ):

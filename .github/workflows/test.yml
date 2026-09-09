@@ -249,6 +249,19 @@ jobs:
             opam exec -- dune build --root . bin/main_eio.exe
             ./_build/default/bin/main_eio.exe sandbox-image --print \
               | docker build -t masc-sandbox:general -
+            # Building the image is half of what a sandboxed suite needs. A
+            # fixture whose keeper runs a command starts a persistent
+            # container through the turn sandbox factory, and
+            # Keeper_sandbox_runtime_setup refuses that under a test
+            # executable unless the run says it wants the real daemon: the
+            # guard exists so a developer's daemon does not collect
+            # containers named for temp workspaces. This runner is thrown
+            # away with its daemon, and the shared factory helper removes
+            # its containers at exit, so this lane says so, once, here --
+            # not in every stanza that dispatches. Without it every Docker
+            # case that used to skip on "image not found" fails on the
+            # guard instead (dispatch_runtime, execute_exit_result).
+            export MASC_TEST_ALLOW_REAL_DOCKER=1
             scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
             exit 0
           fi

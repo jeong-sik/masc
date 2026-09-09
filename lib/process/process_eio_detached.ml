@@ -66,8 +66,9 @@ let fork_session_ready ~child_setup ~child_exec =
       | 0 ->
         close_reader ();
         (try
-           let session_id = resume_syscall Unix.setsid in
-           if session_id <> Unix.getpid () then Unix._exit 126;
+           (* Successful setsid establishes this child as session/group leader.
+              The parent already owns its PID; it needs only the ready signal. *)
+           let _session_id = resume_syscall Unix.setsid in
            child_setup ();
            let ready = Bytes.of_string "R" in
            if resume_syscall (fun () -> Unix.write ready_w ready 0 1) <> 1

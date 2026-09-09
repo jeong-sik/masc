@@ -2607,6 +2607,8 @@ let internal_descriptors : t list =
      |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
+  ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
+  ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor

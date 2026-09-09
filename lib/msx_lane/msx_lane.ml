@@ -58,6 +58,7 @@ let key_of_string s : (key, string) result =
   | "shift" -> Ok Msx.Shift
   | "ctrl" -> Ok Msx.Ctrl
   | "graph" -> Ok Msx.Graph
+  | "select" -> Ok Msx.Select
   | "f1" -> Ok (Msx.Function 1)
   | "f2" -> Ok (Msx.Function 2)
   | "f3" -> Ok (Msx.Function 3)
@@ -69,7 +70,7 @@ let key_of_string s : (key, string) result =
     Error
       (Printf.sprintf
          "unknown key %S: use up, down, left, right, space, esc, return, backspace, \
-          trigger_a, trigger_b, shift, ctrl, graph, f1-f5, or one character"
+          trigger_a, trigger_b, shift, ctrl, graph, select, f1-f5, or one character"
          k)
 ;;
 
@@ -87,6 +88,7 @@ let key_to_string : key -> string = function
   | Msx.Shift -> "shift"
   | Msx.Ctrl -> "ctrl"
   | Msx.Graph -> "graph"
+  | Msx.Select -> "select"
   | Msx.Function n -> Printf.sprintf "f%d" n
   | Msx.Char c -> String.make 1 c
 ;;
@@ -503,6 +505,83 @@ let step_frame ~frames =
 ;;
 
 let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
+;;
+
+(* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------
+   화면 판독은 "인간의 눈"으로 상태를 다시 읽는 비싼 우회다. 게임의 진실은
+   메모리에 있고, 코어는 그 전체를 이미 들고 있다. peek은 논리 주소의 바이트를
+   hex로 읽으며 내부 64K 스냅샷을 갱신하고, ram_diff는 직전 peek 이후 달라진
+   바이트를 변화 구간으로 돌려준다 — "이 조작이 무엇을 바꿨나"를 큰 덤프 없이
+   파악한다. 읽기만 한다: 쓰기는 치트 계약(RFC-0439) 위반이다. *)
+
+let peek_max_bytes = 256
+let ram_diff_max_runs = 64
+let address_space = 0x10000
+
+(* 스냅샷은 머신이 아니라 레인이 든다: peek을 부른 시점의 세계 그 자체가
+   기준이고, 머신 교체(load/restore) 후의 diff도 "달라졌다"로 옳다. *)
+let last_peek : Bytes.t option ref = ref None
+
+type ram_change = { address : int; length : int; from_hex : string; to_hex : string }
+
+let hex_pairs bytes lo hi =
+  String.concat ""
+    (List.init (hi - lo) (fun i -> Printf.sprintf "%02x" (Char.code (Bytes.get bytes (lo + i)))))
+;;
+
+let peek ~address ~length =
+  if address < 0 || length < 1 || length > peek_max_bytes
+     || address + length > address_space then
+    Error
+      (Invalid_request
+         (Printf.sprintf "peek needs 1..%d bytes inside 0x0000-0xFFFF, got %d..%d"
+            peek_max_bytes address (address + length)))
+  else
+    with_machine (fun st ->
+      let snap = Bytes.create address_space in
+      for a = 0 to address_space - 1 do
+        Bytes.set snap a (Char.chr (Msx.mem_read st.m a))
+      done;
+      last_peek := Some snap;
+      Ok (hex_pairs snap address (address + length)))
+;;
+
+type ram_diff = { changes : ram_change list; truncated : bool; changed_bytes : int }
+
+let ram_diff () =
+  match !last_peek with
+  | None -> Error (Invalid_request "no snapshot yet: call masc_msx_peek first")
+  | Some snap ->
+    with_machine (fun st ->
+      let rec go a changes total =
+        if a >= address_space || List.length changes >= ram_diff_max_runs then
+          { changes = List.rev changes
+          ; truncated = a < address_space
+          ; changed_bytes = total }
+        else if Char.code (Bytes.get snap a) = Msx.mem_read st.m a then go (a + 1) changes total
+        else begin
+          (* 하나의 변화 구간: 연속해서 달라진 바이트를 묶는다. *)
+          let rec run b =
+            if b >= address_space
+               || Char.code (Bytes.get snap b) = Msx.mem_read st.m b
+            then b
+            else run (b + 1)
+          in
+          let hi = run a in
+          let change =
+            { address = a
+            ; length = hi - a
+            ; from_hex = hex_pairs snap a hi
+            ; to_hex =
+                String.concat ""
+                  (List.init (hi - a) (fun i ->
+                       Printf.sprintf "%02x" (Msx.mem_read st.m (a + i))))
+            }
+          in
+          go hi (change :: changes) (total + (hi - a))
+        end
+      in
+      Ok (go 0 [] 0))
 ;;
 
 let atomic_write path contents =

@@ -209,6 +209,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some
         (Tool_misc_msx_lane.handle_press ~tool_name:name ~start_time:start
            ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_msx_peek ->
+      Some (Tool_misc_msx_lane.handle_peek ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_msx_ram_diff ->
+      Some (Tool_misc_msx_lane.handle_ram_diff ~tool_name:name ~start_time:start ())
   | Some Tool_schemas_misc.Misc_msx_step ->
       Some (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start args)
 
@@ -230,6 +234,10 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_slack_read
   (* Reads the machine without moving its time. *)
   | Tool_schemas_misc.Misc_msx_screen -> true
+  (* RAM introspection reads memory and moves nothing. *)
+  | Tool_schemas_misc.Misc_msx_peek
+  | Tool_schemas_misc.Misc_msx_ram_diff ->
+    true
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject

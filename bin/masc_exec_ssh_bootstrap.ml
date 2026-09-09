@@ -325,10 +325,17 @@ let confirm_host_key endpoint scan =
     Printf.printf
       "Endpoint %s (%s:%d) ED25519 host-key fingerprint:\n%s\n\nVerify it out-of-band, then retype exactly: %!"
       endpoint.Exec_ssh_endpoint.name endpoint.host endpoint.port expected;
-    let entered = read_line () |> String.trim in
-    if String.equal entered expected
-    then Ok ()
-    else Error "remote_ssh_host_key_confirmation_mismatch"
+    (* [read_line] raises [End_of_file] on a closed stdin, and this function
+       answers the other two cases with a string. A script, a CI job or an
+       agent calling this with no terminal attached got that exception and an
+       OCaml backtrace instead, which reads as a broken tool rather than as
+       "run this where a person can read the fingerprint". *)
+    (match In_channel.input_line In_channel.stdin with
+     | None -> Error "remote_ssh_host_key_confirmation_needs_a_terminal"
+     | Some entered ->
+       if String.equal (String.trim entered) expected
+       then Ok ()
+       else Error "remote_ssh_host_key_confirmation_mismatch")
   | [] -> Error "ssh-keyscan returned no parseable ED25519 fingerprint"
   | _ -> Error "ssh-keyscan returned multiple ED25519 fingerprints"
 ;;

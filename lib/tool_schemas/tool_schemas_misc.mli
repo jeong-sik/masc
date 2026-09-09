@@ -114,6 +114,8 @@ type misc_operation =
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step
+  | Misc_msx_peek
+  | Misc_msx_ram_diff
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)
 

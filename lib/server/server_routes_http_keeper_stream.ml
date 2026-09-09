@@ -1727,6 +1727,28 @@ let process_single_turn ~user_row_origin ~submission
       |> Result.map (fun operation_id ->
         Keeper_chat_delivery_identity.Operation operation_id)
   in
+  let pending_direct_runtime_retry () =
+    match submission with
+    | Owner_operation {operation_id; _} ->
+      Keeper_owner_registry.direct_runtime_retry ~base_path ~keeper_name:payload.name ~operation_id
+      |> Result.map_error Keeper_owner_registry.command_error_to_string
+  in
+  (* Capture this attempt's incoming identity before dispatch consumes it. *)
+  let resumed_from = pending_direct_runtime_retry ()
+    |> Result.map (Option.map (fun (retry : Keeper_semantic_execution.runtime_retry) -> retry.checkpoint)) in
+  let persist_operation_attempt ~settlement ?(tool_calls=[]) ?blocks ?turn_ref
+      ?stream_lifecycle () =
+    let ( let* ) = Result.bind in
+    let* resumed_from = resumed_from in
+    let* operation_id = match submission with
+      | Owner_operation {operation_id; _} ->
+        Keeper_chat_delivery_identity.Request_id.of_string
+          (Keeper_chat_operation.Operation_id.to_string operation_id) in
+    let conversation_id, _, _ = operation_delivery_coordinates in
+    Server_keeper_operation_transcript.persist ~base_dir:base_path
+      ~keeper_name:payload.name ~operation_id ~resumed_from ~settlement ~tool_calls
+      ~surface:chat_surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle ()
+  in
   let append_queued_user_row_once () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
@@ -1754,56 +1776,20 @@ let process_single_turn ~user_row_origin ~submission
       Ok ()
   in
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
-    let ( let* ) = Result.bind in
-    let* delivery_key = queue_delivery_key () in
-    let conversation_id, _, _ = operation_delivery_coordinates in
-    Keeper_chat_store.append_assistant_message_once
-      ~base_dir:base_path
-      ~keeper_name:payload.name
-      ~delivery_key
-      ~content
-      ~tool_calls
-      ~surface:chat_surface
-      ?conversation_id
-      ?blocks
-      ?turn_ref
-      ~stream_lifecycle:completed_stream_lifecycle
-      ()
-    |> Result.map (fun _ -> ())
+    persist_operation_attempt
+      ~settlement:(Server_keeper_operation_transcript.Terminal
+        {content; kind=Keeper_chat_store.Row_kind.Utterance})
+      ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:completed_stream_lifecycle ()
   in
   let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
-    let ( let* ) = Result.bind in
-    let* delivery_key = queue_delivery_key () in
-    let conversation_id, _, _ = operation_delivery_coordinates in
-    Keeper_chat_store.append_assistant_message_once
-      ~base_dir:base_path
-      ~keeper_name:payload.name
-      ~delivery_key
-      ~content
-      ~tool_calls
-      ~surface:chat_surface
-      ?conversation_id
-      ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-      ?blocks
-      ?turn_ref
-      ~stream_lifecycle:errored_stream_lifecycle
-      ()
-    |> Result.map (fun _ -> ())
+    persist_operation_attempt
+      ~settlement:(Server_keeper_operation_transcript.Terminal
+        {content; kind=Keeper_chat_store.Row_kind.Transport_failure})
+      ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:errored_stream_lifecycle ()
   in
   let append_queued_tool_calls_once ?turn_ref tool_calls =
-    let ( let* ) = Result.bind in
-    let* delivery_key = queue_delivery_key () in
-    let conversation_id, _, _ = operation_delivery_coordinates in
-    Keeper_chat_store.append_tool_calls_once
-      ~base_dir:base_path
-      ~keeper_name:payload.name
-      ~delivery_key
-      ~tool_calls
-      ~surface:chat_surface
-      ?conversation_id
-      ?turn_ref
-      ()
-    |> Result.map (fun _ -> ())
+    persist_operation_attempt ~settlement:Server_keeper_operation_transcript.Runtime_deferred
+      ~tool_calls ?turn_ref ()
   in
   (* RFC-0301 item 6: collect generated media from the same stream so the assistant
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
@@ -2144,6 +2130,10 @@ let process_single_turn ~user_row_origin ~submission
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
+                   match pending_direct_runtime_retry () with
+                   | Error detail -> Error detail
+                   | Ok (Some _) -> persist_tool_calls_only () |> delivered_after_persist
+                   | Ok None ->
                    match turn_outcome, String_util.trim_nonempty visible_reply with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
                        | Keeper_turn_outcome.Awaiting_gate_approval
@@ -2640,6 +2630,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
         Keeper_chat_operation.No_queued_operation
         "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
+      let pending_runtime_retry () =
+        Keeper_owner_registry.direct_runtime_retry
+          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~keeper_name ~operation_id:operation.operation_id
+        |> Result.map_error Keeper_owner_registry.command_error_to_string
+      in
       (match operation.input with
        | None ->
          failed
@@ -2857,10 +2853,13 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         | Keeper_turn_outcome.Awaiting_gate_approval
                         | Keeper_turn_outcome.No_visible_reply -> None)
                    | Keeper_chat_events.Run_finished _ ->
-                     commit
-                       (match reply with
-                        | Some reply -> Keeper_event_queue.Delegate_replied reply
-                        | None -> Keeper_event_queue.Delegate_no_reply)
+                     (match pending_runtime_retry () with
+                      | Ok (Some _) -> settle_delivery (Ok ())
+                      | Error detail -> settle_delivery (Error detail)
+                      | Ok None -> commit
+                          (match reply with
+                           | Some reply -> Keeper_event_queue.Delegate_replied reply
+                           | None -> Keeper_event_queue.Delegate_no_reply))
                    | Keeper_chat_events.Event_error { message } ->
                      commit (Keeper_event_queue.Delegate_failed message)
                    | _ -> loop reply
@@ -2907,6 +2906,10 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 ~events
             in
             let delivery = Eio.Promise.await delivery in
+            (match pending_runtime_retry () with
+             | Ok (Some _) -> Keeper_owner.Operation_deferred
+             | Error detail -> failed Keeper_chat_operation.Store_unavailable detail
+             | Ok None ->
             (match outcome, delivery with
              | Some (Delivered { outcome_ref }), Ok () ->
                Keeper_owner.Operation_succeeded { outcome_ref }
@@ -2919,7 +2922,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
              | None, _ ->
                failed
                  Keeper_chat_operation.Turn_invariant
-                 "Owner operation returned no terminal turn outcome")))
+                 "Owner operation returned no terminal turn outcome"))))
   in
   match
     Keeper_turn_dispatch_authority.run execute_admitted
@@ -2946,6 +2949,7 @@ let synthesize_wire_terminal_on_settle ~keeper_name ~operation_id ~execution =
     note_operation_wire_event ~operation_id event;
     Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:None ~event;
     publish_operation_live_event ~operation_id ~seq:None event
+  | Some Wire_started, Keeper_owner.Operation_deferred -> ()
   | Some Wire_started, Keeper_owner.Operation_succeeded _ ->
     Log.Misc.warn
       "keeper chat operation %s succeeded without a wire terminal event"

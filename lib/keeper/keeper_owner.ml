@@ -94,6 +94,7 @@ type error =
   | Owner_closed
 
 type operation_execution =
+  | Operation_deferred
   | Operation_succeeded of { outcome_ref : string }
   | Operation_failed of
       { kind : Chat_operation.failure_kind
@@ -690,6 +691,21 @@ let start
     let finish_operation_child claimed_operation_id execution =
       match claimed_operation_id, execution with
       | None, _ -> Ok ()
+      | Some operation_id, Operation_deferred ->
+        run_operation_read t ~label:"confirm deferred Keeper chat operation" (fun () ->
+          match Chat_operation_store.get t.operation_store operation_id with
+          | Error error -> Error error
+          | Ok None -> Error (Chat_operation_store.Unknown_operation operation_id)
+          | Ok (Some operation) ->
+            (match operation.state with
+             | Chat_operation.Queued ->
+               (match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
+                | Ok (Some _) -> Ok ()
+                | Ok None -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
+                | Error error -> Error error)
+             | Chat_operation.Cancelled _ -> Ok ()
+             | Chat_operation.Running _ | Chat_operation.Succeeded _ | Chat_operation.Failed _ ->
+               Error (Chat_operation_store.Integrity_error "deferred operation is not queued")))
       | Some operation_id, Operation_succeeded { outcome_ref } ->
         run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
           Chat_operation_store.succeed_running

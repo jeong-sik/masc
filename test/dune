@@ -5486,3 +5486,8 @@
  (modules test_workspace_memory_proposals)
  (libraries alcotest yojson masc masc.server masc.masc_core)
  (deps ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
+
+(test
+ (name test_keeper_direct_runtime_resume)
+ (modules test_keeper_direct_runtime_resume)
+ (libraries alcotest masc_test_deps eio_main unix))

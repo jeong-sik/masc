@@ -32,6 +32,7 @@ end
 
 type delivery_key =
   | Operation of Request_id.t
+  | Operation_checkpoint of { operation_id : Request_id.t; checkpoint : Keeper_checkpoint_ref.t }
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
   | Approval_lifecycle of Request_id.t
@@ -92,6 +93,11 @@ let delivery_key_to_yojson = function
       [ "kind", `String "operation"
       ; "operation_id", `String (Request_id.to_string operation_id)
       ]
+  | Operation_checkpoint {operation_id; checkpoint} ->
+    `Assoc ["kind", `String "operation_checkpoint";
+      "operation_id", `String (Request_id.to_string operation_id);
+      "trace_id", `String (Keeper_id.Trace_id.to_string checkpoint.trace_id);
+      "turn_count", `Int checkpoint.turn_count; "sha256", `String checkpoint.sha256]
   | Fusion_run request_id ->
     `Assoc
       [ "kind", `String "fusion_run"
@@ -123,6 +129,19 @@ let delivery_key_of_yojson = function
        let* operation_id = string_field "operation_id" fields in
        let* operation_id = Request_id.of_string operation_id in
        Ok (Operation operation_id)
+     | "operation_checkpoint" ->
+       let* () = validate_fields ~context:"checkpointed operation delivery identity"
+         ~expected:["kind"; "operation_id"; "trace_id"; "turn_count"; "sha256"] fields in
+       let* operation_id = string_field "operation_id" fields in
+       let* operation_id = Request_id.of_string operation_id in
+       let* trace_id = string_field "trace_id" fields in
+       let* trace_id = Keeper_id.Trace_id.of_string trace_id in
+       let* turn_count = match List.assoc_opt "turn_count" fields with
+         | Some (`Int value) -> Ok value | _ -> Error "checkpoint turn count must be an integer" in
+       let* sha256 = string_field "sha256" fields in
+       let* checkpoint = Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count ~sha256
+         |> Result.map_error (fun _ -> "invalid checkpoint delivery identity") in
+       Ok (Operation_checkpoint {operation_id; checkpoint})
      | "fusion_run" ->
        let* () =
          validate_fields
@@ -160,11 +179,14 @@ let delivery_key_of_yojson = function
 let delivery_key_equal left right =
   match left, right with
   | Operation left, Operation right -> Request_id.equal left right
+  | Operation_checkpoint left, Operation_checkpoint right ->
+    Request_id.equal left.operation_id right.operation_id
+    && Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
   | Workspace_message left, Workspace_message right -> Request_id.equal left right
   | Approval_lifecycle left, Approval_lifecycle right -> Request_id.equal left right
-  | (Operation _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
-    (Operation _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
+  | (Operation _ | Operation_checkpoint _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
+    (Operation _ | Operation_checkpoint _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
     false
 ;;
 

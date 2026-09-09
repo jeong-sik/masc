@@ -92,8 +92,8 @@ try:
  js("document.querySelector('#messages').scrollTop=0;window.wheelTrusted=false;document.addEventListener('wheel',e=>window.wheelTrusted=e.isTrusted);")
  js(scene+guard,[args])
  call('POST','/session/'+sid+'/actions',{'actions':[{'type':'wheel','id':'masc-browser-wheel','actions':[{'type':'scroll','duration':0,'origin':'viewport','x':int(point['x']*viewport['width']),'y':int(point['y']*viewport['height']),'deltaX':0,'deltaY':160}]}]})
- call('DELETE','/session/'+sid+'/actions')
- # Match production: guard, wheel, release, page metadata, capture, metadata.
+ # Match production: guard, wheel, page metadata, capture, metadata.
+ # A wheel does not enter pressed-pointer release cleanup.
  js('return {url:location.href,title:document.title};')
  js(scene+"\nreturn browserScene({mode:'viewport'});")
  wheel_png=call('GET','/session/'+sid+'/screenshot')

@@ -7296,10 +7296,13 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
          | Browser_lane_view.Automation -> "click: link   drag: move")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
+  let wheel_hint = match !image_cell_pixels with
+    | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
+    | _ -> "wheel:center" in
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
         (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
-    ~footer:("  Esc: back  r:refresh  wheel:pane  j/k:center  " ^ pointer_hint) bytes;
+    ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -14781,7 +14784,7 @@ and is loaded on demand through keeper_skill.
              | Some region -> (match Masc_tui_graphics.image_point region ~row ~column with
                  | Some (x,y_point) -> scroll_at {x;y=y_point} y
                  | None -> ())
-             | None -> () in
+             | None -> scroll_at {x=0.5;y=0.5} y in
            (match event with
             | Mouse_left_press (row,column) ->
                 browser_pointer_press := None;

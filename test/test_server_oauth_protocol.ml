@@ -125,6 +125,38 @@ let test_public_listener_cannot_admit_loopback_oauth_by_host () =
     fail "explicit loopback authority should be classified before OAuth admission"
 ;;
 
+let test_listener_scope_survives_wire_projection () =
+  List.iter
+    (fun (bind_host, wire_host, expected) ->
+      let trust_policy =
+        match Server_request_authority.make_trust_policy
+          ~bind_host ~bind_port:8935 ~explicit_base_url:None with
+        | Ok policy -> policy
+        | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+      in
+      let check_authority label authority =
+        check bool (bind_host ^ " " ^ label) expected
+          (Server_oauth_metadata.loopback_authority authority)
+      in
+      check_authority "background" (Server_request_authority.projection_context trust_policy);
+      let wire = wire_host ^ ":8935" in
+      let http1 = Httpun.Request.create
+        ~headers:(Httpun.Headers.of_list [ "host", wire ]) `GET "/mcp" in
+      (match Server_request_authority.classify_http1_request ~trust_policy http1 with
+       | Single authority -> check_authority "HTTP/1" authority
+       | _ -> fail "configured local wire identity must remain admitted");
+      let http2 = H2.Request.create ~scheme:"http"
+        ~headers:(H2.Headers.of_list [ ":authority", wire ]) `GET "/mcp" in
+      match Server_request_authority.classify_h2_request ~trust_policy http2 with
+      | H2_authority (Single authority) -> check_authority "HTTP/2" authority
+      | _ -> fail "configured local HTTP/2 identity must remain admitted")
+    [ "0.0.0.0", "127.0.0.1", false
+    ; "::", "127.0.0.1", false
+    ; "127.0.0.1", "127.0.0.1", true
+    ; "::1", "[::1]", true
+    ]
+;;
+
 let registration_request ?origin () =
   let headers =
     ("host", "127.0.0.1:8935")
@@ -336,6 +368,8 @@ let () =
             "public listener rejects loopback OAuth Host"
             `Quick
             test_public_listener_cannot_admit_loopback_oauth_by_host
+        ; test_case "listener scope survives wire projection" `Quick
+            test_listener_scope_survives_wire_projection
         ; test_case
             "registration browser origin boundary"
             `Quick

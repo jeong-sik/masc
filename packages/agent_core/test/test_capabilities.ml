@@ -1620,9 +1620,9 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Response_format_json_schema
       , Replay_not_required
       , Delta_stream "reasoning" )
-    ; ( "Claude Haiku 4.5"
+    ; ( "Claude Sonnet 5"
       , Native_provider Provider_config.Anthropic
-      , "claude-haiku-4-5"
+      , "claude-sonnet-5"
       , Extended_thinking
       , Native_structured_output
       , Replay_every_turn
@@ -2430,7 +2430,7 @@ let test_manifest_rejects_retired_reasoning_visibility_key () =
 let test_manifest_applies_accepted_reasoning_efforts () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"effort-ok","accepted_reasoning_efforts":["none","low","high"]}]}|}
+      {|{"schema_version":1,"models":[{"id_prefix":"effort-ok","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
   match Capability_manifest.of_json json with
   | Ok [ entry ] ->
@@ -2926,63 +2926,124 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    asserts the capability fingerprint that is unique to the longer branch.
    If the two branches were swapped the assertion would fail. Provider-scoped
    rows are exact identities and therefore do not participate in this test. *)
-(* Every [[providers]] entry declares a [capabilities_base], and until
-   2026-09-09 that base was consulted before the model's own bare row. It
-   therefore always answered, and the bare row -- the only lookup that applies
-   prefix matching -- was unreachable for any label naming a provider entry.
-   44 of the catalog's 125 bare rows sat behind that: glm 21, gemini 11,
-   kimi 7, ollama 5. Only `gemini`, `glm`, `kimi` and `ollama` are both a
-   wire-kind label and a [[providers]] id, which is why glm (#34126) and
-   gemini (#34301) were the two that got noticed.
+(* Until 2026-09-09 the provider-wide base was consulted before the model's
+   own bare row, so the bare row -- the only lookup that applies prefix
+   matching -- was unreachable wherever the base answered.
+
+   Which labels those are is narrower than it looks. [provider_base_label]
+   goes through [Model_catalog.provider_entry_for_label], which returns [None]
+   for every wire-kind label ([anthropic], [kimi], [openai_compat], [ollama],
+   [gemini], [glm]). So for a label naming a wire kind the base never answered,
+   before this change or after; the reorder is observable only for a label
+   that names a [[providers]] entry and nothing else -- [glm-coding],
+   [ollama_cloud], [openrouter] and the rest.
 
    The discriminator is a field the row sets and the provider base does not:
    [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
    what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
-   thinking-control contract" -- so [Some _] here means the row was read. *)
-let test_a_bare_row_outranks_the_provider_base () =
-  let resolved label model_id =
-    match
-      Capabilities.for_provider_model_id
-        ~wire:None
-        ~allow_bare_fallback:true
-        ~provider_label:label
-        ~model_id
-    with
-    | Some (c : Capabilities.capabilities) -> c.accepted_reasoning_efforts
-    | None -> failf "%s/%s resolved to no capabilities at all" label model_id
+   thinking-control contract" -- so [Some _] here means the row was read.
+
+   Only gemini bare rows declare that field; no glm bare row does, and
+   [glm-4.6v] additionally carries a [provider_name = "glm"] row, which an
+   exact provider-scoped lookup reads before any fallback. So glm cannot be
+   expressed with this discriminator and is not listed here. *)
+(* The two halves of the assembly step #34743 removed, one test each, because
+   restoring either without the other is a round trip: the erasing form broke
+   #34301, and its absence broke the eleven non-reasoning ollama_cloud rows
+   (#34765).
+
+   Declared efforts survive for a row that supports reasoning. This is the case #34743 exists for -- native
+   Anthropic and Gemini adapters serialize their own thinking controls, so
+   [thinking_control_format = "none"] is not a statement about the effort
+   vocabulary. *)
+let test_a_declared_effort_ladder_survives_its_own_row () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[{"id_prefix":"declares-efforts","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
-  List.iter
-    (fun (label, model_id) ->
-       match resolved label model_id with
-       | Some (_ :: _) -> ()
-       | Some [] ->
-         failf "%s/%s read a row that declares no accepted efforts" label model_id
-       | None ->
-         failf
-           "%s/%s fell through to the provider base; the bare row naming it was not read"
-           label
-           model_id)
-    [ "gemini", "gemini-3-flash-preview"; "glm", "glm-4.6v" ]
+  match Capability_manifest.of_json json with
+  | Ok [ entry ] ->
+    check
+      (option (list string))
+      "the row's own efforts reach the capabilities"
+      (Some [ "none"; "low"; "high" ])
+      (Option.map
+         (List.map Reasoning_effort.to_string)
+         (Capabilities.apply_manifest_entry entry).accepted_reasoning_efforts)
+  | Ok _ -> fail "expected one manifest entry"
+  | Error msg -> failf "unexpected parse error: %s" msg
 ;;
 
-(* The reorder is gated on [allow_bare_fallback]: a config that named a
-   [provider_id] must not pick up a bare row, because a scoped provider's base
-   can deliberately differ from the provider-independent value. *)
-let test_a_named_provider_still_refuses_the_bare_row () =
+(* Inherited does not: [[providers]] ollama_cloud's /v1 base declares the
+   five-step ladder for models it has no row for, and devstral-2:123b is a row
+   on that base saying it does not reason. It names no efforts of its own, so
+   there is nothing to keep. *)
+let test_a_non_reasoning_row_inherits_no_effort_ladder () =
   match
     Capabilities.for_provider_model_id
-      ~wire:None
+      ~wire:(Some Provider_kind.OpenAI_compat)
       ~allow_bare_fallback:false
-      ~provider_label:"gemini"
-      ~model_id:"gemini-3-flash-preview"
+      ~provider_label:"ollama_cloud"
+      ~model_id:"devstral-2:123b"
   with
-  | None -> failf "the provider base should still answer here"
+  | None -> fail "ollama_cloud/devstral-2:123b should resolve"
   | Some (c : Capabilities.capabilities) ->
+    check bool "the row says it does not reason" false c.supports_reasoning;
     check
       bool
-      "a named provider reads the base, which declares no accepted efforts"
+      "and so advertises no effort values"
       true
       (Option.is_none c.accepted_reasoning_efforts)
+;;
+
+(* Keep the row/base distinction local: production catalogs may add scoped
+   rows or omit providers, neither of which tests the fallback branch. *)
+let with_precedence_catalog f =
+  with_temp_model_catalog
+    {|[[providers]]
+id = "precedence-provider"
+kind = "gemini"
+base_url = "https://example.invalid"
+request_path = ""
+api_key_env = ""
+capabilities_base = "gemini"
+
+[[models]]
+id_prefix = "precedence-model"
+base = "gemini"
+supports_reasoning = true
+accepted_reasoning_efforts = ["high"]
+|}
+    (fun path ->
+      let previous = Model_catalog.global () in
+      Fun.protect
+        ~finally:(fun () -> match previous with
+          | Some catalog -> Model_catalog.set_global catalog
+          | None -> Model_catalog.clear_global ())
+        (fun () ->
+          match Model_catalog.load_file path with
+          | Error detail -> fail detail
+          | Ok catalog -> Model_catalog.set_global catalog; f ()))
+;;
+
+let test_a_bare_row_outranks_the_provider_base () =
+  with_precedence_catalog (fun () ->
+    match Capabilities.for_provider_model_id ~wire:None ~allow_bare_fallback:true
+      ~provider_label:"precedence-provider" ~model_id:"precedence-model" with
+    | None -> fail "declared model must resolve"
+    | Some capabilities ->
+      check (option (list string)) "bare row outranks provider base"
+        (Some ["high"]) (accepted_reasoning_effort_strings capabilities))
+;;
+
+let test_a_named_provider_still_refuses_the_bare_row () =
+  with_precedence_catalog (fun () ->
+    match Capabilities.for_provider_model_id ~wire:None ~allow_bare_fallback:false
+      ~provider_label:"precedence-provider" ~model_id:"precedence-model" with
+    | None -> fail "explicitly declared provider base must resolve"
+    | Some capabilities ->
+      check (option (list string)) "scoped lookup does not borrow a bare row"
+        None (accepted_reasoning_effort_strings capabilities))
 ;;
 
 let test_prefix_ordering_invariant () =
@@ -3379,6 +3440,14 @@ let () =
             "shadow pairs all resolve to specific branch (M01)"
             `Quick
             test_prefix_ordering_invariant
+        ; test_case
+            "a declared effort ladder survives its own row"
+            `Quick
+            test_a_declared_effort_ladder_survives_its_own_row
+        ; test_case
+            "a non-reasoning row inherits no effort ladder"
+            `Quick
+            test_a_non_reasoning_row_inherits_no_effort_ladder
         ; test_case
             "a bare row outranks the provider base"
             `Quick

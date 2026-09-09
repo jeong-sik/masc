@@ -54,6 +54,7 @@ let test_outage_marks_inactive_then_restarts () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = env#clock in
+  Otel_spans.set_runtime_enabled true;
   (* Port 0 and read the bound address back, the way the other OTLP tests
      do. A pid-derived port collided under the parallel suite: another
      test's live server took it over after [first] closed, the probe kept

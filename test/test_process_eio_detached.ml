@@ -57,25 +57,59 @@ let test_echo_roundtrip () =
       check string "stdout captured" "legendary-bash\n" stdout;
       check string "stderr empty" "" stderr
 
+let assert_group_and_cleanup ~pid ~pgid ~close =
+  Fun.protect
+    ~finally:(fun () ->
+      (* Kill the owned PID as a fallback even if the group assertion fails. *)
+      (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+      ignore (Unix.waitpid [] pid);
+      close ())
+    (fun () ->
+      check int "pgid equals pid" pid pgid;
+      (* This OS query must succeed immediately when spawn returns. Polling
+         here would hide a parent handle published before child setsid. *)
+      Unix.kill (-pgid) 0;
+      Unix.kill (-pgid) Sys.sigterm)
+
 let test_pgid_equals_pid () =
-  match
-    P.spawn_detached ~argv:[ "/bin/sleep"; "2" ]
-      ~env:(env_of_current ()) ~cwd:""
-  with
-  | Error e -> failf "spawn failed: %s" e
-  | Ok h ->
-      check int "pgid equals pid" h.pid h.pgid;
-      (* There is a fork/setsid race — the parent may observe the
-         pgid before the child has finished establishing its own
-         session.  Poll briefly so the test is deterministic. *)
-      let alive_within =
-        wait_until ~timeout_s:1.0 (fun () ->
-          P.is_pgid_alive ~pgid:h.pgid)
-      in
-      check bool "pgroup reaches alive state" true alive_within;
-      P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:1.0;
-      ignore (Unix.waitpid [] h.pid);
-      Unix.close h.stdout_fd; Unix.close h.stderr_fd
+  match P.spawn_detached ~argv:[ "/bin/sleep"; "30" ]
+    ~env:(env_of_current ()) ~cwd:"" with
+  | Error error -> failf "spawn failed: %s" error
+  | Ok handle ->
+    assert_group_and_cleanup ~pid:handle.pid ~pgid:handle.pgid
+      ~close:(fun () -> Unix.close handle.stdout_fd; Unix.close handle.stderr_fd)
+
+let test_devnull_pgid_exists_immediately () =
+  match P.spawn_detached_devnull ~argv:[ "/bin/sleep"; "30" ]
+    ~env:(env_of_current ()) ~cwd:"" with
+  | Error error -> failf "devnull spawn failed: %s" error
+  | Ok handle ->
+    assert_group_and_cleanup ~pid:handle.devnull_pid ~pgid:handle.devnull_pgid
+      ~close:(fun () -> ())
+
+let test_setup_eof_rejects_without_leaking_fds () =
+  (* An ordinary file cannot be chdir'd into. Both children finish setsid but
+     fail before readiness; the parent must report Error and close all its
+     pipe/devnull descriptors. Unlike an arbitrary nonexistent path, this
+     fixture cannot accidentally become a valid directory. *)
+  let cwd = Filename.temp_file "detached-invalid-cwd" ".file" in
+  Fun.protect ~finally:(fun () -> Sys.remove cwd) (fun () ->
+    let descriptors_before = Array.length (Sys.readdir "/dev/fd") in
+    (match P.spawn_detached ~argv:[ "/bin/true" ] ~env:(env_of_current ()) ~cwd with
+     | Error _ -> ()
+     | Ok handle ->
+       Unix.close handle.stdout_fd; Unix.close handle.stderr_fd;
+       ignore (Unix.waitpid [] handle.pid);
+       fail "pipe spawn published a handle after pre-ready setup failure");
+    check int "pipe setup EOF closes every parent descriptor" descriptors_before
+      (Array.length (Sys.readdir "/dev/fd"));
+    (match P.spawn_detached_devnull ~argv:[ "/bin/true" ] ~env:(env_of_current ()) ~cwd with
+     | Error _ -> ()
+     | Ok handle ->
+       ignore (Unix.waitpid [] handle.devnull_pid);
+       fail "devnull spawn published a handle after pre-ready setup failure");
+    check int "devnull setup EOF closes every parent descriptor" descriptors_before
+      (Array.length (Sys.readdir "/dev/fd")))
 
 let test_tree_kill_sigterm () =
   match
@@ -207,7 +241,9 @@ let () =
       ( "spawn_detached",
         [
           test_case "echo roundtrip" `Quick test_echo_roundtrip;
-          test_case "pgid equals pid" `Quick test_pgid_equals_pid;
+          test_case "pgid exists immediately" `Quick test_pgid_equals_pid;
+          test_case "devnull pgid exists immediately" `Quick test_devnull_pgid_exists_immediately;
+          test_case "setup EOF rejects and closes descriptors" `Quick test_setup_eof_rejects_without_leaking_fds;
           test_case "empty argv rejected" `Quick test_empty_argv_rejected;
           test_case "devnull spawn exits" `Quick
             test_devnull_spawn_exits_without_pipe_handles;

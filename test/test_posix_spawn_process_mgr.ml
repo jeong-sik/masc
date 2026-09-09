@@ -258,6 +258,24 @@ let test_group_term_keeps_owner_after_leader_exit ~mode () =
       Eio.Process.signal sibling Sys.sigkill))
 ;;
 
+let test_group_explicit_kill_reaps_leader_and_stops_descendant () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+    Eio.Switch.run (fun sw ->
+      let proc = Eio.Process.spawn ~sw mgr
+        [ "python3"; "-c"; group_fixture; marker; "ignore" ] in
+      let descendant = wait_for_marker clock marker in
+      Eio.Process.signal proc Sys.sigkill;
+      (match Eio.Process.await proc with
+       | `Signaled signal -> check int "leader received SIGKILL" Sys.sigkill signal
+       | `Exited code -> failf "killed leader exited normally: %d" code);
+      assert_descendant_stopped env descendant;
+      match Unix.waitpid [ Unix.WNOHANG ] (Eio.Process.pid proc) with
+      | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+      | _ -> fail "explicitly killed foreground leader left unreaped"))
+;;
+
 let test_group_normal_exit_reaps_in_long_lived_switch () =
   with_group_fixture (fun env marker ->
     let clock = Eio.Stdenv.clock env in
@@ -298,6 +316,8 @@ let () =
             (test_group_term_keeps_owner_after_leader_exit ~mode:"wait")
         ; test_case "TERM-ignoring leader still reaches group escalation" `Quick
             (test_group_term_keeps_owner_after_leader_exit ~mode:"ignore")
+        ; test_case "explicit group SIGKILL reaps leader and stops descendant" `Quick
+            test_group_explicit_kill_reaps_leader_and_stops_descendant
         ; test_case "normal leaders reap inside a long-lived switch" `Quick
             test_group_normal_exit_reaps_in_long_lived_switch
         ; test_case "native command cancellation cleans its group" `Quick

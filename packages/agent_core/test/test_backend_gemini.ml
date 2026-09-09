@@ -227,6 +227,43 @@ let test_gemini3_uses_thinking_level () =
   check bool "includeThoughts true" true (tc |> member "includeThoughts" |> to_bool)
 ;;
 
+let test_native_effort_requires_reasoning_support () =
+  List.iter (fun supports_reasoning ->
+    let manifest = `Assoc
+      [ "schema_version", `Int 1
+      ; "models", `List [ `Assoc
+          [ "id_prefix", `String "native-effort-fixture"
+          ; "supports_reasoning", `Bool supports_reasoning
+          ; "supports_reasoning_budget", `Bool false
+          ; "accepted_reasoning_efforts", `List [ `String "high" ] ] ] ] in
+    let capabilities = match Capability_manifest.of_json manifest with
+      | Ok [ entry ] -> Capabilities.apply_manifest_entry entry
+      | Ok _ -> fail "expected one capability declaration"
+      | Error detail -> fail detail in
+    let config = Provider_config.make
+      ~kind:Gemini ~model_id:"native-effort-fixture"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~api_key:"test-key" ~request_path:""
+      ~model_capabilities_override:capabilities
+      ~reasoning_effort:Reasoning_effort.High () in
+    let messages = [ Types.user_msg "Think." ] in
+    if supports_reasoning then (
+      let body = Backend_gemini.build_request ~config ~messages () |> parse_body in
+      check string "native vocabulary survives without an OpenAI thinking format"
+        "high" (body |> member "generationConfig" |> member "thinkingConfig"
+                |> member "thinkingLevel" |> to_string))
+    else (
+      (match Provider_config.validate_reasoning_effort_request_typed config with
+       | Error (Provider_config.Undeclared_reasoning_effort_capability
+           { provider_kind = Gemini; effort = Reasoning_effort.High; _ }) -> ()
+       | Error _ -> fail "unexpected rejection for disabled reasoning"
+       | Ok () -> fail "disabled model gained reasoning effort authority");
+      match Backend_gemini.build_request ~config ~messages () with
+      | _ -> fail "disabled native model emitted a thinking request"
+      | exception Invalid_argument _ -> ()))
+    [ true; false ]
+;;
+
 let test_gemini3_disable_is_rejected () =
   let config =
     gemini_config ~model_id:"gemini-3-flash-preview" ~enable_thinking:false ()
@@ -1472,6 +1509,7 @@ let test_gemini_stream_function_call_preserves_thought_signature () =
        ; ContentBlockDelta
            { index = delta_idx; delta = InputJsonSnapshot {|{"q":"test"}|} }
        ; MessageDelta { stop_reason = Some StopToolUse; _ }
+       ; MessageStop
        ] ->
        check int "redacted index" 0 redacted_idx;
        check int "tool index" 1 tool_idx;
@@ -1549,6 +1587,7 @@ let test_gemini_stream_textual_parts_preserve_thought_signatures () =
        ; ContentBlockStart { index = 3; content_type = "thinking"; _ }
        ; ContentBlockDelta { index = 3; delta = ThinkingDelta "plan" }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
+       ; MessageStop
        ] ->
        check_part_signature_carrier
          ~target:"text"
@@ -1601,6 +1640,7 @@ let test_gemini_stream_signed_inline_image () =
                  { media_type = "image/png"; source_type = Base64; data = "iVBORw0KGgo=" }
            }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
+       ; MessageStop
        ] ->
        check_part_signature_carrier ~target:"image" ~signature:"sig-stream-image" carrier
      | _ -> fail "expected signed image carrier and media delta");
@@ -1736,6 +1776,8 @@ let () =
             `Quick
             test_thinking_disabled_requires_exact_numeric_wire
         ; test_case "gemini 3 uses thinkingLevel" `Quick test_gemini3_uses_thinking_level
+        ; test_case "native effort requires reasoning support" `Quick
+            test_native_effort_requires_reasoning_support
         ; test_case "gemini 3 disable is rejected" `Quick test_gemini3_disable_is_rejected
         ; test_case "tools" `Quick test_tools
         ; test_case

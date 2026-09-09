@@ -248,16 +248,25 @@ let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =
 ;;
 let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_name ~start_time args)
 
-let handle_interact ~tool_name ~start_time args : Tool_result.result =
+let handle_interact_with_phase ~tool_name ~start_time args =
+  let pre_error error = make_workflow_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect in
   match Browser_interaction.parse args with
-  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Error error -> pre_error error
   | Ok request ->
     let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
     (match Browser_lane.resolve_target ~lane_name ~client_id:request.client_id with
-     | Error error -> make_workflow_err ~tool_name ~start_time error
-     | Ok target -> answer_to_result ~tool_name ~start_time
-       (Browser_lane.issue_for ~target
+     | Error error -> pre_error error
+     | Ok target ->
+       let answer = Browser_lane.issue_for ~target
          ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
            expected_url=request.expected_url; action=request.action})
-         ~timeout_sec:default_timeout_sec |> add_client target))
+         ~timeout_sec:default_timeout_sec in
+       let phase = match answer with
+         | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent -> Tool_result.Proven_pre_effect
+         | Browser_lane.Answered (`Assoc fields) when
+             List.assoc_opt "ok" fields = Some (`Bool false)
+             && List.assoc_opt "effectPhase" fields = Some (`String "not_started") -> Tool_result.Proven_pre_effect
+         | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Timed_out -> Tool_result.Effect_outcome_unknown in
+       answer_to_result ~tool_name ~start_time (add_client target answer), phase)
 ;;
+let handle_interact ~tool_name ~start_time args = fst (handle_interact_with_phase ~tool_name ~start_time args)

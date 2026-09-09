@@ -95,7 +95,6 @@ type structured_output_support = Capability_vocab.structured_output_support =
 [@@deriving show, eq]
 
 type anthropic_thinking_control =
-  | Anthropic_manual_budget
   | Anthropic_adaptive_default
   | Anthropic_adaptive_preferred
   | Anthropic_adaptive_only

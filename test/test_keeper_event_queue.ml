@@ -1756,7 +1756,6 @@ let () =
       Alcotest.(check bool) "residence is explicitly unknown, never source age" true
         (json_field "oldest_age_seconds" residence = Some `Null
          && string_field "status" residence = "unknown");
-      Alcotest.(check string) "summary status" "degraded" (string_field "status" json);
       Alcotest.(check int)
         "keeper_count excludes snapshotless runtime dirs"
         2
@@ -1787,10 +1786,17 @@ let () =
         "paused/dead oldest age"
         20.0
         (float_field "paused_dead_oldest_source_age_seconds" json);
+      (* A paused keeper is the operator's own standing decision, and this
+         summary cannot tell a standing decision from a stalled owner: it only
+         counts. It used to answer anyway -- as a boolean and again as a status
+         string -- and the health surface read that answer back, cancelling the
+         narrowing it had just applied. The counts below are the whole output;
+         the verdict belongs to the surface that serves them. *)
       Alcotest.(check bool)
-        "paused/dead work requires explicit operator action"
+        "the durable summary states no verdict of its own"
         true
-        (bool_field "operator_action_required" json);
+        (json_field "status" json = None
+         && json_field "operator_action_required" json = None);
       Alcotest.(check int)
         "pending_by_keeper count"
         2
@@ -1866,14 +1872,6 @@ let () =
           ~owner_lifecycle:(fun ~keeper_name:_ ->
             Keeper_event_queue_persistence.Runnable)
       in
-      Alcotest.(check string)
-        "corrupt summary status"
-        "degraded"
-        (string_field "status" json);
-      Alcotest.(check bool)
-        "corrupt summary requires operator action"
-        true
-        (bool_field "operator_action_required" json);
       Alcotest.(check int)
         "corrupt summary read error count"
         1
@@ -1906,10 +1904,6 @@ let () =
             Keeper_event_queue_persistence.Lifecycle_unknown
               "durable keeper metadata missing")
       in
-      Alcotest.(check string)
-        "unknown lifecycle summary status"
-        "degraded"
-        (string_field "status" json);
       Alcotest.(check int)
         "unknown lifecycle is excluded from runnable backlog"
         0
@@ -1921,11 +1915,7 @@ let () =
       Alcotest.(check bool)
         "unknown lifecycle counts are incomplete"
         false
-        (bool_field "counts_complete" json);
-      Alcotest.(check bool)
-        "unknown lifecycle requires operator action"
-        true
-        (bool_field "operator_action_required" json));
+        (bool_field "counts_complete" json));
 
   (* --- durable fleet summary: an empty orphan queue has no lifecycle-bound
      work to classify, so missing owner metadata is not a storage failure. --- *)
@@ -1946,10 +1936,6 @@ let () =
             Keeper_event_queue_persistence.Lifecycle_unknown
               "durable keeper metadata missing")
       in
-      Alcotest.(check string)
-        "empty orphan summary status"
-        "ok"
-        (string_field "status" json);
       Alcotest.(check int)
         "empty orphan is discovered"
         1
@@ -1970,11 +1956,7 @@ let () =
       Alcotest.(check int)
         "empty orphan has no read error"
         0
-        (int_field "read_error_count" json);
-      Alcotest.(check bool)
-        "empty orphan needs no operator action"
-        false
-        (bool_field "operator_action_required" json));
+        (int_field "read_error_count" json));
 
   (* --- durable fleet summary: unreadable primary evidence remains visible,
      and unavailable counts must not be presented as a known empty queue. --- *)
@@ -1998,10 +1980,6 @@ let () =
             Keeper_event_queue_persistence.Lifecycle_unknown
               "durable keeper metadata missing")
       in
-      Alcotest.(check string)
-        "corrupt orphan summary status"
-        "degraded"
-        (string_field "status" json);
       Alcotest.(check bool)
         "corrupt orphan counts are incomplete"
         false
@@ -2009,11 +1987,7 @@ let () =
       Alcotest.(check bool)
         "corrupt orphan retains a read error"
         true
-        (int_field "read_error_count" json > 0);
-      Alcotest.(check bool)
-        "corrupt orphan requires operator action"
-        true
-        (bool_field "operator_action_required" json));
+        (int_field "read_error_count" json > 0));
 
   (* Build the meta through the shared fixture, not a hand-written object: it
      fills every field of the current schema from

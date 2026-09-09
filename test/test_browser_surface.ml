@@ -140,12 +140,13 @@ let test_scoped_scene_acknowledgement () =
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
       let ignores_scope = ref false in
+      let observed_url = ref "https://example.org" in
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_scene {tab_id;view;scope;_} ->
           let scope_json = match scope with None -> `Null | Some target ->
             `Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id] in
           answer (`Assoc ["tabId",`Int tab_id;"schema",`String "masc.browser.scene.v1";
-            "documentId",`String "fixture";"url",`String "https://example.org";"title",`String "Page";
+            "documentId",`String "fixture";"url",`String !observed_url;"title",`String "Page";
             "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
             "nodes",`List [];"truncated",`Bool false;
             "view",`String (if !ignores_scope then "content" else match view with Regions -> "regions" | Content -> "content");
@@ -169,6 +170,16 @@ let test_scoped_scene_acknowledgement () =
         (match guarded_tool "https://example.org" with Tool_result.Completed _ -> true | _ -> false);
       check bool "tool surface rejects old URL" true
         (match guarded_tool "https://example.org/destination" with Tool_result.Failed _ -> true | _ -> false);
+      observed_url := "https://example.org/canonical";
+      check bool "redirect does not bypass original URL guard" true
+        (match guarded_tool "https://example.org" with Tool_result.Failed _ -> true | _ -> false);
+      let observed = Masc.Browser_scene.read ~view:Browser_lane.Regions (request (Some 7)) ~max_chars:1000 in
+      let actual_url = match observed with
+        | Ok json -> Yojson.Safe.Util.(json |> member "url" |> to_string)
+        | Error error -> fail error in
+      check string "unguarded observation exposes final redirect URL" "https://example.org/canonical" actual_url;
+      check bool "verified observed URL can be pinned without another follow" true
+        (match guarded_tool actual_url with Tool_result.Completed _ -> true | _ -> false);
       ignores_scope := true;
       check bool "connector ignoring scope must fail rather than return whole page" true (Result.is_error (read ()));
       check bool "connector ignoring region view must fail" true

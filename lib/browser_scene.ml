@@ -82,7 +82,10 @@ let read ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_su
     ~timeout_sec:20. |> Browser_surface.decode_answer in
   let* scene = of_json json in
   let* () = match expected_url with
-    | Some url when scene.url <> url -> Error "destination_url_not_observed; navigation may be in progress; retry only the read"
+    | Some url when scene.url <> url ->
+        let evidence = Yojson.Safe.to_string (`Assoc ["expectedUrl",`String url;"observedUrl",`String scene.url]) in
+        Error ("destination_url_not_observed " ^ evidence ^
+          "; read this pinned tab without expectedUrl to inspect pending navigation or a possible redirect; verify destination content before pinning its observed URL; do not replay follow_link")
     | Some _ | None -> Ok () in
   let* () = if scene.view = view && scene.scope = scope then Ok ()
     else Error "browser did not acknowledge the requested scene view/scope; update the connector" in

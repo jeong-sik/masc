@@ -208,7 +208,8 @@ availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) be
    named by the wizard in this terminal. For a local model, start its server
    and load a model that supports tool calls. MASC does not install or log in
    to these model runtimes.
-3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
+3. Install and start [Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
+   or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
    `docker info` must succeed as your current user. Then run:
 
 ```bash
@@ -230,7 +231,7 @@ In the TUI, select **Keepers → imp** and send these requests one at a time:
 - “Create a Board post titled First conversation and show its id.”
 - “Create a Task titled Explore my sandbox, with a description, and show its id.”
 - “Run `pwd` and `ls` in your sandbox and show the directory listing.”
-- “Use web_fetch to read https://example.com and tell me its page title.”
+- “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.”
 
 Confirm the reply, persisted Board post and Task, and successful sandbox and
 web tool results. This checks conversation and basic capabilities; Task

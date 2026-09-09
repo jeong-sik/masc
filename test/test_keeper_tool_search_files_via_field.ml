@@ -1,5 +1,5 @@
 (** Regression test for the [via] discriminator in the tool_search_files
-    host-branch JSON. tool_search_files is now the Grep/rg tool only; directory
+    Docker shared-mount branch JSON. tool_search_files is now the Grep/rg tool only; directory
     listing and file reads live under Execute. *)
 
 module Workspace = Masc.Workspace
@@ -44,7 +44,7 @@ let make_meta ~name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta -> { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
   | Error e -> Alcotest.fail e
 
 let setup f =
@@ -70,14 +70,14 @@ let setup f =
 let parse_via_field raw =
   Yojson.Safe.from_string raw |> Json.member "via" |> Json.to_string_option
 
-let assert_via_host ~op raw =
+let assert_via_docker ~op raw =
   match parse_via_field raw with
-  | Some "host" -> ()
+  | Some "docker" -> ()
   | Some other ->
-      Alcotest.failf "op=%s expected via=\"host\", got via=%S; raw=%s" op other raw
+      Alcotest.failf "op=%s expected via=\"docker\", got via=%S; raw=%s" op other raw
   | None ->
       Alcotest.failf
-        "op=%s missing [via] discriminator in host-branch JSON; raw=%s" op raw
+        "op=%s missing [via] discriminator in Docker shared-mount branch JSON; raw=%s" op raw
 
 let assert_error_contains ~needle raw =
   let error = Yojson.Safe.from_string raw |> Json.member "error" |> Json.to_string in
@@ -90,7 +90,7 @@ let invoke ~config ~meta args =
   Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None
     ~config ~meta ~args
 
-let test_rg_host_includes_via () =
+let test_rg_docker_includes_via () =
   setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
@@ -101,9 +101,14 @@ let test_rg_host_includes_via () =
           ("path", `String ".");
         ])
   in
-  assert_via_host ~op:"rg" raw
+  assert_via_docker ~op:"rg" raw;
+  let matches = Yojson.Safe.from_string raw |> Json.member "matches" |> Json.to_list in
+  Alcotest.(check int) "real file produces one match" 1 (List.length matches);
+  Alcotest.(check bool) "match contains the seeded text" true
+    (String_util.contains_substring
+       (matches |> List.hd |> Json.to_string) "alpha via_marker_text")
 
-let test_missing_pattern_rejects_before_host_dispatch () =
+let test_missing_pattern_rejects_before_dispatch () =
   setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw = invoke ~config ~meta (`Assoc [ ("path", `String ".") ]) in
   assert_error_contains ~needle:"pattern is required for rg" raw
@@ -111,11 +116,11 @@ let test_missing_pattern_rejects_before_host_dispatch () =
 let () =
   Alcotest.run "Grep via discriminator"
     [
-      ( "host-branch",
+      ( "Docker shared-mount branch",
         [
-          Alcotest.test_case "rg includes via=host" `Quick
-            test_rg_host_includes_via;
-          Alcotest.test_case "missing pattern rejects before host dispatch" `Quick
-            test_missing_pattern_rejects_before_host_dispatch;
+          Alcotest.test_case "rg includes via=docker" `Quick
+            test_rg_docker_includes_via;
+          Alcotest.test_case "missing pattern rejects before dispatch" `Quick
+            test_missing_pattern_rejects_before_dispatch;
         ] );
     ]

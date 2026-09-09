@@ -65,6 +65,7 @@ console.log('PASS: shared script, explicit tab, unique selector, URL preconditio
 
 closed = false;
 Object.assign(page,{crypto:webcrypto,innerWidth:800,innerHeight:600,scrollX:0,scrollY:0});
+page.window.getComputedStyle = node => page.getComputedStyle(node);
 page.document.documentElement = {};
 page.document.elementFromPoint = (x,y) => {assert.equal(x,200);assert.equal(y,300);return button;};
 // Obtain the same lightweight viewport identity used by capture, inside this page.
@@ -109,10 +110,10 @@ const followPage = vm.createContext({HTMLAnchorElement:Anchor, URL,
 vm.runInContext(driverFunction,followPage);
 const follow = () => vm.runInContext("interactInPage({action:'follow_link',documentId:'doc',nodeId:'link',expectedUrl:'https://example.org/source'})",followPage);
 followed=new Anchor('_blank');
-assert.throws(follow,/follow_link_requires_same_tab/);
+assert.equal(follow().interactionFailure.message,'follow_link_requires_same_tab');
 assert.equal(assigned.length,0,'new-tab target rejects before navigation');
 followed=new Anchor('', 'javascript:window.open("other")');
-assert.throws(follow,/follow_link_requires_http_url/);
+assert.equal(follow().interactionFailure.message,'follow_link_requires_http_url');
 assert.equal(assigned.length,0);
 followed=new Anchor();
 const receipt=follow();
@@ -137,3 +138,14 @@ assert.equal(dispatchedReceipt.data.tabId,7);
 assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
 assert.equal(dispatchedReceipt.data.action,'follow_link');
 console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');
+
+const stale=await command({...dispatchedFollow,expectedUrl:'https://example.org/stale'});
+assert.equal(stale.effectPhase,'not_started','stale URL rejection is explicitly pre-effect through native dispatch');
+const detached=await command({...dispatchedFollow,nodeId:'detached'});
+assert.equal(detached.effectPhase,'not_started','detached reference is pre-effect');
+page.followAnchor.target='_self';
+page.location.assign=()=>{throw new Error('navigation result lost');};
+const uncertain=await command(dispatchedFollow);
+assert.equal(uncertain.ok,false);
+assert.equal(uncertain.effectPhase,undefined,'failure after navigation starts must remain unknown');
+console.log('PASS: native dispatch preserves pre-effect rejection and unknown post-effect failure');

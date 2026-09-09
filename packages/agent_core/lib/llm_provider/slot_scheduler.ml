@@ -137,8 +137,6 @@ let with_permit t f =
   Fun.protect f ~finally:(fun () -> release_slot t)
 ;;
 
-let available t = Eio.Mutex.use_ro t.mutex (fun () -> t.max_slots - t.active)
-let in_use t = Eio.Mutex.use_ro t.mutex (fun () -> t.active)
 let queue_length t = Eio.Mutex.use_ro t.mutex (fun () -> t.waiters.length)
 
 (* ── Capacity Query ───────────────────────────── *)
@@ -172,7 +170,8 @@ let[@warning "-32"] await_queue_length clock t expected =
 let%test "create with valid max_slots" =
   Eio_main.run (fun _env ->
     let t = create ~max_slots:4 in
-    t.max_slots = 4 && available t = 4 && in_use t = 0)
+    let s = snapshot t in
+    s.max_slots = 4 && s.available = 4 && s.active = 0)
 ;;
 
 let%test "create rejects zero" =
@@ -195,7 +194,7 @@ let%test "with_permit runs immediately when slots available" =
   Eio_main.run (fun _env ->
     let t = create ~max_slots:2 in
     let result = with_permit t (fun () -> 42) in
-    result = 42 && available t = 2)
+    result = 42 && (snapshot t).available = 2)
 ;;
 
 let%test "with_permit releases on exception" =
@@ -203,7 +202,7 @@ let%test "with_permit releases on exception" =
     let t = create ~max_slots:2 in
     (try with_permit t (fun () -> failwith "boom") with
      | Failure _ -> ());
-    available t = 2)
+    (snapshot t).available = 2)
 ;;
 
 let%test "queue_length tracks waiters" =

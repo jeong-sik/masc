@@ -217,7 +217,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                 | None -> failf "missing composition control %s" schema.name
               in
               check bool (schema.name ^ " input schema") true
-                (tool.schema.input_schema = schema.input_schema);
+                (tool.schema.input_schema = Some schema.input_schema);
               check bool (schema.name ^ " execution contract") true
                 (Agent_core.Tool.execution_mode tool ~input:`Null = execution);
               check bool (schema.name ^ " continues after success") true

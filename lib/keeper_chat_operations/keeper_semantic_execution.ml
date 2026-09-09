@@ -256,6 +256,8 @@ let apply ~now action current =
              if List.for_all (fun prior -> List.mem prior waiting.obligations) current.gate_obligations
              then unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="waiting for durable Gate resolution"})
              else reject ()
+           | Recovering {origin=Gate_wait state; _} when equal_gate_wait state.waiting waiting ->
+             unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="Gate admission requires reconciliation"})
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Resolve_gate resolution ->
           (match current.phase with

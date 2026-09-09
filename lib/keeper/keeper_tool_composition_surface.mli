@@ -110,7 +110,7 @@ val make_tools
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
   -> ?on_deferred:(unit -> unit)
-  -> ?on_external_effect_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(approval_id:string option -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
   -> unit
@@ -153,7 +153,7 @@ module Compatibility : sig
          (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
     -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
     -> ?on_deferred:(unit -> unit)
-    -> ?on_external_effect_deferred:(unit -> unit)
+    -> ?on_external_effect_deferred:(approval_id:string option -> unit)
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
     -> unit

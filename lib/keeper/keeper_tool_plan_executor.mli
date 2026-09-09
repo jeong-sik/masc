@@ -123,7 +123,7 @@ val execute_keeper
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
   -> ?on_deferred:(unit -> unit)
-  -> ?on_external_effect_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(approval_id:string option -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
@@ -149,7 +149,7 @@ module Compatibility : sig
          (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
     -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
     -> ?on_deferred:(unit -> unit)
-    -> ?on_external_effect_deferred:(unit -> unit)
+    -> ?on_external_effect_deferred:(approval_id:string option -> unit)
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?observe_node_result:(node_result -> (unit, string) result)
     -> unit

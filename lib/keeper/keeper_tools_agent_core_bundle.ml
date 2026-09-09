@@ -49,6 +49,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_surface : Keeper_tools_agent_core.attached_surface option)
       ?composition_plan_index
@@ -221,7 +222,8 @@ let make_tool_bundle_for_descriptors_with_policy
          Terminal_effect_open
          Deferred_tool_result)
   in
-  let mark_external_effect_deferred () =
+  let mark_external_effect_deferred ~approval_id =
+    Option.iter (fun id -> Option.iter (fun record -> record id) on_gate_deferred) approval_id;
     (* A generic deferred transition may precede the Gate result in one AGENT_CORE
        batch. The external effect owns the user-facing terminal projection, so
        it must promote that generic state rather than being hidden by it. *)
@@ -710,6 +712,7 @@ let make_tool_bundle_for_capability_surface
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?identity_surface
       ?composition_plan_index
       ?skill_activation_context
@@ -727,6 +730,7 @@ let make_tool_bundle_for_capability_surface
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
+      ?on_gate_deferred
     ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
     ?identity_surface
     ?composition_plan_index
@@ -749,6 +753,7 @@ let make_tool_bundle_with_policy
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?skill_catalog
       ?identity_surface
       ?composition_plan_index
@@ -767,6 +772,7 @@ let make_tool_bundle_with_policy
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
+      ?on_gate_deferred
     ?skill_catalog
     ?identity_surface
     ?composition_plan_index
@@ -787,6 +793,7 @@ module For_testing = struct
         ?continuation_channel
         ?gate_context
         ?hitl_resolution
+      ?on_gate_deferred
         ?skill_catalog
         ?turn_ctx_cell
         ()
@@ -800,6 +807,7 @@ module For_testing = struct
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?skill_catalog
       ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell

@@ -233,7 +233,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -244,6 +244,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = [])
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; isolated_home
       ; native
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
@@ -1999,6 +2000,31 @@ let test_child_environment_is_allowlisted () =
                  | Error error ->
                    fail (Runtime_codex_app_server.error_to_string error)
                  | Ok _ -> ())))
+;;
+
+let test_readiness_home_overrides_inherited_home () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun fixture ->
+      let wrapper = Filename.temp_file "masc-codex-isolated-wrapper-" ".sh" in
+      let isolated_home = Filename.temp_file "masc-private-readiness-home-" "" in
+      Sys.remove isolated_home;
+      Unix.mkdir isolated_home 0o700;
+      let private_config = Filename.concat isolated_home "config.toml" in
+      let config_output = open_out private_config in
+      output_string config_output "[mcp_servers.dangerous]\nenabled = false\n";
+      close_out config_output;
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper; Sys.remove private_config; Unix.rmdir isolated_home) (fun () ->
+        let output = open_out_bin wrapper in
+        output_string output "#!/bin/sh\n";
+        output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote isolated_home ^ " ] || exit 73\n");
+        output_string output "case \"$*\" in *'mcp_servers.\"dangerous\".enabled=false'*) ;; *) exit 74;; esac\n";
+        output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out output;
+        Unix.chmod wrapper 0o700;
+        match run_fixture ~isolated_home wrapper with
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+        | Ok _ -> ()))
 ;;
 
 let write_fixture_file path content =
@@ -4409,6 +4435,10 @@ let () =
             "full posture names the workspace profile"
             `Quick
             test_native_full_names_the_workspace_profile
+        ; test_case
+            "readiness private home overrides inherited home"
+            `Quick
+            test_readiness_home_overrides_inherited_home
         ; test_case
             "child environment is allowlisted"
             `Quick

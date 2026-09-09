@@ -16,6 +16,9 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; isolated_home : string option
+    (** Verification-only private CODEX_HOME prepared with auth/provider configuration.
+        Normal turns leave this [None] to retain the user's configured home. *)
   ; model : string option
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture

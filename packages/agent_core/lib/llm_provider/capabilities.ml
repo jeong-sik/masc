@@ -1448,12 +1448,6 @@ let for_provider_label_base ~wire ~(provider_label : string) =
       capabilities_for_provider_label
 ;;
 
-let for_provider_model_id_catalog ~wire ~(provider_label : string) ~(model_id : string) =
-  match for_provider_model_id_row ~wire ~provider_label ~model_id with
-  | Some _ as caps -> caps
-  | None -> for_provider_label_base ~wire ~provider_label
-;;
-
 (* [wire] is the caller's resolved provider kind, passed when it knows one. It
    selects the base a matched row is laid over for labels whose two wires
    differ; the row lookup itself is unaffected. Callers that omit it get the

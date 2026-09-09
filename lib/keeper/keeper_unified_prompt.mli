@@ -78,7 +78,10 @@ val effective_instructions :
 (** Resolve the instruction body: the profile default when the keeper TOML
     states one, else the persisted keeper instructions. *)
 
-(** What the prompt knows about one active goal: id, title, and the stored
+(** Stored criterion and review note travel with the goal, so the model can
+    pursue its success conditions without a second read. [summary_criterion]
+    is [None] only when no stored goal was resolved.
+    What the prompt knows about one active goal: id, title, and the stored
     phase. [summary_phase] is [None] only for an id the store cannot resolve
     (a dangling assignment, kept visible). RFC-0387 stage 2 carries the phase
     so a [Verifying] goal renders annotated in the Active Goals layer — the
@@ -87,6 +90,8 @@ type goal_summary = {
   summary_goal_id : string;
   summary_title : string;
   summary_phase : Goal_phase.t option;
+  summary_criterion : Goal_store.criterion option;
+  summary_review_note : string option;
 }
 
 val active_goal_summaries_for_task :

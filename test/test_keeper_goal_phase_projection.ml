@@ -299,6 +299,44 @@ max-concurrent = 1
   seed_all_phases config;
   Workspace_goal_index.write_goal_task_links config
     [ "goal-executing", [ "task-linked" ] ];
+  let goal = { (goal_in Goal_phase.Executing "goal-executing" "Publish an audio essay") with
+    metric = Some "independently reviewed playable audio essays";
+    target_value = Some "1";
+    last_review_note = Some "Audio has not yet been played back." } in
+  Goal_store.write_state config
+    { version = 1; updated_at = Masc_domain.now_iso (); goals = [goal] };
+  let meta = keeper_meta () in
+  let check_criterion expected_metric expected_target expected_review absent_text () =
+    let observation = Keeper_world_observation.observe
+      ~pending_board_events:(Some []) ~config ~meta in
+    let summaries = Keeper_unified_prompt.active_goal_summaries_for_task
+      ~config ~current_task:(current_task_of "task-linked") in
+    let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt
+      ~meta ~config
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:(current_task_of "task-linked")
+      ~active_goal_summaries:summaries ~observation () in
+    check bool "stored criterion reaches the actual turn context" true
+      (contains_in world_state expected_metric);
+    check bool "target reaches the actual turn context" true
+      (contains_in world_state expected_target);
+    check bool "stale values do not remain in the turn context" false
+      (contains_in world_state absent_text);
+    check bool "review evidence reaches the actual turn context" true
+      (contains_in world_state expected_review);
+    check bool "criterion identity is available for evidence binding" true
+      (contains_in world_state goal.criterion_revision)
+  in
+  check_criterion "independently reviewed playable audio essays"
+    "\"target_value\":\"1\"" "Audio has not yet been played back."
+    "Provide an explicit measurable criterion." ();
+  Goal_store.write_state config
+    { version = 1; updated_at = Masc_domain.now_iso ();
+      goals = [{ goal with metric = None; target_value = None;
+        last_review_note = Some "Provide an explicit measurable criterion." }] };
+  check_criterion "\"metric\":null" "\"target_value\":null"
+    "Provide an explicit measurable criterion."
+    "independently reviewed playable audio essays" ();
   let primary = Goal_store.goals_path config in
   let mirror = primary ^ ".last-good" in
   let original = Fs_compat.load_file primary in

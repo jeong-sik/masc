@@ -164,6 +164,8 @@ type goal_summary =
   { summary_goal_id : string
   ; summary_title : string
   ; summary_phase : Goal_phase.t option
+  ; summary_criterion : Goal_store.criterion option
+  ; summary_review_note : string option
   }
 
 (** Format active goals with their titles (RFC-0315). The only rendering of
@@ -187,7 +189,22 @@ let format_goal_summaries (summaries : goal_summary list) : string =
                 Prompt_names.keeper_world_active_goals_row
                 [ "goal_id", summary.summary_goal_id; "title", summary.summary_title ]
           in
-          match summary.summary_phase with
+          let details =
+            match summary.summary_criterion with
+            | None -> []
+            | Some criterion ->
+              [ render_fragment Prompt_names.keeper_world_active_goals_criterion
+                  [ "criterion", Goal_store.criterion_to_yojson criterion
+                    |> Yojson.Safe.to_string ] ]
+          in
+          let details = details @
+            (match summary.summary_review_note with
+             | None -> []
+             | Some note ->
+               [ render_fragment Prompt_names.keeper_world_active_goals_review
+                   [ "note", note ] ])
+          in
+          let base = match summary.summary_phase with
           | Some Goal_phase.Verifying ->
             base
             ^ " "
@@ -195,7 +212,9 @@ let format_goal_summaries (summaries : goal_summary list) : string =
                 Prompt_names.keeper_world_active_goals_verifying_annotation
                 []
           | Some (Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped) | None
-            -> base)
+            -> base
+          in
+          String.concat "\n" (base :: details))
        summaries)
 
 let format_task_skills ?surfaces skills =
@@ -1193,6 +1212,8 @@ let active_goal_summaries_for_task
              { summary_goal_id = goal.id
              ; summary_title = goal.title
              ; summary_phase = Some goal.phase
+             ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
+             ; summary_review_note = goal.last_review_note
              }
          else None)
       ) (Goal_store.list_goals_result config ())

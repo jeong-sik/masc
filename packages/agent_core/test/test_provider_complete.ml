@@ -1016,6 +1016,38 @@ let test_kimi_direct_with_tools_and_thinking () =
     (thinking |> member "type" |> to_string)
 ;;
 
+(* Kimi and Anthropic share this codec and not this wire. kimi_capabilities
+   declares No_thinking_control, so there is no adaptive or effort knob to name,
+   and Claude's {"type":"adaptive"} is a shape nobody checked against Kimi's own
+   contract. *)
+let test_kimi_thinking_wire_is_a_flag () =
+  let build enable_thinking =
+    let config =
+      PC.make
+        ~kind:Kimi
+        ~model_id:"kimi-for-coding"
+        ~base_url:"https://api.kimi.com/coding"
+        ?enable_thinking
+        ()
+    in
+    BA.build_request ~config ~messages:[ user_msg "inspect repo" ] ()
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.member "thinking"
+  in
+  Alcotest.(check string)
+    "thinking on is Kimi's own enabled flag"
+    "enabled"
+    (build (Some true) |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "thinking off is Kimi's own disabled flag"
+    "disabled"
+    (build (Some false) |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool)
+    "an unset request carries no thinking field"
+    true
+    (match build None with `Null -> true | _ -> false)
+;;
+
 let test_kimi_direct_tool_result_uses_text_blocks () =
   let config =
     PC.make
@@ -2176,6 +2208,8 @@ let () =
             "kimi direct tools + thinking"
             `Quick
             test_kimi_direct_with_tools_and_thinking
+        ; Alcotest.test_case "kimi thinking wire is a flag, not adaptive" `Quick
+            test_kimi_thinking_wire_is_a_flag
         ; test_case
             "kimi direct tool_result uses scalar text"
             `Quick

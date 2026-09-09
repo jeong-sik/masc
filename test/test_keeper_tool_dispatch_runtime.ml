@@ -7585,6 +7585,44 @@ let test_composable_outputs_satisfy_declared_schema () =
            (List.length composable_output_probes)
            (String.concat "\n" failures))
 
+let test_native_filesystem_approval_preserves_producer_boundary () =
+  with_exec_fixture "native-filesystem-approval-boundary"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
+       | Ok _ -> () | Error detail -> fail detail);
+      let invoke name input =
+        (match Masc.Keeper_tool_approval_policy.verdict_for ~composition_plan_index:None
+           ~tool_name:name ~input with
+         | Masc.Keeper_tool_approval_policy.Run _ -> ()
+         | Masc.Keeper_tool_approval_policy.Ask _ -> fail "duplicate native approval intercepted filesystem call");
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery
+          ~ctx_work ~name ~input () in
+      let target = playground_file ~config ~meta "result.txt" in
+      let write = invoke "Write" (`Assoc ["file_path", `String target; "content", `String "first"]) in
+      check string "confined write authorized by producer" "success" (outcome_label write.disposition);
+      let edit = invoke "Edit" (`Assoc ["file_path", `String target;
+        "old_string", `String "first"; "new_string", `String "second"]) in
+      check string "confined edit authorized by producer" "success" (outcome_label edit.disposition);
+      check string "actual file changed" "second" (Fs_compat.load_file target);
+      let outside = Filename.concat config.Workspace.base_path "operator-owned.txt" in
+      let denied = invoke "Write" (`Assoc ["file_path", `String outside; "content", `String "unauthorized"]) in
+      check string "native delegation never bypasses confinement" "failure" (outcome_label denied.disposition);
+      check bool "external file untouched" false (Sys.file_exists outside);
+      (* The external filesystem effect authority still durably defers requests
+         in Manual mode; allowing the native hook does not grant that authority. *)
+      match Masc.Keeper_gate.decide ~keeper_always_allow:false
+        { keeper_name = meta.Masc.Keeper_meta_contract.name
+        ; operation = Masc.Keeper_gate.filesystem_write_gate_operation
+        ; input = `Assoc ["path", `String outside]
+        ; call_summary = Some "test external filesystem authorization"
+        ; sandbox_profile = None; base_path = config.base_path
+        ; causal_context = None; task_id = None; continuation_channel = None } with
+      | Masc.Keeper_gate.Deferred { approval_id; _ } ->
+          check bool "durable approval identity exists" true (String.length approval_id > 0)
+      | Masc.Keeper_gate.Allow _ -> fail "Manual Gate authorized an unapproved external effect"
+      | Masc.Keeper_gate.Unavailable reason -> fail (Masc.Keeper_gate.unavailable_reason_to_string reason))
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -7601,6 +7639,8 @@ let () =
         test_initializing_recovery_isolates_only_publication_writes;
       test_case "identical Keeper invocations join across production boundaries" `Quick
         test_identical_keeper_invocations_join_across_production_boundaries;
+      test_case "native filesystem approval preserves producer boundary" `Quick
+        test_native_filesystem_approval_preserves_producer_boundary;
       test_case "Manual Gate does not defer internal memory write" `Quick
         test_manual_gate_does_not_defer_internal_memory_write;
       test_case "initialization crash is redacted from tool output" `Quick

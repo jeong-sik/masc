@@ -2939,6 +2939,56 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
    what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
    thinking-control contract" -- so [Some _] here means the row was read. *)
+(* The two halves of the assembly step #34743 removed, one test each, because
+   restoring either without the other is a round trip: the erasing form broke
+   #34301, and its absence broke the eleven non-reasoning ollama_cloud rows
+   (#34765).
+
+   Declared wins: a row naming its own efforts keeps them no matter what the
+   rest of the row says. This is the case #34743 exists for -- native
+   Anthropic and Gemini adapters serialize their own thinking controls, so
+   [thinking_control_format = "none"] is not a statement about the effort
+   vocabulary. *)
+let test_a_declared_effort_ladder_survives_its_own_row () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[{"id_prefix":"declares-efforts","accepted_reasoning_efforts":["none","low","high"]}]}|}
+  in
+  match Capability_manifest.of_json json with
+  | Ok [ entry ] ->
+    check
+      (option (list string))
+      "the row's own efforts reach the capabilities"
+      (Some [ "none"; "low"; "high" ])
+      (Option.map
+         (List.map Reasoning_effort.to_string)
+         (Capabilities.apply_manifest_entry entry).accepted_reasoning_efforts)
+  | Ok _ -> fail "expected one manifest entry"
+  | Error msg -> failf "unexpected parse error: %s" msg
+;;
+
+(* Inherited does not: [[providers]] ollama_cloud's /v1 base declares the
+   five-step ladder for models it has no row for, and devstral-2:123b is a row
+   on that base saying it does not reason. It names no efforts of its own, so
+   there is nothing to keep. *)
+let test_a_non_reasoning_row_inherits_no_effort_ladder () =
+  match
+    Capabilities.for_provider_model_id
+      ~wire:(Some Provider_kind.OpenAI_compat)
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama_cloud"
+      ~model_id:"devstral-2:123b"
+  with
+  | None -> fail "ollama_cloud/devstral-2:123b should resolve"
+  | Some (c : Capabilities.capabilities) ->
+    check bool "the row says it does not reason" false c.supports_reasoning;
+    check
+      bool
+      "and so advertises no effort values"
+      true
+      (Option.is_none c.accepted_reasoning_efforts)
+;;
+
 let test_a_bare_row_outranks_the_provider_base () =
   let resolved label model_id =
     match
@@ -3379,6 +3429,14 @@ let () =
             "shadow pairs all resolve to specific branch (M01)"
             `Quick
             test_prefix_ordering_invariant
+        ; test_case
+            "a declared effort ladder survives its own row"
+            `Quick
+            test_a_declared_effort_ladder_survives_its_own_row
+        ; test_case
+            "a non-reasoning row inherits no effort ladder"
+            `Quick
+            test_a_non_reasoning_row_inherits_no_effort_ladder
         ; test_case
             "a bare row outranks the provider base"
             `Quick

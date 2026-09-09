@@ -24,3 +24,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_scene_resource)))
+
+(rule
+ (alias runtest-test_browser_connection_extension)
+ (deps test_browser_connection_extension.mjs
+       ../connectors/browser/extension/background.js)
+ (action (run node %{dep:test_browser_connection_extension.mjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_connection_extension)))

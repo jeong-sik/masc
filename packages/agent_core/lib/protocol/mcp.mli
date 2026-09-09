@@ -141,11 +141,5 @@ val reconnect
   -> managed
   -> (managed, Error.t) result
 
-val connect_all_best_effort
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> server_spec list
-  -> managed list * (string * Error.t) list
-
 val close_managed : managed -> unit
 val close_all : managed list -> unit

@@ -104,8 +104,6 @@ let pp_node_kind formatter = function
   | Tool_attempt -> Format.pp_print_string formatter "Tool_attempt"
 ;;
 
-let show_node_kind kind = Format.asprintf "%a" pp_node_kind kind
-
 type node =
   { node_id : Node_id.t
   ; run_id : Run_id.t

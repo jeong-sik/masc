@@ -1389,16 +1389,11 @@ let pp_output_token_ceiling_source = Output_token_wire_internal.pp_ceiling_sourc
 let show_output_token_ceiling_source = Output_token_wire_internal.show_ceiling_source
 let equal_output_token_ceiling_source = Output_token_wire_internal.equal_ceiling_source
 let output_token_envelope_to_yojson = Output_token_wire_internal.envelope_to_yojson
-let output_token_envelope_of_yojson = Output_token_wire_internal.envelope_of_yojson
 let output_token_policy_to_yojson = Output_token_wire_internal.policy_to_yojson
 let output_token_policy_of_yojson = Output_token_wire_internal.policy_of_yojson
 
 let output_token_ceiling_source_to_yojson =
   Output_token_wire_internal.ceiling_source_to_yojson
-;;
-
-let output_token_ceiling_source_of_yojson =
-  Output_token_wire_internal.ceiling_source_of_yojson
 ;;
 
 type output_token_ceiling = Output_token_wire_internal.ceiling =
@@ -1430,8 +1425,6 @@ let output_token_receipt_ceiling_source =
 let output_token_receipt_to_yojson = Output_token_wire_internal.receipt_to_yojson
 let output_token_receipt_of_yojson = Output_token_wire_internal.receipt_of_yojson
 let equal_output_token_receipt = Output_token_wire_internal.equal_receipt
-let pp_output_token_receipt = Output_token_wire_internal.pp_receipt
-let show_output_token_receipt = Output_token_wire_internal.show_receipt
 
 (** Per-call inference telemetry.
     Parsed from the raw API response; never computed by downstream. *)
@@ -1833,9 +1826,6 @@ let visible_text_of_content content =
     | Audio _ -> None)
   |> String.concat "\n"
 ;;
-
-(** Extract end-user-visible assistant text from a message. *)
-let visible_text_of_message (msg : message) = visible_text_of_content msg.content
 
 (** Extract end-user-visible assistant text from an api_response. *)
 let visible_text_of_response (resp : api_response) = visible_text_of_content resp.content

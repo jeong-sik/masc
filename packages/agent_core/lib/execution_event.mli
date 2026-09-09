@@ -83,8 +83,6 @@ type node_kind =
     journal allocates the attempt's occurrence identity when the node opens. *)
 val provider_attempt : ordinal:int -> Binding_identity.t -> (node_kind, string) result
 
-val show_node_kind : node_kind -> string
-
 type node
 
 val make_node

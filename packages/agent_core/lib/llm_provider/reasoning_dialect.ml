@@ -696,20 +696,6 @@ let sampling_params_ignored_for_format
   | Capabilities.Reasoning_effort -> []
 ;;
 
-let sampling_field_ignored_when_thinking
-      ~thinking_control_format
-      ~enable_thinking
-      ~parameter
-  =
-  let thinking_active =
-    match enable_thinking with
-    | Some false -> false
-    | Some true | None -> true
-  in
-  thinking_active
-  && List.mem parameter (sampling_params_ignored_for_format thinking_control_format)
-;;
-
 let should_replay_reasoning dialect ~assistant_had_tool_call =
   match dialect.replay_policy with
   | No_replay | Provider_opaque_state -> false

@@ -33,22 +33,6 @@ let input_required_of_request
   }
 ;;
 
-let runtime_input_request_of_input_required (req : Error.input_required) =
-  { Runtime.request_id = req.request_id
-  ; participant_name = req.participant_name
-  ; question = req.question
-  ; schema = req.schema
-  ; timeout_s = req.timeout_s
-  ; created_at = req.created_at
-  }
-;;
-
-let runtime_response_to_hooks = function
-  | Runtime.Input_answer json -> Hooks.Answer json
-  | Runtime.Input_declined -> Hooks.Declined
-  | Runtime.Input_timeout -> Hooks.Timeout
-;;
-
 let message_of_response ?(metadata = []) ~question = function
   | Hooks.Answer json ->
     let text =

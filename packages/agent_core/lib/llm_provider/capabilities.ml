@@ -1223,11 +1223,11 @@ let apply_declarative_capability_overrides overrides =
        | None -> base.reasoning_replay_override)
     }
   in
-  (* Preserve the declared model contract. Native Anthropic/Gemini adapters
-     serialize their own thinking controls, so absence of an OpenAI-compatible
-     thinking format does not erase their accepted effort vocabulary. The
-     selected backend validates whether a requested value has a wire form. *)
-  capabilities
+  (* Native adapters own their wire format, so [No_thinking_control] does not
+     erase an enabled model's effort vocabulary. An explicit lack of reasoning
+     support still invalidates it before native request validation. *)
+  if capabilities.supports_reasoning then capabilities
+  else { capabilities with accepted_reasoning_efforts = None }
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =

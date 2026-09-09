@@ -91,8 +91,6 @@ let receipt_identity = function
   | Before_dispatch_receipt identity | Dispatch_started_receipt identity -> identity
   | Response_received_receipt receipt | Terminal_receipt receipt -> receipt.identity
 ;;
-
-let receipt_fingerprint receipt = (receipt_identity receipt).fingerprint
 let receipt_request_body_sha256 receipt = (receipt_identity receipt).request_body_sha256
 
 let raw_response_evidence (raw : Http_client.raw_sync_response) response_header_evidence =

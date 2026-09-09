@@ -133,10 +133,6 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
-val get_goal_result :
-  Workspace_utils.config -> goal_id:string -> (goal option, string) result
-(** Authoritative primary-only read; recovery does not mask missing or corrupt data. *)
-
 val transact_goal :
   Workspace_utils.config -> goal_id:string ->
   (goal -> (goal * 'a, string) result) -> (goal * 'a, string) result

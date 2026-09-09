@@ -9,10 +9,6 @@
 
 (** {1 Run Discovery} *)
 
-(** Extract [run_ref] values from a list of parsed records.
-    Groups records by [worker_run_id] and computes [start_seq]/[end_seq]. *)
-val run_refs_of_records : path:string -> Raw_trace.record list -> Raw_trace.run_ref list
-
 (** Read all runs from a trace file at [path]. *)
 val read_runs : path:string -> unit -> (Raw_trace.run_ref list, Error.t) result
 

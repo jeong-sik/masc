@@ -331,9 +331,6 @@ val capabilities_of_kind : Provider_kind.t -> capabilities
 (** Merge Discovery ctx_size into existing capabilities. *)
 val with_context_size : capabilities -> ctx_size:int -> capabilities
 
-(** Update tool support from Discovery. *)
-val with_tool_support : capabilities -> supports_tools:bool -> capabilities
-
 (** {2 Capability Manifest} *)
 
 (** Apply a {!Capability_manifest.entry} on top of a provider-preset base.

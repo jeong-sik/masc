@@ -163,15 +163,6 @@ let paused_dead_reason_to_wire = function
     "runtime_" ^ Keeper_state_machine.phase_to_string phase
 ;;
 
-let owner_execution_truth_to_wire = function
-  | Executable -> "executable"
-  | Recoverable -> "recoverable"
-  | Retained_disabled reason -> retained_disabled_reason_to_wire reason
-  | Paused_dead reason -> paused_dead_reason_to_wire reason
-  | Shutdown_fenced _ -> "shutdown_fenced"
-  | Unknown _ -> "unknown"
-;;
-
 let classify_owner_execution_with
       ~require_proactive
       ~requested

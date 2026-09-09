@@ -53,13 +53,6 @@ val of_core_error : Error.t -> detailed_error
     remains explicitly unclassified instead of being widened downstream. *)
 val of_provider_configuration_error : Error.t -> detailed_error
 
-(** A provider implementation that resolved for this call but is unavailable
-    at dispatch time is owned by that exact runtime binding. *)
-val of_runtime_binding_error
-  :  binding:Binding_identity.t
-  -> Error.t
-  -> detailed_error
-
 val of_request_validation_error
   :  binding:Binding_identity.t
   -> Error.t

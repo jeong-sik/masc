@@ -56,10 +56,6 @@ val trim_non_empty : string -> string option
 (** [trim_non_empty_opt opt] maps [trim_non_empty] over an option. *)
 val trim_non_empty_opt : string option -> string option
 
-(** [json_member_str key json] returns the string value for [key] in [json],
-    or [""] if missing or wrong type. *)
-val json_member_str : string -> Yojson.Safe.t -> string
-
 (** [json_member_bool key json] returns the bool value for [key] in [json],
     or [false] if missing or wrong type. *)
 val json_member_bool : string -> Yojson.Safe.t -> bool

@@ -135,6 +135,23 @@ DEFAULT_MIN_NAME_LEN = 8
 
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
 VAL_RE = re.compile(r"^val\s+(?:\(\s*)?([a-z_][A-Za-z0-9_']*)", re.M)
+TYPE_RE = re.compile(r"^(?:type|and)\s+(?:[^=\n]*?\s)?([a-z_][A-Za-z0-9_']*)\s*(?:=|:=|$)", re.M)
+DERIVING_RE = re.compile(r"\[@@deriving([^\]]*)\]")
+# A `[@@deriving p]` on a type that embeds `M.t` makes ppx emit a call to the
+# derived function `M` exports for `t`. The caller's name exists only in
+# generated code, so a token scan of the sources cannot see it. Each entry maps
+# an export shape to the deriving plugins that would generate a call to it.
+PPX_DERIVED = (
+    (r"^pp_(?P<t>.+)$", ("show",)),
+    (r"^show_(?P<t>.+)$", ("show",)),
+    (r"^equal_(?P<t>.+)$", ("eq", "equal")),
+    (r"^compare_(?P<t>.+)$", ("ord", "compare")),
+    (r"^hash_(?P<t>.+)$", ("hash",)),
+    (r"^(?P<t>.+)_to_yojson$", ("yojson", "to_yojson")),
+    (r"^(?P<t>.+)_of_yojson$", ("yojson", "of_yojson")),
+    (r"^sexp_of_(?P<t>.+)$", ("sexp", "sexp_of")),
+    (r"^(?P<t>.+)_of_sexp$", ("sexp", "of_sexp")),
+)
 
 
 class DeadModule(TypedDict):
@@ -323,6 +340,52 @@ def find_dead_modules(root: Path) -> list[DeadModule]:
     return sorted(dead, key=lambda d: -d["loc"])
 
 
+def ppx_derived_targets(name: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Type name plus the deriving plugins that would generate a call to [name]."""
+    out = []
+    for pattern, plugins in PPX_DERIVED:
+        m = re.match(pattern, name)
+        if m:
+            out.append((m.group("t"), plugins))
+    return out
+
+
+def module_aliases(text: str, mod: str) -> set[str]:
+    """Names [text] can use to reach [mod]: the module itself and its aliases."""
+    names = {mod}
+    for m in re.finditer(r"^\s*module\s+([A-Z][A-Za-z0-9_']*)\s*=\s*([A-Z][A-Za-z0-9_'.]*)", text, re.M):
+        if m.group(2).split(".")[-1] == mod:
+            names.add(m.group(1))
+    return names
+
+
+def ppx_reachable(name: str, mod: str, mli_text: str, others: list[tuple[Path, str]]) -> bool:
+    """True when a `[@@deriving]` elsewhere would generate a call to [name].
+
+    Deleting such a value breaks the build from a call site that exists only
+    after ppx runs, which no source scan can find. Two values in this repo were
+    reported dead for exactly that reason and nearly deleted (#34868). Naming
+    them here would plant the very token this scan counts, so the evidence is
+    the PR, not the identifiers.
+    """
+    declared = set(TYPE_RE.findall(mli_text))
+    for type_name, plugins in ppx_derived_targets(name):
+        if type_name not in declared:
+            continue
+        for _path, text in others:
+            if not any(
+                any(p in group for p in plugins)
+                for group in DERIVING_RE.findall(text)
+            ):
+                continue
+            if any(
+                re.search(r"\b" + re.escape(alias) + r"\." + re.escape(type_name) + r"\b", text)
+                for alias in module_aliases(text, mod)
+            ):
+                return True
+    return False
+
+
 def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
     owners: dict[str, list[tuple[str, Path]]] = defaultdict(list)
     for base in SOURCE_ROOTS:
@@ -339,10 +402,12 @@ def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
 
     wanted = set(owners)
     seen: dict[str, set[Path]] = defaultdict(set)
+    texts: list[tuple[Path, str]] = []
     for path in all_files(root):
         text = read_text(path)
         if not text:
             continue
+        texts.append((path, text))
         for token in set(TOKEN_RE.findall(text)) & wanted:
             seen[token].add(path)
 
@@ -356,6 +421,9 @@ def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
         module, mli = declared[0]
         pair = {mli, mli.with_suffix(".ml")}
         if seen.get(name, set()) - pair:
+            continue
+        others = [(p, t) for p, t in texts if p not in pair]
+        if ppx_reachable(name, module_name(module), read_text(mli), others):
             continue
         # An odoc cross-reference from a sibling declaration's doc block --
         # `use {!load_pending_result} in production control flow` -- documents
@@ -487,6 +555,29 @@ def run_self_test() -> int:
             failures.append("substring match counted as a reference")
         if "used_entry_helper" in dead_exports:
             failures.append("token reference from a test not counted")
+
+        # A `[@@deriving eq]` on a type embedding another module's type makes
+        # ppx emit a call to that module's `equal_*`. The call exists only in
+        # generated code, so the token scan cannot see it and the value must
+        # not be reported dead.
+        (root / "lib" / "derived_surface.mli").write_text(
+            "type widget\ntype gadget\n"
+            "val equal_widget : widget -> widget -> bool\n"
+            "val equal_gadget : gadget -> gadget -> bool\n"
+        )
+        (root / "lib" / "derived_surface.ml").write_text(
+            "type widget = int\ntype gadget = int\n"
+            "let equal_widget = Int.equal\nlet equal_gadget = Int.equal\n"
+        )
+        (root / "lib" / "deriving_consumer.ml").write_text(
+            "module W = Derived_surface\n"
+            "type holder = { part : W.widget } [@@deriving eq]\n"
+        )
+        derived = {d["name"] for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
+        if "equal_widget" in derived:
+            failures.append("ppx-generated caller counted as no caller")
+        if "equal_gadget" not in derived:
+            failures.append("ppx rule suppressed a type nothing embeds")
 
         # A value republished through a facade's signature must be flagged as
         # such: nothing calls it, but deleting it means editing the facade.

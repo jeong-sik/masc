@@ -47,4 +47,3 @@ val create_typed : config -> Tool.t
 val create_simple : name:string -> description:string -> agent_runner -> Tool.t
 
 (** Encode typed child output into stable JSON for tool_result content. *)
-val child_output_to_json : child_output -> Yojson.Safe.t
